@@ -26,7 +26,8 @@ import (
 )
 
 type NonTransactionalEpochReader struct {
-	db kv.RwDB
+	db       kv.RwDB
+	readonly bool
 }
 
 func newEpochReader(db kv.RwDB) *NonTransactionalEpochReader {
@@ -40,6 +41,9 @@ func (cr *NonTransactionalEpochReader) GetEpoch(hash libcommon.Hash, number uint
 	})
 }
 func (cr *NonTransactionalEpochReader) PutEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
+	if cr.readonly {
+		return nil
+	}
 	return cr.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
 		return rawdb.WriteEpoch(tx, number, hash, proof)
 	})
@@ -51,6 +55,9 @@ func (cr *NonTransactionalEpochReader) GetPendingEpoch(hash libcommon.Hash, numb
 	})
 }
 func (cr *NonTransactionalEpochReader) PutPendingEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
+	if cr.readonly {
+		return nil
+	}
 	return cr.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
 		return rawdb.WritePendingEpoch(tx, number, hash, proof)
 	})

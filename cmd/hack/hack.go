@@ -32,7 +32,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/log/v3"

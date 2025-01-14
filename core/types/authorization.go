@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/holiman/uint256"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -37,11 +37,15 @@ func (ath *Authorization) copy() *Authorization {
 }
 
 func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommon.Address, error) {
-	authLen := rlp2.U64Len(ath.ChainID)
-	authLen += (1 + length.Addr)
-	authLen += rlp2.U64Len(ath.Nonce)
+	if ath.Nonce == math.MaxUint64 {
+		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
+	}
 
-	if err := EncodeStructSizePrefix(authLen, data, b); err != nil {
+	authLen := rlp.U64Len(ath.ChainID)
+	authLen += 1 + length.Addr
+	authLen += rlp.U64Len(ath.Nonce)
+
+	if err := rlp.EncodeStructSizePrefix(authLen, data, b); err != nil {
 		return nil, err
 	}
 
@@ -58,48 +62,48 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 		return nil, err
 	}
 
+	return RecoverSignerFromRLP(data.Bytes(), ath.YParity, ath.R, ath.S)
+}
+
+func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*libcommon.Address, error) {
 	hashData := []byte{params.SetCodeMagicPrefix}
-	hashData = append(hashData, data.Bytes()...)
+	hashData = append(hashData, rlp...)
 	hash := crypto.Keccak256Hash(hashData)
 
 	var sig [65]byte
-	r := ath.R.Bytes()
-	s := ath.S.Bytes()
-	copy(sig[32-len(r):32], r)
-	copy(sig[64-len(s):64], s)
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	copy(sig[32-len(rBytes):32], rBytes)
+	copy(sig[64-len(sBytes):64], sBytes)
 
-	if ath.Nonce == 1<<64-1 {
-		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
+	if yParity > 1 {
+		return nil, fmt.Errorf("invalid y parity value: %d", yParity)
 	}
-	if ath.YParity == 0 || ath.YParity == 1 {
-		sig[64] = ath.YParity
-	} else {
-		return nil, fmt.Errorf("invalid y parity value: %d", ath.YParity)
-	}
+	sig[64] = yParity
 
-	if !crypto.TransactionSignatureIsValid(sig[64], &ath.R, &ath.S, false /* allowPreEip2s */) {
+	if !crypto.TransactionSignatureIsValid(sig[64], &r, &s, false /* allowPreEip2s */) {
 		return nil, errors.New("invalid signature")
 	}
 
-	pubkey, err := crypto.Ecrecover(hash.Bytes(), sig[:])
+	pubKey, err := crypto.Ecrecover(hash.Bytes(), sig[:])
 	if err != nil {
 		return nil, err
 	}
-	if len(pubkey) == 0 || pubkey[0] != 4 {
+	if len(pubKey) == 0 || pubKey[0] != 4 {
 		return nil, errors.New("invalid public key")
 	}
 
 	var authority libcommon.Address
-	copy(authority[:], crypto.Keccak256(pubkey[1:])[12:])
+	copy(authority[:], crypto.Keccak256(pubKey[1:])[12:])
 	return &authority, nil
 }
 
 func authorizationSize(auth Authorization) (authLen int) {
-	authLen = rlp2.U64Len(auth.ChainID)
-	authLen += rlp2.U64Len(auth.Nonce)
-	authLen += (1 + length.Addr)
+	authLen = rlp.U64Len(auth.ChainID)
+	authLen += rlp.U64Len(auth.Nonce)
+	authLen += 1 + length.Addr
 
-	authLen += rlp2.U64Len(uint64(auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
+	authLen += rlp.U64Len(uint64(auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
 
 	return
 }
@@ -107,7 +111,7 @@ func authorizationSize(auth Authorization) (authLen int) {
 func authorizationsSize(authorizations []Authorization) (totalSize int) {
 	for _, auth := range authorizations {
 		authLen := authorizationSize(auth)
-		totalSize += rlp2.ListPrefixLen(authLen) + authLen
+		totalSize += rlp.ListPrefixLen(authLen) + authLen
 	}
 
 	return
@@ -184,7 +188,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte) error {
 	for i := 0; i < len(authorizations); i++ {
 		authLen := authorizationSize(authorizations[i])
-		if err := EncodeStructSizePrefix(authLen, w, b); err != nil {
+		if err := rlp.EncodeStructSizePrefix(authLen, w, b); err != nil {
 			return err
 		}
 

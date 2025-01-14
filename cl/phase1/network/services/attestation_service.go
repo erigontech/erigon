@@ -65,10 +65,10 @@ type attestationService struct {
 }
 
 // AttestationWithGossipData type represents attestation with the gossip data where it's coming from.
-type AttestationWithGossipData struct {
+type AttestationForGossip struct {
 	Attestation       *solid.Attestation
 	SingleAttestation *solid.SingleAttestation // New container after Electra
-	GossipData        *sentinel.GossipData
+	Receiver          *sentinel.Peer
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
 }
@@ -103,7 +103,7 @@ func NewAttestationService(
 	return a
 }
 
-func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *AttestationWithGossipData) error {
+func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *AttestationForGossip) error {
 	var (
 		root           libcommon.Hash
 		slot           uint64
@@ -276,10 +276,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 
 	aggregateVerificationData := &AggregateVerificationData{
-		Signatures: [][]byte{signature[:]},
-		SignRoots:  [][]byte{signingRoot[:]},
-		Pks:        [][]byte{pubKey[:]},
-		GossipData: att.GossipData,
+		Signatures:  [][]byte{signature[:]},
+		SignRoots:   [][]byte{signingRoot[:]},
+		Pks:         [][]byte{pubKey[:]},
+		SendingPeer: att.Receiver,
 		F: func() {
 			start := time.Now()
 			defer monitor.ObserveAggregateAttestation(start)

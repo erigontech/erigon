@@ -472,7 +472,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 
 	if !sd.aggTx.a.commitmentValuesTransform ||
 		len(branch) == 0 ||
-		sd.aggTx.minimaxTxNumInDomainFiles() == 0 ||
+		sd.aggTx.TxNumsInFiles(kv.StateDomains...) == 0 ||
 		bytes.Equal(prefix, keyCommitmentState) ||
 		((fEndTxNum-fStartTxNum)/sd.aggTx.a.StepSize())%2 != 0 { // this checks if file has even number of steps, singular files does not transform values.
 
@@ -491,8 +491,8 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		sd.logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err
 	}
-	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.compression)
-	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.compression)
+	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.Compression)
+	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.Compression)
 	metricI := 0
 	for i, f := range sd.aggTx.d[kv.CommitmentDomain].files {
 		if i > 5 {
@@ -818,8 +818,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 			case FILE_CURSOR:
-				indexList := sd.aggTx.d[kv.StorageDomain].d.indexList
-				if indexList&withBTree != 0 {
+				indexList := sd.aggTx.d[kv.StorageDomain].d.IndexList
+				if indexList&AccessorBTree != 0 {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
@@ -830,7 +830,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 						ci1.btCursor.Close()
 					}
 				}
-				if indexList&withHashMap != 0 {
+				if indexList&AccessorHashMap != 0 {
 					ci1.dg.Reset(ci1.latestOffset)
 					if !ci1.dg.HasNext() {
 						break
@@ -915,13 +915,14 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		_, f, l, _ := runtime.Caller(1)
 		fmt.Printf("[SD aggTx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggTx.id, sd.TxNum(), fh, filepath.Base(f), l)
 	}
-	for _, w := range sd.domainWriters {
+	for di, w := range sd.domainWriters {
 		if w == nil {
 			continue
 		}
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
+		sd.aggTx.d[di].closeValsCursor()
 	}
 	for _, w := range sd.iiWriters {
 		if w == nil {

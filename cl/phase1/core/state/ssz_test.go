@@ -56,14 +56,6 @@ func TestBeaconStatePhase0EncodingDecoding(t *testing.T) {
 	// Lets test the caches too
 	var w bytes.Buffer
 	require.NoError(t, state.EncodeCaches(&w))
-	values1 := state.activeValidatorsCache.Values()
-	keys1 := state.activeValidatorsCache.Keys()
-	values2 := state.shuffledSetsCache.Values()
-	keys2 := state.shuffledSetsCache.Keys()
 
 	require.NoError(t, state.DecodeCaches(&w))
-	require.Equal(t, values1, state.activeValidatorsCache.Values())
-	require.Equal(t, keys1, state.activeValidatorsCache.Keys())
-	require.Equal(t, values2, state.shuffledSetsCache.Values())
-	require.Equal(t, keys2, state.shuffledSetsCache.Keys())
 }

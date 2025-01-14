@@ -200,33 +200,33 @@ func StringLen(s []byte) int {
 		return 1 + sLen
 	}
 }
-func EncodeString(s []byte, to []byte) int {
+func EncodeString2(src []byte, dst []byte) int {
 	switch {
-	case len(s) >= 56:
-		beLen := common.BitLenToByteLen(bits.Len(uint(len(s))))
-		binary.BigEndian.PutUint64(to[1:], uint64(len(s)))
-		_ = to[beLen+len(s)]
+	case len(src) >= 56:
+		beLen := common.BitLenToByteLen(bits.Len(uint(len(src))))
+		binary.BigEndian.PutUint64(dst[1:], uint64(len(src)))
+		_ = dst[beLen+len(src)]
 
-		to[8-beLen] = byte(beLen) + 183
-		copy(to, to[8-beLen:9])
-		copy(to[1+beLen:], s)
-		return 1 + beLen + len(s)
-	case len(s) == 0:
-		to[0] = 128
+		dst[8-beLen] = byte(beLen) + 183
+		copy(dst, dst[8-beLen:9])
+		copy(dst[1+beLen:], src)
+		return 1 + beLen + len(src)
+	case len(src) == 0:
+		dst[0] = 128
 		return 1
-	case len(s) == 1:
-		if s[0] < 128 {
-			to[0] = s[0]
+	case len(src) == 1:
+		if src[0] < 128 {
+			dst[0] = src[0]
 			return 1
 		}
-		to[0] = 129
-		to[1] = s[0]
+		dst[0] = 129
+		dst[1] = src[0]
 		return 2
-	default: // 1<s<56
-		_ = to[len(s)]
-		to[0] = byte(len(s)) + 128
-		copy(to[1:], s)
-		return 1 + len(s)
+	default: // 1<src<56
+		_ = dst[len(src)]
+		dst[0] = byte(len(src)) + 128
+		copy(dst[1:], src)
+		return 1 + len(src)
 	}
 }
 
@@ -293,7 +293,7 @@ func EncodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf 
 	hashesLen := len(hashes) / 32 * 33
 	totalLen := typesLen + sizesLen + ListPrefixLen(sizesLen) + hashesLen + ListPrefixLen(hashesLen)
 	pos += EncodeListPrefix(totalLen, encodeBuf)
-	pos += EncodeString(types, encodeBuf[pos:])
+	pos += EncodeString2(types, encodeBuf[pos:])
 	pos += EncodeListPrefix(sizesLen, encodeBuf[pos:])
 	for _, size := range sizes {
 		pos += EncodeU32(size, encodeBuf[pos:])

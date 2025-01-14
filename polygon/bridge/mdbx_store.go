@@ -40,7 +40,7 @@ import (
 
 	e.g. For block 10 with events [1,2,3], block 15 with events [4,5,6] and block 20 with events [7,8].
 	The DB will have the following.
-		10: 0 (initialized at zero, NOTE: Polygon does not have and event 0)
+		10: 0 (initialized at zero, NOTE: Polygon does not have an event 0)
 		15: 3
 		20: 6
 
@@ -571,6 +571,7 @@ func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFr
 	if err != nil {
 		return start, end, false, err
 	}
+	defer cursor.Close()
 
 	_, v, err := cursor.SeekExact(kByte)
 	if err != nil {

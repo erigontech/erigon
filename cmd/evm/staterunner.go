@@ -141,7 +141,7 @@ func aggregateResultsFromStateTests(
 		MustOpen()
 	defer _db.Close()
 
-	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, _db, log.New())
+	agg, err := libstate.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, _db, log.New())
 	if err != nil {
 		return nil, err
 	}

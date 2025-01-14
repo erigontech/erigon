@@ -406,12 +406,12 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	fromStep, toStep := r.values.from/r.aggStep, r.values.to/r.aggStep
 	kvFilePath := dt.d.kvFilePath(fromStep, toStep)
 
-	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.compressCfg, log.LvlTrace, dt.d.logger)
+	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.CompressCfg, log.LvlTrace, dt.d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.filenameBase, err)
 	}
 
-	compression := dt.d.compression
+	compression := dt.d.Compression
 	if toStep-fromStep < DomainMinStepsToCompress {
 		compression = seg.CompressNone
 	}
@@ -425,7 +425,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, item := range domainFiles {
-		g := seg.NewReader(item.decompressor.MakeGetter(), dt.d.compression)
+		g := seg.NewReader(item.decompressor.MakeGetter(), dt.d.Compression)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -515,18 +515,18 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 	}
 
-	if dt.d.indexList&withBTree != 0 {
+	if dt.d.IndexList&AccessorBTree != 0 {
 		btPath := dt.d.kvBtFilePath(fromStep, toStep)
 		btM := DefaultBtreeM
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
 			btM = 128
 		}
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync)
+		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
-	if dt.d.indexList&withHashMap != 0 {
+	if dt.d.IndexList&AccessorHashMap != 0 {
 		if err = dt.d.buildAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
@@ -535,7 +535,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
-	if dt.d.indexList&withExistence != 0 {
+	if dt.d.IndexList&AccessorExistence != 0 {
 		bloomIndexPath := dt.d.kvExistenceIdxFilePath(fromStep, toStep)
 		exists, err := dir.FileExist(bloomIndexPath)
 		if err != nil {
@@ -825,8 +825,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
 			KeyCount:   keyCount,
 			Enums:      false,
-			BucketSize: 2000,
-			LeafSize:   8,
+			BucketSize: recsplit.DefaultBucketSize,
+			LeafSize:   recsplit.DefaultLeafSize,
 			TmpDir:     ht.h.dirs.Tmp,
 			IndexFile:  idxPath,
 			Salt:       ht.h.salt,

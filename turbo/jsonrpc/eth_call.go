@@ -23,16 +23,10 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon-lib/trie"
-
-	"github.com/erigontech/erigon-lib/commitment"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
-
+	"github.com/erigontech/erigon-lib/commitment"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -40,8 +34,12 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
@@ -636,8 +634,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		fmt.Printf("state root mismatch after stateless execution actual(%x) != expected(%x)\n", newStateRoot.Bytes(), block.Root().Bytes())
 	}
 	witnessBufBytes := witnessBuffer.Bytes()
-	witnessBufBytesCopy := make([]byte, len(witnessBufBytes))
-	copy(witnessBufBytesCopy, witnessBufBytes)
+	witnessBufBytesCopy := libcommon.CopyBytes(witnessBufBytes)
 	return witnessBufBytesCopy, nil
 }
 
