@@ -1215,25 +1215,25 @@ func (d *Domain) buildAccessor(ctx context.Context, fromStep, toStep uint64, dat
 }
 
 func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
-	if d.IndexList&AccessorBTree == 0 {
-		return nil
-	}
 	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
-		return []string{
-			d.kvBtFilePath(fromStep, toStep),
-			d.kvExistenceIdxFilePath(fromStep, toStep),
+		var accessors []string
+		if d.IndexList.Has(AccessorBTree) {
+			accessors = append(accessors, d.kvBtFilePath(fromStep, toStep))
 		}
+		if d.IndexList.Has(AccessorExistence) {
+			accessors = append(accessors, d.kvExistenceIdxFilePath(fromStep, toStep))
+		}
+
+		return accessors
 	})
 }
 
 func (d *Domain) missedAccessors() (l []*filesItem) {
-	if d.IndexList&AccessorHashMap == 0 {
+	if !d.IndexList.Has(AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
-		return []string{
-			d.kvAccessorFilePath(fromStep, toStep),
-		}
+		return []string{d.kvAccessorFilePath(fromStep, toStep)}
 	})
 }
 

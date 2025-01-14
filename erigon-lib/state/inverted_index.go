@@ -215,6 +215,9 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 }
 
 func (ii *InvertedIndex) missedAccessors() (l []*filesItem) {
+	if !ii.indexList.Has(AccessorHashMap) {
+		return nil
+	}
 	return fileItemsWithMissingAccessors(ii.dirtyFiles, ii.aggregationStep, func(fromStep, toStep uint64) []string {
 		return []string{
 			ii.efAccessorFilePath(fromStep, toStep),

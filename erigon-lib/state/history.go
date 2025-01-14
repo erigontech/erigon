@@ -315,6 +315,9 @@ func (ht *HistoryRoTx) Files() (res []string) {
 }
 
 func (h *History) missedAccessors() (l []*filesItem) {
+	if !h.indexList.Has(AccessorHashMap) {
+		return nil
+	}
 	return fileItemsWithMissingAccessors(h.dirtyFiles, h.aggregationStep, func(fromStep, toStep uint64) []string {
 		return []string{
 			h.vAccessorFilePath(fromStep, toStep),
@@ -428,8 +431,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps)
-	missedFiles := h.missedAccessors()
-	for _, item := range missedFiles {
+	for _, item := range h.missedAccessors() {
 		item := item
 		g.Go(func() error {
 			return h.buildVi(ctx, item, ps)
