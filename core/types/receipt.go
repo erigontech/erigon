@@ -145,6 +145,10 @@ type storedReceiptRLP struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	FirstLogIndex     uint32 // Logs have their own incremental Index within block. To allow calc it without re-executing whole block - can store it in Receipt
+	// Receipt hash post-Regolith but pre-Canyon inadvertently did not include the above
+	// DepositNonce. Post Canyon, receipts will have a non-empty DepositReceiptVersion indicating
+	// which post-Canyon receipt hash function to invoke.
+	DepositReceiptVersion *uint64 `rlp:"optional"`
 }
 
 // NewReceipt creates a barebone transaction receipt, copying the init fields.
@@ -414,18 +418,19 @@ func (r *Receipt) Copy() *Receipt {
 		return nil
 	}
 	return &Receipt{
-		Type:              r.Type,
-		PostState:         slices.Clone(r.PostState),
-		Status:            r.Status,
-		CumulativeGasUsed: r.CumulativeGasUsed,
-		Bloom:             BytesToBloom(r.Bloom.Bytes()),
-		Logs:              r.Logs.Copy(),
-		TxHash:            libcommon.BytesToHash(r.TxHash.Bytes()),
-		ContractAddress:   libcommon.BytesToAddress(r.ContractAddress.Bytes()),
-		GasUsed:           r.GasUsed,
-		BlockHash:         libcommon.BytesToHash(r.BlockHash.Bytes()),
-		BlockNumber:       big.NewInt(0).Set(r.BlockNumber),
-		TransactionIndex:  r.TransactionIndex,
+		Type:                  r.Type,
+		PostState:             slices.Clone(r.PostState),
+		Status:                r.Status,
+		CumulativeGasUsed:     r.CumulativeGasUsed,
+		Bloom:                 BytesToBloom(r.Bloom.Bytes()),
+		Logs:                  r.Logs.Copy(),
+		TxHash:                libcommon.BytesToHash(r.TxHash.Bytes()),
+		ContractAddress:       libcommon.BytesToAddress(r.ContractAddress.Bytes()),
+		GasUsed:               r.GasUsed,
+		BlockHash:             libcommon.BytesToHash(r.BlockHash.Bytes()),
+		BlockNumber:           big.NewInt(0).Set(r.BlockNumber),
+		TransactionIndex:      r.TransactionIndex,
+		DepositReceiptVersion: r.DepositReceiptVersion,
 	}
 }
 
@@ -443,9 +448,10 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		firstLogIndex = uint32(r.Logs[0].Index)
 	}
 	return rlp.Encode(w, &storedReceiptRLP{
-		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
-		CumulativeGasUsed: r.CumulativeGasUsed,
-		FirstLogIndex:     firstLogIndex,
+		PostStateOrStatus:     (*Receipt)(r).statusEncoding(),
+		CumulativeGasUsed:     r.CumulativeGasUsed,
+		FirstLogIndex:         firstLogIndex,
+		DepositReceiptVersion: r.DepositReceiptVersion,
 	})
 }
 
@@ -461,7 +467,9 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
 	r.FirstLogIndexWithinBlock = stored.FirstLogIndex
-
+	if stored.DepositReceiptVersion != nil {
+		r.DepositReceiptVersion = stored.DepositReceiptVersion
+	}
 	//r.Logs = make([]*Log, len(stored.Logs))
 	//for i, log := range stored.Logs {
 	//	r.Logs[i] = (*Log)(log)
