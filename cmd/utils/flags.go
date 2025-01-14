@@ -1096,13 +1096,17 @@ var (
 		Usage: "Enable 'chaos monkey' to generate spontaneous network/consensus/etc failures. Use ONLY for testing",
 		Value: false,
 	}
-	ShutterEnabled = cli.BoolFlag{
+	ShutterEnabledFlag = cli.BoolFlag{
 		Name:  "shutter",
 		Usage: "Enable the Shutter encrypted transactions mempool (defaults to false)",
 	}
-	ShutterKeyperBootnodes = cli.StringSliceFlag{
-		Name:  "shutter.keyper.bootnodes",
-		Usage: "Use to override the default keyper bootnodes (defaults to using the bootnodes from the embedded config)",
+	ShutterP2pBootstrapNodesFlag = cli.StringSliceFlag{
+		Name:  "shutter.p2p.bootstrap.nodes",
+		Usage: "Use to override the default p2p bootstrap nodes (defaults to using the values in the embedded config)",
+	}
+	ShutterP2pListenPortFlag = cli.UintFlag{
+		Name:  "shutter.p2p.listen.port",
+		Usage: "Use to override the default p2p listen port (defaults to 23102)",
 	}
 )
 
@@ -1586,18 +1590,22 @@ func setTxPool(ctx *cli.Context, dbDir string, fullCfg *ethconfig.Config) {
 	fullCfg.TxPool = cfg
 }
 
-func setShutter(ctx *cli.Context, chainName string, cfg *ethconfig.Config) {
-	if enabled := ctx.Bool(ShutterEnabled.Name); !enabled {
+func setShutter(ctx *cli.Context, chainName string, nodeConfig *nodecfg.Config, ethConfig *ethconfig.Config) {
+	if enabled := ctx.Bool(ShutterEnabledFlag.Name); !enabled {
 		return
 	}
 
 	config := shutter.ConfigByChainName(chainName)
+	config.PrivateKey = nodeConfig.P2P.PrivateKey
 	// check for cli overrides
-	if ctx.IsSet(ShutterKeyperBootnodes.Name) {
-		config.KeyperBootnodes = ctx.StringSlice(ShutterKeyperBootnodes.Name)
+	if ctx.IsSet(ShutterP2pBootstrapNodesFlag.Name) {
+		config.BootstrapNodes = ctx.StringSlice(ShutterP2pBootstrapNodesFlag.Name)
+	}
+	if ctx.IsSet(ShutterP2pListenPortFlag.Name) {
+		config.ListenPort = ctx.Uint64(ShutterP2pListenPortFlag.Name)
 	}
 
-	cfg.Shutter = config
+	ethConfig.Shutter = config
 }
 
 func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
@@ -1898,37 +1906,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.Verify = ctx.Bool(DownloaderVerifyFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
 	cfg.Snapshot.ChainName = chain
-	if cfg.Snapshot.DownloaderAddr == "" {
-		downloadRateStr := ctx.String(TorrentDownloadRateFlag.Name)
-		uploadRateStr := ctx.String(TorrentUploadRateFlag.Name)
-		var downloadRate, uploadRate datasize.ByteSize
-		if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
-			panic(err)
-		}
-		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
-			panic(err)
-		}
-		lvl, _, err := downloadercfg2.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
-		if err != nil {
-			panic(err)
-		}
-		logger.Info("torrent verbosity", "level", lvl.LogString())
-		version := "erigon: " + params.VersionWithCommit(params.GitCommit)
-		webseedsList := libcommon.CliString2Array(ctx.String(WebSeedsFlag.Name))
-		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
-			webseedsList = append(webseedsList, known...)
-		}
-		cfg.Downloader, err = downloadercfg2.New(ctx.Context, cfg.Dirs, version, lvl, downloadRate, uploadRate,
-			ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name),
-			libcommon.CliString2Array(ctx.String(TorrentStaticPeersFlag.Name)),
-			webseedsList, chain, true, ctx.Bool(DbWriteMapFlag.Name),
-		)
-		if err != nil {
-			panic(err)
-		}
-		downloadernat.DoNat(nodeConfig.P2P.NAT, cfg.Downloader.ClientConfig, logger)
-	}
-
 	nodeConfig.Http.Snap = cfg.Snapshot
 
 	if ctx.Command.Name == "import" {
@@ -1939,7 +1916,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setGPO(ctx, &cfg.GPO)
 
 	setTxPool(ctx, nodeConfig.Dirs.TxPool, cfg)
-	setShutter(ctx, chain, cfg)
+	setShutter(ctx, chain, nodeConfig, cfg)
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
 	setClique(ctx, &cfg.Clique, nodeConfig.Dirs.DataDir)
@@ -2018,6 +1995,39 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(TrustedSetupFile.Name) {
 		libkzg.SetTrustedSetupFilePath(ctx.String(TrustedSetupFile.Name))
+	}
+
+	// Do this after chain config as there are chain type registration
+	// dependencies for know config which need to be set-up
+	if cfg.Snapshot.DownloaderAddr == "" {
+		downloadRateStr := ctx.String(TorrentDownloadRateFlag.Name)
+		uploadRateStr := ctx.String(TorrentUploadRateFlag.Name)
+		var downloadRate, uploadRate datasize.ByteSize
+		if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
+			panic(err)
+		}
+		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
+			panic(err)
+		}
+		lvl, _, err := downloadercfg2.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
+		if err != nil {
+			panic(err)
+		}
+		logger.Info("torrent verbosity", "level", lvl.LogString())
+		version := "erigon: " + params.VersionWithCommit(params.GitCommit)
+		webseedsList := libcommon.CliString2Array(ctx.String(WebSeedsFlag.Name))
+		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+			webseedsList = append(webseedsList, known...)
+		}
+		cfg.Downloader, err = downloadercfg2.New(ctx.Context, cfg.Dirs, version, lvl, downloadRate, uploadRate,
+			ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name),
+			libcommon.CliString2Array(ctx.String(TorrentStaticPeersFlag.Name)),
+			webseedsList, chain, true, ctx.Bool(DbWriteMapFlag.Name),
+		)
+		if err != nil {
+			panic(err)
+		}
+		downloadernat.DoNat(nodeConfig.P2P.NAT, cfg.Downloader.ClientConfig, logger)
 	}
 }
 
