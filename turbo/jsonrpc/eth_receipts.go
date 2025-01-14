@@ -340,7 +340,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				log.TxHash = txn.Hash()
 			}
 		} else {
-			println("receipt", r.CumulativeGasUsed, r.FirstLogIndexWithinBlock)
+			println("receipt:", "txnum", txNum, "cumGasUsed", r.CumulativeGasUsed, "firstLog", r.FirstLogIndexWithinBlock)
 			filtered = r.Logs.Filter(addrMap, crit.Topics, 0)
 		}
 
