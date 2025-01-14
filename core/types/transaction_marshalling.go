@@ -280,6 +280,10 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 			return nil, err
 		}
 		return tx, nil
+	case AccountAbstractionBatchHeaderType: // TODO
+		tx := &AccountAbstractionBatchHeaderTransaction{}
+		//if err = tx.UnmarshalJSON(input); err != nil {return nil, err}
+		return tx, nil
 	default:
 		return nil, fmt.Errorf("unknown transaction type: %v", txType)
 	}

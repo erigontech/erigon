@@ -54,6 +54,7 @@ const (
 	BlobTxType
 	SetCodeTxType
 	AccountAbstractionTxType
+	AccountAbstractionBatchHeaderType
 )
 
 // Transaction is an Ethereum transaction.
@@ -197,6 +198,10 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		}
 	case SetCodeTxType:
 		t = &SetCodeTransaction{}
+	case AccountAbstractionTxType:
+		t = &AccountAbstractionTransaction{}
+	case AccountAbstractionBatchHeaderType:
+		t = &AccountAbstractionBatchHeaderTransaction{}
 	default:
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded
