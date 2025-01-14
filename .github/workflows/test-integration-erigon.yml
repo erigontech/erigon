@@ -12,6 +12,8 @@ on:
       - reopened
       - synchronize
       - ready_for_review
+    paths:
+      - '!.github/workflows/**'
   schedule:
     - cron: '20 16 * * *' # daily at 16:20 UTC
   workflow_dispatch:
