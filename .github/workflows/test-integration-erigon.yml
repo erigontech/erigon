@@ -29,6 +29,7 @@ jobs:
         with:
           filters: |
             changed_files:
+              - '**/*'
               - '!dashboards/**'
               - '!**/.github/workflows/**'
 
