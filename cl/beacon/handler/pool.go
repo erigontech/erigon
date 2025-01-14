@@ -145,8 +145,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 				Name:     gossip.TopicNamePrefixBeaconAttestation,
 				SubnetId: &subnet,
 			}); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+				a.logger.Debug("[Beacon REST] failed to publish attestation to gossip", "err", err)
 			}
 		}
 	}
@@ -191,8 +190,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 			Data: encodedSSZ,
 			Name: gossip.TopicNameVoluntaryExit,
 		}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			a.logger.Debug("[Beacon REST] failed to publish voluntary exit to gossip", "err", err)
 		}
 	}
 	// Only write 200
@@ -222,8 +220,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter,
 			Data: encodedSSZ,
 			Name: gossip.TopicNameAttesterSlashing,
 		}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			a.logger.Debug("[Beacon REST] failed to publish attester slashing to gossip", "err", err)
 		}
 	}
 	// Only write 200
@@ -251,8 +248,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter,
 			Data: encodedSSZ,
 			Name: gossip.TopicNameProposerSlashing,
 		}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			a.logger.Debug("[Beacon REST] failed to publish proposer slashing to gossip", "err", err)
 		}
 	}
 	// Only write 200
@@ -295,8 +291,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 				Data: encodedSSZ,
 				Name: gossip.TopicNameBlsToExecutionChange,
 			}); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+				a.logger.Debug("[Beacon REST] failed to publish bls-to-execution-change to gossip", "err", err)
 			}
 		}
 	}
@@ -342,8 +337,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 				Data: encodedSSZ,
 				Name: gossip.TopicNameBeaconAggregateAndProof,
 			}); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+				a.logger.Debug("[Beacon REST] failed to publish aggregate and proof to gossip", "err", err)
 			}
 		}
 	}
@@ -398,8 +392,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 					Name:     gossip.TopicNamePrefixSyncCommittee,
 					SubnetId: &subnetId,
 				}); err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
+					a.logger.Debug("[Beacon REST] failed to publish sync committee message to gossip", "err", err)
 				}
 			}
 		}
@@ -448,8 +441,7 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 				Data: encodedSSZ,
 				Name: gossip.TopicNameSyncCommitteeContributionAndProof,
 			}); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+				a.logger.Debug("[Beacon REST] failed to publish sync committee contribution to gossip", "err", err)
 			}
 		}
 	}

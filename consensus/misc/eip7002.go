@@ -30,8 +30,8 @@ func DequeueWithdrawalRequests7002(syscall consensus.SystemCall) *types.FlatRequ
 		return nil
 	}
 	if res != nil {
+		// Just append the contract output
 		return &types.FlatRequest{Type: types.WithdrawalRequestType, RequestData: res}
 	}
 	return nil
-	// Just append the contract outputs
 }

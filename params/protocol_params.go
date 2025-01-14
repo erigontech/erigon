@@ -177,7 +177,7 @@ const (
 	P256VerifyGas uint64 = 3450
 
 	// EIP-2935: Historical block hashes in state
-	BlockHashHistoryServeWindow uint64 = 8192
+	BlockHashHistoryServeWindow uint64 = 8191
 	BlockHashOldWindow          uint64 = 256
 
 	// EIP-7702
