@@ -61,6 +61,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			txTask.CreateReceipt(se.applyTx)
 
 			if txTask.Final {
+				for receiptIndex := range txTask.BlockReceipts {
+					receipt := txTask.BlockReceipts[receiptIndex]
+					if receipt.Type == types.OptimismDepositTxType && se.cfg.chainConfig.IsOptimismRegolith(txTask.Header.Time) {
+						receipt.DepositReceiptVersion = new(uint64)
+						*receipt.DepositReceiptVersion = types.CanyonDepositReceiptVersion
+					}
+				}
 				if !se.isMining && !se.inMemExec && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
 					// note this assumes the bloach reciepts is a fixed array shared by
 					// all tasks - if that changes this will need to change - robably need to
@@ -68,6 +75,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 					se.cfg.notifications.RecentLogs.Add(txTask.BlockReceipts)
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNum) && !se.cfg.vmConfig.NoReceipts && !se.isMining
+
 				if txTask.BlockNum > 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					if err := core.BlockPostValidation(se.usedGas, se.blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, se.isMining); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
