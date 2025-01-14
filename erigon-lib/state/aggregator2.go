@@ -71,8 +71,8 @@ var Schema = map[kv.Domain]domainCfg{
 
 		IndexList:            AccessorBTree | AccessorExistence,
 		crossDomainIntegrity: domainIntegrityCheck,
-		compression:          seg.CompressNone,
-		compressCfg:          DomainCompressCfg,
+		Compression:          seg.CompressNone,
+		CompressCfg:          DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblAccountHistoryVals,
@@ -92,8 +92,8 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 
 		IndexList:   AccessorBTree | AccessorExistence,
-		compression: seg.CompressKeys,
-		compressCfg: DomainCompressCfg,
+		Compression: seg.CompressKeys,
+		CompressCfg: DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblStorageHistoryVals,
@@ -113,8 +113,8 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
 
 		IndexList:   AccessorBTree | AccessorExistence,
-		compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
-		compressCfg: DomainCompressCfg,
+		Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+		CompressCfg: DomainCompressCfg,
 		largeValues: true,
 
 		hist: histCfg{
@@ -135,8 +135,8 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 
 		IndexList:   AccessorHashMap,
-		compression: seg.CompressKeys,
-		compressCfg: DomainCompressCfg,
+		Compression: seg.CompressKeys,
+		CompressCfg: DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblCommitmentHistoryVals,
@@ -157,8 +157,8 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
 
 		IndexList:   AccessorBTree | AccessorExistence,
-		compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-		compressCfg: DomainCompressCfg,
+		Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		CompressCfg: DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblReceiptHistoryVals,

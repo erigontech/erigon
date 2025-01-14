@@ -1270,7 +1270,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	roots := make([]common.Hash, 0)
 
 	// collect latest root from each available file
-	compression := ac.d[kv.CommitmentDomain].d.compression
+	compression := ac.d[kv.CommitmentDomain].d.Compression
 	fnames := []string{}
 	for _, f := range ac.d[kv.CommitmentDomain].files {
 		var k, stateVal []byte

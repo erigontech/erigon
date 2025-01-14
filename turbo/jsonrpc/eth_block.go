@@ -248,9 +248,21 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	var borTx types.Transaction
 	var borTxHash common.Hash
 	if chainConfig.Bor != nil {
-		borTx = rawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
-		if borTx != nil {
-			borTxHash = bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
+		if api.useBridgeReader {
+			possibleBorTxnHash := bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
+			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				borTx = bortypes.NewBorTransaction()
+				borTxHash = possibleBorTxnHash
+			}
+		} else {
+			borTx = rawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
+			if borTx != nil {
+				borTxHash = bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
+			}
 		}
 	}
 
@@ -261,6 +273,12 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 			response[field] = nil
 		}
 	}
+
+	if chainConfig.Bor != nil {
+		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+		response["miner"], _ = ecrecover(b.Header(), borConfig)
+	}
+
 	return response, err
 }
 
@@ -312,25 +330,37 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	var borTx types.Transaction
 	var borTxHash common.Hash
 	if chainConfig.Bor != nil {
-		borTx = rawdb.ReadBorTransactionForBlock(tx, number)
-		if borTx != nil {
-			borTxHash = bortypes.ComputeBorTxHash(number, block.Hash())
+		if api.useBridgeReader {
+			possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
+			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				borTx = bortypes.NewBorTransaction()
+				borTxHash = possibleBorTxnHash
+			}
+		} else {
+			borTx = rawdb.ReadBorTransactionForBlock(tx, number)
+			if borTx != nil {
+				borTxHash = bortypes.ComputeBorTxHash(number, block.Hash())
+			}
 		}
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
-
-	if chainConfig.Bor != nil {
-		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-		response["miner"], _ = ecrecover(block.Header(), borConfig)
-	}
-
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
 		}
 	}
+
+	if chainConfig.Bor != nil {
+		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+		response["miner"], _ = ecrecover(block.Header(), borConfig)
+	}
+
 	return response, err
 }
 

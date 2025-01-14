@@ -57,7 +57,7 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 
 	snapshots := blockReader.BorSnapshots().(*heimdall.RoSnapshots)
 
-	var prevEventId uint64 = 1
+	var prevEventId uint64
 	var maxBlockNum uint64
 
 	if to > 0 {

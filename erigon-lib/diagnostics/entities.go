@@ -116,8 +116,13 @@ type FileDownloadedStatisticsUpdate struct {
 }
 
 type SegmentPeer struct {
-	Url          string `json:"url"`
-	DownloadRate uint64 `json:"downloadRate"`
+	Url          string   `json:"url"`
+	DownloadRate uint64   `json:"downloadRate"`
+	UploadRate   uint64   `json:"uploadRate"`
+	PiecesCount  uint64   `json:"piecesCount"`
+	RemoteAddr   string   `json:"remoteAddr"`
+	PeerId       [20]byte `json:"peerId"`
+	TorrentName  string   `json:"torrentName"`
 }
 
 type SnapshotIndexingStatistics struct {

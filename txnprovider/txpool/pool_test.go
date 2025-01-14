@@ -28,21 +28,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types/typestest"
-
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/typestest"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -164,6 +168,258 @@ func TestNonceFromAddress(t *testing.T) {
 			assert.Equal(txpoolcfg.NonceTooLow, reason, reason.String())
 		}
 	}
+}
+
+func TestMultipleAuthorizations(t *testing.T) {
+	ch := make(chan Announcements, 100)
+	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := memdb.NewTestPoolDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	cfg := txpoolcfg.DefaultConfig
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0 /* shanghaiTime */, nil /* agraBlock */, common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	assert.NoError(t, err)
+	require.True(t, pool != nil)
+
+	var stateVersionID uint64 = 0
+	pendingBaseFee := uint64(200000)
+	// start blocks from 0, set empty hash - then kvcache will also work on this
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remote.StateChangeBatch{
+		StateVersionId:      stateVersionID,
+		PendingBlockBaseFee: pendingBaseFee,
+		BlockGasLimit:       1000000,
+		ChangeBatch: []*remote.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+
+	chainID := uint64(7078815900)
+	privateKey, err := crypto.GenerateKey()
+	assert.NoError(t, err)
+	authAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
+
+	var addr1, addr2 [20]byte
+	addr2[0] = 1
+	v := types2.EncodeAccountBytesV3(0, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+		Action:  remote.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr1),
+		Data:    v,
+	})
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+		Action:  remote.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr2),
+		Data:    v,
+	})
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+		Action:  remote.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(authAddress),
+		Data:    v,
+	})
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	assert.NoError(t, err)
+
+	// Generate auth data for transactions
+	var b [33]byte
+	data := bytes.NewBuffer(b[:])
+	data.Reset()
+
+	authLen := rlp.U64Len(chainID)
+	authLen += 1 + length.Addr
+	authLen += rlp.U64Len(0)
+	assert.NoError(t, rlp.EncodeStructSizePrefix(authLen, data, b[:]))
+	assert.NoError(t, rlp.EncodeInt(chainID, data, b[:]))
+	assert.NoError(t, rlp.EncodeOptionalAddress(&authAddress, data, b[:]))
+	assert.NoError(t, rlp.EncodeInt(0, data, b[:]))
+
+	hashData := []byte{params.SetCodeMagicPrefix}
+	hashData = append(hashData, data.Bytes()...)
+	hash := crypto.Keccak256Hash(hashData)
+
+	sig, err := crypto.Sign(hash.Bytes(), privateKey)
+	assert.NoError(t, err)
+
+	r := uint256.NewInt(0).SetBytes(sig[:32])
+	s := uint256.NewInt(0).SetBytes(sig[32:64])
+	yParity := sig[64]
+
+	var auth Signature
+	auth.ChainID.Set(uint256.NewInt(chainID))
+	auth.V.Set(uint256.NewInt(uint64(yParity)))
+	auth.R.Set(r)
+	auth.S.Set(s)
+
+	logger := log.New()
+
+	// txn with existing authorization should not be accepted
+	{
+		var txnSlots TxnSlots
+		txnSlot1 := &TxnSlot{
+			Tip:            *uint256.NewInt(300000),
+			FeeCap:         *uint256.NewInt(300000),
+			Gas:            100000,
+			Nonce:          0,
+			Authorizations: []Signature{auth},
+			AuthRaw:        [][]byte{data.Bytes()},
+			Type:           SetCodeTxnType,
+		}
+		txnSlot1.IDHash[0] = 1
+		txnSlots.Append(txnSlot1, addr1[:], true)
+
+		txnSlot2 := &TxnSlot{
+			Tip:            *uint256.NewInt(300000),
+			FeeCap:         *uint256.NewInt(300000),
+			Gas:            100000,
+			Nonce:          0,
+			Authorizations: []Signature{auth},
+			AuthRaw:        [][]byte{data.Bytes()},
+			Type:           SetCodeTxnType,
+		}
+		txnSlot2.IDHash[0] = 2
+		txnSlots.Append(txnSlot2, addr2[:], true)
+
+		assert.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
+
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		assert.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.ErrAuthorityReserved})
+
+		assert.Len(t, pool.auths, 1) // auth address should be in pool auth
+		_, ok := pool.auths[authAddress]
+		assert.True(t, ok)
+
+		err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{[]*TxnSlot{txnSlot1}, Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []bool{true}})
+		assert.NoError(t, err)
+
+		assert.Len(t, pool.auths, 0) // auth address should not be there after block has been mined
+	}
+
+	// fee bump
+	{
+		var txnSlots TxnSlots
+		txnSlot1 := &TxnSlot{
+			Tip:            *uint256.NewInt(300000),
+			FeeCap:         *uint256.NewInt(300000),
+			Gas:            100000,
+			Nonce:          1,
+			Authorizations: []Signature{auth},
+			AuthRaw:        [][]byte{data.Bytes()},
+			Type:           SetCodeTxnType,
+		}
+		txnSlot1.IDHash[0] = 3
+		txnSlots.Append(txnSlot1, addr1[:], true)
+
+		assert.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		assert.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success})
+
+		txnSlots = TxnSlots{}
+		txnSlot2 := &TxnSlot{
+			Tip:            *uint256.NewInt(900000),
+			FeeCap:         *uint256.NewInt(900000),
+			Gas:            100000,
+			Nonce:          1,
+			Authorizations: []Signature{auth},
+			AuthRaw:        [][]byte{data.Bytes()},
+			Type:           SetCodeTxnType,
+		}
+		txnSlot2.IDHash[0] = 4
+		txnSlots.Append(txnSlot2, addr1[:], true)
+
+		assert.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
+		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
+		assert.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success})
+		assert.Equal(t, pool.queued.Best().TxnSlot, txnSlot2)
+
+		err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{[]*TxnSlot{txnSlot1}, Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []bool{true}})
+		assert.NoError(t, err)
+	}
+
+	// do not allow transactions from delegated addresses
+	{
+		var txnSlots TxnSlots
+		txnSlot1 := &TxnSlot{
+			Tip:            *uint256.NewInt(300000),
+			FeeCap:         *uint256.NewInt(300000),
+			Gas:            100000,
+			Nonce:          1,
+			Authorizations: []Signature{auth},
+			AuthRaw:        [][]byte{data.Bytes()},
+			Type:           SetCodeTxnType,
+		}
+		txnSlot1.IDHash[0] = 5
+		txnSlots.Append(txnSlot1, addr1[:], true)
+
+		assert.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		assert.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success})
+
+		txnSlots = TxnSlots{}
+		txnSlot2 := &TxnSlot{
+			Tip:    *uint256.NewInt(300000),
+			FeeCap: *uint256.NewInt(300000),
+			Gas:    100000,
+			Nonce:  1,
+			Type:   DynamicFeeTxnType,
+		}
+		txnSlot2.IDHash[0] = 6
+
+		txnSlots.Append(txnSlot2, authAddress.Bytes(), true)
+		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
+		assert.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.ErrAuthorityReserved})
+	}
+}
+
+func TestRecoverSignerFromRLP_ValidData(t *testing.T) {
+	privateKey, err := crypto.GenerateKey()
+	assert.NoError(t, err)
+	pubKey := crypto.PubkeyToAddress(privateKey.PublicKey)
+	chainID := uint64(7078815900)
+
+	var b [33]byte
+	data := bytes.NewBuffer(b[:])
+	data.Reset()
+
+	// Encode RLP data exactly as in the previous implementation
+	authLen := rlp.U64Len(chainID)
+	authLen += 1 + length.Addr
+	authLen += rlp.U64Len(0) // nonce
+	assert.NoError(t, rlp.EncodeStructSizePrefix(authLen, data, b[:]))
+	assert.NoError(t, rlp.EncodeInt(chainID, data, b[:]))
+	assert.NoError(t, rlp.EncodeOptionalAddress(&pubKey, data, b[:]))
+	assert.NoError(t, rlp.EncodeInt(0, data, b[:]))
+
+	// Prepare hash data exactly as before
+	hashData := []byte{params.SetCodeMagicPrefix}
+	hashData = append(hashData, data.Bytes()...)
+	hash := crypto.Keccak256Hash(hashData)
+
+	// Sign the hash
+	sig, err := crypto.Sign(hash.Bytes(), privateKey)
+	assert.NoError(t, err)
+
+	// Separate signature components
+	r := uint256.NewInt(0).SetBytes(sig[:32])
+	s := uint256.NewInt(0).SetBytes(sig[32:64])
+	yParity := sig[64]
+
+	// Recover signer using the explicit RecoverSignerFromRLP function
+	recoveredAddress, err := types.RecoverSignerFromRLP(data.Bytes(), yParity, *r, *s)
+	assert.NoError(t, err)
+	assert.NotNil(t, recoveredAddress)
+
+	// Verify the recovered address matches the original public key address
+	assert.Equal(t, pubKey, *recoveredAddress)
 }
 
 func TestReplaceWithHigherFee(t *testing.T) {
@@ -631,7 +887,8 @@ func TestShanghaiIntrinsicGas(t *testing.T) {
 
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			gas, reason := txpoolcfg.CalcIntrinsicGas(c.dataLen, c.dataNonZeroLen, c.authorizationsLen, nil, c.creation, true, true, c.isShanghai)
+			// Todo (@somnathb1) - Factor in EIP-7623
+			gas, _, reason := txpoolcfg.CalcIntrinsicGas(c.dataLen, c.dataNonZeroLen, c.authorizationsLen, nil, c.creation, true, true, c.isShanghai, false)
 			if reason != txpoolcfg.Success {
 				t.Errorf("expected success but got reason %v", reason)
 			}
@@ -733,13 +990,71 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			asrt.NoError(err)
 			view, err := cache.View(ctx, tx)
 			asrt.NoError(err)
-
+			pool.blockGasLimit.Store(30_000_000)
 			reason := pool.validateTx(txn, false, view)
 
 			if reason != test.expected {
 				t.Errorf("expected %v, got %v", test.expected, reason)
 			}
 		})
+	}
+}
+
+func TestTooHighGasLimitTxnValidation(t *testing.T) {
+	assert, require := assert.New(t), require.New(t)
+	ch := make(chan Announcements, 100)
+	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := memdb.NewTestPoolDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	cfg := txpoolcfg.DefaultConfig
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	assert.NoError(err)
+	require.True(pool != nil)
+	var stateVersionID uint64 = 0
+	pendingBaseFee := uint64(200000)
+	// start blocks from 0, set empty hash - then kvcache will also work on this
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remote.StateChangeBatch{
+		StateVersionId:      stateVersionID,
+		PendingBlockBaseFee: pendingBaseFee,
+		BlockGasLimit:       1000000,
+		ChangeBatch: []*remote.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+	var addr [20]byte
+	addr[0] = 1
+	v := types2.EncodeAccountBytesV3(2, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+		Action:  remote.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr),
+		Data:    v,
+	})
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	assert.NoError(err)
+
+	{
+		var txnSlots TxnSlots
+		txnSlot := &TxnSlot{
+			Tip:    *uint256.NewInt(300000),
+			FeeCap: *uint256.NewInt(300000),
+			Gas:    1000001,
+			Nonce:  2,
+		}
+		txnSlot.IDHash[0] = 1
+		txnSlots.Append(txnSlot, addr[:], true)
+
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		assert.NoError(err)
+		assert.Len(reasons, 1)
+		assert.Equal(reasons[0], txpoolcfg.GasLimitTooHigh)
 	}
 }
 
@@ -756,6 +1071,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil, /* agraBlock */
 		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
 	assert.NoError(t, err)
+	pool.blockGasLimit.Store(30_000_000)
 	tx, err := coreDB.BeginRw(ctx)
 	defer tx.Rollback()
 	assert.NoError(t, err)
@@ -803,6 +1119,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
+
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
 
@@ -810,7 +1127,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	change := &remote.StateChangeBatch{
 		StateVersionId:       stateVersionID,
 		PendingBlockBaseFee:  200_000,
-		BlockGasLimit:        1000000,
+		BlockGasLimit:        math.MaxUint64,
 		PendingBlobFeePerGas: 100_000,
 		ChangeBatch: []*remote.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
@@ -958,7 +1275,6 @@ func makeBlobTxn() TxnSlot {
 	blobTxn.BlobHashes = make([]common.Hash, 2)
 	blobTxn.BlobHashes[0] = common.Hash(kzg.KZGToVersionedHash(commitment0))
 	blobTxn.BlobHashes[1] = common.Hash(kzg.KZGToVersionedHash(commitment1))
-
 	blobTxn.Tip = *tip
 	blobTxn.FeeCap = *feeCap
 	blobTxn.BlobFeeCap = *blobFeeCap
@@ -1093,7 +1409,7 @@ func TestBlobSlots(t *testing.T) {
 	change := &remote.StateChangeBatch{
 		StateVersionId:       stateVersionID,
 		PendingBlockBaseFee:  200_000,
-		BlockGasLimit:        1000000,
+		BlockGasLimit:        math.MaxUint64,
 		PendingBlobFeePerGas: 100_000,
 		ChangeBatch: []*remote.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
@@ -1201,25 +1517,20 @@ func TestGasLimitChanged(t *testing.T) {
 	reasons, err := pool.AddLocalTxns(ctx, txnSlots)
 	assert.NoError(err)
 	for _, reason := range reasons {
-		assert.Equal(txpoolcfg.Success, reason, reason.String())
+		assert.Equal(reason, txpoolcfg.GasLimitTooHigh)
 	}
-
-	mtx, ok := pool.byHash[string(txnSlot1.IDHash[:])]
-	assert.True(ok)
-	assert.Zero(mtx.subPool&NotTooMuchGas, "Should be insufficient block space for the tx")
 
 	change.ChangeBatch[0].Changes = nil
 	change.BlockGasLimit = 150_000
 	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(err)
 
-	assert.NotZero(mtx.subPool&NotTooMuchGas, "Should now have block space for the tx")
-
-	change.BlockGasLimit = 50_000
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 	assert.NoError(err)
 
-	assert.Zero(mtx.subPool&NotTooMuchGas, "Should now have block space (again) for the tx")
+	for _, reason := range reasons {
+		assert.Equal(txpoolcfg.Success, reason, reason.String())
+	}
 }
 
 // sender - immutable structure which stores only nonce and balance of account

@@ -496,8 +496,8 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		sd.logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err
 	}
-	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.compression)
-	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.compression)
+	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.Compression)
+	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.Compression)
 	metricI := 0
 	for i, f := range sd.aggTx.d[kv.CommitmentDomain].files {
 		if i > 5 {
