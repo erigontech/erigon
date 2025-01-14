@@ -157,10 +157,12 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 
 	// If the IP is an IPv4 address, bind to the correct zero address.
 	if ip.To4() != nil {
-		bindIP = net.IPv4zero
+		// bindIP = net.IPv4zero
+		bindIP = ip.To4()
 		networkVersion = "udp4"
 	} else {
-		bindIP = net.IPv6zero
+		// bindIP = net.IPv6zero
+		bindIP = ip.To16()
 		networkVersion = "udp6"
 	}
 
@@ -178,7 +180,6 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.logger.Info("[Sentinel] Listening for TCP packets", "addr", ip, "port", s.cfg.TCPPort)
 
 	// Start stream handlers
 
@@ -186,6 +187,8 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.logger.Info("[Sentinel] Listening for TCP packets", "addr", net.Self().String())
+
 	handlers.NewConsensusHandlers(s.ctx, s.blockReader, s.indiciesDB, s.host, s.peers, s.cfg.NetworkConfig, localNode, s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.cfg.EnableBlocks).Start()
 
 	return net, err
