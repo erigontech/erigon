@@ -148,6 +148,7 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 		CumulativeGasUsed: cumulativeGasUsed,
 		TxHash:            t.Tx.Hash(),
 		Logs:              t.Logs,
+		DepositNonce:      t.OptimismDepositNonce,
 	}
 	blockNum := t.Header.Number.Uint64()
 	for _, l := range receipt.Logs {
@@ -159,6 +160,11 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful
+	}
+	config := t.Config
+	if config.IsOptimismCanyon(t.Header.Time) && config.IsOptimismRegolith(t.Header.Time) {
+		receipt.DepositReceiptVersion = new(uint64)
+		*receipt.DepositReceiptVersion = types.CanyonDepositReceiptVersion
 	}
 	// if the transaction created a contract, store the creation address in the receipt.
 	//if msg.To() == nil {

@@ -61,18 +61,18 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			txTask.CreateReceipt(se.applyTx)
 
 			if txTask.Final {
-				for _, receipt := range txTask.BlockReceipts {
-					config := se.cfg.chainConfig
-					// The actual nonce for deposit transactions is only recorded from Regolith onwards and
-					// otherwise must be nil.
-					receipt.DepositNonce = txTask.OptimismDepositNonce
-					fmt.Println(receipt.DepositNonce)
+				// for _, receipt := range txTask.BlockReceipts {
+				// 	config := se.cfg.chainConfig
+				// 	// The actual nonce for deposit transactions is only recorded from Regolith onwards and
+				// 	// otherwise must be nil.
+				// 	receipt.DepositNonce = txTask.OptimismDepositNonce
+				// 	fmt.Println(receipt.DepositNonce)
 
-					if config.IsOptimismCanyon(txTask.Header.Time) && config.IsOptimismRegolith(txTask.Header.Time) {
-						receipt.DepositReceiptVersion = new(uint64)
-						*receipt.DepositReceiptVersion = types.CanyonDepositReceiptVersion
-					}
-				}
+				// 	if config.IsOptimismCanyon(txTask.Header.Time) && config.IsOptimismRegolith(txTask.Header.Time) {
+				// 		receipt.DepositReceiptVersion = new(uint64)
+				// 		*receipt.DepositReceiptVersion = types.CanyonDepositReceiptVersion
+				// 	}
+				// }
 				if !se.isMining && !se.inMemExec && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
 					// note this assumes the bloach reciepts is a fixed array shared by
 					// all tasks - if that changes this will need to change - robably need to
