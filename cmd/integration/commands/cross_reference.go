@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/debug"
 )
@@ -63,7 +64,7 @@ func crossReferenceBlockHashes(ctx context.Context, logger log.Logger, startBloc
 			return err
 		}
 
-		goldenBlockFields, err := fetchBlockViaRpc(logger, secondaryRpcUrl, blockNum)
+		goldenBlockFields, err := fetchBlockViaRpcWithRetry(ctx, logger, secondaryRpcUrl, blockNum)
 		if err != nil {
 			return err
 		}
@@ -96,6 +97,34 @@ func crossReferenceBlockHashes(ctx context.Context, logger log.Logger, startBloc
 	return nil
 }
 
+var (
+	errFailedResponse      = errors.New("failed response")
+	errResponseStatusNotOk = errors.New("response status not ok")
+)
+
+func fetchBlockViaRpcWithRetry(ctx context.Context, logger log.Logger, rpcUrl string, blockNum uint64) (map[string]interface{}, error) {
+	var err error
+	var fields map[string]interface{}
+	for i := 0; i < rpcMaxRetries+1; i++ {
+		fields, err = fetchBlockViaRpc(logger, rpcUrl, blockNum)
+		if err == nil {
+			return fields, nil
+		}
+		if !errors.Is(err, errResponseStatusNotOk) && !errors.Is(err, errFailedResponse) {
+			return nil, err
+		}
+
+		// otherwise this is a retry-able error - sleep and retry
+		logger.Error("Failed to fetch block via RPC - retrying after some time", "backOffDuration", rpcBackOffDuration, "err", err)
+		err = libcommon.Sleep(ctx, rpcBackOffDuration)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return nil, errors.New("max retries reached")
+}
+
 func fetchBlockViaRpc(logger log.Logger, rpcUrl string, blockNum uint64) (map[string]interface{}, error) {
 	client := &http.Client{}
 	payload := fmt.Sprintf(`{"method":"eth_getBlockByNumber","params":["0x%x",false],"id":1,"jsonrpc":"2.0"}`, blockNum)
@@ -108,23 +137,26 @@ func fetchBlockViaRpc(logger log.Logger, rpcUrl string, blockNum uint64) (map[st
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: rpcUrl=%s, blockNum=%d: %w", errFailedResponse, rpcUrl, blockNum, err)
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
 			logger.Error("Could not close body", "err", err)
 		}
 	}()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%w: rpcUrl=%s, blockNum=%d", errResponseStatusNotOk, rpcUrl, blockNum)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed io.ReadAll for response body: rpcUrl=%s, blockNum=%d: %w", rpcUrl, blockNum, err)
 	}
 
 	var fields map[string]interface{}
 	err = json.Unmarshal(body, &fields)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed json.Unmarshal for response body: rpcUrl=%s, blockNum=%d: %w", rpcUrl, blockNum, err)
 	}
 
 	return fields, nil

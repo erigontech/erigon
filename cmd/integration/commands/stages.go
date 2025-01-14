@@ -641,6 +641,8 @@ func init() {
 	withEndBlockNum(cmdCrossReferenceBlockHashes)
 	withRpcUrl(cmdCrossReferenceBlockHashes)
 	withSecondaryRpcUrl(cmdCrossReferenceBlockHashes)
+	withRpcMaxRetries(cmdCrossReferenceBlockHashes)
+	withRpcBackOffDuration(cmdCrossReferenceBlockHashes)
 	rootCmd.AddCommand(cmdCrossReferenceBlockHashes)
 }
 

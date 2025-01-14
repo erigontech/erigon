@@ -17,6 +17,8 @@
 package commands
 
 import (
+	"time"
+
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/turbo/cli"
@@ -56,6 +58,8 @@ var (
 
 	startBlockNum, endBlockNum uint64
 	rpcUrl, secondaryRpcUrl    string
+	rpcMaxRetries              int
+	rpcBackOffDuration         time.Duration
 
 	chainTipMode bool
 	syncCfg      = ethconfig.Defaults.Sync
@@ -215,4 +219,12 @@ func withRpcUrl(cmd *cobra.Command) {
 
 func withSecondaryRpcUrl(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&secondaryRpcUrl, "rpc.url.secondary", "", "secondary rpc url")
+}
+
+func withRpcMaxRetries(cmd *cobra.Command) {
+	cmd.Flags().IntVar(&rpcMaxRetries, "rpc.max.retries", 2, "max retries for failed rpc requests")
+}
+
+func withRpcBackOffDuration(cmd *cobra.Command) {
+	cmd.Flags().DurationVar(&rpcBackOffDuration, "rpc.backoff.duration", 30*time.Second, "backoff duration for retry-able rpc request errors")
 }
