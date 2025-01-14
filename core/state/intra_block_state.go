@@ -174,6 +174,7 @@ func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
 	log2.TxIndex = uint(sdb.txIndex)
 	log2.Index = sdb.logSize
+	println("adding log index:", log2.Index)
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
 		sdb.tracingHooks.OnLog(log2)
 	}
@@ -190,6 +191,7 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash libcommon.Hash, blockNu
 	}
 	logs := sdb.logs[txIndex]
 	for _, l := range logs {
+		println("from get:", l.Index)
 		l.TxHash = txnHash
 		l.BlockNumber = blockNumber
 		l.BlockHash = blockHash
@@ -202,6 +204,9 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash libcommon.Hash, blockNu
 func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 	if txIndex >= len(sdb.logs) {
 		return nil
+	}
+	for _, l := range sdb.logs[txIndex] {
+		println("from get:", l.Index)
 	}
 	return sdb.logs[txIndex]
 }
