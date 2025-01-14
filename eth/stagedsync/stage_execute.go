@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
@@ -331,7 +330,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	logPrefix := u.LogPrefix()
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	unwindToLimit, ok, err := txc.Tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindBeforeBlockNum(u.UnwindPoint, txc.Tx)
+	unwindToLimit, ok, err := libstate.AggTx(txc.Tx).CanUnwindBeforeBlockNum(u.UnwindPoint, txc.Tx)
 	if err != nil {
 		return err
 	}
@@ -423,7 +422,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
 	}
-	if _, err = tx.(*temporal.RwTx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
+	if _, err = libstate.AggTx(tx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
 		return err
 	}
 

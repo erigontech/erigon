@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -207,13 +207,13 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 
 	var txc wrap.TxContainer
 	txc.Tx = tx
-	domains, err := state2.NewSharedDomains(tx, log.New())
+	domains, err := libstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	defer domains.Close()
 	txc.Doms = domains
-	r := rpchelper.NewLatestStateReader(tx)
+	r := rpchelper.NewLatestStateReader(domains, tx)
 	w := rpchelper.NewLatestStateWriter(txc, nil, writeBlockNr)
 	statedb := state.New(r)
 
@@ -283,7 +283,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	}
 
 	var root libcommon.Hash
-	rootBytes, err := domains.ComputeCommitment(context2.Background(), true, header.Number.Uint64(), "")
+	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, header.Number.Uint64(), "")
 	if err != nil {
 		return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 	}
@@ -291,7 +291,13 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 }
 
 func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	r := rpchelper.NewLatestStateReader(tx)
+	domains, err := libstate.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+	defer domains.Close()
+	
+	r := rpchelper.NewLatestStateReader(domains, tx)
 	statedb := state.New(r)
 	statedb.SetTxContext(0)
 	for addr, a := range accounts {
@@ -322,11 +328,6 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 	var txc wrap.TxContainer
 	txc.Tx = tx
 
-	domains, err := state2.NewSharedDomains(tx, log.New())
-	if err != nil {
-		return nil, err
-	}
-	defer domains.Close()
 	defer domains.Flush(context2.Background(), tx)
 	txc.Doms = domains
 

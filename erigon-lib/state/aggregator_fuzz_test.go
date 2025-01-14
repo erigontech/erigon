@@ -98,10 +98,10 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 			domains.SetTxNum(txNum)
 
 			buf := types.EncodeAccountBytesV3(1, uint256.NewInt(0), nil, 0)
-			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), nil, buf, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), nil, buf, nil, 0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, addrs[txNum].Bytes(), locs[txNum].Bytes(), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, addrs[txNum].Bytes(), locs[txNum].Bytes(), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
 			require.NoError(t, err)
 
 			var v [8]byte
@@ -110,14 +110,14 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey2, nil, rwTx)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.CommitmentDomain, commKey2, nil, v[:], pv, step)
+				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, nil, v[:], pv, step)
 				require.NoError(t, err)
 				otherMaxWrite = txNum
 			} else {
 				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey1, nil, rwTx)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.CommitmentDomain, commKey1, nil, v[:], pv, step)
+				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, nil, v[:], pv, step)
 				require.NoError(t, err)
 				maxWrite = txNum
 			}
@@ -217,14 +217,14 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			domains.SetTxNum(txNum)
 
 			buf := types.EncodeAccountBytesV3(1, uint256.NewInt(txNum*1e6), nil, 0)
-			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), nil, buf, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), nil, buf, nil, 0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, addrs[txNum].Bytes(), locs[txNum].Bytes(), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, addrs[txNum].Bytes(), locs[txNum].Bytes(), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
 			require.NoError(t, err)
 
 			if (txNum+1)%agg.StepSize() == 0 {
-				_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, "")
+				_, err := domains.ComputeCommitment(context.Background(), rwTx, true, txNum/10, "")
 				require.NoError(t, err)
 			}
 

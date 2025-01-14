@@ -134,7 +134,7 @@ func TestEIP2200(t *testing.T) {
 			tx, sd := testTemporalTxSD(t, testTemporalDB(t))
 			defer tx.Rollback()
 
-			r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
+			r, w := state.NewReaderV3(sd, tx), state.NewWriterV4(sd, tx)
 			s := state.New(r)
 
 			address := libcommon.BytesToAddress([]byte("contract"))
@@ -200,7 +200,7 @@ func TestCreateGas(t *testing.T) {
 		defer domains.Close()
 		txc.Doms = domains
 
-		stateReader = rpchelper.NewLatestStateReader(tx)
+		stateReader = rpchelper.NewLatestStateReader(domains, tx)
 		stateWriter = rpchelper.NewLatestStateWriter(txc, nil, 0)
 
 		s := state.New(stateReader)

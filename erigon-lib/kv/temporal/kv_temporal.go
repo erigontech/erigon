@@ -174,8 +174,8 @@ func (tx *tx) ForceReopenAggCtx() {
 	tx.filesTx = tx.Agg().BeginFilesRo()
 }
 
-func (tx *tx) AggTx() any             { return tx.filesTx }
-func (tx *tx) Agg() *state.Aggregator { return tx.db.agg }
+func (tx *tx) AggTx() *state.AggregatorRoTx { return tx.filesTx }
+func (tx *tx) Agg() *state.Aggregator       { return tx.db.agg }
 func (tx *tx) Rollback() {
 	tx.autoClose()
 }

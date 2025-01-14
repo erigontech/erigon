@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -46,7 +47,11 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	defer tx.Rollback()
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
-	latestState := rpchelper.NewLatestStateReader(tx)
+	domains, err := state.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+	latestState := rpchelper.NewLatestStateReader(domains, tx)
 	plainStateAcc, err := latestState.ReadAccountData(addr)
 	if err != nil {
 		return nil, err

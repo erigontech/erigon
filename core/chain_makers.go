@@ -337,8 +337,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		return nil, err
 	}
 	defer domains.Close()
-	stateReader := state.NewReaderV3(domains)
-	stateWriter := state.NewWriterV4(domains)
+	stateReader := state.NewReaderV3(domains, tx)
+	stateWriter := state.NewWriterV4(domains, tx)
 
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {
@@ -392,7 +392,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			//	return nil, nil, err
 			//}
 			//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
-			stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), "")
+			stateRoot, err := domains.ComputeCommitment(ctx, tx, true, b.header.Number.Uint64(), "")
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
@@ -477,7 +477,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
 
-	it, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+	it, err := libstate.AggTx(tx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
@@ -502,7 +502,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 		}
 	}
 
-	it, err = tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).RangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+	it, err = libstate.AggTx(tx).RangeLatest(tx, kv.StorageDomain, nil, nil, -1)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
@@ -550,14 +550,14 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 			}
 			fmt.Printf("===============================\n")
 		}
-		root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
+		root, err := domains.ComputeCommitment(context.Background(), tx, true, domains.BlockNum(), "")
 		if err != nil {
 			return hashRoot, err
 		}
 		hashRoot.SetBytes(root)
 		return hashRoot, nil
 	}
-	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
+	root, err := domains.ComputeCommitment(context.Background(), tx, true, domains.BlockNum(), "")
 	if err != nil {
 		return hashRoot, err
 	}

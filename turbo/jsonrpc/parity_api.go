@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -68,7 +70,13 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
 	}
 	defer tx.Rollback()
-	a, err := rpchelper.NewLatestStateReader(tx).ReadAccountData(account)
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+
+	a, err := rpchelper.NewLatestStateReader(domains, tx).ReadAccountData(account)
 	if err != nil {
 		return nil, err
 	} else if a == nil {

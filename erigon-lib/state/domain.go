@@ -1753,7 +1753,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 
 	err := roTx.Apply(func(tx kv.Tx) (err error) {
 		v, foundInvStep, found, err = func() ([]byte, []byte, bool, error) {
-			valsC, err := dt.valsCursor(roTx)
+			valsC, err := dt.valsCursor(tx)
 			if err != nil {
 				return nil, nil, false, err
 			}

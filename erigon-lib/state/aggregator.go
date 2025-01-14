@@ -1801,6 +1801,14 @@ func (ac *AggregatorRoTx) nastyFileRead(name kv.Domain, from, to uint64) (*seg.R
 	return ac.d[name].reader(fi), nil
 }
 
+func AggTx(tx kv.Tx) *AggregatorRoTx {
+	if withAggTx, ok := tx.(interface{ AggTx() *AggregatorRoTx }); ok {
+		return withAggTx.AggTx()
+	}
+
+	return nil
+}
+
 // AggregatorRoTx guarantee consistent View of files ("snapshots isolation" level https://en.wikipedia.org/wiki/Snapshot_isolation):
 //   - long-living consistent view of all files (no limitations)
 //   - hiding garbage and files overlaps
@@ -1842,6 +1850,9 @@ func (ac *AggregatorRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, domain kv.Dom
 	return ac.d[domain].RangeAsOf(ctx, tx, fromKey, toKey, ts, asc, limit)
 }
 func (ac *AggregatorRoTx) RangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	if ac == nil {
+		return nil, fmt.Errorf("nil aggregator tx")
+	}
 	return ac.d[domain].RangeLatest(tx, from, to, limit)
 }
 func (ac *AggregatorRoTx) getAsOfFile(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -1871,6 +1882,10 @@ func (ac *AggregatorRoTx) DebugEFKey(domain kv.Domain, k []byte) error {
 }
 
 func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name kv.InvertedIdx, failFast bool, fromStep uint64) error {
+	if ac == nil {
+		return fmt.Errorf("nil aggregator tx")
+	}
+	
 	switch name {
 	case kv.AccountsHistoryIdx:
 		err := ac.d[kv.AccountsDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)

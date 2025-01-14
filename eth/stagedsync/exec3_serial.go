@@ -36,7 +36,7 @@ func (se *serialExecutor) wait(ctx context.Context) error {
 	return nil
 }
 
-func (se *serialExecutor) processEvents(ctx context.Context, commitThreshold uint64) *blockResult {
+func (se *serialExecutor) processEvents(ctx context.Context, wait bool) *blockResult {
 	result := se.lastBlockResult
 	se.lastBlockResult = nil
 	return result
@@ -70,7 +70,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 			if txTask.IsBlockEnd() {
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
-				ibs := state.New(state.NewReaderParallelV3(se.rs.Domains()))
+				ibs := state.New(state.NewReaderParallelV3(se.rs.Domains(), se.tx()))
 
 				syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 					return core.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */)
@@ -101,7 +101,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 					}
 				}
 
-				stateWriter := state.NewStateWriterV3(se.rs.StateV3, se.accumulator)
+				stateWriter := state.NewStateWriterV3(se.rs.StateV3, se.applyTx, se.accumulator)
 
 				if err = ibs.MakeWriteSet(txTask.Rules, stateWriter); err != nil {
 					panic(err)
@@ -161,13 +161,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 			if txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
 				receipt = blockReceipts[txTask.TxIndex]
 			}
-			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
+			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed); err != nil {
 				return false, err
 			}
 		}
 
 		// MA applystate
-		if err := se.rs.ApplyState4(ctx, txTask.BlockNum, txTask.TxNum, nil,
+		if err := se.rs.ApplyState4(ctx, se.applyTx, txTask.BlockNum, txTask.TxNum, nil,
 			txTask.BalanceIncreaseSet, result.Logs, result.TraceFroms, result.TraceTos,
 			txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution); err != nil {
 			return false, err
@@ -178,6 +178,14 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 		se.lastBlockResult = &blockResult{
 			BlockNum:  txTask.BlockNum,
 			lastTxNum: txTask.TxNum,
+		}
+		se.lastExecutedTxNum = txTask.TxNum
+		se.lastExecutedBlockNum = txTask.BlockNum
+
+		if task.IsBlockEnd() {
+			se.executedGas += se.usedGas
+			se.usedGas = 0
+			se.blobGasUsed = 0
 		}
 	}
 
@@ -205,16 +213,17 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, useExternalT
 		if err != nil {
 			return t2, err
 		}
-	}
-	se.doms, err = state2.NewSharedDomains(se.applyTx, se.logger)
-	if err != nil {
-		return t2, err
-	}
-	se.doms.SetTxNum(txNum)
-	se.rs = state.NewStateV3Buffered(state.NewStateV3(se.doms, se.logger))
 
-	se.applyWorker.ResetTx(se.applyTx)
-	se.applyWorker.ResetState(se.rs, nil, nil, se.accumulator)
+		se.doms, err = state2.NewSharedDomains(se.applyTx, se.logger)
+		if err != nil {
+			return t2, err
+		}
+		se.doms.SetTxNum(txNum)
+		se.rs = state.NewStateV3Buffered(state.NewStateV3(se.doms, se.logger))
+
+		se.applyWorker.ResetTx(se.applyTx)
+		se.applyWorker.ResetState(se.rs, nil, nil, se.accumulator)
+	}
 
 	return t2, nil
 }

@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state3 "github.com/erigontech/erigon-lib/state"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/accounts/abi/bind/backends"
 	"github.com/erigontech/erigon/core"
@@ -923,12 +923,12 @@ func TestReproduceCrash(t *testing.T) {
 	value2 := uint256.NewInt(0x58c00a51)
 
 	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := state3.NewSharedDomains(tx, log.New())
+	sd, err := libstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	tsw := state.NewWriterV4(sd)
-	tsr := state.NewReaderV3(sd)
+	tsw := state.NewWriterV4(sd, tx)
+	tsr := state.NewReaderV3(sd, tx)
 	sd.SetTxNum(1)
 	sd.SetBlockNum(1)
 
@@ -1343,11 +1343,11 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
 	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := state3.NewSharedDomains(tx, log.New())
+	sd, err := libstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, tsw := state.NewReaderV3(sd), state.NewWriterV4(sd)
+	r, tsw := state.NewReaderV3(sd, tx), state.NewWriterV4(sd, tx)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1359,7 +1359,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	rh1, err := sd.ComputeCommitment(context.Background(), true, 0, "")
+	rh1, err := sd.ComputeCommitment(context.Background(), tx, true, 0, "")
 	require.NoError(t, err)
 	t.Logf("stateRoot %x", rh1)
 
@@ -1381,7 +1381,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	assert.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 
-	rh2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
+	rh2, err := sd.ComputeCommitment(context.Background(), tx, true, 1, "")
 	require.NoError(t, err)
 	require.NotEqual(t, rh1, rh2)
 }
@@ -1393,11 +1393,11 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := state3.NewSharedDomains(tx, log.New())
+	sd, err := libstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
+	r, w := state.NewReaderV3(sd, tx), state.NewWriterV4(sd, tx)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1431,11 +1431,11 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := state3.NewSharedDomains(tx, log.New())
+	sd, err := libstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
+	r, w := state.NewReaderV3(sd, tx), state.NewWriterV4(sd, tx)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1452,7 +1452,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	r2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
+	r2, err := sd.ComputeCommitment(context.Background(), tx, true, 1, "")
 	require.NoError(t, err)
 	require.EqualValues(t, root, common.CastToHash(r2))
 
@@ -1467,7 +1467,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	assert.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 
-	r2, err = sd.ComputeCommitment(context.Background(), true, 1, "")
+	r2, err = sd.ComputeCommitment(context.Background(), tx, true, 1, "")
 	require.NoError(t, err)
 	require.EqualValues(t, root, common.CastToHash(r2))
 }

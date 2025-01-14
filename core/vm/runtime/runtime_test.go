@@ -151,7 +151,7 @@ func TestCall(t *testing.T) {
 	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	state := state.New(state.NewReaderV3(domains))
+	state := state.New(state.NewReaderV3(domains, tx))
 	address := libcommon.HexToAddress("0xaa")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
@@ -225,8 +225,8 @@ func BenchmarkCall(b *testing.B) {
 	db := testTemporalDB(b)
 	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
-	cfg.r = state.NewReaderV3(sd)
-	cfg.w = state.NewWriterV4(sd)
+	cfg.r = state.NewReaderV3(sd, tx)
+	cfg.w = state.NewWriterV4(sd, tx)
 	cfg.State = state.New(cfg.r)
 
 	tmpdir := b.TempDir()
@@ -254,7 +254,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	require.NoError(b, err)
 
 	var (
-		statedb  = state.New(state.NewReaderV3(domains))
+		statedb  = state.New(state.NewReaderV3(domains, tx))
 		sender   = libcommon.BytesToAddress([]byte("sender"))
 		receiver = libcommon.BytesToAddress([]byte("receiver"))
 	)
@@ -477,7 +477,7 @@ func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name strin
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
-	cfg.State = state.New(state.NewReaderV3(domains))
+	cfg.State = state.New(state.NewReaderV3(domains, tx))
 	cfg.GasLimit = gas
 	var (
 		destination = libcommon.BytesToAddress([]byte("contract"))

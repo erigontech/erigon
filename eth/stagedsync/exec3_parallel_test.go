@@ -5,7 +5,6 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"math"
 	"math/big"
 	"math/rand"
 	"os"
@@ -530,7 +529,7 @@ func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.T
 
 	defer pe.wait(context.Background())
 
-	blockResult := pe.processEvents(context.Background(), math.MaxUint64)
+	blockResult := pe.processEvents(context.Background(), true)
 
 	if check != nil {
 		err = check(pe)

@@ -389,6 +389,22 @@ func (io *VersionedIO) AllWriteSet(txnIdx int) []VersionedWrite {
 	return io.allOutputs[txnIdx+1]
 }
 
+func (io *VersionedIO) WriteCount() (count int64) {
+	for _, output := range io.outputs {
+		count += int64(len(output))
+	}
+
+	return count
+}
+
+func (io *VersionedIO) ReadCount() (count int64) {
+	for _, input := range io.inputs {
+		count += int64(len(input))
+	}
+
+	return count
+}
+
 func (io *VersionedIO) HasWritten(txnIdx int, k VersionKey) bool {
 	if len(io.outputsSet) <= txnIdx+1 {
 		return false

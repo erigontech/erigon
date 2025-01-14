@@ -72,7 +72,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.execArgs.BlockReader))
 
-		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		ac := state2.AggTx(tx)
 		txNum := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
 		var ok bool
 		ok, endBlock, err = txNumsReader.FindBlockNum(tx, txNum)
@@ -119,7 +119,6 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		if err := customTraceBatch(ctx, cfg, ttx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
 			return err
 		}
-		doms.SetTx(tx)
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
@@ -137,7 +136,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		toStep = lastTxNum / agg.StepSize()
 	}
 	if err := db.View(ctx, func(tx kv.Tx) error {
-		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		ac := state2.AggTx(tx)
 		fromStep = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles()
 		return nil
 	}); err != nil {
@@ -148,7 +147,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	}
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		ac := state2.AggTx(tx)
 		if _, err := ac.PruneSmallBatches(ctx, 10*time.Hour, tx); err != nil { // prune part of retired data, before commit
 			return err
 		}
@@ -193,7 +192,6 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				}
 			}
 
-			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
 			if !txTask.IsBlockEnd() {
 				var receipt *types.Receipt
@@ -207,7 +205,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 						CumulativeGasUsed:        cumulativeGasUsed,
 						FirstLogIndexWithinBlock: firstLogIndex,
 					})
-					if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
+					if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), receipt, cumulativeBlobGasUsedInBlock); err != nil {
 						return err
 					}
 				}

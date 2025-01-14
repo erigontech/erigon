@@ -130,7 +130,7 @@ func TestStateLogger(t *testing.T) {
 			defer mockCtl.Finish()
 			mockTracer := mocks.NewMocktracer(mockCtl)
 
-			state := New(NewReaderV3(domains))
+			state := New(NewReaderV3(domains, tx))
 			state.SetHooks(mockTracer.Hooks())
 
 			tt.prepare(mockTracer)

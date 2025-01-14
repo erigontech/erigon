@@ -111,16 +111,16 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, stateReader state.Resett
 		rw.SetReader(stateReader)
 	} else {
 		if rw.background {
-			rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
+			rw.SetReader(state.NewReaderParallelV3(rs.Domains(), rw.chainTx))
 		} else {
-			rw.SetReader(state.NewReaderV3(rs.Domains()))
+			rw.SetReader(state.NewReaderV3(rs.Domains(), rw.chainTx))
 		}
 	}
 
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
-		rw.stateWriter = state.NewStateWriterV3(rs.StateV3, accumulator)
+		rw.stateWriter = state.NewStateWriterV3(rs.StateV3, rw.chainTx, accumulator)
 	}
 }
 
@@ -133,7 +133,18 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	}
 	if chainTx != nil {
 		rw.chainTx = chainTx
-		rw.stateReader.SetTx(rw.chainTx)
+		type resettable interface {
+			SetTx(kv.Tx)
+		}
+
+		if resettable, ok := rw.stateReader.(resettable); ok {
+			resettable.SetTx(rw.chainTx)
+		}
+
+		if resettable, ok := rw.stateWriter.(resettable); ok {
+			resettable.SetTx(rw.chainTx)
+		}
+
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	}
 }
@@ -160,7 +171,6 @@ func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	rw.stateReader = reader
 	rw.stateReader.SetTx(rw.Tx())
-	rw.ibs.Reset()
 	rw.ibs = state.New(rw.stateReader)
 
 	switch reader.(type) {
@@ -182,9 +192,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.IsHistoric() && rw.historyMode {
 		if rw.background {
-			rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderParallelV3(rw.rs.Domains())))
+			rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderParallelV3(rw.rs.Domains(), rw.chainTx)))
 		} else {
-			rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains())))
+			rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains(), rw.chainTx)))
 		}
 	}
 	if rw.background && rw.chainTx == nil {
@@ -237,6 +247,11 @@ func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger lo
 		g, ctx := errgroup.WithContext(ctx)
 		for i := 0; i < workerCount; i++ {
 			reconWorkers[i] = NewWorker(lock, logger, ctx, background, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs)
+
+			if stateReader == nil {
+				stateReader = state.NewBufferedReader(rs, state.NewReaderParallelV3(rs.Domains(), nil))
+			}
+
 			reconWorkers[i].ResetState(rs, stateReader, stateWriter, accumulator)
 		}
 		if background {

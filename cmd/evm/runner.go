@@ -191,7 +191,7 @@ func runCmd(ctx *cli.Context) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewReaderV3(sd)
+	stateReader := state.NewReaderV3(sd, tx)
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = libcommon.HexToAddress(ctx.String(SenderFlag.Name))

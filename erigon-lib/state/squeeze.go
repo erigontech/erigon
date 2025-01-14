@@ -508,7 +508,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			domains.SetTxNum(lastTxnumInShard - 1)
 			domains.sdCtx.SetLimitReadAsOfTxNum(domains.TxNum() + 1) // this helps to read state from correct file during commitment
 
-			rebuiltCommit, err = domains.RebuildCommitmentShard(ctx, nextKey, &RebuiltCommitment{
+			rebuiltCommit, err = domains.RebuildCommitmentShard(ctx, rwTx, nextKey, &RebuiltCommitment{
 				StepFrom: shardFrom,
 				StepTo:   shardTo,
 				TxnFrom:  fromTxNumRange,
