@@ -805,6 +805,7 @@ var (
 	PolygonSyncFlag = cli.BoolFlag{
 		Name:  "polygon.sync",
 		Usage: "Enabling syncing using the new polygon sync component",
+		Value: true,
 	}
 
 	// TODO - this is a depricated flag - should be removed
