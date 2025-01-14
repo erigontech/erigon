@@ -389,8 +389,6 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 				h.ReceiptHash = receiptHash
 				return nil
 			}
-			b, _ := json.Marshal(receipts)
-			fmt.Println(string(b))
 			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
 				receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
 		}
