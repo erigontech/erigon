@@ -1,4 +1,5 @@
 name: Integration tests - ERIGON
+
 on:
   push:
     branches:
@@ -12,13 +13,28 @@ on:
       - reopened
       - synchronize
       - ready_for_review
-    
   schedule:
     - cron: '20 16 * * *' # daily at 16:20 UTC
   workflow_dispatch:
 
 jobs:
+  source-of-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed_files: ${{ steps.filter.outputs.changed_files }}
+    steps:
+      - name: Check for changes outside specific directories
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            changed_files:
+              - '!dashboards/**'
+              - '!**/.github/workflows/**'
+
   tests-mac-linux:
+    needs: source-of-changes
+    if: needs.source-of-changes.outputs.changed_files == 'true'
     strategy:
       matrix:
         os:
@@ -53,6 +69,8 @@ jobs:
         run: GOGC=80 make test-integration
 
   tests-windows:
+    needs: source-of-changes
+    if: needs.source-of-changes.outputs.changed_files == 'true'
     strategy:
       matrix:
         os: [ windows-2022 ]
@@ -84,3 +102,12 @@ jobs:
 
       - name: Run integration tests on ${{ matrix.os }}
         run: .\wmake.ps1 test-integration
+
+  dummyOK:
+    needs: source-of-changes
+    if: needs.source-of-changes.outputs.changed_files != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: OK for the to-be-excluded directories
+        run: echo "OK"
