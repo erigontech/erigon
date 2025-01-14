@@ -12,6 +12,10 @@ on:
       - reopened
       - synchronize
       - ready_for_review
+    paths:
+      - '!.github/workflows/**'
+      - '!dashboards/**'
+
   workflow_dispatch:
 
 concurrency:
