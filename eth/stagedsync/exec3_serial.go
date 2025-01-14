@@ -62,7 +62,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 
 			if txTask.Final {
 				for receiptIndex := range txTask.BlockReceipts {
-					if txTask.BlockReceipts[receiptIndex].Type == types.OptimismDepositTxType && se.cfg.chainConfig.IsOptimismRegolith(txTask.Header.Time) {
+					if txTask.BlockReceipts[receiptIndex].Type == types.OptimismDepositTxType && se.cfg.chainConfig.IsOptimismCanyon(txTask.Header.Time) {
 						txTask.BlockReceipts[receiptIndex].DepositReceiptVersion = new(uint64)
 						*txTask.BlockReceipts[receiptIndex].DepositReceiptVersion = types.CanyonDepositReceiptVersion
 					}
