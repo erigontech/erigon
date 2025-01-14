@@ -50,7 +50,7 @@ func crossReferenceBlockHashes(ctx context.Context, logger log.Logger, startBloc
 	eg.SetLimit(maxParallelRequests)
 	for blockNum := startBlockNum; blockNum < endBlockNum; blockNum++ {
 		eg.Go(func() error {
-			blockFields, err := fetchBlockViaRpc(logger, rpcUrl, blockNum)
+			blockFields, err := fetchBlockViaRpcWithRetry(ctx, logger, rpcUrl, blockNum)
 			if err != nil {
 				return err
 			}
