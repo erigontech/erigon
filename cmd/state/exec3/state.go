@@ -282,6 +282,14 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
+		nonce := msg.Nonce()
+		if msg.IsOptimismDepositTx() && rw.chainConfig.IsOptimismRegolith(rw.evm.Context.Time) {
+			nonce, err = ibs.GetNonce(msg.From())
+			if err != nil {
+				panic(err)
+			}
+		}
+
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
@@ -295,6 +303,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
+			if msg.IsOptimismDepositTx() && rw.chainConfig.IsOptimismRegolith(rw.evm.Context.Time) {
+				txTask.OptimismDepositNonce = new(uint64)
+				*txTask.OptimismDepositNonce = nonce
+			}
 		}
 
 	}

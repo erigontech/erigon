@@ -61,10 +61,16 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			txTask.CreateReceipt(se.applyTx)
 
 			if txTask.Final {
-				for receiptIndex := range txTask.BlockReceipts {
-					if txTask.BlockReceipts[receiptIndex].Type == types.OptimismDepositTxType && se.cfg.chainConfig.IsOptimismCanyon(txTask.Header.Time) {
-						txTask.BlockReceipts[receiptIndex].DepositReceiptVersion = new(uint64)
-						*txTask.BlockReceipts[receiptIndex].DepositReceiptVersion = types.CanyonDepositReceiptVersion
+				for _, receipt := range txTask.BlockReceipts {
+					config := se.cfg.chainConfig
+					// The actual nonce for deposit transactions is only recorded from Regolith onwards and
+					// otherwise must be nil.
+					receipt.DepositNonce = txTask.OptimismDepositNonce
+					fmt.Println("applyTransaction: deposit nonce", *receipt.DepositNonce)
+
+					if config.IsOptimismCanyon(txTask.Header.Time) {
+						receipt.DepositReceiptVersion = new(uint64)
+						*receipt.DepositReceiptVersion = types.CanyonDepositReceiptVersion
 					}
 				}
 				if !se.isMining && !se.inMemExec && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
