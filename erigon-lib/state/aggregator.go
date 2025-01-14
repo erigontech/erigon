@@ -1572,6 +1572,7 @@ func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs
 	case kv.ReceiptHistoryIdx:
 		return ac.d[kv.ReceiptDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	default:
+		// check the ii
 		if v, ok := ac.iis[name]; ok {
 			return v.IdxRange(k, fromTs, toTs, asc, limit, tx)
 		}
