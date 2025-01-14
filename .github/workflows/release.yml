@@ -141,6 +141,11 @@ jobs:
           cd ${GITHUB_WORKSPACE}/build-arm64-check/; sha256sum erigon | awk '{print $1}' > ${GITHUB_WORKSPACE}/erigon-2-arm64.sha256; cd -
           sha256sum ${GITHUB_WORKSPACE}/build-arm64/erigon ${GITHUB_WORKSPACE}/build-arm64-check/erigon
           sha384sum ${GITHUB_WORKSPACE}/build-arm64/erigon ${GITHUB_WORKSPACE}/build-arm64-check/erigon
+
+          strings -n16 ${GITHUB_WORKSPACE}/build-arm64/erigon > ${GITHUB_WORKSPACE}/strings.file1
+          strings -n16 ${GITHUB_WORKSPACE}/build-arm64-check/erigon > ${GITHUB_WORKSPACE}/strings.file2
+          diff -n ${GITHUB_WORKSPACE}/strings.file1 ${GITHUB_WORKSPACE}/strings.file2
+          echo "DEBUG: end of diff"
           if ! cmp -s ${GITHUB_WORKSPACE}/erigon-1-arm64.sha256 ${GITHUB_WORKSPACE}/erigon-2-arm64.sha256; then
             echo >&2 "ERROR: Reproducible build broken on linux/arm64";
             cat erigon-1-arm64.sha256;
