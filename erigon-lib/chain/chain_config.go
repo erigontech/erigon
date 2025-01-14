@@ -312,8 +312,8 @@ func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
 	return 3338477 // BLOB_GASPRICE_UPDATE_FRACTION (EIP-4844)
 }
 
-func (c *Config) GetMaxBlobsPerBlock(t uint64) uint64 {
-	return c.GetMaxBlobGasPerBlock(t) / fixedgas.BlobGasPerBlob
+func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
+	return c.GetMaxBlobGasPerBlock(time) / fixedgas.BlobGasPerBlob
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
