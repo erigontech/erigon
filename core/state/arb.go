@@ -7,9 +7,10 @@ import (
 	"runtime"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/lru"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/arb/ethdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/holiman/uint256"
@@ -31,7 +32,7 @@ var (
 	StylusDiscriminant = []byte{stylusEOFMagic, stylusEOFMagicSuffix, stylusEOFVersion}
 )
 
-type ActivatedWasm map[ethdb.WasmTarget][]byte
+type ActivatedWasm map[WasmTarget][]byte
 
 // checks if a valid Stylus prefix is present
 func IsStylusProgram(b []byte) bool {
@@ -57,6 +58,129 @@ func NewStylusPrefix(dictionary byte) []byte {
 
 type WasmTarget string
 
+const (
+	TargetWavm  WasmTarget = "wavm"
+	TargetArm64 WasmTarget = "arm64"
+	TargetAmd64 WasmTarget = "amd64"
+	TargetHost  WasmTarget = "host"
+)
+
+func LocalTarget() WasmTarget {
+	if runtime.GOOS == "linux" {
+		switch runtime.GOARCH {
+		case "arm64":
+			return TargetArm64
+		case "amd64":
+			return TargetAmd64
+		}
+	}
+	return TargetHost
+}
+
+func activatedAsmKeyPrefix(target WasmTarget) (WasmPrefix, error) {
+	var prefix WasmPrefix
+	switch target {
+	case TargetWavm:
+		prefix = activatedAsmWavmPrefix
+	case TargetArm64:
+		prefix = activatedAsmArmPrefix
+	case TargetAmd64:
+		prefix = activatedAsmX86Prefix
+	case TargetHost:
+		prefix = activatedAsmHostPrefix
+	default:
+		return WasmPrefix{}, fmt.Errorf("invalid target: %v", target)
+	}
+	return prefix, nil
+}
+
+func IsSupportedWasmTarget(target WasmTarget) bool {
+	_, err := activatedAsmKeyPrefix(target)
+	return err == nil
+}
+
+func WriteActivation(db kv.Putter, moduleHash common.Hash, asmMap map[WasmTarget][]byte) {
+	for target, asm := range asmMap {
+		writeActivatedAsm(db, target, moduleHash, asm)
+	}
+}
+
+const WasmActivationTable = "wasm_activation"
+
+// Stores the activated asm for a given moduleHash and target
+func writeActivatedAsm(db kv.Putter, target WasmTarget, moduleHash common.Hash, asm []byte) {
+	prefix, err := activatedAsmKeyPrefix(target)
+	if err != nil {
+		log.Crit("Failed to store activated wasm asm", "err", err)
+	}
+	key := activatedKey(prefix, moduleHash)
+	if err := db.Put(WasmActivationTable, key[:], asm); err != nil {
+		log.Crit("Failed to store activated wasm asm", "err", err)
+	}
+}
+
+// Retrieves the activated asm for a given moduleHash and target
+func ReadActivatedAsm(db kv.Getter, target WasmTarget, moduleHash common.Hash) []byte {
+	prefix, err := activatedAsmKeyPrefix(target)
+	if err != nil {
+		log.Crit("Failed to read activated wasm asm", "err", err)
+	}
+	key := activatedKey(prefix, moduleHash)
+	asm, err := db.GetOne(WasmActivationTable, key[:])
+	if err != nil {
+		return nil
+	}
+	return asm
+}
+
+// Stores wasm schema version
+func WriteWasmSchemaVersion(db kv.Putter) {
+	if err := db.Put(WasmActivationTable, wasmSchemaVersionKey, []byte{WasmSchemaVersion}); err != nil {
+		log.Crit("Failed to store wasm schema version", "err", err)
+	}
+}
+
+// Retrieves wasm schema version
+func ReadWasmSchemaVersion(db kv.Getter) ([]byte, error) {
+	return db.GetOne(WasmActivationTable, wasmSchemaVersionKey)
+}
+
+const WasmSchemaVersion byte = 0x01
+
+const WasmPrefixLen = 3
+
+// WasmKeyLen = CompiledWasmCodePrefix + moduleHash
+const WasmKeyLen = WasmPrefixLen + length.Hash
+
+type WasmPrefix = [WasmPrefixLen]byte
+type WasmKey = [WasmKeyLen]byte
+
+var (
+	wasmSchemaVersionKey = []byte("WasmSchemaVersion")
+
+	// 0x00 prefix to avoid conflicts when wasmdb is not separate database
+	activatedAsmWavmPrefix = WasmPrefix{0x00, 'w', 'w'} // (prefix, moduleHash) -> stylus module (wavm)
+	activatedAsmArmPrefix  = WasmPrefix{0x00, 'w', 'r'} // (prefix, moduleHash) -> stylus asm for ARM system
+	activatedAsmX86Prefix  = WasmPrefix{0x00, 'w', 'x'} // (prefix, moduleHash) -> stylus asm for x86 system
+	activatedAsmHostPrefix = WasmPrefix{0x00, 'w', 'h'} // (prefix, moduleHash) -> stylus asm for system other then ARM and x86
+)
+
+func DeprecatedPrefixesV0() (keyPrefixes [][]byte, keyLength int) {
+	return [][]byte{
+		// deprecated prefixes, used in version 0x00, purged in version 0x01
+		[]byte{0x00, 'w', 'a'}, // ActivatedAsmPrefix
+		[]byte{0x00, 'w', 'm'}, // ActivatedModulePrefix
+	}, 3 + 32
+}
+
+// key = prefix + moduleHash
+func activatedKey(prefix WasmPrefix, moduleHash common.Hash) WasmKey {
+	var key WasmKey
+	copy(key[:WasmPrefixLen], prefix[:])
+	copy(key[WasmPrefixLen:], moduleHash[:])
+	return key
+}
+
 type IntraBlockStateArbitrum interface {
 	evmtypes.IntraBlockState
 
@@ -74,9 +198,11 @@ type IntraBlockStateArbitrum interface {
 	SetStylusPagesOpen(open uint16)
 	AddStylusPages(new uint16) (uint16, uint16)
 	AddStylusPagesEver(new uint16)
+
+	HasSelfDestructed(addr common.Address) bool
 }
 
-func (s *IntraBlockState) ActivateWasm(moduleHash common.Hash, asmMap map[ethdb.WasmTarget][]byte) {
+func (s *IntraBlockState) ActivateWasm(moduleHash common.Hash, asmMap map[WasmTarget][]byte) {
 	_, exists := s.arbExtraData.activatedWasms[moduleHash]
 	if exists {
 		return
@@ -87,7 +213,7 @@ func (s *IntraBlockState) ActivateWasm(moduleHash common.Hash, asmMap map[ethdb.
 	})
 }
 
-func (s *IntraBlockState) TryGetActivatedAsm(target ethdb.WasmTarget, moduleHash common.Hash) ([]byte, error) {
+func (s *IntraBlockState) TryGetActivatedAsm(target WasmTarget, moduleHash common.Hash) ([]byte, error) {
 	asmMap, exists := s.arbExtraData.activatedWasms[moduleHash]
 	if exists {
 		if asm, exists := asmMap[target]; exists {
@@ -98,7 +224,7 @@ func (s *IntraBlockState) TryGetActivatedAsm(target ethdb.WasmTarget, moduleHash
 	return nil, errors.New("not found")
 }
 
-func (s *IntraBlockState) TryGetActivatedAsmMap(targets []ethdb.WasmTarget, moduleHash common.Hash) (map[ethdb.WasmTarget][]byte, error) {
+func (s *IntraBlockState) TryGetActivatedAsmMap(targets []WasmTarget, moduleHash common.Hash) (map[WasmTarget][]byte, error) {
 	asmMap := s.arbExtraData.activatedWasms[moduleHash]
 	if asmMap != nil {
 		for _, target := range targets {
@@ -109,7 +235,7 @@ func (s *IntraBlockState) TryGetActivatedAsmMap(targets []ethdb.WasmTarget, modu
 		return asmMap, nil
 	}
 	var err error
-	asmMap = make(map[ethdb.WasmTarget][]byte, len(targets))
+	asmMap = make(map[WasmTarget][]byte, len(targets))
 	for _, target := range targets {
 		// asm, dbErr := s.db.ActivatedAsm(target, moduleHash)
 		asm := []byte{}
@@ -235,7 +361,7 @@ func (s *IntraBlockState) StartRecording() {
 	s.arbExtraData.userWasms = make(UserWasms)
 }
 
-func (s *IntraBlockState) RecordProgram(targets []ethdb.WasmTarget, moduleHash common.Hash) {
+func (s *IntraBlockState) RecordProgram(targets []WasmTarget, moduleHash common.Hash) {
 	if len(targets) == 0 {
 		// nothing to record
 		return
@@ -299,4 +425,15 @@ func (p RecentWasms) Copy() RecentWasms {
 		cache.Add(item, struct{}{})
 	}
 	return RecentWasms{cache: &cache}
+}
+
+func (s *IntraBlockState) HasSelfDestructed(addr common.Address) bool {
+	stateObject, err := s.getStateObject(addr)
+	if err != nil {
+		panic(err)
+	}
+	if stateObject != nil {
+		return stateObject.selfdestructed
+	}
+	return false
 }

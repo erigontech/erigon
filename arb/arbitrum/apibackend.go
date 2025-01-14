@@ -17,7 +17,6 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/arb/arbitrum_types"
-	"github.com/erigontech/erigon/arb/ethdb"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/bloombits"
@@ -32,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -109,7 +108,7 @@ func createRegisterAPIBackend(backend *eth.Ethereum, filterConfig filters.Config
 	dbForAPICalls := backend.ChainDB()
 	wasmStore, tag := backend.ChainDB().WasmDataBase()
 	if tag != 0 || len(backend.ChainDB().WasmTargets()) > 1 {
-		dbForAPICalls = rawdb.WrapDatabaseWithWasm(backend.ChainDB(), wasmStore, 0, []ethdb.WasmTarget{rawdb.LocalTarget()})
+		dbForAPICalls = rawdb.WrapDatabaseWithWasm(backend.ChainDB(), wasmStore, 0, []state.WasmTarget{state.LocalTarget()})
 	}
 	// backend.apiBackend = &APIBackend{
 	// 	b:              backend,

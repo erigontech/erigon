@@ -102,6 +102,10 @@ type EVMInterpreter struct {
 	depth int
 }
 
+func (e *EVMInterpreter) ReadOnly() bool {
+	return e.VM.readOnly
+}
+
 // structcheck doesn't see embedding
 //
 //nolint:structcheck
