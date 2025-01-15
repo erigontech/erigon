@@ -788,12 +788,14 @@ var (
 		Usage: "Ignore the bor block period and wait for 'blocksize' transactions (for testing purposes)",
 	}
 
+	// TODO - this is a depricated flag - should be removed
 	WithHeimdallMilestones = cli.BoolFlag{
 		Name:  "bor.milestone",
 		Usage: "Enabling bor milestone processing",
 		Value: true,
 	}
 
+	// TODO - this is a depricated flag - should be removed
 	WithHeimdallWaypoints = cli.BoolFlag{
 		Name:  "bor.waypoints",
 		Usage: "Enabling bor waypont recording",
@@ -803,8 +805,10 @@ var (
 	PolygonSyncFlag = cli.BoolFlag{
 		Name:  "polygon.sync",
 		Usage: "Enabling syncing using the new polygon sync component",
+		Value: true,
 	}
 
+	// TODO - this is a depricated flag - should be removed
 	PolygonSyncStageFlag = cli.BoolFlag{
 		Name:  "polygon.sync.stage",
 		Usage: "Enabling syncing with a stage that uses the polygon sync component",
@@ -1693,6 +1697,12 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
 	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
 	cfg.PolygonSyncStage = ctx.Bool(PolygonSyncStageFlag.Name)
+
+	if cfg.PolygonSync {
+		cfg.WithHeimdallMilestones = false
+		cfg.WithHeimdallWaypointRecording = true
+	}
+
 	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync || cfg.PolygonSyncStage)
 
 	chainConfig := params.ChainConfigByChainName(ctx.String(ChainFlag.Name))

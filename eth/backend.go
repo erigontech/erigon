@@ -979,7 +979,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}()
 	}
 
-	if config.PolygonSync {
+	if chainConfig.Bor != nil && config.PolygonSync {
 		backend.polygonSyncService = polygonsync.NewService(
 			logger,
 			chainConfig,

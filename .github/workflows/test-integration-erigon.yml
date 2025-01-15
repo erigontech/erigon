@@ -18,7 +18,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  
+  # 
+  # This first job is used to determine if changes are within out-of-scope dirs or files (in such a case integration tests are not run because they would be meaningless)
+  # NOTE: this logic is needed because the simple 'paths-ignore:' doesn't work since this workflow is set as a mandatory/required check for this repo
+  # - '**/.github/workflows/**' is currently commented to avoid unintended freeze in case of concurrent changes outside the excluded paths (further development will be done in due course)
+  # 
   source-of-changes:
     runs-on: ubuntu-latest
     outputs:
@@ -27,14 +31,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Check for changes outside specific directories
+      - name: Check for changes within out-of-scope dirs or files
         id: filter
         uses: dorny/paths-filter@v3
         with:
           filters: |
             changed_files:
               - 'dashboards/**'
-              - '**/.github/workflows/**'
+              # - '**/.github/workflows/**'
+              - '**/.github/workflows/backups-dashboards.yml'
 
   tests-mac-linux:
     needs: source-of-changes
@@ -43,7 +48,7 @@ jobs:
         os:
           - ubuntu-22.04
           - macos-14
-          - ubuntu-latest-erigontests-large
+          # - ubuntu-latest-erigontests-large
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -76,9 +81,9 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: GOGC=80 make test-integration
 
-      - name: This ${{ matrix.os }} check does not make sense for changes within the excluded directories
+      - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'
-        run: echo "This checks does not make sense for changes within the excluded directories"
+        run: echo "This check does not make sense for changes within out-of-scope directories"
 
 
   tests-windows:
@@ -121,6 +126,6 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: .\wmake.ps1 test-integration
 
-      - name: This ${{ matrix.os }} check does not make sense for changes within the excluded directories
+      - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'
-        run: echo "This checks does not make sense for changes within the excluded directories"
+        run: echo "This check does not make sense for changes within out-of-scope directories"
