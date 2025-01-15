@@ -102,6 +102,11 @@ type EVMInterpreter struct {
 	depth int
 }
 
+// arbitrum
+func (e *EVMInterpreter) EVM() *EVM {
+	return e.VM.evm
+}
+
 func (e *EVMInterpreter) ReadOnly() bool {
 	return e.VM.readOnly
 }
