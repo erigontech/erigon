@@ -341,6 +341,15 @@ func (in *EVMInterpreter) Depth() int {
 	return in.depth
 }
 
+// Depth returns the current call stack depth.
+func (in *EVMInterpreter) IncrementDepth() {
+	in.depth++
+}
+
+func (in *EVMInterpreter) DecrementDepth() {
+	in.depth--
+}
+
 func (vm *VM) setReadonly(outerReadonly bool) func() {
 	if outerReadonly && !vm.readOnly {
 		vm.readOnly = true

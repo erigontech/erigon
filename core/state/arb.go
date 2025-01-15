@@ -286,8 +286,8 @@ func (s *IntraBlockState) SetArbFinalizer(f func(*ArbitrumExtraData)) {
 	runtime.SetFinalizer(s.arbExtraData, f)
 }
 
-func (s *IntraBlockState) GetCurrentTxLogs() []*types.Log {
-	return nil
+func (s *IntraBlockState) GetCurrentTxLogs() []types.Logs {
+	return s.logs
 	//return s.logs[s.thash]
 }
 
