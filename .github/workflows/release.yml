@@ -245,7 +245,7 @@ jobs:
           repository: erigontech/erigon-qa
           fetch-depth: 1
           ref: main
-          path: erigon-qa
+          path: workflow-${{ github.workflow }}-run-${{ github.run_number }}/erigon-qa
 
       - name: Checkout QA Tests Repository & Install Requirements
         working-directory: "workflow-${{ github.workflow }}-run-${{ github.run_number }}"
