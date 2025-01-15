@@ -25,6 +25,17 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
+const (
+	// entityFetcherBatchFetchThresholdInBlocks indicates whether to use batch fetching flow or not
+	// idea is that on initial sync with snapshots we use sequential fetch if snapshots are close enough,
+	// otherwise we use batch fetch flow
+	// below is roughly 3 weeks worth of blocks, we publish new snapshots roughly every week
+	entityFetcherBatchFetchThresholdInBlocks = 1_000_000 // ~30 blks per min * 60 mins * 24 hours * 7 days
+	avgCheckpointLength                      = 1024
+	checkpointsBatchFetchThreshold           = entityFetcherBatchFetchThresholdInBlocks / avgCheckpointLength
+	spansBatchFetchThreshold                 = entityFetcherBatchFetchThresholdInBlocks / spanLength
+)
+
 type EntityFetcher[TEntity Entity] struct {
 	name                      string
 	fetchFirstEntityId        func(ctx context.Context) (int64, error)
@@ -33,6 +44,7 @@ type EntityFetcher[TEntity Entity] struct {
 	fetchEntitiesPage         func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error)
 	fetchEntitiesPageLimit    uint64
 	fetchAllEntitiesIdxOffset uint64
+	batchFetchThreshold       uint64
 	logger                    log.Logger
 }
 
@@ -44,6 +56,7 @@ func NewEntityFetcher[TEntity Entity](
 	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error),
 	fetchEntitiesPageLimit uint64,
 	fetchAllEntitiesIdxOffset uint64,
+	batchFetchThreshold uint64,
 	logger log.Logger,
 ) *EntityFetcher[TEntity] {
 	return &EntityFetcher[TEntity]{
@@ -54,6 +67,7 @@ func NewEntityFetcher[TEntity Entity](
 		fetchEntitiesPage:         fetchEntitiesPage,
 		fetchEntitiesPageLimit:    fetchEntitiesPageLimit,
 		fetchAllEntitiesIdxOffset: fetchAllEntitiesIdxOffset,
+		batchFetchThreshold:       batchFetchThreshold,
 		logger:                    logger,
 	}
 }
@@ -76,12 +90,10 @@ func (f *EntityFetcher[TEntity]) FetchEntityIdRange(ctx context.Context) (Closed
 	return res, nil
 }
 
-const entityFetcherBatchFetchThreshold = 100
-
 func (f *EntityFetcher[TEntity]) FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]TEntity, error) {
 	count := idRange.Len()
 
-	if (count > entityFetcherBatchFetchThreshold) && (f.fetchEntitiesPage != nil) {
+	if (count > f.batchFetchThreshold) && (f.fetchEntitiesPage != nil) {
 		allEntities, err := f.FetchAllEntities(ctx)
 		if err != nil {
 			return nil, err

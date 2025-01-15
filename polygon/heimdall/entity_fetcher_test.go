@@ -28,6 +28,8 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
+const testEntityFetcherBatchFetchThreshold = 100
+
 func makeEntities(count uint64) []*Checkpoint {
 	var entities []*Checkpoint
 	for i := uint64(0); i < count; i++ {
@@ -66,12 +68,13 @@ func testEntityFetcher_FetchAllEntities(t *testing.T, count uint64, fetchEntitie
 
 	fetcher := NewEntityFetcher[*Checkpoint](
 		"fetcher",
-		nil,
-		nil,
-		nil,
+		nil, /* fetchFirstEntityId */
+		nil, /* fetchLastEntityId */
+		nil, /* fetchEntity */
 		fetchEntitiesPage,
 		fetchEntitiesPageLimit,
-		1,
+		1, /* fetchAllEntitiesIdxOffset */
+		testEntityFetcherBatchFetchThreshold,
 		logger,
 	)
 
@@ -108,12 +111,13 @@ func newEntityFetcherFetchEntitiesRangeTest(count uint64, withPaging bool, testR
 
 	fetcher := NewEntityFetcher[*Checkpoint](
 		"fetcher",
-		nil,
-		nil,
+		nil, /* fetchFirstEntityId */
+		nil, /* fetchLastEntityId */
 		fetchEntity,
 		fetchEntitiesPage,
-		entityFetcherBatchFetchThreshold,
-		1,
+		100,                                  /* fetchEntitiesPageLimit */
+		1,                                    /* fetchAllEntitiesIdxOffset */
+		testEntityFetcherBatchFetchThreshold, /* batchFetchThreshold */
 		logger,
 	)
 
@@ -134,7 +138,7 @@ func (test entityFetcherFetchEntitiesRangeTest) Run(t *testing.T) {
 
 func TestEntityFetcher_FetchEntitiesRange(t *testing.T) {
 	makeTest := newEntityFetcherFetchEntitiesRangeTest
-	var many uint64 = entityFetcherBatchFetchThreshold + 1
+	var many uint64 = testEntityFetcherBatchFetchThreshold + 1
 
 	t.Run("no paging", makeTest(1, false, nil).Run)
 	t.Run("paging few", makeTest(1, true, nil).Run)

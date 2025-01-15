@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -113,7 +114,8 @@ func NewCheckpointFetcher(client Client, logger log.Logger) *EntityFetcher[*Chec
 		client.FetchCheckpoint,
 		client.FetchCheckpoints,
 		CheckpointsFetchLimit,
-		1,
+		1, /* fetchAllEntitiesIdxOffset */
+		checkpointsBatchFetchThreshold,
 		logger,
 	)
 }
@@ -124,9 +126,10 @@ func NewMilestoneFetcher(client Client, logger log.Logger) *EntityFetcher[*Miles
 		client.FetchFirstMilestoneNum,
 		client.FetchMilestoneCount,
 		client.FetchMilestone,
-		nil,
-		0,
-		1,
+		nil,            /* fetchEntitiesPage */
+		0,              /* fetchEntitiesPageLimit */
+		1,              /* fetchAllEntitiesIdxOffset */
+		math.MaxUint64, /* batchFetchThreshold - max uint means never use batch fetch */
 		logger,
 	)
 }
@@ -153,7 +156,8 @@ func NewSpanFetcher(client Client, logger log.Logger) *EntityFetcher[*Span] {
 		fetchEntity,
 		client.FetchSpans,
 		SpansFetchLimit,
-		0,
+		0, /* fetchEntitiesPageLimit */
+		spansBatchFetchThreshold,
 		logger,
 	)
 }
