@@ -1,11 +1,13 @@
 package vm
 
 import (
+	"math/big"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"math/big"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 // Depth returns the current depth
@@ -31,8 +33,8 @@ type TxProcessingHook interface {
 	DropTip() bool
 	EndTxHook(totalGasUsed uint64, evmSuccess bool)
 	ScheduledTxes() types.Transactions
-	L1BlockNumber(blockCtx state.BlockContext) (uint64, error)
-	L1BlockHash(blockCtx state.BlockContext, l1BlocKNumber uint64) (common.Hash, error)
+	L1BlockNumber(blockCtx evmtypes.BlockContext) (uint64, error)
+	L1BlockHash(blockCtx evmtypes.BlockContext, l1BlocKNumber uint64) (common.Hash, error)
 	GasPriceOp(evm *EVM) *big.Int
 	FillReceiptInfo(receipt *types.Receipt)
 	MsgIsNonMutating() bool
