@@ -17,11 +17,11 @@
   "mergeNetsplitBlock": 1735371,
   "shanghaiTime": 1677557088,
   "cancunTime": 1706655072,
-  "maxBlobGasPerBlock": {
-    "0": 786432
+  "maxBlobsPerBlock": {
+    "0": 6
   },
-  "targetBlobGasPerBlock": {
-    "0": 393216
+  "targetBlobsPerBlock": {
+    "0": 3
   },
   "blobGasPriceUpdateFraction": {
     "0": 3338477

@@ -16,11 +16,11 @@
   "shanghaiTime": 1690889660,
   "cancunTime": 1710181820,
   "minBlobGasPrice": 1000000000,
-  "maxBlobGasPerBlock": {
-    "0": 262144
+  "maxBlobsPerBlock": {
+    "0": 2
   },
-  "targetBlobGasPerBlock": {
-    "0": 131072
+  "targetBlobsPerBlock": {
+    "0": 1
   },
   "blobGasPriceUpdateFraction": {
     "0": 1112826
