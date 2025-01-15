@@ -31,25 +31,6 @@ import (
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 )
 
-func (e *EthereumExecutionModule) validatePayloadBlobs(expectedBlobHashes []libcommon.Hash, transactions []types.Transaction, blobGasUsed uint64) error {
-	if expectedBlobHashes == nil {
-		return &rpc.InvalidParamsError{Message: "nil blob hashes array"}
-	}
-	actualBlobHashes := []libcommon.Hash{}
-	for _, txn := range transactions {
-		actualBlobHashes = append(actualBlobHashes, txn.GetBlobHashes()...)
-	}
-	if len(actualBlobHashes) > int(e.config.GetMaxBlobsPerBlock(0)) || blobGasUsed > e.config.GetMaxBlobGasPerBlock(0) {
-		return nil
-	}
-	if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
-		e.logger.Warn("[NewPayload] mismatch in blob hashes",
-			"expectedBlobHashes", expectedBlobHashes, "actualBlobHashes", actualBlobHashes)
-		return nil
-	}
-	return nil
-}
-
 func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *execution.InsertBlocksRequest) (*execution.InsertionResult, error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
