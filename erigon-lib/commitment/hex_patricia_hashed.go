@@ -33,6 +33,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/trie"
@@ -2649,9 +2650,22 @@ func commonPrefixLen(b1, b2 []byte) int {
 	return i
 }
 
+func (hph *HexPatriciaHashed) HashAndNibblizeKey(key []byte) []byte {
+	keyLen := length.Addr
+	if len(key) < length.Addr {
+		keyLen = len(key)
+	}
+	compactedHashKey := crypto.Keccak256(key[:keyLen])
+	if len(key) > length.Addr { // storage
+		storageKeyHash := crypto.Keccak256(key[length.Addr:])
+		compactedHashKey = append(compactedHashKey, storageKeyHash...)
+	}
+	return nibblize(compactedHashKey)
+}
+
 // nolint
 // Hashes provided key and expands resulting hash into nibbles (each byte split into two nibbles by 4 bits)
-func (hph *HexPatriciaHashed) HashAndNibblizeKey(key []byte) []byte {
+func (hph *HexPatriciaHashed) HashAndNibblizeKeyLegacy(key []byte) []byte {
 	hashedKey := make([]byte, length.Hash)
 
 	hph.keccak.Reset()
