@@ -259,15 +259,15 @@ jobs:
           ls -l
           echo "DEBUG -- content of directory $(pwd)/qa-tests/tip-tracking/"
           ls -l $(pwd)/qa-tests/tip-tracking/
-          echo "DEBUG -- content of directory GITHUB_WORKSPACE ${GITHUB_WORKSPACE} :"
-          ls -l ${GITHUB_WORKSPACE}
+          echo "DEBUG -- content of directory current dir:"
+          ls -l .
           echo "DEBUG -- end."
-          rm -rf ${RUNNER_WORKSPACE}/erigon-data || true
-          mkdir ${RUNNER_WORKSPACE}/erigon-data
+          rm -rf ./erigon-data || true
+          mkdir ./erigon-data
           # Run Erigon, wait sync and check ability to maintain sync
           python3 qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-            ${GITHUB_WORKSPACE}/${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }} \
-              ${RUNNER_WORKSPACE}/erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }}
+            ./${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }} \
+              ./erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }}
           # Capture monitoring script exit status
           test_exit_status=$?
           # Save the subsection reached status
