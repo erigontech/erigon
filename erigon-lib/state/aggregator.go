@@ -197,9 +197,6 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	cfg := Schema[name]
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
-	if name == kv.CommitmentDomain {
-		cfg.replaceKeysInValues = a.commitmentValuesTransform
-	}
 	cfg.hist.iiCfg.salt = salt
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.aggregationStep = aggregationStep
