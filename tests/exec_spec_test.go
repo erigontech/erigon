@@ -32,9 +32,7 @@ func TestExecutionSpec(t *testing.T) {
 	bt := new(testMatcher)
 	bt.skipLoad(`^`)
 
-	dir := filepath.Join(".", "execution-spec-tests", "prague")
-	// bt.skipLoad(`^cancun`)
-	// bt.skipLoad(`^cancun`)
+	dir := filepath.Join(".", "execution-spec-tests")
 	checkStateRoot := true
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
