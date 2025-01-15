@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"go/types"
 	"os"
-	"strings"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -23,11 +22,21 @@ var (
 	pkgSrc   *types.Package
 )
 
+type gen struct {
+	named    *types.Named
+	imports  map[string]bool
+	content  []byte // encoding size, encode rlp and decode rlp logic for each named type
+	pkgDir   string
+	filename string // gen_<typename>_rlp.go or could be gen_common_rlp.go if multiple types being encoded in the same package, so gen_common_rlp.go will contain all methods for the types in the single file
+}
+
+var gens []gen
+
 func main() {
 	var (
-		pkgdir    = flag.String("dir", ".", "input package")
-		typename  = flag.String("type", "", "type to generate methods for")
-		writefile = flag.Bool("wfile", true, "set to false if no need to write to the file")
+		pkgdir   = flag.String("dir", ".", "input package")
+		typename = flag.String("type", "", "type to generate methods for")
+		// writefile = flag.Bool("wfile", true, "set to false if no need to write to the file")
 	)
 	flag.Parse()
 
@@ -63,32 +72,34 @@ func main() {
 		_exit(err.Error())
 	}
 
+	fmt.Println(typ.Obj().Pkg().Imports())
+
 	// TODO(racytech): add error checks for the possible unhandled errors
 
-	var encodingSize bytes.Buffer
-	var encodeRLP bytes.Buffer
-	var decodeRLP bytes.Buffer
-	// ps[0].Types - rlp package
-	// ps[1].Types - package where to search for to-be generated struct
-	if err := process(typ, &encodingSize, &encodeRLP, &decodeRLP); err != nil {
-		_exit(err.Error())
-	}
+	// var encodingSize bytes.Buffer
+	// var encodeRLP bytes.Buffer
+	// var decodeRLP bytes.Buffer
+	// // ps[0].Types - rlp package
+	// // ps[1].Types - package where to search for to-be generated struct
+	// if err := process(typ); err != nil {
+	// 	_exit(err.Error())
+	// }
 
-	result := addImports()
+	// result := addImports()
 
-	result = append(result, encodingSize.Bytes()...)
-	result = append(result, encodeRLP.Bytes()...)
-	result = append(result, decodeRLP.Bytes()...)
-	os.Stdout.Write(result)
-	if *writefile {
-		outfile := fmt.Sprintf("%s/gen_%s_rlp.go", *pkgdir, strings.ToLower(typ.Obj().Name()))
-		fmt.Println("outfile: ", outfile)
-		if err := os.WriteFile(outfile, result, 0600); err != nil {
-			_exit(err.Error())
-		}
-	} else {
-		os.Stdout.Write(result)
-	}
+	// result = append(result, encodingSize.Bytes()...)
+	// result = append(result, encodeRLP.Bytes()...)
+	// result = append(result, decodeRLP.Bytes()...)
+	// os.Stdout.Write(result)
+	// if *writefile {
+	// 	outfile := fmt.Sprintf("%s/gen_%s_rlp.go", *pkgdir, strings.ToLower(typ.Obj().Name()))
+	// 	fmt.Println("outfile: ", outfile)
+	// 	if err := os.WriteFile(outfile, result, 0600); err != nil {
+	// 		_exit(err.Error())
+	// 	}
+	// } else {
+	// 	os.Stdout.Write(result)
+	// }
 }
 
 func _exit(msg string) {
@@ -110,16 +121,113 @@ func checkPackageErrors(pkg *packages.Package) error {
 	return nil
 }
 
-func addImports() []byte {
-	_imports["fmt"] = true
-	_imports["io"] = true
-	_imports[rlpPackagePath] = true
+func combineImports(pkgDir string) map[string]bool {
+
+	combined := make(map[string]bool)
+
+	for _, g := range gens {
+		if g.pkgDir == pkgDir {
+			for k := range g.imports {
+				combined[k] = true
+			}
+		}
+	}
+	return combined
+}
+
+func combineContents(pkgDir string) []byte {
+	var b []byte
+
+	for _, g := range gens {
+		if g.pkgDir == pkgDir {
+			b = append(b, g.content...)
+		}
+	}
+	return b
+}
+
+func writeToFile() {
+	// outfile := fmt.Sprintf("%s/gen_%s_rlp.go", g.pkgDir, strings.ToLower(g.typename))
+	// fmt.Println("outfile: ", outfile)
+	// if err := os.WriteFile(outfile, content, 0600); err != nil {
+	// 	_exit(err.Error())
+	// }
+
+	// TODO: create a single file for multiple types if they are in the same dir
+
+	sameFiles := make(map[string]int) // count how many types located in the same dir
+
+	for _, g := range gens {
+		sameFiles[g.pkgDir] += 1
+	}
+
+	var b []string
+
+	for _, g := range gens {
+		if sameFiles[g.pkgDir] > 1 { // if couple of more types are in the same dir
+			// save them for later usage (will give it a single file name)
+			b = append(b, g.pkgDir)
+		}
+	}
+
+	for len(b) > 0 {
+		dir := b[0]
+		for _, g := range gens {
+			if g.pkgDir == dir {
+				g.filename = "common" // TODO: should be different? e.g depends on the types?
+			}
+		}
+		b = b[1:]
+	}
+
+	fmt.Println("---- Removing previously generated files ----")
+
+	// remove all the files first
+	for _, g := range gens {
+		if err := os.Remove(g.filename); err != nil {
+			_exit(err.Error())
+		}
+	}
+
+	for _, g := range gens {
+		f, err := os.OpenFile(g.filename, os.O_APPEND, 0600)
+		if err != nil {
+			_exit(err.Error())
+		}
+
+		if sameFiles[g.pkgDir] == -1 {
+			continue
+		}
+
+		if sameFiles[g.pkgDir] > 1 {
+			f.Write([]byte(headerMsg))
+			f.Write([]byte("package " + g.named.Obj().Pkg().Name() + "\n\n"))
+			f.Write(importsToBytes(combineImports(g.pkgDir)))
+			f.Write(combineContents(g.pkgDir))
+			f.Close()
+			sameFiles[g.pkgDir] = -1
+		} else if sameFiles[g.pkgDir] == 1 {
+			f.Write([]byte(headerMsg))
+			f.Write([]byte("package " + g.named.Obj().Pkg().Name() + "\n\n"))
+			f.Write(importsToBytes(g.imports))
+			f.Write(g.content)
+			f.Close()
+		} else {
+			panic("writeToFile else case")
+		}
+	}
+}
+
+func importsToBytes(imports map[string]bool) []byte {
+	imports["fmt"] = true
+	imports["io"] = true
+	imports[rlpPackagePath] = true
 
 	var result []byte
-	result = append(result, []byte(headerMsg)...)
-	result = append(result, []byte("package "+pkgSrc.Name()+"\n\n")...)
+	// result = append(result, []byte(headerMsg)...)
+	// result = append(result, []byte("package "+pkgSrc.Name()+"\n\n")...)
 	result = append(result, []byte("import (\n")...)
-	for k := range _imports {
+	for k := range imports {
 		result = append(result, []byte("    ")...)
 		result = append(result, '"')
 		result = append(result, []byte(k)...)
@@ -130,44 +238,63 @@ func addImports() []byte {
 	return result
 }
 
-func process(typ *types.Named, b1, b2, b3 *bytes.Buffer) error {
+// Generates rlp encoding and decoding methods for each named type in its package location.
+// If the provided type has nested named type in it this results in repeated call to this function,
+// sort of recursion
+func process(typ *types.Named) error {
 	// TODO(racytech): handle all possible errors
 
 	typename := typ.Obj().Name()
 
+	var b1, b2, b3 bytes.Buffer
+
+	g := gen{
+		named:    typ,
+		imports:  make(map[string]bool),
+		pkgDir:   getPkgDir(typ.Obj().Pkg().Path()),
+		filename: typename,
+	}
+
 	// 1. start EncodingSize method on a struct
-	fmt.Fprintf(b1, "func (obj *%s) EncodingSize() (size int) {\n", typename)
+	fmt.Fprintf(&b1, "func (obj *%s) EncodingSize() (size int) {\n", typename)
 
 	// 2. start EncodeRLP
-	fmt.Fprintf(b2, "func (obj *%s) EncodeRLP(w io.Writer) error {\n", typename)
-	fmt.Fprint(b2, "    var b [32]byte\n")
-	fmt.Fprint(b2, "    if err := rlp.EncodeStructSizePrefix(obj.EncodingSize(), w, b[:]); err != nil {\n")
-	fmt.Fprint(b2, "        return err\n")
-	fmt.Fprint(b2, "    }\n")
+	fmt.Fprintf(&b2, "func (obj *%s) EncodeRLP(w io.Writer) error {\n", typename)
+	fmt.Fprint(&b2, "    var b [32]byte\n")
+	fmt.Fprint(&b2, "    if err := rlp.EncodeStructSizePrefix(obj.EncodingSize(), w, b[:]); err != nil {\n")
+	fmt.Fprint(&b2, "        return err\n")
+	fmt.Fprint(&b2, "    }\n")
 
 	// 3. start DecodeRLP
-	fmt.Fprintf(b3, "func (obj *%s) DecodeRLP(s *rlp.Stream) error {\n", typename)
-	fmt.Fprint(b3, "    _, err := s.List()\n")
-	fmt.Fprint(b3, "    if err != nil {\n")
-	fmt.Fprint(b3, "        return err\n")
-	fmt.Fprint(b3, "    }\n")
+	fmt.Fprintf(&b3, "func (obj *%s) DecodeRLP(s *rlp.Stream) error {\n", typename)
+	fmt.Fprint(&b3, "    _, err := s.List()\n")
+	fmt.Fprint(&b3, "    if err != nil {\n")
+	fmt.Fprint(&b3, "        return err\n")
+	fmt.Fprint(&b3, "    }\n")
 
 	// 4. add encoding/decoding logic
-	if err := addEncodeLogic(b1, b2, b3, typ); err != nil {
+	if err := addEncodeLogic(&b1, &b2, &b3, &g); err != nil {
 		return err
 	}
 
 	// 5. end EncodingSize method
-	fmt.Fprintf(b1, "    return\n}\n\n")
+	fmt.Fprintf(&b1, "    return\n}\n\n")
 
 	// 6. end EcnodeRLP
-	fmt.Fprintf(b2, "    return nil\n}\n\n")
+	fmt.Fprintf(&b2, "    return nil\n}\n\n")
 
 	// 7. end DecodeRLP
-	fmt.Fprintf(b3, "    if err = s.ListEnd(); err != nil {\n")
-	fmt.Fprintf(b3, "        return fmt.Errorf(\"error closing %s, err: %%w\", err)\n", typename)
-	fmt.Fprintf(b3, "    }\n")
-	fmt.Fprintf(b3, "    return nil\n}\n")
+	fmt.Fprintf(&b3, "    if err = s.ListEnd(); err != nil {\n")
+	fmt.Fprintf(&b3, "        return fmt.Errorf(\"error closing %s, err: %%w\", err)\n", typename)
+	fmt.Fprintf(&b3, "    }\n")
+	fmt.Fprintf(&b3, "    return nil\n}\n\n")
+
+	result := b1.Bytes()
+	result = append(result, b2.Bytes()...)
+	result = append(result, b3.Bytes()...)
+	g.content = result
+
+	gens = append(gens, g)
 
 	return nil
 }
@@ -192,9 +319,9 @@ func findType(scope *types.Scope, typename string) (*types.Named, error) {
 	return nil, errors.New("not a named type")
 }
 
-func addEncodeLogic(b1, b2, b3 *bytes.Buffer, named *types.Named) error {
+func addEncodeLogic(b1, b2, b3 *bytes.Buffer, g *gen) error {
 
-	if _struct, ok := named.Underlying().(*types.Struct); ok {
+	if _struct, ok := g.named.Underlying().(*types.Struct); ok {
 		for i := 0; i < _struct.NumFields(); i++ {
 
 			strTyp := matchTypeToString(_struct.Field(i).Type(), "")

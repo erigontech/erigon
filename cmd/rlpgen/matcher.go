@@ -39,6 +39,12 @@ var handlers = map[string]handle{
 	"*[n]byte":            byteArrayPtrHandle,
 }
 
+func matchTypeToHandle(fieldType types.Type) {
+	if named, ok := fieldType.(*types.Named); ok {
+		process(named)
+	}
+}
+
 func matchTypeToString(fieldType types.Type, in string) string {
 	if named, ok := fieldType.(*types.Named); ok {
 		return in + named.Obj().Pkg().Name() + "." + named.Obj().Name()
