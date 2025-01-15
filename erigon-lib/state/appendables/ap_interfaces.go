@@ -36,6 +36,7 @@ type Appendable interface {
 	SetIndexBuilders([]AccessorIndexBuilder)
 	DirtySegmentsMaxTsNum() TsNum
 	VisibleSegmentsMaxTsNum() TsNum
+	RecalcVisibleFiles(baseTsNumTo TsNum)
 	Prune(ctx context.Context, baseTsNumTo TsNum, limit uint64, rwTx kv.RwTx) error
 	Unwind(ctx context.Context, baseTsNumFrom TsNum, rwTx kv.RwTx) error
 }

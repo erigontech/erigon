@@ -107,10 +107,11 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, baseTsNumFrom, baseTsN
 		}
 
 		dseg := &DirtySegment{
-			Range:        Range{uint64(from), uint64(to)},
-			Decompressor: valuesDecomp,
-			filePath:     path,
-			enum:         a.enum,
+			Range:                  Range{uint64(from), uint64(to)},
+			Decompressor:           valuesDecomp,
+			filePath:               path,
+			enum:                   a.enum,
+			expectedCountOfIndexes: len(a.indexBuilders),
 		}
 
 		indexes := make([]*recsplit.Index, len(a.indexBuilders))
@@ -135,4 +136,74 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, baseTsNumFrom, baseTsN
 func (a *ProtoAppendable) BuildMissedIndexes(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	// use indexbuilders
 	// caller must "refresh" like OpenFolder to refresh the dirty files
+}
+
+func (a *ProtoAppendable) RecalcVisibleFiles(baseTsNumTo TsNum) {
+	a._visible = calcVisibleFiles(a.dirtyFiles, baseTsNumTo)
+}
+
+func (a *ProtoAppendable) Close() {
+	if a == nil {
+		return
+	}
+	a.closeWhatNotInList([]string{})
+}
+
+func (a *ProtoAppendable) closeWhatNotInList(fNames []string) {
+	protectFiles := make(map[string]struct{}, len(fNames))
+	for _, f := range fNames {
+		protectFiles[f] = struct{}{}
+	}
+	var toClose []*DirtySegment
+	a.dirtyFiles.Walk(func(items []*DirtySegment) bool {
+		for _, item := range items {
+			if item.Decompressor != nil {
+				if _, ok := protectFiles[item.Decompressor.FileName()]; ok {
+					continue
+				}
+			}
+			toClose = append(toClose, item)
+		}
+		return true
+	})
+	for _, item := range toClose {
+		item.closeFiles()
+		a.dirtyFiles.Delete(item)
+	}
+
+}
+
+func calcVisibleFiles(files *btree.BTreeG[*DirtySegment], toTsNum TsNum) []*VisibleSegment {
+	newVisibleFiles := make([]*VisibleSegment, 0, files.Len())
+	iToTsNum := uint64(toTsNum)
+	files.Walk(func(items []*DirtySegment) bool {
+		for _, item := range items {
+			if item.To() > iToTsNum {
+				continue
+			}
+			if item.canDelete.Load() {
+				continue
+			}
+			if item.Decompressor == nil {
+				continue
+			}
+			if len(item.indexes) != item.expectedCountOfIndexes {
+				continue
+			}
+
+			if len(newVisibleFiles) > 0 && newVisibleFiles[len(newVisibleFiles)-1].src.isSubsetOf(item) {
+				newVisibleFiles[len(newVisibleFiles)-1].src = nil
+				newVisibleFiles = newVisibleFiles[:len(newVisibleFiles)-1]
+			}
+
+			newVisibleFiles = append(newVisibleFiles, &VisibleSegment{
+				src: item,
+			})
+		}
+		return true
+	})
+	if newVisibleFiles == nil {
+		newVisibleFiles = []*VisibleSegment{}
+	}
+	return newVisibleFiles
 }
