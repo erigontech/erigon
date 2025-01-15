@@ -226,9 +226,8 @@ jobs:
       - name: Download artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
         uses: actions/download-artifact@v4
         with:
-          working-directory: "workflow-${{ github.workflow }}-run-${{ github.run_number }}"
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
-          path: .
+          path: ./workflow-${{ github.workflow }}-run-${{ github.run_number }}/
 
       - name: Extract artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
         working-directory: "workflow-${{ github.workflow }}-run-${{ github.run_number }}"
