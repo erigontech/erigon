@@ -258,7 +258,7 @@ func (c *Config) GetBurntContract(num uint64) *common.Address {
 	if len(c.BurntContract) == 0 {
 		return nil
 	}
-	addr := BorKeyValueConfigHelper(c.BurntContract, num)
+	addr := ConfigValueLookup(c.BurntContract, num)
 	return &addr
 }
 
@@ -509,7 +509,12 @@ func (c *CliqueConfig) String() string {
 	return "clique"
 }
 
-func BorKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, number uint64) T {
+// Looks up a config value as of a given block number (or time).
+// The assumption here is that config is a càdlàg map of starting_from_block -> value.
+// For example, config of {"0": "0xA", "10": "0xB", "20": "0xC"}
+// means that the config value is 0xA for blocks 0–9,
+// 0xB for blocks 10–19, and 0xC for block 20 and above.
+func ConfigValueLookup[T uint64 | common.Address](field map[string]T, number uint64) T {
 	fieldUint := make(map[uint64]T)
 	for k, v := range field {
 		keyUint, err := strconv.ParseUint(k, 10, 64)
