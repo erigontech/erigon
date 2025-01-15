@@ -1473,7 +1473,7 @@
               "refId": "A"
             }
           ],
-          "title": "ValidateChain: time spent",
+          "title": "NewPayload: time spent",
           "type": "timeseries"
         },
         {
