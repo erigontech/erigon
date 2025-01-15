@@ -168,8 +168,8 @@ var (
 func DeprecatedPrefixesV0() (keyPrefixes [][]byte, keyLength int) {
 	return [][]byte{
 		// deprecated prefixes, used in version 0x00, purged in version 0x01
-		[]byte{0x00, 'w', 'a'}, // ActivatedAsmPrefix
-		[]byte{0x00, 'w', 'm'}, // ActivatedModulePrefix
+		{0x00, 'w', 'a'}, // ActivatedAsmPrefix
+		{0x00, 'w', 'm'}, // ActivatedModulePrefix
 	}, 3 + 32
 }
 
