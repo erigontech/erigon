@@ -84,7 +84,8 @@ type Aggregator struct {
 
 	onFreeze kv.OnFreezeFunc
 
-	ps *background.ProgressSet
+	ps         *background.ProgressSet
+	iiDomainMp map[kv.InvertedIdx]kv.Domain // ii to domain (in which they belong)
 
 	// next fields are set only if agg.doTraceCtx is true. can enable by env: TRACE_AGG=true
 	leakDetector *dbg.LeakDetector
@@ -142,6 +143,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		collateAndBuildWorkers: 1,
 		mergeWorkers:           1,
 		iis:                    make(map[kv.InvertedIdx]*InvertedIndex),
+		iiDomainMp:             make(map[kv.InvertedIdx]kv.Domain),
 
 		commitmentValuesTransform: AggregatorSqueezeCommitmentValues,
 
@@ -193,7 +195,7 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	return salt, nil
 }
 
-func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, logger log.Logger) (err error) {
+func (a *Aggregator) registerDomain(name kv.Domain, historyIdx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, logger log.Logger) (err error) {
 	cfg := Schema[name]
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
@@ -207,6 +209,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	if err != nil {
 		return err
 	}
+	a.iiDomainMp[historyIdx] = name
 	return nil
 }
 
@@ -1560,25 +1563,16 @@ func (ac *AggregatorRoTx) HistoryStartFrom(domainName kv.Domain) uint64 {
 }
 
 func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
-	switch name {
-	case kv.AccountsHistoryIdx:
-		return ac.d[kv.AccountsDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
-	case kv.StorageHistoryIdx:
-		return ac.d[kv.StorageDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
-	case kv.CodeHistoryIdx:
-		return ac.d[kv.CodeDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
-	case kv.CommitmentHistoryIdx:
-		return ac.d[kv.StorageDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
-	case kv.ReceiptHistoryIdx:
-		return ac.d[kv.ReceiptDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
-	default:
-		// check the ii
-		if v, ok := ac.iis[name]; ok {
-			return v.IdxRange(k, fromTs, toTs, asc, limit, tx)
-		}
-
-		return nil, fmt.Errorf("unexpected history name: %s", name)
+	// search in domain
+	if v, ok := ac.a.iiDomainMp[name]; ok {
+		return ac.d[v].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 	}
+	// next check the ii
+	if v, ok := ac.iis[name]; ok {
+		return v.IdxRange(k, fromTs, toTs, asc, limit, tx)
+	}
+
+	return nil, fmt.Errorf("unexpected history name: %s", name)
 }
 
 // -- range end

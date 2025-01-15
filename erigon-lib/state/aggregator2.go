@@ -22,19 +22,19 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 	if err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.AccountsDomain, salt, dirs, aggregationStep, logger); err != nil {
+	if err := a.registerDomain(kv.AccountsDomain, kv.AccountsHistoryIdx, salt, dirs, aggregationStep, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.StorageDomain, salt, dirs, aggregationStep, logger); err != nil {
+	if err := a.registerDomain(kv.StorageDomain, kv.StorageHistoryIdx, salt, dirs, aggregationStep, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.CodeDomain, salt, dirs, aggregationStep, logger); err != nil {
+	if err := a.registerDomain(kv.CodeDomain, kv.CodeHistoryIdx, salt, dirs, aggregationStep, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.CommitmentDomain, salt, dirs, aggregationStep, logger); err != nil {
+	if err := a.registerDomain(kv.CommitmentDomain, kv.CommitmentHistoryIdx, salt, dirs, aggregationStep, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, aggregationStep, logger); err != nil {
+	if err := a.registerDomain(kv.ReceiptDomain, kv.ReceiptHistoryIdx, salt, dirs, aggregationStep, logger); err != nil {
 		return nil, err
 	}
 	if err := a.registerII(kv.LogAddrIdx, salt, dirs, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
