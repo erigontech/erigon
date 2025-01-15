@@ -226,10 +226,12 @@ jobs:
       - name: Download artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
         uses: actions/download-artifact@v4
         with:
+          working-directory: "workflow-${{ github.workflow }}-run-${{ github.run_number }}"
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
           path: .
 
       - name: Extract artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+        working-directory: "workflow-${{ github.workflow }}-run-${{ github.run_number }}"
         run: |
           pwd
           ls -l ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
@@ -239,6 +241,7 @@ jobs:
       - name: Fast checkout git repository erigontech/erigon-qa
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
         with:
+          working-directory: "workflow-${{ github.workflow }}-run-${{ github.run_number }}"
           token: ${{ secrets.ORG_GITHUB_ERIGONTECH_ERIGON_QA_READ }}
           repository: erigontech/erigon-qa
           fetch-depth: 1
@@ -246,6 +249,7 @@ jobs:
           path: erigon-qa
 
       - name: Checkout QA Tests Repository & Install Requirements
+        working-directory: "workflow-${{ github.workflow }}-run-${{ github.run_number }}"
         run: |
           cd ./erigon-qa/test_system
           pwd
