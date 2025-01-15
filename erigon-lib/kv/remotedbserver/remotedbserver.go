@@ -260,8 +260,8 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 				if err != nil {
 					return fmt.Errorf("kvserver: %w", err)
 				}
-				c.k = bytesCopy(k)
-				c.v = bytesCopy(v)
+				c.k = common.CopyBytes(k)
+				c.v = common.CopyBytes(v)
 			}
 
 			if err := s.renew(stream.Context(), id); err != nil {
@@ -419,15 +419,6 @@ func handleOp(c kv.Cursor, stream remote.KV_TxServer, in *remote.Cursor) error {
 	}
 
 	return nil
-}
-
-func bytesCopy(b []byte) []byte {
-	if b == nil {
-		return nil
-	}
-	copiedBytes := make([]byte, len(b))
-	copy(copiedBytes, b)
-	return copiedBytes
 }
 
 func (s *KvServer) StateChanges(_ *remote.StateChangeRequest, server remote.KV_StateChangesServer) error {
@@ -647,8 +638,8 @@ func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) 
 			if err != nil {
 				return err
 			}
-			key := bytesCopy(k)
-			value := bytesCopy(v)
+			key := common.CopyBytes(k)
+			value := common.CopyBytes(v)
 			reply.Keys = append(reply.Keys, key)
 			reply.Values = append(reply.Values, value)
 		}
@@ -692,8 +683,8 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remote.RangeAsOfReq) (*remo
 			if err != nil {
 				return err
 			}
-			key := bytesCopy(k)
-			value := bytesCopy(v)
+			key := common.CopyBytes(k)
+			value := common.CopyBytes(v)
 			reply.Keys = append(reply.Keys, key)
 			reply.Values = append(reply.Values, value)
 			limit--

@@ -1208,7 +1208,7 @@ func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	v, ok, err := ht.historySeekInFiles(key, txNum)
 	if err != nil {
-		return nil, ok, err
+		return nil, false, err
 	}
 	if ok {
 		return v, true, nil

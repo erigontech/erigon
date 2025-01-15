@@ -110,28 +110,26 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		return nil
 	}
 
-	rng := RangesV3{
-		domain: [5]DomainRanges{
-			kv.AccountsDomain: {
-				name:    kv.AccountsDomain,
-				values:  MergeRange{true, 0, math.MaxUint64},
-				history: HistoryRanges{},
-				aggStep: ac.a.StepSize(),
-			},
-			kv.StorageDomain: {
-				name:    kv.StorageDomain,
-				values:  MergeRange{true, 0, math.MaxUint64},
-				history: HistoryRanges{},
-				aggStep: ac.a.StepSize(),
-			},
-			kv.CommitmentDomain: {
-				name:    kv.CommitmentDomain,
-				values:  MergeRange{true, 0, math.MaxUint64},
-				history: HistoryRanges{},
-				aggStep: ac.a.StepSize(),
-			},
+	rng := NewRangesV3()
+	rng.domain = [5]DomainRanges{
+		kv.AccountsDomain: {
+			name:    kv.AccountsDomain,
+			values:  MergeRange{true, 0, math.MaxUint64},
+			history: HistoryRanges{},
+			aggStep: ac.a.StepSize(),
 		},
-		invertedIndex: [4]*MergeRange{},
+		kv.StorageDomain: {
+			name:    kv.StorageDomain,
+			values:  MergeRange{true, 0, math.MaxUint64},
+			history: HistoryRanges{},
+			aggStep: ac.a.StepSize(),
+		},
+		kv.CommitmentDomain: {
+			name:    kv.CommitmentDomain,
+			values:  MergeRange{true, 0, math.MaxUint64},
+			history: HistoryRanges{},
+			aggStep: ac.a.StepSize(),
+		},
 	}
 	sf, err := ac.staticFilesInRange(rng)
 	if err != nil {
@@ -322,16 +320,14 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
 
-	rng := RangesV3{
-		domain: [5]DomainRanges{
-			kv.AccountsDomain: {
-				name:    kv.AccountsDomain,
-				values:  MergeRange{true, 0, math.MaxUint64},
-				history: HistoryRanges{},
-				aggStep: a.StepSize(),
-			},
+	rng := NewRangesV3()
+	rng.domain = [5]DomainRanges{
+		kv.AccountsDomain: {
+			name:    kv.AccountsDomain,
+			values:  MergeRange{true, 0, math.MaxUint64},
+			history: HistoryRanges{},
+			aggStep: a.StepSize(),
 		},
-		invertedIndex: [4]*MergeRange{},
 	}
 	sf, err := acRo.staticFilesInRange(rng)
 	if err != nil {

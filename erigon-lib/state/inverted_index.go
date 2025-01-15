@@ -731,7 +731,7 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 				break
 			}
 			if iit.files[i].src.index == nil { // assert
-				err := fmt.Errorf("why file has not index: %s\n", iit.files[i].src.decompressor.FileName())
+				err := fmt.Errorf("why file has not index: %s", iit.files[i].src.decompressor.FileName())
 				panic(err)
 			}
 			if iit.files[i].src.index.KeyCount() == 0 {

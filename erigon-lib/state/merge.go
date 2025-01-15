@@ -1081,5 +1081,5 @@ func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
 	return false
 }
 
-func (ac *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx            { return ac.d[idx] }
-func (ac *AggregatorRoTx) DbgII(idx kv.InvertedIdxPos) *InvertedIndexRoTx { return ac.iis[idx] }
+func (ac *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return ac.d[idx] }
+func (ac *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return ac.iis[idx] }

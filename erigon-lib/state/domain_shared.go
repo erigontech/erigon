@@ -98,7 +98,7 @@ type SharedDomains struct {
 	storage *btree2.Map[string, dataWithPrevStep]
 
 	domainWriters [kv.DomainLen]*domainBufferedWriter
-	iiWriters     [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
+	iiWriters     map[kv.InvertedIdx]*invertedIndexBufferedWriter
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
@@ -114,8 +114,9 @@ type HasAgg interface {
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
 	sd := &SharedDomains{
-		logger:  logger,
-		storage: btree2.NewMap[string, dataWithPrevStep](128),
+		logger:    logger,
+		storage:   btree2.NewMap[string, dataWithPrevStep](128),
+		iiWriters: map[kv.InvertedIdx]*invertedIndexBufferedWriter{},
 		//trace:   true,
 	}
 	sd.SetTx(tx)
@@ -661,19 +662,10 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
-	switch table {
-	case kv.LogAddrIdx, kv.TblLogAddressIdx:
-		err = sd.iiWriters[kv.LogAddrIdxPos].Add(key)
-	case kv.LogTopicIdx, kv.TblLogTopicsIdx, kv.LogTopicIndex:
-		err = sd.iiWriters[kv.LogTopicIdxPos].Add(key)
-	case kv.TblTracesToIdx:
-		err = sd.iiWriters[kv.TracesToIdxPos].Add(key)
-	case kv.TblTracesFromIdx:
-		err = sd.iiWriters[kv.TracesFromIdxPos].Add(key)
-	default:
-		panic(fmt.Errorf("unknown shared index %s", table))
+	if writer, ok := sd.iiWriters[table]; ok {
+		return writer.Add(key)
 	}
-	return err
+	panic(fmt.Errorf("unknown index %s", table))
 }
 
 func (sd *SharedDomains) SetTx(tx kv.Tx) {

@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
@@ -833,34 +832,6 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 		}
 	}
 
-	return receipts
-}
-
-// ReadReceipts retrieves all the transaction receipts belonging to a block, including
-// its corresponding metadata fields. If it is unable to populate these metadata
-// fields then nil is returned.
-//
-// The current implementation populates these metadata fields by reading the receipts'
-// corresponding block body, so if the block body is not found it will return nil even
-// if the receipt itself is stored.
-func ReadReceipts(db kv.Tx, block *types.Block, senders []common.Address) types.Receipts {
-	if block == nil {
-		return nil
-	}
-	// We're deriving many fields from the block body, retrieve beside the receipt
-	receipts := ReadRawReceipts(db, block.NumberU64())
-	if receipts == nil {
-		return nil
-	}
-	if len(senders) > 0 {
-		block.SendersToTxs(senders)
-	} else {
-		senders = block.Body().SendersFromTxs()
-	}
-	if err := receipts.DeriveFields(block.Hash(), block.NumberU64(), block.Transactions(), senders); err != nil {
-		log.Error("Failed to derive block receipts fields", "hash", block.Hash(), "number", block.NumberU64(), "err", err, "stack", dbg.Stack())
-		return nil
-	}
 	return receipts
 }
 

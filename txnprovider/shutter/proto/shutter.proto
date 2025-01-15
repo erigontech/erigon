@@ -1,0 +1,43 @@
+syntax = "proto3";
+package proto;
+
+import "google/protobuf/any.proto";
+
+option go_package = "./;proto";
+
+message Envelope {
+  string version = 1;
+  google.protobuf.Any message = 2;
+  optional TraceContext trace = 3;
+}
+
+message TraceContext {
+  bytes trace_id = 1;
+  bytes span_id = 2;
+  bytes trace_flags = 3;
+  string trace_state = 4;
+}
+
+message DecryptionKeys {
+  uint64 instance_id = 1;
+  uint64 eon = 2;
+  repeated Key keys = 3;
+  oneof extra {
+    GnosisDecryptionKeysExtra gnosis = 4;
+    OptimismDecryptionKeysExtra optimism = 5;
+  }
+}
+
+message Key {
+  bytes identity_preimage = 1;
+  bytes key = 2;
+}
+
+message GnosisDecryptionKeysExtra {
+  uint64 slot = 1;
+  uint64 tx_pointer = 2;
+  repeated uint64 signer_indices = 3;
+  repeated bytes signatures = 4;
+}
+
+message OptimismDecryptionKeysExtra {}
