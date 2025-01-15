@@ -10,6 +10,7 @@ var decodeBufAdded bool
 var intSizeAdded bool   // for encoding size
 var intEncodeAdded bool // for rlp encoding
 
+// create decoder buffer if not added yet
 func addDecodeBuf(b *bytes.Buffer) {
 	if !decodeBufAdded {
 		fmt.Fprint(b, "    var b []byte\n")
@@ -17,6 +18,7 @@ func addDecodeBuf(b *bytes.Buffer) {
 	}
 }
 
+// add List start check
 func startListDecode(b *bytes.Buffer, fieldName string) {
 	fmt.Fprintf(b, "    _, err = s.List()\n")
 	fmt.Fprintf(b, "    if err != nil {\n")
@@ -24,12 +26,14 @@ func startListDecode(b *bytes.Buffer, fieldName string) {
 	fmt.Fprintf(b, "    }\n")
 }
 
+// add List end check
 func endListDecode(b *bytes.Buffer, fieldName string) {
 	fmt.Fprintf(b, "    if err = s.ListEnd(); err != nil {\n")
 	fmt.Fprintf(b, "        return fmt.Errorf(\"error decoding field %s - fail to close list, err: %%w\", err)\n", fieldName)
 	fmt.Fprintf(b, "    }\n")
 }
 
+// add reusable int for encoding size usage
 func addIntSize(b *bytes.Buffer) {
 	if !intSizeAdded {
 		fmt.Fprint(b, "    gidx := 0\n")
@@ -39,6 +43,7 @@ func addIntSize(b *bytes.Buffer) {
 	}
 }
 
+// add reusable int for encoding usage
 func addIntEncode(b *bytes.Buffer) {
 	if !intEncodeAdded {
 		fmt.Fprint(b, "    gidx := 0\n")

@@ -1,3 +1,7 @@
+// NOTE: This generator works only on structures, if the type is slice of types (e.g []MyType) it will fail.
+//		 And not all the field types currently supported, see `matcher.go`
+//		 This will be fixed in the future.
+
 package main
 
 import (
@@ -202,14 +206,65 @@ func addEncodeLogic(b1, b2, b3 *bytes.Buffer, named *types.Named) error {
 
 			matchStrTypeToFunc(strTyp)(b1, b2, b3, _struct.Field(i).Type(), _struct.Field(i).Name())
 		}
-	} else { // user named types that are not structs, could be:
-		// 1. type aliases
-		//     - type aliases for basic types, e.g type MyInt int
-		//     - type aliases for user named types, e.g type MyHash common.Hash (could be struct as well!)
-		// 2. slice types
-		//     - slice of basice types, e.g type MyInts []int
-		//     - slice of user named types, e.g type ReceiptsForStorage []*ReceiptForStorage
+	} else {
+
+		// TODO(racytech): see handleType
 	}
 
 	return nil
+}
+
+func handleType(t types.Type, caller types.Type, depth int, ptr bool) {
+	switch e := t.(type) {
+	case *types.Pointer:
+		// check if double pointer, fail if depth > 0 and ptr == true
+
+		// if t is Pointer type pass to the next level
+		handleType(e.Elem(), e, depth+1, true)
+	case *types.Named:
+		// if t is user named type,
+		// check if big.Int or uint256.Int -> check if pointer -> encode/decode accordingly -> return
+		// check if rlp generated for this type -> if yes remove the file
+		// else pass to the next level
+		handleType(e.Underlying(), e, depth+1, false)
+		// if underlying is a struct
+		// 		check if rlp generated for this type -> if yes call RLP encode/decode methods on it, return
+	case *types.Basic:
+		// check if caller Named (e.g type MyInt int) -> TODO
+		// check if caller Slice or Array
+		//		if t is byte slice or byte array -> encode -> return
+		// check if caller Pointer -> encode -> return
+		//
+		// or if caller is nil -> call rlp encoding function on basic types, bool, uint, int etc.
+		// return
+	case *types.Slice:
+		// check if it's simple byteslice
+		//		if yes call RLP encode/decode methods on it, return
+		// check if it's slice of named types. e.g []common.Hash -> [][32]byte, or type MyStruct struct {a, b, c}
+		// 				^TODO think about this case^
+		//
+		handleType(e.Elem(), e, depth+1, false)
+	case *types.Array:
+		// check if it's simple bytearray
+		//		if yes call RLP encode/decode methods on it, return
+		// check if it's slice of named types. e.g [10]common.Hash -> [10][32]byte, or type MyStruct struct {a, b, c}
+		// 				^TODO think about this case^
+		//
+		handleType(e.Elem(), e, depth+1, false)
+	case *types.Struct:
+		// check if nested struct
+		// 		if yes check if rlp previously generated for this type -> if yes remove the file
+		// 		try generating rlp for this structure, e.g as follows:
+		// 		process(t) -> if successful
+		//			add encoding/decoding logic of this struct to the buffers
+		//			return
+
+		// else -> top level call
+		for i := 0; i < e.NumFields(); i++ {
+			// this should panic and fail generating everything in case of error
+			handleType(e.Field(i).Type(), e, depth+1, false)
+		}
+	default:
+		panic("unhandled")
+	}
 }
