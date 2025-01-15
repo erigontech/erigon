@@ -1316,7 +1316,7 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 	require.NoError(t, err)
 
 	acc := accounts.Account{}
-	err = accounts.DeserialiseV3(&acc, input)
+	_ = accounts.DeserialiseV3(&acc, input)
 	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash.Bytes())
 }
 

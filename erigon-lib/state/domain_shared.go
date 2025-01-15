@@ -1221,6 +1221,9 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	if len(encAccount) > 0 {
 		acc := accounts.Account{}
 		err = accounts.DeserialiseV3(&acc, encAccount)
+		if err != nil {
+			return nil, err
+		}
 		u.Flags |= commitment.NonceUpdate
 		u.Nonce = acc.Nonce
 		u.Flags |= commitment.BalanceUpdate
