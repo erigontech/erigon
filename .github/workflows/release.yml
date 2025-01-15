@@ -265,9 +265,10 @@ jobs:
           rm -rf ../../erigon-data || true
           mkdir ../../erigon-data
           # Run Erigon, wait sync and check ability to maintain sync
+          find ../.. -ls
           python3 qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-            ./${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }} \
-              ./erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }}
+            ../../${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }} \
+              ../../erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }}
           # Capture monitoring script exit status
           test_exit_status=$?
           # Save the subsection reached status
