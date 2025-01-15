@@ -90,7 +90,7 @@ type Aggregator struct {
 	leakDetector *dbg.LeakDetector
 	logger       log.Logger
 
-	ctxAutoIncrement atomic.Uint64
+	aggRoTxAutoIncrement atomic.Uint64
 
 	produce bool
 }
@@ -1074,7 +1074,7 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 		}
 	}
 
-	stats := make(map[kv.InvertedIdx]*InvertedIndexPruneStat)
+	stats := make(map[kv.InvertedIdx]*InvertedIndexPruneStat, len(ac.a.iis))
 	for iikey := range ac.a.iis {
 		stat, err := ac.iis[iikey].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
 		if err != nil {
@@ -1634,9 +1634,9 @@ type AggregatorRoTx struct {
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	ac := &AggregatorRoTx{
 		a:       a,
-		id:      a.ctxAutoIncrement.Add(1),
+		id:      a.aggRoTxAutoIncrement.Add(1),
 		_leakID: a.leakDetector.Add(),
-		iis:     make(map[kv.InvertedIdx]*InvertedIndexRoTx),
+		iis:     make(map[kv.InvertedIdx]*InvertedIndexRoTx, len(a.iis)),
 	}
 
 	a.visibleFilesLock.RLock()
