@@ -3,6 +3,7 @@ run-name: Build release ${{ inputs.release_version}} from branch ${{ inputs.chec
 
 env:
   APPLICATION: "erigon"
+  APPLICATION_VERSION: "Erigon3"
   BUILDER_IMAGE: "golang:1.22-bookworm"
   DOCKER_BASE_IMAGE: "debian:12.8-slim"
   APP_REPO: "erigontech/erigon"
@@ -210,13 +211,8 @@ jobs:
 
     steps:
 
-      - name: Setup working directory
-        run: |
-          echo "DEBUG: Create working directory for workflow:"
-          mkdir "workflow-${GITHUB_WORKFLOW}-run-${GITHUB_RUN_NUMBER}"
-          echo "DEBUG: Content of current directory $(pwd) :"
-          ls -lao
-          cd "workflow-${GITHUB_WORKFLOW}-run-${GITHUB_RUN_NUMBER}"
+      - name: Cleanup working directory
+        run: rm -drfv *
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -227,28 +223,24 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
-          path: ./workflow-${{ github.workflow }}-run-${{ github.run_number }}/
+          path: .
 
       - name: Extract artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
-        working-directory: "workflow-${{ github.workflow }}-run-${{ github.run_number }}"
         run: |
           pwd
           ls -l ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
           tar xzvf ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
           ls -lR
-
       - name: Fast checkout git repository erigontech/erigon-qa
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
         with:
-          working-directory: "workflow-${{ github.workflow }}-run-${{ github.run_number }}"
           token: ${{ secrets.ORG_GITHUB_ERIGONTECH_ERIGON_QA_READ }}
           repository: erigontech/erigon-qa
           fetch-depth: 1
           ref: main
-          path: workflow-${{ github.workflow }}-run-${{ github.run_number }}/erigon-qa
+          path: erigon-qa
 
       - name: Checkout QA Tests Repository & Install Requirements
-        working-directory: "workflow-${{ github.workflow }}-run-${{ github.run_number }}"
         run: |
           cd ./erigon-qa/test_system
           pwd
@@ -259,16 +251,15 @@ jobs:
           ls -l
           echo "DEBUG -- content of directory $(pwd)/qa-tests/tip-tracking/"
           ls -l $(pwd)/qa-tests/tip-tracking/
-          echo "DEBUG -- content of directory current dir:"
-          ls -l .
+          echo "DEBUG -- content of directory GITHUB_WORKSPACE ${GITHUB_WORKSPACE} :"
+          ls -l ${GITHUB_WORKSPACE}
           echo "DEBUG -- end."
-          rm -rf ../../erigon-data || true
-          mkdir ../../erigon-data
+          rm -rf ${RUNNER_WORKSPACE}/erigon-data || true
+          mkdir ${RUNNER_WORKSPACE}/erigon-data
           # Run Erigon, wait sync and check ability to maintain sync
-          find ../.. -ls
           python3 qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-            ../../${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }} \
-              ../../erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }}
+            ${GITHUB_WORKSPACE}/${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }} \
+              ${RUNNER_WORKSPACE}/erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }}
           # Capture monitoring script exit status
           test_exit_status=$?
           # Save the subsection reached status
@@ -282,6 +273,8 @@ jobs:
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Cleanup working directory
+        run: rm -drfv *
 
   build-debian-pkg:
     name: Debian packages
