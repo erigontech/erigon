@@ -68,6 +68,7 @@ func Assemble(
 	if cfg.OverridePragueTime != nil {
 		pragueTime = cfg.OverridePragueTime
 	}
+	maxBlobsPerBlockPrague := chainConfig.MaxBlobGasPerBlockPrague
 
 	newTxns := make(chan Announcements, 1024)
 	newSlotsStreams := &NewSlotsStreams{}
@@ -84,6 +85,7 @@ func Assemble(
 		cancunTime,
 		pragueTime,
 		maxBlobsPerBlock,
+		maxBlobsPerBlockPrague,
 		sentryClients,
 		stateChangesClient,
 		builderNotifyNewTxns,

@@ -144,6 +144,7 @@ type TxPool struct {
 	pragueTime              *uint64
 	isPostPrague            atomic.Bool
 	maxBlobsPerBlock        uint64
+	maxBlobsPerBlockPrague  *uint64
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -170,6 +171,7 @@ func New(
 	cancunTime *big.Int,
 	pragueTime *big.Int,
 	maxBlobsPerBlock uint64,
+	maxBlobsPerBlockPrague *uint64,
 	sentryClients []sentryproto.SentryClient,
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
@@ -223,6 +225,7 @@ func New(
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
 		maxBlobsPerBlock:        maxBlobsPerBlock,
+		maxBlobsPerBlockPrague:  maxBlobsPerBlockPrague,
 		feeCalculator:           options.feeCalculator,
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
@@ -865,7 +868,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		if blobCount == 0 {
 			return txpoolcfg.NoBlobs
 		}
-		if blobCount > p.maxBlobsPerBlock {
+		if blobCount > p.GetMaxBlobsPerBlock() {
 			return txpoolcfg.TooManyBlobs
 		}
 		equalNumber := len(txn.BlobHashes) == len(txn.Blobs) &&
@@ -1080,6 +1083,17 @@ func (p *TxPool) isCancun() bool {
 
 func (p *TxPool) isPrague() bool {
 	return isTimeBasedForkActivated(&p.isPostPrague, p.pragueTime)
+}
+
+func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
+	if p.isPrague() {
+		if p.maxBlobsPerBlockPrague != nil {
+			return *p.maxBlobsPerBlockPrague
+		}
+		return 9 // EIP-7691 default
+	} else {
+		return p.maxBlobsPerBlock
+	}
 }
 
 // Check that the serialized txn should not exceed a certain max size
