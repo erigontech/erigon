@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -105,7 +106,7 @@ var ErrOutOfGas = errors.New("out of gas") // importing from vm causes cyclic im
 // The code here is adapted from the following functions with the most recent parameters as of The Merge
 //   - operations_acl.go makeCallVariantGasCallEIP2929()
 //   - gas_table.go      gasCall()
-func WasmCallCost(db *IntraBlockState, contract common.Address, value *uint256.Int, budget uint64) (uint64, error) {
+func WasmCallCost(db evmtypes.IntraBlockState, contract common.Address, value *uint256.Int, budget uint64) (uint64, error) {
 	total := uint64(0)
 	apply := func(amount uint64) bool {
 		total += amount
@@ -147,7 +148,7 @@ func WasmCallCost(db *IntraBlockState, contract common.Address, value *uint256.I
 
 // Computes the cost of touching an account in wasm
 // Note: the code here is adapted from gasEip2929AccountCheck with the most recent parameters as of The Merge
-func WasmAccountTouchCost(cfg *chain.Config, db *IntraBlockState, addr common.Address, withCode bool) uint64 {
+func WasmAccountTouchCost(cfg *chain.Config, db evmtypes.IntraBlockState, addr common.Address, withCode bool) uint64 {
 	cost := uint64(0)
 	if withCode {
 		cost = cfg.MaxCodeSize() / 24576 * params.ExtcodeSizeGasEIP150
