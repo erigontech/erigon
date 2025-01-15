@@ -258,7 +258,7 @@ func (c *Config) GetBurntContract(num uint64) *common.Address {
 	if len(c.BurntContract) == 0 {
 		return nil
 	}
-	addr := borKeyValueConfigHelper(c.BurntContract, num)
+	addr := BorKeyValueConfigHelper(c.BurntContract, num)
 	return &addr
 }
 
@@ -509,7 +509,7 @@ func (c *CliqueConfig) String() string {
 	return "clique"
 }
 
-func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, number uint64) T {
+func BorKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, number uint64) T {
 	fieldUint := make(map[uint64]T)
 	for k, v := range field {
 		keyUint, err := strconv.ParseUint(k, 10, 64)
