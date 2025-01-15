@@ -11,12 +11,18 @@ import (
 
 type TransactionArgs = ethapi.SendTxArgs
 
+// func (args *TransactionArgs) ToTransaction() types.Transaction {
+// 	return args.ToTransaction()
+// }
+
+// type TransactionArgs = ethapi.CallArgs
+
 func EstimateGas(
 	ctx context.Context,
 	b ethapi.Backend,
 	args TransactionArgs,
 	blockNrOrHash rpc.BlockNumberOrHash,
-	overrides *ethapi.StateOverride,
+	overrides *ethapi.StateOverrides,
 	gasCap uint64,
 ) (hexutil.Uint64, error) {
 	return ethapi.DoEstimateGas(ctx, b, args, blockNrOrHash, overrides, gasCap)
