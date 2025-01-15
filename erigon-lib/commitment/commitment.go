@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"math/bits"
 	"sort"
 	"strings"
@@ -34,12 +35,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 var (
@@ -1060,21 +1059,26 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	if c.update.Flags&DeleteUpdate != 0 {
 		c.update.Flags = 0 // also could invert with ^ but 0 is just a reset
 	}
-	nonce, balance, chash := types.DecodeAccountBytesV3(val)
-	if c.update.Nonce != nonce {
-		c.update.Nonce = nonce
+
+	acc := accounts.Account{}
+	err := accounts.DeserialiseV3(&acc, val)
+	if err != nil {
+		panic(err)
+	}
+	if c.update.Nonce != acc.Nonce {
+		c.update.Nonce = acc.Nonce
 		c.update.Flags |= NonceUpdate
 	}
-	if !c.update.Balance.Eq(balance) {
-		c.update.Balance.Set(balance)
+	if !c.update.Balance.Eq(&acc.Balance) {
+		c.update.Balance.Set(&acc.Balance)
 		c.update.Flags |= BalanceUpdate
 	}
-	if !bytes.Equal(chash, c.update.CodeHash[:]) {
-		if len(chash) == 0 {
+	if !bytes.Equal(acc.CodeHash.Bytes(), c.update.CodeHash[:]) {
+		if len(acc.CodeHash.Bytes()) == 0 {
 			copy(c.update.CodeHash[:], EmptyCodeHash)
 		} else {
 			c.update.Flags |= CodeUpdate
-			copy(c.update.CodeHash[:], chash)
+			copy(c.update.CodeHash[:], acc.CodeHash.Bytes())
 		}
 	}
 }

@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"fmt"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/bits"
 
@@ -29,7 +30,6 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -235,10 +235,10 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint
 		return 0, uint256.Int{}, nil
 	}
 	if cacheView.StateV3() {
-		var bp *uint256.Int
-		nonce, bp, _ = types2.DecodeAccountBytesV3(encoded)
-		balance = *bp
-	} else {
+		acc := accounts.Account{}
+		err = accounts.DeserialiseV3(&acc, encoded)
+		nonce, balance = acc.Nonce, acc.Balance
+	} else { //TODO: eliminate in future? (always v3)
 		nonce, balance, err = DecodeSender(encoded)
 	}
 	if err != nil {

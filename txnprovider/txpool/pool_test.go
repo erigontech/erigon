@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/big"
 	"testing"
@@ -43,7 +44,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/typestest"
 	"github.com/erigontech/erigon/params"
@@ -76,7 +76,13 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := types2.EncodeAccountBytesV3(2, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	acc := accounts3.Account{
+		Nonce:       2,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    common.Hash{},
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -203,7 +209,13 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	var addr1, addr2 [20]byte
 	addr2[0] = 1
-	v := types2.EncodeAccountBytesV3(0, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	acc := accounts3.Account{
+		Nonce:       0,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    common.Hash{},
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr1),
@@ -448,7 +460,13 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := types2.EncodeAccountBytesV3(2, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	acc := accounts3.Account{
+		Nonce:       2,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    common.Hash{},
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -565,7 +583,13 @@ func TestReverseNonces(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := types2.EncodeAccountBytesV3(2, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	acc := accounts3.Account{
+		Nonce:       2,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    common.Hash{},
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -689,7 +713,13 @@ func TestTxnPoke(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := types2.EncodeAccountBytesV3(2, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	acc := accounts3.Account{
+		Nonce:       2,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    common.Hash{},
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -1026,7 +1056,13 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := types2.EncodeAccountBytesV3(2, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	acc := accounts3.Account{
+		Nonce:       2,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    common.Hash{},
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -1137,7 +1173,13 @@ func TestBlobTxnReplacement(t *testing.T) {
 	addr[0] = 1
 
 	// Add 1 eth to the user account, as a part of change
-	v := types2.EncodeAccountBytesV3(2, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	acc := accounts3.Account{
+		Nonce:       2,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    common.Hash{},
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
 
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
@@ -1316,7 +1358,13 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := types2.EncodeAccountBytesV3(2, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	acc := accounts3.Account{
+		Nonce:       2,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    common.Hash{},
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -1418,7 +1466,13 @@ func TestBlobSlots(t *testing.T) {
 	var addr [20]byte
 
 	// Add 1 eth to the user account, as a part of change
-	v := types2.EncodeAccountBytesV3(0, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	acc := accounts3.Account{
+		Nonce:       0,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    common.Hash{},
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
 
 	for i := 0; i < 11; i++ {
 		addr[0] = uint8(i + 1)
@@ -1483,7 +1537,13 @@ func TestGasLimitChanged(t *testing.T) {
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
 	var addr [20]byte
 	addr[0] = 1
-	v := types2.EncodeAccountBytesV3(0, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	acc := accounts3.Account{
+		Nonce:       0,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    common.Hash{},
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()

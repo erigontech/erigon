@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"testing"
 	"time"
 
@@ -30,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 )
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
@@ -155,7 +156,13 @@ Loop:
 	for ; i < int(maxTx); i++ {
 		domains.SetTxNum(uint64(i))
 		for accs := 0; accs < 256; accs++ {
-			v := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*10e6)+uint64(accs*10e2)), nil, 0)
+			acc := accounts3.Account{
+				Nonce:       uint64(i),
+				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			v := accounts3.SerialiseV3(&acc)
 			k0[0] = byte(accs)
 			pv, step, err := domains.GetLatest(kv.AccountsDomain, k0)
 			require.NoError(t, err)
@@ -416,7 +423,13 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	for ; i < int(maxTx); i++ {
 		domains.SetTxNum(uint64(i))
 		for accs := 0; accs < accounts; accs++ {
-			v := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*10e6)+uint64(accs*10e2)), nil, 0)
+			acc := accounts3.Account{
+				Nonce:       uint64(i),
+				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			v := accounts3.SerialiseV3(&acc)
 			k0[0] = byte(accs)
 
 			pv, step, err := domains.GetLatest(kv.AccountsDomain, k0)
