@@ -16,45 +16,17 @@
 package commitment
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
-	"golang.org/x/crypto/sha3"
 )
 
 // nibblize a key : e.g. [0xab] => [0x0a, 0x0b]
 func Nibblize(key []byte) []byte { // nolint:unused
 	nibblized := make([]byte, len(key)*2)
 	for i, b := range key {
-		nibblized[i*2] = (b >> 4) & 0xf
-		nibblized[i*2+1] = b & 0xf
-	}
-	return nibblized
-}
-
-func legacyHashAndNibblizeKey(key []byte) []byte {
-	hashedKey := make([]byte, length.Hash)
-	keccak := sha3.NewLegacyKeccak256().(keccakState)
-	keccak.Reset()
-	fp := length.Addr
-	if len(key) < length.Addr {
-		fp = len(key)
-	}
-	keccak.Write(key[:fp])
-	keccak.Read(hashedKey[:length.Hash])
-
-	if len(key[fp:]) > 0 {
-		hashedKey = append(hashedKey, make([]byte, length.Hash)...)
-		keccak.Reset()
-		keccak.Write(key[fp:])
-		keccak.Read(hashedKey[length.Hash:])
-	}
-
-	nibblized := make([]byte, len(hashedKey)*2)
-	for i, b := range hashedKey {
 		nibblized[i*2] = (b >> 4) & 0xf
 		nibblized[i*2+1] = b & 0xf
 	}
@@ -72,12 +44,7 @@ func HashAndNibblizeKey(key []byte) []byte {
 		storageKeyHash := crypto.Keccak256(key[length.Addr:])
 		compactedHashKey = append(compactedHashKey, storageKeyHash...)
 	}
-	result := Nibblize(compactedHashKey)
-	legacyResult := legacyHashAndNibblizeKey(key)
-	if !bytes.Equal(result, legacyResult) {
-		panic("result not equal with legacy function")
-	}
-	return result
+	return Nibblize(compactedHashKey)
 }
 
 func CompactedKeyToHex(compact []byte) []byte {
