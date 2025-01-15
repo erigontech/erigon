@@ -814,36 +814,39 @@ type SendTxArgs struct {
 // 		}
 // 	}
 
-// 	// Estimate the gas usage if necessary.
-// 	if args.Gas == nil {
-// 		// For backwards-compatibility reason, we try both input and data
-// 		// but input is preferred.
-// 		input := args.Input
-// 		if input == nil {
-// 			input = args.Data
-// 		}
-// 		callArgs := CallArgs{
-// 			From:       &args.From, // From shouldn't be nil
-// 			To:         args.To,
-// 			GasPrice:   args.GasPrice,
-// 			Value:      args.Value,
-// 			Data:       (*hexutility.Bytes)(input),
-// 			AccessList: args.AccessList,
-// 		}
-// 		pendingBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-// 		estimated, err := DoEstimateGas(ctx, b, callArgs, pendingBlockNr, b.RPCGasCap())
-// 		if err != nil {
-// 			return err
-// 		}
-// 		args.Gas = &estimated
-// 		log.Trace("Estimate gas usage automatically", "gas", args.Gas)
-// 	}
-// 	if args.ChainID == nil {
-// 		id := (*hexutil.Big)(b.ChainConfig().ChainID)
-// 		args.ChainID = id
-// 	}
-// 	return nil
-// }
+//		// Estimate the gas usage if necessary.
+//		if args.Gas == nil {
+//			// For backwards-compatibility reason, we try both input and data
+//			// but input is preferred.
+//			input := args.Input
+//			if input == nil {
+//				input = args.Data
+//			}
+//			callArgs := CallArgs{
+//				From:       &args.From, // From shouldn't be nil
+//				To:         args.To,
+//				GasPrice:   args.GasPrice,
+//				Value:      args.Value,
+//				Data:       (*hexutility.Bytes)(input),
+//				AccessList: args.AccessList,
+//			}
+//			pendingBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+//			estimated, err := DoEstimateGas(ctx, b, callArgs, pendingBlockNr, b.RPCGasCap())
+//			if err != nil {
+//				return err
+//			}
+//			args.Gas = &estimated
+//			log.Trace("Estimate gas usage automatically", "gas", args.Gas)
+//		}
+//		if args.ChainID == nil {
+//			id := (*hexutil.Big)(b.ChainConfig().ChainID)
+//			args.ChainID = id
+//		}
+//		return nil
+//	}
+func (args *SendTxArgs) ToTransaction() types.Transaction {
+	return args.toTransaction()
+}
 
 // toTransaction converts the arguments to a transaction.
 // This assumes that setDefaults has been called.
