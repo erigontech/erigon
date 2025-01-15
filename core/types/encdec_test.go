@@ -141,7 +141,7 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 	auths := make([]Authorization, size)
 	for i := 0; i < size; i++ {
 		auths[i] = Authorization{
-			ChainID: *tr.RandUint64(),
+			ChainID: *tr.RandUint256(),
 			Address: tr.RandAddress(),
 			Nonce:   *tr.RandUint64(),
 			YParity: uint8(*tr.RandUint64()),
