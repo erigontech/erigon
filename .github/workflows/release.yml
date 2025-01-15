@@ -262,8 +262,8 @@ jobs:
           echo "DEBUG -- content of directory current dir:"
           ls -l .
           echo "DEBUG -- end."
-          rm -rf ./erigon-data || true
-          mkdir ./erigon-data
+          rm -rf ../../erigon-data || true
+          mkdir ../../erigon-data
           # Run Erigon, wait sync and check ability to maintain sync
           python3 qa-tests/tip-tracking/run_and_check_tip_tracking.py \
             ./${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }} \
