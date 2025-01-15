@@ -54,7 +54,7 @@ func (a *ProtoAppendable) BaseKeySameAsTsNum() {
 func (a *ProtoAppendable) VisibleSegmentsMaxTsNum() TsNum {
 	// if snapshots store the last tsNum
 	latest := a._visible[len(a._visible)-1]
-	return TsNum(latest.GetLastTsNum())
+	return TsNum(latest.Src().GetLastTsNum())
 }
 
 func (a *ProtoAppendable) DirtySegmentsMaxTsNum() TsNum {

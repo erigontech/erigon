@@ -20,7 +20,6 @@ type RangedAppendable struct {
 func (a *RangedAppendable) Get(tsNum TsNum, tx kv.Tx) (VVType, error) {
 	// first look into snapshots..
 	lastTsNum := a.VisibleSegmentsMaxTsNum()
-	itsNum := uint64(tsNum)
 	if tsNum <= lastTsNum {
 		if a.baseKeySameAsTsNum {
 			// TODO: can do binary search or loop over visible segments and find which segment contains tsNum
@@ -30,7 +29,7 @@ func (a *RangedAppendable) Get(tsNum TsNum, tx kv.Tx) (VVType, error) {
 			// Note: Get assumes that the first index allows ordinal lookup on tsNum. Is this valid assumption?
 			// for borevents this is not a valid assumption
 			if a.indexBuilders[0].AllowsOrdinalLookupByTsNum() {
-				return v.Get(itsNum)
+				return v.Get(tsNum)
 			} else {
 				return nil, fmt.Errorf("ordinal lookup by tsNum not supported for %s", a.enum)
 			}
@@ -40,7 +39,7 @@ func (a *RangedAppendable) Get(tsNum TsNum, tx kv.Tx) (VVType, error) {
 	}
 
 	// then db
-	return tx.GetOne(a.valsTbl, a.encTs(itsNum))
+	return tx.GetOne(a.valsTbl, a.encTs(uint64(tsNum)))
 }
 
 func (a *RangedAppendable) Put(tsNum TsNum, value VVType, tx kv.RwTx) error {

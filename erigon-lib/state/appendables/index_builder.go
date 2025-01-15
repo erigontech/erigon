@@ -29,12 +29,8 @@ type IndexKeyFactory interface {
 	Make(value []byte, index uint64) []byte
 }
 
-type IndexBuilder[IndexType any] interface {
-	Build(ctx context.Context, baseTsNumFrom, baseTsNumTo TsNum, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (IndexType, error)
-}
-
 type AccessorIndexBuilder interface {
-	IndexBuilder[*recsplit.Index]
+	Build(ctx context.Context, baseTsNumFrom, baseTsNumTo TsNum, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error)
 	SetAccessorArgs(*AccessorArgs)
 	AllowsOrdinalLookupByTsNum() bool
 }

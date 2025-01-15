@@ -33,7 +33,7 @@ func (a *BindAppendable) Get(tsNum TsNum, tx kv.Tx) (VVType, error) {
 			var v *VisibleSegment
 
 			if a.indexBuilders[0].AllowsOrdinalLookupByTsNum() {
-				return v.Get(itsNum)
+				return v.Get(tsNum)
 			} else {
 				return nil, fmt.Errorf("ordinal lookup by tsNum not supported for %s", a.enum)
 			}
