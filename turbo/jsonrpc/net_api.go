@@ -52,8 +52,8 @@ func (api *NetAPIImpl) Listening(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf(NotAvailableChainData, "net_listening")
 	}
 
-	// If we can get peer count, it means the network is listening
-	_, err := api.ethBackend.NetPeerCount(ctx)
+	// If we can get peers info, it means the network interface is up and listening
+	_, err := api.ethBackend.Peers(ctx)
 	if err != nil {
 		return false, nil
 	}
