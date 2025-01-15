@@ -4,6 +4,9 @@ run-name: Build release ${{ inputs.release_version}} from branch ${{ inputs.chec
 env:
   APPLICATION: "erigon"
   APPLICATION_VERSION: "Erigon3"
+  TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
+  TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
+  TEST_CHAIN: "mainnet"
   BUILDER_IMAGE: "golang:1.22-bookworm"
   DOCKER_BASE_IMAGE: "debian:12.8-slim"
   APP_REPO: "erigontech/erigon"
