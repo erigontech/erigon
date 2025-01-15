@@ -2649,34 +2649,6 @@ func commonPrefixLen(b1, b2 []byte) int {
 	return i
 }
 
-// nolint
-// Hashes provided key and expands resulting hash into nibbles (each byte split into two nibbles by 4 bits)
-func (hph *HexPatriciaHashed) HashAndNibblizeKey(key []byte) []byte {
-	hashedKey := make([]byte, length.Hash)
-
-	hph.keccak.Reset()
-	fp := length.Addr
-	if len(key) < length.Addr {
-		fp = len(key)
-	}
-	hph.keccak.Write(key[:fp])
-	hph.keccak.Read(hashedKey[:length.Hash])
-
-	if len(key[fp:]) > 0 {
-		hashedKey = append(hashedKey, make([]byte, length.Hash)...)
-		hph.keccak.Reset()
-		hph.keccak.Write(key[fp:])
-		hph.keccak.Read(hashedKey[length.Hash:])
-	}
-
-	nibblized := make([]byte, len(hashedKey)*2)
-	for i, b := range hashedKey {
-		nibblized[i*2] = (b >> 4) & 0xf
-		nibblized[i*2+1] = b & 0xf
-	}
-	return nibblized
-}
-
 func nibblize(key []byte) []byte { // nolint:unused
 	nibblized := make([]byte, len(key)*2)
 	for i, b := range key {
