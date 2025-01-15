@@ -244,7 +244,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 }
 
 // Ordering is crucial for trie. since trie do hashing by itself and reorder updates inside Process{Keys,Updates}, have to reorder them for some tests
-func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [][]byte, updates []Update) ([][]byte, []Update) {
+func sortUpdatesByHashIncrease(t *testing.T, plainKeys [][]byte, updates []Update) ([][]byte, []Update) {
 	t.Helper()
 
 	ku := make([]*KeyUpdate, len(plainKeys))
@@ -303,7 +303,7 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 		trieBatch := NewHexPatriciaHashed(keyLen, stateBatch, stateBatch.TempDir())
 
 		if sortHashedKeys {
-			plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
+			plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 		}
 
 		trieSequential.SetTrace(trace)
@@ -387,7 +387,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch, stateBatch.TempDir())
 	trieBatch.trace = true
 
-	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	// trieSequential.SetTrace(true)
 	// trieBatch.SetTrace(true)
@@ -835,7 +835,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, stateSeq.TempDir())
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch, stateBatch.TempDir())
 
-	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	var rSeq, rBatch []byte
 	{
@@ -930,7 +930,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 	sequential := NewHexPatriciaHashed(20, stateSeq, stateSeq.TempDir())
 	batch := NewHexPatriciaHashed(20, stateBatch, stateBatch.TempDir())
 
-	plainKeys, updates = sortUpdatesByHashIncrease(t, sequential, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	//sequential.SetTrace(true)
 	//batch.SetTrace(true)
@@ -1268,7 +1268,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 		Build()
 
 	trieOne := NewHexPatriciaHashed(length.Addr, msOne, msOne.TempDir())
-	plainKeys, updates = sortUpdatesByHashIncrease(t, trieOne, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	//rnd := rand.New(rand.NewSource(345))
 	//noise := make([]byte, 32)
