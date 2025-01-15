@@ -25,6 +25,7 @@ type ProtoAppendable struct {
 
 	baseAppendable Appendable
 
+	// put these in config
 	stepSize           uint64
 	baseKeySameAsTsNum bool // if the tsNum of this appendable is the same as the tsNum of the base appendable
 
