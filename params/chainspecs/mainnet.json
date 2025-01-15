@@ -19,6 +19,15 @@
   "terminalTotalDifficultyPassed": true,
   "shanghaiTime": 1681338455,
   "cancunTime": 1710338135,
+  "maxBlobGasPerBlock": {
+    "0": 786432
+  },
+  "targetBlobGasPerBlock": {
+    "0": 393216
+  },
+  "blobGasPriceUpdateFraction": {
+    "0": 3338477
+  },
   "depositContractAddress": "0x00000000219ab540356cBB839Cbe05303d7705Fa",
   "ethash": {}
 }
