@@ -52,12 +52,12 @@ func (f *FlatRequest) copy() *FlatRequest {
 type FlatRequests []FlatRequest
 
 func (r FlatRequests) Hash() *libcommon.Hash {
-	if r == nil || len(r) < len(KnownRequestTypes) {
+	if r == nil {
 		return nil
 	}
 	sha := sha256.New()
-	for i, t := range KnownRequestTypes {
-		hi := sha256.Sum256(append([]byte{t}, r[i].RequestData...))
+	for i, t := range r {
+		hi := sha256.Sum256(append([]byte{t.Type}, r[i].RequestData...))
 		sha.Write(hi[:])
 	}
 	h := libcommon.BytesToHash(sha.Sum(nil))

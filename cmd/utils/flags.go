@@ -788,12 +788,14 @@ var (
 		Usage: "Ignore the bor block period and wait for 'blocksize' transactions (for testing purposes)",
 	}
 
+	// TODO - this is a depricated flag - should be removed
 	WithHeimdallMilestones = cli.BoolFlag{
 		Name:  "bor.milestone",
 		Usage: "Enabling bor milestone processing",
 		Value: true,
 	}
 
+	// TODO - this is a depricated flag - should be removed
 	WithHeimdallWaypoints = cli.BoolFlag{
 		Name:  "bor.waypoints",
 		Usage: "Enabling bor waypont recording",
@@ -803,8 +805,10 @@ var (
 	PolygonSyncFlag = cli.BoolFlag{
 		Name:  "polygon.sync",
 		Usage: "Enabling syncing using the new polygon sync component",
+		Value: true,
 	}
 
+	// TODO - this is a depricated flag - should be removed
 	PolygonSyncStageFlag = cli.BoolFlag{
 		Name:  "polygon.sync.stage",
 		Usage: "Enabling syncing with a stage that uses the polygon sync component",
@@ -890,6 +894,11 @@ var (
 	SentinelBootnodes = cli.StringSliceFlag{
 		Name:  "sentinel.bootnodes",
 		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
+		Value: cli.NewStringSlice(),
+	}
+	SentinelStaticPeers = cli.StringSliceFlag{
+		Name:  "sentinel.staticpeers",
+		Usage: "connect to comma-separated Consensus static peers",
 		Value: cli.NewStringSlice(),
 	}
 
@@ -1693,6 +1702,12 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
 	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
 	cfg.PolygonSyncStage = ctx.Bool(PolygonSyncStageFlag.Name)
+
+	if cfg.PolygonSync {
+		cfg.WithHeimdallMilestones = false
+		cfg.WithHeimdallWaypointRecording = true
+	}
+
 	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync || cfg.PolygonSyncStage)
 
 	chainConfig := params.ChainConfigByChainName(ctx.String(ChainFlag.Name))
@@ -1870,6 +1885,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
 	cfg.CaplinConfig.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 	cfg.CaplinConfig.BootstrapNodes = ctx.StringSlice(SentinelBootnodes.Name)
+	cfg.CaplinConfig.StaticPeers = ctx.StringSlice(SentinelStaticPeers.Name)
 
 	chain := ctx.String(ChainFlag.Name) // mainnet by default
 	if ctx.IsSet(NetworkIdFlag.Name) {

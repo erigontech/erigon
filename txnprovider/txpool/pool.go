@@ -144,6 +144,7 @@ type TxPool struct {
 	pragueTime              *uint64
 	isPostPrague            atomic.Bool
 	maxBlobsPerBlock        uint64
+	maxBlobsPerBlockPrague  *uint64
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -170,6 +171,7 @@ func New(
 	cancunTime *big.Int,
 	pragueTime *big.Int,
 	maxBlobsPerBlock uint64,
+	maxBlobsPerBlockPrague *uint64,
 	sentryClients []sentryproto.SentryClient,
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
@@ -223,6 +225,7 @@ func New(
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
 		maxBlobsPerBlock:        maxBlobsPerBlock,
+		maxBlobsPerBlockPrague:  maxBlobsPerBlockPrague,
 		feeCalculator:           options.feeCalculator,
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
@@ -743,7 +746,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
 		authorizationLen := uint64(len(mt.TxnSlot.Authorizations))
-		intrinsicGas, floorGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, nil, mt.TxnSlot.Creation, true, true, isShanghai, isPrague)
+		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isShanghai, isPrague)
 		if isPrague && floorGas > intrinsicGas {
 			intrinsicGas = floorGas
 		}
@@ -865,7 +868,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		if blobCount == 0 {
 			return txpoolcfg.NoBlobs
 		}
-		if blobCount > p.maxBlobsPerBlock {
+		if blobCount > p.GetMaxBlobsPerBlock() {
 			return txpoolcfg.TooManyBlobs
 		}
 		equalNumber := len(txn.BlobHashes) == len(txn.Blobs) &&
@@ -924,7 +927,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		return txpoolcfg.UnderPriced
 	}
 
-	gas, floorGas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), nil, txn.Creation, true, true, isShanghai, p.isPrague())
+	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isShanghai, p.isPrague())
 	if p.isPrague() && floorGas > gas {
 		gas = floorGas
 	}
@@ -932,11 +935,11 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
-	if reason != txpoolcfg.Success {
+	if overflow != false {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed idHash=%x reason=%s", txn.IDHash, reason))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed due to overflow idHash=%x", txn.IDHash))
 		}
-		return reason
+		return txpoolcfg.GasUintOverflow
 	}
 	if gas > txn.Gas {
 		if txn.Traced {
@@ -1080,6 +1083,17 @@ func (p *TxPool) isCancun() bool {
 
 func (p *TxPool) isPrague() bool {
 	return isTimeBasedForkActivated(&p.isPostPrague, p.pragueTime)
+}
+
+func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
+	if p.isPrague() {
+		if p.maxBlobsPerBlockPrague != nil {
+			return *p.maxBlobsPerBlockPrague
+		}
+		return 9 // EIP-7691 default
+	} else {
+		return p.maxBlobsPerBlock
+	}
 }
 
 // Check that the serialized txn should not exceed a certain max size

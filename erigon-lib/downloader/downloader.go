@@ -2897,7 +2897,6 @@ func (d *Downloader) logProgress() {
 	if !d.stats.Completed {
 		log.Info(fmt.Sprintf("[%s] %s", prefix, status),
 			"progress", fmt.Sprintf("(%d/%d files) %.2f%% - %s/%s", d.stats.MetadataReady, d.stats.FilesTotal, percentDone, common.ByteCount(bytesDone), common.ByteCount(d.stats.BytesTotal)),
-			"rate", fmt.Sprintf("%s/s", common.ByteCount(rate)),
 			"time-left", timeLeft,
 			"total-time", time.Since(d.startTime).Round(time.Second).String(),
 			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),

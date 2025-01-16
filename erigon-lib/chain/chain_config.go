@@ -76,6 +76,11 @@ type Config struct {
 	TargetBlobsPerBlock        map[string]uint64 `json:"targetBlobsPerBlock,omitempty"`
 	BlobGasPriceUpdateFraction map[string]uint64 `json:"blobGasPriceUpdateFraction,omitempty"`
 
+	// EIP-7691
+	MaxBlobGasPerBlockPrague         *uint64 `json:"maxBlobGasPerBlockPrague,omitempty"`
+	TargetBlobGasPerBlockPrague      *uint64 `json:"targetBlobGasPerBlockPrague,omitempty"`
+	BlobGasPriceUpdateFractionPrague *uint64 `json:"blobGasPriceUpdateFractionPrague,omitempty"`
+
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
 	// Starting from Prague, EIP-4844 fees might be collected as well:
