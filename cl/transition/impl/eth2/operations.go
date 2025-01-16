@@ -353,6 +353,7 @@ func (I *impl) ProcessWithdrawals(
 		s.SetNextWithdrawalValidatorIndex(nextIndex % numValidators)
 	}
 
+	log.Info("Withdrawals processed", "num_withdrawals", withdrawals.Len())
 	return nil
 }
 
