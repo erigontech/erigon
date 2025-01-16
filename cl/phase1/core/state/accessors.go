@@ -313,19 +313,6 @@ func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*cltype
 		if err != nil {
 			log.Warn("Failed to get validator balance", "index", nextWithdrawalValidatorIndex, "error", err)
 		}
-		if b.Version() >= clparams.ElectraVersion {
-			partiallyWithdrawnBalance := uint64(0)
-			for _, w := range withdrawals {
-				if w.Validator == nextWithdrawalValidatorIndex {
-					partiallyWithdrawnBalance += w.Amount
-				}
-			}
-			if currentBalance <= partiallyWithdrawnBalance {
-				currentBalance = 0
-			} else {
-				currentBalance -= partiallyWithdrawnBalance
-			}
-		}
 		wd := currentValidator.WithdrawalCredentials()
 		// Check if the validator is fully withdrawable
 		if isFullyWithdrawableValidator(b, currentValidator, currentBalance, currentEpoch) {
