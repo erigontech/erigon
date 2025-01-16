@@ -31,16 +31,17 @@ import (
 )
 
 var (
-	diagnosticsDisabledFlag = "diagnostics.disabled"
-	diagnosticsAddrFlag     = "diagnostics.endpoint.addr"
-	diagnosticsPortFlag     = "diagnostics.endpoint.port"
-	metricsHTTPFlag         = "metrics.addr"
-	metricsPortFlag         = "metrics.port"
-	pprofPortFlag           = "pprof.port"
-	pprofAddrFlag           = "pprof.addr"
-	diagnoticsSpeedTestFlag = "diagnostics.speedtest"
-	webSeedsFlag            = "webseed"
-	chainFlag               = "chain"
+	diagnosticsDisabledFlag   = "diagnostics.disabled"
+	diagnosticsAddrFlag       = "diagnostics.endpoint.addr"
+	diagnosticsPortFlag       = "diagnostics.endpoint.port"
+	diagnosticsSocketAddrFlag = "diagnostics.socket.addr"
+	metricsHTTPFlag           = "metrics.addr"
+	metricsPortFlag           = "metrics.port"
+	pprofPortFlag             = "pprof.port"
+	pprofAddrFlag             = "pprof.addr"
+	diagnoticsSpeedTestFlag   = "diagnostics.speedtest"
+	webSeedsFlag              = "webseed"
+	chainFlag                 = "chain"
 )
 
 func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, pprofMux *http.ServeMux) {
@@ -78,7 +79,7 @@ func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, p
 	speedTest := ctx.Bool(diagnoticsSpeedTestFlag)
 	diagnostic, err := diaglib.NewDiagnosticClient(ctx.Context, diagMux, node.Backend().DataDir(), speedTest, webseedsList)
 	if err == nil {
-		diagnostic.Setup()
+		diagnostic.Setup(ctx.String(diagnosticsSocketAddrFlag))
 		SetupEndpoints(ctx, node, diagMux, diagnostic)
 	} else {
 		log.Error("[Diagnostics] Failure in setting up diagnostics", "err", err)

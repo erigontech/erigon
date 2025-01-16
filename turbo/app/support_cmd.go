@@ -148,7 +148,7 @@ func (c *conn) SetWriteDeadline(time time.Time) error {
 	return nil
 }
 
-func testWSS(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal) {
+func testWSS(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, codec *rpc.ServerCodec) {
 	ctx1, cancel1 := context.WithCancel(ctx)
 	defer cancel1()
 
@@ -160,38 +160,70 @@ func testWSS(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal
 		}
 	}()
 
-	serverAddr := "ws://127.0.0.1:6063/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(serverAddr, nil)
+	serverURL := "ws://127.0.0.1:6059/debug/diag/ws"
+	// WebSocket server URL (replace with your server's URL)
+
+	// Connect to the WebSocket server
+	conn, _, err := websocket.DefaultDialer.Dial(serverURL, nil)
 	if err != nil {
-		fmt.Println("6Error connecting to server:", err)
-		return
+		fmt.Printf("Failed to connect to WebSocket server: %v", err)
 	}
 	defer conn.Close()
 
-	fmt.Println("6Connected to server")
+	// Channel to listen for OS signals (e.g., Ctrl+C)
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
 
-	// Send a message
-	message := "6Hello, WebSocket!"
-	if err := conn.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
-		fmt.Println("6Error sending message:", err)
-	}
-	fmt.Println("6Sent:", message)
+	// Goroutine to listen for messages
+	go func() {
+		for {
+			// Read message from server
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				fmt.Println("Error reading message:", err)
+				return
+			}
 
-	// Read response
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		fmt.Println("6Error reading message:", err)
+			// Log the received message
+			fmt.Printf("Received: %s", message)
+			err = (*codec).WriteJSON(ctx1, message)
+			if err != nil {
+				fmt.Println("2323Error writing message:", err)
+				return
+			}
+		}
+	}()
+
+	// Send a ping periodically to keep the connection alive
+	ticker := time.NewTicker(time.Second * 10)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			err := conn.WriteMessage(websocket.PingMessage, nil)
+			if err != nil {
+				fmt.Println("Error sending ping:", err)
+				return
+			}
+
+		case <-interrupt:
+			fmt.Println("Interrupt signal received. Closing connection...")
+
+			// Send a close message to the server
+			err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			if err != nil {
+				fmt.Println("Error during close:", err)
+			}
+			return
+		}
 	}
-	fmt.Println("6Received:", string(msg))
 }
 
 // tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
 // needs to be called repeatedly to implement re-connect logic
 func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
-	testWSS(ctx, cancel, sigs)
-	for {
 
-	}
 	metricsClient := &http.Client{}
 	defer metricsClient.CloseIdleConnections()
 
@@ -254,6 +286,8 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	}
 
 	logger.Info("Connected")
+
+	testWSS(ctx, cancel, sigs, &codec)
 
 	for {
 		requests, _, err := codec.ReadBatch()

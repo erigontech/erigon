@@ -322,7 +322,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			return err
 		}
 	case sentry.MessageId_POOLED_TRANSACTIONS_66, sentry.MessageId_TRANSACTIONS_66:
-		fmt.Println("sentry.MessageId_POOLED_TRANSACTIONS_66, sentry.MessageId_TRANSACTIONS_66")
+		fmt.Println("POOLED_TRANSACTIONS_66")
 		txns := TxnSlots{}
 		if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 			return nil

@@ -465,12 +465,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		}
 	}
 
-	diagUpdate := diagnostics.DiagBlockTxnUpdate{}
-	for _, txn := range minedTxns.Txns {
-		diagUpdate.Txns = append(diagUpdate.Txns, diagnostics.DiagTxn{Hash: txn.IDHash[:]})
-	}
-	diagnostics.Send(diagUpdate)
-
 	return nil
 }
 
@@ -847,8 +841,16 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 	defer addRemoteTxnsTimer.ObserveDuration(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
+
+	//	diagUpdate := diagnostics.IncommingTxnUpdate{}
 	for i, txn := range newTxns.Txns {
+
+		//		diagUpdate.Txns = append(diagUpdate.Txns, diagnostics.DiagTxn{Hash: txn.IDHash[:]})
+
 		hashS := string(txn.IDHash[:])
+		diagnostics.Send(diagnostics.IncommingTxnUpdate{
+			Txn: diagnostics.DiagTxn{Hash: txn.IDHash[:]},
+		})
 		_, ok := p.unprocessedRemoteByHash[hashS]
 		if ok {
 			continue
@@ -856,6 +858,8 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 		p.unprocessedRemoteByHash[hashS] = len(p.unprocessedRemoteTxns.Txns)
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 	}
+
+	//diagnostics.Send(diagUpdate)
 }
 
 func toBlobs(_blobs [][]byte) []gokzg4844.Blob {
@@ -1301,10 +1305,8 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 	sendersWithChangedState := map[uint64]struct{}{}
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
 	announcements := Announcements{}
-	diagUpdate := diagnostics.DiagTxnUpdate{}
 
 	for i, txn := range newTxns.Txns {
-		diagUpdate.Txns = append(diagUpdate.Txns, diagnostics.DiagTxn{Hash: txn.IDHash[:]})
 		if found, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			discardReasons[i] = txpoolcfg.DuplicateHash
 			// In case if the transition is stuck, "poke" it to rebroadcast
@@ -1325,8 +1327,6 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		}
 		sendersWithChangedState[mt.TxnSlot.SenderID] = struct{}{}
 	}
-
-	diagnostics.Send(diagUpdate)
 
 	for senderID := range sendersWithChangedState {
 		nonce, balance, err := senders.info(cacheView, senderID)
@@ -1917,7 +1917,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 			}
 			return err
 		case <-saveToFile.C:
-			writeJSONToFile(slots, "/Volumes/DATA/all.json")
+			writeJSONToFile(slots, "/Volumes/DATA/newall.json")
 		case <-logEvery.C:
 			p.logStats()
 		case <-processRemoteTxnsEvery.C:

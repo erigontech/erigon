@@ -26,73 +26,33 @@ type DiagTxn struct {
 	Hash []byte `json:"hash"`
 }
 
-type DiagTxnUpdate struct {
-	Txns []DiagTxn `json:"txns"`
+type IncommingTxnUpdate struct {
+	Txn DiagTxn `json:"txns"`
 }
 
-func (ti DiagTxnUpdate) Type() Type {
+func (ti IncommingTxnUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
-type DiagBlockTxnUpdate struct {
-	Txns []DiagTxn `json:"txns"`
+func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context, socketAddr string) {
+	d.runOnIncommingTxnListener(rootCtx)
+	d.SetupNotifier(rootCtx, socketAddr)
 }
 
-func (ti DiagBlockTxnUpdate) Type() Type {
-	return TypeOf(ti)
-}
-
-type WsTxnMsg struct {
-	Txns   []DiagTxn `json:"txns"`
-	Source string    `json:"source"`
-}
-
-func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
-	d.runOnNewTnxsListener(rootCtx)
-	d.runOnNewBlockListener(rootCtx)
-	d.SetupNotifier(rootCtx)
-}
-
-func (d *DiagnosticClient) runOnNewTnxsListener(rootCtx context.Context) {
+func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, closeChannel := Context[DiagTxnUpdate](rootCtx, 1)
+		ctx, ch, closeChannel := Context[IncommingTxnUpdate](rootCtx, 1)
 		defer closeChannel()
 
-		StartProviders(ctx, TypeOf(DiagTxnUpdate{}), log.Root())
+		StartProviders(ctx, TypeOf(IncommingTxnUpdate{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
 				d.Notify(DiagMessages{
-					Type: "txpool",
-					Message: WsTxnMsg{
-						Source: "p2p",
-						Txns:   info.Txns,
-					},
-				})
-			}
-		}
-	}()
-}
-
-func (d *DiagnosticClient) runOnNewBlockListener(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[DiagBlockTxnUpdate](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(DiagBlockTxnUpdate{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.Notify(DiagMessages{
-					Type: "txpool",
-					Message: WsTxnMsg{
-						Source: "block",
-						Txns:   info.Txns,
-					},
+					Type:    "incomming_transaction",
+					Message: string(info.Txn.Hash),
 				})
 			}
 		}
