@@ -220,7 +220,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	if parent != nil {
 		nextBlockTime = header.Time + (header.Time - parent.Time) // Close enough to seconds per slot
 	}
-	ret256, err := misc.GetBlobGasPrice(config, misc.CalcExcessBlobGas(config, header), nextBlockTime)
+	ret256, err := misc.GetBlobGasPrice(config, misc.CalcExcessBlobGas(config, header, nextBlockTime), nextBlockTime)
 	if err != nil {
 		return nil, err
 	}

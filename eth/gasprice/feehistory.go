@@ -103,7 +103,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 			bf.err = err
 			return
 		}
-		nextBlobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, misc.CalcExcessBlobGas(chainconfig, bf.header), bf.header.Time+bf.secondsPerSlot)
+		nextBlobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, misc.CalcExcessBlobGas(chainconfig, bf.header, bf.header.Time+bf.secondsPerSlot), bf.header.Time+bf.secondsPerSlot)
 		if err != nil {
 			bf.err = err
 			return
