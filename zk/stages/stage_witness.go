@@ -3,31 +3,19 @@ package stages
 import (
 	"context"
 	"fmt"
-	"time"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	eristate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	eritypes "github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	zkUtils "github.com/ledgerwatch/erigon/zk/utils"
-	"github.com/ledgerwatch/erigon/zk/witness"
-
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
-
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -35,28 +23,30 @@ type WitnessDb interface {
 }
 
 type WitnessCfg struct {
-	db             kv.RwDB
-	zkCfg          *ethconfig.Zk
-	chainConfig    *chain.Config
-	engine         consensus.Engine
-	blockReader    services.FullBlockReader
-	agg            *eristate.Aggregator
-	historyV3      bool
-	dirs           datadir.Dirs
-	forcedContracs []common.Address
+	db              kv.RwDB
+	zkCfg           *ethconfig.Zk
+	chainConfig     *chain.Config
+	engine          consensus.Engine
+	blockReader     services.FullBlockReader
+	agg             *eristate.Aggregator
+	historyV3       bool
+	dirs            datadir.Dirs
+	forcedContracts []common.Address
+	unwindLimit     uint64
 }
 
-func StageWitnessCfg(db kv.RwDB, zkCfg *ethconfig.Zk, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader, agg *eristate.Aggregator, historyV3 bool, dirs datadir.Dirs, forcedContracs []common.Address) WitnessCfg {
+func StageWitnessCfg(db kv.RwDB, zkCfg *ethconfig.Zk, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader, agg *eristate.Aggregator, historyV3 bool, dirs datadir.Dirs, forcedContracts []common.Address, unwindLimit uint64) WitnessCfg {
 	cfg := WitnessCfg{
-		db:             db,
-		zkCfg:          zkCfg,
-		chainConfig:    chainConfig,
-		engine:         engine,
-		blockReader:    blockReader,
-		agg:            agg,
-		historyV3:      historyV3,
-		dirs:           dirs,
-		forcedContracs: forcedContracs,
+		db:              db,
+		zkCfg:           zkCfg,
+		chainConfig:     chainConfig,
+		engine:          engine,
+		blockReader:     blockReader,
+		agg:             agg,
+		historyV3:       historyV3,
+		dirs:            dirs,
+		forcedContracts: forcedContracts,
+		unwindLimit:     unwindLimit,
 	}
 
 	return cfg
@@ -76,8 +66,7 @@ func SpawnStageWitness(
 	cfg WitnessCfg,
 ) error {
 	logPrefix := s.LogPrefix()
-	if cfg.zkCfg.WitnessCacheLimit == 0 {
-		log.Info(fmt.Sprintf("[%s] Skipping witness cache stage. Cache not set or limit is set to 0", logPrefix))
+	if !cfg.zkCfg.WitnessCacheEnabled {
 		return nil
 	}
 	log.Info(fmt.Sprintf("[%s] Starting witness cache stage", logPrefix))
@@ -114,123 +103,81 @@ func SpawnStageWitness(
 		return nil
 	}
 
-	unwindPoint := stageWitnessProgressBlockNo
-	if stageInterhashesProgressBlockNo-cfg.zkCfg.WitnessCacheLimit > unwindPoint {
-		unwindPoint = stageInterhashesProgressBlockNo - cfg.zkCfg.WitnessCacheLimit
+	reader := hermez_db.NewHermezDbReader(tx)
+
+	highestVerifiedBatch, err := reader.GetLatestVerification()
+	if err != nil {
+		return fmt.Errorf("GetLatestVerification: %w", err)
 	}
 
-	//get unwind point to be end of previous batch
+	highestVerifiedBatchWithOffset := highestVerifiedBatch.BatchNo - cfg.zkCfg.WitnessCacheBatchOffset // default 5
+
+	latestCachedWitnessBatchNo, err := reader.GetLatestCachedWitnessBatchNo()
+	if err != nil {
+		return fmt.Errorf("GetLatestCachedWitnessBatchNo: %w", err)
+	}
+
+	fromBatch := latestCachedWitnessBatchNo + 1
+	if fromBatch < highestVerifiedBatchWithOffset {
+		fromBatch = highestVerifiedBatchWithOffset
+	}
+
 	hermezDb := hermez_db.NewHermezDb(tx)
-	blocks, err := getBlocks(tx, unwindPoint, stageInterhashesProgressBlockNo)
-	if err != nil {
-		return fmt.Errorf("getBlocks: %w", err)
-	}
+	g := witness.NewGenerator(cfg.dirs, cfg.historyV3, cfg.agg, cfg.blockReader, cfg.chainConfig, cfg.zkCfg, cfg.engine, cfg.forcedContracts, cfg.unwindLimit)
 
-	// generator := witness.NewGenerator(cfg.dirs, cfg.historyV3, cfg.agg, cfg.blockReader, cfg.chainConfig, cfg.zkCfg, cfg.engine)
-	memTx := membatchwithdb.NewMemoryBatchWithSize(tx, cfg.dirs.Tmp, cfg.zkCfg.WitnessMemdbSize)
-	defer memTx.Rollback()
-	if err := zkUtils.PopulateMemoryMutationTables(memTx); err != nil {
-		return fmt.Errorf("PopulateMemoryMutationTables: %w", err)
-	}
-	memHermezDb := hermez_db.NewHermezDbReader(memTx)
-
-	log.Info(fmt.Sprintf("[%s] Unwinding tree and hashess for witness generation", logPrefix), "from", unwindPoint, "to", stageInterhashesProgressBlockNo)
-	if err := witness.UnwindForWitness(ctx, memTx, unwindPoint, stageInterhashesProgressBlockNo, cfg.dirs, cfg.historyV3, cfg.agg); err != nil {
-		return fmt.Errorf("UnwindForWitness: %w", err)
-	}
-	log.Info(fmt.Sprintf("[%s] Unwind done", logPrefix))
-	startBlock := blocks[0].NumberU64()
-
-	prevHeader, err := cfg.blockReader.HeaderByNumber(ctx, tx, startBlock-1)
-	if err != nil {
-		return fmt.Errorf("blockReader.HeaderByNumber: %w", err)
-	}
-
-	getHeader := func(hash common.Hash, number uint64) *eritypes.Header {
-		h, e := cfg.blockReader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h
-	}
-
-	reader := state.NewPlainState(tx, blocks[0].NumberU64(), systemcontracts.SystemContractCodeLookup[cfg.chainConfig.ChainName])
-	defer reader.Close()
-	prevStateRoot := prevHeader.Root
-
-	log.Info(fmt.Sprintf("[%s] Executing blocks and collecting witnesses", logPrefix), "from", startBlock, "to", stageInterhashesProgressBlockNo)
-
-	now := time.Now()
-
-	// used to ensure that any info tree updates for this batch are included in the witness - re-use of an index for example
-	// won't write to storage so will be missing from the witness but the prover needs it
-	forcedInfoTreeUpdates := make([]common.Hash, 0)
-
-	for _, block := range blocks {
-		reader.SetBlockNr(block.NumberU64())
-		tds := state.NewTrieDbState(prevHeader.Root, tx, startBlock-1, nil)
-		tds.SetResolveReads(true)
-		tds.StartNewBuffer()
-		tds.SetStateReader(reader)
-
-		trieStateWriter := tds.NewTrieStateWriter()
-		if err := witness.PrepareGersForWitness(block, memHermezDb, tds, trieStateWriter); err != nil {
-			return fmt.Errorf("PrepareGersForWitness: %w", err)
-		}
-
-		getHashFn := core.GetHashFn(block.Header(), getHeader)
-
-		chainReader := stagedsync.NewChainReaderImpl(cfg.chainConfig, tx, nil, log.New())
-
-		vmConfig := vm.Config{}
-		if _, err = core.ExecuteBlockEphemerallyZk(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, tds, trieStateWriter, chainReader, nil, hermezDb, &prevStateRoot); err != nil {
-			return fmt.Errorf("ExecuteBlockEphemerallyZk: %w", err)
-		}
-
-		forcedInfoTreeUpdate, err := witness.CheckForForcedInfoTreeUpdate(memHermezDb, block.NumberU64())
+	for batchNo := fromBatch; batchNo <= highestVerifiedBatch.BatchNo; batchNo++ {
+		badBatch, err := reader.GetInvalidBatch(batchNo)
 		if err != nil {
-			return fmt.Errorf("CheckForForcedInfoTreeUpdate: %w", err)
-		}
-		if forcedInfoTreeUpdate != nil {
-			forcedInfoTreeUpdates = append(forcedInfoTreeUpdates, *forcedInfoTreeUpdate)
+			return fmt.Errorf("GetInvalidBatch: %w", err)
 		}
 
-		prevStateRoot = block.Root()
+		if badBatch {
+			log.Warn(fmt.Sprintf("[%s] Bad batch not collecting", logPrefix))
+			continue
+		}
 
-		w, err := witness.BuildWitnessFromTrieDbState(ctx, memTx, tds, reader, cfg.forcedContracs, forcedInfoTreeUpdates, false)
+		blockNumbers, err := reader.GetL2BlockNosByBatch(batchNo)
 		if err != nil {
-			return fmt.Errorf("BuildWitnessFromTrieDbState: %w", err)
+			return fmt.Errorf("GetL2BlockNosByBatch: %w", err)
+		}
+		if len(blockNumbers) == 0 {
+			return fmt.Errorf("no blocks found for batch %d", batchNo)
+		}
+		var startBlock, endBlock uint64
+		for _, blockNumber := range blockNumbers {
+			if startBlock == 0 || blockNumber < startBlock {
+				startBlock = blockNumber
+			}
+			if blockNumber > endBlock {
+				endBlock = blockNumber
+			}
 		}
 
-		bytes, err := witness.GetWitnessBytes(w, false)
+		w, err := g.GetWitnessByBlockRange(tx, ctx, startBlock, endBlock, false, false)
 		if err != nil {
-			return fmt.Errorf("GetWitnessBytes: %w", err)
+			return fmt.Errorf("GetWitnessByBlockRange: %w", err)
 		}
 
-		if hermezDb.WriteWitnessCache(block.NumberU64(), bytes); err != nil {
+		if err = hermezDb.WriteWitnessCache(batchNo, w); err != nil {
 			return fmt.Errorf("WriteWitnessCache: %w", err)
 		}
-		if time.Since(now) > 10*time.Second {
-			log.Info(fmt.Sprintf("[%s] Executing blocks and collecting witnesses", logPrefix), "block", block.NumberU64())
-			now = time.Now()
-		}
-	}
-	log.Info(fmt.Sprintf("[%s] Witnesses collected", logPrefix))
 
-	// delete cache for blocks lower than the limit
+		log.Info(fmt.Sprintf("[%s] Witnesses collected", logPrefix))
+	}
+
 	log.Info(fmt.Sprintf("[%s] Deleting old witness caches", logPrefix))
-	if err := hermezDb.DeleteWitnessCaches(0, stageInterhashesProgressBlockNo-cfg.zkCfg.WitnessCacheLimit); err != nil {
+	if err = hermezDb.TruncateWitnessCacheBelow(highestVerifiedBatchWithOffset); err != nil {
 		return fmt.Errorf("DeleteWitnessCache: %w", err)
 	}
 
-	if err := stages.SaveStageProgress(tx, stages.Witness, stageInterhashesProgressBlockNo); err != nil {
+	if err = stages.SaveStageProgress(tx, stages.Witness, stageInterhashesProgressBlockNo); err != nil {
 		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
 	log.Info(fmt.Sprintf("[%s] Saving stage progress", logPrefix), "lastBlockNumber", stageInterhashesProgressBlockNo)
 
 	if freshTx {
-		if err := tx.Commit(); err != nil {
+		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("tx.Commit: %w", err)
 		}
 	}
@@ -238,25 +185,9 @@ func SpawnStageWitness(
 	return nil
 }
 
-func getBlocks(tx kv.Tx, startBlock, endBlock uint64) (blocks []*eritypes.Block, err error) {
-	idx := 0
-	blocks = make([]*eritypes.Block, endBlock-startBlock+1)
-	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
-		block, err := rawdb.ReadBlockByNumber(tx, blockNum)
-		if err != nil {
-			return nil, fmt.Errorf("ReadBlockByNumber: %w", err)
-		}
-		blocks[idx] = block
-		idx++
-	}
-
-	return blocks, nil
-}
-
 func UnwindWitnessStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg WitnessCfg, ctx context.Context) (err error) {
 	logPrefix := u.LogPrefix()
-	if cfg.zkCfg.WitnessCacheLimit == 0 {
-		log.Info(fmt.Sprintf("[%s] Skipping witness cache stage. Cache not set or limit is set to 0", logPrefix))
+	if !cfg.zkCfg.WitnessCacheEnabled {
 		return nil
 	}
 	useExternalTx := tx != nil
@@ -267,11 +198,9 @@ func UnwindWitnessStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg WitnessCfg, c
 		defer tx.Rollback()
 	}
 
-	if cfg.zkCfg.WitnessCacheLimit == 0 {
-		log.Info(fmt.Sprintf("[%s] Skipping witness cache stage. Cache not set or limit is set to 0", logPrefix))
+	if !cfg.zkCfg.WitnessCacheEnabled {
 		return nil
 	}
-
 	fromBlock := u.UnwindPoint + 1
 	toBlock := u.CurrentBlockNumber
 	log.Info(fmt.Sprintf("[%s] Unwinding witness cache stage from block number", logPrefix), "fromBlock", fromBlock, "toBlock", toBlock)
@@ -299,8 +228,7 @@ func UnwindWitnessStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg WitnessCfg, c
 
 func PruneWitnessStage(s *stagedsync.PruneState, tx kv.RwTx, cfg WitnessCfg, ctx context.Context) (err error) {
 	logPrefix := s.LogPrefix()
-	if cfg.zkCfg.WitnessCacheLimit == 0 {
-		log.Info(fmt.Sprintf("[%s] Skipping witness cache stage. Cache not set or limit is set to 0", logPrefix))
+	if !cfg.zkCfg.WitnessCacheEnabled {
 		return nil
 	}
 	useExternalTx := tx != nil

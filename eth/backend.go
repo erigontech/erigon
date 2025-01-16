@@ -150,7 +150,8 @@ var dataStreamServerFactory = server.NewZkEVMDataStreamServerFactory()
 type Config = ethconfig.Config
 
 type PreStartTasks struct {
-	WarmUpDataStream bool
+	WarmUpDataStream  bool
+	PurgeWitnessCache bool
 }
 
 // Ethereum implements the Ethereum full node service.
@@ -1009,6 +1010,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 		}
 
+		backend.preStartTasks.PurgeWitnessCache = config.WitnessCachePurge
+
 		// entering ZK territory!
 		cfg := backend.config
 
@@ -1436,6 +1439,22 @@ func (s *Ethereum) PreStart() error {
 		}
 		if err = tx.Commit(); err != nil {
 			return err
+		}
+	}
+
+	if s.preStartTasks.PurgeWitnessCache {
+		log.Warn("[PreStart] purge witness cache enabled, purging...", "zkevm.witness-cache-purge", s.config.WitnessCachePurge)
+		tx, err := s.chainDB.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		hermezDb := hermez_db.NewHermezDb(tx)
+		if err := hermezDb.PurgeWitnessCaches(); err != nil {
+			return fmt.Errorf("failed to purge witness caches: %w", err)
+		}
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("tx.Commit: %w", err)
 		}
 	}
 

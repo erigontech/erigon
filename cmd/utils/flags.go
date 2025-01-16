@@ -824,10 +824,15 @@ var (
 		Usage: "Enable witness cache",
 		Value: false,
 	}
-	WitnessCacheLimit = cli.UintFlag{
-		Name:  "zkevm.witness-cache-limit",
-		Usage: "Amount of blocks behind the last executed one to keep witnesses for. Needs a lot of HDD space. Default value 10 000.",
-		Value: 10000,
+	WitnessCachePurge = cli.BoolFlag{
+		Name:  "zkevm.witness-cache-purge",
+		Usage: "Purge the witness cache on startup. Default false.",
+		Value: false,
+	}
+	WitnessCacheBatchOffset = cli.UintFlag{
+		Name:  "zkevm.witness-cache-batch-offset",
+		Usage: "How many batches behind the highest verified batch to cache. Default 5.",
+		Value: 5,
 	}
 	WitnessContractInclusion = cli.StringFlag{
 		Name:  "zkevm.witness-contract-inclusion",
