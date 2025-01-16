@@ -481,6 +481,20 @@ func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, sto
 		}
 	}
 
+	// Verify proofs before returning result to the user
+	err = trie.VerifyAccountProof(header.Root, proof)
+	if err != nil {
+		return nil, fmt.Errorf("internal error: failed to verify account proof for generated proof : %w", err)
+	}
+
+	// verify storage proofs
+	for _, storageProof := range proof.StorageProof {
+		err = trie.VerifyStorageProof(proof.StorageHash, storageProof)
+		if err != nil {
+			return nil, fmt.Errorf("internal error: failed to verify storage proof for key=%x , proof=%+v : %w", storageProof.Key.Bytes(), proof, err)
+		}
+	}
+
 	return proof, nil
 }
 
