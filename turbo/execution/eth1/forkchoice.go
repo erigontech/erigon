@@ -134,6 +134,11 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 
 		select {
 		case <-fcuTimer.C:
+			if e.config.IsOptimism() {
+				// op-node does not handle SYNCING as asynchronous forkChoiceUpdated.
+				// return an error and make op-node retry
+				return nil, errors.New("forkChoiceUpdated timeout")
+			}
 			e.logger.Debug("treating forkChoiceUpdated as asynchronous as it is taking too long")
 			return &execution.ForkChoiceReceipt{
 				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
@@ -178,6 +183,12 @@ func minUnwindableBlock(tx kv.Tx, number uint64) (uint64, error) {
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) {
 	if !e.semaphore.TryAcquire(1) {
+		if e.config.IsOptimism() {
+			// op-node does not handle SYNCING as asynchronous forkChoiceUpdated.
+			// return an error and make op-node retry
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, errors.New("cannot update forkchoice. execution service is busy"))
+			return
+		}
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
@@ -257,6 +268,16 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		return
 	}
+
+	unwindingOptimismToCanonical := false
+	if e.config.IsOptimism() {
+		headHash := rawdb.ReadHeadBlockHash(tx)
+		unwindingOptimismToCanonical = (blockHash != headHash) && (canonicalHash == blockHash)
+		if unwindingOptimismToCanonical {
+			e.logger.Info("Optimism ForkChoice is choosing to unwind to a previously canonical block", "blockHash", blockHash, "blockNumber", fcuHeader.Number.Uint64(), "headHash", headHash)
+		}
+	}
+
 	if fcuHeader.Number.Uint64() > 0 {
 		if canonicalHash == blockHash {
 			// if block hash is part of the canonical chain treat it as no-op.
@@ -273,11 +294,13 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				}, false)
 				return
 			}
-			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
-				LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
-				Status:          execution.ExecutionStatus_Success,
-			}, false)
-			return
+			if !unwindingOptimismToCanonical {
+				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+					LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
+					Status:          execution.ExecutionStatus_Success,
+				}, false)
+				return
+			}
 		}
 
 		currentParentHash := fcuHeader.ParentHash
@@ -289,11 +312,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 		// Find such point, and collect all hashes
 		newCanonicals := make([]*canonicalEntry, 0, 64)
-		newCanonicals = append(newCanonicals, &canonicalEntry{
-			hash:   fcuHeader.Hash(),
-			number: fcuHeader.Number.Uint64(),
-		})
-		for !isCanonicalHash {
+
+		if !unwindingOptimismToCanonical {
+			newCanonicals = append(newCanonicals, &canonicalEntry{
+				hash:   fcuHeader.Hash(),
+				number: fcuHeader.Number.Uint64(),
+			})
+		}
+		for !isCanonicalHash && !unwindingOptimismToCanonical {
 			newCanonicals = append(newCanonicals, &canonicalEntry{
 				hash:   currentParentHash,
 				number: currentParentNumber,
@@ -333,6 +359,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			unwindTarget = minUnwindableBlock
 		}
 
+		if unwindingOptimismToCanonical {
+			unwindTarget = fcuHeader.Number.Uint64()
+		}
 		// if unwindTarget <
 		if err := e.executionPipeline.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
