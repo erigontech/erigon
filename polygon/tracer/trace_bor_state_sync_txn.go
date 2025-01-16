@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/tracers"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
@@ -86,10 +87,11 @@ func TraceBorStateSyncTxnTraceAPI(
 	blockNum uint64,
 	blockTime uint64,
 	msgs []*types.Message,
+	tracer *tracers.Tracer,
 ) (*evmtypes.ExecutionResult, error) {
 	stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
-	if vmConfig.Tracer != nil {
-		vmConfig.Tracer = NewBorStateSyncTxnTracer(vmConfig.Tracer, len(msgs), stateReceiverContract)
+	if tracer != nil {
+		vmConfig.Tracer = NewBorStateSyncTxnTracer(tracer, len(msgs), stateReceiverContract).Hooks
 	}
 
 	txCtx := initStateSyncTxContext(blockNum, blockHash)

@@ -1501,7 +1501,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), borSn)
 	}
 	stageList := stages2.NewDefaultStages(context.Background(), db, snapDb, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
-		heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger)
+		heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger, nil)
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 
 	miner := stagedsync.NewMiningState(&cfg.Miner)
