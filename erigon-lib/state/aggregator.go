@@ -126,131 +126,14 @@ func domainIntegrityCheck(name kv.Domain, dirs datadir.Dirs, fromStep, toStep ui
 	}
 }
 
-var Schema = map[kv.Domain]domainCfg{
-	kv.AccountsDomain: {
-		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
-
-		indexList:            withBTree | withExistence,
-		crossDomainIntegrity: domainIntegrityCheck,
-		compression:          seg.CompressNone,
-		compressCfg:          DomainCompressCfg,
-
-		hist: histCfg{
-			valuesTable: kv.TblAccountHistoryVals,
-			compression: seg.CompressNone,
-
-			historyLargeValues: false,
-			filenameBase:       kv.AccountsDomain.String(), //TODO: looks redundant
-
-			iiCfg: iiCfg{
-				keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.AccountsDomain.String(), //TODO: looks redundant
-			},
-		},
-	},
-	kv.StorageDomain: {
-		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
-
-		indexList:   withBTree | withExistence,
-		compression: seg.CompressKeys,
-		compressCfg: DomainCompressCfg,
-
-		hist: histCfg{
-			valuesTable: kv.TblStorageHistoryVals,
-			compression: seg.CompressNone,
-
-			historyLargeValues: false,
-			filenameBase:       kv.StorageDomain.String(),
-
-			iiCfg: iiCfg{
-				keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.StorageDomain.String(),
-			},
-		},
-	},
-	kv.CodeDomain: {
-		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
-
-		indexList:   withBTree | withExistence,
-		compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
-		compressCfg: DomainCompressCfg,
-		largeValues: true,
-
-		hist: histCfg{
-			valuesTable: kv.TblCodeHistoryVals,
-			compression: seg.CompressKeys | seg.CompressVals,
-
-			historyLargeValues: true,
-			filenameBase:       kv.CodeDomain.String(),
-
-			iiCfg: iiCfg{
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
-				filenameBase: kv.CodeDomain.String(),
-			},
-		},
-	},
-	kv.CommitmentDomain: {
-		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
-
-		indexList:   withBTree | withExistence,
-		compression: seg.CompressKeys,
-		compressCfg: DomainCompressCfg,
-
-		hist: histCfg{
-			valuesTable: kv.TblCommitmentHistoryVals,
-			compression: seg.CompressNone,
-
-			snapshotsDisabled:  true,
-			historyLargeValues: false,
-			filenameBase:       kv.CommitmentDomain.String(),
-
-			iiCfg: iiCfg{
-				keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.CommitmentDomain.String(),
-			},
-		},
-	},
-	kv.ReceiptDomain: {
-		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
-
-		indexList:   withBTree | withExistence,
-		compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-		compressCfg: DomainCompressCfg,
-
-		hist: histCfg{
-			valuesTable: kv.TblReceiptHistoryVals,
-			compression: seg.CompressNone,
-
-			historyLargeValues: false,
-			filenameBase:       kv.ReceiptDomain.String(),
-
-			iiCfg: iiCfg{
-				keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.ReceiptDomain.String(),
-			},
-		},
-	},
-}
-
 func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	tmpdir := dirs.Tmp
-	salt, err := getStateIndicesSalt(dirs.Snap)
-	if err != nil {
-		return nil, err
-	}
-
 	ctx, ctxCancel := context.WithCancel(ctx)
-	a := &Aggregator{
+	return &Aggregator{
 		ctx:                    ctx,
 		ctxCancel:              ctxCancel,
 		onFreeze:               func(frozenFileNames []string) {},
 		dirs:                   dirs,
-		tmpdir:                 tmpdir,
+		tmpdir:                 dirs.Tmp,
 		aggregationStep:        aggregationStep,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
@@ -262,39 +145,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		commitmentValuesTransform: AggregatorSqueezeCommitmentValues,
 
 		produce: true,
-	}
-
-	if err := a.registerDomain(kv.AccountsDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(kv.StorageDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(kv.CodeDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(kv.CommitmentDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.LogTopicIdxPos, salt, dirs, aggregationStep, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.TracesFromIdxPos, salt, dirs, aggregationStep, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
-		return nil, err
-	}
-	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
-	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
-
-	return a, nil
+	}, nil
 }
 
 // TODO: exported for idx_optimize.go
@@ -468,7 +319,7 @@ func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers
 func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, d := range a.d {
-		d.compressCfg.Workers = i
+		d.CompressCfg.Workers = i
 		d.History.compressorCfg.Workers = i
 		d.History.InvertedIndex.compressorCfg.Workers = i
 	}
@@ -658,7 +509,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 }
 
 func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
-	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
+	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	var (
 		logEvery      = time.NewTicker(time.Second * 30)
@@ -844,7 +695,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 }
 
 func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethingDone bool, err error) {
-	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
+	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
@@ -995,96 +846,6 @@ func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (un
 	return blockNum, true, nil
 }
 
-func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.Duration, db kv.RwDB) (haveMore bool, err error) {
-	// On tip-of-chain timeout is about `3sec`
-	//  On tip of chain:     must be real-time - prune by small batches and prioritize exact-`timeout`
-	//  Not on tip of chain: must be aggressive (prune as much as possible) by bigger batches
-
-	furiousPrune := timeout > 5*time.Hour
-	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
-
-	var pruneLimit uint64 = 1_000
-	if furiousPrune {
-		pruneLimit = 10_000_000
-		/* disabling this feature for now - seems it doesn't cancel even after prune finished
-		// start from a bit high limit to give time for warmup
-		// will disable warmup after first iteration and will adjust pruneLimit based on `time`
-		withWarmup = true
-		*/
-	}
-
-	started := time.Now()
-	localTimeout := time.NewTicker(timeout)
-	defer localTimeout.Stop()
-	logPeriod := 30 * time.Second
-	logEvery := time.NewTicker(logPeriod)
-	defer logEvery.Stop()
-	aggLogEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
-	defer aggLogEvery.Stop()
-
-	fullStat := newAggregatorPruneStat()
-	innerCtx := context.Background()
-	goExit := false
-
-	for {
-		err = db.Update(innerCtx, func(tx kv.RwTx) error {
-			iterationStarted := time.Now()
-			// `context.Background()` is important here!
-			//     it allows keep DB consistent - prune all keys-related data or noting
-			//     can't interrupt by ctrl+c and leave dirt in DB
-			stat, err := ac.Prune(innerCtx, tx, pruneLimit, aggLogEvery)
-			if err != nil {
-				ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
-				return err
-			}
-			if stat == nil {
-				if fstat := fullStat.String(); fstat != "" {
-					ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
-				}
-				goExit = true
-				return nil
-			}
-			fullStat.Accumulate(stat)
-
-			if aggressivePrune {
-				took := time.Since(iterationStarted)
-				if took < 2*time.Second {
-					pruneLimit *= 10
-				}
-				if took > logPeriod {
-					pruneLimit /= 10
-				}
-			}
-
-			select {
-			case <-logEvery.C:
-				ac.a.logger.Info("[snapshots] pruning state",
-					"until commit", time.Until(started.Add(timeout)).String(),
-					"pruneLimit", pruneLimit,
-					"aggregatedStep", ac.StepsInFiles(),
-					"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
-					"pruned", fullStat.String(),
-				)
-			default:
-			}
-			return nil
-		})
-		if err != nil {
-			return false, err
-		}
-		select {
-		case <-localTimeout.C: //must be first to improve responsivness
-			return true, nil
-		case <-ctx.Done():
-			return false, ctx.Err()
-		default:
-		}
-		if goExit {
-			return false, nil
-		}
-	}
-}
-
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
 func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (haveMore bool, err error) {
@@ -1155,7 +916,7 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			ac.a.logger.Info("[snapshots] pruning state",
 				"until commit", time.Until(started.Add(timeout)).String(),
 				"pruneLimit", pruneLimit,
-				"aggregatedStep", ac.StepsInFiles(),
+				"aggregatedStep", ac.StepsInFiles(kv.StateDomains...),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)

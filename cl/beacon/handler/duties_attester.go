@@ -48,6 +48,10 @@ func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (libcommon.Ha
 		if attester {
 			dependentRootSlot = ((epoch - 1) * a.beaconChainCfg.SlotsPerEpoch) - 1
 		}
+		if !a.syncedData.Syncing() && dependentRootSlot == a.syncedData.HeadSlot() {
+			dependentRoot = a.syncedData.HeadRoot()
+			return nil
+		}
 		maxIterations := 2048
 		for i := 0; i < maxIterations; i++ {
 			if dependentRootSlot > epoch*a.beaconChainCfg.SlotsPerEpoch {

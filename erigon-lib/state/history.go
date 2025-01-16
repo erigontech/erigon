@@ -96,7 +96,7 @@ type histCfg struct {
 	snapshotsDisabled  bool // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
 	historyDisabled    bool // skip all write operations to this History (even in DB)
 
-	indexList     idxList
+	indexList     Accessors
 	compressorCfg seg.Cfg             // compression settings for history files
 	compression   seg.FileCompression // defines type of compression for history files
 
@@ -108,7 +108,7 @@ func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
-		cfg.indexList = withHashMap
+		cfg.indexList = AccessorHashMap
 	}
 	if cfg.iiCfg.filenameBase == "" {
 		cfg.iiCfg.filenameBase = cfg.filenameBase
@@ -360,8 +360,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   hist.Count(),
 		Enums:      false,
-		BucketSize: 2000,
-		LeafSize:   8,
+		BucketSize: recsplit.DefaultBucketSize,
+		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     h.dirs.Tmp,
 		IndexFile:  historyIdxPath,
 		Salt:       h.salt,
@@ -1225,7 +1225,7 @@ func (ht *HistoryRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if ht.valsC != nil {
 		return ht.valsC, nil
 	}
-	ht.valsC, err = tx.Cursor(ht.h.valuesTable)
+	ht.valsC, err = tx.Cursor(ht.h.valuesTable) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
@@ -1235,7 +1235,7 @@ func (ht *HistoryRoTx) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
 	if ht.valsCDup != nil {
 		return ht.valsCDup, nil
 	}
-	ht.valsCDup, err = tx.CursorDupSort(ht.h.valuesTable)
+	ht.valsCDup, err = tx.CursorDupSort(ht.h.valuesTable) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}

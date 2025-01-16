@@ -87,7 +87,6 @@ import (
 	"github.com/erigontech/erigon/consensus/clique"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/consensus/merge"
-	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
@@ -104,6 +103,7 @@ import (
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/ethstats"
 	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/sentry"
@@ -134,7 +134,6 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolutil"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -193,16 +192,12 @@ type Ethereum struct {
 	waitForStageLoopStop chan struct{}
 	waitForMiningStop    chan struct{}
 
-	txPoolDB                kv.RwDB
-	txPool                  *txpool.TxPool
-	newTxs                  chan txpool.Announcements
-	txPoolFetch             *txpool.Fetch
-	txPoolSend              *txpool.Send
-	txPoolGrpcServer        txpoolproto.TxpoolServer
-	shutterPool             *shutter.Pool
-	notifyMiningAboutNewTxs chan struct{}
-	forkValidator           *engine_helpers.ForkValidator
-	downloader              *downloader.Downloader
+	txPool                    *txpool.TxPool
+	txPoolGrpcServer          txpoolproto.TxpoolServer
+	shutterPool               *shutter.Pool
+	blockBuilderNotifyNewTxns chan struct{}
+	forkValidator             *engine_helpers.ForkValidator
+	downloader                *downloader.Downloader
 
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
@@ -276,14 +271,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
 	backend := &Ethereum{
-		sentryCtx:            ctx,
-		sentryCancel:         ctxCancel,
-		config:               config,
-		networkID:            config.NetworkID,
-		etherbase:            config.Miner.Etherbase,
-		waitForStageLoopStop: make(chan struct{}),
-		waitForMiningStop:    make(chan struct{}),
-		logger:               logger,
+		sentryCtx:                 ctx,
+		sentryCancel:              ctxCancel,
+		config:                    config,
+		networkID:                 config.NetworkID,
+		etherbase:                 config.Miner.Etherbase,
+		waitForStageLoopStop:      make(chan struct{}),
+		waitForMiningStop:         make(chan struct{}),
+		blockBuilderNotifyNewTxns: make(chan struct{}, 1),
+		miningSealingQuit:         make(chan struct{}),
+		minedBlocks:               make(chan *types.Block, 1),
+		logger:                    logger,
 		stopNode: func() error {
 			return stack.Close()
 		},
@@ -337,7 +335,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
-	blockReader, blockWriter, allSnapshots, allBorSnapshots, bridgeStore, heimdallStore, agg, err := setUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, logger, segmentsBuildLimiter)
+	blockReader, blockWriter, allSnapshots, allBorSnapshots, bridgeStore, heimdallStore, agg, err := setUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, stack.Config(), logger, segmentsBuildLimiter)
 	if err != nil {
 		return nil, err
 	}
@@ -645,33 +643,42 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
-	var txnProvider txnprovider.TxnProvider
-	var miningRPC txpoolproto.MiningServer
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
+	var txnProvider txnprovider.TxnProvider
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
 	} else {
-		backend.newTxs = make(chan txpool.Announcements, 1024)
-		backend.txPoolDB, backend.txPool, backend.txPoolFetch, backend.txPoolSend, backend.txPoolGrpcServer, err = txpoolutil.AllComponents(
-			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient, misc.Eip1559FeeCalculator, logger,
+		sentries := backend.sentriesClient.Sentries()
+		blockBuilderNotifyNewTxns := func() {
+			select {
+			case backend.blockBuilderNotifyNewTxns <- struct{}{}:
+			default:
+			}
+		}
+		backend.txPool, backend.txPoolGrpcServer, err = txpool.Assemble(
+			ctx,
+			config.TxPool,
+			backend.chainDB,
+			kvcache.NewDummy(),
+			sentries,
+			stateDiffClient,
+			blockBuilderNotifyNewTxns,
+			logger,
 		)
 		if err != nil {
 			return nil, err
 		}
+
 		txnProvider = backend.txPool
 	}
 	if config.Shutter.Enabled {
 		if config.TxPool.Disable {
 			panic("can't enable shutter pool when devp2p txpool is disabled")
 		}
-		backend.shutterPool = shutter.NewPool(logger, config.Shutter, txnProvider)
+
+		backend.shutterPool = shutter.NewPool(logger, config.Shutter, backend.txPool)
 		txnProvider = backend.shutterPool
 	}
-
-	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
-	backend.miningSealingQuit = make(chan struct{})
-	backend.pendingBlocks = make(chan *types.Block, 1)
-	backend.minedBlocks = make(chan *types.Block, 1)
 
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
@@ -791,7 +798,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, heimdallStore, bridgeStore, backend.chainConfig, config, backend.notifications.Events, segmentsBuildLimiter, logger)
 
-	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi, logger)
+	var miningRPC txpoolproto.MiningServer = privateapi.NewMiningServer(ctx, backend, ethashApi, logger)
 
 	var creds credentials.TransportCredentials
 	if stack.Config().PrivateApiAddr != "" {
@@ -820,26 +827,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if currentBlock == nil {
 		currentBlock = genesis
-	}
-	// We start the transaction pool on startup, for a couple of reasons:
-	// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
-	// to initialize it properly.
-	// 2) we cannot propose for block 1 regardless.
-
-	if !config.TxPool.Disable {
-		backend.txPoolFetch.ConnectCore()
-		backend.txPoolFetch.ConnectSentries()
-		var newTxsBroadcaster *txpool.NewSlotsStreams
-		if casted, ok := backend.txPoolGrpcServer.(*txpool.GrpcServer); ok {
-			newTxsBroadcaster = casted.NewSlotsStreams
-		}
-		go txpool.MainLoop(backend.sentryCtx, backend.txPool, backend.newTxs, backend.txPoolSend, newTxsBroadcaster,
-			func() {
-				select {
-				case backend.notifyMiningAboutNewTxs <- struct{}{}:
-				default:
-				}
-			})
 	}
 
 	go func() {
@@ -1279,8 +1266,8 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					// block info in the state channel
 					hasWork = true
 
-				case <-s.notifyMiningAboutNewTxs:
-					//log.Warn("[dbg] notifyMiningAboutNewTxs")
+				case <-s.blockBuilderNotifyNewTxns:
+					//log.Warn("[dbg] blockBuilderNotifyNewTxns")
 
 					// Skip mining based on new txn notif for bor consensus
 					hasWork = s.chainConfig.Bor == nil
@@ -1437,7 +1424,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 	return err
 }
 
-func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, *libstate.Aggregator, error) {
+func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, nodeConfig *nodecfg.Config, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, *libstate.Aggregator, error) {
 	var minFrozenBlock uint64
 
 	if frozenLimit := snConfig.Sync.FrozenBlockLimit; frozenLimit != 0 {
@@ -1456,15 +1443,15 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		allBorSnapshots = heimdall.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 
 		if snConfig.PolygonSync {
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, 0), allBorSnapshots, chainConfig.Bor)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, 0), allBorSnapshots)
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots, chainConfig.Bor)
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots)
 		} else {
 			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots, chainConfig.Bor)
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
 		}
 	}
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger)
+	agg, err := libstate.NewAggregator2(ctx, dirs, config3.DefaultStepSize, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
@@ -1598,8 +1585,28 @@ func (s *Ethereum) Start() error {
 		}
 	}
 
+	if s.txPool != nil {
+		// We start the transaction pool on startup, for a couple of reasons:
+		// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
+		// to initialize it properly.
+		// 2) we cannot propose for block 1 regardless.
+		s.bgComponentsEg.Go(func() error {
+			err := s.txPool.Run(s.sentryCtx)
+			if err != nil {
+				s.logger.Error("txPool.Run error", "err", err)
+			}
+			return err
+		})
+	}
+
 	if s.shutterPool != nil {
-		s.bgComponentsEg.Go(func() error { return s.shutterPool.Run(s.sentryCtx) })
+		s.bgComponentsEg.Go(func() error {
+			err := s.shutterPool.Run(s.sentryCtx)
+			if err != nil {
+				s.logger.Error("shutterPool.Run error", "err", err)
+			}
+			return err
+		})
 	}
 
 	return nil
@@ -1638,9 +1645,6 @@ func (s *Ethereum) Stop() error {
 	}
 	for _, sentryServer := range s.sentryServers {
 		sentryServer.Close()
-	}
-	if s.txPoolDB != nil {
-		s.txPoolDB.Close()
 	}
 	s.chainDB.Close()
 

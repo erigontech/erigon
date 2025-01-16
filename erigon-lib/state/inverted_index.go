@@ -89,7 +89,7 @@ type iiCfg struct {
 
 	// external checker for integrity of inverted index ranges
 	integrity rangeIntegrityChecker
-	indexList idxList
+	indexList Accessors
 }
 
 type iiVisible struct {
@@ -111,7 +111,7 @@ func NewInvertedIndex(cfg iiCfg, logger log.Logger) (*InvertedIndex, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
-		cfg.indexList = withHashMap
+		cfg.indexList = AccessorHashMap
 	}
 
 	ii := InvertedIndex{
@@ -200,12 +200,14 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	}
 }
 
-type idxList int
+type Accessors int
 
-var (
-	withBTree     idxList = 0b1
-	withHashMap   idxList = 0b10
-	withExistence idxList = 0b100
+func (l Accessors) Has(target Accessors) bool { return l&target != 0 }
+
+const (
+	AccessorBTree     Accessors = 0b1
+	AccessorHashMap   Accessors = 0b10
+	AccessorExistence Accessors = 0b100
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
@@ -1200,8 +1202,8 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Enums:              true,
 		LessFalsePositives: true,
 
-		BucketSize: 2000,
-		LeafSize:   8,
+		BucketSize: recsplit.DefaultBucketSize,
+		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     ii.dirs.Tmp,
 		IndexFile:  idxPath,
 		Salt:       ii.salt,

@@ -37,7 +37,7 @@ type syncContributionKey struct {
 }
 
 type syncContributionPoolImpl struct {
-	// syncContributionPool is a map of sync contributions, indexed by slot, subcommittee index and block root.
+	// syncContributionPoolForBlocks is a map of sync contributions, indexed by slot, subcommittee index and block root.
 	syncContributionPoolForBlocks     map[syncContributionKey]*cltypes.Contribution // Used for block publishing.
 	syncContributionPoolForAggregates map[syncContributionKey]*cltypes.Contribution // Used for sync committee messages aggregation.
 	beaconCfg                         *clparams.BeaconChainConfig
