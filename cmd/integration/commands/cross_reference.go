@@ -48,6 +48,7 @@ func crossReferenceBlockHashes(ctx context.Context, logger log.Logger, startBloc
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(maxParallelRequests)
+LOOP:
 	for blockNum := startBlockNum; blockNum < endBlockNum; blockNum++ {
 		blockNum := blockNum
 		eg.Go(func() error {
@@ -89,7 +90,7 @@ func crossReferenceBlockHashes(ctx context.Context, logger log.Logger, startBloc
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			break LOOP // eg Wait will return correct err
 		case <-logTicker.C:
 			logger.Info(
 				"Cross reference block hashes progress",
