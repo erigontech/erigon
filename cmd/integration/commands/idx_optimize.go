@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/erigontech/erigon-lib/common/background"
@@ -21,6 +22,33 @@ import (
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/spf13/cobra"
 )
+
+func parseEFFilename(fileName string) (*efFileInfo, error) {
+	parts := strings.Split(fileName, ".")
+	stepParts := strings.Split(parts[1], "-")
+	startStep, err := strconv.ParseUint(stepParts[0], 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	endStep, err := strconv.ParseUint(stepParts[1], 10, 64)
+	if err != nil {
+		return nil, err
+	}
+
+	return &efFileInfo{
+		prefix:    parts[0],
+		stepSize:  endStep - startStep,
+		startStep: startStep,
+		endStep:   endStep,
+	}, nil
+}
+
+type efFileInfo struct {
+	prefix    string
+	stepSize  uint64
+	startStep uint64
+	endStep   uint64
+}
 
 var MAGIC_KEY_BASE_TX_NUM = hexutility.MustDecodeHex("0x8453FFFFFFFFFFFFFFFFFFFF")
 
