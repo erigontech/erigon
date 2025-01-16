@@ -112,7 +112,7 @@ type (
 
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH EVM op code.
-	GetHashFunc func(uint64) common.Hash
+	GetHashFunc func(uint64) (common.Hash, error)
 
 	// PostApplyMessageFunc is an extension point to execute custom logic at the end of core.ApplyMessage.
 	// It's used in Bor for AddFeeTransferLog or in ethereum to clear out the authority code at end of tx.
@@ -145,9 +145,9 @@ type IntraBlockState interface {
 	SubRefund(uint64) error
 	GetRefund() uint64
 
-	GetCommittedState(common.Address, *common.Hash, *uint256.Int) error
-	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int) error
-	SetState(common.Address, *common.Hash, uint256.Int) error
+	GetCommittedState(common.Address, common.Hash, *uint256.Int) error
+	GetState(address common.Address, slot common.Hash, outValue *uint256.Int) error
+	SetState(common.Address, common.Hash, uint256.Int) error
 
 	GetTransientState(addr common.Address, key common.Hash) uint256.Int
 	SetTransientState(addr common.Address, key common.Hash, value uint256.Int)
@@ -174,7 +174,7 @@ type IntraBlockState interface {
 	// even if the feature/fork is not active yet
 	AddSlotToAccessList(addr common.Address, slot common.Hash) (addrMod, slotMod bool)
 
-	RevertToSnapshot(int)
+	RevertToSnapshot(int, error)
 	Snapshot() int
 
 	AddLog(*types.Log)
@@ -184,4 +184,6 @@ type IntraBlockState interface {
 	// temp
 	TraceAccount(common.Address) bool
 	TxIndex() int
+	Incarnation() int
+	Print(chain.Rules, bool)
 }

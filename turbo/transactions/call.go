@@ -128,18 +128,18 @@ func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, req
 	return core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
 }
 
-func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services.HeaderReader) func(uint64) libcommon.Hash {
-	return func(n uint64) libcommon.Hash {
+func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services.HeaderReader) func(uint64) (libcommon.Hash, error) {
+	return func(n uint64) (libcommon.Hash, error) {
 		h, err := headerReader.HeaderByNumber(context.Background(), tx, n)
 		if err != nil {
 			log.Error("Can't get block hash by number", "number", n, "only-canonical", requireCanonical)
-			return libcommon.Hash{}
+			return libcommon.Hash{}, err
 		}
 		if h == nil {
 			log.Warn("[evm] header is nil", "blockNum", n)
-			return libcommon.Hash{}
+			return libcommon.Hash{}, nil
 		}
-		return h.Hash()
+		return h.Hash(), nil
 	}
 }
 

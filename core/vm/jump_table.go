@@ -31,6 +31,7 @@ type (
 	gasFunc       func(*EVM, *Contract, *stack.Stack, *Memory, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
 	memorySizeFunc func(*stack.Stack) (size uint64, overflow bool)
+	stringer       func(pc uint64, callContext *ScopeContext) string
 )
 
 type operation struct {
@@ -51,6 +52,7 @@ type operation struct {
 	opNum   int // only for push, swap, dup
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
+	string     stringer
 }
 
 var (
@@ -213,6 +215,7 @@ func newByzantiumInstructionSet() JumpTable {
 		numPop:      6,
 		numPush:     1,
 		memorySize:  memoryStaticCall,
+		string:      stStaticCall,
 	}
 	instructionSet[RETURNDATASIZE] = &operation{
 		execute:     opReturnDataSize,
@@ -413,6 +416,7 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      1,
 			numPush:     1,
+			string:      stNot,
 		},
 		BYTE: {
 			execute:     opByte,
@@ -463,12 +467,14 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasFastestStep,
 			numPop:      1,
 			numPush:     1,
+			string:      stCallDataLoad,
 		},
 		CALLDATASIZE: {
 			execute:     opCallDataSize,
 			constantGas: GasQuickStep,
 			numPop:      0,
 			numPush:     1,
+			string:      stCallDataSize,
 		},
 		CALLDATACOPY: {
 			execute:     opCallDataCopy,
@@ -477,6 +483,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:      3,
 			numPush:     0,
 			memorySize:  memoryCallDataCopy,
+			string:      stCallDataCopy,
 		},
 		CODESIZE: {
 			execute:     opCodeSize,
@@ -595,6 +602,7 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasMidStep,
 			numPop:      1,
 			numPush:     0,
+			string:      stJump,
 		},
 		JUMPI: {
 			execute:     opJumpi,
@@ -633,6 +641,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     1,
 			isPush:      true,
 			opNum:       1,
+			string:      stPush1,
 		},
 		PUSH2: {
 			execute:     makePush(2, 2),
@@ -889,6 +898,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     2,
 			isDup:       true,
 			opNum:       1,
+			string:      makeDupStringer(1),
 		},
 		DUP2: {
 			execute:     makeDup(2),
@@ -897,6 +907,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     3,
 			isDup:       true,
 			opNum:       2,
+			string:      makeDupStringer(2),
 		},
 		DUP3: {
 			execute:     makeDup(3),
@@ -905,6 +916,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     4,
 			isDup:       true,
 			opNum:       3,
+			string:      makeDupStringer(3),
 		},
 		DUP4: {
 			execute:     makeDup(4),
@@ -913,6 +925,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     5,
 			isDup:       true,
 			opNum:       4,
+			string:      makeDupStringer(4),
 		},
 		DUP5: {
 			execute:     makeDup(5),
@@ -921,6 +934,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     6,
 			isDup:       true,
 			opNum:       5,
+			string:      makeDupStringer(5),
 		},
 		DUP6: {
 			execute:     makeDup(6),
@@ -929,6 +943,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     7,
 			isDup:       true,
 			opNum:       6,
+			string:      makeDupStringer(6),
 		},
 		DUP7: {
 			execute:     makeDup(7),
@@ -937,6 +952,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     8,
 			isDup:       true,
 			opNum:       7,
+			string:      makeDupStringer(7),
 		},
 		DUP8: {
 			execute:     makeDup(8),
@@ -945,6 +961,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     9,
 			isDup:       true,
 			opNum:       8,
+			string:      makeDupStringer(8),
 		},
 		DUP9: {
 			execute:     makeDup(9),
@@ -953,6 +970,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     10,
 			isDup:       true,
 			opNum:       9,
+			string:      makeDupStringer(9),
 		},
 		DUP10: {
 			execute:     makeDup(10),
@@ -961,6 +979,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     11,
 			isDup:       true,
 			opNum:       10,
+			string:      makeDupStringer(10),
 		},
 		DUP11: {
 			execute:     makeDup(11),
@@ -969,6 +988,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     12,
 			isDup:       true,
 			opNum:       11,
+			string:      makeDupStringer(11),
 		},
 		DUP12: {
 			execute:     makeDup(12),
@@ -977,6 +997,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     13,
 			isDup:       true,
 			opNum:       12,
+			string:      makeDupStringer(12),
 		},
 		DUP13: {
 			execute:     makeDup(13),
@@ -985,6 +1006,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     14,
 			isDup:       true,
 			opNum:       13,
+			string:      makeDupStringer(13),
 		},
 		DUP14: {
 			execute:     makeDup(14),
@@ -993,6 +1015,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     15,
 			isDup:       true,
 			opNum:       14,
+			string:      makeDupStringer(14),
 		},
 		DUP15: {
 			execute:     makeDup(15),
@@ -1001,6 +1024,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     16,
 			isDup:       true,
 			opNum:       15,
+			string:      makeDupStringer(15),
 		},
 		DUP16: {
 			execute:     makeDup(16),
@@ -1009,6 +1033,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     17,
 			isDup:       true,
 			opNum:       16,
+			string:      makeDupStringer(16),
 		},
 		SWAP1: {
 			execute:     makeSwap(1),
@@ -1017,6 +1042,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     2,
 			isSwap:      true,
 			opNum:       1,
+			string:      makeSwapStringer(1),
 		},
 		SWAP2: {
 			execute:     makeSwap(2),
@@ -1025,6 +1051,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     3,
 			isSwap:      true,
 			opNum:       2,
+			string:      makeSwapStringer(2),
 		},
 		SWAP3: {
 			execute:     makeSwap(3),
@@ -1033,6 +1060,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     4,
 			isSwap:      true,
 			opNum:       3,
+			string:      makeSwapStringer(3),
 		},
 		SWAP4: {
 			execute:     makeSwap(4),
@@ -1041,6 +1069,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     5,
 			isSwap:      true,
 			opNum:       4,
+			string:      makeSwapStringer(4),
 		},
 		SWAP5: {
 			execute:     makeSwap(5),
@@ -1049,6 +1078,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     6,
 			isSwap:      true,
 			opNum:       5,
+			string:      makeSwapStringer(5),
 		},
 		SWAP6: {
 			execute:     makeSwap(6),
@@ -1057,6 +1087,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     7,
 			isSwap:      true,
 			opNum:       6,
+			string:      makeSwapStringer(6),
 		},
 		SWAP7: {
 			execute:     makeSwap(7),
@@ -1065,6 +1096,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     8,
 			isSwap:      true,
 			opNum:       7,
+			string:      makeSwapStringer(7),
 		},
 		SWAP8: {
 			execute:     makeSwap(8),
@@ -1073,6 +1105,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     9,
 			isSwap:      true,
 			opNum:       8,
+			string:      makeSwapStringer(8),
 		},
 		SWAP9: {
 			execute:     makeSwap(9),
@@ -1081,6 +1114,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     10,
 			isSwap:      true,
 			opNum:       9,
+			string:      makeSwapStringer(9),
 		},
 		SWAP10: {
 			execute:     makeSwap(10),
@@ -1089,6 +1123,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     11,
 			isSwap:      true,
 			opNum:       10,
+			string:      makeSwapStringer(10),
 		},
 		SWAP11: {
 			execute:     makeSwap(11),
@@ -1097,6 +1132,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     12,
 			isSwap:      true,
 			opNum:       11,
+			string:      makeSwapStringer(11),
 		},
 		SWAP12: {
 			execute:     makeSwap(12),
@@ -1105,6 +1141,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     13,
 			isSwap:      true,
 			opNum:       12,
+			string:      makeSwapStringer(12),
 		},
 		SWAP13: {
 			execute:     makeSwap(13),
@@ -1113,6 +1150,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     14,
 			isSwap:      true,
 			opNum:       13,
+			string:      makeSwapStringer(13),
 		},
 		SWAP14: {
 			execute:     makeSwap(14),
@@ -1121,6 +1159,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     15,
 			isSwap:      true,
 			opNum:       14,
+			string:      makeSwapStringer(14),
 		},
 		SWAP15: {
 			execute:     makeSwap(15),
@@ -1129,6 +1168,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     16,
 			isSwap:      true,
 			opNum:       15,
+			string:      makeSwapStringer(15),
 		},
 		SWAP16: {
 			execute:     makeSwap(16),
@@ -1137,6 +1177,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     17,
 			isSwap:      true,
 			opNum:       16,
+			string:      makeSwapStringer(16),
 		},
 		LOG0: {
 			execute:    makeLog(0),

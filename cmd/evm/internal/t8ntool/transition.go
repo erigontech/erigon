@@ -285,16 +285,16 @@ func Main(ctx *cli.Context) error {
 	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
 	var hashError error
-	getHash := func(num uint64) libcommon.Hash {
+	getHash := func(num uint64) (libcommon.Hash, error) {
 		if prestate.Env.BlockHashes == nil {
 			hashError = fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
-			return libcommon.Hash{}
+			return libcommon.Hash{}, hashError
 		}
 		h, ok := prestate.Env.BlockHashes[math.HexOrDecimal64(num)]
 		if !ok {
 			hashError = fmt.Errorf("getHash(%d) invoked, blockhash for that block not provided", num)
 		}
-		return h
+		return h, hashError
 	}
 
 	db, agg := temporaltest.NewTestDB(nil, datadir.New(""))

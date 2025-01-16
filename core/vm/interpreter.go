@@ -178,6 +178,8 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	}
 }
 
+var Trace bool
+
 // Run loops and evaluates the contract's code with the given input data and returns
 // the return byte-slice and an error if one occurred.
 //
@@ -316,6 +318,17 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			logged = true
 		}
 		// execute the operation
+		if Trace && in.evm.intraBlockState.TxIndex() == 1 /*&& in.evm.intraBlockState.Incarnation() == 1*/ {
+			var str string
+			if operation.string != nil {
+				str = operation.string(*pc, callContext)
+			} else {
+				str = op.String()
+			}
+
+			fmt.Printf("(%d.%d) %s\n", in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), str)
+		}
+
 		res, err = operation.execute(pc, in, callContext)
 
 		if err != nil {

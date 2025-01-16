@@ -140,7 +140,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 		rw.chain = consensuschain.NewReader(rw.execArgs.ChainConfig, rw.chainTx, rw.execArgs.BlockReader, rw.logger)
 	}
 
-	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateWriter = state.NewNoopWriter()
 
 	rw.ibs.Reset()
@@ -393,16 +392,23 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		WorkerCount = cfg.Workers
 	}
 
-	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
+	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header, err error) {
 		if tx != nil && WorkerCount == 1 {
-			h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)
+			h, err = cfg.BlockReader.Header(ctx, tx, hash, number)
+			if err != nil {
+				return nil, err
+			}
 		} else {
-			cfg.ChainDB.View(ctx, func(tx kv.Tx) error {
-				h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)
-				return nil
+			err = cfg.ChainDB.View(ctx, func(tx kv.Tx) error {
+				h, err = cfg.BlockReader.Header(ctx, tx, hash, number)
+				return err
 			})
+
+			if err != nil {
+				return nil, err
+			}
 		}
-		return h
+		return h, nil
 	}
 
 	outTxNum := &atomic.Uint64{}
@@ -441,7 +447,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
-		getHashFn := func(n uint64) common.Hash {
+		getHashFn := func(n uint64) (common.Hash,error) {
 			getHashFnMute.Lock()
 			defer getHashFnMute.Unlock()
 			return f(n)
@@ -508,7 +514,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 					}
 
 					_, _, _, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(header), ibs, txTask.Txs,
-						txTask.Uncles, blockReceipts,txTask.Withdrawals, applyWorker.chain, syscall, logger)
+						txTask.Uncles, blockReceipts, txTask.Withdrawals, applyWorker.chain, syscall, logger)
 					if err != nil {
 						result.Err = err
 					}

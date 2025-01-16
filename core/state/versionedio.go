@@ -183,10 +183,10 @@ func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObje
 			if path.IsState() {
 				stateKey := path.GetStateKey()
 				var state uint256.Int
-				so.GetState(&stateKey, &state)
+				so.GetState(stateKey, &state)
 				if len(prevs) > 0 {
 					var prevState uint256.Int
-					prevs[len(prevs)-1].GetState(&stateKey, &state)
+					prevs[len(prevs)-1].GetState(stateKey, &state)
 					if prevState.Eq(&state) {
 						continue
 					}

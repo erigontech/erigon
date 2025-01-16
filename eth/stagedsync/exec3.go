@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"runtime"
@@ -621,7 +622,7 @@ Loop:
 		totalGasUsed += b.GasUsed()
 		getHashFnMutex := sync.Mutex{}
 
-		blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header) {
+		blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 			getHashFnMutex.Lock()
 			defer getHashFnMutex.Unlock()
 			return executor.getHeader(ctx, hash, number)
@@ -660,6 +661,7 @@ Loop:
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 				Config:           chainConfig,
+				Trace:            blockNum == 14748605 || blockNum == 14734485,
 			}
 
 			if cfg.genesis != nil {
@@ -730,9 +732,6 @@ Loop:
 					logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 					return errors.New("wrong trie root")
 				}
-				//if blockNum == 14694013 {
-				//	fmt.Println(blockNum, hex.EncodeToString(rh), hex.EncodeToString(header.Root.Bytes()))
-				//}
 
 				ts += time.Since(start)
 				aggTx.RestrictSubsetFileDeletions(false)
@@ -743,6 +742,10 @@ Loop:
 					}
 				}
 				executor.domains().SetChangesetAccumulator(nil)
+			}
+
+			if blockNum == 14748605 || blockNum == 14734485 {
+				fmt.Println(blockNum, hex.EncodeToString(header.Root.Bytes()))
 			}
 		}
 
@@ -789,8 +792,8 @@ Loop:
 				aggregatorRo := libstate.AggTx(executor.tx())
 
 				needCalcRoot := executor.readState().SizeEstimate() >= commitThreshold ||
-					skipPostEvaluation || // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
-					aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
+					skipPostEvaluation //|| // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
+					//TEMP aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
 				if !needCalcRoot {
 					break
 				}
@@ -917,7 +920,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *libstate.SharedDomains) {
 		doms.Flush(context.Background(), tx)
 	}
 	{
-		it, err :=libstate.AggTx(tx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := libstate.AggTx(tx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}

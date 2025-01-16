@@ -116,7 +116,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 		logger.Info("Commit an empty block", "number", current.Header.Number)
 		return nil
 	}
-	getHeader := func(hash libcommon.Hash, number uint64) *types.Header { return rawdb.ReadHeader(txc.Tx, hash, number) }
+	getHeader := func(hash libcommon.Hash, number uint64) (*types.Header, error) { return rawdb.ReadHeader(txc.Tx, hash, number), nil }
 
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since
@@ -435,7 +435,7 @@ func addTransactionsToMiningBlock(
 	current *MiningBlock,
 	chainConfig chain.Config,
 	vmConfig *vm.Config,
-	getHeader func(hash libcommon.Hash, number uint64) *types.Header,
+	getHeader func(hash libcommon.Hash, number uint64) (*types.Header,error),
 	engine consensus.Engine,
 	txns types.Transactions,
 	coinbase libcommon.Address,
@@ -462,7 +462,7 @@ func addTransactionsToMiningBlock(
 		snap := ibs.Snapshot()
 		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, header.BlobGasUsed, *vmConfig)
 		if err != nil {
-			ibs.RevertToSnapshot(snap)
+			ibs.RevertToSnapshot(snap, err)
 			gasPool = new(core.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs
 			return nil, err
 		}

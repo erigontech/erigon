@@ -126,7 +126,6 @@ func (hr *HistoryReaderV3) ReadAccountIncarnation(address common.Address) (uint6
 type ResettableStateReader interface {
 	StateReader
 	SetTx(tx kv.Tx)
-	SetTxNum(txn uint64)
 	DiscardReadList()
 }
 

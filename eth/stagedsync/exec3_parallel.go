@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -81,7 +82,7 @@ type executor interface {
 	execute(ctx context.Context, tasks []exec.Task, profile bool) (bool, error)
 	processEvents(ctx context.Context, wait bool) *blockResult
 	wait(ctx context.Context) error
-	getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header)
+	getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header, err error)
 
 	//these are reset by commit - so need to be read from the executor once its processing
 	tx() kv.RwTx
@@ -145,9 +146,12 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		return nil, nil
 	}
 
+	//fmt.Printf("(%d.%d) Finalize\n", txIndex, task.version.Incarnation)
+
 	versionedReader := state.NewVersionedStateReader(result.TxIn)
 	ibs := state.New(versionedReader)
 	ibs.SetTxContext(txIndex)
+	ibs.SetVersion(task.version.Incarnation)
 	ibs.ApplyVersionedWrites(result.TxOut)
 	versionedReader.SetStateReader(stateReader)
 
@@ -353,7 +357,7 @@ func (te *txExecutor) domains() *libstate.SharedDomains {
 	return te.doms
 }
 
-func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header) {
+func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header, err error) {
 
 	if te.applyTx != nil {
 		err := te.applyTx.Apply(func(tx kv.Tx) (err error) {
@@ -362,18 +366,18 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 		})
 
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 	} else {
 		if err := te.cfg.db.View(ctx, func(tx kv.Tx) (err error) {
 			h, err = te.cfg.blockReader.Header(ctx, tx, hash, number)
 			return err
 		}); err != nil {
-			panic(err)
+			return nil, err
 		}
 	}
 
-	return h
+	return h, nil
 }
 
 func (te *txExecutor) LogExecuted() {
@@ -521,6 +525,10 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 			}
 
 			if blockResult.complete {
+				if blockResult.BlockNum == 14748605 || blockResult.BlockNum == 14734485 {
+					fmt.Println(blockResult.BlockNum)
+				}
+
 				if blockStatus, ok := pe.blockStatus[blockResult.BlockNum]; ok {
 					if blockResult.complete {
 						blockReceipts := make([]*types.Receipt, 0, len(blockStatus.results))
@@ -534,6 +542,8 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 						txTask := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
 						ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderParallelV3(pe.rs.Domains(), tx)))
+						ibs.SetTxContext(txTask.TxIndex)
+						ibs.SetVersion(txTask.Version().Incarnation)
 
 						syscall := func(contract common.Address, data []byte) ([]byte, error) {
 							return core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false)
@@ -588,7 +598,11 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 					blockStatus.cntExec++
 					execTask := blockStatus.tasks[nextTx]
 
-					//fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
+					fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
+					if blockResult.BlockNum+1 == 14748605 || blockResult.BlockNum+1 == 14734485 {
+						vm.Trace = true
+						fmt.Println(blockResult.BlockNum + 1)
+					}
 					pe.in.Add(ctx,
 						&taskVersion{
 							execTask:   execTask,
@@ -677,6 +691,17 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 						lastBlockResult = *applyResult
 						pe.lastExecutedBlockNum = applyResult.BlockNum
 						uncommittedGas += applyResult.GasUsed
+					}
+
+					if false {
+						rh, err := pe.doms.ComputeCommitment(ctx, tx, true, applyResult.BlockNum, pe.execStage.LogPrefix())
+						if err != nil {
+							return err
+						}
+						if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
+							logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.execStage.LogPrefix(), applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
+							return errors.New("wrong trie root")
+						}
 					}
 
 					if (applyResult.complete || applyResult.Err != nil) && pe.blockResults != nil {

@@ -272,7 +272,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	gaspool := new(core.GasPool)
 	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock())
 	if _, err = core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */); err != nil {
-		statedb.RevertToSnapshot(snapshot)
+		statedb.RevertToSnapshot(snapshot, nil)
 	}
 
 	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
@@ -296,7 +296,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		return nil, err
 	}
 	defer domains.Close()
-	
+
 	r := rpchelper.NewLatestStateReader(domains, tx)
 	statedb := state.New(r)
 	statedb.SetTxContext(0)
@@ -311,7 +311,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		for k, v := range a.Storage {
 			key := k
 			val := uint256.NewInt(0).SetBytes(v.Bytes())
-			statedb.SetState(addr, &key, *val)
+			statedb.SetState(addr, key, *val)
 		}
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
@@ -364,8 +364,8 @@ func rlpHash(x interface{}) (h libcommon.Hash) {
 	return h
 }
 
-func vmTestBlockHash(n uint64) libcommon.Hash {
-	return libcommon.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
+func vmTestBlockHash(n uint64) (libcommon.Hash, error) {
+	return libcommon.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
 }
 
 func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message, error) {

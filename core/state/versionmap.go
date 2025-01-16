@@ -172,9 +172,9 @@ func (vm *VersionMap) Write(k VersionKey, v Version, data interface{}, complete 
 		return
 	})
 
-	cells.rw.RLock()
+	cells.rw.Lock()
+	defer cells.rw.Unlock()
 	ci, ok := cells.tm.Get(v.TxIndex)
-	cells.rw.RUnlock()
 
 	var flag uint = FlagDone
 
@@ -192,21 +192,17 @@ func (vm *VersionMap) Write(k VersionKey, v Version, data interface{}, complete 
 		ci.incarnation = v.Incarnation
 		ci.data = data
 	} else {
-		func() {
-			cells.rw.Lock()
-			defer cells.rw.Unlock()
-			if ci, ok = cells.tm.Get(v.TxIndex); !ok {
-				cells.tm.Set(v.TxIndex, &WriteCell{
-					flag:        flag,
-					incarnation: v.Incarnation,
-					data:        data,
-				})
-			} else {
-				ci.flag = flag
-				ci.incarnation = v.Incarnation
-				ci.data = data
-			}
-		}()
+		if ci, ok = cells.tm.Get(v.TxIndex); !ok {
+			cells.tm.Set(v.TxIndex, &WriteCell{
+				flag:        flag,
+				incarnation: v.Incarnation,
+				data:        data,
+			})
+		} else {
+			ci.flag = flag
+			ci.incarnation = v.Incarnation
+			ci.data = data
+		}
 	}
 }
 
@@ -323,8 +319,9 @@ func (vm *VersionMap) Read(k VersionKey, txIdx int) (res ReadResult) {
 	}
 
 	cells.rw.RLock()
+	defer cells.rw.RUnlock()
+
 	fk, fv := floor(txIdx - 1)
-	cells.rw.RUnlock()
 
 	if fk != -1 && fv != nil {
 		c := fv

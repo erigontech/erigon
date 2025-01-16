@@ -49,5 +49,5 @@ func storeHash(num uint64, hash libcommon.Hash, state *state.IntraBlockState) er
 	slotNum := num % params.BlockHashHistoryServeWindow
 	storageSlot := libcommon.BytesToHash(uint256.NewInt(slotNum).Bytes())
 	parentHashInt := uint256.NewInt(0).SetBytes32(hash.Bytes())
-	return state.SetState(params.HistoryStorageAddress, &storageSlot, *parentHashInt)
+	return state.SetState(params.HistoryStorageAddress, storageSlot, *parentHashInt)
 }

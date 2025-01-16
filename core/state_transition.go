@@ -78,10 +78,6 @@ type StateTransition struct {
 	state        evmtypes.IntraBlockState
 	evm          *vm.EVM
 
-	//some pre-allocated intermediate variables
-	sharedBuyGas        *uint256.Int
-	sharedBuyGasBalance *uint256.Int
-
 	// If true, fee burning and tipping won't happen during transition. Instead, their values will be included in the
 	// ExecutionResult, which caller can use the values to update the balance of burner and coinbase account.
 	// This is useful during parallel state transition, where the common account read/write should be minimized.
@@ -142,9 +138,6 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 		value:     msg.Value(),
 		data:      msg.Data(),
 		state:     evm.IntraBlockState(),
-
-		sharedBuyGas:        uint256.NewInt(0),
-		sharedBuyGasBalance: uint256.NewInt(0),
 	}
 }
 
@@ -177,7 +170,7 @@ func (st *StateTransition) to() libcommon.Address {
 }
 
 func (st *StateTransition) buyGas(gasBailout bool) error {
-	gasVal := st.sharedBuyGas
+	gasVal := &uint256.Int{}
 	gasVal.SetUint64(st.msg.Gas())
 	gasVal, overflow := gasVal.MulOverflow(gasVal, st.gasPrice)
 	if overflow {
@@ -185,7 +178,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	}
 
 	// compute blob fee for eip-4844 data blobs if any
-	blobGasVal := new(uint256.Int)
+	blobGasVal := &uint256.Int{}
 	if st.evm.ChainRules().IsCancun {
 		blobGasPrice := st.evm.Context.BlobBaseFee
 		if blobGasPrice == nil {
@@ -202,8 +195,9 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	if !gasBailout {
 		balanceCheck := gasVal
+
 		if st.gasFeeCap != nil {
-			balanceCheck = st.sharedBuyGasBalance.SetUint64(st.msg.Gas())
+			balanceCheck = (&uint256.Int{}).SetUint64(st.msg.Gas())
 			balanceCheck, overflow = balanceCheck.MulOverflow(balanceCheck, st.gasFeeCap)
 			if overflow {
 				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
@@ -531,13 +525,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	effectiveTip := st.gasPrice
 	if rules.IsLondon {
 		if st.gasFeeCap.Gt(st.evm.Context.BaseFee) {
-			effectiveTip = math.Min256(st.tip, new(uint256.Int).Sub(st.gasFeeCap, st.evm.Context.BaseFee))
+			effectiveTip = math.Min256(st.tip, (&uint256.Int{}).Sub(st.gasFeeCap, st.evm.Context.BaseFee))
 		} else {
 			effectiveTip = u256.Num0
 		}
 	}
 
-	tipAmount := new(uint256.Int).SetUint64(st.gasUsed())
+	tipAmount := (&uint256.Int{}).SetUint64(st.gasUsed())
 	tipAmount.Mul(tipAmount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	if !st.noFeeBurnAndTip {
@@ -552,11 +546,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if burntContractAddress != nil {
-			burnAmount = new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
+			burnAmount = (&uint256.Int{}).Mul((&uint256.Int{}).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
 
 			if rules.IsAura && rules.IsPrague {
 				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
-				burnAmount = new(uint256.Int).Add(burnAmount, st.evm.BlobFee)
+				burnAmount = (&uint256.Int{}).Add(burnAmount, st.evm.BlobFee)
 			}
 
 			if !st.noFeeBurnAndTip {
@@ -566,7 +560,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	if st.state.TraceAccount(st.msg.From()) {
-		fmt.Printf("(%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.TxIndex(), st.msg.From(), tipAmount, burnAmount, st.gasPrice, st.gasUsed)
+		fmt.Printf("(%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount, burnAmount, st.gasPrice, st.gasUsed)
 	}
 
 	result := &evmtypes.ExecutionResult{
@@ -603,7 +597,7 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
 	if st.state.TraceAccount(st.msg.From()) {
-		fmt.Printf("(%d) Refund %x: remaining: %d, refund %d (%d), price: %d val: %d\n", st.state.TxIndex(), st.msg.From(), st.gasRemaining-refund, refund,
+		fmt.Printf("(%d.%d) Refund %x: remaining: %d, refund %d (%d), price: %d val: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining-refund, refund,
 			st.gasRemaining, st.gasPrice, remaining)
 	}
 

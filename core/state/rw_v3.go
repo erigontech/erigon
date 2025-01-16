@@ -595,11 +595,11 @@ func NewReaderV3(domains *state.SharedDomains, tx kv.Tx) *ReaderV3 {
 
 func (r *ReaderV3) DiscardReadList()      {}
 func (r *ReaderV3) SetTxNum(txNum uint64) { r.txNum = txNum }
-func (r *ReaderV3) SetTx(tx kv.Tx)        { 
+func (r *ReaderV3) SetTx(tx kv.Tx) {
 	r.tx = tx
 }
 
-func (r *ReaderV3) SetTrace(trace bool)   { r.trace = trace }
+func (r *ReaderV3) SetTrace(trace bool) { r.trace = trace }
 
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	_, acc, err := r.readAccountData(address)
@@ -680,7 +680,6 @@ func (r *ReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error
 
 type ReaderParallelV3 struct {
 	ReaderV3
-	txNum           uint64
 	discardReadList bool
 	readLists       map[string]*state.KvList
 }
@@ -693,8 +692,7 @@ func NewReaderParallelV3(sd *state.SharedDomains, tx kv.Tx) *ReaderParallelV3 {
 	}
 }
 
-func (r *ReaderParallelV3) DiscardReadList()      { r.discardReadList = true }
-func (r *ReaderParallelV3) SetTxNum(txNum uint64) { r.txNum = txNum }
+func (r *ReaderParallelV3) DiscardReadList() { r.discardReadList = true }
 
 func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, acc, err := r.ReaderV3.readAccountData(address)
@@ -767,24 +765,34 @@ func NewBufferedReader(bufferedState *StateV3Buffered, reader ResettableStateRea
 }
 
 func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	var data *accounts.Account
+
 	r.bufferedState.accountsMutex.RLock()
-	so, ok := r.bufferedState.accounts[address]
+	if so, ok := r.bufferedState.accounts[address]; ok {
+		data = so.data
+	}
 	r.bufferedState.accountsMutex.RUnlock()
 
-	if ok && so.data != nil {
-		return so.data, nil
+	if data != nil {
+		result := *data
+		return &result, nil
 	}
 
 	return r.reader.ReadAccountData(address)
 }
 
 func (r *bufferedReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	var data *accounts.Account
+
 	r.bufferedState.accountsMutex.RLock()
-	so, ok := r.bufferedState.accounts[address]
+	if so, ok := r.bufferedState.accounts[address]; ok {
+		data = so.data
+	}
 	r.bufferedState.accountsMutex.RUnlock()
 
-	if ok && so.data != nil {
-		return so.data, nil
+	if data != nil {
+		result := *data
+		return &result, nil
 	}
 
 	return r.reader.ReadAccountDataForDebug(address)
@@ -793,27 +801,31 @@ func (r *bufferedReader) ReadAccountDataForDebug(address common.Address) (*accou
 func (r *bufferedReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
-	r.bufferedState.accountsMutex.RUnlock()
 
 	if ok && so.storage != nil {
-		r.bufferedState.accountsMutex.RLock()
 		value, ok := so.storage[*key]
-		r.bufferedState.accountsMutex.RUnlock()
 
 		if ok {
+			r.bufferedState.accountsMutex.RUnlock()
 			return value.Bytes(), nil
 		}
 	}
+
+	r.bufferedState.accountsMutex.RUnlock()
 
 	return r.reader.ReadAccountStorage(address, incarnation, key)
 }
 
 func (r *bufferedReader) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
+	var code []byte
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
+	if ok && len(so.code) != 0 {
+		code = so.code
+	}
 	r.bufferedState.accountsMutex.RUnlock()
 
-	if ok && len(so.code) != 0 {
+	if len(code) != 0 {
 		return so.code, nil
 	}
 
@@ -821,24 +833,33 @@ func (r *bufferedReader) ReadAccountCode(address common.Address, incarnation uin
 }
 
 func (r *bufferedReader) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+	var code []byte
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
+	if ok && len(so.code) != 0 {
+		code = so.code
+	}
 	r.bufferedState.accountsMutex.RUnlock()
 
-	if ok && len(so.code) != 0 {
-		return len(so.code), nil
+	if len(code) != 0 {
+		return len(code), nil
 	}
 
 	return r.reader.ReadAccountCodeSize(address, incarnation)
 }
 
 func (r *bufferedReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	var incarnation uint64
+
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
+	if ok && so.data != nil {
+		incarnation = so.data.Incarnation
+	}
 	r.bufferedState.accountsMutex.RUnlock()
 
-	if ok && so.data != nil {
-		return so.data.Incarnation, nil
+	if ok {
+		return incarnation, nil
 	}
 
 	return r.reader.ReadAccountIncarnation(address)
@@ -846,10 +867,6 @@ func (r *bufferedReader) ReadAccountIncarnation(address common.Address) (uint64,
 
 func (r *bufferedReader) SetTx(tx kv.Tx) {
 	r.reader.SetTx(tx)
-}
-
-func (r *bufferedReader) SetTxNum(txn uint64) {
-	r.reader.SetTxNum(txn)
 }
 
 func (r *bufferedReader) DiscardReadList() {

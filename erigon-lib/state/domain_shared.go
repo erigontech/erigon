@@ -1368,7 +1368,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.justRestored.Store(false)
 
 	if saveState {
-		if err := sdc.storeCommitmentState(roTx, blockNum, rootHash); err != nil {
+		if err := sdc.storeCommitmentState(blockNum, rootHash); err != nil {
 			return nil, err
 		}
 	}
@@ -1376,7 +1376,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	return rootHash, err
 }
 
-func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(roTx kv.Tx, blockNum uint64, rootHash []byte) error {
+func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64, rootHash []byte) error {
 	if sdc.sharedDomains.aggTx == nil {
 		return fmt.Errorf("store commitment state: AggregatorContext is not initialized")
 	}

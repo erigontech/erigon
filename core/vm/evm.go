@@ -307,7 +307,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
-		evm.intraBlockState.RevertToSnapshot(snapshot)
+		evm.intraBlockState.RevertToSnapshot(snapshot, err)
 		if err != ErrExecutionReverted {
 			gas = 0
 		}
@@ -489,7 +489,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in homestead this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
-		evm.intraBlockState.RevertToSnapshot(snapshot)
+		evm.intraBlockState.RevertToSnapshot(snapshot, nil)
 		if err != ErrExecutionReverted {
 			contract.UseGas(contract.Gas, tracing.GasChangeCallFailedExecution)
 		}

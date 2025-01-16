@@ -398,7 +398,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	noop := state.NewNoopWriter()
 	isPos := false
 	for it.HasNext() {
-		txNum, blockNum, txIndex, isFnalTxn, blockNumChanged, err := it.Next()
+		_, blockNum, txIndex, isFnalTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			if first {
 				first = false
@@ -583,7 +583,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue
 		}
 
-		stateReader.SetTxNum(txNum)
 		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
 		cachedReader := state.NewCachedReader(stateReader, stateCache)
 		//cachedReader := stateReader

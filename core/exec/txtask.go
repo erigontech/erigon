@@ -187,6 +187,7 @@ type TxTask struct {
 
 	Config *chain.Config
 	Logger log.Logger
+	Trace  bool
 }
 
 func (t *TxTask) TxType() uint8 {
@@ -263,10 +264,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	calcFees bool) *Result {
 	var result Result
 
-	stateReader.SetTxNum(txTask.TxNum)
-	rs.Domains().SetTxNum(txTask.TxNum)
-
-	//ibs.SetTrace(true)
+	ibs.SetTrace(txTask.Trace)
 
 	rules := txTask.Rules
 	var err error

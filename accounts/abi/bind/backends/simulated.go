@@ -73,7 +73,7 @@ var (
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
 	m         *mock.MockSentry
-	getHeader func(hash libcommon.Hash, number uint64) *types.Header
+	getHeader func(hash libcommon.Hash, number uint64) (*types.Header, error)
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -101,15 +101,12 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
-		getHeader: func(hash libcommon.Hash, number uint64) (h *types.Header) {
-			var err error
-			if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		getHeader: func(hash libcommon.Hash, number uint64) (h *types.Header, err error) {
+			err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 				h, err = m.BlockReader.Header(context.Background(), tx, hash, number)
 				return nil
-			}); err != nil {
-				panic(err)
-			}
-			return h
+			})
+			return h, err
 		},
 	}
 	backend.emptyPendingBlock()
@@ -249,7 +246,7 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract libcommon.Add
 
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
 	var val uint256.Int
-	stateDB.GetState(contract, &key, &val)
+	stateDB.GetState(contract, key, &val)
 	return val.Bytes(), nil
 }
 
@@ -581,7 +578,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 func (b *SimulatedBackend) PendingCallContract(ctx context.Context, call ethereum.CallMsg) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	defer b.pendingState.RevertToSnapshot(b.pendingState.Snapshot())
+	defer b.pendingState.RevertToSnapshot(b.pendingState.Snapshot(), nil)
 
 	res, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
 	if err != nil {
@@ -659,7 +656,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 		snapshot := b.pendingState.Snapshot()
 		res, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
-		b.pendingState.RevertToSnapshot(snapshot)
+		b.pendingState.RevertToSnapshot(snapshot, nil)
 
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {

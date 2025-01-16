@@ -140,7 +140,7 @@ func TestEIP2200(t *testing.T) {
 			address := libcommon.BytesToAddress([]byte("contract"))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
-			s.SetState(address, &libcommon.Hash{}, *uint256.NewInt(uint64(tt.original)))
+			s.SetState(address, libcommon.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
 			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0), w)
 			vmctx := evmtypes.BlockContext{

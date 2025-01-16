@@ -248,11 +248,13 @@ func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger lo
 		for i := 0; i < workerCount; i++ {
 			reconWorkers[i] = NewWorker(lock, logger, ctx, background, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs)
 
-			if stateReader == nil {
-				stateReader = state.NewBufferedReader(rs, state.NewReaderParallelV3(rs.Domains(), nil))
+			reader := stateReader
+
+			if reader == nil {
+				reader = state.NewBufferedReader(rs, state.NewReaderParallelV3(rs.Domains(), nil))
 			}
 
-			reconWorkers[i].ResetState(rs, stateReader, stateWriter, accumulator)
+			reconWorkers[i].ResetState(rs, reader, stateWriter, accumulator)
 		}
 		if background {
 			for i := 0; i < workerCount; i++ {
