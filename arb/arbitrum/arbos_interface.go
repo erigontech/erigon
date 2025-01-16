@@ -5,7 +5,7 @@ import (
 
 	"github.com/erigontech/erigon/arb/arbitrum_types"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
 )
 
 type ArbInterface interface {

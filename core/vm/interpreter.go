@@ -102,15 +102,6 @@ type EVMInterpreter struct {
 	depth int
 }
 
-// arbitrum
-func (e *EVMInterpreter) EVM() *EVM {
-	return e.VM.evm
-}
-
-func (e *EVMInterpreter) ReadOnly() bool {
-	return e.VM.readOnly
-}
-
 // structcheck doesn't see embedding
 //
 //nolint:structcheck
@@ -339,20 +330,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 	ret = append(ret, res...)
 	return
-}
-
-// Depth returns the current call stack depth.
-func (in *EVMInterpreter) Depth() int {
-	return in.depth
-}
-
-// Depth returns the current call stack depth.
-func (in *EVMInterpreter) IncrementDepth() {
-	in.depth++
-}
-
-func (in *EVMInterpreter) DecrementDepth() {
-	in.depth--
 }
 
 func (vm *VM) setReadonly(outerReadonly bool) func() {

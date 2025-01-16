@@ -20,12 +20,26 @@
 package vm
 
 import (
+	"math/big"
+
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon/core/types"
 )
+
+type ArbEVMLogger interface {
+	EVMLogger
+
+	// Arbitrum: capture a transfer, mint, or burn that happens outside of EVM execution
+	CaptureArbitrumTransfer(env *EVM, from, to *libcommon.Address, value *big.Int, before bool, purpose string)
+	CaptureArbitrumStorageGet(key libcommon.Hash, depth int, before bool)
+	CaptureArbitrumStorageSet(key, value libcommon.Hash, depth int, before bool)
+
+	// Stylus: capture hostio invocation
+	CaptureStylusHostio(name string, args, outs []byte, startInk, endInk uint64)
+}
 
 // EVMLogger is used to collect execution traces from an EVM transaction
 // execution. CaptureState is called for each step of the VM with the
