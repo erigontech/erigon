@@ -34,6 +34,7 @@ type DirtySegment struct {
 	enum                   ApEnum
 	refcount               atomic.Int32
 	canDelete              atomic.Bool
+	frozen                 bool
 }
 
 type VisibleSegment struct {

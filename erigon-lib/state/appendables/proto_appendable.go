@@ -21,7 +21,7 @@ type ProtoAppendable struct {
 	indexBuilders []AccessorIndexBuilder
 
 	dirtyFiles *btree.BTreeG[*DirtySegment]
-	_visible   []*VisibleSegment
+	_visible   VisibleSegments
 
 	baseAppendable Appendable
 
@@ -150,6 +150,13 @@ func (a *ProtoAppendable) Close() {
 	a.closeWhatNotInList([]string{})
 }
 
+func (a *ProtoAppendable) Prune(ctx context.Context, baseTsNumTo TsNum, limit uint64, rwTx kv.RwTx) error {
+	return nil
+}
+func (a *ProtoAppendable) Unwind(ctx context.Context, baseTsNumFrom TsNum, rwTx kv.RwTx) error {
+	return nil
+}
+
 func (a *ProtoAppendable) closeWhatNotInList(fNames []string) {
 	protectFiles := make(map[string]struct{}, len(fNames))
 	for _, f := range fNames {
@@ -174,8 +181,46 @@ func (a *ProtoAppendable) closeWhatNotInList(fNames []string) {
 
 }
 
-func calcVisibleFiles(files *btree.BTreeG[*DirtySegment], toTsNum TsNum) []*VisibleSegment {
-	newVisibleFiles := make([]*VisibleSegment, 0, files.Len())
+/// appendableRoTx
+// preserve certain visiblefiles (inc refcount)
+// AppendableRoTx and AppendableRwTx
+
+// temporalTx.GetAsOf(name, k, ts) --> aggTx.GetAsOf(name, tx, k, ts)
+// -> domaintx.GetAsOf(tx, k, ts)
+//
+/*
+
+// on forkchoice update, temporalrwtx created, and then passed used for
+// everything, block stuff and state stuff.
+// need to follow same pattern here
+
+// temporaldb has multiple aggregators. Today there's a single "state aggregator";
+// but also need a "block aggregator"
+ temporalDb.BeginRwNosync() -> tempRwTx (creates rotx for all aggregators;)
+ tempRwTx.AppAggTx(base_appendable_eum) -> appendable_AggTx
+ appendable_aggtx.Prune() etc.... : agg level ops
+ appendable_aggtx.Get(app_enum) : appendable rotx level ops (this way because each get can return a different appendable rotx)
+
+ queries can be PointQueries, RangedQueries, MarkedQueries
+*/
+
+type AppendableRoTx struct {
+	files VisibleSegments
+	a     Appendable
+	name  ApEnum
+
+	getters    []*seg.Reader
+	idxReaders [][]*recsplit.IndexReader
+}
+
+func (a *AppendableRoTx) Unwind(ctx context.Context, baseTsNumFrom TsNum, rwTx kv.RwTx) error {
+	return a.a.Unwind(ctx, baseTsNumFrom, rwTx)
+}
+
+///
+
+func calcVisibleFiles(files *btree.BTreeG[*DirtySegment], toTsNum TsNum) VisibleSegments {
+	newVisibleFiles := make([]VisibleSegment, 0, files.Len())
 	iToTsNum := uint64(toTsNum)
 	files.Walk(func(items []*DirtySegment) bool {
 		for _, item := range items {
@@ -197,14 +242,14 @@ func calcVisibleFiles(files *btree.BTreeG[*DirtySegment], toTsNum TsNum) []*Visi
 				newVisibleFiles = newVisibleFiles[:len(newVisibleFiles)-1]
 			}
 
-			newVisibleFiles = append(newVisibleFiles, &VisibleSegment{
+			newVisibleFiles = append(newVisibleFiles, VisibleSegment{
 				src: item,
 			})
 		}
 		return true
 	})
 	if newVisibleFiles == nil {
-		newVisibleFiles = []*VisibleSegment{}
+		newVisibleFiles = []VisibleSegment{}
 	}
 	return newVisibleFiles
 }

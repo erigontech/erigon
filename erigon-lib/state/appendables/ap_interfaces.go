@@ -39,27 +39,29 @@ type Appendable interface {
 	RecalcVisibleFiles(baseTsNumTo TsNum)
 	Prune(ctx context.Context, baseTsNumTo TsNum, limit uint64, rwTx kv.RwTx) error
 	Unwind(ctx context.Context, baseTsNumFrom TsNum, rwTx kv.RwTx) error
+
+	// don't put BeginFilesRo here, since it returns PointQueries, RangedQueries etc.
+	// so anyway aggregator has to recover concrete type, and then it can 
+	// call BeginFilesRo on that
 }
 
-// appendable extensions...providing different query patterns
+// appendableRoTx extensions...providing different query patterns
 // idea is that aggregator "return" a *Queries interface, and user can do Get/Put/Range on that.
 // alternate is to expose eveything, but that means exposing tsId/forkId etc. even for appendables
 // for which it is not relevant. Plus, sometimes base appendable tsNum should also be managed...
-type PointQueries interface {
-	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
-	Put(tsNum TsNum, value VVType, tx kv.RwTx) error
-}
+// type PointQueries interface {
+// 	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
+// 	Put(tsNum TsNum, value VVType, tx kv.RwTx) error
+// }
 
-type RangedQueries interface {
-	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
-	Put(tsNum TsNum, value VVType, tx kv.RwTx) error
-	PutEntityEnd(tsNum TsNum, startBaseTsNum TsNum, tx kv.RwTx) error
-}
+// type RangedQueries interface {
+// 	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
+// 	Put(tsNum TsNum, value VVType, tx kv.RwTx) error
+// 	PutEntityEnd(tsNum TsNum, startBaseTsNum TsNum, tx kv.RwTx) error
+// }
 
-type MarkedQueries interface {
-	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
-	GetNc(tsId TsId, forkId []byte, tx kv.Tx) (VVType, error)
-	Put(tsId TsId, forkId []byte, value VVType, tx kv.RwTx) error
-}
-
-// type BindQueries interface { // 1:many
+// type MarkedQueries interface {
+// 	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
+// 	GetNc(tsId TsId, forkId []byte, tx kv.Tx) (VVType, error)
+// 	Put(tsId TsId, forkId []byte, value VVType, tx kv.RwTx) error
+// }

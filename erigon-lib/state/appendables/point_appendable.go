@@ -39,35 +39,6 @@ func NewPointAppendable(valsTbl string, enum ApEnum, stepSize uint64) Appendable
 
 // func NewCanonicalAppendableWithFreezer() etc.
 
-func (a *PointAppendable) Get(tsNum TsNum, tx kv.Tx) (VVType, error) {
-	// first look into snapshots..
-	lastTsNum := a.VisibleSegmentsMaxTsNum()
-	if tsNum <= lastTsNum {
-		if a.baseKeySameAsTsNum {
-			// TODO: can do binary search or loop over visible segments and find which segment contains tsNum
-			// and then get from there
-			var v *VisibleSegment
-
-			// Note: Get assumes that the first index allows ordinal lookup on tsNum. Is this valid assumption?
-			// for borevents this is not a valid assumption
-			if a.indexBuilders[0].AllowsOrdinalLookupByTsNum() {
-				return v.Get(tsNum)
-			} else {
-				return nil, fmt.Errorf("ordinal lookup by tsNum not supported for %s", a.enum)
-			}
-		} else {
-			// TODO: loop over all visible segments and find which segment contains tsNum
-		}
-	}
-
-	// then db
-	return tx.GetOne(a.valsTbl, a.encTs(uint64(tsNum)))
-}
-
-func (a *PointAppendable) Put(tsNum TsNum, value VVType, tx kv.RwTx) error {
-	return tx.Append(a.valsTbl, a.encTs(uint64(tsNum)), value)
-}
-
 func (a *PointAppendable) Prune(ctx context.Context, baseKeyTo TsNum, limit uint64, rwTx kv.RwTx) error {
 	// probably fromKey value needs to be in configuration...it is 1 because we want to keep genesis block
 	// but this might start from 0 as well.
@@ -91,4 +62,56 @@ type sequentialFetcher struct{}
 
 func (s *sequentialFetcher) GetKeys(baseTsNumFrom, baseTsNumTo TsNum, tx kv.Tx) stream.Uno[VKType] {
 	return NewSequentialStream(uint64(baseTsNumFrom), uint64(baseTsNumTo))
+}
+
+/// rotx
+
+type PointAppendableRoTx struct {
+	a     *PointAppendable
+	enum  ApEnum
+	files VisibleSegments
+}
+
+func (a *PointAppendable) BeginFilesRo() *PointAppendableRoTx {
+	for i := 0; i < len(a._visible); i++ {
+		if a._visible[i].src.frozen {
+			a._visible[i].src.refcount.Add(1)
+		}
+	}
+
+	return &PointAppendableRoTx{
+		a:     a,
+		enum:  a.enum,
+		files: a._visible,
+	}
+}
+
+func (a *PointAppendableRoTx) Get(tsNum TsNum, tx kv.Tx) (VVType, error) {
+	// first look into snapshots..
+	ap := a.a
+	lastTsNum := ap.VisibleSegmentsMaxTsNum()
+	if tsNum <= lastTsNum {
+		if ap.baseKeySameAsTsNum {
+			// TODO: can do binary search or loop over visible segments and find which segment contains tsNum
+			// and then get from there
+			var v *VisibleSegment
+
+			// Note: Get assumes that the first index allows ordinal lookup on tsNum. Is this valid assumption?
+			// for borevents this is not a valid assumption
+			if ap.indexBuilders[0].AllowsOrdinalLookupByTsNum() {
+				return v.Get(tsNum)
+			} else {
+				return nil, fmt.Errorf("ordinal lookup by tsNum not supported for %s", a.enum)
+			}
+		} else {
+			// TODO: loop over all visible segments and find which segment contains tsNum
+		}
+	}
+
+	// then db
+	return tx.GetOne(ap.valsTbl, ap.encTs(uint64(tsNum)))
+}
+
+func (a *PointAppendableRoTx) Put(tsNum TsNum, value VVType, tx kv.RwTx) error {
+	return tx.Append(a.a.valsTbl, a.a.encTs(uint64(tsNum)), value)
 }
