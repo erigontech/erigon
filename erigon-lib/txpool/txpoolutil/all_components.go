@@ -132,7 +132,7 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 	}
 
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	maxBlobsPerBlock := chainConfig.GetMaxBlobsPerBlock()
+	maxBlobsPerBlock := chainConfig.GetMaxBlobsPerBlock(uint64(time.Now().Second()))
 
 	shanghaiTime := chainConfig.ShanghaiTime
 	var agraBlock *big.Int
@@ -146,7 +146,7 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 	}
 
 	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, pragueTime,
-		maxBlobsPerBlock, feeCalculator, logger)
+		maxBlobsPerBlock, &maxBlobsPerBlock, feeCalculator, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
