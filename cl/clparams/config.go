@@ -605,7 +605,13 @@ func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
 }
 
 func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
-	forkEpochList := []uint64{b.AltairForkEpoch, b.BellatrixForkEpoch, b.CapellaForkEpoch, b.DenebForkEpoch}
+	forkEpochList := []uint64{
+		b.AltairForkEpoch,
+		b.BellatrixForkEpoch,
+		b.CapellaForkEpoch,
+		b.DenebForkEpoch,
+		b.ElectraForkEpoch,
+	}
 	stateVersion := Phase0Version
 	for _, forkEpoch := range forkEpochList {
 		if forkEpoch > epoch {
@@ -834,8 +840,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	TargetNumberOfPeers:          70,
 
 	// Electra
-	MinPerEpochChurnLimitElectra:          128000000000,
-	MaxPerEpochActivationExitChurnLimit:   256000000000,
+	MinPerEpochChurnLimitElectra:          128_000_000_000,
+	MaxPerEpochActivationExitChurnLimit:   256_000_000_000,
 	MaxDepositRequestsPerPayload:          8192,
 	MaxWithdrawalRequestsPerPayload:       16,
 	MaxConsolidationRequestsPerPayload:    1,

@@ -239,7 +239,6 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		s.sentinel.Peers().RemovePeer(pid)
 		s.sentinel.Host().Peerstore().RemovePeer(pid)
 		s.sentinel.Host().Network().ClosePeer(pid)
-
 		return nil, fmt.Errorf("peer error code: %d", isError)
 	}
 
@@ -278,7 +277,7 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 			s.sentinel.Host().Network().ClosePeer(pid)
 			s.sentinel.Peers().SetBanStatus(pid, true)
 		}
-		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err)
+		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err, "topic", req.Topic)
 		return nil, err
 	}
 	return resp, nil

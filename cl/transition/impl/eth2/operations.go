@@ -880,7 +880,7 @@ func batchVerifyAttestations(
 	s abstract.BeaconState,
 	indexedAttestations []*cltypes.IndexedAttestation,
 ) (valid bool, err error) {
-	c := make(chan indexedAttestationVerificationResult, 1)
+	c := make(chan indexedAttestationVerificationResult, len(indexedAttestations))
 
 	for idx := range indexedAttestations {
 		go func(idx int) {
@@ -894,7 +894,7 @@ func batchVerifyAttestations(
 	for i := 0; i < len(indexedAttestations); i++ {
 		result := <-c
 		if result.err != nil {
-			return false, err
+			return false, result.err
 		}
 		if !result.valid {
 			return false, nil
@@ -1077,11 +1077,11 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	// Verify pubkey exists
 	vindex, exist := s.ValidatorIndexByPubkey(reqPubkey)
 	if !exist {
-		return nil
+		return fmt.Errorf("ProcessWithdrawalRequest: validator index not found for pubkey %v", common.Bytes2Hex(reqPubkey[:]))
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(vindex))
 	if err != nil {
-		return err
+		return fmt.Errorf("ProcessWithdrawalRequest: validator not found for index %d", vindex)
 	}
 	// Verify withdrawal credentials
 	hasCorrectCredential := state.HasExecutionWithdrawalCredential(validator, s.BeaconConfig())
@@ -1122,7 +1122,8 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 			vbalance-s.BeaconConfig().MinActivationBalance-pendingBalanceToWithdraw,
 			amount,
 		)
-		exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(validator.EffectiveBalance())
+		//exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(validator.EffectiveBalance()) mekong alpha9
+		exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(toWithdraw)
 		withdrawableEpoch := exitQueueEpoch + s.BeaconConfig().MinValidatorWithdrawabilityDelay
 		s.AppendPendingPartialWithdrawal(&solid.PendingPartialWithdrawal{
 			Index:             vindex,
@@ -1200,13 +1201,16 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 		return nil
 	}
 	// Verify the source has been active long enough
-	if curEpoch < sourceValidator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
+	// mekong alpha9
+	/*if curEpoch < sourceValidator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
+		log.Info("[Consolidation] Source has not been active long enough, ignoring consolidation request", "slot", s.Slot(), "curEpoch", curEpoch, "activationEpoch", sourceValidator.ActivationEpoch())
 		return nil
 	}
 	// Verify the source has no pending withdrawals in the queue
 	if getPendingBalanceToWithdraw(s, sourceIndex) > 0 {
+		log.Info("[Consolidation] Source has pending withdrawals, ignoring consolidation request", "slot", s.Slot())
 		return nil
-	}
+	}*/
 
 	// Initiate source validator exit and append pending consolidation
 	sourceValidator.SetExitEpoch(computeConsolidationEpochAndUpdateChurn(s, sourceValidator.EffectiveBalance()))
