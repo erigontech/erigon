@@ -98,7 +98,7 @@ type SharedDomains struct {
 	storage *btree2.Map[string, dataWithPrevStep]
 
 	domainWriters [kv.DomainLen]*domainBufferedWriter
-	iiWriters     map[kv.InvertedIdx]*invertedIndexBufferedWriter
+	iiWriters     []*invertedIndexBufferedWriter
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
@@ -114,12 +114,12 @@ type HasAgg interface {
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
 	sd := &SharedDomains{
-		logger:    logger,
-		storage:   btree2.NewMap[string, dataWithPrevStep](128),
-		iiWriters: map[kv.InvertedIdx]*invertedIndexBufferedWriter{},
+		logger:  logger,
+		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
 	}
 	sd.SetTx(tx)
+	sd.iiWriters = make([]*invertedIndexBufferedWriter, len(sd.aggTx.iis))
 
 	sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
 
@@ -662,8 +662,10 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
-	if writer, ok := sd.iiWriters[table]; ok {
-		return writer.Add(key)
+	for _, writer := range sd.iiWriters {
+		if writer.iiId == table {
+			return writer.Add(key)
+		}
 	}
 	panic(fmt.Errorf("unknown index %s", table))
 }

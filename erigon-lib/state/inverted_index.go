@@ -82,6 +82,7 @@ type iiCfg struct {
 	aggregationStep uint64 // amount of transactions inside single aggregation step
 	keysTable       string // bucket name for index keys;    txnNum_u64 -> key (k+auto_increment)
 	valuesTable     string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
+	iiId            kv.InvertedIdx
 
 	withExistence bool                // defines if existence index should be built
 	compression   seg.FileCompression // compression type for inverted index keys and values
@@ -381,6 +382,7 @@ type invertedIndexBufferedWriter struct {
 	txNum           uint64
 	aggregationStep uint64
 	txNumBytes      [8]byte
+	iiId            kv.InvertedIdx
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -455,6 +457,7 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIn
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
 		indexKeys: etl.NewCollector(iit.ii.filenameBase+".flush.ii.keys", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
 		index:     etl.NewCollector(iit.ii.filenameBase+".flush.ii.vals", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
+		iiId:      iit.ii.iiId,
 	}
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)

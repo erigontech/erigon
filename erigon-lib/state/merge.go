@@ -1082,4 +1082,12 @@ func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
 }
 
 func (ac *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return ac.d[idx] }
-func (ac *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return ac.iis[idx] }
+func (ac *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return ac.searchII(idx) }
+func (ac *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
+	for _, iit := range ac.iis {
+		if iit.ii.iiId == idx {
+			return iit
+		}
+	}
+	return nil
+}
