@@ -188,6 +188,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
 	&utils.SentinelBootnodes,
+	&utils.SentinelStaticPeers,
 
 	&utils.OtsSearchMaxCapFlag,
 

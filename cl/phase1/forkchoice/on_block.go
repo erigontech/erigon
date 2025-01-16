@@ -148,7 +148,7 @@ func (f *ForkChoiceStore) ProcessBlockConsensus(ctx context.Context, block *clty
 		return fmt.Errorf("ProcessBlockConsensus: replay block, status %+v", err)
 	}
 	if time.Since(start) > 1*time.Millisecond {
-		log.Debug("OnBlock", "elapsed", time.Since(start))
+		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
 	}
 	return nil
 }
@@ -214,6 +214,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		timeStartExec := time.Now()
 		payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 		monitor.ObserveNewPayloadTime(timeStartExec)
+		log.Debug("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 		switch payloadStatus {
 		case execution_client.PayloadStatusNotValidated:
 			log.Debug("OnBlock: block is not validated yet", "block", libcommon.Hash(blockRoot))
@@ -345,7 +346,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		f.validatorMonitor.OnNewBlock(lastProcessedState, block.Block)
 	}
 	if !isVerifiedExecutionPayload {
-		log.Debug("OnBlock", "elapsed", time.Since(start))
+		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
 	}
 	return nil
 }
