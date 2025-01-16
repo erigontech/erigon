@@ -326,11 +326,109 @@ func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 }
 
 func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
-	b, err := s.Bytes()
+	_, err := s.List()
 	if err != nil {
 		return err
 	}
-	return rlp.DecodeBytes(b, tx)
+	var b []byte
+
+	if b, err = s.Uint256Bytes(); err != nil {
+		return err
+	}
+	tx.ChainID = new(uint256.Int).SetBytes(b)
+
+	if b, err = s.Uint256Bytes(); err != nil {
+		return err
+	}
+	tx.NonceKey = new(uint256.Int).SetBytes(b)
+
+	if tx.Nonce, err = s.Uint(); err != nil {
+		return err
+	}
+
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for SenderAddress: %d", len(b))
+	}
+	tx.SenderAddress = &common.Address{}
+	copy((*tx.SenderAddress)[:], b)
+
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for Deployer: %d", len(b))
+	}
+	tx.Deployer = &common.Address{}
+	copy((*tx.Deployer)[:], b)
+
+	if tx.DeployerData, err = s.Bytes(); err != nil {
+		return err
+	}
+
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for Paymaster: %d", len(b))
+	}
+	tx.Paymaster = &common.Address{}
+	copy((*tx.Paymaster)[:], b)
+
+	if tx.PaymasterData, err = s.Bytes(); err != nil {
+		return err
+	}
+
+	if tx.ExecutionData, err = s.Bytes(); err != nil {
+		return err
+	}
+
+	if b, err = s.Uint256Bytes(); err != nil {
+		return err
+	}
+	tx.BuilderFee = new(uint256.Int).SetBytes(b)
+
+	if b, err = s.Uint256Bytes(); err != nil {
+		return err
+	}
+	tx.Tip = new(uint256.Int).SetBytes(b)
+
+	if b, err = s.Uint256Bytes(); err != nil {
+		return err
+	}
+	tx.FeeCap = new(uint256.Int).SetBytes(b)
+
+	if tx.ValidationGasLimit, err = s.Uint(); err != nil {
+		return err
+	}
+
+	if tx.PaymasterValidationGasLimit, err = s.Uint(); err != nil {
+		return err
+	}
+
+	if tx.PostOpGasLimit, err = s.Uint(); err != nil {
+		return err
+	}
+
+	if tx.Gas, err = s.Uint(); err != nil {
+		return err
+	}
+
+	// decode AccessList
+	tx.AccessList = AccessList{}
+	if err = decodeAccessList(&tx.AccessList, s); err != nil {
+		return err
+	}
+
+	// decode authorizations
+	tx.AuthorizationData = make([]Authorization, 0)
+	if err = decodeAuthorizations(&tx.AuthorizationData, s); err != nil {
+		return err
+	}
+
+	return s.ListEnd()
 }
 
 func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
