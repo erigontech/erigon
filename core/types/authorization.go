@@ -47,7 +47,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 	}
 
 	// chainId, address, nonce
-	if err := rlp.EncodeUint256(&ath.ChainID, data, b); err != nil {
+	if err := ath.ChainID.EncodeRLP(data); err != nil {
 		return nil, err
 	}
 
@@ -192,7 +192,7 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 		}
 
 		// 1. encode ChainId
-		if err := rlp.EncodeUint256(&auth.ChainID, w, b); err != nil {
+		if err := auth.ChainID.EncodeRLP(w); err != nil {
 			return err
 		}
 		// 2. encode Address

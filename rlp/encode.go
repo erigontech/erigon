@@ -875,32 +875,3 @@ func EncodeOptionalAddress(addr *libcommon.Address, w io.Writer, buffer []byte) 
 
 	return nil
 }
-
-func EncodeUint256(i *uint256.Int, w io.Writer, buffer []byte) error {
-	buffer[0] = 0x80
-	if i == nil {
-		_, err := w.Write(buffer[:1])
-		return err
-	}
-	nBits := i.BitLen()
-	if nBits == 0 {
-		_, err := w.Write(buffer[:1])
-		return err
-	}
-	buffer[0] = byte(i[0])
-	if nBits <= 7 {
-		_, err := w.Write(buffer[:1])
-		return err
-	}
-	nBytes := byte(libcommon.BitLenToByteLen(nBits))
-	buffer[0] = 0x80 + nBytes
-	if _, err := w.Write(buffer[:1]); err != nil {
-		return err
-	}
-	binary.BigEndian.PutUint64(buffer[0:8], i[3])
-	binary.BigEndian.PutUint64(buffer[8:16], i[2])
-	binary.BigEndian.PutUint64(buffer[16:24], i[1])
-	binary.BigEndian.PutUint64(buffer[24:32], i[0])
-	_, err := w.Write(buffer[32-nBytes:])
-	return err
-}
