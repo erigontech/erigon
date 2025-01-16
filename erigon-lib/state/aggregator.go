@@ -1559,9 +1559,6 @@ func (ac *AggregatorRoTx) HistoryStartFrom(domainName kv.Domain) uint64 {
 func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
 	// check domain iis
 	for _, d := range ac.d {
-		if d == nil {
-			continue
-		}
 		if d.d.historyIdx == name {
 			return d.ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 		}
