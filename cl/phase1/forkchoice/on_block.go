@@ -115,6 +115,7 @@ func (f *ForkChoiceStore) ProcessBlockExecution(ctx context.Context, block *clty
 
 	timeStartExec := time.Now()
 	payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+	monitor.ObserveNewPayloadTime(timeStartExec)
 	switch payloadStatus {
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot), "err", err)
@@ -135,7 +136,6 @@ func (f *ForkChoiceStore) ProcessBlockExecution(ctx context.Context, block *clty
 	if err != nil {
 		return fmt.Errorf("newPayload failed: %v", err)
 	}
-	monitor.ObserveExecutionTime(timeStartExec)
 	return nil
 }
 
@@ -213,6 +213,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 		timeStartExec := time.Now()
 		payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+		monitor.ObserveNewPayloadTime(timeStartExec)
 		switch payloadStatus {
 		case execution_client.PayloadStatusNotValidated:
 			log.Debug("OnBlock: block is not validated yet", "block", libcommon.Hash(blockRoot))
@@ -239,7 +240,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		if err != nil {
 			return fmt.Errorf("newPayload failed: %v", err)
 		}
-		monitor.ObserveExecutionTime(timeStartExec)
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
 	startStateProcess := time.Now()

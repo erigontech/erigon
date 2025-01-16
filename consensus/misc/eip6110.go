@@ -85,5 +85,8 @@ func ParseDepositLogs(logs []*types.Log, depositContractAddress libcommon.Addres
 			reqData = append(reqData, d...)
 		}
 	}
-	return &types.FlatRequest{Type: types.DepositRequestType, RequestData: reqData}, nil
+	if len(reqData) > 0 {
+		return &types.FlatRequest{Type: types.DepositRequestType, RequestData: reqData}, nil
+	}
+	return nil, nil
 }
