@@ -483,11 +483,7 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
 		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
 		pendingBlobFee := h.chainConfig.GetMinBlobGasPrice()
 		if currentHeader.ExcessBlobGas != nil {
-			nextBlockTime := currentHeader.Time + 1
-			parentHeader := rawdb.ReadHeaderByNumber(tx, currentHeader.Number.Uint64())
-			if parentHeader != nil {
-				nextBlockTime = currentHeader.Time + (currentHeader.Time - parentHeader.Time) // Approximately next block time
-			}
+			nextBlockTime := currentHeader.Time + h.chainConfig.SecondsPerSlot
 			excessBlobGas := misc.CalcExcessBlobGas(h.chainConfig, currentHeader, nextBlockTime)
 			f, err := misc.GetBlobGasPrice(h.chainConfig, excessBlobGas, nextBlockTime)
 			if err != nil {
