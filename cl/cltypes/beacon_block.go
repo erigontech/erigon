@@ -536,25 +536,28 @@ func (b *BeaconBody) GetExecutionRequests() *ExecutionRequests {
 }
 
 func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
-	ret := []hexutility.Bytes{}
 	r := b.ExecutionRequests
-	for requestType, requests := range map[byte]ssz.EncodableSSZ{
-		b.beaconCfg.DepositRequestType:       r.Deposits,
-		b.beaconCfg.WithdrawalRequestType:    r.Withdrawals,
-		b.beaconCfg.ConsolidationRequestType: r.Consolidations,
+	if r == nil {
+		return nil
+	}
+	ret := []hexutility.Bytes{}
+	for _, r := range []struct {
+		typ      byte
+		requests ssz.EncodableSSZ
+	}{
+		{b.beaconCfg.DepositRequestType, r.Deposits},
+		{b.beaconCfg.WithdrawalRequestType, r.Withdrawals},
+		{b.beaconCfg.ConsolidationRequestType, r.Consolidations},
 	} {
-		if requests != nil {
-			ssz, err := r.Deposits.EncodeSSZ(nil)
-			if err != nil {
-				log.Warn("Error encoding deposits", "err", err)
-				return nil
-			}
-			if len(ssz) == 0 {
-				continue
-			}
-			// type + ssz
-			ret = append(ret, append(hexutility.Bytes{requestType}, ssz...))
+		ssz, err := r.requests.EncodeSSZ([]byte{})
+		if err != nil {
+			log.Warn("Error encoding deposits", "err", err)
+			return nil
 		}
+		// type + ssz
+		// ret = append(ret, append(hexutility.Bytes{requestType}, ssz...))
+		// in Mekong devnet-4, we don't need to add type
+		ret = append(ret, ssz)
 	}
 	return ret
 }

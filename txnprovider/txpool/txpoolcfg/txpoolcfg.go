@@ -18,16 +18,12 @@ package txpoolcfg
 
 import (
 	"fmt"
-	"math"
 	"math/big"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
-	emath "github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/core/types"
 )
 
 // BorDefaultTxPoolPriceLimit defines the minimum gas price limit for bor to enforce txns acceptance into the pool.
@@ -189,111 +185,4 @@ func (r DiscardReason) String() string {
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
-}
-
-// CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-// TODO: move input data to a struct
-func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028, isShanghai, isPrague bool) (gas uint64, floorGas7623 uint64, d DiscardReason) {
-	// Set the starting gas for the raw transaction
-	if isContractCreation && isHomestead {
-		gas = fixedgas.TxGasContractCreation
-	} else {
-		gas = fixedgas.TxGas
-		floorGas7623 = fixedgas.TxGas
-	}
-	// Bump the required gas by the amount of transactional data
-	if dataLen > 0 {
-		// Zero and non-zero bytes are priced differently
-		nz := dataNonZeroLen
-		// Make sure we don't exceed uint64 for all data combinations
-		nonZeroGas := fixedgas.TxDataNonZeroGasFrontier
-		if isEIP2028 {
-			nonZeroGas = fixedgas.TxDataNonZeroGasEIP2028
-		}
-
-		product, overflow := emath.SafeMul(nz, nonZeroGas)
-		if overflow {
-			return 0, 0, GasUintOverflow
-		}
-		gas, overflow = emath.SafeAdd(gas, product)
-		if overflow {
-			return 0, 0, GasUintOverflow
-		}
-
-		z := dataLen - nz
-
-		product, overflow = emath.SafeMul(z, fixedgas.TxDataZeroGas)
-		if overflow {
-			return 0, 0, GasUintOverflow
-		}
-		gas, overflow = emath.SafeAdd(gas, product)
-		if overflow {
-			return 0, 0, GasUintOverflow
-		}
-
-		if isContractCreation && isShanghai {
-			numWords := toWordSize(dataLen)
-			product, overflow = emath.SafeMul(numWords, fixedgas.InitCodeWordGas)
-			if overflow {
-				return 0, 0, GasUintOverflow
-			}
-			gas, overflow = emath.SafeAdd(gas, product)
-			if overflow {
-				return 0, 0, GasUintOverflow
-			}
-		}
-
-		// EIP-7623
-		if isPrague {
-			tokenLen := dataLen + 3*nz
-			dataGas, overflow := emath.SafeMul(tokenLen, fixedgas.TxTotalCostFloorPerToken)
-			if overflow {
-				return 0, 0, GasUintOverflow
-			}
-			floorGas7623, overflow = emath.SafeAdd(floorGas7623, dataGas)
-			if overflow {
-				return 0, 0, GasUintOverflow
-			}
-		}
-	}
-	if accessList != nil {
-		product, overflow := emath.SafeMul(uint64(len(accessList)), fixedgas.TxAccessListAddressGas)
-		if overflow {
-			return 0, 0, GasUintOverflow
-		}
-		gas, overflow = emath.SafeAdd(gas, product)
-		if overflow {
-			return 0, 0, GasUintOverflow
-		}
-
-		product, overflow = emath.SafeMul(uint64(accessList.StorageKeys()), fixedgas.TxAccessListStorageKeyGas)
-		if overflow {
-			return 0, 0, GasUintOverflow
-		}
-		gas, overflow = emath.SafeAdd(gas, product)
-		if overflow {
-			return 0, 0, GasUintOverflow
-		}
-	}
-
-	// Add the cost of authorizations
-	product, overflow := emath.SafeMul(authorizationsLen, fixedgas.PerEmptyAccountCost)
-	if overflow {
-		return 0, 0, GasUintOverflow
-	}
-
-	gas, overflow = emath.SafeAdd(gas, product)
-	if overflow {
-		return 0, 0, GasUintOverflow
-	}
-
-	return gas, floorGas7623, Success
-}
-
-// toWordSize returns the ceiled word size required for memory expansion.
-func toWordSize(size uint64) uint64 {
-	if size > math.MaxUint64-31 {
-		return math.MaxUint64/32 + 1
-	}
-	return (size + 31) / 32
 }
