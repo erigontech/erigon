@@ -19,9 +19,11 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
@@ -332,6 +334,14 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	return hexutil.Uint64(hi), nil
 }
 
+func toHexutilityBytes(bytes [][]byte) []hexutility.Bytes {
+	result := make([]hexutility.Bytes, len(bytes))
+	for i, b := range bytes {
+		result[i] = hexutility.Bytes(b)
+	}
+	return result
+}
+
 // maxGetProofRewindBlockCount limits the number of blocks into the past that
 // GetProof will allow computing proofs.  Because we must rewind the hash state
 // and re-compute the state trie, the further back in time the request, the more
@@ -344,88 +354,231 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 // GetProof is partially implemented; no Storage proofs, and proofs must be for
 // blocks within maxGetProofRewindBlockCount blocks of the head.
 func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
-	return nil, errors.New("not supported by Erigon3")
-	/*
-		tx, err := api.db.BeginTemporalRo(ctx)
+	db := api.db
+	logger := api.logger
+	roTx, err := db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer roTx.Rollback()
+
+	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	if err != nil {
+		return nil, err
+	}
+
+	block, err := api.blockWithSenders(ctx, roTx, hash, blockNr)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+
+	header := block.Header()
+
+	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
+	if err != nil {
+		return nil, err
+	}
+
+	if latestBlock < blockNr {
+		// shouldn't happen, but check anyway
+		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
+	}
+
+	engine, ok := api.engine().(consensus.Engine)
+	if !ok {
+		return nil, errors.New("engine is not consensus.Engine")
+	}
+
+	roTx2, err := db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer roTx2.Rollback()
+	txBatch2 := membatchwithdb.NewMemoryBatch(roTx2, "", logger)
+	defer txBatch2.Rollback()
+
+	// Prepare witness config
+	chainConfig, err := api.chainConfig(ctx, roTx2)
+	if err != nil {
+		return nil, fmt.Errorf("error loading chain config: %v", err)
+	}
+
+	// Unwind to blockNr
+	cfg := stagedsync.StageWitnessCfg(true, 0, chainConfig, engine, api._blockReader, api.dirs)
+	// only unwind if not latest block
+	if blockNr != latestBlock {
+		// the +1 is because stage state is blockNr+1
+		err = stagedsync.RewindStagesForWitness(txBatch2, blockNr+1, latestBlock, &cfg, false, ctx, logger)
 		if err != nil {
 			return nil, err
 		}
-		defer tx.Rollback()
+	}
 
-		blockNr, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	txNumsReader := rawdbv3.TxNums
+	var stateReader state.StateReader
+	if blockNr != latestBlock {
+		stateReader, err = rpchelper.CreateHistoryStateReader(txBatch2, txNumsReader, blockNr+1, 0, chainConfig.ChainName)
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		stateReader = rpchelper.NewLatestStateReader(txBatch2)
+	}
 
-		header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNr)
+	a, err := stateReader.ReadAccountData(address)
+	if err != nil {
+		return nil, err
+	}
+	if a == nil {
+		a = &accounts.Account{}
+	}
+	rl := trie.NewRetainList(0)
+	pr, err := trie.NewProofRetainer(address, a, storageKeys, rl)
+	if err != nil {
+		return nil, err
+	}
+
+	domains, err := libstate.NewSharedDomains(txBatch2, log.New())
+	if err != nil {
+		return nil, err
+	}
+	sdCtx := domains.GetCommitmentContext()
+	patricieTrie := sdCtx.Trie()
+	hph, ok := patricieTrie.(*commitment.HexPatriciaHashed)
+	if !ok {
+		return nil, errors.New("casting to HexPatriciaTrieHashed failed")
+	}
+
+	// define these keys as "updates", but we are not really updating anything, we just want to load them into the grid,
+	// so this is just to satisfy the current hex patricia trie api.
+	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
+	updates.TouchPlainKey(string(address.Bytes()), nil, updates.TouchAccount)
+	for _, storageKey := range storageKeys {
+		// the full storage key is concat(address, storageKey) which is 20+32 = 52 bytes
+		fullStorageKey := make([]byte, 52)
+		copy(fullStorageKey[:20], address.Bytes())
+		copy(fullStorageKey[20:], storageKey.Bytes())
+		updates.TouchPlainKey(string(fullStorageKey), nil, updates.TouchAccount)
+	}
+
+	hph.SetTrace(false) // disable tracing to avoid mixing with trace from witness computation
+	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
+	witnessTrie, _, err := hph.GenerateWitness(ctx, updates, nil /* codeReads */, header.Root[:], "computeWitness(eth_getProof)")
+	if err != nil {
+		return nil, fmt.Errorf("could not generate merkle proof for account: %w", err)
+	}
+
+	accountHashedKey := hph.HashAndNibblizeKey(address.Bytes())
+	accountHashedKeyCompact, err := commitment.CompactKey(accountHashedKey)
+	if err != nil {
+		return nil, errors.New("could not compact account hashed key")
+	}
+	accInTrie, gotValue := witnessTrie.GetAccount(accountHashedKeyCompact)
+	if !gotValue {
+		return nil, errors.New("could not find account in proof trie")
+	}
+
+	accNode, gotValue := witnessTrie.GetAccountNode(accountHashedKeyCompact)
+	if !gotValue {
+		return nil, errors.New("could not find account node in proof trie")
+	}
+
+	if accInTrie != nil { // sanity checks to ensure the values from state reader much the values in trie
+		if accInTrie.Balance.Uint64() != a.Balance.Uint64() {
+			panic("differing balances between state and trie")
+		}
+		if accInTrie.Nonce != a.Nonce {
+			return nil, errors.New("differing nonces between state and trie")
+		}
+
+		if accInTrie.CodeHash != a.CodeHash {
+			return nil, errors.New("differing codehashes betweeen state and trie")
+		}
+	}
+
+	// compute account proof
+	accProof, err := witnessTrie.Prove(accountHashedKeyCompact, 0, false)
+	if err != nil {
+		return nil, err
+	}
+	pr.SetAccountProof(toHexutilityBytes(accProof))
+
+	var storageRoot libcommon.Hash
+	if !a.Initialised || accInTrie == nil { // account does not exist
+		storageRoot = libcommon.Hash{}
+	} else {
+		storageRoot = accInTrie.Root
+	}
+
+	fmt.Printf("storageRoot = %x\n", storageRoot)
+	pr.SetStorageRoot(storageRoot)
+
+	// Proofs for storage keys
+	var storageProof = make([]accounts.StorageProofResult, len(storageKeys))
+
+	// Create the proofs for the storageKeys.
+	for i, key := range storageKeys {
+		if !a.Initialised || accInTrie == nil { // account does not exist
+			storageProof[i] = accounts.StorageProofResult{Key: key, Value: (*hexutil.Big)(libcommon.Big0), Proof: nil}
+			continue
+		}
+		// Get storage value
+		value, err := stateReader.ReadAccountStorage(address, 0, &key)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to get storage value for key %x : %w", key, err)
 		}
 
-		latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
-		if err != nil {
-			return nil, err
-		}
+		// Decode the hexadecimal string into the big.Int
+		// The base is 16 for hexadecimal
+		valueAsBigInt := new(big.Int)
+		valueAsBigInt.SetString(hex.EncodeToString(value), 16)
+		storageValue := (*hexutil.Big)(unsafe.Pointer(valueAsBigInt))
 
-		if latestBlock < blockNr {
-			// shouldn't happen, but check anyway
-			return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
-		}
-
-		rl := trie.NewRetainList(0)
-		var loader *trie.FlatDBTrieLoader
-		if blockNr < latestBlock {
-			if latestBlock-blockNr > uint64(api.MaxGetProofRewindBlockCount) {
-				return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", uint64(api.MaxGetProofRewindBlockCount), latestBlock)
-			}
-			batch := membatchwithdb.NewMemoryBatch(tx, api.dirs.Tmp, api.logger)
-			defer batch.Rollback()
-
-			unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr}
-			stageState := &stagedsync.StageState{BlockNumber: latestBlock}
-
-			hashStageCfg := stagedsync.StageHashStateCfg(nil, api.dirs, api.historyV3(batch))
-			if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx, api.logger); err != nil {
-				return nil, err
-			}
-
-			interHashStageCfg := stagedsync.StageTrieCfg(nil, false, false, false, api.dirs.Tmp, api._blockReader, nil, api.historyV3(batch), api._agg)
-			loader, err = stagedsync.UnwindIntermediateHashesForTrieLoader("eth_getProof", rl, unwindState, stageState, batch, interHashStageCfg, nil, nil, ctx.Done(), api.logger)
-			if err != nil {
-				return nil, err
-			}
-			tx = batch
+		if storageRoot == trie.EmptyRoot {
+			storageProof[i] = accounts.StorageProofResult{Key: key, Value: storageValue, Proof: nil}
 		} else {
-			loader = trie.NewFlatDBTrieLoader("eth_getProof", rl, nil, nil, false)
+			var fullStorageKey []byte
+			fullStorageKey = append(fullStorageKey, crypto.Keccak256(address.Bytes())...)
+			fullStorageKey = append(fullStorageKey, crypto.Keccak256(key.Bytes())...)
+
+			// fullStorageKey := make([]byte, 64)
+			// copy(fullStorageKey[:32], accountHashedKeyCompact)
+			// copy(fullStorageKey[32:], crypto.Keccak256(key.Bytes()))
+			// Get the proof for the storage key in the storage trie
+			storageTrie := trie.NewInMemoryTrie(accNode.Storage)
+			storageKeyProof, err := storageTrie.Prove(fullStorageKey[32:], 0 /*fromLevel */, false /* storage */)
+			if err != nil {
+				return nil, fmt.Errorf("failed to prove storage key %x : %w", key, err)
+			}
+
+			storageProof[i] = accounts.StorageProofResult{Key: key, Value: storageValue, Proof: toHexutilityBytes(storageKeyProof)}
 		}
 
-		reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, "")
-		if err != nil {
-			return nil, err
-		}
-		a, err := reader.ReadAccountData(address)
-		if err != nil {
-			return nil, err
-		}
-		if a == nil {
-			a = &accounts.Account{}
-		}
-		pr, err := trie.NewProofRetainer(address, a, storageKeys, rl)
-		if err != nil {
-			return nil, err
-		}
+	}
+	pr.SetStorageProof(storageProof)
+	proofResult, err := pr.ProofResult()
+	if err != nil {
+		return nil, fmt.Errorf("failed to produce final proof result: %w", err)
+	}
 
-		loader.SetProofRetainer(pr)
-		root, err := loader.CalcTrieRoot(tx, nil)
-		if err != nil {
-			return nil, err
-		}
+	// Verify proofs before returning result to the user
+	err = trie.VerifyAccountProof(header.Root, proofResult)
+	if err != nil {
+		return nil, fmt.Errorf("internal error: failed to verify account proof for generated proof : %w", err)
+	}
 
-		if root != header.Root {
-			return nil, fmt.Errorf("mismatch in expected state root computed %v vs %v indicates bug in proof implementation", root, header.Root)
+	// verify storage proofs
+	for _, storageProof := range proofResult.StorageProof {
+		err = trie.VerifyStorageProof(proofResult.StorageHash, storageProof)
+		if err != nil {
+			return nil, fmt.Errorf("internal error: failed to verify storage proof for key=%x : %w", storageProof.Key.Bytes(), err)
 		}
-		return pr.ProofResult()
-	*/
+	}
+
+	return proofResult, nil
 }
 
 func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {

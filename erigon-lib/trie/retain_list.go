@@ -21,10 +21,7 @@ package trie
 
 import (
 	"bytes"
-	"encoding/binary"
-	"errors"
 	"fmt"
-	"math/big"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -32,8 +29,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/common/length"
-
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
@@ -108,6 +103,9 @@ type DefaultProofRetainer struct {
 	accHexKey      []byte
 	storageKeys    []libcommon.Hash
 	storageHexKeys [][]byte
+	storageRoot    libcommon.Hash
+	accountProof   []hexutility.Bytes // list of RLP encoded nodes in merkle path starting from root leading to the account node
+	storageProof   []accounts.StorageProofResult
 	proofs         []*proofElement
 }
 
@@ -124,17 +122,16 @@ func NewProofRetainer(addr libcommon.Address, a *accounts.Account, storageKeys [
 	accHexKey := rl.AddKey(addrHash[:])
 
 	storageHexKeys := make([][]byte, len(storageKeys))
-	for i, sk := range storageKeys {
-		storageHash, err := libcommon.HashData(sk[:])
+	for i, storageKey := range storageKeys {
+		storageHash, err := libcommon.HashData(storageKey[:])
 		if err != nil {
 			return nil, err
 		}
 
-		var compactEncoded [72]byte
-		copy(compactEncoded[:32], addrHash[:])
-		binary.BigEndian.PutUint64(compactEncoded[32:40], a.Incarnation)
-		copy(compactEncoded[40:], storageHash[:])
-		storageHexKeys[i] = rl.AddKey(compactEncoded[:])
+		var compactEncodedStorageKey [64]byte
+		copy(compactEncodedStorageKey[:32], addrHash[:])
+		copy(compactEncodedStorageKey[32:], storageHash[:])
+		storageHexKeys[i] = rl.AddKey(compactEncodedStorageKey[:])
 	}
 
 	return &DefaultProofRetainer{
@@ -145,6 +142,22 @@ func NewProofRetainer(addr libcommon.Address, a *accounts.Account, storageKeys [
 		storageKeys:    storageKeys,
 		storageHexKeys: storageHexKeys,
 	}, nil
+}
+
+func (pr *DefaultProofRetainer) SetStorageRoot(storageRoot libcommon.Hash) {
+	pr.storageRoot = storageRoot
+}
+
+func (pr *DefaultProofRetainer) AddProof(proof *proofElement) {
+	pr.proofs = append(pr.proofs, proof)
+}
+
+func (pr *DefaultProofRetainer) SetAccountProof(accountProof []hexutility.Bytes) {
+	pr.accountProof = accountProof
+}
+
+func (pr *DefaultProofRetainer) SetStorageProof(storageProof []accounts.StorageProofResult) {
+	pr.storageProof = storageProof
 }
 
 // ProofElement requests a new proof element for a given prefix.  This proof
@@ -183,66 +196,14 @@ func (pr *DefaultProofRetainer) ProofElement(prefix []byte) *proofElement {
 // supplied by the Load operation of the trie construction.
 func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) {
 	result := &accounts.AccProofResult{
-		Address:  pr.addr,
-		Balance:  (*hexutil.Big)(pr.acc.Balance.ToBig()),
-		Nonce:    hexutil.Uint64(pr.acc.Nonce),
-		CodeHash: pr.acc.CodeHash,
+		Address:      pr.addr,
+		AccountProof: pr.accountProof,
+		Balance:      (*hexutil.Big)(pr.acc.Balance.ToBig()),
+		Nonce:        hexutil.Uint64(pr.acc.Nonce),
+		CodeHash:     pr.acc.CodeHash,
+		StorageHash:  pr.storageRoot,
+		StorageProof: pr.storageProof,
 	}
-
-	for _, pe := range pr.proofs {
-		if !bytes.HasPrefix(pr.accHexKey, pe.hexKey) {
-			continue
-		}
-		result.AccountProof = append(result.AccountProof, pe.proof.Bytes())
-		if bytes.Equal(pr.accHexKey, pe.storageRootKey) {
-			result.StorageHash = pe.storageRoot
-		}
-	}
-
-	if pr.acc.Initialised && result.StorageHash == (libcommon.Hash{}) {
-		return nil, errors.New("did not find storage root in proof elements")
-	}
-
-	result.StorageProof = make([]accounts.StorProofResult, len(pr.storageKeys))
-	for i, sk := range pr.storageKeys {
-		result.StorageProof[i].Key = sk
-		hexKey := pr.storageHexKeys[i]
-		if !pr.acc.Initialised || result.StorageHash == EmptyRoot {
-			// The yellow paper makes it clear that the EmptyRoot is a special case
-			// when the trie has no nodes, but EIP-1186 states that the proof is
-			// "starting with the storageHash-Node".  Since the trie has no nodes,
-			// it's unclear whether the correct proof should contain the EmptyRoot
-			// pre-image of RLP([]byte(nil)), or be empty.  This implementation
-			// chooses 'empty' as it seems more consistent and it is expected that
-			// provers will treat the EmptyRoot as a special case and ignore the proof
-			// bytes.
-			result.StorageProof[i].Value = (*hexutil.Big)(new(big.Int))
-			result.StorageProof[i].Proof = make([]hexutility.Bytes, 0)
-			continue
-		}
-
-		for _, pe := range pr.proofs {
-			if len(pe.hexKey) <= 2*32 {
-				// Ignore the proof elements above the storage tree (64 bytes, as nibble
-				// encoded)
-				continue
-			}
-			if !bytes.HasPrefix(hexKey, pe.hexKey) {
-				continue
-			}
-
-			if pe.storageValue != nil && bytes.Equal(pe.storageKey, hexKey[2*(length.Hash+length.Incarnation):]) {
-				result.StorageProof[i].Value = (*hexutil.Big)(pe.storageValue.ToBig())
-			}
-
-			result.StorageProof[i].Proof = append(result.StorageProof[i].Proof, pe.proof.Bytes())
-		}
-
-		if result.StorageProof[i].Value == nil {
-			result.StorageProof[i].Value = (*hexutil.Big)(new(big.Int))
-		}
-	}
-
 	return result, nil
 }
 

@@ -371,6 +371,11 @@ func (t *Trie) GetAccountCodeSize(key []byte) (value int, gotValue bool) {
 	return 0, gotValue
 }
 
+func (t *Trie) GetAccountNode(key []byte) (value *AccountNode, gotValue bool) {
+	hex := keybytesToHex(key)
+	return t.getAccount(t.RootNode, hex, 0)
+}
+
 func (t *Trie) getAccount(origNode Node, key []byte, pos int) (value *AccountNode, gotValue bool) {
 	switch n := (origNode).(type) {
 	case nil:
