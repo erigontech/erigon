@@ -1,4 +1,4 @@
-# `Ethdb` package hold's bouquet of objects to access DB
+# `Ethdb` package holds bouquet of objects to access DB
 
 Words "KV" and "DB" have special meaning here:
 
