@@ -208,6 +208,7 @@ Sequencer specific config:
 
 Resource Utilisation config:
 - `zkevm.smt-regenerate-in-memory`: As documented above, allows SMT regeneration in memory if machine has enough RAM, for a speedup in initial sync.
+- `zkevm.shadow-sequencer`: Defaulted to false. Allows the sequencer to lag behind the latest L1 batch. Used for local testing.
 
 Useful config entries:
 - `zkevm.sync-limit`: This will ensure the network only syncs to a given block height.
