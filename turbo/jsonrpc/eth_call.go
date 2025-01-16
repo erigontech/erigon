@@ -19,7 +19,6 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -360,29 +359,17 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, errors.New("proofs are available only for the 'latest' block")
 	}
 
-	return api.getProof(ctx, address, storageKeys, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(latestBlock)), api.db, api.logger)
+	return api.getProof(ctx, &roTx, address, storageKeys, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(latestBlock)), api.db, api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
-	roTx, err := api.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer roTx.Rollback()
-
+func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
 	// get the root hash from header to validate proofs along the way
-	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNrOrHash.BlockNumber.Uint64())
+	header, err := api._blockReader.HeaderByNumber(ctx, *roTx, blockNrOrHash.BlockNumber.Uint64())
 	if err != nil {
 		return nil, err
 	}
 
-	roTx2, err := db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer roTx2.Rollback()
-
-	domains, err := libstate.NewSharedDomains(roTx2, log.New())
+	domains, err := libstate.NewSharedDomains(*roTx, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -397,11 +384,10 @@ func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, sto
 		return nil, err
 	}
 
-	a := new(big.Int).SetInt64(0)
 	// set initial response fields
 	proof := &accounts.AccProofResult{
 		Address:      address,
-		Balance:      (*hexutil.Big)(a),
+		Balance:      new(hexutil.Big),
 		Nonce:        hexutil.Uint64(0),
 		CodeHash:     libcommon.Hash{},
 		StorageHash:  libcommon.Hash{},
@@ -409,7 +395,7 @@ func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, sto
 	}
 
 	// get account proof
-	accountProof, _, err := proofTrie.Prove(crypto.Keccak256(address.Bytes()), 0, false)
+	accountProof, err := proofTrie.Prove(crypto.Keccak256(address.Bytes()), 0, false)
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +407,7 @@ func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, sto
 		for i, k := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
 				Key:   k,
-				Value: (*hexutil.Big)(a),
+				Value: new(hexutil.Big),
 				Proof: nil,
 			}
 		}
@@ -447,16 +433,24 @@ func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, sto
 		}
 	}
 
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, "")
+	if err != nil {
+		return nil, err
+	}
+
 	// get storage key proofs
 	for i, keyHash := range storageKeys {
 		proof.StorageProof[i].Key = keyHash
 
-		n := new(big.Int)
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(libcommon.BytesToHash(commitment.EmptyRootHash)) == 0 {
-			n.SetInt64(0)
 			proof.StorageProof[i].Proof = nil
-			proof.StorageProof[i].Value = (*hexutil.Big)(unsafe.Pointer(n))
+			proof.StorageProof[i].Value = new(hexutil.Big)
 			continue
 		}
 
@@ -466,17 +460,23 @@ func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, sto
 		fullKey = append(fullKey, crypto.Keccak256(keyHash.Bytes())...)
 
 		// get proof for the given key
-		storageProof, value, err := proofTrie.Prove(fullKey, len(proof.AccountProof), true)
+		storageProof, err := proofTrie.Prove(fullKey, len(proof.AccountProof), true)
 		if err != nil {
 			return nil, errors.New("cannot verify store proof")
 		}
 
-		n.SetString(hex.EncodeToString(value), 16)
-		proof.StorageProof[i].Value = (*hexutil.Big)(unsafe.Pointer(n))
+		res, err := reader.ReadAccountStorage(address, acc.Incarnation, &keyHash)
+		if err != nil {
+			res = []byte{}
+			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
+		}
+		n := new(big.Int)
+		n.SetBytes(res)
+		proof.StorageProof[i].Value = (*hexutil.Big)(n)
 
 		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutility.Bytes{[]byte{0x80}}
-		if storageProof != nil && len(storageProof) != 0 {
+		if len(storageProof) != 0 {
 			proof.StorageProof[i].Proof = *(*[]hexutility.Bytes)(unsafe.Pointer(&storageProof))
 		}
 	}

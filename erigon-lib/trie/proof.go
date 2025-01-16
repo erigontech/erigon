@@ -31,14 +31,13 @@ import (
 
 // Prove constructs a merkle proof for key. The result contains all encoded nodes
 // on the path to the value at key. The value itself is also included in the last
-// node and can be retrieved by verifying the proof. Value is returned as well.
+// node and can be retrieved by verifying the proof.
 //
 // If the trie does not contain a value for key, the returned proof contains all
 // nodes of the longest existing prefix of the key (at least the root node), ending
 // with the node that proves the absence of the key.
-func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, []byte, error) {
+func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) {
 	var proof [][]byte
-	var value []byte
 	hasher := newHasher(t.valueNodesRLPEncoded)
 	defer returnHasherToPool(hasher)
 	// Collect all nodes on the path to key.
@@ -52,7 +51,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, []byte,
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
 					proof = append(proof, libcommon.CopyBytes(rlp))
 				} else {
-					return nil, value, err
+					return nil, err
 				}
 			}
 			nKey := n.Key
@@ -64,9 +63,6 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, []byte,
 				tn = nil
 			} else {
 				tn = n.Val
-				if valNode, ok := n.Val.(ValueNode); ok {
-					value = valNode
-				}
 				key = key[len(nKey):]
 			}
 			if fromLevel > 0 {
@@ -77,7 +73,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, []byte,
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
 					proof = append(proof, libcommon.CopyBytes(rlp))
 				} else {
-					return nil, value, err
+					return nil, err
 				}
 			}
 			i1, i2 := n.childrenIdx()
@@ -99,7 +95,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, []byte,
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
 					proof = append(proof, libcommon.CopyBytes(rlp))
 				} else {
-					return nil, value, err
+					return nil, err
 				}
 			}
 			tn = n.Children[key[0]]
@@ -114,15 +110,14 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, []byte,
 				tn = nil
 			}
 		case ValueNode:
-			value = n
 			tn = nil
 		case HashNode:
-			return nil, value, fmt.Errorf("encountered hashNode unexpectedly, key %x, fromLevel %d", key, fromLevel)
+			return nil, fmt.Errorf("encountered hashNode unexpectedly, key %x, fromLevel %d", key, fromLevel)
 		default:
 			panic(fmt.Sprintf("%T: invalid node: %v", tn, tn))
 		}
 	}
-	return proof, value, nil
+	return proof, nil
 }
 
 func decodeRef(buf []byte) (Node, []byte, error) {
