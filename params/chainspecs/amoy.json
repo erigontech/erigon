@@ -16,7 +16,6 @@
       "0": "0x000000000000000000000000000000000000dead",
       "73100": "0xeCDD77cE6f146cCf5dab707941d318Bd50eeD2C9"
     },
-    "secondsPerSlot": 2,
     "bor": {
       "period": {
         "0": 2

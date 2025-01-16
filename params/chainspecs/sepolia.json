@@ -18,6 +18,5 @@
   "shanghaiTime": 1677557088,
   "cancunTime": 1706655072,
   "depositContractAddress": "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D",
-  "secondsPerSlot": 12,
   "ethash": {}
 }

@@ -23,7 +23,6 @@
     "0": "0x1559000000000000000000000000000000000000"
   },
   "depositContractAddress": "0xb97036A26259B7147018913bD58a774cf91acf25",
-  "secondsPerSlot": 5,
   "aura": {
     "stepDuration": 5,
     "blockReward": 0,
