@@ -52,36 +52,37 @@ LOOP:
 	for blockNum := startBlockNum; blockNum < endBlockNum; blockNum++ {
 		blockNum := blockNum
 		eg.Go(func() error {
-			blockFields, err := fetchBlockViaRpcWithRetry(ctx, logger, rpcUrl, blockNum)
+			r1, err := fetchBlockViaRpcWithRetry(ctx, logger, rpcUrl, blockNum)
 			if err != nil {
 				return err
 			}
 
-			goldenBlockFields, err := fetchBlockViaRpcWithRetry(ctx, logger, secondaryRpcUrl, blockNum)
+			r2, err := fetchBlockViaRpcWithRetry(ctx, logger, secondaryRpcUrl, blockNum)
 			if err != nil {
 				return err
 			}
 
-			resultMap := blockFields["result"].(map[string]interface{})
-			goldenResultMap := goldenBlockFields["result"].(map[string]interface{})
+			resultMap1 := r1["result"].(map[string]interface{})
+			resultMap2 := r2["result"].(map[string]interface{})
 
-			hash, goldenHash := resultMap["hash"].(string), goldenResultMap["hash"].(string)
-			if hash != goldenHash {
-				return fmt.Errorf("header hash mismatch: blockNum=%d, hash=%s, goldenHash=%s", blockNum, hash, goldenHash)
+			hash1, hash2 := resultMap1["hash"].(string), resultMap2["hash"].(string)
+			if hash1 != hash2 {
+				return fmt.Errorf("header Hash mismatch: blockNum=%v, %v vs %v", blockNum, hash1, hash2)
 			}
 
-			transactionsRootHash, goldenTransactionsRootHash := resultMap["transactionsRoot"].(string), goldenResultMap["transactionsRoot"].(string)
-			if transactionsRootHash != goldenTransactionsRootHash {
-				return fmt.Errorf("transactionsRoot hash mismatch: blockNum=%d, transactionsRootHash=%s, goldenTransactionsRootHash=%s", blockNum, transactionsRootHash, goldenTransactionsRootHash)
+			transactionsRoot1, transactionsRoot2 := resultMap1["transactionsRoot"].(string), resultMap2["transactionsRoot"].(string)
+			if transactionsRoot1 != transactionsRoot2 {
+				return fmt.Errorf("header TransactionsRoot mismatch: blockNum=%v, %v vs %v", blockNum, transactionsRoot1, transactionsRoot2)
 			}
 
-			transactions, goldenTransactions := resultMap["transactions"].([]interface{}), goldenResultMap["transactions"].([]interface{})
-			if len(transactions) != len(goldenTransactions) {
-				return fmt.Errorf("transactions length mismatch: blockNum=%d, transactions=%d, goldenTransactions=%d", blockNum, len(transactions), len(goldenTransactions))
+			transactionHashes1, transactionHashes2 := resultMap1["transactions"].([]interface{}), resultMap2["transactions"].([]interface{})
+			if len(transactionHashes1) != len(transactionHashes2) {
+				return fmt.Errorf("header Transactions length mismatch: blockNum=%v, %v vs %v", blockNum, len(transactionHashes1), len(transactionHashes2))
 			}
-			for i, transaction := range transactions {
-				if transaction.(string) != goldenTransactions[i].(string) {
-					return fmt.Errorf("transaction mismatch: blockNum=%d, transactionIdx=%d, transaction=%s, goldenTransaction=%s", blockNum, i, transaction, goldenTransactions[i])
+			for i, transactionHash1 := range transactionHashes1 {
+				transactionHash2 := transactionHashes2[i]
+				if transactionHash1.(string) != transactionHash2.(string) {
+					return fmt.Errorf("transaction Hash mismatch: blockNum=%d, transactionIdx=%d, %v vs %v", blockNum, i, transactionHash1, transactionHash2)
 				}
 			}
 
