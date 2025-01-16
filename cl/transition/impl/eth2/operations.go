@@ -322,13 +322,6 @@ func (I *impl) ProcessWithdrawals(
 		}
 	}
 
-	if s.Version() >= clparams.ElectraVersion {
-		// Update pending partial withdrawals [New in Electra:EIP7251]
-		pendingPartialWithdrawal := s.GetPendingPartialWithdrawals()
-		pendingPartialWithdrawal.Cut(int(partialWithdrawalsCount))
-		s.SetPendingPartialWithdrawals(pendingPartialWithdrawal)
-	}
-
 	if err := solid.RangeErr[*cltypes.Withdrawal](withdrawals, func(_ int, w *cltypes.Withdrawal, _ int) error {
 		if err := state.DecreaseBalance(s, w.Validator, w.Amount); err != nil {
 			return err
@@ -338,10 +331,17 @@ func (I *impl) ProcessWithdrawals(
 		return err
 	}
 
+	if s.Version() >= clparams.ElectraVersion {
+		// Update pending partial withdrawals [New in Electra:EIP7251]
+		pendingPartialWithdrawal := s.GetPendingPartialWithdrawals()
+		pendingPartialWithdrawal.Cut(int(partialWithdrawalsCount))
+		s.SetPendingPartialWithdrawals(pendingPartialWithdrawal)
+	}
+
 	// Update next withdrawal index based on number of withdrawals.
 	if withdrawals.Len() > 0 {
-		lastWithdrawalIndex := withdrawals.Get(withdrawals.Len() - 1).Index
-		s.SetNextWithdrawalIndex(lastWithdrawalIndex + 1)
+		latestWithdrawalIndex := withdrawals.Get(withdrawals.Len() - 1).Index
+		s.SetNextWithdrawalIndex(latestWithdrawalIndex + 1)
 	}
 
 	// Update next withdrawal validator index based on number of withdrawals.
