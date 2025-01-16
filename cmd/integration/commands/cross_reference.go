@@ -52,13 +52,19 @@ LOOP:
 	for blockNum := startBlockNum; blockNum < endBlockNum; blockNum++ {
 		blockNum := blockNum
 		eg.Go(func() error {
-			r1, err := fetchBlockViaRpcWithRetry(ctx, logger, rpcUrl, blockNum)
-			if err != nil {
+			var r1, r2 map[string]interface{}
+			subEg, ctx := errgroup.WithContext(ctx)
+			subEg.Go(func() error {
+				var err error
+				r1, err = fetchBlockViaRpcWithRetry(ctx, logger, rpcUrl, blockNum)
 				return err
-			}
-
-			r2, err := fetchBlockViaRpcWithRetry(ctx, logger, secondaryRpcUrl, blockNum)
-			if err != nil {
+			})
+			subEg.Go(func() error {
+				var err error
+				r2, err = fetchBlockViaRpcWithRetry(ctx, logger, secondaryRpcUrl, blockNum)
+				return err
+			})
+			if err := subEg.Wait(); err != nil {
 				return err
 			}
 
