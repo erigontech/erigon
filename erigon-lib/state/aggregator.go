@@ -1557,24 +1557,21 @@ func (ac *AggregatorRoTx) HistoryStartFrom(domainName kv.Domain) uint64 {
 }
 
 func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
-	switch name {
-	case kv.AccountsHistoryIdx:
-		return ac.d[kv.AccountsDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
-	case kv.StorageHistoryIdx:
-		return ac.d[kv.StorageDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
-	case kv.CodeHistoryIdx:
-		return ac.d[kv.CodeDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
-	case kv.CommitmentHistoryIdx:
-		return ac.d[kv.StorageDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
-	case kv.ReceiptHistoryIdx:
-		return ac.d[kv.ReceiptDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
-	default:
-		// check the ii
-		if ii := ac.searchII(name); ii != nil {
-			return ii.IdxRange(k, fromTs, toTs, asc, limit, tx)
+	// check domain iis
+	for _, d := range ac.d {
+		if d == nil {
+			continue
 		}
-		return nil, fmt.Errorf("unexpected history name: %s", name)
+		if d.d.historyIdx == name {
+			return d.ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
+		}
 	}
+
+	// check the ii
+	if ii := ac.searchII(name); ii != nil {
+		return ii.IdxRange(k, fromTs, toTs, asc, limit, tx)
+	}
+	return nil, fmt.Errorf("unexpected history name: %s", name)
 }
 
 // -- range end

@@ -73,6 +73,7 @@ var Schema = map[kv.Domain]domainCfg{
 		crossDomainIntegrity: domainIntegrityCheck,
 		Compression:          seg.CompressNone,
 		CompressCfg:          DomainCompressCfg,
+		historyIdx:           kv.AccountsHistoryIdx,
 
 		hist: histCfg{
 			valuesTable: kv.TblAccountHistoryVals,
@@ -94,6 +95,7 @@ var Schema = map[kv.Domain]domainCfg{
 		IndexList:   AccessorBTree | AccessorExistence,
 		Compression: seg.CompressKeys,
 		CompressCfg: DomainCompressCfg,
+		historyIdx:  kv.StorageHistoryIdx,
 
 		hist: histCfg{
 			valuesTable: kv.TblStorageHistoryVals,
@@ -116,6 +118,7 @@ var Schema = map[kv.Domain]domainCfg{
 		Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 		CompressCfg: DomainCompressCfg,
 		largeValues: true,
+		historyIdx:  kv.CodeHistoryIdx,
 
 		hist: histCfg{
 			valuesTable: kv.TblCodeHistoryVals,
@@ -138,6 +141,7 @@ var Schema = map[kv.Domain]domainCfg{
 		Compression:         seg.CompressKeys,
 		CompressCfg:         DomainCompressCfg,
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
+		historyIdx:          kv.CommitmentHistoryIdx,
 
 		hist: histCfg{
 			valuesTable: kv.TblCommitmentHistoryVals,
@@ -160,6 +164,7 @@ var Schema = map[kv.Domain]domainCfg{
 		IndexList:   AccessorBTree | AccessorExistence,
 		Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 		CompressCfg: DomainCompressCfg,
+		historyIdx:  kv.ReceiptHistoryIdx,
 
 		hist: histCfg{
 			valuesTable: kv.TblReceiptHistoryVals,
