@@ -121,7 +121,10 @@ var readDomains = &cobra.Command{
 }
 
 func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
-	sn, bsn, agg, _, _, _ := allSnapshots(ctx, chainDb, logger)
+	sn, bsn, agg, _, _, _, err := allSnapshots(ctx, chainDb, logger)
+	if err != nil {
+		return err
+	}
 	defer sn.Close()
 	defer bsn.Close()
 	defer agg.Close()
