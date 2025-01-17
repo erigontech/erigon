@@ -54,7 +54,6 @@ const (
 	BlobTxType
 	SetCodeTxType
 	AccountAbstractionTxType
-	AccountAbstractionBatchHeaderType
 )
 
 // Transaction is an Ethereum transaction.

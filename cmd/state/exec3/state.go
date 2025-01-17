@@ -273,8 +273,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
-		if txTask.Tx.Type() == types.AccountAbstractionBatchHeaderType {
-			batchHeaderTxn := txTask.Tx.(*types.AccountAbstractionBatchHeaderTransaction)
+		if txTask.Tx.Type() == types.AccountAbstractionTxType {
+			batchHeaderTxn, ok := txTask.Tx.(*types.AccountAbstractionBatchHeaderTransaction)
+			if !ok {
+				break // this is an AA transaction that should have already been executed at batch header
+			}
 
 			startIdx := uint64(txTask.TxIndex + 1)
 			endIdx := startIdx + batchHeaderTxn.TransactionCount
@@ -285,7 +288,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			for i := startIdx; i <= endIdx; i++ {
 				// check if next n transactions are AA transactions and run validation
 				if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
-					aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction)
+					aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
+					if !ok {
+						outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
+						break
+					}
+
 					paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, rw.taskGasPool, header, rw.evm, rw.chainConfig)
 					if err != nil {
 						outerErr = err
@@ -309,7 +317,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 
 			// execute batch txns
 			for i := startIdx; i <= endIdx; i++ {
-				aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction)
+				aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction) // type cast checked earlier
 				validationRes := validationResults[i-startIdx]
 
 				execStatus, execReturnData, postOpReturnData, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm)
@@ -330,11 +338,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 				break
 			}
 
-		}
-
-		if txTask.Tx.Type() == types.AccountAbstractionTxType {
-			// already executed at batch header
-			break
 		}
 
 		msg := txTask.TxAsMessage

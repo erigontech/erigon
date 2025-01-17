@@ -33,7 +33,7 @@ func (tx *AccountAbstractionBatchHeaderTransaction) SetTxnIndex(txnIndex uint64)
 // Transaction interface
 
 func (tx *AccountAbstractionBatchHeaderTransaction) Type() byte {
-	return AccountAbstractionBatchHeaderType
+	return AccountAbstractionTxType
 }
 
 func (tx *AccountAbstractionBatchHeaderTransaction) GetChainID() *uint256.Int {
