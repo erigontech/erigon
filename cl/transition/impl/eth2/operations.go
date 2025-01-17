@@ -352,8 +352,9 @@ func (I *impl) ProcessWithdrawals(
 		nextIndex := s.NextWithdrawalValidatorIndex() + beaconConfig.MaxValidatorsPerWithdrawalsSweep
 		s.SetNextWithdrawalValidatorIndex(nextIndex % numValidators)
 	}
-
-	log.Info("Withdrawals processed", "num_withdrawals", withdrawals.Len())
+	if withdrawals.Len() > 0 {
+		log.Info("Withdrawals processed", "num_withdrawals", withdrawals.Len())
+	}
 	return nil
 }
 
