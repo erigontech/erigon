@@ -606,3 +606,15 @@ func TestCopyTxs(t *testing.T) {
 	copies := CopyTxs(txs)
 	assert.Equal(t, txs, copies)
 }
+
+func TestCopyHeader(t *testing.T) {
+	// please update copy function to include new attribute
+	// if this test fails when adding a new attribute to the Header struct
+	const runCount = 1000
+	tr := NewTRand()
+	for range make([]byte, runCount) {
+		h1 := tr.RandHeader()
+		h2 := CopyHeader(h1)
+		require.Equal(t, h1, h2)
+	}
+}
