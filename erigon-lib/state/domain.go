@@ -109,8 +109,6 @@ type domainCfg struct {
 
 	// restricts subset file deletions on domain open/close. Needed to hold files until commitment is merged
 	restrictSubsetFileDeletions bool
-
-	historyIdx kv.InvertedIdx
 }
 
 type domainVisible struct {
