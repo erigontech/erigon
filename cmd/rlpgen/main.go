@@ -205,10 +205,11 @@ func addEncodeLogic(b1, b2, b3 *bytes.Buffer, named *types.Named) error {
 
 			matchStrTypeToFunc(strTyp)(b1, b2, b3, _struct.Field(i).Type(), _struct.Field(i).Name())
 		}
-	} else {
-
-		// TODO(racytech): see handleType
 	}
+	// else {
+
+	// 	// TODO(racytech): see handleType
+	// }
 
 	return nil
 }
