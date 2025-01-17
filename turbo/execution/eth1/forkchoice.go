@@ -186,7 +186,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		if e.config.IsOptimism() {
 			// op-node does not handle SYNCING as asynchronous forkChoiceUpdated.
 			// return an error and make op-node retry
-			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, errors.New("cannot update forkchoice. execution service is busy"))
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, errors.New("cannot update forkchoice. execution service is busy"), false)
 			return
 		}
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
