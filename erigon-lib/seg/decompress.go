@@ -658,6 +658,16 @@ func (d *Decompressor) EmptyWordsCount() int { return int(d.emptyWordsCount) }
 // Getter is not thread-safe, but there can be multiple getters used simultaneously and concurrently
 // for the same decompressor
 func (d *Decompressor) MakeGetter() *Getter {
+	log.Info(
+		"makeGetter decompressor info",
+		"wordsCount", d.wordsCount,
+		"emptyWordsCount", d.emptyWordsCount,
+		"serializedDictSize", d.serializedDictSize,
+		"wordsStart", d.wordsStart,
+		"size", d.size,
+		"wordsSize", uint64(d.size)-d.wordsStart,
+	)
+
 	return &Getter{
 		posDict:     d.posDict,
 		data:        d.data[d.wordsStart:],

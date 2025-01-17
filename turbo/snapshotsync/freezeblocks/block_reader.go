@@ -506,7 +506,7 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 	}
 	defer release()
 
-	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
+	h, _, err = r.HeaderFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -586,7 +586,7 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 	}
 	defer release()
 
-	header, _, err := r.headerFromSnapshot(blockHeight, seg, nil)
+	header, _, err := r.HeaderFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return h, false, err
 	}
@@ -620,7 +620,7 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 	}
 	defer release()
 
-	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
+	h, _, err = r.HeaderFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return h, err
 	}
@@ -827,7 +827,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	defer release()
 
 	var buf []byte
-	h, buf, err := r.headerFromSnapshot(blockHeight, seg, buf)
+	h, buf, err := r.HeaderFromSnapshot(blockHeight, seg, buf)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -899,7 +899,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	return block, senders, nil
 }
 
-func (r *BlockReader) headerFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment, buf []byte) (*types.Header, []byte, error) {
+func (r *BlockReader) HeaderFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment, buf []byte) (*types.Header, []byte, error) {
 	index := sn.Src().Index()
 	if index == nil {
 		return nil, buf, nil
@@ -1514,7 +1514,7 @@ func (r *BlockReader) LastFrozenCheckpointId() uint64 {
 // ---- Data Integrity part ----
 
 func (r *BlockReader) ensureHeaderNumber(n uint64, seg *snapshotsync.VisibleSegment) error {
-	h, _, err := r.headerFromSnapshot(n, seg, nil)
+	h, _, err := r.HeaderFromSnapshot(n, seg, nil)
 	if err != nil {
 		return err
 	}

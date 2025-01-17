@@ -35,7 +35,7 @@ var (
 	reset, noCommit                          bool
 	resetPruneAt                             bool
 	bucket                                   string
-	datadirCli, toChaindata                  string
+	datadirCli, datadirCli2, toChaindata     string
 	migration                                string
 	integrityFast, integritySlow             bool
 	file                                     string
@@ -51,6 +51,7 @@ var (
 	outputCsvFile                            string
 
 	startTxNum uint64
+	from, to   uint64
 
 	dbWriteMap bool
 
@@ -147,6 +148,20 @@ func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
 
 	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
+}
+
+func with2DataDirs(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&datadirCli2, "datadir2", "", "secondary datadir for comparisons")
+	must(cmd.MarkFlagRequired("datadir2"))
+	must(cmd.MarkFlagDirname("datadir2"))
+}
+
+func withFrom(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&from, "from", 0, "")
+}
+
+func withTo(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&to, "to", 0, "")
 }
 
 func withBatchSize(cmd *cobra.Command) {
