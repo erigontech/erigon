@@ -59,6 +59,7 @@ type MiningExecCfg struct {
 	interrupt   *int32
 	payloadId   uint64
 	txnProvider txnprovider.TxnProvider
+	noTxPool    bool
 }
 
 func StageMiningExecCfg(
@@ -73,6 +74,7 @@ func StageMiningExecCfg(
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
 	blockReader services.FullBlockReader,
+	noTxPool bool,
 ) MiningExecCfg {
 	return MiningExecCfg{
 		db:          db,
@@ -86,6 +88,7 @@ func StageMiningExecCfg(
 		interrupt:   interrupt,
 		payloadId:   payloadId,
 		txnProvider: txnProvider,
+		noTxPool:    noTxPool,
 	}
 }
 
@@ -122,6 +125,17 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
+		forceTxs := current.ForceTxs
+		if len(forceTxs) > 0 {
+			// forceTxs is sent by Optimism consensus client, and all force txs must be included in the payload.
+			// Therefore, interrupts to block building must not be handled while force txs are being processed.
+			// So do not pass cfg.interrupt
+			logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, forceTxs, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+			if err != nil {
+				return err
+			}
+			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+		}
 
 		if len(preparedTxns) > 0 {
 			logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
@@ -129,7 +143,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 				return err
 			}
 			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
-		} else {
+		} else if !cfg.noTxPool {
 
 			yielded := mapset.NewSet[[32]byte]()
 			var simStateReader state.StateReader

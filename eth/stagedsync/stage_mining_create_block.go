@@ -53,6 +53,9 @@ type MiningBlock struct {
 	Withdrawals      []*types.Withdrawal
 	PreparedTxns     types.Transactions
 	Requests         types.FlatRequests
+
+	// Optimism
+	ForceTxs types.Transactions
 }
 
 type MiningState struct {
@@ -108,7 +111,7 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	current := cfg.miner.MiningBlock
 	var txPoolLocals []libcommon.Address //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := cfg.miner.MiningConfig.Etherbase
-
+	// TODO cfg.miner.MiningBlock.ForceTxs = type
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
 		staleThreshold = 7
@@ -125,7 +128,21 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	}
 
 	if cfg.blockBuilderParameters != nil && cfg.blockBuilderParameters.ParentHash != parent.Hash() {
-		return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockBuilderParameters.ParentHash)
+		if cfg.chainConfig.IsOptimism() {
+			// In Optimism, self re-org via engine_forkchoiceUpdatedV1 is allowed
+
+			log.Warn("wrong head block", "current", parent.Hash(), "requested", cfg.blockBuilderParameters.ParentHash, "executionAt", executionAt)
+			exectedParent, err := rawdb.ReadHeaderByHash(txc.Tx, cfg.blockBuilderParameters.ParentHash)
+			if err != nil {
+				return err
+			}
+			expectedExecutionAt := exectedParent.Number.Uint64()
+
+			executionAt = expectedExecutionAt
+			parent = exectedParent
+		} else {
+			return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockBuilderParameters.ParentHash)
+		}
 	}
 
 	if cfg.miner.MiningConfig.Etherbase == (libcommon.Address{}) {
