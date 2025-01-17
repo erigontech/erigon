@@ -136,16 +136,54 @@ func (tx *AccountAbstractionBatchHeaderTransaction) EncodingSize() int {
 }
 
 func (tx *AccountAbstractionBatchHeaderTransaction) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, tx)
-}
-
-func (tx *AccountAbstractionBatchHeaderTransaction) DecodeRLP(s *rlp.Stream) error {
-	b, err := s.Bytes()
-	if err != nil {
+	payloadSize := tx.payloadSize()
+	envelopSize := 2 + rlp.ListPrefixLen(payloadSize) + payloadSize
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// encode envelope size
+	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode TxType
+	b[0] = AccountAbstractionTxType
+	b[1] = 0x01
+	if _, err := w.Write(b[:2]); err != nil {
 		return err
 	}
 
-	return rlp.DecodeBytes(b, tx)
+	// prefix
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+		return err
+	}
+
+	if err := rlp.EncodeUint256(tx.ChainID, w, b[:]); err != nil {
+		return err
+	}
+
+	if err := rlp.EncodeInt(tx.TransactionCount, w, b[:]); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (tx *AccountAbstractionBatchHeaderTransaction) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	var b []byte
+
+	if b, err = s.Uint256Bytes(); err != nil {
+		return err
+	}
+	tx.ChainID = new(uint256.Int).SetBytes(b)
+
+	if tx.TransactionCount, err = s.Uint(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (tx *AccountAbstractionBatchHeaderTransaction) MarshalBinary(w io.Writer) error {

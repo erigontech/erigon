@@ -297,17 +297,8 @@ func (tx *AccountAbstractionTransaction) EncodingSize() int {
 }
 
 func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
-	zeroAddress := common.Address{}
-	txCopy := tx.copy()
-	if txCopy.Paymaster != nil && bytes.Compare(zeroAddress[:], txCopy.Paymaster[:]) == 0 {
-		txCopy.Paymaster = nil
-	}
-	if txCopy.Deployer != nil && bytes.Compare(zeroAddress[:], txCopy.Deployer[:]) == 0 {
-		txCopy.Deployer = nil
-	}
-
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
+	envelopSize := 2 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// encode envelope size
@@ -316,7 +307,8 @@ func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 	}
 	// encode TxType
 	b[0] = AccountAbstractionTxType
-	if _, err := w.Write(b[:1]); err != nil {
+	b[1] = 0x00
+	if _, err := w.Write(b[:2]); err != nil {
 		return err
 	}
 
@@ -518,7 +510,6 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	return s.ListEnd()
-	//return nil
 }
 
 func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
