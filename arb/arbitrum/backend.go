@@ -11,7 +11,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
 
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/rpc"
