@@ -200,8 +200,10 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	case AccountAbstractionTxType:
 		if data[1] == 0x00 {
 			t = &AccountAbstractionTransaction{}
+			s = rlp.NewStream(bytes.NewReader(data[2:]), uint64(len(data)-2))
 		} else if data[1] == 0x01 {
 			t = &AccountAbstractionBatchHeaderTransaction{}
+			s = rlp.NewStream(bytes.NewReader(data[2:]), uint64(len(data)-2))
 		} else {
 			return nil, ErrTxTypeNotSupported
 		}
