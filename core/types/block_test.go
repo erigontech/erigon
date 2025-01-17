@@ -608,8 +608,8 @@ func TestCopyTxs(t *testing.T) {
 }
 
 func TestCopyHeader(t *testing.T) {
-	// please update copy function to include new attribute
 	// if this test fails when adding a new attribute to the Header struct
+	// please update the copy function to include logic for the new attribute
 	const runCount = 1000
 	tr := NewTRand()
 	for range make([]byte, runCount) {
