@@ -94,7 +94,7 @@ func (a *PointAppendableRoTx) Get(tsNum TsNum, tx kv.Tx) (VVType, error) {
 
 func (a *PointAppendableRoTx) Put(tsNum TsNum, value VVType, tx kv.RwTx) error {
 	// bleh...RoTx should just be declared as RwTx?
-	// domain gets around this by a NewWriter() method + Flush(rwtx) on it.
+	// domain gets around this by a NewWriter() method + bufferedWriter.Flush(rwtx) on it.
 	return tx.Append(a.a.valsTbl, a.a.encTs(uint64(tsNum)), value)
 }
 

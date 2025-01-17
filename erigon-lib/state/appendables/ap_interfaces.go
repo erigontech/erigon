@@ -49,19 +49,21 @@ type Appendable interface {
 // idea is that aggregator "return" a *Queries interface, and user can do Get/Put/Range on that.
 // alternate is to expose eveything, but that means exposing tsId/forkId etc. even for appendables
 // for which it is not relevant. Plus, sometimes base appendable tsNum should also be managed...
-// type PointQueries interface {
-// 	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
-// 	Put(tsNum TsNum, value VVType, tx kv.RwTx) error
-// }
 
-// type RangedQueries interface {
-// 	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
-// 	Put(tsNum TsNum, value VVType, tx kv.RwTx) error
-// 	PutEntityEnd(tsNum TsNum, startBaseTsNum TsNum, tx kv.RwTx) error
-// }
+// each appendable kind has a different query pattern
+type PointQueries interface {
+	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
+	Put(tsNum TsNum, value VVType, tx kv.RwTx) error
+}
 
-// type MarkedQueries interface {
-// 	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
-// 	GetNc(tsId TsId, forkId []byte, tx kv.Tx) (VVType, error)
-// 	Put(tsId TsId, forkId []byte, value VVType, tx kv.RwTx) error
-// }
+type RangedQueries interface {
+	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
+	Put(tsNum TsNum, value VVType, tx kv.RwTx) error
+	PutEntityEnd(tsNum TsNum, startBaseTsNum TsNum, tx kv.RwTx) error
+}
+
+type MarkedQueries interface {
+	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
+	GetNc(tsId TsId, forkId []byte, tx kv.Tx) (VVType, error)
+	Put(tsId TsId, forkId []byte, value VVType, tx kv.RwTx) error
+}
