@@ -407,7 +407,6 @@ func BenchmarkPrecompiledP256Verify(b *testing.B) {
 }
 
 func TestPrecompiledP256Verify(t *testing.T) {
-	// t.Parallel()
-
+	t.Parallel()
 	testJson("p256Verify", "100", t)
 }

@@ -97,12 +97,13 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 
 	// Fill in blob base fee and next blob base fee.
 	if excessBlobGas := bf.header.ExcessBlobGas; excessBlobGas != nil {
-		blobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, *excessBlobGas)
+		blobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, *excessBlobGas, bf.header.Time)
 		if err != nil {
 			bf.err = err
 			return
 		}
-		nextBlobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, misc.CalcExcessBlobGas(chainconfig, bf.header))
+		nextBlockTime := bf.header.Time + chainconfig.SecondsPerSlot()
+		nextBlobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, misc.CalcExcessBlobGas(chainconfig, bf.header, nextBlockTime), nextBlockTime)
 		if err != nil {
 			bf.err = err
 			return
@@ -116,8 +117,8 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 	}
 	bf.gasUsedRatio = float64(bf.header.GasUsed) / float64(bf.header.GasLimit)
 
-	if blobGasUsed := bf.header.BlobGasUsed; blobGasUsed != nil && chainconfig.GetMaxBlobGasPerBlock() != 0 {
-		bf.blobGasUsedRatio = float64(*blobGasUsed) / float64(chainconfig.GetMaxBlobGasPerBlock())
+	if blobGasUsed := bf.header.BlobGasUsed; blobGasUsed != nil && chainconfig.GetMaxBlobGasPerBlock(bf.header.Time) != 0 {
+		bf.blobGasUsedRatio = float64(*blobGasUsed) / float64(chainconfig.GetMaxBlobGasPerBlock(bf.header.Time))
 	}
 
 	if len(percentiles) == 0 {

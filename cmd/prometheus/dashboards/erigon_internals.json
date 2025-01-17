@@ -5727,6 +5727,18 @@
               "legendFormat": "dirty: {{instance}}",
               "range": true,
               "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "editorMode": "code",
+              "expr": "tx_retired{instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "limit: {{instance}}",
+              "range": true,
+              "refId": "C"
             }
           ],
           "title": "Tx Size",

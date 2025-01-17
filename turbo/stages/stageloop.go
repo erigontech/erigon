@@ -483,8 +483,9 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
 		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
 		pendingBlobFee := h.chainConfig.GetMinBlobGasPrice()
 		if currentHeader.ExcessBlobGas != nil {
-			excessBlobGas := misc.CalcExcessBlobGas(h.chainConfig, currentHeader)
-			f, err := misc.GetBlobGasPrice(h.chainConfig, excessBlobGas)
+			nextBlockTime := currentHeader.Time + h.chainConfig.SecondsPerSlot()
+			excessBlobGas := misc.CalcExcessBlobGas(h.chainConfig, currentHeader, nextBlockTime)
+			f, err := misc.GetBlobGasPrice(h.chainConfig, excessBlobGas, nextBlockTime)
 			if err != nil {
 				return err
 			}
