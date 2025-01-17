@@ -228,41 +228,18 @@ func (tx *AccountAbstractionTransaction) RawSignatureValues() (*uint256.Int, *ui
 
 func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListLen, authorizationsLen int) {
 	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.Nonce)
-
-	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.ChainID)
 
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.Tip)
+	payloadSize += rlp.Uint256LenExcludingHead(tx.NonceKey)
 
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.FeeCap)
-
-	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.Gas)
-
-	accessListLen = accessListSize(tx.AccessList)
-	payloadSize += rlp.ListPrefixLen(accessListLen) + accessListLen
+	payloadSize += rlp.IntLenExcludingHead(tx.Nonce)
 
 	payloadSize++
 	if tx.SenderAddress != nil {
 		payloadSize += 20
 	}
-
-	authorizationsLen = authorizationsSize(tx.Authorizations)
-	payloadSize += rlp.ListPrefixLen(authorizationsLen) + authorizationsLen
-
-	payloadSize++
-	payloadSize += rlp.StringLen(tx.ExecutionData)
-
-	payloadSize++
-	if tx.Paymaster != nil {
-		payloadSize += 20
-	}
-
-	payloadSize++
-	payloadSize += rlp.StringLen(tx.PaymasterData)
 
 	payloadSize++
 	if tx.Deployer != nil {
@@ -273,7 +250,24 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 	payloadSize += rlp.StringLen(tx.DeployerData)
 
 	payloadSize++
+	if tx.Paymaster != nil {
+		payloadSize += 20
+	}
+
+	payloadSize++
+	payloadSize += rlp.StringLen(tx.PaymasterData)
+
+	payloadSize++
+	payloadSize += rlp.StringLen(tx.ExecutionData)
+
+	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.BuilderFee)
+
+	payloadSize++
+	payloadSize += rlp.Uint256LenExcludingHead(tx.Tip)
+
+	payloadSize++
+	payloadSize += rlp.Uint256LenExcludingHead(tx.FeeCap)
 
 	payloadSize++
 	payloadSize += rlp.IntLenExcludingHead(tx.ValidationGasLimit)
@@ -285,7 +279,13 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 	payloadSize += rlp.IntLenExcludingHead(tx.PostOpGasLimit)
 
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.NonceKey)
+	payloadSize += rlp.IntLenExcludingHead(tx.Gas)
+
+	accessListLen = accessListSize(tx.AccessList)
+	payloadSize += rlp.ListPrefixLen(accessListLen) + accessListLen
+
+	authorizationsLen = authorizationsSize(tx.Authorizations)
+	payloadSize += rlp.ListPrefixLen(authorizationsLen) + authorizationsLen
 
 	return
 }
@@ -315,7 +315,7 @@ func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode TxType
-	b[0] = SetCodeTxType
+	b[0] = AccountAbstractionTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -518,10 +518,22 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	return s.ListEnd()
+	//return nil
 }
 
 func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
-	return tx.EncodeRLP(w)
+	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// encode TxType
+	b[0] = AccountAbstractionTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (tx *AccountAbstractionTransaction) PreTransactionGasCost() (uint64, error) {
