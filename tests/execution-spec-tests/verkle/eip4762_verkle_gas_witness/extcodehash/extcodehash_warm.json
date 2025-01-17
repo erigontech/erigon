@@ -1,0 +1,230 @@
+{
+    "tests/verkle/eip4762_verkle_gas_witness/test_extcodehash.py::test_extcodehash_warm[fork_Verkle-blockchain_test]": {
+        "network": "Verkle",
+        "genesisBlockHeader": {
+            "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+            "coinbase": "0x0000000000000000000000000000000000000000",
+            "stateRoot": "0x598ad36f8842f52ca419c816e370f23b141a76df2daf852a749cdb44700ee251",
+            "transactionsTrie": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "receiptTrie": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "bloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "difficulty": "0x00",
+            "number": "0x00",
+            "gasLimit": "0x02540be400",
+            "gasUsed": "0x00",
+            "timestamp": "0x00",
+            "extraData": "0x00",
+            "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "nonce": "0x0000000000000000",
+            "baseFeePerGas": "0x07",
+            "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "hash": "0x0472bdeeb82a3cb1cd580c1c488f2f03b9b93f85ade7ff16f7d876f3d2bc47d6"
+        },
+        "pre": {
+            "0xfffffffffffffffffffffffffffffffffffffffe": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x60203611603157600143035f35116029575f356120000143116029576120005f3506545f5260205ff35b5f5f5260205ff35b5f5ffd00",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x8a0a19589531694250d570040a0c4b74576919b8": {
+                "nonce": "0x00",
+                "balance": "0x00",
+                "code": "0x73fffffff4fce5edbc8e2a8697c15331677e6ebf0c3f73fffffff4fce5edbc8e2a8697c15331677e6ebf0c3f5f55",
+                "storage": {}
+            },
+            "0xfffffff4fce5edbc8e2a8697c15331677e6ebf0c": {
+                "nonce": "0x00",
+                "balance": "0x00",
+                "code": "0x5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f",
+                "storage": {}
+            }
+        },
+        "lastblockhash": "0xfdb18b91f13b4ff2c13567c6c89e992edb59b1774e49b5becd29579ce06e531c",
+        "genesisRLP": "0xf9021af90214a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a0598ad36f8842f52ca419c816e370f23b141a76df2daf852a749cdb44700ee251a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080808502540be400808000a0000000000000000000000000000000000000000000000000000000000000000088000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421c0c0c0",
+        "blocks": [
+            {
+                "blockHeader": {
+                    "parentHash": "0x0472bdeeb82a3cb1cd580c1c488f2f03b9b93f85ade7ff16f7d876f3d2bc47d6",
+                    "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "coinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+                    "stateRoot": "0x145610ba07fdf357a6cd1d99c4acfb6a9cd52e6d68bbe579d9fda22da13d2815",
+                    "transactionsTrie": "0x3689aafcc5e72f08b809aa44a48978afe322c74ba051c10d3b175e1b5e8892b1",
+                    "receiptTrie": "0xd6936e27d4dfb5a8246189dfaea4daaf851caab7a0d6df7355e072664bdae78a",
+                    "bloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                    "difficulty": "0x00",
+                    "number": "0x01",
+                    "gasLimit": "0x02540be400",
+                    "gasUsed": "0x6aac",
+                    "timestamp": "0x0c",
+                    "extraData": "0x",
+                    "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                    "nonce": "0x0000000000000000",
+                    "baseFeePerGas": "0x07",
+                    "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+                    "hash": "0xfdb18b91f13b4ff2c13567c6c89e992edb59b1774e49b5becd29579ce06e531c"
+                },
+                "transactions": [
+                    {
+                        "type": "0x00",
+                        "chainId": "0x01",
+                        "nonce": "0x00",
+                        "gasPrice": "0x0a",
+                        "gasLimit": "0x0f4240",
+                        "to": "0x8a0a19589531694250d570040a0c4b74576919b8",
+                        "value": "0x00",
+                        "data": "0x",
+                        "v": "0x26",
+                        "r": "0xf072481d98bbf72e5b77c44ae076dd6b2f0db9073936b73556ba2aae4b22f572",
+                        "s": "0x68aab80c9019049f258dc900bac0b30846e7384a64a521938ee0e2b1969f5615",
+                        "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                    }
+                ],
+                "uncleHeaders": [],
+                "withdrawals": [],
+                "witness": {
+                    "stateDiff": [
+                        {
+                            "stem": "0x0365b079a274a1808d56484ce5bd97914629907d75767f51439102e22cd50d",
+                            "suffixDiffs": [
+                                {
+                                    "suffix": 0,
+                                    "currentValue": "0x00000000000000000000000000000000000000000000003635c9adc5dea00000",
+                                    "newValue": "0x00000000000000000000000000000001000000000000003635c9adc5de9bd548"
+                                },
+                                {
+                                    "suffix": 1,
+                                    "currentValue": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+                                    "newValue": null
+                                }
+                            ]
+                        },
+                        {
+                            "stem": "0x5b5fdfedd6a0e932da408ac7d772a36513d1eee9b9926e52620c43a433aad7",
+                            "suffixDiffs": [
+                                {
+                                    "suffix": 64,
+                                    "newValue": "0x0472bdeeb82a3cb1cd580c1c488f2f03b9b93f85ade7ff16f7d876f3d2bc47d6",
+                                    "currentValue": null
+                                }
+                            ]
+                        },
+                        {
+                            "stem": "0x914ec5f0e0c27fe094862fbd89a6abe684939af6940434d8bf218cedb2d624",
+                            "suffixDiffs": [
+                                {
+                                    "suffix": 0,
+                                    "newValue": "0x0000000000000000000000000000000000000000000000000000000000014004",
+                                    "currentValue": null
+                                },
+                                {
+                                    "suffix": 1,
+                                    "newValue": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+                                    "currentValue": null
+                                }
+                            ]
+                        },
+                        {
+                            "stem": "0x95fc02ab6fbd0567b91c6155ef19e1354fc25a1c5c8c18efe371ea81bfb03a",
+                            "suffixDiffs": [
+                                {
+                                    "suffix": 1,
+                                    "currentValue": "0x87327ef4ab2bcafd0f726ce78f526760ab4faaf675cea3942c05d1eda18da7be",
+                                    "newValue": null
+                                }
+                            ]
+                        },
+                        {
+                            "stem": "0xecb505156708480caf702cd85124f67f3ed78ae4bc890a6dcb62574ba9a90c",
+                            "suffixDiffs": [
+                                {
+                                    "suffix": 0,
+                                    "currentValue": "0x000000000000002e000000000000000000000000000000000000000000000000",
+                                    "newValue": null
+                                },
+                                {
+                                    "suffix": 1,
+                                    "currentValue": "0x988a2088a794b47f6e1ef9b0b8210923812809d77894ce7f4a8e53bcee276326",
+                                    "newValue": null
+                                },
+                                {
+                                    "suffix": 64,
+                                    "newValue": "0x87327ef4ab2bcafd0f726ce78f526760ab4faaf675cea3942c05d1eda18da7be",
+                                    "currentValue": null
+                                },
+                                {
+                                    "suffix": 128,
+                                    "currentValue": "0x0073fffffff4fce5edbc8e2a8697c15331677e6ebf0c3f73fffffff4fce5edbc",
+                                    "newValue": null
+                                },
+                                {
+                                    "suffix": 129,
+                                    "currentValue": "0x0c8e2a8697c15331677e6ebf0c3f5f5500000000000000000000000000000000",
+                                    "newValue": null
+                                }
+                            ]
+                        }
+                    ],
+                    "verkleProof": {
+                        "otherStems": [],
+                        "depthExtensionPresent": "0xa0a080a0a",
+                        "commitmentsByPath": [
+                            "0x360bcc4c15a10f6f058d1d07e13e9a271da3da0cd69026d5a9ab25e1c0a5d697",
+                            "0x324e7b7405bbfae46866bad5c94ac2983093b86f85035fe5984ec40a1b5e5ce3",
+                            "0x61506c1cc4f27c9231a546a4b0d249d5f3ba4ba9e63c5ebb84087665eb396e95",
+                            "0x4909fc1889e10819cda41706a26373145c4e4575d68b96569af12db69040b6e1",
+                            "0x475d90d2052bcfc9c4a272b0710f7d7d8b9112f646a966e15304b9bd6d71bd4e",
+                            "0x237cd1079d984daf3d2f3b20a6e3321d94721ca1cf3dd3ee39c1d4a8ac5f51ad",
+                            "0x66bfec71c97472f8ffb0dfe26b70c05ac54cfcd2398961b9d2489946cb5d45f2",
+                            "0x71092a8c03e06f56f6e64259defba312e26be93f40e662c38b319bc5d853b2e4",
+                            "0x4aff29b4b9a88a67e0abff04b23f35c5d8742b835335cbb472f173e39bb1133e"
+                        ],
+                        "d": "0x20be4fe3390aacd37fd8c494c1cd1b3928be0ec39b9c2e8d6703cccf43daf7c2",
+                        "ipaProof": {
+                            "cl": [
+                                "0x1f283f5a7ba74fba89ceac968297740e13a80f5de780d4c1d3b8df5015c1e0e0",
+                                "0x6c05ece629238a3477c48466261a58826378d19ae578d0b0d0f4187f3315ae47",
+                                "0x04946a156cdb1f0e722684604add2a0a3bfe19da6784517792e969161fc0007d",
+                                "0x3274c7a51d3f5e54884628bf1cf4f4d5222893c102890945971ab7789436baeb",
+                                "0x150f1da94da47ff84123e076509a241409b9af1861b83042507cc4e927119933",
+                                "0x3b053c2a8248293e4088b95a59426b9968bf4858549407ec17f4359e5adb8146",
+                                "0x20474e4425aae20c51724ee617483a06374240443dab3d49cf5f516a218af262",
+                                "0x0a1c1f0f424caa159f183358749e43d5628831f4f4ba4971717b4110dd57d599"
+                            ],
+                            "cr": [
+                                "0x2a65aae382064af9e04a9aee7557b40efc5ada6afe9a9860b00b6c3ede1ac102",
+                                "0x599a13a946e0c81896749c309b2de59ae7825d8887ef3816a72dfff1044cda79",
+                                "0x010265c0e16683cfca2771b547fbffc2ee4f68ee242f623176704872a90e9a97",
+                                "0x46cc83eb4aab84bc1a9a2136c6550d698ccdb2f13eadeabda9947ce0e6708b10",
+                                "0x1e1bde869d027da265f418c40341e54afd8165a559e7590f5c9ad6dcf8263361",
+                                "0x2e95d7f313815fd4313e180fc3a32fbb5833e451053170d87461b4121604488c",
+                                "0x69bcb8e84a4942564f3bb952c2360cc274505390debd1136b3406ebbeb0210c2",
+                                "0x22fe1516b1c8ce9c586594b14b7ddf9455c16ad2981caf0f6d20298129bd9660"
+                            ],
+                            "finalEvaluation": "0x081836832a1202532138f0f4c29c1891f8116aef722bf79c9c0e7555f98922b4"
+                        }
+                    }
+                },
+                "rlp": "0xf9027ff90216a00472bdeeb82a3cb1cd580c1c488f2f03b9b93f85ade7ff16f7d876f3d2bc47d6a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0145610ba07fdf357a6cd1d99c4acfb6a9cd52e6d68bbe579d9fda22da13d2815a03689aafcc5e72f08b809aa44a48978afe322c74ba051c10d3b175e1b5e8892b1a0d6936e27d4dfb5a8246189dfaea4daaf851caab7a0d6df7355e072664bdae78ab901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080018502540be400826aac0c80a0000000000000000000000000000000000000000000000000000000000000000088000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421f862f860800a830f4240948a0a19589531694250d570040a0c4b74576919b8808026a0f072481d98bbf72e5b77c44ae076dd6b2f0db9073936b73556ba2aae4b22f572a068aab80c9019049f258dc900bac0b30846e7384a64a521938ee0e2b1969f5615c0c0",
+                "blocknumber": "1"
+            }
+        ],
+        "sealEngine": "NoProof",
+        "_info": {
+            "hash": "0xc14bdd7496498d63879313800d7e1c66045a1d61c3224048c3ce59045d2d04d7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.12.1-unstable-c329550a-20241022",
+            "description": "Test function documentation:\n\n    Test EXTCODEHASH with WARM cost.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/verkle@v0.0.6/tests/verkle/eip4762_verkle_gas_witness/test_extcodehash.py#L78",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4762.md",
+            "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
+        }
+    }
+}

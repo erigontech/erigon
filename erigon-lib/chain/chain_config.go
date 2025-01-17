@@ -48,6 +48,7 @@ type Config struct {
 	DAOForkBlock          *big.Int `json:"daoForkBlock,omitempty"`
 	TangerineWhistleBlock *big.Int `json:"eip150Block,omitempty"`
 	SpuriousDragonBlock   *big.Int `json:"eip155Block,omitempty"`
+	Eip158Block           *big.Int `json:"eip158Block,omitempty"`
 	ByzantiumBlock        *big.Int `json:"byzantiumBlock,omitempty"`
 	ConstantinopleBlock   *big.Int `json:"constantinopleBlock,omitempty"`
 	PetersburgBlock       *big.Int `json:"petersburgBlock,omitempty"`
@@ -68,6 +69,7 @@ type Config struct {
 	CancunTime   *big.Int `json:"cancunTime,omitempty"`
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
+	VerkleTime   *big.Int `json:"verkleTime,omitempty"`
 
 	// Optional EIP-4844 parameters
 	MinBlobGasPrice            *uint64 `json:"minBlobGasPrice,omitempty"`
@@ -165,6 +167,11 @@ func (c *Config) IsSpuriousDragon(num uint64) bool {
 	return isForked(c.SpuriousDragonBlock, num)
 }
 
+// IsSpuriousDragon returns whether num is either equal to the Spurious Dragon fork block or greater.
+func (c *Config) IsEIP158(num uint64) bool {
+	return isForked(c.Eip158Block, num)
+}
+
 // IsByzantium returns whether num is either equal to the Byzantium fork block or greater.
 func (c *Config) IsByzantium(num uint64) bool {
 	return isForked(c.ByzantiumBlock, num)
@@ -243,6 +250,11 @@ func (c *Config) IsPrague(time uint64) bool {
 // IsOsaka returns whether time is either equal to the Osaka fork time or greater.
 func (c *Config) IsOsaka(time uint64) bool {
 	return isForked(c.OsakaTime, time)
+}
+
+// IsVerkle returns whether time is either equal to the Verkle fork time or greater.
+func (c *Config) IsVerkle(time uint64) bool {
+	return isForked(c.VerkleTime, time)
 }
 
 func (c *Config) GetBurntContract(num uint64) *common.Address {
@@ -507,10 +519,11 @@ func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, numb
 type Rules struct {
 	ChainID                                           *big.Int
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
+	IsEIP158                                          bool
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli                                bool
-	IsPrague, IsOsaka                                 bool
+	IsPrague, IsOsaka, IsVerkle                       bool
 	IsAura                                            bool
 }
 
@@ -526,6 +539,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsHomestead:        c.IsHomestead(num),
 		IsTangerineWhistle: c.IsTangerineWhistle(num),
 		IsSpuriousDragon:   c.IsSpuriousDragon(num),
+		IsEIP158:           c.IsEIP158(num),
 		IsByzantium:        c.IsByzantium(num),
 		IsConstantinople:   c.IsConstantinople(num),
 		IsPetersburg:       c.IsPetersburg(num),

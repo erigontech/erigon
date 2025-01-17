@@ -137,6 +137,19 @@ var ChiadoBootnodes = []string{
 	"enode://f7e62226a64a2ccc0ada8b032b33c4389464562f87135a3e0d5bdb814fab717d58db5d142c453b071d08b4e0ffd9c5aff4a6d4441c2041401634f10d7962f885@35.210.126.23:30303",
 }
 
+var VerkleGenDevnet6Bootnodes = []string{
+	"enode://7c51103dd772a164a7c45c2cce2c9171ce1a9e032671a158aac6f8bc7b927dbc0be40a564af1678fd6aec5e2768a41afa3d97d38e3fde6edbeffab31a7a71258@128.140.104.96:30303?discport=30303",
+	"enode://1ff18a6e90574d3d7276e72516ac396325770b4c7e2db0b6eaa82dc5edb5ec91d0b4ce7c4b22166a64617d2d27b8555f100a804706518e9ecab7131bc1bdd8b1@49.13.196.169:30303?discport=30303",
+	"enode://3cd52cb1b4839c4defb04662521e0ceb226ff697660e0a88de2abc3f2afa3f15207df9678f2c511b7731f1d4f2077351966cd3c455d4ab5129a5e45424ef9a04@128.140.103.190:30303?discport=30303",
+	"enode://797bffc7ddc8f1fe016fb680c0c623772b9bfde69cd2f9c7eee5af5c9dfab0c634a047526812eb034f3c799e92d25801f8daa2af58955b0e243ae5052c1ce178@78.47.30.10:30303?discport=30303",
+	"enode://4e17d94ca94a332b5ae2ea4052bb961e53e1ae6b25ab51e744e6cedd9a52194a7e997e2452c78b40173254cb377900f64adb119c6f4360fc57d02c45dc2e09ea@116.203.113.205:30303?discport=30303",
+	"enode://ff62daadb1a1f08cb332ed87893e061252ffd42f32704c512ef4fb1937a19acda00f814e57bd1c8f06d9d8c6d404481bea67b692f412d8e1f8fd628103992465@167.235.68.89:30303?discport=30303",
+	"enode://87480c659d9e1bfd5c11b82f3a2e23fcb10c143ec73da619167d74ecc2181f39d2117655cf25ff87bb250b2433ca1ef999ee2ef88c990a7f2d1d6fb71ed18432@195.201.139.113:30303?discport=30303",
+	"enode://0eee8ed3c4d5f06e3d395c2290db054d39989d21a9c4038de9d40009416e3aea5d7269481ec2214d45303aaa0a80d2522bb529673bbdd22a4ec7cb22f5a4f5a4@116.203.223.168:30303?discport=30303",
+	"enode://627ee97e5c297d3229d08abb53842d61b47d0162618264ef3156654c9f4cd26c994e02c44e0ca1576c932b8d29133a769e24bf5482f6a3412ba4dad5adbb4185@195.201.36.62:30303?discport=30303",
+	"enode://261ce91ece10fef227bbad6453f3bc5648ea18c42c9750820cf2110b590755630d3d5c32b360cc06787abefafc7ce6dbe92f8c39fb613774c922d8fc340e47a8@128.140.104.94:30303?discport=30303",
+}
+
 const dnsPrefix = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@"
 
 // KnownDNSNetwork returns the address of a public DNS-based node list for the given
@@ -179,6 +192,8 @@ func BootnodeURLsOfChain(chain string) []string {
 		return GnosisBootnodes
 	case networkname.ChiadoChainName:
 		return ChiadoBootnodes
+	case networkname.VerkleGenDevnet6:
+		return VerkleGenDevnet6Bootnodes
 	default:
 		return []string{}
 	}
@@ -188,6 +203,8 @@ func StaticPeerURLsOfChain(chain string) []string {
 	switch chain {
 	case networkname.SepoliaChainName:
 		return SepoliaStaticPeers
+	// case networkname.VerkleGenDevnet6:
+	// 	return VerkleGenDevnet6Bootnodes
 	default:
 		return []string{}
 	}

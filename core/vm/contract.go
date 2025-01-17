@@ -56,6 +56,9 @@ type Contract struct {
 	CodeAddr *libcommon.Address
 	Input    []byte
 
+	// is the execution frame represented by this object a contract deployment
+	IsDeployment bool
+
 	Gas   uint64
 	value *uint256.Int
 }
