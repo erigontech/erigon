@@ -296,6 +296,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			txTask.Error = err
 		} else {
 			txTask.Failed = applyRes.Failed()
+			fmt.Println(txTask.UsedGas, txTask.TxIndex)
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			ibs.SoftFinalise()
