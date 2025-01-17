@@ -1112,14 +1112,14 @@ func CopyHeader(h *Header) *Header {
 	cpy.GasLimit = h.GasLimit
 	cpy.GasUsed = h.GasUsed
 	cpy.Time = h.Time
-	if len(h.Extra) > 0 {
+	if h.Extra != nil {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
 	}
 	cpy.MixDigest = h.MixDigest
 	cpy.Nonce = h.Nonce
 	cpy.AuRaStep = h.AuRaStep
-	if len(h.AuRaSeal) > 0 {
+	if h.AuRaSeal != nil {
 		cpy.AuRaSeal = make([]byte, len(h.AuRaSeal))
 		copy(cpy.AuRaSeal, h.AuRaSeal)
 	}
@@ -1148,11 +1148,11 @@ func CopyHeader(h *Header) *Header {
 		cpy.RequestsHash.SetBytes(h.RequestsHash.Bytes())
 	}
 	cpy.Verkle = h.Verkle
-	if len(h.VerkleProof) > 0 {
+	if h.VerkleProof != nil {
 		cpy.VerkleProof = make([]byte, len(h.VerkleProof))
 		copy(cpy.VerkleProof, h.VerkleProof)
 	}
-	if len(h.VerkleKeyVals) > 0 {
+	if h.VerkleKeyVals != nil {
 		cpy.VerkleKeyVals = make([]verkle.KeyValuePair, len(h.VerkleKeyVals))
 		copy(cpy.VerkleKeyVals, h.VerkleKeyVals)
 	}
