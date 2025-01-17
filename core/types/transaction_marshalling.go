@@ -580,10 +580,10 @@ func (tx *AccountAbstractionTransaction) unmarshalJson(dec aaTxnJSON) error {
 	tx.AccessList = *dec.AccessList
 	tx.SenderAddress = dec.SenderAccess
 
-	tx.AuthorizationData = make([]Authorization, len(*dec.AuthorizationData))
+	tx.Authorizations = make([]Authorization, len(*dec.AuthorizationData))
 	for i, auth := range *dec.AuthorizationData {
 		var err error
-		tx.AuthorizationData[i], err = auth.ToAuthorization()
+		tx.Authorizations[i], err = auth.ToAuthorization()
 		if err != nil {
 			return err
 		}
