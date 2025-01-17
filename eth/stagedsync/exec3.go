@@ -290,9 +290,9 @@ func ExecV3(ctx context.Context,
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
-	// if cfg.chainConfig.IsOptimism() {
-	// 	shouldGenerateChangesets = true
-	// }
+	if cfg.chainConfig.IsOptimism() {
+		shouldGenerateChangesets = true
+	}
 
 	if maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
