@@ -85,6 +85,7 @@ var (
 	TxSpill   = metrics.GetOrCreateGauge(`tx_spill`)   //nolint
 	TxUnspill = metrics.GetOrCreateGauge(`tx_unspill`) //nolint
 	TxDirty   = metrics.GetOrCreateGauge(`tx_dirty`)   //nolint
+	TxRetired = metrics.GetOrCreateGauge(`tx_retired`) //nolint
 
 	DbCommitPreparation = metrics.GetOrCreateSummary(`db_commit_seconds{phase="preparation"}`) //nolint
 	//DbGCWallClock       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_wall_clock"}`) //nolint

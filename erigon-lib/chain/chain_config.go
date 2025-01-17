@@ -296,6 +296,16 @@ func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
 	return 3338477 // BLOB_GASPRICE_UPDATE_FRACTION (EIP-4844)
 }
 
+func (c *Config) SecondsPerSlot() uint64 {
+	if c.Bor != nil {
+		return 2 // Polygon
+	}
+	if c.Aura != nil {
+		return 5 // Gnosis
+	}
+	return 12 // Ethereum
+}
+
 // CheckCompatible checks whether scheduled fork transitions have been imported
 // with a mismatching chain configuration.
 func (c *Config) CheckCompatible(newcfg *Config, height uint64) *ConfigCompatError {

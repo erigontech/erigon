@@ -72,7 +72,9 @@ func (e *Eth1Header) SetVersion(v clparams.StateVersion) {
 func (e *Eth1Header) Copy() *Eth1Header {
 	copied := *e
 	copied.Extra = solid.NewExtraData()
-	copied.Extra.SetBytes(e.Extra.Bytes())
+	if e.Extra != nil {
+		copied.Extra.SetBytes(e.Extra.Bytes())
+	}
 	return &copied
 }
 
