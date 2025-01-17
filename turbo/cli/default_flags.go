@@ -107,6 +107,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,
 	&utils.SnapStateStopFlag,
+	&utils.SnapSkipStateSnapshotDownloadFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
 	&utils.DbWriteMapFlag,
@@ -187,6 +188,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
 	&utils.SentinelBootnodes,
+	&utils.SentinelStaticPeers,
 
 	&utils.OtsSearchMaxCapFlag,
 
@@ -236,6 +238,7 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.ChaosMonkeyFlag,
 
-	&utils.ShutterEnabled,
-	&utils.ShutterKeyperBootnodes,
+	&utils.ShutterEnabledFlag,
+	&utils.ShutterP2pBootstrapNodesFlag,
+	&utils.ShutterP2pListenPortFlag,
 }

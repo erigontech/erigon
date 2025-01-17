@@ -225,7 +225,19 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
-		borTx := rawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
+		var borTx types2.Transaction
+		if api.useBridgeReader {
+			possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
+			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				borTx = bortypes.NewBorTransaction()
+			}
+		} else {
+			borTx = rawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
+		}
 		if borTx == nil {
 			return nil, nil // not error
 		}
@@ -289,7 +301,19 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
-		borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
+		var borTx types2.Transaction
+		if api.useBridgeReader {
+			possibleBorTxnHash := bortypes.ComputeBorTxHash(blockNum, hash)
+			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				borTx = bortypes.NewBorTransaction()
+			}
+		} else {
+			borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
+		}
 		if borTx == nil {
 			return nil, nil
 		}

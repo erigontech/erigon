@@ -144,12 +144,14 @@ type TxPool struct {
 	pragueTime              *uint64
 	isPostPrague            atomic.Bool
 	maxBlobsPerBlock        uint64
+	maxBlobsPerBlockPrague  *uint64
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
 	newSlotsStreams         *NewSlotsStreams
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
+	auths                   map[common.Address]*metaTxn // All accounts with a pooled authorization
 }
 
 type FeeCalculator interface {
@@ -169,6 +171,7 @@ func New(
 	cancunTime *big.Int,
 	pragueTime *big.Int,
 	maxBlobsPerBlock uint64,
+	maxBlobsPerBlockPrague *uint64,
 	sentryClients []sentryproto.SentryClient,
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
@@ -222,10 +225,12 @@ func New(
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
 		maxBlobsPerBlock:        maxBlobsPerBlock,
+		maxBlobsPerBlockPrague:  maxBlobsPerBlockPrague,
 		feeCalculator:           options.feeCalculator,
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
+		auths:                   map[common.Address]*metaTxn{},
 	}
 
 	if shanghaiTime != nil {
@@ -418,6 +423,22 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	if err = p.removeMined(p.all, minedTxns.Txns); err != nil {
 		return err
+	}
+
+	// remove auths from pool map
+	for _, mt := range minedTxns.Txns {
+		if mt.Type == SetCodeTxnType {
+			numAuths := len(mt.AuthRaw)
+			for i := range numAuths {
+				signature := mt.Authorizations[i]
+				signer, err := types.RecoverSignerFromRLP(mt.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+				if err != nil {
+					continue
+				}
+
+				delete(p.auths, *signer)
+			}
+		}
 	}
 
 	var announcements Announcements
@@ -671,6 +692,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	best := p.pending.best
 
 	isShanghai := p.isShanghai() || p.isAgra()
+	isPrague := p.isPrague()
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
@@ -724,7 +746,10 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
 		authorizationLen := uint64(len(mt.TxnSlot.Authorizations))
-		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, nil, mt.TxnSlot.Creation, true, true, isShanghai)
+		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isShanghai, isPrague)
+		if isPrague && floorGas > intrinsicGas {
+			intrinsicGas = floorGas
+		}
 		if intrinsicGas > availableGas {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
@@ -843,7 +868,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		if blobCount == 0 {
 			return txpoolcfg.NoBlobs
 		}
-		if blobCount > p.maxBlobsPerBlock {
+		if blobCount > p.GetMaxBlobsPerBlock() {
 			return txpoolcfg.TooManyBlobs
 		}
 		equalNumber := len(txn.BlobHashes) == len(txn.Blobs) &&
@@ -901,15 +926,20 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.UnderPriced
 	}
-	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), nil, txn.Creation, true, true, isShanghai)
+
+	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isShanghai, p.isPrague())
+	if p.isPrague() && floorGas > gas {
+		gas = floorGas
+	}
+
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
-	if reason != txpoolcfg.Success {
+	if overflow != false {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed idHash=%x reason=%s", txn.IDHash, reason))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed due to overflow idHash=%x", txn.IDHash))
 		}
-		return reason
+		return txpoolcfg.GasUintOverflow
 	}
 	if gas > txn.Gas {
 		if txn.Traced {
@@ -917,6 +947,13 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.IntrinsicGas
 	}
+	if txn.Gas > p.blockGasLimit.Load() {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx txn.gas > block gas limit idHash=%x gas=%d, block gas limit=%d", txn.IDHash, txn.Gas, p.blockGasLimit.Load()))
+		}
+		return txpoolcfg.GasLimitTooHigh
+	}
+
 	if !isLocal && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
@@ -1046,6 +1083,17 @@ func (p *TxPool) isCancun() bool {
 
 func (p *TxPool) isPrague() bool {
 	return isTimeBasedForkActivated(&p.isPostPrague, p.pragueTime)
+}
+
+func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
+	if p.isPrague() {
+		if p.maxBlobsPerBlockPrague != nil {
+			return *p.maxBlobsPerBlockPrague
+		}
+		return 9 // EIP-7691 default
+	} else {
+		return p.maxBlobsPerBlock
+	}
 }
 
 // Check that the serialized txn should not exceed a certain max size
@@ -1256,6 +1304,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 			continue
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
+
 		if reason := p.addLocked(mt, &announcements); reason != txpoolcfg.NotSet {
 			discardReasons[i] = reason
 			continue
@@ -1420,6 +1469,40 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		return txpoolcfg.FeeTooLow
 	}
 
+	// Check if we have txn with same authorization in the pool
+	if mt.TxnSlot.Type == SetCodeTxnType {
+		numAuths := len(mt.TxnSlot.AuthRaw)
+		foundDuplicate := false
+		for i := range numAuths {
+			signature := mt.TxnSlot.Authorizations[i]
+			signer, err := types.RecoverSignerFromRLP(mt.TxnSlot.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+			if err != nil {
+				continue
+			}
+
+			if _, ok := p.auths[*signer]; ok {
+				foundDuplicate = true
+				break
+			}
+
+			p.auths[*signer] = mt
+		}
+
+		if foundDuplicate {
+			return txpoolcfg.ErrAuthorityReserved
+		}
+	}
+
+	// Do not allow transaction from reserved authority
+	addr, ok := p.senders.getAddr(mt.TxnSlot.SenderID)
+	if !ok {
+		p.logger.Info("senderID not registered, discarding transaction for safety")
+		return txpoolcfg.InvalidSender
+	}
+	if _, ok := p.auths[addr]; ok {
+		return txpoolcfg.ErrAuthorityReserved
+	}
+
 	hashStr := string(mt.TxnSlot.IDHash[:])
 	p.byHash[hashStr] = mt
 
@@ -1455,6 +1538,18 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	if mt.TxnSlot.Type == BlobTxnType {
 		t := p.totalBlobsInPool.Load()
 		p.totalBlobsInPool.Store(t - uint64(len(mt.TxnSlot.BlobHashes)))
+	}
+	if mt.TxnSlot.Type == SetCodeTxnType {
+		numAuths := len(mt.TxnSlot.AuthRaw)
+		for i := range numAuths {
+			signature := mt.TxnSlot.Authorizations[i]
+			signer, err := types.RecoverSignerFromRLP(mt.TxnSlot.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+			if err != nil {
+				continue
+			}
+
+			delete(p.auths, *signer)
+		}
 	}
 }
 
@@ -1523,7 +1618,7 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	for _, txn := range minedTxns {
 		nonce, ok := noncesToRemove[txn.SenderID]
 		if !ok || txn.Nonce > nonce {
-			noncesToRemove[txn.SenderID] = txn.Nonce
+			noncesToRemove[txn.SenderID] = txn.Nonce // TODO: after 7702 nonce can be incremented more than once, may affect this
 		}
 	}
 
