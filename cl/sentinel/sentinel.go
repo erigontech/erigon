@@ -152,18 +152,12 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, fmt.Errorf("bad ip address provided, %s was provided", ipAddr)
 	}
 
-	var bindIP net.IP
-	var networkVersion string
-
+	bindIP, networkVersion := net.IPv4(127, 0, 0, 1), "udp4"
 	// If the IP is an IPv4 address, bind to the correct zero address.
 	if ip.To4() != nil {
-		// bindIP = net.IPv4zero
-		bindIP = ip.To4()
-		networkVersion = "udp4"
+		bindIP, networkVersion = ip.To4(), "udp4"
 	} else {
-		// bindIP = net.IPv6zero
-		bindIP = ip.To16()
-		networkVersion = "udp6"
+		bindIP, networkVersion = ip.To16(), "udp6"
 	}
 
 	udpAddr := &net.UDPAddr{
@@ -174,7 +168,6 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.logger.Info("[Sentinel] Listening for UDP packets", "at", udpAddr.String())
 
 	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, int(s.cfg.TCPPort), s.cfg.TmpDir)
 	if err != nil {
@@ -182,13 +175,10 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	// Start stream handlers
-
 	net, err := discover.ListenV5(s.ctx, "any", conn, localNode, discCfg)
 	if err != nil {
-		s.logger.Error("[Sentinel] failed Listening for TCP packets", "err", err)
 		return nil, err
 	}
-	s.logger.Info("[Sentinel] Listening for TCP packets", "addr", net.Self().String())
 
 	handlers.NewConsensusHandlers(s.ctx, s.blockReader, s.indiciesDB, s.host, s.peers, s.cfg.NetworkConfig, localNode, s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.cfg.EnableBlocks).Start()
 
