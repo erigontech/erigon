@@ -817,7 +817,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 			case FILE_CURSOR:
-				indexList := sd.aggTx.d[kv.StorageDomain].d.IndexList
+				indexList := sd.aggTx.d[kv.StorageDomain].d.AccessorList
 				if indexList&AccessorBTree != 0 {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
