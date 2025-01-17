@@ -178,8 +178,8 @@ var idxOptimize = &cobra.Command{
 				Enums:              true,
 				LessFalsePositives: true,
 
-				BucketSize: 2000,
-				LeafSize:   8,
+				BucketSize: recsplit.DefaultBucketSize,
+				LeafSize:   recsplit.DefaultLeafSize,
 				TmpDir:     tmpDir,
 				IndexFile:  idxPath,
 				Salt:       salt,
