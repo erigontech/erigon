@@ -152,7 +152,8 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, fmt.Errorf("bad ip address provided, %s was provided", ipAddr)
 	}
 
-	bindIP, networkVersion := net.IPv4(127, 0, 0, 1), "udp4"
+	var bindIP net.IP
+	var networkVersion string
 	// If the IP is an IPv4 address, bind to the correct zero address.
 	if ip.To4() != nil {
 		bindIP, networkVersion = ip.To4(), "udp4"
