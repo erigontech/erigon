@@ -69,17 +69,9 @@ type Config struct {
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
 
-	// Optional EIP-4844/EIP-7691 parameters
-	MinBlobGasPrice *uint64 `json:"minBlobGasPrice,omitempty"`
-	// In the maps below the key corresponds to the block time, starting from which the value applies.
-	MaxBlobsPerBlock           map[string]uint64 `json:"maxBlobsPerBlock,omitempty"`
-	TargetBlobsPerBlock        map[string]uint64 `json:"targetBlobsPerBlock,omitempty"`
-	BlobGasPriceUpdateFraction map[string]uint64 `json:"blobGasPriceUpdateFraction,omitempty"`
-
-	// EIP-7691
-	MaxBlobGasPerBlockPrague         *uint64 `json:"maxBlobGasPerBlockPrague,omitempty"`
-	TargetBlobGasPerBlockPrague      *uint64 `json:"targetBlobGasPerBlockPrague,omitempty"`
-	BlobGasPriceUpdateFractionPrague *uint64 `json:"blobGasPriceUpdateFractionPrague,omitempty"`
+	// Optional blob parameters (see EIP-4844, EIP-7691, EIP-7840)
+	MinBlobGasPrice *uint64       `json:"minBlobGasPrice,omitempty"`
+	BlobSchedule    *BlobSchedule `json:"blobSchedule,omitempty"`
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -275,25 +267,27 @@ func (c *Config) GetMaxBlobGasPerBlock(t uint64) uint64 {
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
-	if c != nil && c.MaxBlobsPerBlock != nil {
-		return ConfigValueLookup(c.MaxBlobsPerBlock, time)
+	var b *BlobSchedule
+	if c != nil {
+		b = c.BlobSchedule
 	}
-	return 6 // EIP-4844 default
+	return b.MaxBlobsPerBlock(c.IsPrague(time))
 }
 
 func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
-	targetBlobsPerBlock := uint64(3) // EIP-4844 default
-	if c != nil && c.TargetBlobsPerBlock != nil {
-		targetBlobsPerBlock = ConfigValueLookup(c.TargetBlobsPerBlock, t)
+	var b *BlobSchedule
+	if c != nil {
+		b = c.BlobSchedule
 	}
-	return targetBlobsPerBlock * fixedgas.BlobGasPerBlob
+	return b.TargetBlobsPerBlock(c.IsPrague(t))
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
-	if c != nil && c.BlobGasPriceUpdateFraction != nil {
-		return ConfigValueLookup(c.BlobGasPriceUpdateFraction, t)
+	var b *BlobSchedule
+	if c != nil {
+		b = c.BlobSchedule
 	}
-	return 3338477 // BLOB_GASPRICE_UPDATE_FRACTION (EIP-4844)
+	return b.BaseFeeUpdateFraction(c.IsPrague(t))
 }
 
 func (c *Config) SecondsPerSlot() uint64 {
