@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"go/types"
 )
 
@@ -70,6 +69,6 @@ func matchStrTypeToFunc(strType string) handle {
 		if fn, ok := handlers[strType]; ok {
 			return fn
 		}
-		panic(fmt.Sprintf("no handle added for type: %s", strType))
+		panic("no handle added for type: " + strType)
 	}
 }

@@ -109,7 +109,7 @@ func checkPackageErrors(pkg *packages.Package) error {
 		}
 	}
 	if b.Len() > 0 {
-		return fmt.Errorf(b.String())
+		return errors.New(b.String())
 	}
 	return nil
 }
@@ -119,7 +119,7 @@ func addImports() []byte {
 	_imports["io"] = true
 	_imports[rlpPackagePath] = true
 
-	var result []byte
+	result := make([]byte, 0, len(_imports))
 	result = append(result, []byte(headerMsg)...)
 	result = append(result, []byte("package "+pkgSrc.Name()+"\n\n")...)
 	result = append(result, []byte("import (\n")...)
@@ -127,8 +127,7 @@ func addImports() []byte {
 		result = append(result, []byte("    ")...)
 		result = append(result, '"')
 		result = append(result, []byte(k)...)
-		result = append(result, '"')
-		result = append(result, '\n')
+		result = append(result, '"', '\n')
 	}
 	result = append(result, []byte(")\n\n")...)
 	return result
