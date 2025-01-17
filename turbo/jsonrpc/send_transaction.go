@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
@@ -88,7 +89,6 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 	if err != nil {
 		return common.Hash{}, err
 	}
-
 	defer tx.Rollback()
 
 	cc, err = api.chainConfig(ctx, tx)
@@ -105,6 +105,17 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 	}
 
 	hash := txn.Hash()
+
+	// [zkevm] - check if the transaction is a bad one
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+	badTxHashCounter, err := hermezDb.GetBadTxHashCounter(hash)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if badTxHashCounter >= api.BadTxAllowance {
+		return common.Hash{}, errors.New("transaction uses too many counters to fit into a batch")
+	}
+
 	res, err := api.txPool.Add(ctx, &txPoolProto.AddRequest{RlpTxs: [][]byte{encodedTx}})
 	if err != nil {
 		return common.Hash{}, err

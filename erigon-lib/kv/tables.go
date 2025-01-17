@@ -548,6 +548,7 @@ const (
 	TablePoolLimbo                    = "PoolLimbo"
 	BATCH_ENDS                        = "batch_ends"
 	WITNESS_CACHE                     = "witness_cache"
+	BAD_TX_HASHES                     = "bad_tx_hashes"
 	//Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
@@ -793,6 +794,7 @@ var ChaindataTables = []string{
 	TablePoolLimbo,
 	BATCH_ENDS,
 	WITNESS_CACHE,
+	BAD_TX_HASHES,
 }
 
 const (

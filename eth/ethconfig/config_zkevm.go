@@ -110,6 +110,7 @@ type Zk struct {
 	RejectLowGasPriceTransactions  bool
 	RejectLowGasPriceTolerance     float64
 	LogLevel                       log.Lvl
+	BadTxAllowance                 uint64
 }
 
 var DefaultZkConfig = &Zk{}

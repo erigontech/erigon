@@ -844,6 +844,11 @@ var (
 		Usage: "Shadow the main sequencer when run in sequencer mode. Used for local testing",
 		Value: false,
 	}
+	BadTxAllowance = cli.Uint64Flag{
+		Name:  "zkevm.bad-tx-allowance",
+		Usage: "The maximum number of times a transaction that consumes too many counters to fit into a batch will be attempted before it is rejected outright by eth_sendRawTransaction",
+		Value: 2,
+	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
 		Usage: "Number of entries to print from the ACL history on node start up",

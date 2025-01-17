@@ -379,8 +379,8 @@ type APIImpl struct {
 	gasTracker                    RpcL1GasPriceTracker
 	RejectLowGasPriceTransactions bool
 	RejectLowGasPriceTolerance    float64
-
-	logLevel utils.LogLevel
+	logLevel                      utils.LogLevel
+	BadTxAllowance                uint64
 }
 
 // NewEthAPI returns APIImpl instance
@@ -418,6 +418,7 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		gasTracker:                    gasTracker,
 		RejectLowGasPriceTransactions: ethCfg.RejectLowGasPriceTransactions,
 		RejectLowGasPriceTolerance:    ethCfg.RejectLowGasPriceTolerance,
+		BadTxAllowance:                ethCfg.BadTxAllowance,
 	}
 }
 

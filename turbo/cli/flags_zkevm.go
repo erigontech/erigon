@@ -261,6 +261,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		LogLevel:                               logLevel,
 		PanicOnReorg:                           ctx.Bool(utils.PanicOnReorg.Name),
 		ShadowSequencer:                        ctx.Bool(utils.ShadowSequencer.Name),
+		BadTxAllowance:                         ctx.Uint64(utils.BadTxAllowance.Name),
 	}
 
 	utils2.EnableTimer(cfg.DebugTimers)

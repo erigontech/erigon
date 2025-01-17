@@ -345,7 +345,7 @@ func (p *TxPool) RemoveMinedTransactions(ctx context.Context, tx kv.Tx, blockGas
 // deletes the discarded txs from the overflowZkCounters
 func (p *TxPool) discardOverflowZkCountersFromPending(pending *PendingPool, discard func(*metaTx, DiscardReason), sendersWithChangedState map[uint64]struct{}) {
 	for _, mt := range p.overflowZkCounters {
-		log.Info("[tx_pool] Removing TX from pending due to counter overflow", "tx", mt.Tx.IDHash)
+		log.Info("[tx_pool] Removing TX from pending due to counter overflow", "tx", common.BytesToHash(mt.Tx.IDHash[:]))
 		pending.Remove(mt)
 		discard(mt, OverflowZkCounters)
 		sendersWithChangedState[mt.Tx.SenderID] = struct{}{}

@@ -189,10 +189,7 @@ func sequencingBatchStep(
 		return err
 	}
 
-	batchCounters, err := prepareBatchCounters(batchContext, batchState)
-	if err != nil {
-		return err
-	}
+	batchCounters := prepareBatchCounters(batchContext, batchState)
 
 	if batchState.isL1Recovery() {
 		if cfg.zk.L1SyncStopBatch > 0 && batchState.batchNumber > cfg.zk.L1SyncStopBatch {
@@ -435,7 +432,7 @@ func sequencingBatchStep(
 
 					// The copying of this structure is intentional
 					backupDataSizeChecker := *blockDataSizeChecker
-					receipt, execResult, anyOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, batchState.isL1Recovery(), batchState.forkId, l1TreeUpdateIndex, &backupDataSizeChecker)
+					receipt, execResult, txCounters, anyOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, batchState.isL1Recovery(), batchState.forkId, l1TreeUpdateIndex, &backupDataSizeChecker)
 					if err != nil {
 						if batchState.isLimboRecovery() {
 							panic("limbo transaction has already been executed once so they must not fail while re-executing")
@@ -482,8 +479,9 @@ func sequencingBatchStep(
 
 					switch anyOverflow {
 					case overflowCounters:
-						// remove the last attempted counters as we may want to continue processing this batch with other transactions
-						batchCounters.RemovePreviousTransactionCounters()
+						// as we know this has caused an overflow we need to make sure we don't keep it in the inclusion list and attempt to add it again in the
+						// next block
+						badTxHashes = append(badTxHashes, txHash)
 
 						if batchState.isLimboRecovery() {
 							panic("limbo transaction has already been executed once so they must not overflow counters while re-executing")
@@ -491,29 +489,40 @@ func sequencingBatchStep(
 
 						if !batchState.isL1Recovery() {
 							/*
-								There are two cases when overflow could occur.
-								1. The block DOES not contain any transactions.
-									In this case it means that a single tx overflow entire zk-counters.
-									In this case we mark it so. Once marked it will be discarded from the tx-pool async (once the tx-pool process the creation of a new batch)
-									Block production then continues as normal looking for more suitable transactions
-									NB: The tx SHOULD not be removed from yielded set, because if removed, it will be picked again on next block. That's why there is i++. It ensures that removing from yielded will start after the problematic tx
-								2. The block contains transactions.
-									In this case we make note that we have had a transaction that overflowed and continue attempting to process transactions
-									Once we reach the cap for these attempts we will stop producing blocks and consider the batch done
+								here we check if the transaction on it's own would overdflow the batch counters
+								by creating a new counter collector and priming it for a single block with just this transaction
+								in it.  We already have the computed execution counters so we don't need to recompute them and
+								can just combine collectors as normal to see if it would overflow.
+
+								If it does overflow then we mark the hash as a bad one and move on.  Calls to the RPC will
+								check if this hash has appeared too many times and stop allowing it through if required.
 							*/
-							if !batchState.hasAnyTransactionsInThisBatch && len(batchState.builtBlocks) == 0 {
+
+							// now check if this transaction on it's own would overflow counters for the batch
+							tempCounters := prepareBatchCounters(batchContext, batchState)
+							singleTxOverflow, err := tempCounters.SingleTransactionOverflowCheck(txCounters)
+							if err != nil {
+								return err
+							}
+
+							// if the transaction overflows or if there are no transactions in the batch and no blocks built yet
+							// then we mark the transaction as bad and move on
+							if singleTxOverflow || (!batchState.hasAnyTransactionsInThisBatch && len(batchState.builtBlocks) == 0) {
+								ocs, _ := tempCounters.CounterStats(l1TreeUpdateIndex != 0)
 								// mark the transaction to be removed from the pool
 								cfg.txPool.MarkForDiscardFromPendingBest(txHash)
-								log.Info(fmt.Sprintf("[%s] single transaction %s cannot fit into batch", logPrefix, txHash))
+								counter, err := handleBadTxHashCounter(sdb.hermezDb, txHash)
+								if err != nil {
+									return err
+								}
+								log.Info(fmt.Sprintf("[%s] single transaction %s cannot fit into batch - overflow", logPrefix, txHash), "context", ocs, "times_seen", counter)
 							} else {
 								batchState.newOverflowTransaction()
-								// batchCounters.
 								transactionNotAddedText := fmt.Sprintf("[%s] transaction %s was not included in this batch because it overflowed.", logPrefix, txHash)
 								ocs, _ := batchCounters.CounterStats(l1TreeUpdateIndex != 0)
-								// was not included in this batch because it overflowed: counter x, counter y
 								log.Info(transactionNotAddedText, "Counters context:", ocs, "overflow transactions", batchState.overflowTransactions)
 								if batchState.reachedOverflowTransactionLimit() || cfg.zk.SealBatchImmediatelyOnOverflow {
-									log.Info(fmt.Sprintf("[%s] closing batch due to counters", logPrefix), "counters: ", batchState.overflowTransactions, "immediate", cfg.zk.SealBatchImmediatelyOnOverflow)
+									log.Info(fmt.Sprintf("[%s] closing batch due to overflow counters", logPrefix), "counters: ", batchState.overflowTransactions, "immediate", cfg.zk.SealBatchImmediatelyOnOverflow)
 									runLoopBlocks = false
 									if len(batchState.blockState.builtBlockElements.transactions) == 0 {
 										emptyBlockOverflow = true
@@ -521,6 +530,9 @@ func sequencingBatchStep(
 									break OuterLoopTransactions
 								}
 							}
+
+							// now we have finished with logging the overflow,remove the last attempted counters as we may want to continue processing this batch with other transactions
+							batchCounters.RemovePreviousTransactionCounters()
 
 							// continue on processing other transactions and skip this one
 							continue
@@ -703,6 +715,16 @@ func removeInclusionTransaction(orig []types.Transaction, index int) []types.Tra
 		return orig
 	}
 	return append(orig[:index], orig[index+1:]...)
+}
+
+func handleBadTxHashCounter(hermezDb *hermez_db.HermezDb, txHash common.Hash) (uint64, error) {
+	counter, err := hermezDb.GetBadTxHashCounter(txHash)
+	if err != nil {
+		return 0, err
+	}
+	newCounter := counter + 1
+	hermezDb.WriteBadTxHashCounter(txHash, newCounter)
+	return newCounter, nil
 }
 
 func isOkKnownError(err error) bool {
