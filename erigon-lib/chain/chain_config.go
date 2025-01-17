@@ -69,7 +69,7 @@ type Config struct {
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
 
-	// Optional blob parameters (see EIP-4844, EIP-7691, EIP-7840)
+	// Optional EIP-4844 parameters (see also EIP-7691 & EIP-7840)
 	MinBlobGasPrice *uint64       `json:"minBlobGasPrice,omitempty"`
 	BlobSchedule    *BlobSchedule `json:"blobSchedule,omitempty"`
 
