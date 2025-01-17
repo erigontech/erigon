@@ -1095,24 +1095,37 @@ func NewBlockFromNetwork(header *Header, body *Body) *Block {
 // CopyHeader creates a deep copy of a block header to prevent side effects from
 // modifying a header variable.
 func CopyHeader(h *Header) *Header {
-	cpy := *h //nolint
+	cpy := Header{} // note: do not copy hash atomic.Pointer
+	cpy.ParentHash = h.ParentHash
+	cpy.UncleHash = h.UncleHash
+	cpy.Coinbase = h.Coinbase
+	cpy.Root = h.Root
+	cpy.TxHash = h.TxHash
+	cpy.ReceiptHash = h.ReceiptHash
+	cpy.Bloom = h.Bloom
 	if cpy.Difficulty = new(big.Int); h.Difficulty != nil {
 		cpy.Difficulty.Set(h.Difficulty)
 	}
 	if cpy.Number = new(big.Int); h.Number != nil {
 		cpy.Number.Set(h.Number)
 	}
-	if h.BaseFee != nil {
-		cpy.BaseFee = new(big.Int)
-		cpy.BaseFee.Set(h.BaseFee)
-	}
+	cpy.GasLimit = h.GasLimit
+	cpy.GasUsed = h.GasUsed
+	cpy.Time = h.Time
 	if len(h.Extra) > 0 {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
 	}
+	cpy.MixDigest = h.MixDigest
+	cpy.Nonce = h.Nonce
+	cpy.AuRaStep = h.AuRaStep
 	if len(h.AuRaSeal) > 0 {
 		cpy.AuRaSeal = make([]byte, len(h.AuRaSeal))
 		copy(cpy.AuRaSeal, h.AuRaSeal)
+	}
+	if h.BaseFee != nil {
+		cpy.BaseFee = new(big.Int)
+		cpy.BaseFee.Set(h.BaseFee)
 	}
 	if h.WithdrawalsHash != nil {
 		cpy.WithdrawalsHash = new(libcommon.Hash)
@@ -1133,6 +1146,15 @@ func CopyHeader(h *Header) *Header {
 	if h.RequestsHash != nil {
 		cpy.RequestsHash = new(libcommon.Hash)
 		cpy.RequestsHash.SetBytes(h.RequestsHash.Bytes())
+	}
+	cpy.Verkle = h.Verkle
+	if len(h.VerkleProof) > 0 {
+		cpy.VerkleProof = make([]byte, len(h.VerkleProof))
+		copy(cpy.VerkleProof, h.VerkleProof)
+	}
+	if len(h.VerkleKeyVals) > 0 {
+		cpy.VerkleKeyVals = make([]verkle.KeyValuePair, len(h.VerkleKeyVals))
+		copy(cpy.VerkleKeyVals, h.VerkleKeyVals)
 	}
 	cpy.mutable = h.mutable
 	if hash := h.hash.Load(); hash != nil {
