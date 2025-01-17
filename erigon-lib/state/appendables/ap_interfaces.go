@@ -40,8 +40,8 @@ type Appendable interface {
 	Prune(ctx context.Context, baseTsNumTo TsNum, limit uint64, rwTx kv.RwTx) error
 	Unwind(ctx context.Context, baseTsNumFrom TsNum, rwTx kv.RwTx) error
 
-	// don't put BeginFilesRo here, since it returns PointQueries, RangedQueries etc.
-	// so anyway aggregator has to recover concrete type, and then it can 
+	// don't put BeginFilesRo here, since it returns PointAppendableRo, RangedAppendableRo etc. (each has different query patterns)
+	// so anyway aggregator has to recover concrete type, and then it can
 	// call BeginFilesRo on that
 }
 

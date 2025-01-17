@@ -14,6 +14,7 @@ import (
 	"github.com/tidwall/btree"
 )
 
+// common members/functions for appendables impls. Embed this.
 type ProtoAppendable struct {
 	freezer Freezer
 
@@ -178,7 +179,10 @@ func (a *ProtoAppendable) closeWhatNotInList(fNames []string) {
 		item.closeFiles()
 		a.dirtyFiles.Delete(item)
 	}
+}
 
+func (a *ProtoAppendable) IsBaseAppendable() bool {
+	return a == a.baseAppendable
 }
 
 /// appendableRoTx
@@ -253,3 +257,76 @@ func calcVisibleFiles(files *btree.BTreeG[*DirtySegment], toTsNum TsNum) Visible
 	}
 	return newVisibleFiles
 }
+
+// proto_appendable_rotx
+
+type ProtoAppendableRoTx struct {
+	enum  ApEnum
+	files VisibleSegments
+	a     *ProtoAppendable
+}
+
+func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableRoTx {
+	for i := 0; i < len(a._visible); i++ {
+		if a._visible[i].src.frozen {
+			a._visible[i].src.refcount.Add(1)
+		}
+	}
+
+	return &ProtoAppendableRoTx{
+		enum:  a.enum,
+		files: a._visible,
+		a:     a,
+	}
+}
+
+func (a *ProtoAppendableRoTx) Close() {
+	if a.files == nil {
+		return
+	}
+	files := a.files
+	a.files = nil
+	for i := range files {
+		src := files[i].src
+		if src == nil || src.frozen {
+			continue
+		}
+		refCnt := src.refcount.Add(-1)
+		if refCnt == 0 && src.canDelete.Load() {
+			src.CloseFilesAndRemove()
+		}
+	}
+}
+
+func (a *ProtoAppendableRoTx) Garbage(merged *DirtySegment) (outs []*DirtySegment) {
+	if merged == nil {
+		return
+	}
+
+	a.a.dirtyFiles.Walk(func(item []*DirtySegment) bool {
+		for _, item := range item {
+			if item.frozen {
+				continue
+			}
+			if item.isSubsetOf(merged) {
+				outs = append(outs, item)
+			}
+			if item.isBefore(merged) && hasCoverVisibleFile(a.files, item) {
+				outs = append(outs, item)
+			}
+		}
+		return true
+	})
+	return outs
+}
+
+func hasCoverVisibleFile(visibleFiles VisibleSegments, item *DirtySegment) bool {
+	for _, f := range visibleFiles {
+		if item.isSubsetOf(f.src) {
+			return true
+		}
+	}
+	return false
+}
+
+//func deleteMergeFile(dirtyFiles *btree2.BTreeG[*DirtySegment], outs []*DirtySegment)

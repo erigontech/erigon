@@ -39,19 +39,6 @@ func NewPointAppendable(valsTbl string, enum ApEnum, stepSize uint64) Appendable
 
 // func NewCanonicalAppendableWithFreezer() etc.
 
-func (a *PointAppendable) Prune(ctx context.Context, baseKeyTo TsNum, limit uint64, rwTx kv.RwTx) error {
-	// probably fromKey value needs to be in configuration...it is 1 because we want to keep genesis block
-	// but this might start from 0 as well.
-	fromKey := a.encTs(uint64(1))
-	toKey := a.encTs(uint64(baseKeyTo))
-	return DeleteRangeFromTbl(a.valsTbl, fromKey, toKey, limit, rwTx)
-}
-
-func (a *PointAppendable) Unwind(ctx context.Context, baseKeyFrom TsNum, rwTx kv.RwTx) error {
-	fromKey := a.encTs(uint64(baseKeyFrom))
-	return DeleteRangeFromTbl(a.valsTbl, fromKey, nil, MaxUint64, rwTx)
-}
-
 func (a *PointAppendable) encTs(ts uint64) []byte {
 	return Encode64ToBytes(ts, true)
 }
@@ -67,22 +54,15 @@ func (s *sequentialFetcher) GetKeys(baseTsNumFrom, baseTsNumTo TsNum, tx kv.Tx) 
 /// rotx
 
 type PointAppendableRoTx struct {
+	*ProtoAppendableRoTx
 	a     *PointAppendable
-	enum  ApEnum
-	files VisibleSegments
+	valsC kv.Cursor
 }
 
 func (a *PointAppendable) BeginFilesRo() *PointAppendableRoTx {
-	for i := 0; i < len(a._visible); i++ {
-		if a._visible[i].src.frozen {
-			a._visible[i].src.refcount.Add(1)
-		}
-	}
-
 	return &PointAppendableRoTx{
-		a:     a,
-		enum:  a.enum,
-		files: a._visible,
+		ProtoAppendableRoTx: a.ProtoAppendable.BeginFilesRo(),
+		a:                   a,
 	}
 }
 
@@ -113,5 +93,44 @@ func (a *PointAppendableRoTx) Get(tsNum TsNum, tx kv.Tx) (VVType, error) {
 }
 
 func (a *PointAppendableRoTx) Put(tsNum TsNum, value VVType, tx kv.RwTx) error {
+	// bleh...RoTx should just be declared as RwTx?
+	// domain gets around this by a NewWriter() method + Flush(rwtx) on it.
 	return tx.Append(a.a.valsTbl, a.a.encTs(uint64(tsNum)), value)
+}
+
+func (a *PointAppendableRoTx) Prune(ctx context.Context, baseKeyTo TsNum, limit uint64, rwTx kv.RwTx) error {
+	// probably fromKey value needs to be in configuration...it is 1 because we want to keep genesis block
+	// but this might start from 0 as well.
+
+	// probably should use etl?
+	// also doesn't need to use PruneProgress tables
+	fromKey := a.a.encTs(uint64(1))
+	toKey := a.a.encTs(uint64(baseKeyTo))
+	return DeleteRangeFromTbl(a.a.valsTbl, fromKey, toKey, limit, rwTx)
+}
+
+func (a *PointAppendableRoTx) Unwind(ctx context.Context, baseKeyFrom TsNum, rwTx kv.RwTx) error {
+	fromKey := a.a.encTs(uint64(baseKeyFrom))
+	return DeleteRangeFromTbl(a.a.valsTbl, fromKey, nil, MaxUint64, rwTx)
+}
+
+func (a *PointAppendableRoTx) Close() {
+	if a.files == nil {
+		return
+	}
+
+	if a.valsC != nil {
+		a.valsC.Close()
+		a.valsC = nil
+	}
+	a.ProtoAppendableRoTx.Close()
+}
+
+func (a *PointAppendableRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
+	if a.valsC != nil {
+		return a.valsC, nil
+	}
+
+	a.valsC, err = tx.Cursor(a.a.valsTbl)
+	return a.valsC, err
 }

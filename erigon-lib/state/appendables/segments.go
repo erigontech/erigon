@@ -97,3 +97,9 @@ func (v *DirtySegment) closeFiles() {
 	}
 	v.indexes = nil
 }
+
+func (v *DirtySegment) CloseFilesAndRemove() {
+	// similar to filesItem#closeFilesAndRemove
+}
+
+func (v *DirtySegment) isBefore(j *DirtySegment) bool { return v.to < j.from }

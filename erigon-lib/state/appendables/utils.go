@@ -29,7 +29,7 @@ func Decode64FromBytes(buf []byte, x8Bytes bool) (x uint64) {
 }
 
 func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, rwTx kv.RwTx) error {
-	c, err := rwTx.RwCursor(tbl)
+	c, err := rwTx.RwCursor(tbl) // TODO: tbl can be DUpsort enabled too
 	if err != nil {
 		return err
 	}
