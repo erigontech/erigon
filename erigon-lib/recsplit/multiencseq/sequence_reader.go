@@ -64,6 +64,10 @@ func Seek(baseNum uint64, data []byte, n uint64) (uint64, bool) {
 	return seq.search(n)
 }
 
+func (s *SequenceReader) EncodingType() EncodingType {
+	return s.currentEnc
+}
+
 func (s *SequenceReader) Get(i uint64) uint64 {
 	if s.currentEnc == SimpleEncoding {
 		return s.sseq.Get(i)

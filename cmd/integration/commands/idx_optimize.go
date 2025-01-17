@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"encoding/binary"
 	"io/fs"
 	"log"
 	"os"
@@ -10,11 +9,11 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/config3"
 	lllog "github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/state"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -50,39 +49,22 @@ type efFileInfo struct {
 	endStep   uint64
 }
 
-var MAGIC_KEY_BASE_TX_NUM = hexutility.MustDecodeHex("0x8453FFFFFFFFFFFFFFFFFFFF")
+var b []byte
 
-// Delta encoding starting from 1st elem; only for ef sequences < 16 elems
-//
-// Encode all elems as deltas from baseTxId; they can fit into uint32
-// because max delta is bounded by 64 * stepSize == 100M
-// hence size == count * sizeof(uint32) + 1 byte for encoding type
-func doOpt4(baseTxNum uint64, v []byte) ([]byte, error) {
+func doConvert(baseTxNum uint64, v []byte) ([]byte, error) {
 	ef, _ := eliasfano32.ReadEliasFano(v)
-	count := ef.Count()
-	if count < 16 {
-		if ef.Max()-ef.Min()+1 < uint64(0xffffffff) {
-			return convertEF(baseTxNum, ef)
-		}
-	}
 
-	return v, nil // DO NOT OPTIMIZE; plain elias fano
-}
-
-func convertEF(baseTxNum uint64, ef *eliasfano32.EliasFano) ([]byte, error) {
-	b := make([]byte, 0, 1+ef.Count()*4)
-	b = append(b, 0b10000000)
+	seqBuilder := multiencseq.NewBuilder(baseTxNum, ef.Count(), ef.Max())
 	for it := ef.Iterator(); it.HasNext(); {
 		n, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
-		n -= baseTxNum
-
-		bn := make([]byte, 4)
-		binary.BigEndian.PutUint32(bn, uint32(n))
-		b = append(b, bn...)
+		seqBuilder.AddOffset(n)
 	}
+	seqBuilder.Build()
+
+	b = seqBuilder.AppendBytes(b[:0])
 	return b, nil
 }
 
@@ -153,10 +135,7 @@ var idxOptimize = &cobra.Command{
 			reader.Reset(0)
 
 			writer := seg.NewWriter(idxOutput, seg.CompressNone)
-			writer.AddWord(MAGIC_KEY_BASE_TX_NUM)
-			b := make([]byte, 8)
-			binary.BigEndian.PutUint64(b, baseTxNum)
-			writer.AddWord(b)
+			ps := background.NewProgressSet()
 
 			for reader.HasNext() {
 				k, _ := reader.Next(nil)
@@ -168,7 +147,7 @@ var idxOptimize = &cobra.Command{
 				}
 
 				v, _ := reader.Next(nil)
-				v, err := doOpt4(baseTxNum, v)
+				v, err := doConvert(baseTxNum, v)
 				if err != nil {
 					log.Fatalf("error while optimizing value %v", err)
 				}
@@ -210,7 +189,6 @@ var idxOptimize = &cobra.Command{
 			if err != nil {
 				log.Fatalf("Failed to build accessor: %v", err)
 			}
-			ps := background.NewProgressSet()
 			if err := state.BuildAccessor(ctx, data, seg.CompressNone, idxPath, false, cfg, ps, logger); err != nil {
 				log.Fatalf("Failed to build accessor: %v", err)
 			}

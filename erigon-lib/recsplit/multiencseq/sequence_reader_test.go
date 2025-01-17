@@ -23,7 +23,7 @@ func TestMultiEncSeq(t *testing.T) {
 
 		// check deserialization
 		s := ReadMultiEncSeq(1000, b)
-		require.Equal(t, PlainEliasFano, s.currentEnc)
+		require.Equal(t, PlainEliasFano, s.EncodingType())
 		requireSequenceChecks(t, s)
 		requireRawDataChecks(t, b)
 	})
@@ -43,7 +43,7 @@ func TestMultiEncSeq(t *testing.T) {
 
 		// check deserialization
 		s := ReadMultiEncSeq(1000, b)
-		require.Equal(t, SimpleEncoding, s.currentEnc)
+		require.Equal(t, SimpleEncoding, s.EncodingType())
 		requireSequenceChecks(t, s)
 		requireRawDataChecks(t, b)
 	})
@@ -64,7 +64,7 @@ func TestMultiEncSeq(t *testing.T) {
 
 		// check deserialization
 		s := ReadMultiEncSeq(1000, b)
-		require.Equal(t, RebasedEliasFano, s.currentEnc)
+		require.Equal(t, RebasedEliasFano, s.EncodingType())
 		requireSequenceChecks(t, s)
 		requireRawDataChecks(t, b)
 	})

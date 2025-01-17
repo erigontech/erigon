@@ -39,15 +39,17 @@ var idxVerify = &cobra.Command{
 				continue
 			}
 
-			log.Printf("Deep checking file %s...", file.Name())
-
 			efInfo, err := parseEFFilename(file.Name())
 			if err != nil {
 				log.Fatalf("Failed to parse file info: %v", err)
 			}
 			baseTxNum := efInfo.startStep * config3.DefaultStepSize
 
-			targetEfi, err := recsplit.OpenIndex(targetDirCli + "/snapshots/accessor/" + file.Name() + "i")
+			targetIndexFilename := targetDirCli + "/snapshots/accessor/" + file.Name() + "i"
+			if manuallyOptimized {
+				targetIndexFilename = targetDirCli + "/snapshots/accessor/" + file.Name() + "i.new"
+			}
+			targetEfi, err := recsplit.OpenIndex(targetIndexFilename)
 			if err != nil {
 				log.Fatalf("Failed to open index: %v", err)
 			}
@@ -57,18 +59,25 @@ var idxVerify = &cobra.Command{
 			defer targetEfiReader.Close()
 
 			// original .ef file
-			sourceIdx, err := seg.NewDecompressor(sourceDirCli + "/snapshots/idx/" + file.Name())
+			sourceFilename := sourceDirCli + "/snapshots/idx/" + file.Name()
+			sourceIdx, err := seg.NewDecompressor(sourceFilename)
 			if err != nil {
 				log.Fatalf("Failed to open decompressor: %v", err)
 			}
 			defer sourceIdx.Close()
 
 			// reencoded optimized .ef file
-			targetIdx, err := seg.NewDecompressor(targetDirCli + "/snapshots/idx/" + file.Name())
+			targetFilename := targetDirCli + "/snapshots/idx/" + file.Name()
+			if manuallyOptimized {
+				targetFilename = targetDirCli + "/snapshots/idx/" + file.Name() + ".new"
+			}
+			targetIdx, err := seg.NewDecompressor(targetFilename)
 			if err != nil {
 				log.Fatalf("Failed to open decompressor: %v", err)
 			}
 			defer targetIdx.Close()
+
+			log.Printf("Deep checking files %s -> %s, %s...", sourceFilename, targetFilename, targetIndexFilename)
 
 			g := sourceIdx.MakeGetter()
 			sourceReader := seg.NewReader(g, seg.CompressNone)
@@ -143,9 +152,14 @@ var idxVerify = &cobra.Command{
 }
 
 func compareSequences(sourceK, sourceV, targetV []byte, baseTxNum uint64) bool {
+	// log.Printf("k=%s sv=%s tv=%s baseTxNum=%d", hexutility.Encode(sourceK), hexutility.Encode(sourceV), hexutility.Encode(targetV), baseTxNum)
 	sourceEf, _ := eliasfano32.ReadEliasFano(sourceV)
 	targetSeq := multiencseq.ReadMultiEncSeq(baseTxNum, targetV)
 
+	if targetSeq.EncodingType() == multiencseq.PlainEliasFano {
+		log.Printf("target encoding type can't be PlainEliasFano")
+		return false
+	}
 	if targetSeq.Count() > sourceEf.Count() {
 		log.Print("Optimized eliasfano is longer")
 		log.Printf("key=%s", hexutility.Encode(sourceK))
@@ -193,7 +207,10 @@ func init() {
 	must(idxVerify.MarkFlagRequired("targetdir"))
 	must(idxVerify.MarkFlagDirname("targetdir"))
 
+	idxVerify.Flags().BoolVar(&manuallyOptimized, "manuallyOptimized", false, "set this parameter if you have manually optimized the .ef files ith idx_optimize; set sourcedir/targetdir to the same")
+
 	rootCmd.AddCommand(idxVerify)
 }
 
 var sourceDirCli, targetDirCli string
+var manuallyOptimized bool
