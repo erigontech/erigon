@@ -613,7 +613,7 @@ func TestCopyHeader(t *testing.T) {
 	const runCount = 1000
 	tr := NewTRand()
 	for range make([]byte, runCount) {
-		h1 := tr.RandHeader()
+		h1 := tr.RandHeaderReflectAllFields()
 		h2 := CopyHeader(h1)
 		require.Equal(t, h1, h2)
 	}
