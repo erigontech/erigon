@@ -28,6 +28,7 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -155,7 +156,7 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 func (tr *TRand) RandTransaction(_type int) Transaction {
 	var txType int
 	if _type == -1 {
-		txType = tr.RandIntInRange(0, 5) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType
+		txType = tr.RandIntInRange(0, 6) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, AccountAbstractionTxType
 	} else {
 		txType = _type
 	}
@@ -216,6 +217,28 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 			},
 			Authorizations: tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
+		}
+	case AccountAbstractionTxType:
+		senderAddress, paymaster, deployer := tr.RandAddress(), tr.RandAddress(), tr.RandAddress()
+		return &AccountAbstractionTransaction{
+			Nonce:                       commonTx.Nonce,
+			ChainID:                     uint256.NewInt(*tr.RandUint64()),
+			Tip:                         uint256.NewInt(*tr.RandUint64()),
+			FeeCap:                      uint256.NewInt(*tr.RandUint64()),
+			Gas:                         commonTx.Gas,
+			AccessList:                  tr.RandAccessList(tr.RandIntInRange(0, 5)),
+			SenderAddress:               &senderAddress,
+			Authorizations:              tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
+			ExecutionData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
+			Paymaster:                   &paymaster,
+			PaymasterData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
+			Deployer:                    &deployer,
+			DeployerData:                tr.RandBytes(tr.RandIntInRange(128, 1024)),
+			BuilderFee:                  uint256.NewInt(*tr.RandUint64()),
+			ValidationGasLimit:          *tr.RandUint64(),
+			PaymasterValidationGasLimit: *tr.RandUint64(),
+			PostOpGasLimit:              *tr.RandUint64(),
+			NonceKey:                    uint256.NewInt(*tr.RandUint64()),
 		}
 	default:
 		fmt.Printf("unexpected txType %v", txType)
@@ -452,6 +475,84 @@ func TestTransactionEncodeDecodeRLP(t *testing.T) {
 		}
 		compareTransactions(t, enc, dec)
 	}
+}
+
+func TestTransactionDecodeRLP_AA(t *testing.T) {
+	// fails - incorrect rlp from ef team
+	rlpStr := "05f85d8205390182303985174876e800830493e0c0947cd129f392c34d898035b3e3870c56537d4270fb8a6e6f20636f6e746578748461379cb694add32fafe807c8c9e814030b74a3c6313b7256e780808080831e8480830f4240830f424080"
+	bodyRlx := hexutility.MustDecodeHex(rlpStr)
+
+	dec, err := UnmarshalTransactionFromBinary(bodyRlx, false)
+	if err != nil {
+		t.Errorf("error: DecodeRLPTransaction: %v", err)
+	}
+	t.Log(dec.GetNonce())
+}
+
+func TestTransactionEncodeRLP_AAMarker(t *testing.T) {
+	marker := AccountAbstractionBatchHeaderTransaction{TransactionCount: 2, ChainID: new(uint256.Int).SetUint64(1337)}
+
+	var buf bytes.Buffer
+	if err := marker.EncodeRLP(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+	dec, err := DecodeRLPTransaction(s, false)
+	if err != nil {
+		t.Errorf("error: DecodeRLPTransaction: %v", err)
+	}
+
+	t.Log(dec)
+}
+
+func TestTransactionEncodeRLP_AA(t *testing.T) {
+	// fails - bad rlp encoding?
+	tr := NewTRand()
+	senderAddress, paymaster, deployer, to := tr.RandAddress(), tr.RandAddress(), tr.RandAddress(), tr.RandAddress()
+	commonTx := CommonTx{
+		Nonce: *tr.RandUint64(),
+		Gas:   *tr.RandUint64(),
+		To:    &to,
+		Value: uint256.NewInt(*tr.RandUint64()), // wei amount
+		Data:  tr.RandBytes(tr.RandIntInRange(128, 1024)),
+		V:     *tr.RandUint256(),
+		R:     *tr.RandUint256(),
+		S:     *tr.RandUint256(),
+	}
+	aaTxn := AccountAbstractionTransaction{
+		Nonce:                       commonTx.Nonce,
+		ChainID:                     uint256.NewInt(*tr.RandUint64()),
+		Tip:                         uint256.NewInt(*tr.RandUint64()),
+		FeeCap:                      uint256.NewInt(*tr.RandUint64()),
+		Gas:                         commonTx.Gas,
+		AccessList:                  tr.RandAccessList(tr.RandIntInRange(0, 5)),
+		SenderAddress:               &senderAddress,
+		Authorizations:              tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
+		ExecutionData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
+		Paymaster:                   &paymaster,
+		PaymasterData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
+		Deployer:                    &deployer,
+		DeployerData:                tr.RandBytes(tr.RandIntInRange(128, 1024)),
+		BuilderFee:                  uint256.NewInt(*tr.RandUint64()),
+		ValidationGasLimit:          *tr.RandUint64(),
+		PaymasterValidationGasLimit: *tr.RandUint64(),
+		PostOpGasLimit:              *tr.RandUint64(),
+		NonceKey:                    uint256.NewInt(*tr.RandUint64()),
+	}
+
+	var buf bytes.Buffer
+	if err := aaTxn.EncodeRLP(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+	dec, err := DecodeRLPTransaction(s, false)
+	if err != nil {
+		t.Errorf("error: DecodeRLPTransaction: %v", err)
+	}
+
+	t.Log(dec)
 }
 
 func TestHeaderEncodeDecodeRLP(t *testing.T) {
