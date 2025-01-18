@@ -218,10 +218,10 @@ func init() {
 		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
 	}
 	for k := range PrecompiledContractsFjord {
-		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
+		PrecompiledAddressesFjord = append(PrecompiledAddressesFjord, k)
 	}
 	for k := range PrecompiledContractsGranite {
-		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
+		PrecompiledAddressesGranite = append(PrecompiledAddressesGranite, k)
 	}
 
 }
