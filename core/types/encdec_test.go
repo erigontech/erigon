@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gballet/go-verkle"
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -77,8 +78,27 @@ func (tr *TRand) RandHash() libcommon.Hash {
 	return libcommon.Hash(tr.RandBytes(32))
 }
 
+func (tr *TRand) RandBoolean() bool {
+	return tr.rnd.Intn(2) == 0
+}
+
 func (tr *TRand) RandBloom() Bloom {
 	return Bloom(tr.RandBytes(BloomByteLength))
+}
+
+func (tr *TRand) RandVerkleKeyValuePairs(count int) []verkle.KeyValuePair {
+	res := make([]verkle.KeyValuePair, count)
+	for i := 0; i < count; i++ {
+		res[i] = tr.RandVerkleKeyValuePair()
+	}
+	return res
+}
+
+func (tr *TRand) RandVerkleKeyValuePair() verkle.KeyValuePair {
+	return verkle.KeyValuePair{
+		Key:   tr.RandBytes(tr.RandIntInRange(1, 32)),
+		Value: tr.RandBytes(tr.RandIntInRange(1, 32)),
+	}
 }
 
 func (tr *TRand) RandWithdrawal() *Withdrawal {
@@ -115,6 +135,60 @@ func (tr *TRand) RandHeader() *Header {
 		ExcessBlobGas:         tr.RandUint64(),                            // *uint64
 		ParentBeaconBlockRoot: &pHash,                                     //*libcommon.Hash
 	}
+}
+
+func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
+	skipSet := make(map[string]struct{}, len(skipFields))
+	for _, field := range skipFields {
+		skipSet[field] = struct{}{}
+	}
+
+	emptyUint64 := uint64(0)
+	h := &Header{}
+	// note unexported fields are skipped in reflection auto-assign as they are not assignable
+	h.mutable = tr.RandBoolean()
+	headerValue := reflect.ValueOf(h)
+	headerElem := headerValue.Elem()
+	numField := headerElem.Type().NumField()
+	for i := 0; i < numField; i++ {
+		field := headerElem.Field(i)
+		if !field.CanSet() {
+			continue
+		}
+
+		if _, skip := skipSet[headerElem.Type().Field(i).Name]; skip {
+			continue
+		}
+
+		switch field.Type() {
+		case reflect.TypeOf(libcommon.Hash{}):
+			field.Set(reflect.ValueOf(tr.RandHash()))
+		case reflect.TypeOf(&libcommon.Hash{}):
+			randHash := tr.RandHash()
+			field.Set(reflect.ValueOf(&randHash))
+		case reflect.TypeOf(libcommon.Address{}):
+			field.Set(reflect.ValueOf(tr.RandAddress()))
+		case reflect.TypeOf(Bloom{}):
+			field.Set(reflect.ValueOf(tr.RandBloom()))
+		case reflect.TypeOf(BlockNonce{}):
+			field.Set(reflect.ValueOf(BlockNonce(tr.RandBytes(8))))
+		case reflect.TypeOf(&big.Int{}):
+			field.Set(reflect.ValueOf(tr.RandBig()))
+		case reflect.TypeOf(uint64(0)):
+			field.Set(reflect.ValueOf(*tr.RandUint64()))
+		case reflect.TypeOf(&emptyUint64):
+			field.Set(reflect.ValueOf(tr.RandUint64()))
+		case reflect.TypeOf([]byte{}):
+			field.Set(reflect.ValueOf(tr.RandBytes(tr.RandIntInRange(128, 1024))))
+		case reflect.TypeOf(false):
+			field.Set(reflect.ValueOf(tr.RandBoolean()))
+		case reflect.TypeOf([]verkle.KeyValuePair{}):
+			field.Set(reflect.ValueOf(tr.RandVerkleKeyValuePairs(tr.RandIntInRange(1, 3))))
+		default:
+			panic(fmt.Sprintf("don't know how to generate rand value for Header field type %v - please add handler", field.Type()))
+		}
+	}
+	return h
 }
 
 func (tr *TRand) RandAccessTuple() AccessTuple {
