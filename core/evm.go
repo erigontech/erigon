@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon/consensus"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
@@ -107,38 +109,33 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uint64) (*types.Header, error)) func(n uint64) (libcommon.Hash, error) {
 	// Cache will initially contain [refHash.parent],
 	// Then fill up with [refHash.p, refHash.pp, refHash.ppp, ...]
-	var cache []libcommon.Hash
-	var cacheLock sync.RWMutex
+	// lru.New only returns err on -ve size
+	cache, _ := lru.New[uint64, common.Hash](8192)
+	lastKnownNumber := ref.Number.Uint64() - 1
+	lastKnownHash := ref.ParentHash
+	cacheLock := sync.Mutex{}
+
+	cache.Add(lastKnownNumber, lastKnownHash)
 
 	return func(n uint64) (libcommon.Hash, error) {
-		// If there's no hash cache yet, make one
 		cacheLock.Lock()
-		if len(cache) == 0 {
-			cache = append(cache, ref.ParentHash)
-		}
+		defer cacheLock.Unlock()
 
-		if idx := ref.Number.Uint64() - n - 1; idx < uint64(len(cache)) {
-			cacheLock.Unlock()
-			return cache[idx], nil
+		if hash, ok := cache.Get(n); ok {
+			return hash, nil
 		}
-		// No luck in the cache, but we can start iterating from the last element we already know
-		lastKnownHash := cache[len(cache)-1]
-		lastKnownNumber := ref.Number.Uint64() - uint64(len(cache))
-		cacheLock.Unlock()
 
 		for {
 			header, err := getHeader(lastKnownHash, lastKnownNumber)
-			if err!=nil {
+			if err != nil {
 				return libcommon.Hash{}, err
 			}
 			if header == nil {
 				break
 			}
-			cacheLock.Lock()
-			cache = append(cache, header.ParentHash)
-			cacheLock.Unlock()
 			lastKnownHash = header.ParentHash
 			lastKnownNumber = header.Number.Uint64() - 1
+			cache.Add(lastKnownNumber, lastKnownHash)
 			if n == lastKnownNumber {
 				return lastKnownHash, nil
 			}

@@ -182,6 +182,7 @@ type IntraBlockState interface {
 	SetHooks(hooks *tracing.Hooks)
 
 	// temp
+	Trace() bool
 	TraceAccount(common.Address) bool
 	TxIndex() int
 	Incarnation() int

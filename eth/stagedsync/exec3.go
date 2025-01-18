@@ -661,7 +661,7 @@ Loop:
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 				Config:           chainConfig,
-				Trace:            blockNum == 14748605 || blockNum == 14734485,
+				Trace:            blockNum == 14936592 || blockNum == 14753281,
 			}
 
 			if cfg.genesis != nil {
@@ -744,7 +744,7 @@ Loop:
 				executor.domains().SetChangesetAccumulator(nil)
 			}
 
-			if blockNum == 14748605 || blockNum == 14734485 {
+			if blockNum == 14753281 || blockNum == 14936592 {
 				fmt.Println(blockNum, hex.EncodeToString(header.Root.Bytes()))
 			}
 		}

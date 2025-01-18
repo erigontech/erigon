@@ -1513,6 +1513,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	defer logEvery.Stop()
 	//hph.trace = true
 
+	trace := hph.trace // temp
+	hph.trace = false  // temp
+	defer func() { hph.trace = trace } //temp
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
@@ -1523,6 +1526,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 		default:
 		}
+
+		trace := hph.trace // temp
+		hph.trace = false  // temp
 
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
@@ -1559,7 +1565,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			}
 		}
 
-		if hph.trace {
+		if trace /*hph.trace*/ {
 			fmt.Printf("%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 

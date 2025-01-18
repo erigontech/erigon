@@ -650,10 +650,10 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 }
 
 var tracedAccounts = map[libcommon.Address]struct{}{
-	libcommon.HexToAddress("3cad627d8cc7ca1dd31bb7b0411b7cfda15571f2"): {},
-	libcommon.HexToAddress("47c4002f8554fec15828af5386fc63555393650e"): {},
-	libcommon.HexToAddress("749e27557966db1a6932e60a5dfbde7615b8c503"): {},
-	libcommon.HexToAddress("343300b5d84d444b2adc9116fef1bed02be49cf2"): {},
+	//libcommon.HexToAddress("3cad627d8cc7ca1dd31bb7b0411b7cfda15571f2"): {},
+	//libcommon.HexToAddress("47c4002f8554fec15828af5386fc63555393650e"): {},
+	//libcommon.HexToAddress("749e27557966db1a6932e60a5dfbde7615b8c503"): {},
+	//libcommon.HexToAddress("343300b5d84d444b2adc9116fef1bed02be49cf2"): {},
 }
 
 func traceAccount(addr libcommon.Address) bool {
@@ -663,6 +663,10 @@ func traceAccount(addr libcommon.Address) bool {
 
 func (sdb *IntraBlockState) TraceAccount(addr libcommon.Address) bool {
 	return traceAccount(addr)
+}
+
+func (sdb *IntraBlockState) Trace() bool {
+	return sdb.trace
 }
 
 func (sdb *IntraBlockState) TxIndex() int {
@@ -1236,7 +1240,7 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // - Add delegated designation (if it exists for dst) to access list (EIP-7702)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
 	precompiles []libcommon.Address, list types.AccessList, authorities []libcommon.Address) error {
-	if sdb.trace || traceAccount(sender) || dst!=nil && traceAccount(*dst) {
+	if sdb.trace || traceAccount(sender) || dst != nil && traceAccount(*dst) {
 		fmt.Printf("(%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v, %v\n", sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules, authorities)
 	}
 	if rules.IsBerlin {
@@ -1346,19 +1350,6 @@ func (s *IntraBlockState) versionWritten(k VersionKey, val any) {
 	if s.versionMap != nil {
 		if s.versionedWrites == nil {
 			s.versionedWrites = map[VersionKey]*VersionedWrite{}
-		}
-
-		if s.trace || traceAccount(k.GetAddress()) {
-			switch v := val.(type) {
-			case []byte:
-				lenv := len(v)
-				if lenv > 41 {
-					v = v[0:40]
-				}
-				fmt.Printf("(%d.%d) Version Written %x: %v: %d: %x...\n", s.txIndex, s.version, k.GetAddress(), s.Version(), lenv, v[0:40])
-			default:
-				fmt.Printf("(%d.%d) Version Written %x: %v: %d\n", s.txIndex, s.version, k.GetAddress(), s.Version(), val)
-			}
 		}
 
 		s.versionedWrites[k] = &VersionedWrite{

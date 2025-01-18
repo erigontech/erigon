@@ -318,7 +318,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			logged = true
 		}
 		// execute the operation
-		if Trace && in.evm.intraBlockState.TxIndex() == 1 /*&& in.evm.intraBlockState.Incarnation() == 1*/ {
+		if (Trace || in.evm.intraBlockState.Trace()) && op == BLOCKHASH {
+			//&& in.evm.intraBlockState.TxIndex() == 1 && in.evm.intraBlockState.Incarnation() == 1*/ {
 			var str string
 			if operation.string != nil {
 				str = operation.string(*pc, callContext)
@@ -326,7 +327,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				str = op.String()
 			}
 
-			fmt.Printf("(%d.%d) %s\n", in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), str)
+			fmt.Printf("(%d.%d) %5d %s\n", in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), _pc, str)
 		}
 
 		res, err = operation.execute(pc, in, callContext)

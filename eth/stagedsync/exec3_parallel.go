@@ -525,8 +525,9 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 			}
 
 			if blockResult.complete {
-				if blockResult.BlockNum == 14748605 || blockResult.BlockNum == 14734485 {
+				if blockResult.BlockNum == 14753281 /*|| blockResult.BlockNum == 14734485*/ {
 					fmt.Println(blockResult.BlockNum)
+					//panic(blockResult.BlockNum)
 				}
 
 				if blockStatus, ok := pe.blockStatus[blockResult.BlockNum]; ok {
@@ -598,10 +599,12 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 					blockStatus.cntExec++
 					execTask := blockStatus.tasks[nextTx]
 
-					fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
+					//fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
 					if blockResult.BlockNum+1 == 14748605 || blockResult.BlockNum+1 == 14734485 {
-						vm.Trace = true
-						fmt.Println(blockResult.BlockNum + 1)
+						//vm.Trace = true
+						//	fmt.Println(blockResult.BlockNum + 1)
+					} else {
+						//vm.Trace = false
 					}
 					pe.in.Add(ctx,
 						&taskVersion{
@@ -693,7 +696,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 						uncommittedGas += applyResult.GasUsed
 					}
 
-					if false {
+					if true {
 						rh, err := pe.doms.ComputeCommitment(ctx, tx, true, applyResult.BlockNum, pe.execStage.LogPrefix())
 						if err != nil {
 							return err

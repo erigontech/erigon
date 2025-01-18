@@ -1348,6 +1348,8 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
 
+	sdc.sharedDomains.trace = blockNum == 14753281
+
 	updateCount := sdc.updates.Size()
 	if sdc.sharedDomains.trace {
 		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
