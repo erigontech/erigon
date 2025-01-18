@@ -307,7 +307,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
-	available := len(p.pending.best.ms)
 
 	if err = minedTxns.Valid(); err != nil {
 		return err
@@ -329,6 +328,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	}()
 
 	defer func() {
+		available := len(p.pending.best.ms)
 		p.logger.Debug("[txpool] New block", "block", block, "unwound", len(unwindTxns.Txns), "mined", len(minedTxns.Txns), "baseFee", baseFee, "pending-pre", available, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len(), "err", err)
 	}()
 
