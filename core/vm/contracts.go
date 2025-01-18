@@ -229,6 +229,10 @@ func init() {
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 	switch {
+	case rules.IsOptimismGranite:
+		return PrecompiledAddressesGranite
+	case rules.IsOptimismFjord:
+		return PrecompiledAddressesFjord
 	case rules.IsPrague:
 		return PrecompiledAddressesPrague
 	case rules.IsNapoli:
@@ -241,10 +245,6 @@ func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 		return PrecompiledAddressesIstanbul
 	case rules.IsByzantium:
 		return PrecompiledAddressesByzantium
-	case rules.IsOptimismGranite:
-		return PrecompiledAddressesGranite
-	case rules.IsOptimismFjord:
-		return PrecompiledAddressesFjord
 	default:
 		return PrecompiledAddressesHomestead
 	}
