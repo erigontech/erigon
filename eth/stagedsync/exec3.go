@@ -551,6 +551,7 @@ Loop:
 
 				Config: chainConfig,
 			}
+			fmt.Println("Fjord", chainConfig.IsFjord(header.Time), "Granite", chainConfig.IsGranite(header.Time))
 
 			if txTask.HistoryExecution && usedGas == 0 {
 				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
