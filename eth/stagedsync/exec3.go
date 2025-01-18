@@ -551,6 +551,7 @@ Loop:
 
 				Config: chainConfig,
 			}
+			fmt.Println(header.Time, chainConfig.FjordTime.Uint64())
 			fmt.Println("Fjord", chainConfig.IsFjord(header.Time), "Granite", chainConfig.IsGranite(header.Time))
 
 			if txTask.HistoryExecution && usedGas == 0 {
