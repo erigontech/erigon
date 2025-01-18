@@ -290,9 +290,9 @@ func ExecV3(ctx context.Context,
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
-	if cfg.chainConfig.IsOptimism() {
-		shouldGenerateChangesets = true
-	}
+	// if cfg.chainConfig.IsOptimism() {
+	// 	shouldGenerateChangesets = true
+	// }
 
 	if maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
@@ -551,8 +551,8 @@ Loop:
 
 				Config: chainConfig,
 			}
-			fmt.Println(header.Time, chainConfig.FjordTime.Uint64())
-			fmt.Println("Fjord", chainConfig.IsFjord(header.Time), "Granite", chainConfig.IsGranite(header.Time))
+			// fmt.Println(header.Time, chainConfig.FjordTime.Uint64())
+			// fmt.Println("Fjord", chainConfig.IsFjord(header.Time), "Granite", chainConfig.IsGranite(header.Time))
 
 			if txTask.HistoryExecution && usedGas == 0 {
 				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
