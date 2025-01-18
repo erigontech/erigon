@@ -370,7 +370,16 @@ func doSort(in map[string]string) Preverified {
 
 func newCfg(networkName string, preverified Preverified) *Cfg {
 	maxBlockNum, _ := preverified.MaxBlock(0)
-	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
+	cfg := &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
+	cfg.PreverifiedParsed = make([]*snaptype.FileInfo, len(preverified))
+	for i, p := range cfg.Preverified {
+		info, _, ok := snaptype.ParseFileName("", p.Name)
+		if !ok {
+			continue
+		}
+		cfg.PreverifiedParsed[i] = &info
+	}
+	return cfg
 }
 
 func NewNonSeededCfg(networkName string) *Cfg {
@@ -378,9 +387,10 @@ func NewNonSeededCfg(networkName string) *Cfg {
 }
 
 type Cfg struct {
-	ExpectBlocks uint64
-	Preverified  Preverified
-	networkName  string
+	ExpectBlocks      uint64
+	Preverified       Preverified          // immutable
+	PreverifiedParsed []*snaptype.FileInfo //Preverified field after `snaptype.ParseFileName("", p.Name)`
+	networkName       string
 }
 
 // Seedable - can seed it over Bittorrent network to other nodes
@@ -398,12 +408,11 @@ func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	hasType := t == snaptype.MinCoreEnum
 
-	for _, p := range c.Preverified {
-		info, _, ok := snaptype.ParseFileName("", p.Name)
-		if !ok {
+	for _, info := range c.PreverifiedParsed {
+		if info == nil {
 			continue
 		}
-		if strings.Contains(p.Name, "caplin") {
+		if strings.Contains(info.Name(), "caplin") {
 			continue
 		}
 
