@@ -83,6 +83,11 @@ type BlobsBundleV1 struct {
 	Blobs       []hexutility.Bytes `json:"blobs"       gencodec:"required"`
 }
 
+type BlobAndProofV1 struct {
+	Blob  hexutility.Bytes `json:"blob" gencodec:"required"`
+	Proof hexutility.Bytes `json:"proof" gencodec:"required"`
+}
+
 type ExecutionPayloadBody struct {
 	Transactions []hexutility.Bytes  `json:"transactions" gencodec:"required"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
