@@ -337,7 +337,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") && !strings.Contains(p.Name, "blobsidecars") && !strings.Contains(p.Name, "caplin") {
 			continue
 		}
-		fmt.Println(isStateSnapshot(p.Name), blockReader.FreezingCfg().DisableDownloadE3, p.Name)
+
 		if isStateSnapshot(p.Name) && blockReader.FreezingCfg().DisableDownloadE3 {
 			continue
 		}
