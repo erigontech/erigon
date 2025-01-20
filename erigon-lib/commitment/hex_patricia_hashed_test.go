@@ -628,8 +628,10 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 
 	WrapKeyUpdatesInto(t, upds, nextPK, nextUpdates)
 
+	before.SetTrace(true)
 	rh2Before, err := before.Process(ctx, upds, "")
 	require.NoError(t, err)
+	after.SetTrace(true)
 
 	WrapKeyUpdatesInto(t, upds, nextPK, nextUpdates) // they're resetted after Process
 

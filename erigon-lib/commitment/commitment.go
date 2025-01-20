@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 
 	"github.com/erigontech/erigon-lib/common/length"
@@ -175,6 +176,7 @@ func (p cellFields) String() string {
 
 type BranchEncoder struct {
 	buf       *bytes.Buffer
+	keccak    keccakState
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
 	updates   *etl.Collector
@@ -270,17 +272,253 @@ func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
 	return nil
 }
 
+func (cell *cell) EncodeInto(be *BranchEncoder) error {
+	var fields cellFields
+	if cell.extLen > 0 && cell.storageAddrLen == 0 {
+		fields |= fieldExtension
+	}
+	if cell.accountAddrLen > 0 {
+		fields |= fieldAccountAddr
+	}
+	if cell.storageAddrLen > 0 {
+		fields |= fieldStorageAddr
+	}
+	if cell.hashLen > 0 {
+		fields |= fieldHash
+	}
+	if cell.stateHashLen == 32 && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
+		fields |= fieldStateHash
+	}
+	if err := be.buf.WriteByte(byte(fields)); err != nil {
+		return err
+	}
+	if fields&fieldExtension != 0 {
+		if err := be.putUvarAndVal(uint64(cell.extLen), cell.extension[:cell.extLen]); err != nil {
+			return err
+		}
+	}
+	if fields&fieldAccountAddr != 0 {
+		if err := be.putUvarAndVal(uint64(cell.accountAddrLen), cell.accountAddr[:cell.accountAddrLen]); err != nil {
+			return err
+		}
+	}
+	if fields&fieldStorageAddr != 0 {
+		if err := be.putUvarAndVal(uint64(cell.storageAddrLen), cell.storageAddr[:cell.storageAddrLen]); err != nil {
+			return err
+		}
+	}
+	if fields&fieldHash != 0 {
+		if err := be.putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
+			return err
+		}
+	}
+	if fields&fieldStateHash != 0 {
+		if err := be.putUvarAndVal(uint64(cell.stateHashLen), cell.stateHash[:cell.stateHashLen]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// todo test sepolia
+// can compare what is written for hashing and for branch in 2 different approaches
+func (hph *HexPatriciaHashed) foldRow(prefix []byte, bitmap uint16, row, depth, nibblesLeftAfterUpdate int) (branchRoot []byte, err error) {
+	var lastNibble int
+	totalBranchLen := 17 - nibblesLeftAfterUpdate // For every empty cell, one byte
+	toHash := make([]byte, 0, 32)
+	fill := func(lastNibble, until int) {
+		// bytes.Repeat(b []byte, count int)
+		for ; lastNibble < until; lastNibble++ {
+			toHash = append(toHash, 0x80)
+			// if hph.trace {
+			// 	fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", i, row, i, depth)
+			// }
+		}
+	}
+
+	touchMap := hph.touchMap[row]
+	afterMap := hph.afterMap[row]
+
+	newBranchData := hph.branchEncoder.buf
+	newBranchData.Reset() // write branch data into buf
+	if err := hph.branchEncoder.encodeMaps(touchMap, afterMap); err != nil {
+		return nil, err
+	}
+
+	for bitset, j := afterMap, 0; bitset != 0; j++ {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		cell := &hph.grid[row][nibble]
+
+		fill(lastNibble, nibble)
+
+		/* memoization of state hashes*/
+		counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
+		if cell.stateHashLen > 0 && (touchMap&afterMap&uint16(1<<nibble) > 0 || cell.stateHashLen != length.Hash) {
+			// 	// drop state hash if updated or hashLen < 32 (corner case, may even not encode such leaf hashes)
+			// 	if hph.trace {
+			// 		fmt.Printf("DROP hash for (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
+			// 	}
+			cell.stateHashLen = 0
+			hadToReset.Add(1)
+			if cell.accountAddrLen > 0 {
+				counters.accReset++
+			}
+			if cell.storageAddrLen > 0 {
+				counters.storReset++
+			}
+		}
+
+		if cell.stateHashLen == 0 { // load state if needed
+			if !cell.loaded.account() && cell.accountAddrLen > 0 {
+				upd, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
+				if err != nil {
+					return nil, fmt.Errorf("failed to get account: %w", err)
+				}
+				cell.setFromUpdate(upd)
+				// if update is empty, loaded flag was not updated so do it manually
+				cell.loaded = cell.loaded.addFlag(cellLoadAccount)
+				counters.accLoaded++
+			}
+			if !cell.loaded.storage() && cell.storageAddrLen > 0 {
+				upd, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
+				if err != nil {
+					return nil, fmt.Errorf("failed to get storage: %w", err)
+				}
+				cell.setFromUpdate(upd)
+				// if update is empty, loaded flag was not updated so do it manually
+				cell.loaded = cell.loaded.addFlag(cellLoadStorage)
+				counters.storLoaded++
+			}
+			// computeCellHash can reset hash as well so have to check if node has been skipped  right after computeCellHash.
+		}
+		hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
+		/* end of memoization stats */
+
+		cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
+		if err != nil {
+			return nil, err
+		}
+		totalBranchLen += hph.computeCellHashLen(cell, depth)
+		// totalBranchLen += len(cellHash)
+		toHash = append(toHash, cellHash...)
+		if afterMap&bit != 0 {
+			if err = hph.grid[row][nibble].EncodeInto(hph.branchEncoder); err != nil {
+				return nil, err
+			}
+		}
+		// if hph.trace {
+		// 	fmt.Printf("  %x: computeCellHash(%d, %x, depth=%d)=[%x]\n", nibble, row, nibble, depth, cellHash)
+		// }
+		lastNibble = nibble + 1
+		bitset ^= bit
+	}
+	fill(lastNibble, 17)
+
+	hph.keccak2.Reset()
+	pt := rlp.GenerateStructLen(hph.branchEncoder.bitmapBuf[:], totalBranchLen)
+	if _, err := hph.keccak2.Write(hph.branchEncoder.bitmapBuf[:pt]); err != nil {
+		return nil, err
+	}
+
+	fmt.Printf("toHash [%x]%x\n", hph.branchEncoder.bitmapBuf[:pt], toHash)
+	if _, err := hph.keccak2.Write(toHash); err != nil {
+		return nil, err
+	}
+	branchRoot = make([]byte, 0)
+	branchRoot = hph.keccak2.Sum(branchRoot[:0])
+	// if _, err := hph.keccak2.Read(branchRoot[:]); err != nil {
+	// 	return nil, err
+	// }
+
+	// fetch previous branch data
+	prev, prevStep, err := hph.ctx.Branch(prefix)
+	if err != nil {
+		return nil, err
+	}
+	// skip if no changes
+	if len(prev) > 0 && bytes.Equal(prev, newBranchData.Bytes()) {
+		return branchRoot, nil
+	}
+
+	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
+	// store updated branch data, has to copy :(
+	if err = hph.ctx.PutBranch(common.Copy(prefix), common.Copy(newBranchData.Bytes()), prev, prevStep); err != nil {
+		return nil, err
+	}
+	return branchRoot, nil
+}
+
+// Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
+// func (be *BranchEncoder) EncodeRow(bitmap, touchMap, afterMap uint16, row []cell) (BranchData, int, error) {
+// 	be.buf.Reset()
+
+// 	if err := be.encodeMaps(touchMap, afterMap); err != nil {
+// 		return nil, 0, err
+// 	}
+
+// 	b := []byte{0x80}
+// 	be.keccak.Reset()
+// 	// trace := false
+// 	fill := func(lastNibble int) error { // only writes 0x80 into hasher
+// 		for ; lastNibble < 17; lastNibble++ {
+// 			if _, err := be.keccak.Write(b[:]); err != nil {
+// 				return err
+// 			}
+// 			// if hph.trace {
+// 			// 	fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", i, row, i, depth)
+// 			// }
+// 		}
+// 		return nil
+// 	}
+
+// 	var lastNibble int
+// 	for bitset, j := afterMap, 0; bitset != 0; j++ {
+// 		bit := bitset & -bitset
+// 		nibble := bits.TrailingZeros16(bit)
+
+// 		if err := fill(lastNibble); err != nil {
+// 			return nil, 0, fmt.Errorf("failed to write empty nibble to hash: %w", err)
+// 		}
+// 		//if len(updateKey) > DepthWithoutNodeHashes {
+// 		//	cell.hashLen = 0 // do not write hashes for storages in the branch node, should reset ext as well which can break unfolding.. -
+// 		//  cell.extLen = 0
+// 		//}
+// 		if _, err := hph.keccak2.Write(cellHash); err != nil {
+// 			return nil, err
+// 		}
+
+// 		if bitmap&bit != 0 {
+// 			if err := row[nibble].EncodeInto(be); err != nil {
+// 				return nil, 0, err
+// 			}
+// 		}
+
+// 		lastNibble = nibble + 1
+// 		bitset ^= bit
+// 	}
+// 	if err := fill(lastNibble); err != nil {
+// 		return nil, 0, fmt.Errorf("failed to write empty nibble to hash: %w", err)
+// 	}
+// 	//fmt.Printf("EncodeBranch [%x] size: %d\n", be.buf.Bytes(), be.buf.Len())
+// 	return be.buf.Bytes(), lastNibble, nil
+// }
+
+func (be *BranchEncoder) encodeMaps(touchMap, afterMap uint16) error {
+	binary.BigEndian.PutUint16(be.bitmapBuf[:], touchMap)
+	binary.BigEndian.PutUint16(be.bitmapBuf[2:], afterMap)
+	be.buf.Reset()
+	if _, err := be.buf.Write(be.bitmapBuf[:4]); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
 func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*cell, error)) (BranchData, int, error) {
 	be.buf.Reset()
 
-	var encoded [2]byte
-	binary.BigEndian.PutUint16(encoded[:], touchMap)
-	if _, err := be.buf.Write(encoded[:]); err != nil {
-		return nil, 0, err
-	}
-	binary.BigEndian.PutUint16(encoded[:], afterMap)
-	if _, err := be.buf.Write(encoded[:]); err != nil {
+	if err := be.encodeMaps(touchMap, afterMap); err != nil {
 		return nil, 0, err
 	}
 
