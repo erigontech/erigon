@@ -51,7 +51,13 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 	defer tx.Rollback()
 
 	written := 0
+	maxIter := 32
+	currIter := 0
 	for slot := req.StartSlot; slot < req.StartSlot+req.Count; slot++ {
+		if currIter >= maxIter {
+			break
+		}
+		currIter++
 		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
 			return err

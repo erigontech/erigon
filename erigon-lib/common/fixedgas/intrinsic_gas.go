@@ -11,8 +11,8 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessListLen,
 		gas = TxGasContractCreation
 	} else {
 		gas = TxGas
-		floorGas7623 = TxGas
 	}
+	floorGas7623 = TxGas
 	// Bump the required gas by the amount of transactional data
 	if dataLen > 0 {
 		// Zero and non-zero bytes are priced differently
