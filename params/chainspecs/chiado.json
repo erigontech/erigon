@@ -21,6 +21,11 @@
       "target": 1,
       "max": 2,
       "baseFeeUpdateFraction": 1112826
+    },
+    "prague": {
+      "target": 1,
+      "max": 2,
+      "baseFeeUpdateFraction": 1112826
     }
   },
   "burntContract": {
