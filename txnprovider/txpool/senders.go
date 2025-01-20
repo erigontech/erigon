@@ -236,6 +236,9 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, ui
 	}
 	acc := accounts.Account{}
 	err = accounts.DeserialiseV3(&acc, encoded)
+	if err != nil {
+		return 0, uint256.Int{}, err
+	}
 	return acc.Nonce, acc.Balance, nil
 }
 
