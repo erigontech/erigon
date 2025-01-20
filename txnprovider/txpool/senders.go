@@ -222,7 +222,7 @@ func (sc *sendersBatch) getOrCreateID(addr common.Address, logger log.Logger) (u
 	return id, traced
 }
 
-func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint64, balance uint256.Int, err error) {
+func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, uint256.Int, error) {
 	addr, ok := sc.senderID2Addr[id]
 	if !ok {
 		panic("must not happen")
@@ -234,17 +234,9 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint
 	if len(encoded) == 0 {
 		return 0, uint256.Int{}, nil
 	}
-	if cacheView.StateV3() {
-		acc := accounts.Account{}
-		err = accounts.DeserialiseV3(&acc, encoded)
-		nonce, balance = acc.Nonce, acc.Balance
-	} else { //TODO: eliminate in future? (always v3)
-		nonce, balance, err = DecodeSender(encoded)
-	}
-	if err != nil {
-		return 0, uint256.Int{}, err
-	}
-	return nonce, balance, nil
+	acc := accounts.Account{}
+	err = accounts.DeserialiseV3(&acc, encoded)
+	return acc.Nonce, acc.Balance, nil
 }
 
 func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger) (err error) {
