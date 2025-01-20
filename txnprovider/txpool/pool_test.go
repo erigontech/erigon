@@ -59,7 +59,7 @@ func TestNonceFromAddress(t *testing.T) {
 	db := memdb.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
@@ -185,7 +185,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0 /* shanghaiTime */, nil /* agraBlock */, common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0 /* shanghaiTime */, nil /* agraBlock */, common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(t, err)
 	require.True(t, pool != nil)
 
@@ -443,7 +443,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.NotEqual(nil, pool)
 	var stateVersionID uint64 = 0
@@ -566,7 +566,7 @@ func TestReverseNonces(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
@@ -696,7 +696,7 @@ func TestTxnPoke(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
@@ -864,71 +864,6 @@ func TestTxnPoke(t *testing.T) {
 	}
 }
 
-func TestShanghaiIntrinsicGas(t *testing.T) {
-	cases := map[string]struct {
-		expected          uint64
-		dataLen           uint64
-		dataNonZeroLen    uint64
-		authorizationsLen uint64
-		creation          bool
-		isShanghai        bool
-	}{
-		"simple no data": {
-			expected:          21000,
-			dataLen:           0,
-			dataNonZeroLen:    0,
-			authorizationsLen: 0,
-			creation:          false,
-			isShanghai:        false,
-		},
-		"simple with data": {
-			expected:          21512,
-			dataLen:           32,
-			dataNonZeroLen:    32,
-			authorizationsLen: 0,
-			creation:          false,
-			isShanghai:        false,
-		},
-		"creation with data no shanghai": {
-			expected:          53512,
-			dataLen:           32,
-			dataNonZeroLen:    32,
-			authorizationsLen: 0,
-			creation:          true,
-			isShanghai:        false,
-		},
-		"creation with single word and shanghai": {
-			expected:          53514, // additional gas for single word
-			dataLen:           32,
-			dataNonZeroLen:    32,
-			authorizationsLen: 0,
-			creation:          true,
-			isShanghai:        true,
-		},
-		"creation between word 1 and 2 and shanghai": {
-			expected:          53532, // additional gas for going into 2nd word although not filling it
-			dataLen:           33,
-			dataNonZeroLen:    33,
-			authorizationsLen: 0,
-			creation:          true,
-			isShanghai:        true,
-		},
-	}
-
-	for name, c := range cases {
-		t.Run(name, func(t *testing.T) {
-			// Todo (@somnathb1) - Factor in EIP-7623
-			gas, _, reason := txpoolcfg.CalcIntrinsicGas(c.dataLen, c.dataNonZeroLen, c.authorizationsLen, nil, c.creation, true, true, c.isShanghai, false)
-			if reason != txpoolcfg.Success {
-				t.Errorf("expected success but got reason %v", reason)
-			}
-			if gas != c.expected {
-				t.Errorf("expected %v but got %v", c.expected, gas)
-			}
-		})
-	}
-}
-
 func TestShanghaiValidateTxn(t *testing.T) {
 	asrt := assert.New(t)
 	tests := map[string]struct {
@@ -992,7 +927,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			t.Cleanup(cancel)
 			cache := &kvcache.DummyCache{}
-			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
+			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
 			asrt.NoError(err)
 			tx, err := coreDB.BeginRw(ctx)
 			defer tx.Rollback()
@@ -1039,7 +974,7 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
@@ -1105,7 +1040,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	cache := &kvcache.DummyCache{}
 	logger := log.New()
 	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil, /* agraBlock */
-		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
+		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
 	assert.NoError(t, err)
 	pool.blockGasLimit.Store(30_000_000)
 	tx, err := coreDB.BeginRw(ctx)
@@ -1153,7 +1088,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 
 	require.True(pool != nil)
@@ -1337,7 +1272,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	txnPool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, big.NewInt(0), big.NewInt(0), nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
+	txnPool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, big.NewInt(0), big.NewInt(0), nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(txnPool != nil)
 
@@ -1448,7 +1383,7 @@ func TestBlobSlots(t *testing.T) {
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
@@ -1528,7 +1463,7 @@ func TestGasLimitChanged(t *testing.T) {
 	db := memdb.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
