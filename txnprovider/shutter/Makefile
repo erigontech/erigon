@@ -35,3 +35,19 @@ $(GOBINREL)/protoc-gen-go: $(GOBINREL)
 .PHONY: proto
 proto: $(GOBINREL)/protoc $(GOBINREL)/protoc-gen-go
 	PATH="$(GOBIN):$(PATH)" protoc -I=$(PROTO_DIR) --go_out=$(PROTO_DIR) $(PROTO_DIR)/shutter.proto
+
+.PHONY: contracts
+contracts: solc abigen
+
+.PHONY: check-solc
+check-solc:
+	@type "solc" 2> /dev/null || echo 'Please install solc'
+
+.PHONY: solc
+solc: check-solc
+	PATH="$(GOBIN):$(PATH)" go generate -run "solc" ./...
+
+.PHONY: abigen
+abigen:
+	go build -o "$(GOBIN)/abigen" ../../cmd/abigen
+	PATH="$(GOBIN):$(PATH)" go generate -run "abigen" ./...

@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter/proto"
 )
@@ -35,18 +36,21 @@ type Pool struct {
 	secondaryTxnProvider    txnprovider.TxnProvider
 	decryptionKeysListener  DecryptionKeysListener
 	decryptionKeysProcessor DecryptionKeysProcessor
+	encryptedTxnsPool       EncryptedTxnsPool
 }
 
-func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.TxnProvider) *Pool {
+func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.TxnProvider, chainEvents *shards.Events) *Pool {
 	logger = logger.New("component", "shutter")
 	decryptionKeysListener := NewDecryptionKeysListener(logger, config)
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
+	encryptedTxnsPool := NewEncryptedTxnsPool(config, chainEvents)
 	return &Pool{
 		logger:                  logger,
 		config:                  config,
 		secondaryTxnProvider:    secondaryTxnProvider,
 		decryptionKeysListener:  decryptionKeysListener,
 		decryptionKeysProcessor: decryptionKeysProcessor,
+		encryptedTxnsPool:       encryptedTxnsPool,
 	}
 }
 
@@ -61,6 +65,7 @@ func (p Pool) Run(ctx context.Context) error {
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return p.decryptionKeysListener.Run(ctx) })
 	eg.Go(func() error { return p.decryptionKeysProcessor.Run(ctx) })
+	eg.Go(func() error { return p.encryptedTxnsPool.Run(ctx) })
 	return eg.Wait()
 }
 

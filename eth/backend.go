@@ -676,7 +676,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			panic("can't enable shutter pool when devp2p txpool is disabled")
 		}
 
-		backend.shutterPool = shutter.NewPool(logger, config.Shutter, backend.txPool)
+		backend.shutterPool = shutter.NewPool(logger, config.Shutter, backend.txPool, backend.notifications.Events)
 		txnProvider = backend.shutterPool
 	}
 
