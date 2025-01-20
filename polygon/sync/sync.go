@@ -198,7 +198,7 @@ func (s *Sync) applyNewMilestoneOnTip(ctx context.Context, event EventNewMilesto
 }
 
 func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb *CanonicalChainBuilder) error {
-	newBlockHeader := event.NewBlock.Header()
+	newBlockHeader := event.NewBlock.HeaderNoCopy()
 	newBlockHeaderNum := newBlockHeader.Number.Uint64()
 	newBlockHeaderHash := newBlockHeader.Hash()
 	rootNum := ccb.Root().Number.Uint64()

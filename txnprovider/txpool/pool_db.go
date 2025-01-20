@@ -18,13 +18,17 @@ package txpool
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var PoolChainConfigKey = []byte("chain_config")
@@ -95,4 +99,74 @@ func PutChainConfig(tx kv.Putter, cc *chain.Config, buf []byte) error {
 		return err
 	}
 	return nil
+}
+
+func SaveChainConfigIfNeed(
+	ctx context.Context,
+	coreDB kv.RoDB,
+	poolDB kv.RwDB,
+	force bool,
+	logger log.Logger,
+) (cc *chain.Config, blockNum uint64, err error) {
+	if err = poolDB.View(ctx, func(tx kv.Tx) error {
+		cc, err = ChainConfig(tx)
+		if err != nil {
+			return err
+		}
+		blockNum, err = LastSeenBlock(tx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, 0, err
+	}
+	if cc != nil && !force {
+		if cc.ChainID.Uint64() == 0 {
+			return nil, 0, errors.New("wrong chain config")
+		}
+		return cc, blockNum, nil
+	}
+
+	for {
+		if err = coreDB.View(ctx, func(tx kv.Tx) error {
+			cc, err = chain.GetConfig(tx, nil)
+			if err != nil {
+				return err
+			}
+			n, err := chain.CurrentBlockNumber(tx)
+			if err != nil {
+				return err
+			}
+			if n != nil {
+				blockNum = *n
+			}
+			return nil
+		}); err != nil {
+			logger.Error("cant read chain config from core db", "err", err)
+			time.Sleep(5 * time.Second)
+			continue
+		} else if cc == nil {
+			logger.Error("cant read chain config from core db")
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		break
+	}
+
+	if err = poolDB.Update(ctx, func(tx kv.RwTx) error {
+		if err = PutChainConfig(tx, cc, nil); err != nil {
+			return err
+		}
+		if err = PutLastSeenBlock(tx, blockNum, nil); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, 0, err
+	}
+	if cc.ChainID.Uint64() == 0 {
+		return nil, 0, errors.New("wrong chain config")
+	}
+	return cc, blockNum, nil
 }

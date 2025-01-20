@@ -355,7 +355,7 @@ func TestIterator(t *testing.T) {
 			require.NoError(t, err)
 		}
 		_, err := it.Next()
-		require.ErrorIs(t, err, ErrEliasFanoIterExhausted)
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
 
 		it = ef.ReverseIterator()
 		for range offsets {
@@ -363,7 +363,7 @@ func TestIterator(t *testing.T) {
 			require.NoError(t, err)
 		}
 		_, err = it.Next()
-		require.ErrorIs(t, err, ErrEliasFanoIterExhausted)
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
 	})
 
 	t.Run("article-example1", func(t *testing.T) {
@@ -464,7 +464,7 @@ func checkSeekReverse(t *testing.T, j int, ef *EliasFano, vals []uint64) {
 	require.Equal(t, bits.TrailingZeros64(prevUpperMask), bits.TrailingZeros64(efi.upperMask))
 }
 
-func BenchmarkName(b *testing.B) {
+func BenchmarkEF(b *testing.B) {
 	count := uint64(1_000_000)
 	maxOffset := (count - 1) * 123
 	ef := NewEliasFano(count, maxOffset)

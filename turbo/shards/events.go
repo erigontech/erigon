@@ -226,7 +226,7 @@ func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
 
 			for _, l := range receipt.Logs {
 				res := &remote.SubscribeLogsReply{
-					Address:          gointerfaces.ConvertAddressToH160(receipt.ContractAddress),
+					Address:          gointerfaces.ConvertAddressToH160(l.Address),
 					BlockHash:        gointerfaces.ConvertHashToH256(receipt.BlockHash),
 					BlockNumber:      blockNum,
 					Data:             l.Data,

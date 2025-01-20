@@ -266,10 +266,10 @@ func getNextTransactions(
 	remainingGas := header.GasLimit - header.GasUsed
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
-		remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed
+		remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed
 	}
 
-	yieldOpts := []txnprovider.YieldOption{
+	provideOpts := []txnprovider.ProvideOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
 		txnprovider.WithGasTarget(remainingGas),
@@ -277,7 +277,7 @@ func getNextTransactions(
 		txnprovider.WithTxnIdsFilter(alreadyYielded),
 	}
 
-	txns, err := cfg.txnProvider.Yield(ctx, yieldOpts...)
+	txns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +345,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		if !account.IsEmptyCodeHash() {
 			isEoaCodeAllowed := false
 			if config.IsPrague(header.Time) {
-				code, err := simStateReader.ReadAccountCode(sender, account.Incarnation, account.CodeHash)
+				code, err := simStateReader.ReadAccountCode(sender, account.Incarnation)
 				if err != nil {
 					return nil, err
 				}
@@ -448,7 +448,7 @@ func addTransactionsToMiningBlock(
 	txnIdx := ibs.TxnIndex() + 1
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
-		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed)
+		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
 	}
 	signer := types.MakeSigner(&chainConfig, header.Number.Uint64(), header.Time)
 

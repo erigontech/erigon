@@ -24,6 +24,7 @@ import (
 
 	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -37,6 +38,13 @@ import (
 var (
 	blsVerify = bls.Verify
 )
+
+// SignedBLSToExecutionChangeForGossip type represents SignedBLSToExecutionChange with the gossip data where it's coming from.
+type SignedBLSToExecutionChangeForGossip struct {
+	SignedBLSToExecutionChange *cltypes.SignedBLSToExecutionChange
+	Receiver                   *sentinel.Peer
+	ImmediateVerification      bool
+}
 
 type blsToExecutionChangeService struct {
 	operationsPool         pool.OperationsPool
@@ -62,7 +70,7 @@ func NewBLSToExecutionChangeService(
 	}
 }
 
-func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedBLSToExecutionChangeWithGossipData) error {
+func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet *uint64, msg *SignedBLSToExecutionChangeForGossip) error {
 	// https://github.com/ethereum/consensus-specs/blob/dev/specs/capella/p2p-interface.md#bls_to_execution_change
 	// [IGNORE] The signed_bls_to_execution_change is the first valid signed bls to execution change received
 	// for the validator with index signed_bls_to_execution_change.message.validator_index.
@@ -117,10 +125,10 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	}
 
 	aggregateVerificationData := &AggregateVerificationData{
-		Signatures: [][]byte{msg.SignedBLSToExecutionChange.Signature[:]},
-		SignRoots:  [][]byte{signedRoot[:]},
-		Pks:        [][]byte{change.From[:]},
-		GossipData: msg.GossipData,
+		Signatures:  [][]byte{msg.SignedBLSToExecutionChange.Signature[:]},
+		SignRoots:   [][]byte{signedRoot[:]},
+		Pks:         [][]byte{change.From[:]},
+		SendingPeer: msg.Receiver,
 		F: func() {
 			s.emitters.Operation().SendBlsToExecution(msg.SignedBLSToExecutionChange)
 			s.operationsPool.BLSToExecutionChangesPool.Insert(msg.SignedBLSToExecutionChange.Signature, msg.SignedBLSToExecutionChange)

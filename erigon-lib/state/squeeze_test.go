@@ -50,7 +50,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 
 		for j := 0; j < len(keys); j++ {
 			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
-			prev, step, err := domains.GetLatest(kv.AccountsDomain, keys[j], nil)
+			prev, step, err := domains.GetLatest(kv.AccountsDomain, keys[j])
 			require.NoError(tb, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)
@@ -122,7 +122,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	for acit.HasNext() {
 		k, _, err := acit.Next()
 		require.NoError(t, err)
-		domains.sdCtx.updates.TouchPlainKey(k, nil, domains.sdCtx.updates.TouchAccount)
+		domains.sdCtx.updates.TouchPlainKey(string(k), nil, domains.sdCtx.updates.TouchAccount)
 	}
 
 	// check if the commitment is the same

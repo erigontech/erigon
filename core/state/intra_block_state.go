@@ -31,11 +31,11 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/turbo/trie"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
@@ -310,7 +310,10 @@ func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) (int, error) {
 	if stateObject.code != nil {
 		return len(stateObject.code), nil
 	}
-	l, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation, stateObject.data.CodeHash)
+	if stateObject.data.CodeHash == emptyCodeHashH {
+		return 0, nil
+	}
+	l, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation)
 	if err != nil {
 		sdb.setErrorUnsafe(err)
 		return l, err
@@ -355,24 +358,6 @@ func (sdb *IntraBlockState) ResolveCode(addr libcommon.Address) ([]byte, error) 
 		return nil, err
 	}
 	return sdb.GetCode(addr)
-}
-
-func (sdb *IntraBlockState) ResolveCodeSize(addr libcommon.Address) (int, error) {
-	// eip-7702
-	size, err := sdb.GetCodeSize(addr)
-	if err != nil {
-		return 0, err
-	}
-	if size == types.DelegateDesignationCodeSize {
-		// might be delegated designation
-		code, err := sdb.ResolveCode(addr)
-		if err != nil {
-			return 0, err
-		}
-		return len(code), nil
-	}
-
-	return size, nil
 }
 
 func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (libcommon.Address, bool, error) {

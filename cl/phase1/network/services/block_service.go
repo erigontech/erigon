@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -158,7 +159,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
-		if err == forkchoice.ErrEIP4844DataNotAvailable {
+		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) {
 			b.scheduleBlockForLaterProcessing(msg)
 			return ErrIgnore
 		}
@@ -201,6 +202,20 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 
 // processAndStoreBlock processes and stores a block
 func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
+	group, _ := errgroup.WithContext(ctx)
+
+	group.Go(func() error {
+		return b.forkchoiceStore.ProcessBlockExecution(ctx, block)
+	})
+	group.Go(func() error {
+		return b.forkchoiceStore.ProcessBlockConsensus(ctx, block)
+	})
+
+	err := group.Wait()
+	if err != nil {
+		return err
+	}
+
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
 	}); err != nil {

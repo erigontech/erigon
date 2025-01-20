@@ -16,7 +16,7 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 	defer tx.Rollback()
 	pruneDistance := uint64(1_000_000)
 
-	if !cfg.backfilling {
+	if !cfg.caplinConfig.ArchiveBlocks {
 		if err := beacon_indicies.PruneBlocks(ctx, tx, args.seenSlot-pruneDistance); err != nil {
 			return err
 		}

@@ -530,6 +530,10 @@ var (
 			Raw types.Log // Blockchain specific contextual infos
 		}
 
+		func (_{{$contract.Type}} *{{$contract.Type}}Filterer) {{.Normalized.Name}}EventID() libcommon.Hash {
+   			return libcommon.HexToHash("0x{{printf "%x" .Original.ID}}")
+  		}
+
 		// Filter{{.Normalized.Name}} is a free log retrieval operation binding the contract event 0x{{printf "%x" .Original.ID}}.
 		//
 		// Solidity: {{.Original.String}}

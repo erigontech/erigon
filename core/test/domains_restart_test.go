@@ -66,7 +66,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, err := state.NewAggregator(context.Background(), dirs, aggStep, db, logger)
+	agg, err := state.NewAggregator2(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()
@@ -241,7 +241,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, networkname.Test, "", log.New())
+	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
@@ -411,7 +411,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, networkname.Test, "", log.New())
+	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 

@@ -37,9 +37,11 @@ const (
 	VersionMajor       = 3        // Major version component of the current release
 	VersionMinor       = 0        // Minor version component of the current release
 	VersionMicro       = 0        // Patch version component of the current release
-	VersionModifier    = "alpha5" // Modifier component of the current release
+	VersionModifier    = "alpha7" // Modifier component of the current release
 	VersionKeyCreated  = "ErigonVersionCreated"
 	VersionKeyFinished = "ErigonVersionFinished"
+	ClientName         = "erigon"
+	ClientCode         = "EG"
 )
 
 // Version holds the textual version string.

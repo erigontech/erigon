@@ -18,6 +18,7 @@ package bptree
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unsafe"
 )
@@ -31,12 +32,7 @@ func (keys Keys) Less(i, j int) bool { return keys[i] < keys[j] }
 func (keys Keys) Swap(i, j int) { keys[i], keys[j] = keys[j], keys[i] }
 
 func (keys Keys) Contains(key Felt) bool {
-	for _, k := range keys {
-		if k == key {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(keys, key)
 }
 
 func (keys Keys) String() string {

@@ -183,10 +183,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 			log.Warn("Failed to process slots", "slot", slot, "err", err)
 			return solid.AttestationData{}, err
 		}
-		if err != nil {
-			return solid.AttestationData{}, err
-		}
-
 	}
 
 	targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, baseStateBlockRoot, slot)
@@ -200,7 +196,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 		Source:          baseState.CurrentJustifiedCheckpoint(),
 		Target:          targetCheckpoint,
 	}
-	fmt.Println("baseAttestationData", baseAttestationData, "epoch", epoch, "baseStateBlockRoot", baseStateBlockRoot)
 	ap.attestationsCache.Add(epoch, baseAttestationData)
 	ap.blockRootsUsedForSlotCache.Add(slot, baseStateBlockRoot)
 

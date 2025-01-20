@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
@@ -105,6 +106,17 @@ type GetPayloadResponse struct {
 	BlobsBundle           *BlobsBundleV1     `json:"blobsBundle"`
 	ExecutionRequests     []hexutility.Bytes `json:"executionRequests"`
 	ShouldOverrideBuilder bool               `json:"shouldOverrideBuilder"`
+}
+
+type ClientVersionV1 struct {
+	Code    string `json:"code" gencodec:"required"`
+	Name    string `json:"name" gencodec:"required"`
+	Version string `json:"version" gencodec:"required"`
+	Commit  string `json:"commit" gencodec:"required"`
+}
+
+func (c ClientVersionV1) String() string {
+	return fmt.Sprintf("ClientCode: %s, %s-%s-%s", c.Code, c.Name, c.Version, c.Commit)
 }
 
 type StringifiedError struct{ err error }
