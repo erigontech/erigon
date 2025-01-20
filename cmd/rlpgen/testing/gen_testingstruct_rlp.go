@@ -3,13 +3,13 @@
 package testing
 
 import (
-    "github.com/erigontech/erigon-lib/rlp"
-    "math/big"
-    "github.com/holiman/uint256"
     "github.com/erigontech/erigon/core/types"
     "github.com/erigontech/erigon-lib/common"
     "fmt"
     "io"
+    "github.com/erigontech/erigon-lib/rlp"
+    "math/big"
+    "github.com/holiman/uint256"
 )
 
 func (obj *TestingStruct) EncodingSize() (size int) {
@@ -51,7 +51,6 @@ func (obj *TestingStruct) EncodingSize() (size int) {
         size += 1
     }
     size += rlp.ByteSliceSliceSize(obj.i)
-    size += rlp.ByteSliceSlicePtrSize(obj.ii)
     gidx := 0
     gidx = (8 + 1) * len(obj.j)
     size += rlp.ListPrefixLen(gidx) + gidx
@@ -222,9 +221,6 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
         }
     }
     if err := rlp.EncodeByteSliceSlice(obj.i, w, b[:]); err != nil {
-        return err
-    }
-    if err := rlp.EncodeByteSliceSlicePtr(obj.ii, w, b[:]); err != nil {
         return err
     }
     gidx := 0
@@ -447,19 +443,6 @@ func (obj *TestingStruct) DecodeRLP(s *rlp.Stream) error {
     }
     if err = s.ListEnd(); err != nil {
         return fmt.Errorf("error decoding field i - fail to close list, err: %w", err)
-    }
-    _, err = s.List()
-    if err != nil {
-        return fmt.Errorf("error decoding field ii - expected list start, err: %w", err)
-    }
-    obj.ii = []*[]byte{}
-    for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-        cpy := make([]byte, len(b))
-        copy(cpy, b)
-        obj.ii = append(obj.ii, &cpy)
-    }
-    if err = s.ListEnd(); err != nil {
-        return fmt.Errorf("error decoding field ii - fail to close list, err: %w", err)
     }
     _, err = s.List()
     if err != nil {

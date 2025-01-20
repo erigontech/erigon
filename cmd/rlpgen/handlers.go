@@ -1,3 +1,19 @@
+// Copyright 2023 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -502,29 +518,6 @@ func byteSliceSliceHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName stri
 	fmt.Fprintf(b3, "    obj.%s = [][]byte{}\n", fieldName)
 	fmt.Fprintf(b3, "    for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {\n")
 	fmt.Fprintf(b3, "        obj.%s = append(obj.%s, b)\n", fieldName, fieldName)
-	fmt.Fprintf(b3, "    }\n")
-
-	endListDecode(b3, fieldName)
-}
-
-func byteSlicePtrSliceHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
-	// size
-	fmt.Fprintf(b1, "    size += rlp.ByteSliceSlicePtrSize(obj.%s)\n", fieldName)
-
-	// encode
-	fmt.Fprintf(b2, "    if err := rlp.EncodeByteSliceSlicePtr(obj.%s, w, b[:]); err != nil {\n", fieldName)
-	fmt.Fprintf(b2, "        return err\n")
-	fmt.Fprintf(b2, "    }\n")
-
-	// decode
-	addDecodeBuf(b3)
-	startListDecode(b3, fieldName)
-
-	fmt.Fprintf(b3, "    obj.%s = []*[]byte{}\n", fieldName)
-	fmt.Fprintf(b3, "    for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {\n")
-	fmt.Fprintf(b3, "        cpy := make([]byte, len(b))\n")
-	fmt.Fprintf(b3, "        copy(cpy, b)\n")
-	fmt.Fprintf(b3, "        obj.%s = append(obj.%s, &cpy)\n", fieldName, fieldName)
 	fmt.Fprintf(b3, "    }\n")
 
 	endListDecode(b3, fieldName)

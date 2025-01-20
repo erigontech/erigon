@@ -87,13 +87,6 @@ func compareTestingStructs(t *testing.T, a, b *TestingStruct) {
 	check(t, "obj.hh", a.hh, b.hh)
 	check(t, "obj.i", a.i, b.i)
 
-	if len(a.ii) != len(b.ii) {
-		t.Errorf("len mismatch: want %v, got %v", len(a.ii), len(b.ii))
-	}
-	for i := 0; i < len(a.ii); i++ {
-		check(t, "obj.ii", *a.ii[i], *b.ii[i])
-	}
-
 	if len(a.j) != len(b.j) {
 		t.Errorf("len mismatch: want %v, got %v", len(a.j), len(b.j))
 	}
@@ -210,7 +203,6 @@ func randTestingStruct(tr *TRand) *TestingStruct {
 		h:  tr.RandBytes(tr.RandIntInRange(0, 128)),
 		hh: &_byteSlice,
 		i:  _byteSliceSlice,
-		ii: _byteSliceSlicePtr,
 		j:  _nonceSlice,
 		jj: _nonceSlicePtr,
 		k:  _addrSlice,

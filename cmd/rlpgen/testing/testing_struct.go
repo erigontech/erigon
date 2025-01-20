@@ -26,7 +26,6 @@ type TestingStruct struct {
 	h  []byte
 	hh *[]byte
 	i  [][]byte
-	ii []*[]byte
 	j  []types.BlockNonce
 	jj []*types.BlockNonce
 	k  []common.Address
