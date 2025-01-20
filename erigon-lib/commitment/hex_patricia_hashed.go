@@ -2579,7 +2579,6 @@ type HexPatriciaHashedReader struct {
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
-	branchEncoder *BranchEncoder
 
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 	hadToLoadL    map[uint64]skipStat
@@ -2871,7 +2870,7 @@ func (hph *HexPatriciaHashedReader) Traverse(ctx context.Context, updates *Updat
 				update.Merge(stateUpdate)
 			}
 		}
-		hph.updateCell(plainKey, hashedKey, update)
+		hph.updateCell(plainKey, hashedKey, update) // todo this may update the cell with value obtained with hph.ctx.
 
 		mxTrieProcessedKeys.Inc()
 		ki++
@@ -3186,10 +3185,12 @@ func (hph *HexPatriciaHashedReader) fold() (err error) {
 			upCell.accountAddrLen = 0
 		}
 		upCell.storageAddrLen = 0
-		upCell.hashLen = 32
-		if _, err := hph.keccak2.Read(upCell.hash[:]); err != nil {
-			return err
-		}
+		// upCell.hashLen = 32
+		//
+		// TODO we suppose that we did not made any changes so branch hash should not really change, we just read existing vals from db
+		// if _, err := hph.keccak2.Read(upCell.hash[:]); err != nil {
+		// 	return err
+		// }
 		if hph.trace {
 			fmt.Printf("} [%x]\n", upCell.hash[:])
 		}
