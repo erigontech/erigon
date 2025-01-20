@@ -49,7 +49,7 @@ jobs:
     strategy:
       matrix:
         # For each dashboard add an entry in the list here below (and add an entry in the dictionary within the backup script too!)
-        dashboard: [erigon_custom_metrics]
+        dashboard: [erigon_custom_metrics,erigonQA]
     env:
       DASHBOARDS_AUTH_TOKEN: ${{ secrets.DASHBOARDS_AUTH_TOKEN }}
       GH_TOKEN: ${{ secrets.GH_TOKEN }}

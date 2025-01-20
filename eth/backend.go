@@ -103,6 +103,7 @@ import (
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/ethstats"
 	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/sentry"
@@ -339,7 +340,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
-	blockReader, blockWriter, allSnapshots, allBorSnapshots, bridgeStore, heimdallStore, agg, err := setUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, logger, segmentsBuildLimiter)
+	blockReader, blockWriter, allSnapshots, allBorSnapshots, bridgeStore, heimdallStore, agg, err := setUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, stack.Config(), logger, segmentsBuildLimiter)
 	if err != nil {
 		return nil, err
 	}
@@ -628,7 +629,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	sentryMcDisableBlockDownload := config.PolygonSync || config.PolygonSyncStage
+	sentryMcDisableBlockDownload := chainConfig.Bor != nil && (config.PolygonSync || config.PolygonSyncStage)
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
@@ -983,7 +984,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}()
 	}
 
-	if config.PolygonSync {
+	if chainConfig.Bor != nil && config.PolygonSync {
 		backend.polygonSyncService = polygonsync.NewService(
 			logger,
 			chainConfig,
@@ -1428,7 +1429,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 	return err
 }
 
-func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, *libstate.Aggregator, error) {
+func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, nodeConfig *nodecfg.Config, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, *libstate.Aggregator, error) {
 	var minFrozenBlock uint64
 
 	if frozenLimit := snConfig.Sync.FrozenBlockLimit; frozenLimit != 0 {
@@ -1447,8 +1448,8 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		allBorSnapshots = heimdall.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 
 		if snConfig.PolygonSync {
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, 0), allBorSnapshots, chainConfig.Bor)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, 0), allBorSnapshots)
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots, chainConfig.Bor)
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots)
 		} else {
 			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots, chainConfig.Bor)
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
@@ -1594,11 +1595,23 @@ func (s *Ethereum) Start() error {
 		// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
 		// to initialize it properly.
 		// 2) we cannot propose for block 1 regardless.
-		s.bgComponentsEg.Go(func() error { return s.txPool.Run(s.sentryCtx) })
+		s.bgComponentsEg.Go(func() error {
+			err := s.txPool.Run(s.sentryCtx)
+			if err != nil {
+				s.logger.Error("txPool.Run error", "err", err)
+			}
+			return err
+		})
 	}
 
 	if s.shutterPool != nil {
-		s.bgComponentsEg.Go(func() error { return s.shutterPool.Run(s.sentryCtx) })
+		s.bgComponentsEg.Go(func() error {
+			err := s.shutterPool.Run(s.sentryCtx)
+			if err != nil {
+				s.logger.Error("shutterPool.Run error", "err", err)
+			}
+			return err
+		})
 	}
 
 	return nil
