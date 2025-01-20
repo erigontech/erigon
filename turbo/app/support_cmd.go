@@ -213,13 +213,6 @@ func connectToSocket(ctx context.Context, cancel context.CancelFunc, sigs chan o
 // tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
 // needs to be called repeatedly to implement re-connect logic
 func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
-
-	metricsClient := &http.Client{}
-	defer metricsClient.CloseIdleConnections()
-
-	//ctx, cancel := context.WithCancel(ctx)
-	//defer cancel()
-
 	go func() {
 		select {
 		case <-sigs:
@@ -230,43 +223,28 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		}
 	}()
 
+	codec, err := createCodec(ctx, diagnosticsUrl)
+	if err != nil {
+		return err
+	} else {
+		defer codec.Close()
+	}
+
+	metricsClient := &http.Client{}
+	defer metricsClient.CloseIdleConnections()
+
 	nodes, _ := getNodes(metricsClient, debugURLs)
 
-	conn, err := dial(ctx, diagnosticsUrl)
+	err = sendNodesInfoToDiagnostics(ctx, codec, sessionIds, nodes)
 	if err != nil {
 		return err
 	}
-
-	type connectionInfo struct {
-		Version  uint64        `json:"version"`
-		Sessions []string      `json:"sessions"`
-		Nodes    []*tunnelInfo `json:"nodes"`
-	}
-
-	codec := rpc.NewWebsocketCodec(conn, "wss://"+diagnosticsUrl, nil) //TODO: revise why is it so
-	defer codec.Close()
-
-	err = codec.WriteJSON(ctx, &connectionInfo{
-		Version:  Version,
-		Sessions: sessionIds,
-		Nodes: func() (replies []*tunnelInfo) {
-			for _, node := range nodes {
-				replies = append(replies, node.info)
-			}
-
-			return replies
-		}(),
-	})
-
-	if err != nil {
-		return err
-	}
-
-	logger.Info("Connected")
 
 	for _, debugURL := range debugURLs {
 		connectToSocket(ctx, cancel, sigs, &codec, debugURL+"/debug/diag/ws")
 	}
+
+	logger.Info("Connected")
 
 	for {
 		requests, _, err := codec.ReadBatch()
@@ -288,27 +266,11 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 			continue
 		}
 
-		nodeRequest := struct {
-			NodeId      string     `json:"nodeId"`
-			QueryParams url.Values `json:"queryParams"`
-		}{}
+		nodeRequest := nodeRequest{}
 
 		if err = json.Unmarshal(requests[0].Params, &nodeRequest); err != nil {
 			logger.Error("Invalid node request", "err", err, "id", requestId)
 			continue
-		}
-
-		type responseError struct {
-			Code    int64            `json:"code"`
-			Message string           `json:"message"`
-			Data    *json.RawMessage `json:"data,omitempty"`
-		}
-
-		type nodeResponse struct {
-			Id     string          `json:"id"`
-			Result json.RawMessage `json:"result,omitempty"`
-			Error  *responseError  `json:"error,omitempty"`
-			Last   bool            `json:"last,omitempty"`
 		}
 
 		if node, ok := nodes[nodeRequest.NodeId]; ok {
@@ -492,7 +454,18 @@ func getNodes(metricsClient *http.Client, debugURLs []string) (map[string]*tunne
 	return nodes, nil
 }
 
-func dial(ctx context.Context, diagnosticsUrl string) (*websocket.Conn, error) {
+func createCodec(ctx context.Context, diagnosticsUrl string) (rpc.ServerCodec, error) {
+	conn, err := establishConnection(ctx, diagnosticsUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	codec := rpc.NewWebsocketCodec(conn, "wss://"+diagnosticsUrl, nil) //TODO: revise why is it so
+
+	return codec, nil
+}
+
+func establishConnection(ctx context.Context, diagnosticsUrl string) (*websocket.Conn, error) {
 	dialer := websocket.Dialer{
 		ReadBufferSize:  wsReadBuffer,
 		WriteBufferSize: wsWriteBuffer,
@@ -514,6 +487,28 @@ func dial(ctx context.Context, diagnosticsUrl string) (*websocket.Conn, error) {
 	}
 
 	return conn, nil
+}
+
+func sendNodesInfoToDiagnostics(ctx context.Context, codec rpc.ServerCodec, sessionIds []string, nodes map[string]*tunnelNode) error {
+	type connectionInfo struct {
+		Version  uint64        `json:"version"`
+		Sessions []string      `json:"sessions"`
+		Nodes    []*tunnelInfo `json:"nodes"`
+	}
+
+	err := codec.WriteJSON(ctx, &connectionInfo{
+		Version:  Version,
+		Sessions: sessionIds,
+		Nodes: func() (replies []*tunnelInfo) {
+			for _, node := range nodes {
+				replies = append(replies, node.info)
+			}
+
+			return replies
+		}(),
+	})
+
+	return err
 }
 
 func queryNode(metricsClient *http.Client, debugURL string) (*remote.NodesInfoReply, error) {
@@ -557,4 +552,22 @@ type tunnelInfo struct {
 type tunnelNode struct {
 	debugURL string
 	info     *tunnelInfo
+}
+
+type nodeRequest struct {
+	NodeId      string     `json:"nodeId"`
+	QueryParams url.Values `json:"queryParams"`
+}
+
+type responseError struct {
+	Code    int64            `json:"code"`
+	Message string           `json:"message"`
+	Data    *json.RawMessage `json:"data,omitempty"`
+}
+
+type nodeResponse struct {
+	Id     string          `json:"id"`
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  *responseError  `json:"error,omitempty"`
+	Last   bool            `json:"last,omitempty"`
 }
