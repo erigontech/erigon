@@ -34,9 +34,6 @@ func (sf *PlainFreezer) Freeze(ctx context.Context, baseTsNumFrom, baseTsNumTo T
 			return err
 		}
 
-		if err != nil {
-			return err
-		}
 		if err := sf.coll(data); err != nil {
 			return err
 		}

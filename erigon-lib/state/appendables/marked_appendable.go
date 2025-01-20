@@ -11,7 +11,8 @@ import (
 // marked appendable has two tables
 // 1. canonicalMarkerTbl: stores tsId -> forkId
 // 2. valsTbl: maps `bigendian(tsId) + forkId -> value`
-// currently assuming that only base appendable can be marked.
+// common for base appendables to be marked, as it provides quick way to unwind.
+// so headers are marked; but also bodies.
 type MarkedAppendable struct {
 	*ProtoAppendable
 	canonicalTbl string
