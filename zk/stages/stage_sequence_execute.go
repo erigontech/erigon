@@ -428,6 +428,22 @@ func sequencingBatchStep(
 					}
 
 					txHash := transaction.Hash()
+
+					if _, ok := transaction.GetSender(); !ok {
+						signer := types.MakeSigner(cfg.chainConfig, executionAt, 0)
+						sender, err := signer.Sender(transaction)
+						if err != nil {
+							log.Warn("[extractTransaction] Failed to recover sender from transaction, skipping and removing from pool",
+								"error", err,
+								"hash", transaction.Hash())
+							badTxHashes = append(badTxHashes, txHash)
+							batchState.blockState.transactionsToDiscard = append(batchState.blockState.transactionsToDiscard, batchState.blockState.transactionHashesToSlots[txHash])
+							continue
+						}
+
+						transaction.SetSender(sender)
+					}
+
 					effectiveGas := batchState.blockState.getL1EffectiveGases(cfg, i)
 
 					// The copying of this structure is intentional
