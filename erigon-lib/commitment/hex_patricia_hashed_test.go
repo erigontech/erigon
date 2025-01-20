@@ -383,14 +383,13 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 		Build()
 
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, stateSeq.TempDir())
-	trieSequential.trace = true
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch, stateBatch.TempDir())
-	trieBatch.trace = true
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 
-	// trieSequential.SetTrace(true)
-	// trieBatch.SetTrace(true)
+	trace := false
+	trieSequential.SetTrace(trace)
+	trieBatch.SetTrace(trace)
 
 	var rSeq, rBatch []byte
 	{
@@ -628,10 +627,10 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 
 	WrapKeyUpdatesInto(t, upds, nextPK, nextUpdates)
 
-	before.SetTrace(true)
+	// before.SetTrace(true)
 	rh2Before, err := before.Process(ctx, upds, "")
 	require.NoError(t, err)
-	after.SetTrace(true)
+	// after.SetTrace(true)
 
 	WrapKeyUpdatesInto(t, upds, nextPK, nextUpdates) // they're resetted after Process
 
@@ -1302,8 +1301,8 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 
 	trieTwo := NewHexPatriciaHashed(length.Addr, msTwo, msTwo.TempDir())
 
-	trieOne.SetTrace(true)
-	trieTwo.SetTrace(true)
+	// trieOne.SetTrace(true)
+	// trieTwo.SetTrace(true)
 
 	var rSeq, rBatch []byte
 	{
