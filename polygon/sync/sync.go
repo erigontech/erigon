@@ -155,14 +155,6 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 		"milestoneRootHash", event.RootHash(),
 	)
 
-	//
-	// TODO - is this it?
-	//
-	// 0. wait for any possibly unprocessed previous block inserts to finish
-	//if err := s.store.Flush(ctx); err != nil {
-	//	return err
-	//}
-
 	if err := s.bridgeSync.Unwind(ctx, rootNum); err != nil {
 		return err
 	}
@@ -185,6 +177,11 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 		return s.handleWaypointExecutionErr(ctx, ccb.Root(), err)
 	}
 
+	s.logger.Info(
+		syncLogPrefix("resetting ccb to new tip after handling milestone mismatch"),
+		"num", newTip.Number.Uint64(),
+		"hash", newTip.Hash(),
+	)
 	ccb.Reset(newTip)
 	return nil
 }
