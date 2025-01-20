@@ -139,10 +139,16 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 	// unwind to the previous verified milestone
 	// and download the blocks of the new milestone
 	rootNum := ccb.Root().Number.Uint64()
+	rootHash := ccb.Root().Hash()
+	tipNum := ccb.Tip().Number.Uint64()
+	tipHash := ccb.Tip().Hash()
 
-	s.logger.Debug(
+	s.logger.Info(
 		syncLogPrefix("local chain tip does not match the milestone, unwinding to the previous verified root"),
 		"rootNum", rootNum,
+		"rootHash", rootHash,
+		"tipNum", tipNum,
+		"tipHash", tipHash,
 		"milestoneId", event.Id,
 		"milestoneStart", event.StartBlock(),
 		"milestoneEnd", event.EndBlock(),
@@ -171,6 +177,11 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 		return s.handleWaypointExecutionErr(ctx, ccb.Root(), err)
 	}
 
+	s.logger.Info(
+		syncLogPrefix("resetting ccb to new tip after handling milestone mismatch"),
+		"num", newTip.Number.Uint64(),
+		"hash", newTip.Hash(),
+	)
 	ccb.Reset(newTip)
 	return nil
 }
@@ -181,7 +192,7 @@ func (s *Sync) applyNewMilestoneOnTip(ctx context.Context, event EventNewMilesto
 		return nil
 	}
 
-	s.logger.Debug(
+	s.logger.Info(
 		syncLogPrefix("applying new milestone event"),
 		"milestoneId", milestone.RawId(),
 		"milestoneStart", milestone.StartBlock().Uint64(),
@@ -198,7 +209,7 @@ func (s *Sync) applyNewMilestoneOnTip(ctx context.Context, event EventNewMilesto
 }
 
 func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb *CanonicalChainBuilder) error {
-	newBlockHeader := event.NewBlock.Header()
+	newBlockHeader := event.NewBlock.HeaderNoCopy()
 	newBlockHeaderNum := newBlockHeader.Number.Uint64()
 	newBlockHeaderHash := newBlockHeader.Hash()
 	rootNum := ccb.Root().Number.Uint64()
@@ -470,7 +481,7 @@ func (s *Sync) publishNewBlock(ctx context.Context, block *types.Block) {
 func (s *Sync) handleBridgeOnForkChange(ctx context.Context, ccb *CanonicalChainBuilder, oldTip *types.Header) error {
 	// forks have changed, we need to unwind unwindable data
 	newTip := ccb.Tip()
-	s.logger.Debug(
+	s.logger.Info(
 		syncLogPrefix("handling bridge on fork change"),
 		"oldNum", oldTip.Number.Uint64(),
 		"oldHash", oldTip.Hash(),
@@ -533,7 +544,7 @@ func (s *Sync) handleBridgeOnBlocksInsertAheadOfTip(ctx context.Context, tipNum,
 	// make sure the bridge does not go past the tip (it may happen when we insert blocks from another fork that
 	// has a higher block number than the canonical tip but lower difficulty) - this is to prevent the bridge
 	// from recording incorrect bor txn hashes
-	s.logger.Debug(
+	s.logger.Info(
 		syncLogPrefix("unwinding bridge due to inserting headers past the tip"),
 		"tip", tipNum,
 		"lastInsertedNum", lastInsertedNum,
@@ -832,7 +843,7 @@ func (s *Sync) sync(
 }
 
 func (s *Sync) handleWaypointExecutionErr(ctx context.Context, lastCorrectTip *types.Header, execErr error) error {
-	s.logger.Debug(
+	s.logger.Error(
 		syncLogPrefix("waypoint execution err"),
 		"lastCorrectTipNum", lastCorrectTip.Number.Uint64(),
 		"lastCorrectTipHash", lastCorrectTip.Hash(),
