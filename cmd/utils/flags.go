@@ -819,7 +819,7 @@ var (
 	CaplinDiscoveryAddrFlag = cli.StringFlag{
 		Name:  "caplin.discovery.addr",
 		Usage: "Address for Caplin DISCV5 protocol",
-		Value: "127.0.0.1",
+		Value: "0.0.0.0",
 	}
 	CaplinDiscoveryPortFlag = cli.Uint64Flag{
 		Name:  "caplin.discovery.port",
