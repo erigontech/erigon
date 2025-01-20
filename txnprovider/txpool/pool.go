@@ -162,7 +162,7 @@ func New(
 	ctx context.Context,
 	newTxns chan Announcements,
 	poolDB kv.RwDB,
-	coreDB kv.RoDB,
+	chainDB kv.RoDB,
 	cfg txpoolcfg.Config,
 	cache kvcache.Cache,
 	chainID uint256.Int,
@@ -217,7 +217,7 @@ func New(
 		_stateCache:             cache,
 		senders:                 newSendersBatch(tracedSenders),
 		poolDB:                  poolDB,
-		_chainDB:                coreDB,
+		_chainDB:                chainDB,
 		cfg:                     cfg,
 		chainID:                 chainID,
 		unprocessedRemoteTxns:   &TxnSlots{},
@@ -273,7 +273,7 @@ func (p *TxPool) start(ctx context.Context) error {
 	}
 
 	return p.poolDB.View(ctx, func(tx kv.Tx) error {
-		coreDb, _ := p.coreDBWithCache()
+		coreDb, _ := p.chainDB()
 		coreTx, err := coreDb.BeginRo(ctx)
 		if err != nil {
 			return err
@@ -296,7 +296,7 @@ func (p *TxPool) start(ctx context.Context) error {
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
 	defer newBlockTimer.ObserveDuration(time.Now())
 
-	coreDB, cache := p.coreDBWithCache()
+	coreDB, cache := p.chainDB()
 	cache.OnNewBlock(stateChanges)
 	coreTx, err := coreDB.BeginRo(ctx)
 	if err != nil {
@@ -307,7 +307,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
-	available := len(p.pending.best.ms)
 
 	if err = minedTxns.Valid(); err != nil {
 		return err
@@ -329,6 +328,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	}()
 
 	defer func() {
+		available := len(p.pending.best.ms)
 		p.logger.Debug("[txpool] New block", "block", block, "unwound", len(unwindTxns.Txns), "mined", len(minedTxns.Txns), "baseFee", baseFee, "pending-pre", available, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len(), "err", err)
 	}()
 
@@ -479,7 +479,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 
 	defer processBatchTxnsTimer.ObserveDuration(time.Now())
-	coreDB, cache := p.coreDBWithCache()
+	coreDB, cache := p.chainDB()
 	coreTx, err := coreDB.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1209,7 +1209,7 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 }
 
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
-	coreDb, cache := p.coreDBWithCache()
+	coreDb, cache := p.chainDB()
 	coreTx, err := coreDb.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1266,7 +1266,7 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	return reasons, nil
 }
 
-func (p *TxPool) coreDBWithCache() (kv.RoDB, kvcache.Cache) {
+func (p *TxPool) chainDB() (kv.RoDB, kvcache.Cache) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	return p._chainDB, p._stateCache
