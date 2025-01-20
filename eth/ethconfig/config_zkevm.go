@@ -8,6 +8,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+const DatastreamVersion = 2
+
 type Zk struct {
 	L2ChainId                              uint64
 	L2RpcUrl                               string
@@ -38,7 +40,6 @@ type Zk struct {
 	L1CachePort                            uint
 	RpcRateLimits                          int
 	RpcGetBatchWitnessConcurrencyLimit     int
-	DatastreamVersion                      int
 	SequencerBlockSealTime                 time.Duration
 	SequencerEmptyBlockSealTime            time.Duration
 	SequencerBatchSealTime                 time.Duration

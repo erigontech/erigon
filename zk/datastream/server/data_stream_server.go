@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	eritypes "github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/zk/datastream/client"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
@@ -68,8 +69,8 @@ func NewZkEVMDataStreamServerFactory() *ZkEVMDataStreamServerFactory {
 	return &ZkEVMDataStreamServerFactory{}
 }
 
-func (f *ZkEVMDataStreamServerFactory) CreateStreamServer(port uint16, version uint8, systemID uint64, streamType datastreamer.StreamType, fileName string, writeTimeout time.Duration, inactivityTimeout time.Duration, inactivityCheckInterval time.Duration, cfg *dslog.Config) (StreamServer, error) {
-	return datastreamer.NewServer(port, version, systemID, streamType, fileName, writeTimeout, inactivityTimeout, inactivityCheckInterval, cfg)
+func (f *ZkEVMDataStreamServerFactory) CreateStreamServer(port uint16, systemID uint64, streamType datastreamer.StreamType, fileName string, writeTimeout time.Duration, inactivityTimeout time.Duration, inactivityCheckInterval time.Duration, cfg *dslog.Config) (StreamServer, error) {
+	return datastreamer.NewServer(port, ethconfig.DatastreamVersion, systemID, streamType, fileName, writeTimeout, inactivityTimeout, inactivityCheckInterval, cfg)
 }
 
 func (f *ZkEVMDataStreamServerFactory) CreateDataStreamServer(streamServer StreamServer, chainId uint64) DataStreamServer {
