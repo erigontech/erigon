@@ -68,16 +68,25 @@ jobs:
 
             if (( tests < 4 )); then
               echo "Too few tests run for suite ${1} - ${tests} tests"
+              echo "failed" > failed.log
               exit 1
             fi
             if (( failed*2 > tests )); then
               echo "Too many failures for suite ${1} - ${failed} failed out of ${tests}"
+              echo "failed" > failed.log
               exit 1
             fi
           }
           run_suite eest/consume-engine
+        continue-on-error: true
       - name: Upload output log
         uses: actions/upload-artifact@v4
         with:
           name: hive-workspace-log
           path: hive/workspace/logs
+      - name: Check for failures
+        run: |
+          if grep -q "failed" hive/failed.log; then
+            echo "One or more tests failed."
+            exit 1
+          fi
