@@ -27,7 +27,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -134,82 +133,6 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 	}
 }
 
-type conn struct {
-	io.ReadCloser
-	*io.PipeWriter
-}
-
-func (c *conn) Close() error {
-	c.ReadCloser.Close()
-	c.PipeWriter.Close()
-	return nil
-}
-
-func (c *conn) SetWriteDeadline(time time.Time) error {
-	return nil
-}
-
-func connectToSocket(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, codec *rpc.ServerCodec, serverURL string) {
-	serverURL = strings.Replace(serverURL, "http://", "ws://", 1)
-	//serverURL = "ws://" + serverURL
-
-	// Connect to the WebSocket server
-	conn, _, err := websocket.DefaultDialer.Dial(serverURL, nil)
-	if err != nil {
-		fmt.Printf("Failed to connect to WebSocket server: %v", err)
-	}
-	defer conn.Close()
-
-	// Channel to listen for OS signals (e.g., Ctrl+C)
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-
-	// Goroutine to listen for messages
-	go func() {
-		for {
-			// Read message from server
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				fmt.Println("Error reading message:", err)
-				return
-			}
-
-			// Log the received message
-			fmt.Printf("Received: %s", message)
-			err = (*codec).WriteJSON(ctx, message)
-			if err != nil {
-				fmt.Println("Error writing message:", err)
-				return
-			}
-		}
-	}()
-
-	// Send a ping periodically to keep the connection alive
-	ticker := time.NewTicker(time.Second * 10)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			err := conn.WriteMessage(websocket.PingMessage, nil)
-			if err != nil {
-				fmt.Println("Error sending ping:", err)
-				return
-			}
-
-		case <-interrupt:
-			fmt.Println("Interrupt signal received. Closing connection...")
-
-			// Send a close message to the server
-			err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-			if err != nil {
-				fmt.Println("Error during close:", err)
-			}
-			return
-		}
-	}
-}
-
 // tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
 // needs to be called repeatedly to implement re-connect logic
 func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
@@ -241,14 +164,13 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	}
 
 	for _, debugURL := range debugURLs {
-		connectToSocket(ctx, cancel, sigs, &codec, debugURL+"/debug/diag/ws")
+		go connectToSocket(ctx, cancel, sigs, &codec, debugURL+"/debug/diag/ws")
 	}
 
 	logger.Info("Connected")
 
 	for {
 		requests, _, err := codec.ReadBatch()
-
 		select {
 		case <-ctx.Done():
 			return nil
@@ -259,161 +181,55 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 			}
 		}
 
-		var requestId string
+		for _, request := range requests {
+			var requestId string
 
-		if err = json.Unmarshal(requests[0].ID, &requestId); err != nil {
-			logger.Error("Invalid request id", "err", err)
-			continue
-		}
+			if err = json.Unmarshal(request.ID, &requestId); err != nil {
+				logger.Error("Invalid request id", "err", err)
+				continue
+			}
 
-		nodeRequest := nodeRequest{}
+			nodeRequest := nodeRequest{}
 
-		if err = json.Unmarshal(requests[0].Params, &nodeRequest); err != nil {
-			logger.Error("Invalid node request", "err", err, "id", requestId)
-			continue
-		}
+			if err = json.Unmarshal(request.Params, &nodeRequest); err != nil {
+				logger.Error("Invalid node request", "err", err, "id", requestId)
+				continue
+			}
 
-		if node, ok := nodes[nodeRequest.NodeId]; ok {
-			err := func() error {
-				var queryString string
+			if node, ok := nodes[nodeRequest.NodeId]; ok {
+				err := func() error {
+					var queryString string
+					if len(nodeRequest.QueryParams) > 0 {
+						queryString = "?" + nodeRequest.QueryParams.Encode()
+					}
 
-				if len(nodeRequest.QueryParams) > 0 {
-					queryString = "?" + nodeRequest.QueryParams.Encode()
-				}
+					debugURL := node.debugURL + "/debug/diag/" + request.Method + queryString
+					debugResponse, err := metricsClient.Get(debugURL)
+					if err != nil {
+						return sendErrorResponse(ctx, codec, requestId, http.StatusFailedDependency, fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err))
+					}
+					defer debugResponse.Body.Close()
 
-				debugURL := node.debugURL + "/debug/diag/" + requests[0].Method + queryString
-				debugResponse, err := metricsClient.Get(debugURL)
+					if debugResponse.StatusCode != http.StatusOK {
+						body, _ := io.ReadAll(debugResponse.Body)
+						return sendErrorResponse(ctx, codec, requestId, int64(debugResponse.StatusCode), fmt.Sprintf("Request for metrics method [%s] failed: %s", debugURL, string(body)))
+					}
+
+					buffer := &bytes.Buffer{}
+					if err := copyResponseBody(buffer, debugResponse); err != nil {
+						return sendErrorResponse(ctx, codec, requestId, http.StatusInternalServerError, fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err))
+					}
+
+					return codec.WriteJSON(ctx, &nodeResponse{
+						Id:     requestId,
+						Result: json.RawMessage(buffer.Bytes()),
+						Last:   true,
+					})
+				}()
 
 				if err != nil {
-					return codec.WriteJSON(ctx, &nodeResponse{
-						Id: requestId,
-						Error: &responseError{
-							Code:    http.StatusFailedDependency,
-							Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
-						},
-						Last: true,
-					})
+					return err
 				}
-
-				defer debugResponse.Body.Close()
-
-				//Websocket ok message
-				if resp.StatusCode != http.StatusSwitchingProtocols {
-					body, _ := io.ReadAll(debugResponse.Body)
-					return codec.WriteJSON(ctx, &nodeResponse{
-						Id: requestId,
-						Error: &responseError{
-							Code:    int64(resp.StatusCode),
-							Message: fmt.Sprintf("Request for metrics method [%s] failed: %s", debugURL, string(body)),
-						},
-						Last: true,
-					})
-				}
-
-				buffer := &bytes.Buffer{}
-
-				switch debugResponse.Header.Get("Content-Type") {
-				case "application/json":
-					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
-						return codec.WriteJSON(ctx, &nodeResponse{
-							Id: requestId,
-							Error: &responseError{
-								Code:    http.StatusInternalServerError,
-								Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
-							},
-							Last: true,
-						})
-
-					}
-				case "application/octet-stream":
-					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
-						return codec.WriteJSON(ctx, &nodeResponse{
-							Id: requestId,
-							Error: &responseError{
-								Code:    int64(http.StatusInternalServerError),
-								Message: fmt.Sprintf("Can't copy metrics response for [%s]: %s", debugURL, err),
-							},
-							Last: true,
-						})
-					}
-
-					offset, _ := strconv.ParseInt(debugResponse.Header.Get("X-Offset"), 10, 64)
-					size, _ := strconv.ParseInt(debugResponse.Header.Get("X-Size"), 10, 64)
-
-					data, err := json.Marshal(struct {
-						Offset int64  `json:"offset"`
-						Size   int64  `json:"size"`
-						Data   []byte `json:"chunk"`
-					}{
-						Offset: offset,
-						Size:   size,
-						Data:   buffer.Bytes(),
-					})
-
-					buffer = bytes.NewBuffer(data)
-
-					if err != nil {
-						return codec.WriteJSON(ctx, &nodeResponse{
-							Id: requestId,
-							Error: &responseError{
-								Code:    int64(http.StatusInternalServerError),
-								Message: fmt.Sprintf("Can't copy metrics response for [%s]: %s", debugURL, err),
-							},
-							Last: true,
-						})
-					}
-
-				case "application/profile":
-					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
-						return codec.WriteJSON(ctx, &nodeResponse{
-							Id: requestId,
-							Error: &responseError{
-								Code:    http.StatusInternalServerError,
-								Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
-							},
-							Last: true,
-						})
-					}
-
-					data, err := json.Marshal(struct {
-						Data []byte `json:"chunk"`
-					}{
-						Data: buffer.Bytes(),
-					})
-
-					buffer = bytes.NewBuffer(data)
-
-					if err != nil {
-						return codec.WriteJSON(ctx, &nodeResponse{
-							Id: requestId,
-							Error: &responseError{
-								Code:    int64(http.StatusInternalServerError),
-								Message: fmt.Sprintf("Can't copy metrics response for [%s]: %s", debugURL, err),
-							},
-							Last: true,
-						})
-					}
-
-				default:
-					return codec.WriteJSON(ctx, &nodeResponse{
-						Id: requestId,
-						Error: &responseError{
-							Code:    int64(http.StatusInternalServerError),
-							Message: fmt.Sprintf("Unhandled content type: %s, from: %s", debugResponse.Header.Get("Content-Type"), debugURL),
-						},
-						Last: true,
-					})
-				}
-
-				return codec.WriteJSON(ctx, &nodeResponse{
-					Id:     requestId,
-					Result: json.RawMessage(buffer.Bytes()),
-					Last:   true,
-				})
-			}()
-
-			if err != nil {
-				return err
 			}
 		}
 	}
@@ -533,6 +349,62 @@ func queryNode(metricsClient *http.Client, debugURL string) (*remote.NodesInfoRe
 	}
 
 	return &reply, nil
+}
+
+func sendErrorResponse(ctx context.Context, codec rpc.ServerCodec, requestId string, code int64, message string) error {
+	return codec.WriteJSON(ctx, &nodeResponse{
+		Id: requestId,
+		Error: &responseError{
+			Code:    code,
+			Message: message,
+		},
+		Last: true,
+	})
+}
+
+func copyResponseBody(buffer *bytes.Buffer, debugResponse *http.Response) error {
+	switch debugResponse.Header.Get("Content-Type") {
+	case "application/json":
+		_, err := io.Copy(buffer, debugResponse.Body)
+		return err
+	case "application/octet-stream":
+		if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
+			return err
+		}
+		offset, _ := strconv.ParseInt(debugResponse.Header.Get("X-Offset"), 10, 64)
+		size, _ := strconv.ParseInt(debugResponse.Header.Get("X-Size"), 10, 64)
+		data, err := json.Marshal(struct {
+			Offset int64  `json:"offset"`
+			Size   int64  `json:"size"`
+			Data   []byte `json:"chunk"`
+		}{
+			Offset: offset,
+			Size:   size,
+			Data:   buffer.Bytes(),
+		})
+		if err != nil {
+			return err
+		}
+		buffer.Reset()
+		buffer.Write(data)
+	case "application/profile":
+		if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
+			return err
+		}
+		data, err := json.Marshal(struct {
+			Data []byte `json:"chunk"`
+		}{
+			Data: buffer.Bytes(),
+		})
+		if err != nil {
+			return err
+		}
+		buffer.Reset()
+		buffer.Write(data)
+	default:
+		return fmt.Errorf("Unhandled content type: %s, from: %s", debugResponse.Header.Get("Content-Type"), debugResponse.Request.URL)
+	}
+	return nil
 }
 
 type tunnelEnode struct {
