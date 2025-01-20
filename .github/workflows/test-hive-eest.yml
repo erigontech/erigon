@@ -76,3 +76,8 @@ jobs:
             fi
           }
           run_suite eest/consume-engine
+      - name: Upload output log
+        uses: actions/upload-artifact@v4
+        with:
+          name: hive-workspace-log
+          path: hive/workspace/logs

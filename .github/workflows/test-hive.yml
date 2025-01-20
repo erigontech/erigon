@@ -83,3 +83,8 @@ jobs:
           run_suite engine api
           run_suite engine auth
           run_suite rpc compat
+      - name: Upload output log
+        uses: actions/upload-artifact@v4
+        with:
+          name: hive-workspace-log
+          path: hive/workspace/logs
