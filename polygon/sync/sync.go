@@ -514,14 +514,6 @@ func (s *Sync) reorganiseBridge(ctx context.Context, ccb *CanonicalChainBuilder,
 		return fmt.Errorf("unexpected newTipNum <= unwindPoint: %d < %d", newTipNum, unwindPoint)
 	}
 
-	//
-	// TODO - is this it?
-	//
-	// 0. wait for any possibly unprocessed previous block inserts to finish
-	//if err := s.store.Flush(ctx); err != nil {
-	//	return err
-	//}
-
 	// 1. Do the unwind from the old tip (on the old canonical fork) to the unwindPoint
 	if err := s.bridgeSync.Unwind(ctx, unwindPoint); err != nil {
 		return err
