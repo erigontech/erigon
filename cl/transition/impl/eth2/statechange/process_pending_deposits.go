@@ -78,7 +78,7 @@ func ProcessPendingDeposits(s abstract.BeaconState) {
 }
 
 func applyPendingDeposit(s abstract.BeaconState, d *solid.PendingDeposit) {
-	if vindex, exist := s.ValidatorIndexByPubkey(d.PubKey); !exist {
+	if _, exist := s.ValidatorIndexByPubkey(d.PubKey); !exist {
 		if valid, _ := IsValidDepositSignature(&cltypes.DepositData{
 			PubKey:                d.PubKey,
 			WithdrawalCredentials: d.WithdrawalCredentials,
