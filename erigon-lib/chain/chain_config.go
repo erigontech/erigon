@@ -133,7 +133,7 @@ func (c *Config) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Cancun: %v, Prague: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Dencun: %v, Pectra: %v, Engine: %v}",
 		c.ChainID,
 		timestampToTime(c.CancunTime),
 		timestampToTime(c.PragueTime),
