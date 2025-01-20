@@ -53,8 +53,8 @@ func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmp
 	num := make([]byte, binary.MaxVarintLen64)
 	cfg := recsplit.RecSplitArgs{
 		Enums:      true,
-		BucketSize: 2000,
-		LeafSize:   8,
+		BucketSize: recsplit.DefaultBucketSize,
+		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     tmpDir,
 		Salt:       &salt,
 		BaseDataID: sn.From,
@@ -647,8 +647,8 @@ func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir st
 	num := make([]byte, binary.MaxVarintLen64)
 	cfg := recsplit.RecSplitArgs{
 		Enums:      true,
-		BucketSize: 2000,
-		LeafSize:   8,
+		BucketSize: recsplit.DefaultBucketSize,
+		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     tmpDir,
 		Salt:       &salt,
 		BaseDataID: sn.From,

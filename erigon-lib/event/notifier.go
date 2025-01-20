@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package polygoncommon
+package event
 
 import (
 	"context"
@@ -22,36 +22,36 @@ import (
 	"sync/atomic"
 )
 
-// EventNotifier notifies waiters about an event.
+// Notifier notifies waiters about an event.
 // It supports a single "producer" and multiple waiters.
 // A producer can set the event state to "signaled" or "non-signaled".
 // Waiters can wait for the "signaled" event state.
-type EventNotifier struct {
+type Notifier struct {
 	mutex    sync.Mutex
 	cond     *sync.Cond
 	hasEvent atomic.Bool
 }
 
-func NewEventNotifier() *EventNotifier {
-	instance := &EventNotifier{}
+func NewNotifier() *Notifier {
+	instance := &Notifier{}
 	instance.cond = sync.NewCond(&instance.mutex)
 	return instance
 }
 
 // Reset to the "non-signaled" state.
-func (en *EventNotifier) Reset() {
+func (en *Notifier) Reset() {
 	en.hasEvent.Store(false)
 }
 
 // SetAndBroadcast sets the "signaled" state and notifies all waiters.
-func (en *EventNotifier) SetAndBroadcast() {
+func (en *Notifier) SetAndBroadcast() {
 	en.hasEvent.Store(true)
 	en.cond.Broadcast()
 }
 
 // Wait for the "signaled" state.
 // If the event is already "signaled" it returns immediately.
-func (en *EventNotifier) Wait(ctx context.Context) error {
+func (en *Notifier) Wait(ctx context.Context) error {
 	waitCtx, waitCancel := context.WithCancel(ctx)
 	defer waitCancel()
 
@@ -74,7 +74,7 @@ func (en *EventNotifier) Wait(ctx context.Context) error {
 	<-waitCtx.Done()
 
 	// if the parent context is done, force the waiting goroutine to exit
-	// this might lead to spurious wake ups for other waiters,
+	// this might lead to spurious wake-ups for other waiters,
 	// but it is ok due to the waiting loop conditions
 	en.cond.Broadcast()
 

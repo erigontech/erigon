@@ -124,12 +124,12 @@ func copy(cliCtx *cli.Context) error {
 		pos++
 	}
 
-	switch dst.LType {
+	switch dst.LType { //nolint:govet
 	case sync.TorrentFs:
 		return errors.New("can't copy to torrent - need intermediate local fs")
 
 	case sync.RemoteFs:
-		if rcCli == nil {
+		if rcCli == nil { //nolint:govet
 			rcCli, err = downloader.NewRCloneClient(logger)
 
 			if err != nil {
@@ -144,7 +144,7 @@ func copy(cliCtx *cli.Context) error {
 
 	switch src.LType {
 	case sync.TorrentFs:
-		config := sync.NewTorrentClientConfigFromCobra(cliCtx, dst.Chain)
+		config := sync.NewTorrentClientConfigFromCobra(cliCtx, dst.Chain) //nolint:govet
 		torrentCli, err = sync.NewTorrentClient(cliCtx.Context, config)
 		if err != nil {
 			return fmt.Errorf("can't create torrent: %w", err)
@@ -186,7 +186,7 @@ func copy(cliCtx *cli.Context) error {
 	version := cliCtx.Int(VersionFlag.Name)
 
 	if version != 0 {
-		dst.Version = snaptype.Version(version)
+		dst.Version = snaptype.Version(version) //nolint:govet
 	}
 
 	if cliCtx.Args().Len() > pos {
@@ -205,7 +205,7 @@ func copy(cliCtx *cli.Context) error {
 
 	switch src.LType {
 	case sync.LocalFs:
-		switch dst.LType {
+		switch dst.LType { //nolint:govet
 		case sync.LocalFs:
 			return localToLocal(src, dst, firstBlock, lastBlock, snapTypes, torrents, hashes, manifest)
 		case sync.RemoteFs:
@@ -215,7 +215,7 @@ func copy(cliCtx *cli.Context) error {
 		}
 
 	case sync.RemoteFs:
-		switch dst.LType {
+		switch dst.LType { //nolint:govet
 		case sync.LocalFs:
 			return remoteToLocal(cliCtx.Context, rcCli, src, dst, firstBlock, lastBlock, snapTypes, torrents, hashes, manifest)
 		case sync.RemoteFs:
@@ -225,7 +225,7 @@ func copy(cliCtx *cli.Context) error {
 		}
 
 	case sync.TorrentFs:
-		switch dst.LType {
+		switch dst.LType { //nolint:govet
 		case sync.LocalFs:
 			return torrentToLocal(torrentCli, src, dst, firstBlock, lastBlock, snapTypes, torrents, hashes, manifest)
 		case sync.RemoteFs:

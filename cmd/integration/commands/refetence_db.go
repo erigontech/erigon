@@ -263,6 +263,7 @@ func compareBuckets(ctx context.Context, tx kv.Tx, b string, refTx kv.Tx, refB s
 	if err != nil {
 		return err
 	}
+	defer c.Close()
 	k, v, e := c.First()
 	if e != nil {
 		return e
@@ -271,6 +272,7 @@ func compareBuckets(ctx context.Context, tx kv.Tx, b string, refTx kv.Tx, refB s
 	if err != nil {
 		return err
 	}
+	defer refC.Close()
 	refK, refV, revErr := refC.First()
 	if revErr != nil {
 		return revErr
@@ -386,6 +388,7 @@ MainLoop:
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 
 		for {
 			if !fileScanner.Scan() {
@@ -419,6 +422,7 @@ MainLoop:
 				logger.Info("Progress", "bucket", bucket, "key", hex.EncodeToString(k))
 			}
 		}
+		c.Close()
 		err = fileScanner.Err()
 		if err != nil {
 			panic(err)

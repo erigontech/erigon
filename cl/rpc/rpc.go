@@ -239,7 +239,7 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByRangerReq(ctx context.Context, start, c
 	}
 
 	data := libcommon.CopyBytes(buffer.Bytes())
-	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRangeProtocolV1, data, count*b.beaconConfig.MaxBlobsPerBlock)
+	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRangeProtocolV2, data, count*b.beaconConfig.MaxBlobsPerBlock)
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
@@ -292,18 +292,6 @@ func (b *BeaconRpcP2P) SetStatus(finalizedRoot libcommon.Hash, finalizedEpoch ui
 		FinalizedEpoch: finalizedEpoch,
 		HeadRoot:       gointerfaces.ConvertHashToH256(headRoot),
 		HeadSlot:       headSlot,
-	})
-	return err
-}
-
-func (b *BeaconRpcP2P) PropagateBlock(block *cltypes.SignedBeaconBlock) error {
-	encoded, err := block.EncodeSSZ(nil)
-	if err != nil {
-		return err
-	}
-	_, err = b.sentinel.PublishGossip(b.ctx, &sentinel.GossipData{
-		Data: encoded,
-		Name: "beacon_block",
 	})
 	return err
 }

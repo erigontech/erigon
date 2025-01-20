@@ -169,15 +169,13 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized li
 
 	err := cc.client.CallContext(ctx, forkChoiceResp, rpc_helper.ForkChoiceUpdatedV1, args...)
 	if err != nil {
+		if err.Error() == errContextExceeded {
+			// ignore timeouts
+			return nil, nil
+		}
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
-	// Ignore timeouts
-	if err != nil && err.Error() == errContextExceeded {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
+
 	if forkChoiceResp.PayloadId == nil {
 		return []byte{}, checkPayloadStatus(forkChoiceResp.PayloadStatus)
 	}

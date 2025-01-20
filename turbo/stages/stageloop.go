@@ -75,15 +75,13 @@ func StageLoop(
 	defer close(waitForDone)
 
 	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook); err != nil {
-		if err != nil {
-			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
-				return
-			}
+		if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
+			return
+		}
 
-			logger.Error("Staged Sync", "err", err)
-			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
-				logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)
-			}
+		logger.Error("Staged Sync", "err", err)
+		if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
+			logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)
 		}
 	}
 
@@ -485,8 +483,9 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
 		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
 		pendingBlobFee := h.chainConfig.GetMinBlobGasPrice()
 		if currentHeader.ExcessBlobGas != nil {
-			excessBlobGas := misc.CalcExcessBlobGas(h.chainConfig, currentHeader)
-			f, err := misc.GetBlobGasPrice(h.chainConfig, excessBlobGas)
+			nextBlockTime := currentHeader.Time + h.chainConfig.SecondsPerSlot()
+			excessBlobGas := misc.CalcExcessBlobGas(h.chainConfig, currentHeader, nextBlockTime)
+			f, err := misc.GetBlobGasPrice(h.chainConfig, excessBlobGas, nextBlockTime)
 			if err != nil {
 				return err
 			}
@@ -675,7 +674,6 @@ func NewDefaultStages(ctx context.Context,
 	snapDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
-	agg *state.Aggregator,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
 	heimdallClient heimdall.Client,
@@ -693,7 +691,7 @@ func NewDefaultStages(ctx context.Context,
 	runInTestMode := cfg.ImportMode
 
 	return stagedsync.DefaultStages(ctx,
-		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, cfg.CaplinConfig.BlobBackfilling, cfg.CaplinConfig.Archive, silkworm, cfg.Prune),
+		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, silkworm, cfg.Prune),
 		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications),
 		stagedsync.StageBorHeimdallCfg(db, snapDb, stagedsync.MiningState{}, *controlServer.ChainConfig, heimdallClient, heimdallStore, bridgeStore, blockReader, controlServer.Hd, controlServer.Penalize, recents, signatures, cfg.WithHeimdallWaypointRecording, nil),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
@@ -713,7 +711,6 @@ func NewPipelineStages(ctx context.Context,
 	snapDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
-	agg *state.Aggregator,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
 	logger log.Logger,
@@ -734,7 +731,7 @@ func NewPipelineStages(ctx context.Context,
 
 	if len(cfg.Sync.UploadLocation) == 0 {
 		return stagedsync.PipelineStages(ctx,
-			stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, cfg.CaplinConfig.BlobBackfilling, cfg.CaplinConfig.Archive, silkworm, cfg.Prune),
+			stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, silkworm, cfg.Prune),
 			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, false, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg)),
@@ -743,7 +740,7 @@ func NewPipelineStages(ctx context.Context,
 	}
 
 	return stagedsync.UploaderPipelineStages(ctx,
-		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, cfg.CaplinConfig.BlobBackfilling, cfg.CaplinConfig.Archive, silkworm, cfg.Prune),
+		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, silkworm, cfg.Prune),
 		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
@@ -753,7 +750,7 @@ func NewPipelineStages(ctx context.Context,
 }
 
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry_multi_client.MultiClient,
-	dirs datadir.Dirs, notifications *shards.Notifications, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, agg *state.Aggregator,
+	dirs datadir.Dirs, notifications *shards.Notifications, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter,
 	silkworm *silkworm.Silkworm, logger log.Logger) *stagedsync.Sync {
 	return stagedsync.New(
 		cfg.Sync,
@@ -778,7 +775,6 @@ func NewPolygonSyncStages(
 	snapDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
-	agg *state.Aggregator,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
 	heimdallClient heimdall.Client,
@@ -800,10 +796,9 @@ func NewPolygonSyncStages(
 			snapDownloader,
 			blockReader,
 			notifications,
-			agg,
-			config.InternalCL && config.CaplinConfig.Backfilling,
-			config.CaplinConfig.BlobBackfilling,
-			config.CaplinConfig.Archive,
+			config.InternalCL && config.CaplinConfig.ArchiveBlocks,
+			config.CaplinConfig.ArchiveBlobs,
+			config.CaplinConfig.ArchiveStates,
 			silkworm,
 			config.Prune,
 		),

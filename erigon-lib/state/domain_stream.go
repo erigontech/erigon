@@ -130,7 +130,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	var key, value []byte
 
 	if dc.d.largeValues {
-		valsCursor, err := hi.roTx.Cursor(dc.d.valuesTable)
+		valsCursor, err := hi.roTx.Cursor(dc.d.valuesTable) //nolint:gocritic
 		if err != nil {
 			return err
 		}
@@ -146,7 +146,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 			heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
 		}
 	} else {
-		valsCursor, err := hi.roTx.CursorDupSort(dc.d.valuesTable)
+		valsCursor, err := hi.roTx.CursorDupSort(dc.d.valuesTable) //nolint:gocritic
 		if err != nil {
 			return err
 		}

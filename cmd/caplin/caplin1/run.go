@@ -133,11 +133,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader proto_downloader.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
 
-	var (
-		backfilling     = config.Backfilling
-		blobBackfilling = config.BlobBackfilling
-		states          = config.Archive
-	)
 	var networkConfig *clparams.NetworkConfig
 	var beaconConfig *clparams.BeaconChainConfig
 
@@ -165,7 +160,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 		genesisState = state.New(beaconConfig)
 
-		if genesisState.DecodeSSZ(stateBytes, int(beaconConfig.GetCurrentStateVersion(beaconConfig.GenesisEpoch))); err != nil {
+		if err := genesisState.DecodeSSZ(stateBytes, int(beaconConfig.GetCurrentStateVersion(beaconConfig.GenesisEpoch))); err != nil {
 			return fmt.Errorf("could not decode genesis state: %s", err)
 		}
 	} else {
@@ -214,7 +209,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	ethClock := eth_clock.NewEthereumClock(state.GenesisTime(), state.GenesisValidatorsRoot(), beaconConfig)
 
 	pruneBlobDistance := uint64(128600)
-	if config.BlobBackfilling || config.BlobPruningDisabled {
+	if config.ArchiveBlobs || config.BlobPruningDisabled {
 		pruneBlobDistance = math.MaxUint64
 	}
 
@@ -391,16 +386,13 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	vTables := state_accessors.NewStaticValidatorTable()
 	// Read the current table
-	if states {
+	if config.ArchiveStates {
 		if err := state_accessors.ReadValidatorsTable(tx, vTables); err != nil {
 			return err
 		}
 	}
 	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB), logger)
-	if err := stateSnapshots.OpenFolder(); err != nil {
-		return err
-	}
-	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, states, backfilling, blobBackfilling, config.SnapshotGenerationEnabled, snBuildSema)
+	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, config.ArchiveStates, config.ArchiveBlocks, config.ArchiveBlobs, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {
 		if err := antiq.Loop(); err != nil {
@@ -470,8 +462,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		rcsn,
 		dirs,
 		config.LoopBlockLimit,
-		backfilling,
-		blobBackfilling,
+		config,
 		syncedDataManager,
 		emitters,
 		blobStorage,

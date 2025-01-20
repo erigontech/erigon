@@ -300,11 +300,16 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		)
 	}
 
-	// make a simple copy to the current head state
-	baseState, err := a.forkchoiceStore.GetStateAtBlockRoot(
-		baseBlockRoot,
-		true,
-	) // we start the block production from this state
+	var baseState *state.CachingBeaconState
+	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		baseState, err = headState.Copy()
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
 	if err != nil {
 		return nil, err
@@ -546,7 +551,7 @@ func (a *ApiHandler) getBuilderPayload(
 		ethHeader.SetVersion(baseState.Version())
 	}
 	// check kzg commitments
-	if header != nil && baseState.Version() >= clparams.DenebVersion {
+	if baseState.Version() >= clparams.DenebVersion {
 		if header.Data.Message.BlobKzgCommitments.Len() >= cltypes.MaxBlobsCommittmentsPerBlock {
 			return nil, fmt.Errorf("too many blob kzg commitments: %d", header.Data.Message.BlobKzgCommitments.Len())
 		}
@@ -1139,8 +1144,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		Name: gossip.TopicNameBeaconBlock,
 		Data: blkSSZ,
 	}); err != nil {
-		log.Error("Failed to publish block", "err", err)
-		return err
+		a.logger.Error("Failed to publish block", "err", err)
 	}
 	for idx, blob := range blobsSidecarsBytes {
 		idx64 := uint64(idx)
@@ -1149,8 +1153,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			Data:     blob,
 			SubnetId: &idx64,
 		}); err != nil {
-			log.Error("Failed to publish blob sidecar", "err", err)
-			return err
+			a.logger.Error("Failed to publish blob sidecar", "err", err)
 		}
 	}
 	return nil
@@ -1177,7 +1180,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		return err
 	}
 
-	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
+	if err := a.forkchoiceStore.OnBlock(ctx, block, true, true, false); err != nil {
 		return err
 	}
 	finalizedBlockRoot := a.forkchoiceStore.FinalizedCheckpoint().Root

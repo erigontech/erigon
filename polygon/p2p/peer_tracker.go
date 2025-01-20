@@ -24,10 +24,10 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 func NewPeerTracker(
@@ -65,7 +65,7 @@ type PeerTracker struct {
 func (pt *PeerTracker) Run(ctx context.Context) error {
 	pt.logger.Info(peerTrackerLogPrefix("running peer tracker component"))
 
-	var peerEventUnreg polygoncommon.UnregisterFunc
+	var peerEventUnreg event.UnregisterFunc
 	defer func() { peerEventUnreg() }()
 
 	err := func() error {
@@ -214,7 +214,7 @@ func (pt *PeerTracker) updatePeerSyncProgress(peerId *PeerId, update func(psp *p
 	update(peerSyncProgress)
 }
 
-func newPeerEventObserver(pt *PeerTracker) polygoncommon.Observer[*sentryproto.PeerEvent] {
+func newPeerEventObserver(pt *PeerTracker) event.Observer[*sentryproto.PeerEvent] {
 	return func(message *sentryproto.PeerEvent) {
 		peerId := PeerIdFromH512(message.PeerId)
 		switch message.EventId {
@@ -226,7 +226,7 @@ func newPeerEventObserver(pt *PeerTracker) polygoncommon.Observer[*sentryproto.P
 	}
 }
 
-func newBlockHashAnnouncesObserver(pt *PeerTracker) polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]] {
+func newBlockHashAnnouncesObserver(pt *PeerTracker) event.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]] {
 	return func(message *DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
 		for _, hashOrNum := range *message.Decoded {
 			pt.BlockHashPresent(message.PeerId, hashOrNum.Hash)
@@ -234,7 +234,7 @@ func newBlockHashAnnouncesObserver(pt *PeerTracker) polygoncommon.Observer[*Deco
 	}
 }
 
-func newBlockAnnouncesObserver(pt *PeerTracker) polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]] {
+func newBlockAnnouncesObserver(pt *PeerTracker) event.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]] {
 	return func(message *DecodedInboundMessage[*eth.NewBlockPacket]) {
 		pt.BlockHashPresent(message.PeerId, message.Decoded.Block.Hash())
 	}

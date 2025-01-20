@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/consensus"
 )
 
-// Draws an validator nonce modulo number of validators.
+// Draws a validator nonce modulo number of validators.
 func GetFromValidatorSet(set ValidatorSet, parent libcommon.Hash, nonce uint, call consensus.Call) (libcommon.Address, error) {
 	//d, err := set.defaultCaller(parent)
 	//if err != nil {

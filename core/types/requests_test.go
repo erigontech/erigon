@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,4 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package exec3
+package types
+
+import (
+	"testing"
+)
+
+func TestEmptyRequestsHashCalculation(t *testing.T) {
+	reqs := make(FlatRequests, 0)
+	h := reqs.Hash()
+	testH := EmptyRequestsHash
+	if *h != testH {
+		t.Errorf("Requests Hash calculation error for empty hash, expected: %v, got: %v", testH, h)
+	}
+}

@@ -78,7 +78,7 @@ func (t *blsToExecutionChangeTestSuite) TearDownTest() {
 }
 
 func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
-	mockMsg := &cltypes.SignedBLSToExecutionChangeWithGossipData{
+	mockMsg := &SignedBLSToExecutionChangeForGossip{
 		SignedBLSToExecutionChange: &cltypes.SignedBLSToExecutionChange{
 			Message: &cltypes.BLSToExecutionChange{
 				ValidatorIndex: 1,
@@ -87,14 +87,13 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 			},
 			Signature: [96]byte{1, 2, 3},
 		},
-		GossipData:            nil,
 		ImmediateVerification: true,
 	}
 
 	tests := []struct {
 		name        string
 		mock        func()
-		msg         *cltypes.SignedBLSToExecutionChangeWithGossipData
+		msg         *SignedBLSToExecutionChangeForGossip
 		wantErr     bool
 		specificErr error
 	}{

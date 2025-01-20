@@ -37,7 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/consensus/merge"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/turbo/services"
 
 	"github.com/erigontech/erigon-lib/rlp"

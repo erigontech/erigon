@@ -87,10 +87,6 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	ctx, cn := context.WithCancel(cliCtx.Context)
 	defer cn()
 
-	if err != nil {
-		log.Error("[Checkpoint Sync] Failed", "reason", err)
-		return err
-	}
 	var executionEngine execution_client2.ExecutionEngine
 	if cfg.RunEngineAPI {
 		cc, err := execution_client2.NewExecutionClientRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)

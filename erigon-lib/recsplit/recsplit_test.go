@@ -22,9 +22,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRecSplit2(t *testing.T) {

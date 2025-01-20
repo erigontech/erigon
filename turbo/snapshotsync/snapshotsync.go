@@ -158,8 +158,8 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 	return blocks - blocks%snaptype.Erigon2MergeLimit
 }
 
-func shouldUseStepsForPruning(name string) bool {
-	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
+func isStateSnapshot(name string) bool {
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor") || strings.HasPrefix(name, "domain")
 }
 
 func canSnapshotBePruned(name string) bool {
@@ -182,7 +182,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 		}
 		var _, to uint64
 		var err error
-		if shouldUseStepsForPruning(name) {
+		if isStateSnapshot(name) {
 			// parse "from" (0) and "to" (64) from the name
 			// parse the snapshot "kind". e.g kind of 'idx/v1-accounts.0-64.ef' is "idx/v1-accounts"
 			rangeString := strings.Split(name, ".")[1]
@@ -335,6 +335,10 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			continue
 		}
 		if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") && !strings.Contains(p.Name, "blobsidecars") && !strings.Contains(p.Name, "caplin") {
+			continue
+		}
+
+		if isStateSnapshot(p.Name) && blockReader.FreezingCfg().DisableDownloadE3 {
 			continue
 		}
 		if !blobs && strings.Contains(p.Name, "blobsidecars") {

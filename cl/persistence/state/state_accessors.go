@@ -151,7 +151,7 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 		}
 		out.validatorTable = append(out.validatorTable, staticValidator)
 	}
-	if err != nil {
+	if err != nil { //nolint:govet
 		return err
 	}
 	slot, err := GetStateProcessingProgress(tx)

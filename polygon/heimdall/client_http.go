@@ -500,7 +500,7 @@ func FetchWithRetryEx[T any](
 			return nil, err
 		}
 
-		client.logger.Warn(heimdallLogPrefix("an error while fetching"), "path", url.Path, "queryParams", url.RawQuery, "attempt", attempt, "err", err)
+		client.logger.Debug(heimdallLogPrefix("an error while fetching"), "path", url.Path, "queryParams", url.RawQuery, "attempt", attempt, "err", err)
 
 		select {
 		case <-ctx.Done():

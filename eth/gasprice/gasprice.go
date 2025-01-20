@@ -261,7 +261,7 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 			continue
 		}
 		sender, _ := tx.GetSender()
-		if err == nil && sender != block.Coinbase() {
+		if sender != block.Coinbase() {
 			heap.Push(s, tip)
 			count = count + 1
 		}

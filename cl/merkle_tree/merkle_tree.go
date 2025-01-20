@@ -58,6 +58,10 @@ func (m *MerkleTree) Initialize(leavesCount, maxTreeCacheDepth int, computeLeaf 
 	m.dirtyLeaves = make([]atomic.Bool, leavesCount)
 }
 
+func (m *MerkleTree) SetComputeLeafFn(computeLeaf func(idx int, out []byte)) {
+	m.computeLeaf = computeLeaf
+}
+
 func (m *MerkleTree) MarkLeafAsDirty(idx int) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -207,7 +211,7 @@ func (m *MerkleTree) CopyInto(other *MerkleTree) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	defer other.mu.Unlock()
-	other.computeLeaf = m.computeLeaf
+	//other.computeLeaf = m.computeLeaf
 	if len(other.layers) > len(m.layers) {
 		// reset the internal layers
 		for i := len(m.layers); i < len(other.layers); i++ {

@@ -256,10 +256,6 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 	}
 
 	finalizedCheckpoint, currentJustifiedCheckpoint, previousJustifiedCheckpoint, ok := a.forkchoiceStore.GetFinalityCheckpoints(blockRoot)
-	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
-	}
-
 	snRoTx := a.caplinStateSnapshots.View()
 	defer snRoTx.Close()
 

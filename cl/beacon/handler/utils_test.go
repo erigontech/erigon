@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	mock_services2 "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -119,22 +120,22 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	mockValidatorMonitor := mockMonitor.NewMockValidatorMonitor(ctrl)
 
 	// ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error
-	syncCommitteeMessagesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessageWithGossipData) error {
+	syncCommitteeMessagesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *services.SyncCommitteeMessageForGossip) error {
 		return h.syncMessagePool.AddSyncCommitteeMessage(postState, *subnetID, msg.SyncCommitteeMessage)
 	}).AnyTimes()
 
-	syncContributionService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedContributionAndProofWithGossipData) error {
+	syncContributionService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *services.SignedContributionAndProofForGossip) error {
 		return h.syncMessagePool.AddSyncContribution(postState, msg.SignedContributionAndProof.Message.Contribution)
 	}).AnyTimes()
-	aggregateAndProofsService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedAggregateAndProofData) error {
+	aggregateAndProofsService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *services.SignedAggregateAndProofForGossip) error {
 		opPool.AttestationsPool.Insert(msg.SignedAggregateAndProof.Message.Aggregate.Signature, msg.SignedAggregateAndProof.Message.Aggregate)
 		return nil
 	}).AnyTimes()
-	voluntaryExitService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedVoluntaryExitWithGossipData) error {
+	voluntaryExitService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *services.SignedVoluntaryExitForGossip) error {
 		opPool.VoluntaryExitsPool.Insert(msg.SignedVoluntaryExit.VoluntaryExit.ValidatorIndex, msg.SignedVoluntaryExit)
 		return nil
 	}).AnyTimes()
-	blsToExecutionChangeService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedBLSToExecutionChangeWithGossipData) error {
+	blsToExecutionChangeService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *services.SignedBLSToExecutionChangeForGossip) error {
 		opPool.BLSToExecutionChangesPool.Insert(msg.SignedBLSToExecutionChange.Signature, msg.SignedBLSToExecutionChange)
 		return nil
 	}).AnyTimes()

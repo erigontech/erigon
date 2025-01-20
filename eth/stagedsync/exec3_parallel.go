@@ -430,7 +430,7 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 			//	return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("block hashk mismatch: %x != %x bn =%d, txn= %d", rh, txTask.BlockRoot[:], txTask.BlockNum, txTask.TxNum)
 			//}
 		}
-		triggers += pe.rs.CommitTxNum(txTask.Sender, txTask.TxNum, pe.in)
+		triggers += pe.rs.CommitTxNum(txTask.Sender(), txTask.TxNum, pe.in)
 		outputTxNum++
 		if backPressure != nil {
 			select {
@@ -533,7 +533,7 @@ func (pe *parallelExecutor) wait() error {
 
 func (pe *parallelExecutor) execute(ctx context.Context, tasks []*state.TxTask) (bool, error) {
 	for _, txTask := range tasks {
-		if txTask.Sender != nil {
+		if txTask.Sender() != nil {
 			if ok := pe.rs.RegisterSender(txTask); ok {
 				pe.rs.AddWork(ctx, txTask, pe.in)
 			}

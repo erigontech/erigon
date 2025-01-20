@@ -13,7 +13,7 @@ on:
       - reopened
       - synchronize
       - ready_for_review
-
+    
 jobs:
   tests:
     strategy:
@@ -66,7 +66,6 @@ jobs:
       - name: Install dependencies
         run: |
           choco upgrade mingw -y --no-progress --version 13.2.0
-          choco install cmake -y --no-progress --version 3.27.8
 
       - name: test-integration-caplin
         run: cd ./cl/spectest/ && .\wmake.ps1 Tests Mainnet

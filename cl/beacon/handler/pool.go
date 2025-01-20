@@ -126,13 +126,8 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		attestationWithGossipData := &services.AttestationWithGossipData{
-			Attestation: attestation,
-			GossipData: &sentinel.GossipData{
-				Data:     encodedSSZ,
-				Name:     gossip.TopicNamePrefixBeaconAttestation,
-				SubnetId: &subnet,
-			},
+		attestationWithGossipData := &services.AttestationForGossip{
+			Attestation:      attestation,
 			ImmediateProcess: true, // we want to process attestation immediately
 		}
 
@@ -143,6 +138,15 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 				Message: err.Error(),
 			})
 			continue
+		}
+		if a.sentinel != nil {
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+				Data:     encodedSSZ,
+				Name:     gossip.TopicNamePrefixBeaconAttestation,
+				SubnetId: &subnet,
+			}); err != nil {
+				a.logger.Debug("[Beacon REST] failed to publish attestation to gossip", "err", err)
+			}
 		}
 	}
 	if len(failures) > 0 {
@@ -173,11 +177,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 		return
 	}
 
-	if err := a.voluntaryExitService.ProcessMessage(r.Context(), nil, &cltypes.SignedVoluntaryExitWithGossipData{
-		GossipData: &sentinel.GossipData{
-			Data: encodedSSZ,
-			Name: gossip.TopicNameVoluntaryExit,
-		},
+	if err := a.voluntaryExitService.ProcessMessage(r.Context(), nil, &services.SignedVoluntaryExitForGossip{
 		SignedVoluntaryExit:   &req,
 		ImmediateVerification: true,
 	}); err != nil && !errors.Is(err, services.ErrIgnore) {
@@ -185,7 +185,14 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 		return
 	}
 	a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
-
+	if a.sentinel != nil {
+		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+			Data: encodedSSZ,
+			Name: gossip.TopicNameVoluntaryExit,
+		}); err != nil {
+			a.logger.Debug("[Beacon REST] failed to publish voluntary exit to gossip", "err", err)
+		}
+	}
 	// Only write 200
 	w.WriteHeader(http.StatusOK)
 }
@@ -213,8 +220,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter,
 			Data: encodedSSZ,
 			Name: gossip.TopicNameAttesterSlashing,
 		}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			a.logger.Debug("[Beacon REST] failed to publish attester slashing to gossip", "err", err)
 		}
 	}
 	// Only write 200
@@ -242,8 +248,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter,
 			Data: encodedSSZ,
 			Name: gossip.TopicNameProposerSlashing,
 		}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			a.logger.Debug("[Beacon REST] failed to publish proposer slashing to gossip", "err", err)
 		}
 	}
 	// Only write 200
@@ -275,15 +280,19 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 			return
 		}
 
-		if err := a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, &cltypes.SignedBLSToExecutionChangeWithGossipData{
+		if err := a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, &services.SignedBLSToExecutionChangeForGossip{
 			SignedBLSToExecutionChange: v,
-			GossipData: &sentinel.GossipData{
-				Data: encodedSSZ,
-				Name: gossip.TopicNameBlsToExecutionChange,
-			},
 		}); err != nil && !errors.Is(err, services.ErrIgnore) {
 			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
 			continue
+		}
+		if a.sentinel != nil {
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+				Data: encodedSSZ,
+				Name: gossip.TopicNameBlsToExecutionChange,
+			}); err != nil {
+				a.logger.Debug("[Beacon REST] failed to publish bls-to-execution-change to gossip", "err", err)
+			}
 		}
 	}
 
@@ -312,20 +321,24 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 			log.Warn("[Beacon REST] failed to encode aggregate and proof", "err", err)
 			return
 		}
-		gossipData := &sentinel.GossipData{
-			Data: encodedSSZ,
-			Name: gossip.TopicNameBeaconAggregateAndProof,
-		}
 
 		// for this service we are not publishing gossipData as the service does it internally, we just pass that data as a parameter.
-		if err := a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, &cltypes.SignedAggregateAndProofData{
+		if err := a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, &services.SignedAggregateAndProofForGossip{
 			SignedAggregateAndProof: v,
-			GossipData:              gossipData,
 			ImmediateProcess:        true, // we want to process aggregate and proof immediately
 		}); err != nil && !errors.Is(err, services.ErrIgnore) {
 			log.Warn("[Beacon REST] failed to process bls-change", "err", err)
 			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
 			continue
+		}
+
+		if a.sentinel != nil {
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+				Data: encodedSSZ,
+				Name: gossip.TopicNameBeaconAggregateAndProof,
+			}); err != nil {
+				a.logger.Debug("[Beacon REST] failed to publish aggregate and proof to gossip", "err", err)
+			}
 		}
 	}
 }
@@ -356,7 +369,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 
 		for _, subnet := range publishingSubnets {
 
-			var syncCommitteeMessageWithGossipData cltypes.SyncCommitteeMessageWithGossipData
+			var syncCommitteeMessageWithGossipData services.SyncCommitteeMessageForGossip
 			syncCommitteeMessageWithGossipData.SyncCommitteeMessage = v
 			syncCommitteeMessageWithGossipData.ImmediateVerification = true
 
@@ -367,16 +380,20 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 			}
 
 			subnetId := subnet
-			syncCommitteeMessageWithGossipData.GossipData = &sentinel.GossipData{
-				Data:     encodedSSZ,
-				Name:     gossip.TopicNamePrefixSyncCommittee,
-				SubnetId: &subnetId,
-			}
 
 			if err = a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, &syncCommitteeMessageWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
 				log.Warn("[Beacon REST] failed to process attestation in syncCommittee service", "err", err)
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
+			}
+			if a.sentinel != nil {
+				if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+					Data:     encodedSSZ,
+					Name:     gossip.TopicNamePrefixSyncCommittee,
+					SubnetId: &subnetId,
+				}); err != nil {
+					a.logger.Debug("[Beacon REST] failed to publish sync committee message to gossip", "err", err)
+				}
 			}
 		}
 	}
@@ -403,7 +420,7 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 			continue // skip empty contributions
 		}
 
-		var signedContributionAndProofWithGossipData cltypes.SignedContributionAndProofWithGossipData
+		var signedContributionAndProofWithGossipData services.SignedContributionAndProofForGossip
 		signedContributionAndProofWithGossipData.SignedContributionAndProof = v
 		signedContributionAndProofWithGossipData.ImmediateVerification = true
 
@@ -414,15 +431,18 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 			return
 		}
 
-		signedContributionAndProofWithGossipData.GossipData = &sentinel.GossipData{
-			Data: encodedSSZ,
-			Name: gossip.TopicNameSyncCommitteeContributionAndProof,
-		}
-
 		if err = a.syncContributionAndProofsService.ProcessMessage(r.Context(), nil, &signedContributionAndProofWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
 			log.Warn("[Beacon REST] failed to process sync contribution", "err", err)
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
+		}
+		if a.sentinel != nil {
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+				Data: encodedSSZ,
+				Name: gossip.TopicNameSyncCommitteeContributionAndProof,
+			}); err != nil {
+				a.logger.Debug("[Beacon REST] failed to publish sync committee contribution to gossip", "err", err)
+			}
 		}
 	}
 

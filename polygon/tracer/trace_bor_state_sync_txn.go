@@ -48,9 +48,10 @@ func TraceBorStateSyncTxnDebugAPI(
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
 	msgs []*types.Message,
+	txIndex int,
 ) (usedGas uint64, err error) {
 	txCtx := initStateSyncTxContext(blockNum, blockHash)
-	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, stream, callTimeout)
+	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, blockHash, txIndex, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
 		return usedGas, err

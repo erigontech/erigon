@@ -17,7 +17,7 @@
 package bodydownload
 
 import (
-	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/google/btree"
 
 	libcommon "github.com/erigontech/erigon-lib/common"

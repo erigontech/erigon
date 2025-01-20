@@ -3,11 +3,14 @@ package cltypes
 import (
 	"encoding/json"
 
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/core/types"
 )
 
 var (
@@ -79,4 +82,13 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 	e.Withdrawals = c.Withdrawals
 	e.Consolidations = c.Consolidations
 	return nil
+}
+
+func ComputeExecutionRequestHash(executionRequests []hexutility.Bytes) common.Hash {
+	requests := make(types.FlatRequests, len(types.KnownRequestTypes))
+	for i, r := range types.KnownRequestTypes {
+		requests[i] = types.FlatRequest{Type: r, RequestData: executionRequests[i]}
+	}
+	rh := requests.Hash()
+	return *rh
 }

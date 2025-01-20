@@ -22,12 +22,11 @@ import (
 	"fmt"
 	"time"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	commonerrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type Scraper[TEntity Entity] struct {
@@ -35,8 +34,8 @@ type Scraper[TEntity Entity] struct {
 	store           EntityStore[TEntity]
 	fetcher         entityFetcher[TEntity]
 	pollDelay       time.Duration
-	observers       *polygoncommon.Observers[[]TEntity]
-	syncEvent       *polygoncommon.EventNotifier
+	observers       *event.Observers[[]TEntity]
+	syncEvent       *event.Notifier
 	transientErrors []error
 	logger          log.Logger
 }
@@ -54,8 +53,8 @@ func NewScraper[TEntity Entity](
 		store:           store,
 		fetcher:         fetcher,
 		pollDelay:       pollDelay,
-		observers:       polygoncommon.NewObservers[[]TEntity](),
-		syncEvent:       polygoncommon.NewEventNotifier(),
+		observers:       event.NewObservers[[]TEntity](),
+		syncEvent:       event.NewNotifier(),
 		transientErrors: transientErrors,
 		logger:          logger,
 	}
@@ -146,7 +145,7 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (s *Scraper[TEntity]) RegisterObserver(observer func([]TEntity)) polygoncommon.UnregisterFunc {
+func (s *Scraper[TEntity]) RegisterObserver(observer func([]TEntity)) event.UnregisterFunc {
 	return s.observers.Register(observer)
 }
 

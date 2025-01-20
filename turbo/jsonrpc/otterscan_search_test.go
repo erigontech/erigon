@@ -19,7 +19,7 @@ package jsonrpc
 import (
 	"testing"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/RoaringBitmap/roaring/v2/roaring64"
 )
 
 func createBitmap(t *testing.T, blocks []uint64) []byte {

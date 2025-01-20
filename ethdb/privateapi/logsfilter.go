@@ -149,7 +149,7 @@ func (a *LogsFilterAggregator) subscribeLogs(server remote.ETHBACKEND_SubscribeL
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateLogsFilter(filter, filterReq)
 	}
-	if recvErr != nil && recvErr != io.EOF { // termination
+	if recvErr != io.EOF { // termination
 		return fmt.Errorf("receiving log filter request: %w", recvErr)
 	}
 	return nil

@@ -1,22 +1,21 @@
 name: Release
-run-name: "Build release ${{ inputs.release_version}} from branch ${{ inputs.checkout_ref }} by @${{ github.actor}}"
+run-name: Build release ${{ inputs.release_version}} from branch ${{ inputs.checkout_ref }} by @${{ github.actor }}
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "ghcr.io/goreleaser/goreleaser-cross:v1.22.7"
-  DOCKER_BASE_IMAGE: "alpine:3.20.3"
+  APPLICATION_VERSION: "Erigon3"
+  TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
+  TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
+  TEST_CHAIN: "mainnet"
+  BUILDER_IMAGE: "golang:1.22-bookworm"
+  DOCKER_BASE_IMAGE: "debian:12.8-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   DOCKERFILE_PATH: "Dockerfile.release"
-  GITHUB_AUTOMATION_EMAIL: "github-automation@erigon.tech"
-  GITHUB_AUTOMATION_NAME: "Erigon Github Automation"
   LABEL_DESCRIPTION: "Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
 
 on:
-  push:
-    branches-ignore:
-      - '**'
   workflow_dispatch:
     inputs:
       checkout_ref:
@@ -27,13 +26,12 @@ on:
       release_version:
         required: true
         type: string
-        description: 'Release version number (Pattern - v#.#.# , f.e. v2.60.8 or v3.0.0 or v3.0.0-alpha1 for pre-releases. Prefix it with "v".)'
+        description: 'Release version number (Pattern - v#.#.# , f.e. v2.60.1 or v3.0.0 or v3.0.0-alpha1 for pre-releases. Use prefix "v".)'
       perform_release:
         required: false
         type: boolean
         default: false
-        description: 'perform_release: when set then all artifacts will be published and the DRAFT of the release 
-          notes will be created.'
+        description: 'perform_release: when set then all artifacts will be published and the DRAFT of the release notes will be created.'
       publish_latest_tag:
         required: false
         type: boolean
@@ -43,10 +41,10 @@ on:
 jobs:
 
   build-release:
-    ## runs-on: ubuntu-22.04
-    runs-on: ubuntu-latest-devops-xxlarge
+    runs-on: ubuntu-latest
+    #runs-on: ubuntu-latest-devops-xxlarge
     timeout-minutes: 75
-    name: Create git tag, build and publish Artifacts
+    name: Create git tag, build and publish Release Artifacts
     outputs:
       commit-id: ${{ steps.getCommitId.outputs.id }}
       short-commit-id: ${{ steps.getCommitId.outputs.short_commit_id }}
@@ -54,16 +52,18 @@ jobs:
       parsed-version: ${{ steps.getCommitId.outputs.parsed_version}}
 
     steps:
-      - name: Checkout git repository ${{ env.APP_REPO }}
+      - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0
           ref: ${{ inputs.checkout_ref }}
+          path: 'erigon'
 
-      - name: Check if tag ${{ inputs.release_version }} already exists in case perform_release is set.
+      - name: Check if tag ${{ inputs.release_version }} already exists and create it in case perform_release is set.
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
         run: |
+          cd erigon
           if git ls-remote --exit-code --quiet --tags origin '${{ inputs.release_version }}'; then
             echo "ERROR: tag ${{ inputs.release_version }} exists and workflow is performing release. Exit."
             exit 1
@@ -74,12 +74,20 @@ jobs:
             echo; echo "Git TAG ${{ inputs.release_version }} created and pushed."
           fi
 
-      - name: Get commit id
+      - name: Run some commands, get commit id
         id: getCommitId
         run: |
+          mkdir $GITHUB_WORKSPACE/build-arm64 $GITHUB_WORKSPACE/build-amd64 $GITHUB_WORKSPACE/build-amd64v2
           echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
           echo "parsed_version=$(echo ${{ inputs.release_version }} | sed -e 's/^v//g')" >> $GITHUB_OUTPUT
+          echo "week_of_the_year=$(/bin/date -u "+%Y-%W")" >> $GITHUB_OUTPUT
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
+        with:
+          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
+          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf ## v3.2.0
@@ -87,33 +95,86 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
 
-      - name: Build binaries with goreleaser
+      - name: Setup GO build and pkg cache for one week only
+        id: cache
+        uses: actions/cache@v4
+        with:
+          key: cache-year-week-${{ steps.getCommitId.outputs.week_of_the_year }}-go.mod-hash:${{ hashFiles('erigon/go.mod') }}
+          path: |
+            ~/go/pkg
+            ~/.cache
+
+      - name: Build for linux/arm64
+        run: >
+          docker run --platform linux/arm64
+          --rm
+          -v $(pwd)/erigon:/erigon:ro
+          -v ${GITHUB_WORKSPACE}/build-arm64:/erigon-build
+          -v ${HOME}/.cache:/root/.cache
+          -v ${HOME}/go/pkg/mod:/go/pkg/mod
+          -w /erigon --entrypoint /bin/bash
+          ${{ env.BUILDER_IMAGE }}
+          -c "git config --global --add safe.directory /erigon;
+          make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
+          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
+
+        ## temporary disable silkworm in 3.x.x
+      - name: Build for linux/amd64 (with nosilkworm tag)
+        run: >
+          docker run --platform linux/amd64
+          --rm
+          -v $(pwd)/erigon:/erigon:ro
+          -v ${GITHUB_WORKSPACE}/build-amd64:/erigon-build
+          -v ${HOME}/.cache:/root/.cache
+          -v ${HOME}/go/pkg/mod:/go/pkg/mod
+          -w /erigon --entrypoint /bin/bash
+          ${{ env.BUILDER_IMAGE }}
+          -c "git config --global --add safe.directory /erigon;
+          make GOARCH=amd64 GOAMD64=v1 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
+          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
+          if [ ${WITH_SILKWORM} ]; then find / -name libsilkworm_capi.so -exec install {} /erigon-build \; ; fi;"
+
+        ## temporary disable silkworm in 3.x.x
+      - name: Build for linux/amd64/v2 (with nosilkworm tag)
+        run: >
+          docker run --platform linux/amd64/v2
+          --rm
+          -v $(pwd)/erigon:/erigon:ro
+          -v ${GITHUB_WORKSPACE}/build-amd64v2:/erigon-build
+          -v ${HOME}/.cache:/root/.cache
+          -v ${HOME}/go/pkg/mod:/go/pkg/mod
+          -w /erigon --entrypoint /bin/bash
+          ${{ env.BUILDER_IMAGE }}
+          -c "git config --global --add safe.directory /erigon;
+          make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
+          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
+          if [ ${WITH_SILKWORM} ]; then find / -name libsilkworm_capi.so -exec install {} /erigon-build \; ; fi;"
+
+      - name: Create archives and checksums
         env:
-          BUILD_VERSION: ${{ inputs.release_version }}
-          DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
-          docker run --rm \
-            -w /${{ env.APPLICATION }}/ \
-            -e BUILD_VERSION=${{ env.BUILD_VERSION }} \
-            -e GIT_COMMIT=${{ steps.getCommitId.outputs.id }} \
-            -e GIT_BRANCH=${{ inputs.checkout_ref }} \
-            -e GIT_TAG=${{ inputs.release_version }} \
-            -e PACKAGE=${{ env.PACKAGE }} \
-            -e APPLICATION=${{ env.APPLICATION }} \
-            -v $(pwd):/${{ env.APPLICATION}} \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            ${{ env.BUILDER_IMAGE }} release --timeout 60m0s --clean --skip=validate,announce,publish
-          echo "DEBUG: ls -lao in the working directory"
-          ls -lao
-          echo "DEBUG: content of the dist/ directory"
-          find dist/ -ls
+          cd ${GITHUB_WORKSPACE}
+          mkdir $GITHUB_WORKSPACE/release
+          for dir in build-*; do
+            cd $dir
+            echo Current directory is $(pwd) . Checksum file and archive will be created for this directory
+            sha256sum * > checksums.txt
+            tar czvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,').tar.gz \
+              --transform "s,^./,${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,')/," .
+            cd -
+          done
+          cd $GITHUB_WORKSPACE/release
+          sha256sum * > ${APPLICATION}_${RELEASE_VERSION}_checksums.txt
+          echo Content of release directory:
+          find . -type f -ls
 
       - name: Upload artifact -- linux/arm64
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
-          retention-days: 1
+          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
+          retention-days: 3
           compression-level: 0
           if-no-files-found: error
 
@@ -121,8 +182,8 @@ jobs:
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
-          retention-days: 1
+          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
+          retention-days: 3
           compression-level: 0
           if-no-files-found: error
 
@@ -130,43 +191,105 @@ jobs:
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
-          retention-days: 1
+          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
+          retention-days: 3
           compression-level: 0
           if-no-files-found: error
 
-      - name: Upload artifact -- darwin/arm64
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+
+  test-release:
+    name: test on ${{ matrix.id }}
+    runs-on: [ self-hosted, Release, "${{ matrix.runner-arch }}" ]
+    timeout-minutes: 7200  # 5 days
+    needs: [ build-release ]
+    strategy:
+      matrix:
+        include:
+          - id: linux/amd64
+            runner-arch: X64
+            artifact: linux_amd64
+          - id: linux/arm64
+            runner-arch: ARM64
+            artifact: linux_arm64
+
+    steps:
+
+      - name: Cleanup working directory
+        run: rm -drfv *
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_arm64.tar.gz
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_arm64.tar.gz
-          retention-days: 1
-          compression-level: 0
-          if-no-files-found: error
+          python-version: '3.12'
 
-      - name: Upload artifact -- darwin/amd64
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+      - name: Download artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+        uses: actions/download-artifact@v4
         with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_amd64.tar.gz
-          path: ./dist/${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_amd64.tar.gz
-          retention-days: 1
-          compression-level: 0
-          if-no-files-found: error
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+          path: .
 
+      - name: Extract artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+        run: |
+          pwd
+          ls -l ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+          tar xzvf ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+          ls -lR
+      - name: Fast checkout git repository erigontech/erigon-qa
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
+        with:
+          token: ${{ secrets.ORG_GITHUB_ERIGONTECH_ERIGON_QA_READ }}
+          repository: erigontech/erigon-qa
+          fetch-depth: 1
+          ref: main
+          path: erigon-qa
 
+      - name: Checkout QA Tests Repository & Install Requirements
+        run: |
+          cd ./erigon-qa/test_system
+          pwd
+          ls -lao
+          pip3 install -r requirements.txt   
+          ln -s $(pwd)/base_library $(pwd)/qa-tests/tip-tracking/base_library
+          echo "DEBUG -- content of directory $(pwd) :"
+          ls -l
+          echo "DEBUG -- content of directory $(pwd)/qa-tests/tip-tracking/"
+          ls -l $(pwd)/qa-tests/tip-tracking/
+          echo "DEBUG -- content of directory GITHUB_WORKSPACE ${GITHUB_WORKSPACE} :"
+          ls -l ${GITHUB_WORKSPACE}
+          echo "DEBUG -- end."
+          rm -rf ${RUNNER_WORKSPACE}/erigon-data || true
+          mkdir ${RUNNER_WORKSPACE}/erigon-data
+          # Run Erigon, wait sync and check ability to maintain sync
+          python3 qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+            ${GITHUB_WORKSPACE}/${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }} \
+              ${RUNNER_WORKSPACE}/erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }}
+          # Capture monitoring script exit status
+          test_exit_status=$?
+          # Save the subsection reached status
+          echo "::set-output name=test_executed::true"
+          # Check test runner script exit status
+          if [ $test_exit_status -eq 0 ]; then
+            echo "Tests completed successfully"
+            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "Error detected during tests"
+            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cleanup working directory
+        run: rm -drfv *
 
   build-debian-pkg:
     name: Debian packages
-    needs: [ build-release ]
+    needs: [ build-release, test-release ]
     uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@main
     with:
       application: ${{ needs.build-release.outputs.application }}
       version: ${{ needs.build-release.outputs.parsed-version }}
 
 
-
   publish-docker-image:
-    needs: [ build-release ]
+    needs: [ build-release, test-release ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     name: Docker image        
@@ -185,19 +308,16 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
-        path: dist/
 
     - name: Download amd64 artifact
       uses: actions/download-artifact@v4
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
-        path: dist/
 
     - name: Download amd64v2 artifact
       uses: actions/download-artifact@v4
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
-        path: dist/
 
     - name: Set up QEMU
       uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf ## v3.2.0
@@ -271,18 +391,6 @@ jobs:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
         path: dist/
 
-    - name: Download darwin/amd64 artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_amd64.tar.gz
-        path: dist/
-
-    - name: Download darwin/arm64 artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_arm64.tar.gz
-        path: dist/
-
     - name: Download arm64 debian package
       uses: actions/download-artifact@v4
       with:
@@ -317,7 +425,7 @@ jobs:
 
   In-case-of-failure:
     name: "In case of failure: remove remote git tag pointing to the new version."
-    needs: [ publish-release, build-release ]
+    needs: [ publish-release, build-release, test-release ]
     if: always() && !contains(needs.build-release.result, 'success')
     runs-on: ubuntu-22.04
 

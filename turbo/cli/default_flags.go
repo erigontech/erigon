@@ -28,8 +28,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.EthashDatasetDirFlag,
 	&utils.ExternalConsensusFlag,
 	&utils.TxPoolDisableFlag,
-	&utils.TxPoolLocalsFlag,
-	&utils.TxPoolNoLocalsFlag,
 	&utils.TxPoolPriceLimitFlag,
 	&utils.TxPoolPriceBumpFlag,
 	&utils.TxPoolBlobPriceBumpFlag,
@@ -38,9 +36,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolTotalBlobPoolLimit,
 	&utils.TxPoolGlobalSlotsFlag,
 	&utils.TxPoolGlobalBaseFeeSlotsFlag,
-	&utils.TxPoolAccountQueueFlag,
 	&utils.TxPoolGlobalQueueFlag,
-	&utils.TxPoolLifetimeFlag,
 	&utils.TxPoolTraceSendersFlag,
 	&utils.TxPoolCommitEveryFlag,
 	&PruneDistanceFlag,
@@ -111,6 +107,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,
 	&utils.SnapStateStopFlag,
+	&utils.SnapSkipStateSnapshotDownloadFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
 	&utils.DbWriteMapFlag,
@@ -191,6 +188,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
 	&utils.SentinelBootnodes,
+	&utils.SentinelStaticPeers,
 
 	&utils.OtsSearchMaxCapFlag,
 
@@ -217,11 +215,13 @@ var DefaultFlags = []cli.Flag{
 	&utils.BeaconApiProtocolFlag,
 	&utils.BeaconApiIdleTimeoutFlag,
 
-	&utils.CaplinBackfillingFlag,
-	&utils.CaplinBlobBackfillingFlag,
+	&utils.CaplinArchiveBlocksFlag,
+	&utils.CaplinArchiveBlobsFlag,
+	&utils.CaplinArchiveStatesFlag,
+	&utils.CaplinImmediateBlobBackfillFlag,
+
 	&utils.CaplinDisableBlobPruningFlag,
 	&utils.CaplinDisableCheckpointSyncFlag,
-	&utils.CaplinArchiveFlag,
 	&utils.CaplinEnableSnapshotGeneration,
 	&utils.CaplinMevRelayUrl,
 	&utils.CaplinValidatorMonitorFlag,
@@ -237,4 +237,8 @@ var DefaultFlags = []cli.Flag{
 	&SyncParallelStateFlushing,
 
 	&utils.ChaosMonkeyFlag,
+
+	&utils.ShutterEnabledFlag,
+	&utils.ShutterP2pBootstrapNodesFlag,
+	&utils.ShutterP2pListenPortFlag,
 }

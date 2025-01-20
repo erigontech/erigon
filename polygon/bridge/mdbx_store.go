@@ -571,6 +571,7 @@ func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFr
 	if err != nil {
 		return start, end, false, err
 	}
+	defer cursor.Close()
 
 	_, v, err := cursor.SeekExact(kByte)
 	if err != nil {

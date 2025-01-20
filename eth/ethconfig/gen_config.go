@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -39,8 +40,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Ethash                         ethashcfg.Config
 		Clique                         params.ConsensusSnapshotConfig
 		Aura                           chain.AuRaConfig
-		DeprecatedTxPool               DeprecatedTxPoolConfig
 		TxPool                         txpoolcfg.Config
+		Shutter                        shutter.Config
 		GPO                            gaspricecfg.Config
 		RPCGasCap                      uint64  `toml:",omitempty"`
 		RPCTxFeeCap                    float64 `toml:",omitempty"`
@@ -66,7 +67,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		SilkwormRpcLogDumpResponse     bool
 		SilkwormRpcNumWorkers          uint32
 		SilkwormRpcJsonCompatibility   bool
-		DisableTxPoolGossip            bool
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -86,8 +86,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Ethash = c.Ethash
 	enc.Clique = c.Clique
 	enc.Aura = c.Aura
-	enc.DeprecatedTxPool = c.DeprecatedTxPool
 	enc.TxPool = c.TxPool
+	enc.Shutter = c.Shutter
 	enc.GPO = c.GPO
 	enc.RPCGasCap = c.RPCGasCap
 	enc.RPCTxFeeCap = c.RPCTxFeeCap
@@ -113,7 +113,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.SilkwormRpcLogDumpResponse = c.SilkwormRpcLogDumpResponse
 	enc.SilkwormRpcNumWorkers = c.SilkwormRpcNumWorkers
 	enc.SilkwormRpcJsonCompatibility = c.SilkwormRpcJsonCompatibility
-	enc.DisableTxPoolGossip = c.DisableTxPoolGossip
 	return &enc, nil
 }
 
@@ -137,8 +136,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Ethash                         *ethashcfg.Config
 		Clique                         *params.ConsensusSnapshotConfig
 		Aura                           *chain.AuRaConfig
-		DeprecatedTxPool               *DeprecatedTxPoolConfig
 		TxPool                         *txpoolcfg.Config
+		Shutter                        *shutter.Config
 		GPO                            *gaspricecfg.Config
 		RPCGasCap                      *uint64  `toml:",omitempty"`
 		RPCTxFeeCap                    *float64 `toml:",omitempty"`
@@ -164,7 +163,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		SilkwormRpcLogDumpResponse     *bool
 		SilkwormRpcNumWorkers          *uint32
 		SilkwormRpcJsonCompatibility   *bool
-		DisableTxPoolGossip            *bool
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -221,11 +219,11 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.Aura != nil {
 		c.Aura = *dec.Aura
 	}
-	if dec.DeprecatedTxPool != nil {
-		c.DeprecatedTxPool = *dec.DeprecatedTxPool
-	}
 	if dec.TxPool != nil {
 		c.TxPool = *dec.TxPool
+	}
+	if dec.Shutter != nil {
+		c.Shutter = *dec.Shutter
 	}
 	if dec.GPO != nil {
 		c.GPO = *dec.GPO
@@ -301,9 +299,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.SilkwormRpcJsonCompatibility != nil {
 		c.SilkwormRpcJsonCompatibility = *dec.SilkwormRpcJsonCompatibility
-	}
-	if dec.DisableTxPoolGossip != nil {
-		c.DisableTxPoolGossip = *dec.DisableTxPoolGossip
 	}
 	return nil
 }

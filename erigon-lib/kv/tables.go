@@ -581,6 +581,11 @@ var ChaindataTablesCfg = TableCfg{
 	TblTracesToIdx:           {Flags: DupSort},
 }
 
+var AuRaTablesCfg = TableCfg{
+	Epoch:        {},
+	PendingEpoch: {},
+}
+
 var BorTablesCfg = TableCfg{
 	BorFinality:             {Flags: DupSort},
 	BorTxLookup:             {Flags: DupSort},
@@ -727,6 +732,8 @@ const (
 	DomainLen        Domain = 5
 )
 
+var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
+
 const (
 	AccountsHistoryIdx   InvertedIdx = "AccountsHistoryIdx"
 	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
@@ -738,33 +745,12 @@ const (
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
 	TracesFromIdx InvertedIdx = "TracesFromIdx"
 	TracesToIdx   InvertedIdx = "TracesToIdx"
-
-	LogAddrIdxPos    InvertedIdxPos = 0
-	LogTopicIdxPos   InvertedIdxPos = 1
-	TracesFromIdxPos InvertedIdxPos = 2
-	TracesToIdxPos   InvertedIdxPos = 3
-	StandaloneIdxLen InvertedIdxPos = 4
 )
 
 const (
 	ReceiptsAppendable Appendable = 0
 	AppendableLen      Appendable = 0
 )
-
-func (iip InvertedIdxPos) String() string {
-	switch iip {
-	case LogAddrIdxPos:
-		return "logAddr"
-	case LogTopicIdxPos:
-		return "logTopic"
-	case TracesFromIdxPos:
-		return "traceFrom"
-	case TracesToIdxPos:
-		return "traceTo"
-	default:
-		return "unknown inverted index"
-	}
-}
 
 func (d Domain) String() string {
 	switch d {

@@ -225,7 +225,7 @@ func cmp(cliCtx *cli.Context) error {
 		return errors.New("no first session established")
 	}
 
-	if session1 == nil {
+	if session2 == nil {
 		return errors.New("no second session established")
 	}
 

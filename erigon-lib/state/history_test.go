@@ -28,64 +28,42 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-
-	"github.com/stretchr/testify/require"
-	btree2 "github.com/tidwall/btree"
-
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
+	"github.com/stretchr/testify/require"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
-	keysTable := "AccountKeys"
-	indexTable := "AccountIndex"
-	valsTable := "AccountVals"
-	settingsTable := "Settings"
-	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.SnapDomain).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		if largeValues {
-			return kv.TableCfg{
-				keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
-				indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
-				valsTable:             kv.TableCfgItem{Flags: kv.DupSort},
-				settingsTable:         kv.TableCfgItem{},
-				kv.TblPruningProgress: kv.TableCfgItem{},
-			}
-		}
-		return kv.TableCfg{
-			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
-			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
-			valsTable:             kv.TableCfgItem{Flags: kv.DupSort},
-			settingsTable:         kv.TableCfgItem{},
-			kv.TblPruningProgress: kv.TableCfgItem{},
-		}
-	}).MustOpen()
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
 	salt := uint32(1)
-	cfg := histCfg{
-		filenameBase: "hist",
-		valuesTable:  valsTable,
+	cfg := Schema[kv.AccountsDomain]
 
-		iiCfg: iiCfg{salt: &salt, dirs: dirs, db: db, withExistence: false,
-			aggregationStep: 16, filenameBase: "hist", keysTable: keysTable, valuesTable: indexTable,
-		},
-		compression: seg.CompressNone, historyLargeValues: largeValues,
-	}
-	h, err := NewHistory(cfg, logger)
+	cfg.hist.iiCfg.aggregationStep = 16
+	cfg.hist.iiCfg.dirs = dirs
+	cfg.hist.iiCfg.salt = &salt
+
+	cfg.hist.historyLargeValues = largeValues
+
+	//perf of tests
+	cfg.hist.iiCfg.withExistence = false
+	cfg.hist.iiCfg.compression = seg.CompressNone
+	cfg.hist.compression = seg.CompressNone
+	h, err := NewHistory(cfg.hist, logger)
 	require.NoError(tb, err)
 	h.DisableFsync()
 	tb.Cleanup(db.Close)
@@ -237,7 +215,8 @@ func TestHistoryCollationBuild(t *testing.T) {
 
 		c, err := h.collate(ctx, 0, 0, 8, tx)
 		require.NoError(err)
-		require.True(strings.HasSuffix(c.historyPath, "v1-hist.0-1.v"))
+
+		require.True(strings.HasSuffix(c.historyPath, h.vFileName(0, 1)))
 		require.Equal(6, c.historyCount)
 		require.Equal(3, c.efHistoryComp.Count()/2)
 
@@ -1389,20 +1368,23 @@ func TestIterateChanged2(t *testing.T) {
 func TestScanStaticFilesH(t *testing.T) {
 	t.Parallel()
 
-	h := &History{
-		histCfg: histCfg{
-			filenameBase: "test",
-		},
-		InvertedIndex: emptyTestInvertedIndex(1),
-		dirtyFiles:    btree2.NewBTreeG[*filesItem](filesItemLess),
+	newTestDomain := func() (*InvertedIndex, *History) {
+		d := emptyTestDomain(1)
+		d.History.InvertedIndex.integrity = nil
+		d.History.InvertedIndex.indexList = 0
+		d.History.indexList = 0
+		return d.History.InvertedIndex, d.History
 	}
+
+	_, h := newTestDomain()
+
 	files := []string{
-		"v1-test.0-1.v",
-		"v1-test.1-2.v",
-		"v1-test.0-4.v",
-		"v1-test.2-3.v",
-		"v1-test.3-4.v",
-		"v1-test.4-5.v",
+		"v1-accounts.0-1.v",
+		"v1-accounts.1-2.v",
+		"v1-accounts.0-4.v",
+		"v1-accounts.2-3.v",
+		"v1-accounts.3-4.v",
+		"v1-accounts.4-5.v",
 	}
 	h.scanDirtyFiles(files)
 	require.Equal(t, 6, h.dirtyFiles.Len())

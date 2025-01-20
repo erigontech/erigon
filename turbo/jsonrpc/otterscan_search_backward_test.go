@@ -22,7 +22,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/stretchr/testify/require"

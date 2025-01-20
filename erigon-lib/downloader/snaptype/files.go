@@ -232,7 +232,7 @@ func SeedableV3Extensions() []string {
 }
 
 func AllV3Extensions() []string {
-	return []string{".kv", ".v", ".ef", ".kvei", ".vi", ".efi", ".bt"}
+	return []string{".kv", ".v", ".ef", ".kvei", ".vi", ".efi", ".bt", ".kvi"}
 }
 
 func IsSeedableExtension(name string) bool {

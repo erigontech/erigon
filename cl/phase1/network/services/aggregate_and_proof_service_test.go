@@ -35,11 +35,11 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 )
 
-func getAggregateAndProofAndState(t *testing.T) (*cltypes.SignedAggregateAndProofData, *state.CachingBeaconState) {
+func getAggregateAndProofAndState(t *testing.T) (*SignedAggregateAndProofForGossip, *state.CachingBeaconState) {
 	_, _, s := tests.GetBellatrixRandom()
 	br, _ := s.BlockRoot()
 	checkpoint := s.CurrentJustifiedCheckpoint()
-	a := &cltypes.SignedAggregateAndProofData{
+	a := &SignedAggregateAndProofForGossip{
 		SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{
 			Message: &cltypes.AggregateAndProof{
 				AggregatorIndex: 141,
@@ -62,7 +62,6 @@ func getAggregateAndProofAndState(t *testing.T) (*cltypes.SignedAggregateAndProo
 				},
 			},
 		},
-		GossipData: nil,
 	}
 
 	a.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = s.Slot() / 32

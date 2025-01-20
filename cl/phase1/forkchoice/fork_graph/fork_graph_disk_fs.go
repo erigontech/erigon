@@ -94,13 +94,12 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	}
 	defer cacheFile.Close()
 
-	f.sszBuffer = f.sszBuffer[:0]
-	b := bytes.NewBuffer(f.sszBuffer)
-	if _, err := io.Copy(b, cacheFile); err != nil {
+	b := bytes.Buffer{}
+	if _, err := io.Copy(&b, cacheFile); err != nil {
 		return nil, err
 	}
 
-	if err := bs.DecodeCaches(b); err != nil {
+	if err := bs.DecodeCaches(&b); err != nil {
 		return nil, err
 	}
 
@@ -112,6 +111,8 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 	if !forced && bs.Slot()%dumpSlotFrequency != 0 {
 		return
 	}
+	f.stateDumpLock.Lock()
+	defer f.stateDumpLock.Unlock()
 	// Truncate and then grow the buffer to the size of the state.
 	f.sszBuffer, err = bs.EncodeSSZ(f.sszBuffer[:0])
 	if err != nil {
@@ -165,25 +166,21 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 		return
 	}
 
-	f.stateDumpLock.Lock()
-	go func() {
-		cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
-		if err != nil {
-			log.Error("failed to open cache file", "err", err)
-			return
-		}
-		defer cacheFile.Close()
-		defer f.stateDumpLock.Unlock()
+	cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+	if err != nil {
+		log.Error("failed to open cache file", "err", err)
+		return
+	}
+	defer cacheFile.Close()
 
-		if _, err = cacheFile.Write(b.Bytes()); err != nil {
-			log.Error("failed to write cache file", "err", err)
-			return
-		}
-		if err = cacheFile.Sync(); err != nil {
-			log.Error("failed to sync cache file", "err", err)
-			return
-		}
-	}()
+	if _, err = cacheFile.Write(b.Bytes()); err != nil {
+		log.Error("failed to write cache file", "err", err)
+		return
+	}
+	if err = cacheFile.Sync(); err != nil {
+		log.Error("failed to sync cache file", "err", err)
+		return
+	}
 
 	return
 }

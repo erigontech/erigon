@@ -25,7 +25,7 @@ import (
 )
 
 // BlindOrExecutionBeaconBlock is a union type that can be either a BlindedBeaconBlock or a BeaconBlock, depending on the context.
-// It's a intermediate type used in the block production process.
+// It's an intermediate type used in the block production process.
 type BlindOrExecutionBeaconBlock struct {
 	Slot          uint64         `json:"-"`
 	ProposerIndex uint64         `json:"-"`

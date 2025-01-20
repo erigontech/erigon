@@ -22,6 +22,7 @@ import (
 	"slices"
 	"sync"
 
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -50,6 +51,12 @@ type syncCommitteeMessagesService struct {
 	mu sync.Mutex
 }
 
+type SyncCommitteeMessageForGossip struct {
+	SyncCommitteeMessage  *cltypes.SyncCommitteeMessage
+	Receiver              *sentinel.Peer
+	ImmediateVerification bool
+}
+
 // NewSyncCommitteeMessagesService creates a new sync committee messages service
 func NewSyncCommitteeMessagesService(
 	beaconChainCfg *clparams.BeaconChainConfig,
@@ -70,7 +77,7 @@ func NewSyncCommitteeMessagesService(
 }
 
 // ProcessMessage processes a sync committee message
-func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessageWithGossipData) error {
+func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *SyncCommitteeMessageForGossip) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -105,15 +112,22 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 			return err
 		}
 		aggregateVerificationData := &AggregateVerificationData{
-			Signatures: [][]byte{signature},
-			SignRoots:  [][]byte{signingRoot},
-			Pks:        [][]byte{pubKey},
-			GossipData: msg.GossipData,
+			Signatures:  [][]byte{signature},
+			SignRoots:   [][]byte{signingRoot},
+			Pks:         [][]byte{pubKey},
+			SendingPeer: msg.Receiver,
 			F: func() {
 				s.seenSyncCommitteeMessages.Store(seenSyncCommitteeMessageIdentifier, struct{}{})
 				s.cleanupOldSyncCommitteeMessages() // cleanup old messages
-				// Aggregate the message
-				s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
+				// ImmediateVerification is sequential so using the headState directly is safe
+				if msg.ImmediateVerification {
+					s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
+				} else {
+					// ImmediateVerification=false is parallel so using the headState directly is unsafe
+					s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+						return s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
+					})
+				}
 			},
 		}
 
@@ -160,9 +174,6 @@ func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltyp
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	signingRoot, err := utils.Sha256(msg.BeaconBlockRoot[:], domain), nil
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	signingRoot := utils.Sha256(msg.BeaconBlockRoot[:], domain)
 	return msg.Signature[:], signingRoot[:], publicKey[:], nil
 }

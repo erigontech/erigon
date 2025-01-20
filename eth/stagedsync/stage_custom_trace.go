@@ -69,11 +69,12 @@ func StageCustomTraceCfg(db kv.TemporalRwDB, prune prune.Mode, dirs datadir.Dirs
 
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
 	var startBlock, endBlock uint64
+	stepSize := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
 	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.execArgs.BlockReader))
 
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-		txNum := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
+		txNum := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * stepSize
 		var ok bool
 		ok, endBlock, err = txNumsReader.FindBlockNum(tx, txNum)
 		if err != nil {
@@ -83,7 +84,9 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 			panic(ok)
 		}
 
-		txNum = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles() * cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
+		txNum = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles() * stepSize
+		log.Info("SpawnCustomTrace", "recpStep", ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles(), "accDomain", ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles())
+		log.Info("SpawnCustomTrace", "files", ac.DbgDomain(kv.ReceiptDomain).Name(), "recp", fmt.Sprintf("%+v", ac.DbgDomain(kv.ReceiptDomain)), "files", ac.DbgDomain(kv.ReceiptDomain).Files())
 		ok, startBlock, err = txNumsReader.FindBlockNum(tx, txNum)
 		if err != nil {
 			return fmt.Errorf("getting last executed block: %w", err)
@@ -97,8 +100,11 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	}
 	defer cfg.execArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 
-	for ; startBlock < endBlock; startBlock += 1_000_000 {
-		if err := customTraceBatchProduce(ctx, cfg.execArgs, cfg.db, startBlock, startBlock+1_000_000, "custom_trace", logger); err != nil {
+	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
+
+	batchSize := uint64(100_000)
+	for ; startBlock < endBlock; startBlock += batchSize {
+		if err := customTraceBatchProduce(ctx, cfg.execArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", logger); err != nil {
 			return err
 		}
 	}

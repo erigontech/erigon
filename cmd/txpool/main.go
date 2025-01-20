@@ -28,6 +28,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
@@ -38,16 +39,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/consensus/misc"
-	"github.com/erigontech/erigon/ethdb/privateapi"
-	"github.com/erigontech/erigon/txnprovider/txpool"
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolutil"
-
-	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/ethdb/privateapi"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/txnprovider/txpool"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 var (
@@ -183,26 +180,31 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 		cfg.TracedSenders[i] = string(sender[:])
 	}
 
-	newTxs := make(chan txpool.Announcements, 1024)
-	defer close(newTxs)
-	txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpoolutil.AllComponents(ctx, cfg,
-		kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient, misc.Eip1559FeeCalculator, logger)
+	notifyMiner := func() {}
+	txPool, txpoolGrpcServer, err := txpool.Assemble(
+		ctx,
+		cfg,
+		coreDB,
+		kvcache.New(cacheConfig),
+		sentryClients,
+		kvClient,
+		notifyMiner,
+		logger,
+	)
 	if err != nil {
 		return err
 	}
-	defer txPoolDB.Close()
-	fetch.ConnectCore()
-	fetch.ConnectSentries()
 
 	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil, logger)
-
 	grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil, logger)
 	if err != nil {
 		return err
 	}
 
-	notifyMiner := func() {}
-	txpool.MainLoop(ctx, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams, notifyMiner)
+	err = txPool.Run(ctx)
+	if err != nil {
+		return err
+	}
 
 	grpcServer.GracefulStop()
 	return nil

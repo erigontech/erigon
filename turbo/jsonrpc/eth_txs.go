@@ -19,7 +19,11 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
+
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
@@ -49,10 +53,13 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	}
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
-	blockNum, _, ok, err := api.txnLookup(ctx, tx, txnHash)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
 	}
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
 	// Private API returns 0 if transaction is not found.
 	if blockNum == 0 && chainConfig.Bor != nil {
 		if api.useBridgeReader {
@@ -66,28 +73,36 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 	}
 	if ok {
-		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+		txNumMin, err := txNumsReader.Min(tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
-		if block == nil {
+
+		if txNumMin+2 > txNum { //TODO: what a magic is this "2" and how to avoid it
+			return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
+		}
+
+		var txnIndex uint64 = txNum - txNumMin - 2
+
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txnIndex))
+		if err != nil {
+			return nil, err
+		}
+
+		header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+		if header == nil {
 			return nil, nil
 		}
-		blockHash := block.Hash()
-		var txnIndex uint64
-		var txn types2.Transaction
-		for i, transaction := range block.Transactions() {
-			if transaction.Hash() == txnHash {
-				txn = transaction
-				txnIndex = uint64(i)
-				break
-			}
-		}
+
+		blockHash := header.Hash()
 
 		// Add GasPrice for the DynamicFeeTransaction
 		var baseFee *big.Int
 		if chainConfig.IsLondon(blockNum) && blockHash != (common.Hash{}) {
-			baseFee = block.BaseFee()
+			baseFee = header.BaseFee
 		}
 
 		// if no transaction was found then we return nil
@@ -96,7 +111,11 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 				return nil, nil
 			}
 			borTx := bortypes.NewBorTransaction()
-			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee, chainConfig.ChainID), nil
+			_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+			if err != nil {
+				return nil, err
+			}
+			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(txCount), baseFee, chainConfig.ChainID), nil
 		}
 
 		return NewRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
@@ -206,7 +225,19 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
-		borTx := rawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
+		var borTx types2.Transaction
+		if api.useBridgeReader {
+			possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
+			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				borTx = bortypes.NewBorTransaction()
+			}
+		} else {
+			borTx = rawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
+		}
 		if borTx == nil {
 			return nil, nil // not error
 		}
@@ -270,7 +301,19 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
-		borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
+		var borTx types2.Transaction
+		if api.useBridgeReader {
+			possibleBorTxnHash := bortypes.ComputeBorTxHash(blockNum, hash)
+			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				borTx = bortypes.NewBorTransaction()
+			}
+		} else {
+			borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
+		}
 		if borTx == nil {
 			return nil, nil
 		}

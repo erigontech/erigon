@@ -111,12 +111,10 @@ func manifest(cliCtx *cli.Context, command string) error {
 
 	switch src.LType {
 	case sync.RemoteFs:
-		if rcCli == nil {
-			rcCli, err = downloader.NewRCloneClient(logger)
+		rcCli, err = downloader.NewRCloneClient(logger)
 
-			if err != nil {
-				return err
-			}
+		if err != nil {
+			return err
 		}
 
 		if err = sync.CheckRemote(rcCli, src.Src); err != nil {

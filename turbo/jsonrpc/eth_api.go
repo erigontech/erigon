@@ -270,7 +270,7 @@ func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chai
 	if err != nil {
 		return nil, nil, err
 	}
-	if cc != nil && genesisBlock != nil {
+	if cc != nil {
 		api._genesis.Store(genesisBlock)
 		api._chainConfig.Store(cc)
 	}

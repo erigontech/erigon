@@ -568,7 +568,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 }
 
 var (
-	EnableP2PReceipts = dbg.EnvBool("P2P_RECEIPTS", false)
+	EnableP2PReceipts = dbg.EnvBool("P2P_RECEIPTS", true)
 )
 
 func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {

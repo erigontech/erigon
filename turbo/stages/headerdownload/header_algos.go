@@ -333,6 +333,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
 		if err != nil {
 			return err
@@ -432,7 +433,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeout bool, request *HeaderRequest, penalties []PenaltyItem) {
 	anchor := hd.posAnchor
 	if anchor == nil {
-		dataflow.HeaderDownloadStates.AddChange(anchor.blockHeight-1, dataflow.HeaderEmpty)
+		//dataflow.HeaderDownloadStates.AddChange(anchor.blockHeight-1, dataflow.HeaderEmpty)
 		hd.logger.Debug("[downloader] No PoS anchor")
 		return
 	}

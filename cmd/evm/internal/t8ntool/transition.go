@@ -627,6 +627,7 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer c.Close()
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
 	domains, err := libstate.NewSharedDomains(tx, log.New())
