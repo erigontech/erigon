@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -92,6 +93,8 @@ func runErigon(cliCtx *cli.Context) error {
 	if err := datadir.ApplyMigrations(nodeCfg.Dirs); err != nil {
 		return err
 	}
+
+	fmt.Println("LAL priv on start:", string(crypto.FromECDSA(nodeCfg.P2P.PrivateKey)))
 
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
