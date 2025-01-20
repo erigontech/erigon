@@ -78,7 +78,7 @@ func ProcessPendingDeposits(s abstract.BeaconState) {
 }
 
 func applyPendingDeposit(s abstract.BeaconState, d *solid.PendingDeposit) {
-	if _, exist := s.ValidatorIndexByPubkey(d.PubKey); !exist {
+	if vindex, exist := s.ValidatorIndexByPubkey(d.PubKey); !exist {
 		if valid, _ := IsValidDepositSignature(&cltypes.DepositData{
 			PubKey:                d.PubKey,
 			WithdrawalCredentials: d.WithdrawalCredentials,
@@ -89,14 +89,6 @@ func applyPendingDeposit(s abstract.BeaconState, d *solid.PendingDeposit) {
 		}
 	} else {
 		// increase balance
-		//state.IncreaseBalance(s, vindex, d.Amount)
-		return
+		state.IncreaseBalance(s, vindex, d.Amount)
 	}
-	s.AppendPendingDeposit(&solid.PendingDeposit{
-		PubKey:                d.PubKey,
-		WithdrawalCredentials: d.WithdrawalCredentials,
-		Amount:                d.Amount,
-		Signature:             d.Signature,
-		Slot:                  s.BeaconConfig().GenesisSlot,
-	})
 }
