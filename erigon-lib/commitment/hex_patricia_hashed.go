@@ -2587,8 +2587,9 @@ type HexPatriciaHashedReader struct {
 	accValBuf rlp.RlpEncodedBytes
 }
 
-func NewHexPatriciaHashedReader(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
-	hph := &HexPatriciaHashed{
+// returned reader has to be set to some state before use. Use .SetState() for that and `SeekCommitment` to get this state
+func NewHexPatriciaHashedReader(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashedReader {
+	hph := &HexPatriciaHashedReader{
 		ctx:           ctx,
 		keccak:        sha3.NewLegacyKeccak256().(keccakState),
 		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
@@ -2597,7 +2598,6 @@ func NewHexPatriciaHashedReader(accountKeyLen int, ctx PatriciaContext, tmpdir s
 		hadToLoadL:    make(map[uint64]skipStat),
 		accValBuf:     make(rlp.RlpEncodedBytes, 128),
 	}
-	hph.branchEncoder = NewBranchEncoder(1024, filepath.Join(tmpdir, "branch-encoder"))
 	return hph
 }
 
