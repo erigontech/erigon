@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
@@ -106,35 +107,36 @@ type BorConfig interface {
 	IsNapoli(num uint64) bool
 	GetNapoliBlock() *big.Int
 	IsAhmedabad(number uint64) bool
+	GeAhmedabadBlock() *big.Int
 	StateReceiverContractAddress() common.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
 }
 
+func timestampToTime(unixTime *big.Int) *time.Time {
+	if unixTime == nil {
+		return nil
+	}
+	t := time.Unix(unixTime.Int64(), 0).UTC()
+	return &t
+}
+
 func (c *Config) String() string {
 	engine := c.getEngine()
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Engine: %v}",
+	if c.Bor != nil {
+		return fmt.Sprintf("{ChainID: %v, Napoli: %v, Ahmedabad: %v, Engine: %v}",
+			c.ChainID,
+			c.Bor.GetNapoliBlock(),
+			c.Bor.GeAhmedabadBlock(),
+			engine,
+		)
+	}
+
+	return fmt.Sprintf("{ChainID: %v, Cancun: %v, Prague: %v, Engine: %v}",
 		c.ChainID,
-		c.HomesteadBlock,
-		c.DAOForkBlock,
-		c.TangerineWhistleBlock,
-		c.SpuriousDragonBlock,
-		c.ByzantiumBlock,
-		c.ConstantinopleBlock,
-		c.PetersburgBlock,
-		c.IstanbulBlock,
-		c.MuirGlacierBlock,
-		c.BerlinBlock,
-		c.LondonBlock,
-		c.ArrowGlacierBlock,
-		c.GrayGlacierBlock,
-		c.TerminalTotalDifficulty,
-		c.MergeNetsplitBlock,
-		c.ShanghaiTime,
-		c.CancunTime,
-		c.PragueTime,
-		c.OsakaTime,
+		timestampToTime(c.CancunTime),
+		timestampToTime(c.PragueTime),
 		engine,
 	)
 }
