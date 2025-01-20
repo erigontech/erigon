@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -148,20 +149,9 @@ func (c *conn) SetWriteDeadline(time time.Time) error {
 	return nil
 }
 
-func testWSS(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, codec *rpc.ServerCodec) {
-	ctx1, cancel1 := context.WithCancel(ctx)
-	defer cancel1()
-
-	go func() {
-		select {
-		case <-sigs:
-			cancel()
-		case <-ctx1.Done():
-		}
-	}()
-
-	serverURL := "ws://127.0.0.1:6059/debug/diag/ws"
-	// WebSocket server URL (replace with your server's URL)
+func connectToSocket(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, codec *rpc.ServerCodec, serverURL string) {
+	serverURL = strings.Replace(serverURL, "http://", "ws://", 1)
+	//serverURL = "ws://" + serverURL
 
 	// Connect to the WebSocket server
 	conn, _, err := websocket.DefaultDialer.Dial(serverURL, nil)
@@ -186,9 +176,9 @@ func testWSS(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal
 
 			// Log the received message
 			fmt.Printf("Received: %s", message)
-			err = (*codec).WriteJSON(ctx1, message)
+			err = (*codec).WriteJSON(ctx, message)
 			if err != nil {
-				fmt.Println("2323Error writing message:", err)
+				fmt.Println("Error writing message:", err)
 				return
 			}
 		}
@@ -227,37 +217,24 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	metricsClient := &http.Client{}
 	defer metricsClient.CloseIdleConnections()
 
-	ctx1, cancel1 := context.WithCancel(ctx)
-	defer cancel1()
+	//ctx, cancel := context.WithCancel(ctx)
+	//defer cancel()
 
 	go func() {
 		select {
 		case <-sigs:
+			fmt.Println("Got interrupt, shutting down...")
 			cancel()
-		case <-ctx1.Done():
+		case <-ctx.Done():
+			fmt.Println("Context done")
 		}
 	}()
 
 	nodes, _ := getNodes(metricsClient, debugURLs)
 
-	dialer := websocket.Dialer{
-		ReadBufferSize:  wsReadBuffer,
-		WriteBufferSize: wsWriteBuffer,
-		WriteBufferPool: wsBufferPool,
-	}
-
-	conn, resp, err := dialer.DialContext(ctx1, "wss://"+diagnosticsUrl, nil)
-
+	conn, err := dial(ctx, diagnosticsUrl)
 	if err != nil {
-		conn, resp, err = dialer.DialContext(ctx1, "ws://"+diagnosticsUrl, nil)
-
-		if err != nil {
-			return err
-		}
-	}
-
-	if resp.StatusCode != http.StatusSwitchingProtocols {
-		return fmt.Errorf("support request to %s failed: %s", diagnosticsUrl, resp.Status)
+		return err
 	}
 
 	type connectionInfo struct {
@@ -269,7 +246,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	codec := rpc.NewWebsocketCodec(conn, "wss://"+diagnosticsUrl, nil) //TODO: revise why is it so
 	defer codec.Close()
 
-	err = codec.WriteJSON(ctx1, &connectionInfo{
+	err = codec.WriteJSON(ctx, &connectionInfo{
 		Version:  Version,
 		Sessions: sessionIds,
 		Nodes: func() (replies []*tunnelInfo) {
@@ -287,7 +264,9 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 
 	logger.Info("Connected")
 
-	testWSS(ctx, cancel, sigs, &codec)
+	for _, debugURL := range debugURLs {
+		connectToSocket(ctx, cancel, sigs, &codec, debugURL+"/debug/diag/ws")
+	}
 
 	for {
 		requests, _, err := codec.ReadBatch()
@@ -344,7 +323,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 				debugResponse, err := metricsClient.Get(debugURL)
 
 				if err != nil {
-					return codec.WriteJSON(ctx1, &nodeResponse{
+					return codec.WriteJSON(ctx, &nodeResponse{
 						Id: requestId,
 						Error: &responseError{
 							Code:    http.StatusFailedDependency,
@@ -359,7 +338,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 				//Websocket ok message
 				if resp.StatusCode != http.StatusSwitchingProtocols {
 					body, _ := io.ReadAll(debugResponse.Body)
-					return codec.WriteJSON(ctx1, &nodeResponse{
+					return codec.WriteJSON(ctx, &nodeResponse{
 						Id: requestId,
 						Error: &responseError{
 							Code:    int64(resp.StatusCode),
@@ -374,7 +353,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 				switch debugResponse.Header.Get("Content-Type") {
 				case "application/json":
 					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
-						return codec.WriteJSON(ctx1, &nodeResponse{
+						return codec.WriteJSON(ctx, &nodeResponse{
 							Id: requestId,
 							Error: &responseError{
 								Code:    http.StatusInternalServerError,
@@ -386,7 +365,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					}
 				case "application/octet-stream":
 					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
-						return codec.WriteJSON(ctx1, &nodeResponse{
+						return codec.WriteJSON(ctx, &nodeResponse{
 							Id: requestId,
 							Error: &responseError{
 								Code:    int64(http.StatusInternalServerError),
@@ -412,7 +391,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					buffer = bytes.NewBuffer(data)
 
 					if err != nil {
-						return codec.WriteJSON(ctx1, &nodeResponse{
+						return codec.WriteJSON(ctx, &nodeResponse{
 							Id: requestId,
 							Error: &responseError{
 								Code:    int64(http.StatusInternalServerError),
@@ -424,7 +403,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 
 				case "application/profile":
 					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
-						return codec.WriteJSON(ctx1, &nodeResponse{
+						return codec.WriteJSON(ctx, &nodeResponse{
 							Id: requestId,
 							Error: &responseError{
 								Code:    http.StatusInternalServerError,
@@ -443,7 +422,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					buffer = bytes.NewBuffer(data)
 
 					if err != nil {
-						return codec.WriteJSON(ctx1, &nodeResponse{
+						return codec.WriteJSON(ctx, &nodeResponse{
 							Id: requestId,
 							Error: &responseError{
 								Code:    int64(http.StatusInternalServerError),
@@ -454,7 +433,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					}
 
 				default:
-					return codec.WriteJSON(ctx1, &nodeResponse{
+					return codec.WriteJSON(ctx, &nodeResponse{
 						Id: requestId,
 						Error: &responseError{
 							Code:    int64(http.StatusInternalServerError),
@@ -464,7 +443,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					})
 				}
 
-				return codec.WriteJSON(ctx1, &nodeResponse{
+				return codec.WriteJSON(ctx, &nodeResponse{
 					Id:     requestId,
 					Result: json.RawMessage(buffer.Bytes()),
 					Last:   true,
@@ -511,6 +490,30 @@ func getNodes(metricsClient *http.Client, debugURLs []string) (map[string]*tunne
 	}
 
 	return nodes, nil
+}
+
+func dial(ctx context.Context, diagnosticsUrl string) (*websocket.Conn, error) {
+	dialer := websocket.Dialer{
+		ReadBufferSize:  wsReadBuffer,
+		WriteBufferSize: wsWriteBuffer,
+		WriteBufferPool: wsBufferPool,
+	}
+
+	conn, resp, err := dialer.DialContext(ctx, "wss://"+diagnosticsUrl, nil)
+
+	if err != nil {
+		conn, resp, err = dialer.DialContext(ctx, "ws://"+diagnosticsUrl, nil)
+
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		return nil, fmt.Errorf("support request to %s failed: %s", diagnosticsUrl, resp.Status)
+	}
+
+	return conn, nil
 }
 
 func queryNode(metricsClient *http.Client, debugURL string) (*remote.NodesInfoReply, error) {

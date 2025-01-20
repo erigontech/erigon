@@ -17,7 +17,7 @@ In order to connect diagnostics run
 ```
 
 |                      |                                                                                                                                                                                                            |
-|----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | diagnostics.addr     | Address of the diagnostics system provided by the support team, include unique session PIN. [Instructions how to get proper adderess](https://github.com/erigontech/diagnostics?tab=readme-ov-file#step-4) |
 | debug.addrs          | Comma separated list of URLs to the debug endpoints thats are being diagnosed. This endpoints must match values of `diagnostics.endpoint.addr:diagnostics.endpoint.port` by default its `localhost:6060`   |
 | diagnostics.sessions | Comma separated list of session PINs to connect to [Instructions how to obtain PIN](https://github.com/erigontech/diagnostics?tab=readme-ov-file#step-2)                                                   |
@@ -45,18 +45,18 @@ in the rclone config file.
 
 The **uploader** is configured to minimize disk usage by doing the following:
 
-* It removes snapshots once they are loaded
-* It agressively prunes the database once entities are transferred to snapshots
+- It removes snapshots once they are loaded
+- It agressively prunes the database once entities are transferred to snapshots
 
 in addition to this it has the following performance related features:
 
-* maximises the workers allocated to snapshot processing to improve thoughtput
-* Can be started from scratch by downloading the latest snapshots from the remote location to seed processing
+- maximises the workers allocated to snapshot processing to improve thoughtput
+- Can be started from scratch by downloading the latest snapshots from the remote location to seed processing
 
 The following configuration can be used to upload blocks from genesis where:
 
 |                                                    |                                                                                                                                                                            |
-|----------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | sync.loop.prune.limit=500000                       | Sets the records to be pruned to the database to 500,000 per iteration (as opposed to 100)                                                                                 |
 | upload.location=r2:erigon-v2-snapshots-bor-mainnet | Specified the rclone location to upload snapshot to                                                                                                                        |
 | upload.from=earliest                               | Sets the upload start location to be the earliest available block, which will be 0 in the case of a fresh installation, or specified by the last block in the chaindata db |
@@ -67,7 +67,7 @@ The following configuration can be used to upload blocks from genesis where:
 erigon/build/bin/erigon seg uploader --datadir=~/snapshots/bor-mainnet --chain=bor-mainnet \
   --bor.heimdall=https://heimdall-api.polygon.technology --bor.milestone=false --sync.loop.prune.limit=500000 \
   --upload.location=r2:erigon-v2-snapshots-bor-mainnet --upload.from=earliest --snapshot.version=2 \
-  --upload.snapshot.limit=1500000 
+  --upload.snapshot.limit=1500000
 ```
 
 In order to start with the lates uploaded block when starting with an empty drive set the `upload.from` flag to
@@ -83,7 +83,7 @@ The configuration of the uploader implicitly sets the following flag values on s
     --sync.loop.break.after=Senders
 	--sync.loop.block.limit=100000
 	--sync.loop.prune.limit=100000
-	--upload.snapshot.limit=1500000 
+	--upload.snapshot.limit=1500000
 	--nodownloader=true
 	--http.enables=false
 	--txpool.disable=true

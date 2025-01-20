@@ -1,7 +1,6 @@
 package diagnostics
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -19,37 +18,13 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// SetupNotifier initializes and starts a WebSocket diagnostics server.
-// It listens for incoming WebSocket connections and provides a mechanism
-// for notifying clients of diagnostic messages.
+// SetupNotifier configures the diagnostics WebSocket endpoint.
 //
-// Parameters:
-//   - rootCtx: The root context to control the server lifecycle.
-//   - socketAddr: The address (e.g., "127.0.0.1:6059") where the WebSocket server will listen.
-func (d *DiagnosticClient) SetupNotifier(rootCtx context.Context, socketAddr string) {
-	diagMux := http.NewServeMux()
-	diagMux.HandleFunc("/debug/diag/ws", d.HandleConnections)
-
-	diagServer := &http.Server{
-		Addr:    socketAddr,
-		Handler: diagMux,
-	}
-
-	go func() {
-		log.Debug("[Diagnostics] Starting diagnostics websocket server", "address", diagServer.Addr)
-		if err := diagServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Debug("[Diagnostics] Error running diagnostics websocket server", "err", err)
-		}
-	}()
-
-	// Graceful shutdown on context cancellation
-	go func() {
-		<-rootCtx.Done()
-		log.Debug("[Diagnostics] Shutting down diagnostics websocket server")
-		if err := diagServer.Shutdown(context.Background()); err != nil {
-			log.Debug("[Diagnostics] Error shutting down websocket server", "err", err)
-		}
-	}()
+// This function registers the `/ws` path on the existing HTTP server's multiplexer (`metricsMux`)
+// to handle WebSocket connection requests. The `HandleConnections` method is used to process
+// these WebSocket connections.
+func (d *DiagnosticClient) SetupNotifier() {
+	d.metricsMux.HandleFunc("/ws", d.HandleConnections)
 }
 
 // Notify sends a structured diagnostic message to the connected WebSocket client.

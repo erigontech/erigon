@@ -34,9 +34,9 @@ func (ti IncommingTxnUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
-func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context, socketAddr string) {
+func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnIncommingTxnListener(rootCtx)
-	d.SetupNotifier(rootCtx, socketAddr)
+	d.SetupNotifier()
 }
 
 func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
