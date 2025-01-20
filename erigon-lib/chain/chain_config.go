@@ -92,6 +92,60 @@ type Config struct {
 	BorJSON json.RawMessage `json:"bor,omitempty"`
 }
 
+type BlobConfig struct {
+	Target                uint64 `json:"target"`
+	Max                   uint64 `json:"max"`
+	BaseFeeUpdateFraction uint64 `json:"baseFeeUpdateFraction"`
+}
+
+// See EIP-7840: Add blob schedule to EL config files
+type BlobSchedule struct {
+	Cancun *BlobConfig `json:"cancun,omitempty"`
+	Prague *BlobConfig `json:"prague,omitempty"`
+}
+
+func (b *BlobSchedule) TargetBlobsPerBlock(isPrague bool) uint64 {
+	eip4844default := uint64(3)
+	if b == nil {
+		return eip4844default
+	}
+	if isPrague && b.Prague != nil {
+		return b.Prague.Target
+	}
+	if b.Cancun != nil {
+		return b.Cancun.Target
+	}
+	return eip4844default
+}
+
+func (b *BlobSchedule) MaxBlobsPerBlock(isPrague bool) uint64 {
+	eip4844default := uint64(6)
+	if b == nil {
+		return eip4844default
+	}
+	if isPrague && b.Prague != nil {
+		return b.Prague.Max
+	}
+	if b.Cancun != nil {
+		return b.Cancun.Max
+	}
+	return eip4844default
+}
+
+func (b *BlobSchedule) BaseFeeUpdateFraction(isPrague bool) uint64 {
+	eip4844default := uint64(3338477)
+	if b == nil {
+		return eip4844default
+	}
+	if isPrague && b.Prague != nil {
+		return b.Prague.BaseFeeUpdateFraction
+	}
+	if b.Cancun != nil {
+		return b.Cancun.BaseFeeUpdateFraction
+	}
+	return eip4844default
+}
+
 type BorConfig interface {
 	fmt.Stringer
 	IsAgra(num uint64) bool

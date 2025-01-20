@@ -141,3 +141,24 @@ func TestGetBurntContract(t *testing.T) {
 	require.NotNil(t, addr)
 	assert.Equal(t, common.HexToAddress("0x000000000000000000000000000000000000dead"), *addr)
 }
+
+func TestMainnetBlobSchedule(t *testing.T) {
+	b := MainnetChainConfig.BlobSchedule
+	assert.Equal(t, uint64(3), b.TargetBlobsPerBlock(false /* isPrague */))
+	assert.Equal(t, uint64(6), b.MaxBlobsPerBlock(false /* isPrague */))
+	assert.Equal(t, uint64(3338477), b.BaseFeeUpdateFraction(false /* isPrague */))
+	// EIP-7691: Blob throughput increase
+	assert.Equal(t, uint64(6), b.TargetBlobsPerBlock(true /* isPrague */))
+	assert.Equal(t, uint64(9), b.MaxBlobsPerBlock(true /* isPrague */))
+	assert.Equal(t, uint64(5007716), b.BaseFeeUpdateFraction(true /* isPrague */))
+}
+
+func TestGnosisBlobSchedule(t *testing.T) {
+	b := GnosisChainConfig.BlobSchedule
+	assert.Equal(t, uint64(1), b.TargetBlobsPerBlock(false /* isPrague */))
+	assert.Equal(t, uint64(2), b.MaxBlobsPerBlock(false /* isPrague */))
+	assert.Equal(t, uint64(1112826), b.BaseFeeUpdateFraction(false /* isPrague */))
+	assert.Equal(t, uint64(1), b.TargetBlobsPerBlock(true /* isPrague */))
+	assert.Equal(t, uint64(2), b.MaxBlobsPerBlock(true /* isPrague */))
+	assert.Equal(t, uint64(1112826), b.BaseFeeUpdateFraction(true /* isPrague */))
+}
