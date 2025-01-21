@@ -21,13 +21,10 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"math/big"
-	"os"
-	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -1286,7 +1283,6 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 	sendersWithChangedState := map[uint64]struct{}{}
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
 	announcements := Announcements{}
-
 	for i, txn := range newTxns.Txns {
 		if found, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			discardReasons[i] = txpoolcfg.DuplicateHash
@@ -1832,30 +1828,6 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	for _ = p.queued.Worst(); p.queued.Len() > p.queued.limit; _ = p.queued.Worst() {
 		p.discardLocked(p.queued.PopWorst(), txpoolcfg.QueuedPoolOverflow)
 	}
-}
-
-func writeJSONToFile(data interface{}, filePath string) error {
-	// Create the directory if it doesn't exist
-	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create directory: %v", err)
-	}
-
-	// Open the file for writing (create if it doesn't exist)
-	file, err := os.Create(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %v", err)
-	}
-	defer file.Close()
-
-	// Encode the data to JSON and write to the file
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ") // Optional: pretty print with indentation
-	if err := encoder.Encode(data); err != nil {
-		return fmt.Errorf("failed to encode JSON: %v", err)
-	}
-
-	return nil
 }
 
 // Run - does:
