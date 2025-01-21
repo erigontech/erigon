@@ -480,10 +480,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		if block == nil {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 		}
-		receipts, err := api.getReceipts(ctx, tx, block)
-		if err != nil {
-			return nil, fmt.Errorf("getReceipts error: %w", err)
-		}
 
 		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
 		if err != nil {
@@ -494,7 +490,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			return nil, errors.New("tx not found")
 		}
 
-		borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
+		borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -549,7 +545,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		}
 
 		if len(events) != 0 {
-			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
+			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
 			if err != nil {
 				return nil, err
 			}
