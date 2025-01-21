@@ -155,13 +155,14 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 		"milestoneRootHash", event.RootHash(),
 	)
 
-	//
-	// TODO - is this it?
-	//
-	// 0. wait for any possibly unprocessed previous block inserts to finish
-	//if err := s.store.Flush(ctx); err != nil {
-	//	return err
-	//}
+	// wait for any possibly unprocessed previous block inserts to finish
+	if err := s.store.Flush(ctx); err != nil {
+		return err
+	}
+
+	if err := s.bridgeSync.Synchronize(ctx, tipNum); err != nil {
+		return err
+	}
 
 	if err := s.bridgeSync.Unwind(ctx, rootNum); err != nil {
 		return err
@@ -364,7 +365,8 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
 	if len(newConnectedBlocks) > 1 {
 		s.logger.Info(
-			syncLogPrefix(fmt.Sprintf("inserting %d connected blocks", len(newConnectedBlocks))),
+			syncLogPrefix("inserting multiple connected blocks"),
+			"amount", len(newConnectedBlocks),
 			"start", newConnectedBlocks[0].NumberU64(),
 			"end", newConnectedBlocks[len(newConnectedBlocks)-1].NumberU64(),
 		)
@@ -503,6 +505,15 @@ func (s *Sync) handleBridgeOnForkChange(ctx context.Context, ccb *CanonicalChain
 		return errors.New("could not find lowest common ancestor of old and new tip")
 	}
 
+	// wait for any possibly unprocessed previous block inserts to finish
+	if err := s.store.Flush(ctx); err != nil {
+		return err
+	}
+
+	if err := s.bridgeSync.Synchronize(ctx, oldTip.Number.Uint64()); err != nil {
+		return err
+	}
+
 	return s.reorganiseBridge(ctx, ccb, lca)
 }
 
@@ -521,14 +532,6 @@ func (s *Sync) reorganiseBridge(ctx context.Context, ccb *CanonicalChainBuilder,
 	if newTipNum < unwindPoint { // defensive check against underflow & unexpected newTipNum and unwindPoint
 		return fmt.Errorf("unexpected newTipNum <= unwindPoint: %d < %d", newTipNum, unwindPoint)
 	}
-
-	//
-	// TODO - is this it?
-	//
-	// 0. wait for any possibly unprocessed previous block inserts to finish
-	//if err := s.store.Flush(ctx); err != nil {
-	//	return err
-	//}
 
 	// 1. Do the unwind from the old tip (on the old canonical fork) to the unwindPoint
 	if err := s.bridgeSync.Unwind(ctx, unwindPoint); err != nil {
