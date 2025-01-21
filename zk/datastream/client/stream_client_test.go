@@ -51,7 +51,7 @@ func TestStreamClientReadHeaderEntry(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			c := NewClient(context.Background(), "", false, 0, 500*time.Millisecond, 0, DefaultEntryChannelSize)
+			c := NewClient(context.Background(), "", false, 500*time.Millisecond, 0, DefaultEntryChannelSize)
 			server, conn := net.Pipe()
 			defer server.Close()
 			defer c.Stop()
@@ -118,7 +118,7 @@ func TestStreamClientReadResultEntry(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			c := NewClient(context.Background(), "", false, 0, 500*time.Millisecond, 0, DefaultEntryChannelSize)
+			c := NewClient(context.Background(), "", false, 500*time.Millisecond, 0, DefaultEntryChannelSize)
 			server, conn := net.Pipe()
 			defer server.Close()
 			defer c.Stop()
@@ -190,7 +190,7 @@ func TestStreamClientReadFileEntry(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			c := NewClient(context.Background(), "", false, 0, 500*time.Millisecond, 0, DefaultEntryChannelSize)
+			c := NewClient(context.Background(), "", false, 500*time.Millisecond, 0, DefaultEntryChannelSize)
 			server, conn := net.Pipe()
 			defer server.Close()
 			defer c.Stop()
@@ -213,7 +213,7 @@ func TestStreamClientReadFileEntry(t *testing.T) {
 }
 
 func TestStreamClientReadParsedProto(t *testing.T) {
-	c := NewClient(context.Background(), "", false, 0, 500*time.Millisecond, 0, DefaultEntryChannelSize)
+	c := NewClient(context.Background(), "", false, 500*time.Millisecond, 0, DefaultEntryChannelSize)
 	serverConn, clientConn := net.Pipe()
 	c.conn = clientConn
 	c.checkTimeout = 1 * time.Second
@@ -285,7 +285,7 @@ func TestStreamClientGetLatestL2Block(t *testing.T) {
 		clientConn.Close()
 	}()
 
-	c := NewClient(context.Background(), "", false, 0, 500*time.Millisecond, 0, DefaultEntryChannelSize)
+	c := NewClient(context.Background(), "", false, 500*time.Millisecond, 0, DefaultEntryChannelSize)
 	c.conn = clientConn
 	c.checkTimeout = 1 * time.Second
 	c.allowStops = false
@@ -399,7 +399,7 @@ func TestStreamClientGetL2BlockByNumber(t *testing.T) {
 		clientConn.Close()
 	}()
 
-	c := NewClient(context.Background(), "", false, 0, 500*time.Millisecond, 0, DefaultEntryChannelSize)
+	c := NewClient(context.Background(), "", false, 500*time.Millisecond, 0, DefaultEntryChannelSize)
 	c.header = &types.HeaderEntry{
 		TotalEntries: 4,
 	}
