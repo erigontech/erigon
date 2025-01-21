@@ -80,7 +80,6 @@ func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, i
 	numReceipts := len(blockReceipts)
 	lastReceipt := &types.Receipt{
 		CumulativeGasUsed: 0,
-		GasUsed:           0,
 	}
 	if numReceipts > 0 {
 		lastReceipt = blockReceipts[numReceipts-1]
@@ -91,7 +90,7 @@ func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, i
 		Type:              0,
 		CumulativeGasUsed: lastReceipt.CumulativeGasUsed,
 		TxHash:            bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash()),
-		GasUsed:           lastReceipt.GasUsed,
+		GasUsed:           0,
 		BlockHash:         block.Hash(),
 		BlockNumber:       block.Number(),
 		TransactionIndex:  uint(numReceipts),
