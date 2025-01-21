@@ -203,7 +203,7 @@ define run_suite
     echo -e "\n\n============================================================"; \
     echo "Running test: $1-$2"; \
     echo -e "\n"; \
-    ./hive --sim ethereum/$1 --sim.limit=$2 --client erigon $3 2>&1 | tee output.log; \
+    ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --client erigon $3 2>&1 | tee output.log; \
     if [ $$? -gt 0 ]; then \
         echo "Exitcode gt 0"; \
     fi; \
