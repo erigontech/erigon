@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -1139,7 +1140,7 @@ type keyWithHash struct {
 
 func hashKeysConcurrently(keys []string, hasher keyHasher) []*keyWithHash {
 	keysWithHash := make([]*keyWithHash, len(keys))
-	numWorkers := 8 // hardcoded for now
+	numWorkers := runtime.NumCPU()
 	// Split the keys slice into chunks and process in parallel.
 	chunkSize := (len(keys) + numWorkers - 1) / numWorkers
 	var wg sync.WaitGroup
