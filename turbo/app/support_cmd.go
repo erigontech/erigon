@@ -140,8 +140,10 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	go func() {
 		select {
 		case <-sigs:
+			logger.Info("Got interrupt, shutting down...")
 			cancel()
 		case <-ctx.Done():
+			logger.Info("Context done")
 		}
 	}()
 
