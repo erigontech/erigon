@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -525,8 +526,9 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 			}
 
 			if blockResult.complete {
-				if blockResult.BlockNum == 14753281 /*|| blockResult.BlockNum == 14734485*/ {
-					fmt.Println(blockResult.BlockNum)
+				if /*blockResult.BlockNum == 14850205 ||*/
+				blockResult.BlockNum == 14935178 || blockResult.BlockNum == 14935090 || blockResult.BlockNum == 14898492 {
+					//fmt.Println("Block Complete", blockResult.BlockNum)
 					//panic(blockResult.BlockNum)
 				}
 
@@ -600,12 +602,14 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 					execTask := blockStatus.tasks[nextTx]
 
 					//fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
-					if blockResult.BlockNum+1 == 14748605 || blockResult.BlockNum+1 == 14734485 {
+					if /*blockResult.BlockNum+1 == 14748605 || blockResult.BlockNum+1 == 14734485 ||*/
+					blockResult.BlockNum+1 == 14935178 || blockResult.BlockNum+1 == 14935090 || blockResult.BlockNum+1 == 14898492 {
 						//vm.Trace = true
-						//	fmt.Println(blockResult.BlockNum + 1)
+						//fmt.Println(blockResult.BlockNum + 1)
 					} else {
-						//vm.Trace = false
+						vm.Trace = false
 					}
+
 					pe.in.Add(ctx,
 						&taskVersion{
 							execTask:   execTask,
@@ -631,8 +635,9 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 // Maybe need split channels? Maybe don't exit from ApplyLoop? Maybe current way is also ok?
 
 func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error {
-	//fmt.Println("rwLoop started", maxTxNum)
-	//defer fmt.Println("rwLoop done")
+	defer func() {
+		fmt.Println("rwLoop done")
+	}()
 
 	tx := pe.applyTx
 	if tx == nil {
@@ -696,7 +701,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 						uncommittedGas += applyResult.GasUsed
 					}
 
-					if true {
+					if false {
 						rh, err := pe.doms.ComputeCommitment(ctx, tx, true, applyResult.BlockNum, pe.execStage.LogPrefix())
 						if err != nil {
 							return err
@@ -720,43 +725,43 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 					logger.Info(fmt.Sprintf("[%s] Background files build", pe.execStage.LogPrefix()), "progress", pe.agg.BackgroundProgress())
 				}
 			case <-pruneEvery:
-				/*
-						if pe.rs.SizeEstimate() < pe.cfg.batchSize.Bytes() && lastBlockResult.BlockNum > pe.lastCommittedBlockNum {
-							_, err := pe.doms.ComputeCommitment(ctx, true, lastBlockResult.BlockNum, pe.execStage.LogPrefix())
+				if false {
+					if pe.rs.SizeEstimate() < pe.cfg.batchSize.Bytes() && lastBlockResult.BlockNum > pe.lastCommittedBlockNum {
+						rhash, err := pe.doms.ComputeCommitment(ctx, tx, true, lastBlockResult.BlockNum, pe.execStage.LogPrefix())
 
-							if err != nil {
-								return err
-							}
-
-					//if !bytes.Equal(rhash, lastBlockResult.StateRoot.Bytes()) {
-					//	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x",
-					//		pe.execStage.LogPrefix(), lastBlockResult.BlockNum, rhash, lastBlockResult.StateRoot.Bytes(), lastBlockResult.BlockHash))
-					//	return errors.New("wrong trie root")
-					//}
-
-					fmt.Println("BC DONE", lastBlockResult.BlockNum, hex.EncodeToString(rhash), hex.EncodeToString(lastBlockResult.StateRoot.Bytes())) //Temp Done
-
-					//pe.lastCommittedBlockNum = lastBlockResult.BlockNum
-					//pe.lastCommittedTxNum = lastBlockResult.lastTxNum
-					//pe.committedGas += uncommittedGas
-					//uncommittedGas = 0
-
-					if !pe.inMemExec {
-						err = tx.ApplyRw(func(tx kv.RwTx) error {
-							ac := pe.agg.BeginFilesRo()
-							if _, err = ac.PruneSmallBatches(ctx, 150*time.Millisecond, tx); err != nil { // prune part of retired data, before commit
-								return err
-							}
-							ac.Close()
-
-							return pe.doms.Flush(ctx, tx)
-						})
 						if err != nil {
 							return err
 						}
-					}
+
+						if !bytes.Equal(rhash, lastBlockResult.StateRoot.Bytes()) {
+							logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x",
+								pe.execStage.LogPrefix(), lastBlockResult.BlockNum, rhash, lastBlockResult.StateRoot.Bytes(), lastBlockResult.BlockHash))
+							return errors.New("wrong trie root")
+						}
+
+						fmt.Println("BC DONE", lastBlockResult.BlockNum, hex.EncodeToString(rhash), hex.EncodeToString(lastBlockResult.StateRoot.Bytes())) //Temp Done
+
+						pe.lastCommittedBlockNum = lastBlockResult.BlockNum
+						pe.lastCommittedTxNum = lastBlockResult.lastTxNum
+						pe.committedGas += uncommittedGas
+						uncommittedGas = 0
+
+						if !pe.inMemExec {
+							err = tx.ApplyRw(func(tx kv.RwTx) error {
+								ac := pe.agg.BeginFilesRo()
+								if _, err = ac.PruneSmallBatches(ctx, 150*time.Millisecond, tx); err != nil { // prune part of retired data, before commit
+									return err
+								}
+								ac.Close()
+
+								return pe.doms.Flush(ctx, tx)
+							})
+							if err != nil {
+								return err
 							}
-				*/
+						}
+					}
+				}
 				if pe.inMemExec || tx == pe.applyTx {
 					break
 				}

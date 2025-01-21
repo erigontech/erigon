@@ -572,7 +572,7 @@ func (q *ResultsQueue) Add(ctx context.Context, task *Result) error {
 
 	q.RLock()
 	resultCh := q.resultCh
-	defer q.RUnlock()
+	q.RUnlock()
 
 	if err := ctx.Err(); err != nil {
 		return err

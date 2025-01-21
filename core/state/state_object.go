@@ -208,7 +208,7 @@ func (so *stateObject) GetCommittedState(key libcommon.Hash, out *uint256.Int) e
 }
 
 // SetState updates a value in account storage.
-func (so *stateObject) SetState(key libcommon.Hash, value uint256.Int) {
+func (so *stateObject) SetState(key libcommon.Hash, value uint256.Int) bool {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
 		so.db.journal.append(fakeStorageChange{
@@ -217,24 +217,28 @@ func (so *stateObject) SetState(key libcommon.Hash, value uint256.Int) {
 			prevalue: so.fakeStorage[key],
 		})
 		so.fakeStorage[key] = value
-		return
+		return true
 	}
 	// If the new value is the same as old, don't set
 	var prev uint256.Int
 	so.GetState(key, &prev)
 	if prev == value {
-		return
+		return false
 	}
+
 	// New value is different, update and journal the change
 	so.db.journal.append(storageChange{
 		account:  &so.address,
 		key:      key,
 		prevalue: prev,
 	})
+
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
 		so.db.tracingHooks.OnStorageChange(so.address, &key, prev, value)
 	}
 	so.setState(key, value)
+
+	return true
 }
 
 // SetStorage replaces the entire state storage with the given one.

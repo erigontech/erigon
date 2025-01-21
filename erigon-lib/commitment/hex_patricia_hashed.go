@@ -1515,7 +1515,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	trace := hph.trace // temp
 	hph.trace = false  // temp
-	defer func() { hph.trace = trace } //temp
+	defer func() { hph.trace = trace }() //temp
+	
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:

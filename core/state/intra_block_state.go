@@ -87,7 +87,7 @@ type IntraBlockState struct {
 	// Snapshot and RevertToSnapshot.
 	journal        *journal
 	validRevisions []revision
-	nextRevisionID int
+	nextRevisionId int
 	trace          bool
 	tracingHooks   *tracing.Hooks
 	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
@@ -192,6 +192,8 @@ func (sdb *IntraBlockState) Reset() {
 	clear(sdb.logs) // free pointers
 	sdb.logs = sdb.logs[:0]
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
+	sdb.journal.Reset()
+	sdb.nextRevisionId = 0
 	sdb.refund = 0
 	sdb.txIndex = 0
 	sdb.logSize = 0
@@ -522,6 +524,11 @@ func (sdb *IntraBlockState) ReadVersion(k VersionKey, txIdx int) ReadResult {
 func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
 	if sdb.trace || traceAccount(addr) {
 		bal, _ := sdb.GetBalance(addr)
+		if bal.Cmp((&uint256.Int{}).SetUint64(13879667836263552)) == 0 {
+			if amount.Cmp((&uint256.Int{}).SetUint64(10000000000000000)) == 0 {
+				fmt.Println(23879667836263552)
+			}
+		}
 		fmt.Printf("(%d.%d) AddBalance %x, %d+%d=%d\n", sdb.txIndex, sdb.version, addr, bal, amount, (&uint256.Int{}).Add(bal, amount))
 	}
 
@@ -650,6 +657,8 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 }
 
 var tracedAccounts = map[libcommon.Address]struct{}{
+	//libcommon.HexToAddress("f39fd6e51aad88f6f4ce6ab8827279cfffb92266"): {},
+	//libcommon.HexToAddress("0000000071727de22e5e9d8baf0edac6f37da032"): {},
 	//libcommon.HexToAddress("3cad627d8cc7ca1dd31bb7b0411b7cfda15571f2"): {},
 	//libcommon.HexToAddress("47c4002f8554fec15828af5386fc63555393650e"): {},
 	//libcommon.HexToAddress("749e27557966db1a6932e60a5dfbde7615b8c503"): {},
@@ -681,17 +690,15 @@ func (sdb *IntraBlockState) Incarnation() int {
 func (sdb *IntraBlockState) SetState(addr libcommon.Address, key libcommon.Hash, value uint256.Int) error {
 	if sdb.trace || traceAccount(addr) {
 		fmt.Printf("(%d.%d) SetState %x, %x=%x\n", sdb.txIndex, sdb.version, addr, key.Bytes(), &value)
-		//if fmt.Sprintf("%x", key) == "53045942ab85c160ea91ee236c9e23258238d4facb253249bdcf00df2729ac0f"  {
-		//	fmt.Printf("%x=%x\n", key, &value)
-		//}
 	}
 
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
 	}
-	stateObject.SetState(key, value)
-	sdb.versionWritten(StateKey(addr, key), &value)
+	if stateObject.SetState(key, value) {
+		sdb.versionWritten(StateKey(addr, key), &value)
+	}
 	return nil
 }
 
@@ -980,20 +987,22 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 
 // Snapshot returns an identifier for the current revision of the state.
 func (sdb *IntraBlockState) Snapshot() int {
-	id := sdb.nextRevisionID
-	sdb.nextRevisionID++
+	id := sdb.nextRevisionId
+	sdb.nextRevisionId++
 	sdb.validRevisions = append(sdb.validRevisions, revision{id, sdb.journal.length()})
 	return id
 }
 
 // RevertToSnapshot reverts all state changes made since the given revision.
 func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
+	var traced bool
 	for addr := range tracedAccounts {
 		if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
+			traced = true
 			if err == nil {
-				fmt.Printf("(%d.%d) Reverted %x\n", sdb.txIndex, sdb.version, addr)
+				fmt.Printf("(%d.%d) Reverted %x, %d\n", sdb.txIndex, sdb.version, addr, revid)
 			} else {
-				fmt.Printf("(%d.%d) Reverted %x: %s\n", sdb.txIndex, sdb.version, addr, err)
+				fmt.Printf("(%d.%d) Reverted %x, %d: %s\n", sdb.txIndex, sdb.version, addr, revid, err)
 			}
 		}
 	}
@@ -1017,7 +1026,6 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 		for key := range sdb.versionedWrites {
 			if _, isDirty := sdb.journal.dirties[key.GetAddress()]; !isDirty {
 				revertedWrites = append(revertedWrites, key)
-			} else {
 			}
 		}
 
@@ -1025,6 +1033,10 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 			sdb.versionMap.Delete(key, sdb.txIndex, false)
 			delete(sdb.versionedWrites, key)
 		}
+	}
+
+	if traced && sdb.txIndex == 8 && sdb.version == 1 {
+		fmt.Printf("(%d.%d) Reverted: %d:%d\n", sdb.txIndex, sdb.version, revid, snapshot)
 	}
 }
 
@@ -1166,6 +1178,9 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
+		if traceAccount(addr) {
+			fmt.Printf("(%d.%d) Balance: %x (%v): %d\n", sdb.txIndex, sdb.version, addr, isDirty, &stateObject.data.Balance)
+		}
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.tracingHooks); err != nil {
 			return err
 		}

@@ -20,6 +20,7 @@
 package core
 
 import (
+	"fmt"
 	"math/big"
 	"sync"
 
@@ -105,28 +106,76 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	}
 }
 
-// GetHashFn returns a GetHashFunc which retrieves header hashes by number
-func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uint64) (*types.Header, error)) func(n uint64) (libcommon.Hash, error) {
-	// Cache will initially contain [refHash.parent],
-	// Then fill up with [refHash.p, refHash.pp, refHash.ppp, ...]
+var hashLookupCache = func() *lru.Cache[uint64, common.Hash] {
 	// lru.New only returns err on -ve size
 	cache, _ := lru.New[uint64, common.Hash](8192)
-	lastKnownNumber := ref.Number.Uint64() - 1
-	lastKnownHash := ref.ParentHash
-	cacheLock := sync.Mutex{}
+	return cache
+}()
+var hashLookupCacheLock sync.Mutex
 
-	cache.Add(lastKnownNumber, lastKnownHash)
+// GetHashFn returns a GetHashFunc which retrieves header hashes by number
+func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uint64) (*types.Header, error)) func(n uint64) (libcommon.Hash, error) {
+	refNumber := ref.Number.Uint64() - 1
+	refHash := ref.ParentHash
+	lastKnownNumber := refNumber
+	lastKnownHash := refHash
+
+	hashLookupCacheLock.Lock()
+	defer hashLookupCacheLock.Unlock()
+
+	if _, ok := hashLookupCache.Get(refNumber); !ok {
+		hashLookupCache.Add(refNumber, refHash)
+	}
 
 	return func(n uint64) (libcommon.Hash, error) {
-		cacheLock.Lock()
-		defer cacheLock.Unlock()
+		hashLookupCacheLock.Lock()
+		defer hashLookupCacheLock.Unlock()
 
-		if hash, ok := cache.Get(n); ok {
+		if n == lastKnownNumber {
+			//fmt.Println("GH-LN", n, refHash)
+			return lastKnownHash, nil
+		}
+
+		if n == refNumber {
+			//fmt.Println("GH-RF", n, refHash)
+			return refHash, nil
+		}
+
+		if hash, ok := hashLookupCache.Get(n); ok {
+			//fmt.Println("GH-CA", n, hash)
 			return hash, nil
 		}
 
+		if n > lastKnownNumber {
+			if n > refNumber {
+				return libcommon.Hash{}, fmt.Errorf("block number out of range: max=%d", refNumber)
+			}
+			lastKnownNumber = refNumber
+			lastKnownHash = refHash
+		}
+
 		for {
-			header, err := getHeader(lastKnownHash, lastKnownNumber)
+			for {
+				hash, ok := hashLookupCache.Get(lastKnownNumber - 1)
+
+				if !ok {
+					break
+				}
+
+				lastKnownHash = hash
+				lastKnownNumber = lastKnownNumber - 1
+				if n == lastKnownNumber {
+					//fmt.Println("GH-CA1", lastKnownNumber, lastKnownHash)
+					return lastKnownHash, nil
+				}
+			}
+
+			header, err := func() (*types.Header, error) {
+				hashLookupCacheLock.Unlock()
+				defer hashLookupCacheLock.Lock()
+				return getHeader(lastKnownHash, lastKnownNumber)
+			}()
+
 			if err != nil {
 				return libcommon.Hash{}, err
 			}
@@ -135,8 +184,10 @@ func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uin
 			}
 			lastKnownHash = header.ParentHash
 			lastKnownNumber = header.Number.Uint64() - 1
-			cache.Add(lastKnownNumber, lastKnownHash)
+			hashLookupCache.Add(lastKnownNumber, lastKnownHash)
+
 			if n == lastKnownNumber {
+				//fmt.Println("GH-DB", lastKnownNumber, lastKnownHash)
 				return lastKnownHash, nil
 			}
 		}
