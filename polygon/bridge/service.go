@@ -307,7 +307,7 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 	from := blocks[0].NumberU64()
 	s.logger.Debug(
 		bridgeLogPrefix("processing new blocks"),
-		"from", blocks[0].NumberU64(),
+		"from", from,
 		"to", blocks[len(blocks)-1].NumberU64(),
 		"lastProcessedBlockNum", lastProcessedBlockInfo.BlockNum,
 		"lastProcessedBlockTime", lastProcessedBlockInfo.BlockTime,
