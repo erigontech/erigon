@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/u256"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -821,16 +820,7 @@ func (p *TxPool) CountContent() (int, int, int) {
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
 }
 
-type slts struct {
-	Slots []TxnSlots `json:"slots"`
-}
-
-var slots = slts{
-	Slots: make([]TxnSlots, 0),
-}
-
 func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
-	slots.Slots = append(slots.Slots, newTxns)
 	if p.cfg.NoGossip {
 		// if no gossip, then
 		// disable adding remote transactions
@@ -842,15 +832,8 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	//	diagUpdate := diagnostics.IncommingTxnUpdate{}
 	for i, txn := range newTxns.Txns {
-
-		//		diagUpdate.Txns = append(diagUpdate.Txns, diagnostics.DiagTxn{Hash: txn.IDHash[:]})
-
 		hashS := string(txn.IDHash[:])
-		diagnostics.Send(diagnostics.IncommingTxnUpdate{
-			Txn: diagnostics.DiagTxn{Hash: txn.IDHash[:]},
-		})
 		_, ok := p.unprocessedRemoteByHash[hashS]
 		if ok {
 			continue
@@ -858,8 +841,6 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 		p.unprocessedRemoteByHash[hashS] = len(p.unprocessedRemoteTxns.Txns)
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 	}
-
-	//diagnostics.Send(diagUpdate)
 }
 
 func toBlobs(_blobs [][]byte) []gokzg4844.Blob {
@@ -1899,9 +1880,6 @@ func (p *TxPool) Run(ctx context.Context) error {
 	logEvery := time.NewTicker(p.cfg.LogEvery)
 	defer logEvery.Stop()
 
-	saveToFile := time.NewTicker(100 * time.Second)
-	defer saveToFile.Stop()
-
 	if err := p.start(ctx); err != nil {
 		p.logger.Error("[txpool] Failed to start", "err", err)
 		return err
@@ -1916,8 +1894,6 @@ func (p *TxPool) Run(ctx context.Context) error {
 				err = fmt.Errorf("%w: %w", flushErr, err)
 			}
 			return err
-		case <-saveToFile.C:
-			writeJSONToFile(slots, "/Volumes/DATA/newall.json")
 		case <-logEvery.C:
 			p.logStats()
 		case <-processRemoteTxnsEvery.C:
