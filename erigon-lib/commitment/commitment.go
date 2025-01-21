@@ -176,7 +176,6 @@ type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
-	updates   *etl.Collector
 	tmpdir    string
 }
 

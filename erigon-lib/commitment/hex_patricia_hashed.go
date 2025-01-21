@@ -1765,7 +1765,7 @@ func (hph *HexPatriciaHashed) foldRow(prefix []byte, bitmap uint16, row, depth, 
 	}
 	branchRoot = hph.keccak2.Sum(nil)
 	if hph.trace {
-		fmt.Printf("} [%x]\n", branchRoot[:])
+		fmt.Printf("} [%x]\n", branchRoot)
 	}
 	// branchRoot = make([]byte, length.Hash)
 	// if _, err := hph.keccak2.Read(branchRoot[:0]); err != nil {
