@@ -8,8 +8,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-const DatastreamVersion = 2
-
 type Zk struct {
 	L2ChainId                              uint64
 	L2RpcUrl                               string

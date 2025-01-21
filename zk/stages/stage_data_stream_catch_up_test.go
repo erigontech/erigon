@@ -68,7 +68,6 @@ func TestSpawnStageDataStreamCatchup(t *testing.T) {
 	require.NoError(t, err)
 
 	chainID := uint64(1)
-	// streamVersion := 1
 
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
