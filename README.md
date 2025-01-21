@@ -196,7 +196,6 @@ For a full explanation of the config options, see below:
 - `zkevm.address-ger-manager`: The address for the GER manager contract
 - `zkevm.data-stream-port`: Port for the data stream.  This needs to be set to enable the datastream server
 - `zkevm.data-stream-host`: The host for the data stream i.e. `localhost`.  This must be set to enable the datastream server
-- `zkevm.datastream-version:` Version of the data stream protocol.
 - `http.api`: List of enabled HTTP API modules.
 
 Sequencer specific config:

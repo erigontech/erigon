@@ -21,7 +21,7 @@ zkevm.l1-rollup-id: 1
 zkevm.l1-first-block: 4794475
 txpool.disable: true
 torrent.port: 42070
-zkevm.datastream-version: 2
+ 
 
 # debug.timers: true # Uncomment to enable timers
 
