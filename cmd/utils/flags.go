@@ -849,6 +849,16 @@ var (
 		Usage: "The maximum number of times a transaction that consumes too many counters to fit into a batch will be attempted before it is rejected outright by eth_sendRawTransaction",
 		Value: 2,
 	}
+	SyncLimitVerifiedEnabled = cli.BoolFlag{
+		Name:  "zkevm.sync-limit-verified-enabled",
+		Usage: "Enable sync to verified batch height.",
+		Value: false,
+	}
+	SyncLimitUnverifiedCount = cli.UintFlag{
+		Name:  "zkevm.sync-limit-unverified-count",
+		Usage: "The number of unverified batches to sync to past verified batch height. Used in combination with zkevm.sync-limit-verified-enabled. Default 5.",
+		Value: 5,
+	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
 		Usage: "Number of entries to print from the ACL history on node start up",

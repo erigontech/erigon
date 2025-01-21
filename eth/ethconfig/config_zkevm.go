@@ -77,12 +77,14 @@ type Zk struct {
 	PanicOnReorg                           bool
 	ShadowSequencer                        bool
 
-	RebuildTreeAfter      uint64
-	IncrementTreeAlways   bool
-	SmtRegenerateInMemory bool
-	WitnessFull           bool
-	SyncLimit             uint64
-	Gasless               bool
+	RebuildTreeAfter         uint64
+	IncrementTreeAlways      bool
+	SmtRegenerateInMemory    bool
+	WitnessFull              bool
+	SyncLimit                uint64
+	SyncLimitVerifiedEnabled bool
+	SyncLimitUnverifiedCount uint64
+	Gasless                  bool
 
 	DebugTimers    bool
 	DebugNoSync    bool

@@ -484,6 +484,11 @@ func (p *BatchesProcessor) LastBlockHeight() uint64 {
 func (p *BatchesProcessor) HighestSeenBatchNumber() uint64 {
 	return p.highestSeenBatchNo
 }
+
+func (p *BatchesProcessor) HighestVerifiedBatchNumber() uint64 {
+	return p.highestVerifiedBatch
+}
+
 func (p *BatchesProcessor) LastForkId() uint64 {
 	return p.lastForkId
 }

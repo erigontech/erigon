@@ -176,10 +176,22 @@ func SpawnStageBatches(
 		return nil
 	}
 
+	reader := hermez_db.NewHermezDbReader(tx)
+	highestVerifiedBatch, err := reader.GetLatestVerification()
+	if err != nil {
+		return fmt.Errorf("GetLatestVerification: %w", err)
+	}
+
 	// get batch for batches progress
 	stageProgressBatchNo, err := hermezDb.GetBatchNoByL2Block(stageProgressBlockNo)
 	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
 		return fmt.Errorf("GetBatchNoByL2Block: %w", err)
+	}
+
+	if cfg.zkCfg.SyncLimitVerifiedEnabled && stageProgressBatchNo >= highestVerifiedBatch.BatchNo+cfg.zkCfg.SyncLimitUnverifiedCount {
+		log.Info(fmt.Sprintf("[%s] Verified batch sync limit reached", logPrefix), "highestVerifiedBatch", highestVerifiedBatch, "stageProgressBatchNo", stageProgressBatchNo)
+		time.Sleep(2 * time.Second)
+		return nil
 	}
 
 	startSyncTime := time.Now()
@@ -303,6 +315,11 @@ func SpawnStageBatches(
 		case entry := <-*entryChan:
 			// DEBUG LIMIT - don't write more than we need to
 			if cfg.zkCfg.DebugLimit > 0 && batchProcessor.LastBlockHeight() >= cfg.zkCfg.DebugLimit {
+				endLoop = true
+				break
+			}
+			// Highest Verified Batch Limit + configurable amount of unverified batches
+			if cfg.zkCfg.SyncLimitVerifiedEnabled && batchProcessor.HighestSeenBatchNumber() >= batchProcessor.HighestVerifiedBatchNumber()+cfg.zkCfg.SyncLimitUnverifiedCount {
 				endLoop = true
 				break
 			}
