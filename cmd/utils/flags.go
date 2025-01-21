@@ -819,10 +819,15 @@ var (
 		Usage: "Enable witness cache",
 		Value: false,
 	}
-	WitnessCacheLimit = cli.UintFlag{
-		Name:  "zkevm.witness-cache-limit",
-		Usage: "Amount of blocks behind the last executed one to keep witnesses for. Needs a lot of HDD space. Default value 10 000.",
-		Value: 10000,
+	WitnessCachePurge = cli.BoolFlag{
+		Name:  "zkevm.witness-cache-purge",
+		Usage: "Purge the witness cache on startup. Default false.",
+		Value: false,
+	}
+	WitnessCacheBatchOffset = cli.UintFlag{
+		Name:  "zkevm.witness-cache-batch-offset",
+		Usage: "How many batches behind the highest verified batch to cache. Default 5.",
+		Value: 5,
 	}
 	WitnessContractInclusion = cli.StringFlag{
 		Name:  "zkevm.witness-contract-inclusion",
@@ -843,6 +848,16 @@ var (
 		Name:  "zkevm.bad-tx-allowance",
 		Usage: "The maximum number of times a transaction that consumes too many counters to fit into a batch will be attempted before it is rejected outright by eth_sendRawTransaction",
 		Value: 2,
+	}
+	SyncLimitVerifiedEnabled = cli.BoolFlag{
+		Name:  "zkevm.sync-limit-verified-enabled",
+		Usage: "Enable sync to verified batch height.",
+		Value: false,
+	}
+	SyncLimitUnverifiedCount = cli.UintFlag{
+		Name:  "zkevm.sync-limit-unverified-count",
+		Usage: "The number of unverified batches to sync to past verified batch height. Used in combination with zkevm.sync-limit-verified-enabled. Default 5.",
+		Value: 5,
 	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",

@@ -1912,8 +1912,8 @@ func (db *HermezDb) WriteWitnessCache(blockNo uint64, witnessBytes []byte) error
 	return db.tx.Put(WITNESS_CACHE, key, witnessBytes)
 }
 
-func (db *HermezDbReader) GetWitnessCache(blockNo uint64) ([]byte, error) {
-	v, err := db.tx.GetOne(WITNESS_CACHE, Uint64ToBytes(blockNo))
+func (db *HermezDbReader) GetWitnessCache(batchNo uint64) ([]byte, error) {
+	v, err := db.tx.GetOne(WITNESS_CACHE, Uint64ToBytes(batchNo))
 	if err != nil {
 		return nil, err
 	}
@@ -1922,4 +1922,43 @@ func (db *HermezDbReader) GetWitnessCache(blockNo uint64) ([]byte, error) {
 
 func (db *HermezDb) DeleteWitnessCaches(from, to uint64) error {
 	return db.deleteFromBucketWithUintKeysRange(WITNESS_CACHE, from, to)
+}
+
+func (db *HermezDb) PurgeWitnessCaches() error {
+	return db.tx.ClearBucket(WITNESS_CACHE)
+}
+
+func (db *HermezDbReader) GetLatestCachedWitnessBatchNo() (uint64, error) {
+	c, err := db.tx.Cursor(WITNESS_CACHE)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+
+	k, _, err := c.Last()
+	if err != nil {
+		return 0, err
+	}
+
+	return BytesToUint64(k), nil
+}
+
+func (db *HermezDb) TruncateWitnessCacheBelow(below uint64) error {
+	c, err := db.tx.Cursor(WITNESS_CACHE)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, _, err := c.SeekExact(Uint64ToBytes(below - 1)); k != nil; k, _, err = c.Prev() {
+		if err != nil {
+			return err
+		}
+
+		if err = db.tx.Delete(WITNESS_CACHE, k); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

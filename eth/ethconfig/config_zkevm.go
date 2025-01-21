@@ -76,12 +76,14 @@ type Zk struct {
 	PanicOnReorg                           bool
 	ShadowSequencer                        bool
 
-	RebuildTreeAfter      uint64
-	IncrementTreeAlways   bool
-	SmtRegenerateInMemory bool
-	WitnessFull           bool
-	SyncLimit             uint64
-	Gasless               bool
+	RebuildTreeAfter         uint64
+	IncrementTreeAlways      bool
+	SmtRegenerateInMemory    bool
+	WitnessFull              bool
+	SyncLimit                uint64
+	SyncLimitVerifiedEnabled bool
+	SyncLimitUnverifiedCount uint64
+	Gasless                  bool
 
 	DebugTimers    bool
 	DebugNoSync    bool
@@ -104,7 +106,8 @@ type Zk struct {
 	SealBatchImmediatelyOnOverflow bool
 	MockWitnessGeneration          bool
 	WitnessCacheEnabled            bool
-	WitnessCacheLimit              uint64
+	WitnessCachePurge              bool
+	WitnessCacheBatchOffset        uint64
 	WitnessContractInclusion       []common.Address
 	RejectLowGasPriceTransactions  bool
 	RejectLowGasPriceTolerance     float64
