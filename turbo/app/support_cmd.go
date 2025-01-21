@@ -278,14 +278,24 @@ func establishConnection(ctx context.Context, diagnosticsUrl string) (*websocket
 		WriteBufferPool: wsBufferPool,
 	}
 
-	conn, resp, err := dialer.DialContext(ctx, "wss://"+diagnosticsUrl, nil)
+	var conn *websocket.Conn
+	var resp *http.Response
+	var err error
 
+	// Attempt to establish a secure WebSocket connection (wss://)
+	conn, resp, err = dialer.DialContext(ctx, "wss://"+diagnosticsUrl, nil)
 	if err != nil {
 		conn, resp, err = dialer.DialContext(ctx, "ws://"+diagnosticsUrl, nil)
+	}
 
-		if err != nil {
-			return nil, err
+	defer func() {
+		if resp != nil {
+			resp.Body.Close()
 		}
+	}()
+
+	if err != nil {
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
@@ -485,7 +495,8 @@ func (nc *nodeConnection) connectSocket(requestId string) error {
 	}
 
 	socketURL := strings.Replace(nc.debugURL, "http://", "ws://", 1) + "/debug/diag/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(socketURL, nil)
+	conn, resp, err := websocket.DefaultDialer.Dial(socketURL, nil)
+	defer resp.Body.Close()
 	if err != nil {
 		return err
 	}
