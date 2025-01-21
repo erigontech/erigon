@@ -62,7 +62,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	var blobBaseFee *uint256.Int
 	if header.ExcessBlobGas != nil {
 		var err error
-		blobBaseFee, err = misc.GetBlobGasPrice(config, *header.ExcessBlobGas)
+		blobBaseFee, err = misc.GetBlobGasPrice(config, *header.ExcessBlobGas, header.Time)
 		if err != nil {
 			panic(err)
 		}

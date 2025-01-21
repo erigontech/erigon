@@ -147,13 +147,6 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 		if executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
 		}
-	} else {
-		if executionRequests == nil {
-			return &rpc.InvalidParamsError{Message: "missing requests list"}
-		}
-		if len(executionRequests) != len(types.KnownRequestTypes) {
-			return &rpc.InvalidParamsError{Message: "invalid requests lists"}
-		}
 	}
 	return nil
 }
@@ -215,12 +208,12 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, err
 	}
 	if version >= clparams.ElectraVersion {
-		requests = make(types.FlatRequests, len(types.KnownRequestTypes))
-		for i, r := range types.KnownRequestTypes {
-			if len(executionRequests) == i {
-				executionRequests = append(executionRequests, []byte{})
+		requests = make(types.FlatRequests, 0)
+		for i, r := range executionRequests {
+			if len(r) <= 1 {
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("Invalid Request at index %d", i)}
 			}
-			requests[i] = types.FlatRequest{Type: r, RequestData: executionRequests[i]}
+			requests = append(requests, types.FlatRequest{Type: r[0], RequestData: r})
 		}
 		rh := requests.Hash()
 		header.RequestsHash = rh
@@ -280,7 +273,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
-		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(), s.config.GetMaxBlobsPerBlock(), expectedBlobHashes, &transactions)
+		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time), s.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions)
 		if errors.Is(err, ethutils.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
@@ -499,16 +492,9 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	data := resp.Data
 	var executionRequests []hexutility.Bytes
 	if version >= clparams.ElectraVersion {
-		executionRequests = make([]hexutility.Bytes, len(types.KnownRequestTypes))
-		if len(data.Requests.Requests) != 3 {
-			s.logger.Warn("Error in getPayload - data.Requests.Requests len not 3")
-		}
-		for i := 0; i < len(types.KnownRequestTypes); i++ {
-			if len(data.Requests.Requests) < i+1 || data.Requests.Requests[i] == nil {
-				executionRequests[i] = make(hexutility.Bytes, 0)
-			} else {
-				executionRequests[i] = data.Requests.Requests[i]
-			}
+		executionRequests = make([]hexutility.Bytes, 0)
+		for _, r := range data.Requests.Requests {
+			executionRequests = append(executionRequests, r)
 		}
 	}
 

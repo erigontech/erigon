@@ -21,14 +21,32 @@ import (
 
 // shouldProcessBlobs checks if any block in the given list of blocks
 // has a version greater than or equal to DenebVersion and contains BlobKzgCommitments.
-func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock) bool {
+func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
+	blobsExist := false
+	highestSlot := blocks[0].Block.Slot
 	for _, block := range blocks {
 		// Check if block version is greater than or equal to DenebVersion and contains BlobKzgCommitments
 		if block.Version() >= clparams.DenebVersion && block.Block.Body.BlobKzgCommitments.Len() > 0 {
-			return true
+			blobsExist = true
+		}
+		if block.Block.Slot > highestSlot {
+			highestSlot = block.Block.Slot
 		}
 	}
-	return false
+	// Check if the requested blocks are too old to request blobs
+	// https://github.com/ethereum/consensus-specs/blob/dev/specs/deneb/p2p-interface.md#the-reqresp-domain
+	highestEpoch := highestSlot / cfg.beaconCfg.SlotsPerEpoch
+	currentEpoch := cfg.ethClock.GetCurrentEpoch()
+	minEpochDist := uint64(0)
+	if currentEpoch > cfg.beaconCfg.MinEpochsForBlobsSidecarsRequest {
+		minEpochDist = currentEpoch - cfg.beaconCfg.MinEpochsForBlobsSidecarsRequest
+	}
+	finalizedEpoch := currentEpoch - 2
+	if highestEpoch < max(cfg.beaconCfg.DenebForkEpoch, minEpochDist, finalizedEpoch) {
+		return false
+	}
+
+	return blobsExist
 }
 
 // downloadAndProcessEip4844DA handles downloading and processing of EIP-4844 data availability blobs.
@@ -47,7 +65,6 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 		err = fmt.Errorf("failed to get blob identifiers: %w", err)
 		return
 	}
-
 	// If there are no blobs to retrieve, return the highest slot processed
 	if ids.Len() == 0 {
 		return highestSlotProcessed, nil
@@ -62,7 +79,6 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 	}
 
 	var highestProcessed, inserted uint64
-
 	// Verify and insert blobs into the blob store
 	if highestProcessed, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
 		// Ban the peer if verification fails
@@ -71,7 +87,6 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 		err = fmt.Errorf("failed to verify blobs: %w", err)
 		return
 	}
-
 	// If all blobs were inserted successfully, return the highest processed slot
 	if inserted == uint64(ids.Len()) {
 		return highestProcessed, nil
@@ -183,13 +198,11 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			logger.Warn("[Caplin] Failed to process block batch", "err", err)
 			return initialHighestSlotProcessed, err
 		}
-
 		// Exit if we are pre-EIP-4844
-		if !shouldProcessBlobs(blocks) {
+		if !shouldProcessBlobs(blocks, cfg) {
 			currentSlot.Store(highestSlotProcessed)
 			return highestSlotProcessed, nil
 		}
-
 		// Process blobs for EIP-4844
 		highestBlobSlotProcessed, err := downloadAndProcessEip4844DA(ctx, logger, cfg, initialHighestSlotProcessed, blocks)
 		if err != nil {
@@ -211,7 +224,6 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	// Run the log loop until the highest processed slot reaches the chain tip slot
 	for downloader.GetHighestProcessedSlot() < chainTipSlot {
 		downloader.RequestMore(ctx)
-
 		select {
 		case <-ctx.Done():
 			// Return if the context is done

@@ -119,8 +119,15 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 			F: func() {
 				s.seenSyncCommitteeMessages.Store(seenSyncCommitteeMessageIdentifier, struct{}{})
 				s.cleanupOldSyncCommitteeMessages() // cleanup old messages
-				// Aggregate the message
-				s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
+				// ImmediateVerification is sequential so using the headState directly is safe
+				if msg.ImmediateVerification {
+					s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
+				} else {
+					// ImmediateVerification=false is parallel so using the headState directly is unsafe
+					s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+						return s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
+					})
+				}
 			},
 		}
 
