@@ -27,14 +27,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 )
 
-func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
-	b.SetParallelism(1)
-
-	rnd := rand.New(rand.NewSource(133777))
-	keysCount := rnd.Intn(100_0000)
-
+func buildUpdates(b *testing.B, mode Mode) (*MockState, *Updates, [][]byte, []Update) {
+	keysCount := 4_000_000
 	// generate updates
 	b.Logf("keys count: %d", keysCount)
+	rnd := rand.New(rand.NewSource(133777))
 	builder := NewUpdateBuilder()
 	for i := 0; i < keysCount; i++ {
 		key := make([]byte, length.Addr)
@@ -47,21 +44,30 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	ms := NewMockState(&testing.T{})
 	err := ms.applyPlainUpdates(pk, updates)
 	require.NoError(b, err)
+	upds := WrapKeyUpdates(b, mode, KeyToHexNibbleHash, nil, nil)
+	return ms, upds, pk, updates
+}
 
-	hph := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
-	upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, nil, nil)
+func Benchmark_HexPatriciaHashed_Process_ModeDirect(b *testing.B) {
+	b.SetParallelism(1)
+	mockState, upds, pk, updates := buildUpdates(b, ModeDirect)
 	defer upds.Close()
-
 	b.ResetTimer()
-
+	WrapKeyUpdatesInto(b, upds, pk, updates)
+	hph := NewHexPatriciaHashed(length.Addr, mockState, mockState.TempDir())
 	ctx := context.Background()
-	for i := 0; i < b.N; i++ {
-		if i+5 >= len(pk) {
-			i = 0
-		}
+	_, err := hph.Process(ctx, upds, "")
+	require.NoError(b, err)
+}
 
-		WrapKeyUpdatesInto(b, upds, pk[i:i+5], updates[i:i+5])
-		_, err := hph.Process(ctx, upds, "")
-		require.NoError(b, err)
-	}
+func Benchmark_HexPatriciaHashed_Process_ModeInMemory(b *testing.B) {
+	b.SetParallelism(1)
+	mockState, upds, pk, updates := buildUpdates(b, ModeInMemory)
+	defer upds.Close()
+	b.ResetTimer()
+	WrapKeyUpdatesInto(b, upds, pk, updates)
+	hph := NewHexPatriciaHashed(length.Addr, mockState, mockState.TempDir())
+	ctx := context.Background()
+	_, err := hph.Process(ctx, upds, "")
+	require.NoError(b, err)
 }

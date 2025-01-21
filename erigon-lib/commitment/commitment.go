@@ -23,8 +23,10 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/holiman/uint256"
@@ -930,6 +932,7 @@ const (
 	ModeDisabled Mode = 0
 	ModeDirect   Mode = 1
 	ModeUpdate   Mode = 2
+	ModeInMemory Mode = 3 // hashsort of updated keys happens in-memory , without use of ETL
 )
 
 func (m Mode) String() string {
@@ -940,6 +943,8 @@ func (m Mode) String() string {
 		return "direct"
 	case ModeUpdate:
 		return "update"
+	case ModeInMemory:
+		return "in-memory"
 	default:
 		return "unknown"
 	}
@@ -952,6 +957,8 @@ func ParseCommitmentMode(s string) Mode {
 		mode = ModeDisabled
 	case "update":
 		mode = ModeUpdate
+	case "in-memory":
+		mode = ModeInMemory
 	default:
 		mode = ModeDirect
 	}
@@ -982,6 +989,9 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	if t.mode == ModeDirect {
 		t.keys = make(map[string]struct{})
 		t.initCollector()
+
+	} else if t.mode == ModeInMemory {
+		t.keys = make(map[string]struct{})
 	} else if t.mode == ModeUpdate {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
 	}
@@ -994,6 +1004,8 @@ func (t *Updates) SetMode(m Mode) {
 		t.initCollector()
 	} else if t.mode == ModeUpdate && t.tree == nil {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+	} else if t.Mode() == ModeUpdate && t.keys == nil {
+		t.keys = make(map[string]struct{})
 	}
 	t.Reset()
 }
@@ -1012,7 +1024,7 @@ func (t *Updates) Mode() Mode { return t.mode }
 
 func (t *Updates) Size() (updates uint64) {
 	switch t.mode {
-	case ModeDirect:
+	case ModeDirect, ModeInMemory:
 		return uint64(len(t.keys))
 	case ModeUpdate:
 		return uint64(t.tree.Len())
@@ -1046,6 +1058,10 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			if err := t.etl.Collect(t.hasher(keyBytes), keyBytes); err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
+			t.keys[key] = struct{}{}
+		}
+	case ModeInMemory:
+		if _, ok := t.keys[key]; !ok {
 			t.keys[key] = struct{}{}
 		}
 	default:
@@ -1116,6 +1132,50 @@ func (t *Updates) Close() {
 	}
 }
 
+type keyWithHash struct {
+	key       []byte   //plainkey
+	hashedKey [64]byte // nibblized hash
+}
+
+func hashKeysConcurrently(keys []string, hasher keyHasher) []*keyWithHash {
+	keysWithHash := make([]*keyWithHash, len(keys))
+	numWorkers := 8 // hardcoded for now
+	// Split the keys slice into chunks and process in parallel.
+	chunkSize := (len(keys) + numWorkers - 1) / numWorkers
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		start := w * chunkSize
+		end := start + chunkSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		if start >= end {
+			break
+		}
+
+		wg.Add(1)
+		go func(start, end int) {
+			defer wg.Done()
+
+			for i := start; i < end; i++ {
+				key := keys[i]
+				keyBytes := toBytesZeroCopy(key)
+				hashBytes := hasher(keyBytes)
+
+				keysWithHash[i] = &keyWithHash{
+					key:       keyBytes,
+					hashedKey: [64]byte(hashBytes),
+				}
+			}
+		}(start, end)
+	}
+
+	// Wait for all workers to finish
+	wg.Wait()
+	return keysWithHash
+
+}
+
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
 func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
@@ -1144,6 +1204,24 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 			return true
 		})
 		t.tree.Clear(true)
+	case ModeInMemory:
+		keys := make([]string, 0, len(t.keys))
+		for key := range t.keys {
+			keys = append(keys, key)
+		}
+
+		keysWithHash := hashKeysConcurrently(keys, t.hasher) // hash plainkeys concurrently
+
+		// sort keys by lexicographycally by hash
+		slices.SortFunc(keysWithHash, func(a, b *keyWithHash) int {
+			return bytes.Compare(a.hashedKey[:], b.hashedKey[:])
+		})
+
+		for _, entry := range keysWithHash {
+			if err := fn(entry.hashedKey[:], entry.key, nil); err != nil {
+				return err
+			}
+		}
 	default:
 		return nil
 	}
