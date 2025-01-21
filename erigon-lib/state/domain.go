@@ -1215,6 +1215,9 @@ func (d *Domain) buildAccessor(ctx context.Context, fromStep, toStep uint64, dat
 }
 
 func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
+	if !d.IndexList.Has(AccessorBTree | AccessorExistence) {
+		return nil
+	}
 	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
 		var accessors []string
 		if d.IndexList.Has(AccessorBTree) {
