@@ -185,6 +185,11 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 		return s.handleWaypointExecutionErr(ctx, ccb.Root(), err)
 	}
 
+	s.logger.Info(
+		syncLogPrefix("resetting ccb to new tip after handling milestone mismatch"),
+		"num", newTip.Number.Uint64(),
+		"hash", newTip.Hash(),
+	)
 	ccb.Reset(newTip)
 	return nil
 }
