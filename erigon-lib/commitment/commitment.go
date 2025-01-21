@@ -32,7 +32,6 @@ import (
 	"github.com/google/btree"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
@@ -179,21 +178,11 @@ type BranchEncoder struct {
 	tmpdir    string
 }
 
-func NewBranchEncoder(sz uint64, tmpdir string) *BranchEncoder {
-	be := &BranchEncoder{
+func NewBranchEncoder(sz uint64) *BranchEncoder {
+	return &BranchEncoder{
 		buf:    bytes.NewBuffer(make([]byte, sz)),
-		tmpdir: tmpdir,
 		merger: NewHexBranchMerger(sz / 2),
 	}
-	//be.initCollector()
-	return be
-}
-
-func (be *BranchEncoder) CollectDeletion(ctx PatriciaContext, prefix []byte, tm uint16) (err error) {
-	if err = be.encodeMaps(tm, 0); err != nil {
-		return err
-	}
-	return ctx.PutBranch(common.Copy(prefix), common.Copy(be.buf.Bytes()), nil, 0)
 }
 
 func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
@@ -255,16 +244,37 @@ func (cell *cell) EncodeInto(be *BranchEncoder) error {
 	return nil
 }
 
-// also resets be.buf before writing
+// EncodeDelete encodes deleted branch with given touchMap.
+// Returned slice is valid until next call to encodeMaps/Reset()
+func (be *BranchEncoder) EncodeDelete(tm uint16) ([]byte, error) {
+	if err := be.encodeMaps(tm, 0); err != nil {
+		return nil, err
+	}
+	return be.EncodedBranch(), nil
+}
+
+// Each branch begins with 4 bytes bitmap (touchMap, afterMap).
+// encodeMaps resets be.buf and encodes them into be.buf
 func (be *BranchEncoder) encodeMaps(touchMap, afterMap uint16) error {
 	binary.BigEndian.PutUint16(be.bitmapBuf[:], touchMap)
 	binary.BigEndian.PutUint16(be.bitmapBuf[2:], afterMap)
+
 	be.buf.Reset()
+
 	if _, err := be.buf.Write(be.bitmapBuf[:4]); err != nil {
+		be.buf.Reset()
 		return err
 	}
 	return nil
 }
+
+// Cells in branch comes one by one without mentionting the nibble
+func (be *BranchEncoder) encodeCell(c *cell) error { return c.EncodeInto(be) }
+
+// Returned slice is valid until next call to encodeMaps/be.Reset()
+func (be *BranchEncoder) EncodedBranch() []byte { return be.buf.Bytes() }
+
+func (be *BranchEncoder) Reset() { be.buf.Reset() }
 
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
 // DEPRECATED

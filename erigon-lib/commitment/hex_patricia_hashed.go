@@ -26,7 +26,6 @@ import (
 	"hash"
 	"io"
 	"math/bits"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -102,7 +101,7 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string)
 		hadToLoadL:    make(map[uint64]skipStat),
 		accValBuf:     make(rlp.RlpEncodedBytes, 128),
 	}
-	hph.branchEncoder = NewBranchEncoder(1024, filepath.Join(tmpdir, "branch-encoder"))
+	hph.branchEncoder = NewBranchEncoder(1024)
 	return hph
 }
 
@@ -1554,7 +1553,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			row, updatedNibs(hph.touchMap[row]), depth, hph.currentKey[:hph.currentKeyLen], hph.touchMap[row], hph.afterMap[row])
 	}
 
+	var branchUpdate []byte
 	updateKind, nibblesLeftAfterUpdate := afterMapUpdateKind(hph.afterMap[row])
+
 	switch updateKind {
 	case updateKindDelete: // Everything deleted
 		if hph.touchMap[row] != 0 {
@@ -1575,10 +1576,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 		upCell.reset()
 		if hph.branchBefore[row] {
-			err = hph.branchEncoder.CollectDeletion(hph.ctx, updateKey, hph.touchMap[row])
-			// _, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			branchUpdate, err = hph.branchEncoder.EncodeDelete(hph.touchMap[row])
 			if err != nil {
-				return fmt.Errorf("failed to encode leaf node update: %w", err)
+				return fmt.Errorf("failed to encode deletion of pre-existed branch: %w", err)
 			}
 		}
 		hph.currentKeyLen = max(upDepth-1, 0)
@@ -1601,10 +1601,12 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 		if hph.branchBefore[row] { // encode Delete if prefix existed before
 			//fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
-			err = hph.branchEncoder.CollectDeletion(hph.ctx, updateKey, hph.touchMap[row])
-			// _, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			del, err := hph.branchEncoder.EncodeDelete(hph.touchMap[row])
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
+			}
+			if err = hph.ctx.PutBranch(common.Copy(updateKey), common.Copy(del), nil, 0); err != nil {
+				return fmt.Errorf("failed to collect leaf node update: %w", err)
 			}
 		}
 		if hph.trace {
@@ -1629,7 +1631,8 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			bitmap |= hph.afterMap[row]
 		}
 
-		upcellHash, err := hph.foldRow(updateKey, bitmap, row, depth, nibblesLeftAfterUpdate)
+		var branchRoot []byte
+		branchRoot, branchUpdate, err = hph.foldRow(bitmap, row, depth, nibblesLeftAfterUpdate)
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
@@ -1645,22 +1648,37 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		}
 		upCell.storageAddrLen = 0
 		upCell.hashLen = length.Hash
-		copy(upCell.hash[:], upcellHash)
+		copy(upCell.hash[:], branchRoot[:])
 
 		hph.currentKeyLen = max(upDepth-1, 0)
 		hph.activeRows--
 	}
+
+	// fetch previous branch data
+	prev, prevStep, err := hph.ctx.Branch(updateKey)
+	if err != nil {
+		return err
+	}
+	// skip if no changes
+	if len(prev) > 0 && bytes.Equal(prev, branchUpdate) {
+		return nil
+	}
+
+	// bot kv has to be copied :(
+	if err = hph.ctx.PutBranch(common.Copy(updateKey), common.Copy(branchUpdate), prev, prevStep); err != nil {
+		return fmt.Errorf("failed to collect trie update: %w", err)
+	}
+	mxTrieBranchesUpdated.Inc()
 	return nil
 }
 
-// can compare what is written for hashing and for branch in 2 different approaches
-func (hph *HexPatriciaHashed) foldRow(prefix []byte, bitmap uint16, row, depth, nibblesLeftAfterUpdate int) (branchRoot []byte, err error) {
+// folds branch row and providing branch hash along with latest encoded version of this branch at given row.
+func (hph *HexPatriciaHashed) foldRow(bitmap uint16, row, depth, nibblesLeftAfterUpdate int) (branchRoot, branchUpdate []byte, err error) {
 	touchMap := hph.touchMap[row]
-	afterMap := hph.afterMap[row]
+	afterMap := hph.afterMap[row] // can get nibblesLeftAfterUpdate from aftermap
 
 	toHash := make([]byte, 0, length.Hash*bits.OnesCount16(afterMap))
 	fill := func(lastNibble, until int) {
-		// bytes.Repeat(b []byte, count int)
 		for ; lastNibble < until; lastNibble++ {
 			toHash = append(toHash, 0x80)
 			if hph.trace {
@@ -1674,10 +1692,8 @@ func (hph *HexPatriciaHashed) foldRow(prefix []byte, bitmap uint16, row, depth, 
 			row, updatedNibs(bitmap), depth, hph.currentKey[:hph.currentKeyLen], hph.touchMap[row], hph.afterMap[row])
 	}
 
-	newBranchData := hph.branchEncoder.buf
-	newBranchData.Reset() // write branch data into buf
 	if err := hph.branchEncoder.encodeMaps(touchMap, afterMap); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var lastNibble int
@@ -1711,7 +1727,7 @@ func (hph *HexPatriciaHashed) foldRow(prefix []byte, bitmap uint16, row, depth, 
 			if !cell.loaded.account() && cell.accountAddrLen > 0 {
 				upd, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 				if err != nil {
-					return nil, fmt.Errorf("failed to get account: %w", err)
+					return nil, nil, fmt.Errorf("failed to get account: %w", err)
 				}
 				cell.setFromUpdate(upd)
 				// if update is empty, loaded flag was not updated so do it manually
@@ -1721,7 +1737,7 @@ func (hph *HexPatriciaHashed) foldRow(prefix []byte, bitmap uint16, row, depth, 
 			if !cell.loaded.storage() && cell.storageAddrLen > 0 {
 				upd, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
 				if err != nil {
-					return nil, fmt.Errorf("failed to get storage: %w", err)
+					return nil, nil, fmt.Errorf("failed to get storage: %w", err)
 				}
 				cell.setFromUpdate(upd)
 				// if update is empty, loaded flag was not updated so do it manually
@@ -1735,14 +1751,16 @@ func (hph *HexPatriciaHashed) foldRow(prefix []byte, bitmap uint16, row, depth, 
 
 		cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		totalBranchLen += hph.computeCellHashLen(cell, depth)
-		// totalBranchLen += len(cellHash)
+		// totalBranchLen += hph.computeCellHashLen(cell, depth)
+		totalBranchLen += len(cellHash)
+
 		toHash = append(toHash, cellHash...)
 		if afterMap&bit != 0 { // serialize cell data into branch
-			if err = hph.grid[row][nibble].EncodeInto(hph.branchEncoder); err != nil {
-				return nil, err
+			if err = hph.branchEncoder.encodeCell(&hph.grid[row][nibble]); err != nil {
+				// if err = hph.grid[row][nibble].EncodeInto(hph.branchEncoder); err != nil {
+				return nil, nil, err
 			}
 		}
 		if hph.trace {
@@ -1751,17 +1769,17 @@ func (hph *HexPatriciaHashed) foldRow(prefix []byte, bitmap uint16, row, depth, 
 		lastNibble = nibble + 1
 		bitset ^= bit
 	}
-	fill(lastNibble, 17)
+	fill(lastNibble, 17) // finish rest non-existing nibbles with 0x80
 
-	hph.keccak2.Reset()
+	hph.keccak2.Reset() // begin branch hash computation
 	pt := rlp.GenerateStructLen(hph.branchEncoder.bitmapBuf[:], totalBranchLen)
 	if _, err := hph.keccak2.Write(hph.branchEncoder.bitmapBuf[:pt]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// fmt.Printf("toHash [%x]%x\n", hph.branchEncoder.bitmapBuf[:pt], toHash)
 	if _, err := hph.keccak2.Write(toHash); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	branchRoot = hph.keccak2.Sum(nil)
 	if hph.trace {
@@ -1771,24 +1789,7 @@ func (hph *HexPatriciaHashed) foldRow(prefix []byte, bitmap uint16, row, depth, 
 	// if _, err := hph.keccak2.Read(branchRoot[:0]); err != nil {
 	// 	return nil, err
 	// }
-
-	// fetch previous branch data
-	prev, prevStep, err := hph.ctx.Branch(prefix)
-	if err != nil {
-		return nil, err
-	}
-	// skip if no changes
-	if len(prev) > 0 && bytes.Equal(prev, newBranchData.Bytes()) {
-		return branchRoot, nil
-	}
-
-	// store updated branch data, has to copy :(
-	if err = hph.ctx.PutBranch(common.Copy(prefix), common.Copy(newBranchData.Bytes()), prev, prevStep); err != nil {
-		// if err = hph.ctx.PutBranch(common.Copy(prefix), update, prev, prevStep); err != nil {
-		return nil, err
-	}
-	mxTrieBranchesUpdated.Inc()
-	return branchRoot, nil
+	return branchRoot, hph.branchEncoder.EncodedBranch(), nil
 }
 
 func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
