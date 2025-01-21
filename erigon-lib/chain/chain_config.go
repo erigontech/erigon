@@ -107,7 +107,7 @@ type BorConfig interface {
 	IsNapoli(num uint64) bool
 	GetNapoliBlock() *big.Int
 	IsAhmedabad(number uint64) bool
-	GeAhmedabadBlock() *big.Int
+	GetAhmedabadBlock() *big.Int
 	StateReceiverContractAddress() common.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
@@ -129,7 +129,7 @@ func (c *Config) String() string {
 			c.ChainID,
 			c.Bor.GetAgraBlock(),
 			c.Bor.GetNapoliBlock(),
-			c.Bor.GeAhmedabadBlock(),
+			c.Bor.GetAhmedabadBlock(),
 			engine,
 		)
 	}
