@@ -206,9 +206,6 @@ func (c *StreamClient) GetLatestL2Block() (l2Block *types.FullL2Block, err error
 		return nil, errors.New("context done - stopping")
 	default:
 	}
-	if err = c.stopStreamingIfStarted(); err != nil {
-		err = fmt.Errorf("stopStreamingIfStarted: %w", err)
-	}
 
 	fullBlock, err := c.getLatestL2Block()
 	if err != nil {
@@ -238,14 +235,6 @@ func (c *StreamClient) stopStreamingIfStarted() error {
 			return fmt.Errorf("sendStopCmd: %w", err)
 		}
 		c.setStreaming(false)
-	}
-
-	// empty the socket buffer
-	for {
-		c.conn.SetReadDeadline(time.Now().Add(1 * time.Millisecond))
-		if _, err := readBuffer(c.conn, 1000 /* arbitrary number*/); err != nil {
-			break
-		}
 	}
 
 	return nil

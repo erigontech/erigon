@@ -294,7 +294,10 @@ func SpawnStageBatches(
 	// start routine to download blocks and push them in a channel
 	errorChan := make(chan struct{})
 	dsClientRunner := NewDatastreamClientRunner(dsQueryClient, logPrefix)
-	dsClientRunner.StartRead(errorChan, highestDSL2Block-stageProgressBlockNo)
+	err = dsClientRunner.StartRead(errorChan, highestDSL2Block-stageProgressBlockNo)
+	if err != nil {
+		return fmt.Errorf("StartRead: %w", err)
+	}
 	defer dsClientRunner.StopRead()
 
 	entryChan := dsQueryClient.GetEntryChan()
@@ -847,13 +850,14 @@ func getHighestDSL2Block(ctx context.Context, batchCfg BatchesCfg, latestFork ui
 	if err == nil {
 		return highestBlock, nil
 	}
+	log.Warn("problem getting highest ds l2 block from sequencer rpc", "err", err)
 
 	// so something went wrong with the rpc call, let's try the older method,
 	// but we're going to open a new connection rather than use the one for syncing blocks.
 	// This is so we can keep the logic simple and just dispose of the connection when we're done
 	// greatly simplifying state juggling of the connection if it errors
 	dsClient := buildNewStreamClient(ctx, batchCfg, latestFork)
-	if err = dsClient.Start(); err != nil {
+	if err := dsClient.Start(); err != nil {
 		return 0, err
 	}
 	defer func() {
