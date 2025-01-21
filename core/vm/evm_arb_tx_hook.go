@@ -5,7 +5,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
@@ -69,11 +68,11 @@ func (p DefaultTxProcessor) ScheduledTxes() types.Transactions {
 	return types.Transactions{}
 }
 
-func (p DefaultTxProcessor) L1BlockNumber(blockCtx state.BlockContext) (uint64, error) {
+func (p DefaultTxProcessor) L1BlockNumber(blockCtx evmtypes.BlockContext) (uint64, error) {
 	return blockCtx.BlockNumber, nil
 }
 
-func (p DefaultTxProcessor) L1BlockHash(blockCtx state.BlockContext, l1BlocKNumber uint64) (common.Hash, error) {
+func (p DefaultTxProcessor) L1BlockHash(blockCtx evmtypes.BlockContext, l1BlocKNumber uint64) (common.Hash, error) {
 	return blockCtx.GetHash(l1BlocKNumber), nil
 }
 
