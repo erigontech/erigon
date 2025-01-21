@@ -125,18 +125,22 @@ func (c *Config) String() string {
 	engine := c.getEngine()
 
 	if c.Bor != nil {
-		return fmt.Sprintf("{ChainID: %v, Napoli: %v, Ahmedabad: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Engine: %v}",
 			c.ChainID,
+			c.Bor.GetAgraBlock(),
 			c.Bor.GetNapoliBlock(),
 			c.Bor.GeAhmedabadBlock(),
 			engine,
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Dencun: %v, Pectra: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, Engine: %v}",
 		c.ChainID,
+		c.TerminalTotalDifficulty,
+		timestampToTime(c.ShanghaiTime),
 		timestampToTime(c.CancunTime),
 		timestampToTime(c.PragueTime),
+		timestampToTime(c.OsakaTime),
 		engine,
 	)
 }
