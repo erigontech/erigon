@@ -164,7 +164,7 @@ func (c *BorConfig) IsAhmedabad(number uint64) bool {
 	return isForked(c.AhmedabadBlock, number)
 }
 
-func (c *BorConfig) GeAhmedabadBlock() *big.Int {
+func (c *BorConfig) GetAhmedabadBlock() *big.Int {
 	return c.AhmedabadBlock
 }
 
