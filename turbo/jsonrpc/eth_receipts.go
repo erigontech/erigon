@@ -472,7 +472,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	if txn == nil && chainConfig.Bor != nil { //TODO: add tx gran here to.
+	if txn == nil && chainConfig.Bor != nil {
 		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
