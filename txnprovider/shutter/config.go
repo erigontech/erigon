@@ -23,12 +23,15 @@ import (
 	"github.com/multiformats/go-multiaddr"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 type Config struct {
 	P2pConfig
 	Enabled                          bool
 	InstanceId                       uint64
+	BeaconChainGenesisTimestamp      uint64
+	SecondsPerSlot                   uint64
 	SequencerContractAddress         string
 	ValidatorRegistryContractAddress string
 	KeyBroadcastContractAddress      string
@@ -76,6 +79,8 @@ var (
 	chiadoConfig = Config{
 		Enabled:                          true,
 		InstanceId:                       102_000,
+		BeaconChainGenesisTimestamp:      1665396300,
+		SecondsPerSlot:                   clparams.BeaconConfigs[clparams.ChiadoNetwork].SecondsPerSlot,
 		SequencerContractAddress:         "0x2aD8E2feB0ED5b2EC8e700edB725f120576994ed",
 		ValidatorRegistryContractAddress: "0xa9289A3Dd14FEBe10611119bE81E5d35eAaC3084",
 		KeyBroadcastContractAddress:      "0x9D31865BEffcE842FBd36CDA587aDDA8bef804B7",
@@ -93,6 +98,8 @@ var (
 	gnosisConfig = Config{
 		Enabled:                          true,
 		InstanceId:                       1_000,
+		BeaconChainGenesisTimestamp:      1638993340,
+		SecondsPerSlot:                   clparams.BeaconConfigs[clparams.GnosisNetwork].SecondsPerSlot,
 		SequencerContractAddress:         "0xc5C4b277277A1A8401E0F039dfC49151bA64DC2E",
 		ValidatorRegistryContractAddress: "0xefCC23E71f6bA9B22C4D28F7588141d44496A6D6",
 		KeyBroadcastContractAddress:      "0x626dB87f9a9aC47070016A50e802dd5974341301",
