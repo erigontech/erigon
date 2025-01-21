@@ -828,7 +828,6 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 	defer addRemoteTxnsTimer.ObserveDuration(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
-
 	for i, txn := range newTxns.Txns {
 		hashS := string(txn.IDHash[:])
 		_, ok := p.unprocessedRemoteByHash[hashS]
@@ -1268,8 +1267,6 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 			}
 		}
 	}
-
-	//fmt.Println("Call!!!")
 
 	// This can be thought of a reverse operation from the one described before.
 	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
