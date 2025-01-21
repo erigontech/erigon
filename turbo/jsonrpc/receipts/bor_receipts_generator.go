@@ -95,7 +95,7 @@ func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, i
 		Type:              0,
 		CumulativeGasUsed: cumulativeGasUsed,
 		TxHash:            bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash()),
-		GasUsed:           cumulativeGasUsed,
+		GasUsed:           0,
 		BlockHash:         block.Hash(),
 		BlockNumber:       block.Number(),
 		TransactionIndex:  uint(numReceipts),
