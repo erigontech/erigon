@@ -438,7 +438,12 @@ func (s *Service) Unwind(ctx context.Context, blockNum uint64) error {
 		return errors.New("no last processed block info after unwind")
 	}
 
-	s.logger.Debug(bridgeLogPrefix("last processed block after unwind"), "info", lastProcessedBlockInfo)
+	s.logger.Debug(
+		bridgeLogPrefix("last processed block after unwind"),
+		"blockNum", lastProcessedBlockInfo.BlockNum,
+		"blockTime", lastProcessedBlockInfo.BlockTime,
+	)
+
 	s.lastProcessedBlockInfo.Store(&lastProcessedBlockInfo)
 	return nil
 }
