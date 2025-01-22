@@ -28,9 +28,6 @@ type EntityDefinition struct {
 }
 
 const (
-	versionProto         = 2 // converted to proto
-	versionAddedBlockEnd = 3 // Added block end
-
 	DefaultEntryChannelSize = 100000
 )
 
@@ -44,7 +41,6 @@ var (
 type StreamClient struct {
 	ctx          context.Context
 	server       string // Server address to connect IP:port
-	version      int
 	streamType   StreamType
 	conn         net.Conn
 	checkTimeout time.Duration // time to wait for data before reporting an error
@@ -91,12 +87,11 @@ const (
 
 // Creates a new client fo datastream
 // server must be in format "url:port"
-func NewClient(ctx context.Context, server string, useTLS bool, version int, checkTimeout time.Duration, latestDownloadedForkId uint16, maxEntryChanSize uint64) *StreamClient {
+func NewClient(ctx context.Context, server string, useTLS bool, checkTimeout time.Duration, latestDownloadedForkId uint16, maxEntryChanSize uint64) *StreamClient {
 	c := &StreamClient{
 		ctx:              ctx,
 		checkTimeout:     checkTimeout,
 		server:           server,
-		version:          version,
 		streamType:       StSequencer,
 		entryChan:        make(chan interface{}, 100000),
 		maxEntryChanSize: maxEntryChanSize,
@@ -114,10 +109,6 @@ func NewClient(ctx context.Context, server string, useTLS bool, version int, che
 	c.tlsConfig.ServerName = host
 
 	return c
-}
-
-func (c *StreamClient) IsVersion3() bool {
-	return c.version >= versionAddedBlockEnd
 }
 
 func (c *StreamClient) GetEntryChan() *chan interface{} {

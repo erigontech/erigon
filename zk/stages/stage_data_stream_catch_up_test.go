@@ -68,7 +68,6 @@ func TestSpawnStageDataStreamCatchup(t *testing.T) {
 	require.NoError(t, err)
 
 	chainID := uint64(1)
-	streamVersion := 1
 
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
@@ -89,7 +88,7 @@ func TestSpawnStageDataStreamCatchup(t *testing.T) {
 
 	dataStreamServerMock.EXPECT().WriteBlocksToStreamConsecutively(ctx, s.LogPrefix(), tx1, hDBReaderMatcher, uint64(1), uint64(20)).Return(nil)
 
-	cfg := StageDataStreamCatchupCfg(dataStreamServerMock, db1, chainID, streamVersion, true)
+	cfg := StageDataStreamCatchupCfg(dataStreamServerMock, db1, chainID, true)
 
 	// Act
 	err = SpawnStageDataStreamCatchup(s, ctx, tx1, cfg)

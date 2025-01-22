@@ -648,11 +648,6 @@ var (
 		Usage: "The maximum number of concurrent requests to the executor for getBatchWitness.",
 		Value: 1,
 	}
-	DatastreamVersionFlag = cli.IntFlag{
-		Name:  "zkevm.datastream-version",
-		Usage: "Stream version indicator 1: PreBigEndian, 2: BigEndian.",
-		Value: 2,
-	}
 	DataStreamPort = cli.UintFlag{
 		Name:  "zkevm.data-stream-port",
 		Usage: "Define the port used for the zkevm data stream",

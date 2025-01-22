@@ -52,6 +52,7 @@ runs:
         sed -i '/zkevm\.pool-manager-url/d' ./templates/cdk-erigon/config.yml
         sed -i '$a\zkevm.disable-virtual-counters: true' ./templates/cdk-erigon/config.yml
         sed -i '/zkevm.l2-datastreamer-timeout:/d' templates/cdk-erigon/config.yml
+        sed -i '/zkevm.datastream-version:/d' templates/cdk-erigon/config.yml
 
     - name: Create params.yml overrides
       working-directory: ./kurtosis-cdk

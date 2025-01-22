@@ -38,7 +38,6 @@ type Zk struct {
 	L1CachePort                            uint
 	RpcRateLimits                          int
 	RpcGetBatchWitnessConcurrencyLimit     int
-	DatastreamVersion                      int
 	SequencerBlockSealTime                 time.Duration
 	SequencerEmptyBlockSealTime            time.Duration
 	SequencerBatchSealTime                 time.Duration

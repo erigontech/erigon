@@ -23,7 +23,7 @@ zkevm.l1-query-delay: 6000
 zkevm.l1-first-block: 4789190
 txpool.disable: true
 torrent.port: 42070
-zkevm.datastream-version: 2
+ 
 
 # debug.timers: true # Uncomment to enable timers
 

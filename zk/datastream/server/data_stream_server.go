@@ -68,8 +68,11 @@ func NewZkEVMDataStreamServerFactory() *ZkEVMDataStreamServerFactory {
 	return &ZkEVMDataStreamServerFactory{}
 }
 
-func (f *ZkEVMDataStreamServerFactory) CreateStreamServer(port uint16, version uint8, systemID uint64, streamType datastreamer.StreamType, fileName string, writeTimeout time.Duration, inactivityTimeout time.Duration, inactivityCheckInterval time.Duration, cfg *dslog.Config) (StreamServer, error) {
-	return datastreamer.NewServer(port, version, systemID, streamType, fileName, writeTimeout, inactivityTimeout, inactivityCheckInterval, cfg)
+func (f *ZkEVMDataStreamServerFactory) CreateStreamServer(port uint16, systemID uint64, streamType datastreamer.StreamType, fileName string, writeTimeout time.Duration, inactivityTimeout time.Duration, inactivityCheckInterval time.Duration, cfg *dslog.Config) (StreamServer, error) {
+	// after we moved to protobuff encoding we no longer need to support multiple versions.
+	const datastreamVersion = 3
+	// the library still requires version as a input in it's arguments.
+	return datastreamer.NewServer(port, datastreamVersion, systemID, streamType, fileName, writeTimeout, inactivityTimeout, inactivityCheckInterval, cfg)
 }
 
 func (f *ZkEVMDataStreamServerFactory) CreateDataStreamServer(streamServer StreamServer, chainId uint64) DataStreamServer {
