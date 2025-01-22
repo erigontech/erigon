@@ -18,6 +18,7 @@ package state
 
 import (
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 )
 
@@ -43,18 +44,26 @@ func (b *CachingBeaconState) copyCachesInto(bs *CachingBeaconState) error {
 	if bs.publicKeyIndicies == nil {
 		bs.publicKeyIndicies = make(map[[48]byte]uint64)
 	}
+
+	// We regenerate public keys from the copied state to avoid concurrency issues.
 	for k, idx := range bs.publicKeyIndicies {
-		if otherIdx, ok := b.publicKeyIndicies[k]; ok {
-			if idx != otherIdx {
-				delete(bs.publicKeyIndicies, k)
-			}
-			continue
+		if idx >= uint64(b.ValidatorSet().Length()) {
+			delete(bs.publicKeyIndicies, k)
 		}
-		delete(bs.publicKeyIndicies, k)
+		pk := bs.ValidatorSet().Get(int(idx)).PublicKey()
+		if pk != k {
+			delete(bs.publicKeyIndicies, k)
+		}
 	}
-	for pk, index := range b.publicKeyIndicies {
-		bs.publicKeyIndicies[pk] = index
-	}
+	bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
+		pk := v.PublicKey()
+		if _, ok := bs.publicKeyIndicies[pk]; ok {
+			return true
+		}
+		bs.publicKeyIndicies[pk] = uint64(idx)
+		return true
+	})
+
 	// Sync caches
 	bs.activeValidatorsCache = copyLRU(bs.activeValidatorsCache, b.activeValidatorsCache)
 	bs.shuffledSetsCache = copyLRU(bs.shuffledSetsCache, b.shuffledSetsCache)
