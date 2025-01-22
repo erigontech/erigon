@@ -200,6 +200,13 @@ type IntraBlockStateArbitrum interface {
 	AddStylusPagesEver(new uint16)
 
 	HasSelfDestructed(addr common.Address) bool
+
+	RecordProgram(targets []WasmTarget, moduleHash common.Hash)
+
+	ActivatedAsm(target WasmTarget, moduleHash common.Hash) (asm []byte, err error)
+	WasmStore() kv.RwDB
+	WasmCacheTag() uint32
+	WasmTargets() []WasmTarget
 }
 
 func (s *IntraBlockState) ActivateWasm(moduleHash common.Hash, asmMap map[WasmTarget][]byte) {
@@ -310,49 +317,49 @@ func (s *IntraBlockState) GetSelfDestructs() []common.Address {
 	return selfDestructs
 }
 
-//// making the function public to be used by external tests
-//func ForEachStorage(s *IntraBlockState, addr common.Address, cb func(key, value common.Hash) bool) error {
-//	return forEachStorage(s, addr, cb)
-//}
-//
-//// moved here from statedb_test.go
-//func forEachStorage(s *IntraBlockState, addr common.Address, cb func(key, value common.Hash) bool) error {
-//	s.domains.IterateStoragePrefix(addr[:], cb)
-//	so := s.getStateObject(addr)
-//	if so == nil {
-//		return nil
-//	}
-//	tr, err := so.getTrie()
-//	if err != nil {
-//		return err
-//	}
-//	trieIt, err := tr.NodeIterator(nil)
-//	if err != nil {
-//		return err
-//	}
-//	it := trie.NewIterator(trieIt)
-//
-//	for it.Next() {
-//		key := common.BytesToHash(s.trie.GetKey(it.Key))
-//		if value, dirty := so.dirtyStorage[key]; dirty {
-//			if !cb(key, value) {
-//				return nil
-//			}
-//			continue
-//		}
-//
-//		if len(it.Value) > 0 {
-//			_, content, _, err := rlp.Split(it.Value)
-//			if err != nil {
-//				return err
-//			}
-//			if !cb(key, common.BytesToHash(content)) {
-//				return nil
-//			}
-//		}
-//	}
-//	return nil
-//}
+// making the function public to be used by external tests
+// func ForEachStorage(s *IntraBlockState, addr common.Address, cb func(key, value common.Hash) bool) error {
+// 	return forEachStorage(s, addr, cb)
+// }
+
+// moved here from statedb_test.go
+// func forEachStorage(s *IntraBlockState, addr common.Address, cb func(key, value common.Hash) bool) error {
+// 	s.domains.IterateStoragePrefix(addr[:], cb)
+// 	so := s.getStateObject(addr)
+// 	if so == nil {
+// 		return nil
+// 	}
+// 	tr, err := so.getTrie()
+// 	if err != nil {
+// 		return err
+// 	}
+// 	trieIt, err := tr.NodeIterator(nil)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	it := trie.NewIterator(trieIt)
+
+// 	for it.Next() {
+// 		key := common.BytesToHash(s.trie.GetKey(it.Key))
+// 		if value, dirty := so.dirtyStorage[key]; dirty {
+// 			if !cb(key, value) {
+// 				return nil
+// 			}
+// 			continue
+// 		}
+
+// 		if len(it.Value) > 0 {
+// 			_, content, _, err := rlp.Split(it.Value)
+// 			if err != nil {
+// 				return err
+// 			}
+// 			if !cb(key, common.BytesToHash(content)) {
+// 				return nil
+// 			}
+// 		}
+// 	}
+// 	return nil
+// }
 
 // maps moduleHash to activation info
 type UserWasms map[common.Hash]ActivatedWasm
@@ -436,4 +443,10 @@ func (s *IntraBlockState) HasSelfDestructed(addr common.Address) bool {
 		return stateObject.selfdestructed
 	}
 	return false
+}
+
+func (s *IntraBlockState) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
+	_, fn, ln, _ := runtime.Caller(1)
+	log.Warn("need shared domains and writer to calculate intermediate root", "caller", fmt.Sprintf("%s:%d", fn, ln))
+	return common.Hash{}
 }
