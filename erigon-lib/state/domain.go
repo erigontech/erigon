@@ -1223,7 +1223,7 @@ func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
 	})
 }
 
-func (d *Domain) missedHashAccessors() (l []*filesItem) {
+func (d *Domain) missedMapAccessors() (l []*filesItem) {
 	if !d.IndexList.Has(AccessorHashMap) {
 		return nil
 	}
@@ -1250,7 +1250,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 			return nil
 		})
 	}
-	for _, item := range d.missedHashAccessors() {
+	for _, item := range d.missedMapAccessors() {
 		if item.decompressor == nil {
 			log.Warn(fmt.Sprintf("[dbg] BuildMissedAccessors: item with nil decompressor %s %d-%d", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
 		}

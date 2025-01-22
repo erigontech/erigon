@@ -214,7 +214,7 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false, toTxNum))
 }
 
-func (ii *InvertedIndex) missedHashAccessors() (l []*filesItem) {
+func (ii *InvertedIndex) missedMapAccessors() (l []*filesItem) {
 	if !ii.indexList.Has(AccessorHashMap) {
 		return nil
 	}
@@ -235,7 +235,7 @@ func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *filesItem, p
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	for _, item := range ii.missedHashAccessors() {
+	for _, item := range ii.missedMapAccessors() {
 		item := item
 		g.Go(func() error {
 			return ii.buildEfAccessor(ctx, item, ps)

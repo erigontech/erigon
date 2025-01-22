@@ -314,7 +314,7 @@ func (ht *HistoryRoTx) Files() (res []string) {
 	return append(res, ht.iit.Files()...)
 }
 
-func (h *History) missedHashAccessors() (l []*filesItem) {
+func (h *History) missedMapAccessors() (l []*filesItem) {
 	if !h.indexList.Has(AccessorHashMap) {
 		return nil
 	}
@@ -431,7 +431,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps)
-	for _, item := range h.missedHashAccessors() {
+	for _, item := range h.missedMapAccessors() {
 		item := item
 		g.Go(func() error {
 			return h.buildVi(ctx, item, ps)
