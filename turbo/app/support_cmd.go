@@ -137,17 +137,20 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 // tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
 // needs to be called repeatedly to implement re-connect logic
 func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
+	ctx1, cancel1 := context.WithCancel(ctx)
+	defer cancel1()
+
 	go func() {
 		select {
 		case <-sigs:
 			logger.Info("Got interrupt, shutting down...")
-			cancel()
-		case <-ctx.Done():
+			cancel1()
+		case <-ctx1.Done():
 			logger.Info("Context done")
 		}
 	}()
 
-	codec, err := createCodec(ctx, diagnosticsUrl)
+	codec, err := createCodec(ctx1, diagnosticsUrl)
 	if err != nil {
 		return err
 	} else {
@@ -157,12 +160,12 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	metricsClient := &http.Client{}
 	defer metricsClient.CloseIdleConnections()
 
-	connections, _ := createConnections(ctx, &codec, metricsClient, debugURLs)
+	connections, _ := createConnections(ctx1, &codec, metricsClient, debugURLs)
 	if len(connections) == 0 {
 		return nil
 	}
 
-	err = sendNodesInfoToDiagnostics(ctx, codec, sessionIds, connections)
+	err = sendNodesInfoToDiagnostics(ctx1, codec, sessionIds, connections)
 	if err != nil {
 		return err
 	}
@@ -172,7 +175,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	for {
 		requests, _, err := codec.ReadBatch()
 		select {
-		case <-ctx.Done():
+		case <-ctx1.Done():
 			return nil
 		default:
 			if err != nil {
@@ -206,34 +209,50 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 					if isSubscribe(request.Method) {
 						err := conn.connectSocket(requestId)
 						if err != nil {
-							return sendErrorResponse(ctx, codec, requestId, http.StatusFailedDependency, fmt.Sprintf("Request for metrics method [%s] failed: %v", conn.debugURL, err))
+							return sendErrorResponse(ctx1, codec, requestId, http.StatusFailedDependency, fmt.Sprintf("Request for metrics method [%s] failed: %v", conn.debugURL, err))
 						}
 
-						return codec.WriteJSON(ctx, &nodeResponse{
+						fmt.Println("Subscribed to", conn.debugURL)
+						return codec.WriteJSON(ctx1, &nodeResponse{
 							Id:     requestId,
 							Result: json.RawMessage(`"subscribed"`),
 							Last:   false,
 						})
 					}
 
+					if isUnsubscribe(request.Method) {
+						err := conn.closeWebSocket()
+						if err != nil {
+							return sendErrorResponse(ctx1, codec, requestId, http.StatusFailedDependency, fmt.Sprintf("Request for metrics method [%s] failed: %v", conn.debugURL, err))
+						}
+
+						fmt.Println("Unsubscribed from", conn.debugURL)
+						nerr := codec.WriteJSON(ctx1, &nodeResponse{
+							Id:     requestId,
+							Result: json.RawMessage(`"unsubscribed"`),
+							Last:   true,
+						})
+						return nerr
+					}
+
 					debugURL := conn.debugURL + "/debug/diag/" + request.Method + queryString
 					debugResponse, err := metricsClient.Get(debugURL)
 					if err != nil {
-						return sendErrorResponse(ctx, codec, requestId, http.StatusFailedDependency, fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err))
+						return sendErrorResponse(ctx1, codec, requestId, http.StatusFailedDependency, fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err))
 					}
 					defer debugResponse.Body.Close()
 
 					if debugResponse.StatusCode != http.StatusOK {
 						body, _ := io.ReadAll(debugResponse.Body)
-						return sendErrorResponse(ctx, codec, requestId, int64(debugResponse.StatusCode), fmt.Sprintf("Request for metrics method [%s] failed: %s", debugURL, string(body)))
+						return sendErrorResponse(ctx1, codec, requestId, int64(debugResponse.StatusCode), fmt.Sprintf("Request for metrics method [%s] failed: %s", debugURL, string(body)))
 					}
 
 					buffer := &bytes.Buffer{}
 					if err := copyResponseBody(buffer, debugResponse); err != nil {
-						return sendErrorResponse(ctx, codec, requestId, http.StatusInternalServerError, fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err))
+						return sendErrorResponse(ctx1, codec, requestId, http.StatusInternalServerError, fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err))
 					}
 
-					return codec.WriteJSON(ctx, &nodeResponse{
+					return codec.WriteJSON(ctx1, &nodeResponse{
 						Id:     requestId,
 						Result: json.RawMessage(buffer.Bytes()),
 						Last:   true,
@@ -250,8 +269,13 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 
 // detect is the method is a txpool subscription
 // TODO: implementation of othere subscribtions (e.g. downloader)
+// TODO: change subscribe from plain string to something more structured
 func isSubscribe(method string) bool {
 	return method == "txpool/subscribe"
+}
+
+func isUnsubscribe(method string) bool {
+	return method == "txpool/unsubscribe"
 }
 
 /*
@@ -510,31 +534,42 @@ func (nc *nodeConnection) connectSocket(requestId string) error {
 }
 
 func (nc *nodeConnection) startListening() {
-	defer nc.close()
-
-	//Read messages from the node and stream it to the diagnostics system
 	for {
-		_, message, err := nc.connection.ReadMessage()
+		if nc.connection == nil {
+			fmt.Println("connection closed, exiting read loop")
+			return
+		}
+
+		_, _, err := nc.connection.ReadMessage()
 		if err != nil {
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) ||
+				websocket.IsUnexpectedCloseError(err) {
+				fmt.Println("Connection closed by peer:", err)
+				return
+			}
+
 			fmt.Println("Error reading message:", err)
 			return
 		}
 
-		err = (*nc.codec).WriteJSON(nc.ctx, &nodeResponse{
-			Id:     nc.requestId,
-			Result: json.RawMessage(message),
-			Last:   false,
-		})
-
-		if err != nil {
-			fmt.Println("Error writing message:", err)
-			return
-		}
+		fmt.Println("Received message")
+		//TODO: send message to diagnostics
 	}
 }
 
-func (nc *nodeConnection) close() {
-	if nc.connection != nil {
-		nc.connection.Close()
+func (nc *nodeConnection) closeWebSocket() error {
+	err := nc.connection.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "closing connection"))
+	if err != nil {
+		fmt.Printf("Failed to send close message: %v\n", err)
 	}
+
+	err = nc.connection.Close()
+	if err != nil {
+		fmt.Printf("Failed to close connection: %v\n", err)
+		return err
+	}
+
+	nc.connection = nil
+	fmt.Println("WebSocket connection closed successfully")
+	return nil
 }
