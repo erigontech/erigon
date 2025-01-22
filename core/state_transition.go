@@ -518,6 +518,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		}
 		st.gasRemaining = st.initialGas - gasUsed
 		st.refundGas()
+	} else {
+		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
 	}
 
 	effectiveTip := st.gasPrice
