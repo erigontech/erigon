@@ -1,0 +1,24 @@
+name: Security Tests
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+
+jobs:
+  run-security-tests:
+    name: Run Security Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup kurtosis
+        uses: ./.github/actions/setup-kurtosis
+
+      - name: Set up env vars
+        run: |
+          echo "RPC_URL=$(kurtosis port print cdk-v1 cdk-erigon-rpc-001 rpc)" >> $GITHUB_ENV  
+
+      - name: Pull Docker Image & Run Security Tests
+        run: docker run --rm -e RPC_URL=$RPC_URL c7toc5154/rnd_tests:latest pytest -m "security"
