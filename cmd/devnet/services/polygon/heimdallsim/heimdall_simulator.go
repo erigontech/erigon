@@ -95,7 +95,7 @@ func (noopBridgeStore) PutEvents(ctx context.Context, events []*heimdall.EventRe
 func (noopBridgeStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
 	return nil
 }
-func (noopBridgeStore) PutProcessedBlockInfo(ctx context.Context, info bridge.ProcessedBlockInfo) error {
+func (noopBridgeStore) PutProcessedBlockInfo(ctx context.Context, info []bridge.ProcessedBlockInfo) error {
 	return nil
 }
 func (noopBridgeStore) Unwind(ctx context.Context, blockNum uint64) error {
