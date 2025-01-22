@@ -498,22 +498,26 @@ func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
 			debugURL := nc.debugURL + "/debug/diag/" + action.method + "?" + action.queryParams.Encode()
 			debugResponse, err := metricsClient.Get(debugURL)
 			if err != nil {
-				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusFailedDependency, fmt.Sprintf("Request failed: %v", err))
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusFailedDependency, "Request failed: "+err.Error())
+				debugResponse.Body.Close()
 				continue
 			}
 
 			if debugResponse.StatusCode != http.StatusOK {
 				body, _ := io.ReadAll(debugResponse.Body)
-				nc.responseChannel <- errorResponseMessage(action.requestId, int64(debugResponse.StatusCode), fmt.Sprintf("Request failed: %s", string(body)))
+				nc.responseChannel <- errorResponseMessage(action.requestId, int64(debugResponse.StatusCode), "Request failed: "+string(body))
+				debugResponse.Body.Close()
 				continue
 			}
 
 			buffer := &bytes.Buffer{}
 			if err := copyResponseBody(buffer, debugResponse); err != nil {
-				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusInternalServerError, fmt.Sprintf("Request failed: %v", err))
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusInternalServerError, "Request failed: "+err.Error())
+				debugResponse.Body.Close()
 				continue
 			}
 
+			debugResponse.Body.Close()
 			nc.responseChannel <- nodeResponse{
 				Id:     action.requestId,
 				Result: json.RawMessage(buffer.Bytes()),
