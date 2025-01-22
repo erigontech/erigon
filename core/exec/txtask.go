@@ -61,7 +61,7 @@ type Task interface {
 
 	TxType() uint8
 	TxHash() libcommon.Hash
-	TxSender() *libcommon.Address
+	TxSender() (*libcommon.Address, error)
 	TxMessage() types.Message
 
 	BlockHash() libcommon.Hash
@@ -177,7 +177,6 @@ type TxTask struct {
 	Withdrawals        types.Withdrawals
 	Sender             *libcommon.Address
 	SkipAnalysis       bool
-	PruneNonEssentials bool
 	TxAsMessage        types.Message
 	EvmBlockContext    evmtypes.BlockContext
 	HistoryExecution   bool // use history reader for that txn instead of state reader
@@ -201,8 +200,22 @@ func (t *TxTask) TxHash() libcommon.Hash {
 	return t.Tx.Hash()
 }
 
-func (t *TxTask) TxSender() *libcommon.Address {
-	return t.Sender
+func (t *TxTask) TxSender() (*libcommon.Address, error) {
+	if t.sender != nil {
+		return t.sender, nil
+	}
+	if sender, ok := t.Tx.GetSender(); ok {
+		t.sender = &sender
+		return t.sender, nil
+	}
+	signer := *types.MakeSigner(t.Config, t.BlockNum, t.Header.Time)
+	sender, err := signer.Sender(t.Tx)
+	if err != nil {
+		return nil, err
+	}
+	t.sender = &sender
+	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNum, "txIdx", t.TxIndex)
+	return t.sender, nil
 }
 
 func (t *TxTask) TxMessage() types.Message {

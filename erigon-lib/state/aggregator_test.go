@@ -95,26 +95,26 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		require.EqualValues(t, length.Hash, n)
 
 		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(0), nil, 0)
-		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, nil, buf, nil, 0)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, rwTx, addr, loc, []byte{addr[0], loc[0]}, nil, 0)
 		require.NoError(t, err)
 
 		var v [8]byte
 		binary.BigEndian.PutUint64(v[:], txNum)
 		if txNum%135 == 0 {
-			pv, step, err := domains.GetLatest(kv.CommitmentDomain, commKey2)
+			pv, step, err := domains.GetLatest(kv.CommitmentDomain, rwTx, commKey2)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.CommitmentDomain, commKey2, nil, v[:], pv, step)
+			err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, nil, v[:], pv, step)
 			require.NoError(t, err)
 			otherMaxWrite = txNum
 		} else {
-			pv, step, err := domains.GetLatest(kv.CommitmentDomain, commKey1)
+			pv, step, err := domains.GetLatest(kv.CommitmentDomain, rwTx, commKey1)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.CommitmentDomain, commKey1, nil, v[:], pv, step)
+			err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, nil, v[:], pv, step)
 			require.NoError(t, err)
 			maxWrite = txNum
 		}
@@ -210,14 +210,14 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		require.EqualValues(t, length.Hash, n)
 
 		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(txNum*1e6), nil, 0)
-		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, nil, buf, nil, 0)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, rwTx, addr, loc, []byte{addr[0], loc[0]}, nil, 0)
 		require.NoError(t, err)
 
 		if (txNum+1)%agg.StepSize() == 0 {
-			_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, "")
+			_, err := domains.ComputeCommitment(context.Background(), rwTx, true, txNum/10, "")
 			require.NoError(t, err)
 		}
 

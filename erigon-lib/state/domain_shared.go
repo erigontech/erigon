@@ -763,7 +763,6 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 			}
 		}
 
-		roTx := sd.roTx
 		valsCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].valuesTable)
 		if err != nil {
 			return err
@@ -785,7 +784,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 
 		sctx := sd.aggTx.d[kv.StorageDomain]
 		for i, item := range sctx.files {
-			cursor, err := item.src.bindex.Seek(sctx.statelessGetter(i), prefix)
+			cursor, err := item.src.bindex.Seek(sctx.reader(i), prefix)
 			if err != nil {
 				return err
 			}
@@ -957,14 +956,14 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 }
 
 // TemporalDomain satisfaction
-func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step uint64, err error) {
+func (sd *SharedDomains) GetLatest(domain kv.Domain, roTx kv.Tx, k []byte) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(roTx, k)
 	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil
 	}
-	v, step, _, err = sd.aggTx.GetLatest(domain, k, sd.roTx)
+	v, step, _, err = sd.aggTx.GetLatest(domain, k, roTx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
@@ -1001,7 +1000,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k1, k2 []byte, 
 	}
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, k1)
+		prevVal, prevStep, err = sd.GetLatest(domain, roTx, k1)
 		if err != nil {
 			return err
 		}

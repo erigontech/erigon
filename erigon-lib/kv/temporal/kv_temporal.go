@@ -234,8 +234,16 @@ func (tx *RwTx) Commit() error {
 	return t.Commit()
 }
 
-func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+func (tx *tx) historyStartFrom(name kv.Domain) uint64 {
 	return tx.filesTx.HistoryStartFrom(name)
+}
+
+func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.historyStartFrom(name)
+}
+
+func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.historyStartFrom(name)
 }
 
 func (tx *tx) rangeAsOf(name kv.Domain, dbTx kv.Tx, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
@@ -282,8 +290,8 @@ func (tx *Tx) GetAsOf(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool,
 	return tx.getAsOf(name, tx.Tx, key, ts)
 }
 
-func (tx *RwTx) GetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.getAsOf(name, tx.RwTx, key, key2, ts)
+func (tx *RwTx) GetAsOf(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.getAsOf(name, tx.RwTx, key, ts)
 }
 
 func (tx *tx) historySeek(name kv.Domain, dbTx kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
