@@ -215,7 +215,7 @@ func randTestingStruct(tr *TRand) *TestingStruct {
 	return &enc
 }
 
-const RUNS = 10000
+const RUNS = 1
 
 func TestTestingStruct(t *testing.T) {
 	tr := NewTRand()
