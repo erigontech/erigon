@@ -514,19 +514,19 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			// Before EIP-3529: refunds were capped to gasUsed / 2
 			refundQuotient = params.RefundQuotient
 		}
+		gasUsed := st.gasUsed()
+		// Apply refund counter, capped to half of the used gas.
+		refund := gasUsed / refundQuotient
+		if refund > st.state.GetRefund() {
+			refund = st.state.GetRefund()
+		}
+		gasUsed = gasUsed - refund
+		if gasUsed < floorGas7623 && rules.IsPrague {
+			gasUsed = floorGas7623
+		}
+		st.gasRemaining = st.initialGas - gasUsed
+		st.refundGas()
 	}
-	gasUsed := st.gasUsed()
-	// Apply refund counter, capped to half of the used gas.
-	refund := gasUsed / refundQuotient
-	if refund > st.state.GetRefund() {
-		refund = st.state.GetRefund()
-	}
-	gasUsed = gasUsed - refund
-	if gasUsed < floorGas7623 && rules.IsPrague {
-		gasUsed = floorGas7623
-	}
-	st.gasRemaining = st.initialGas - gasUsed
-	st.refundGas()
 
 	effectiveTip := st.gasPrice
 	if rules.IsLondon {
