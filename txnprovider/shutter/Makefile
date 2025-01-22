@@ -32,22 +32,27 @@ $(GOBINREL)/protoc: $(GOBINREL)
 $(GOBINREL)/protoc-gen-go: $(GOBINREL)
 	go build -o "$(GOBIN)/protoc-gen-go" google.golang.org/protobuf/cmd/protoc-gen-go
 
+$(GOBINREL)/abigen: $(GOBINREL)
+	go build -o "$(GOBIN)/abigen" ../../cmd/abigen
+
+.PHONY: devtools
+devtools: $(GOBINREL)/protoc $(GOBINREL)/protoc-gen-go $(GOBINREL)/abigen
+
 .PHONY: proto
-proto: $(GOBINREL)/protoc $(GOBINREL)/protoc-gen-go
+proto:
+	@test -x $(GOBIN)/protoc || (echo 'Please build protoc by running `make devtools`'; exit 1)
+	@test -x $(GOBIN)/protoc-gen-go || (echo 'Please build protoc-gen-go by running `make devtools`'; exit 1)
 	PATH="$(GOBIN):$(PATH)" protoc -I=$(PROTO_DIR) --go_out=$(PROTO_DIR) $(PROTO_DIR)/shutter.proto
 
 .PHONY: contracts
 contracts: solc abigen
 
-.PHONY: check-solc
-check-solc:
-	@type "solc" 2> /dev/null || echo 'Please install solc'
-
 .PHONY: solc
-solc: check-solc
+solc:
+	@type "solc" 2> /dev/null || (echo 'Please install solc'; exit 1)
 	PATH="$(GOBIN):$(PATH)" go generate -run "solc" ./...
 
 .PHONY: abigen
 abigen:
-	go build -o "$(GOBIN)/abigen" ../../cmd/abigen
+	@test -x $(GOBIN)/abigen || (echo 'Please build abigen by running `make devtools`'; exit 1)
 	PATH="$(GOBIN):$(PATH)" go generate -run "abigen" ./...
