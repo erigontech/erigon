@@ -18,13 +18,19 @@ def run(plan):
         EL_P2P_ETH68_PORT_ID: 30303,
     })
 
+    ctx_n3 = launch_el(plan, "el-n3", enodes = [ctx_n1], public_ports = {
+        EL_RPC_PORT_ID: 8547,
+    })
+
 def launch_el(plan, service_name, enodes = [], public_ports = {}):
     cmd = [
         "--chain=dev",
         "--datadir=/home/erigon/dev",
         "--http.addr=0.0.0.0",
         "--http.corsdomain=*",
-        "--http.api=eth,erigon,web3,net,debug,trace,txpool,parity,admin"
+        "--http.api=eth,erigon,web3,net,debug,trace,txpool,parity,admin",
+        "--txpool.accountslots=30000",
+        "--txpool.globalslots=30000"
     ]
 
     if len(enodes) > 0:
