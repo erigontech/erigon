@@ -56,7 +56,7 @@ require (
 	golang.org/x/time v0.9.0
 	google.golang.org/grpc v1.65.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.4.0
-	google.golang.org/protobuf v1.34.2
+	google.golang.org/protobuf v1.36.3
 )
 
 require (
