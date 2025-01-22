@@ -1,8 +1,8 @@
 # Erigon
 
 Documentation: **[docs.erigon.tech](https://docs.erigon.tech)**
-Blog: **[erigon.substack.com](https://erigon.substack.com/)**
-Twitter: [x.com/ErigonEth](https://x.com/ErigonEth)
+Blog: **[erigon.tech/news](https://erigon.tech/news/)**
+X/Twitter: **[x.com/ErigonEth](https://x.com/ErigonEth)**
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
 frontier.
@@ -721,14 +721,6 @@ Getting in touch
 
 The main discussions are happening on our Discord server. To get an invite, send an email to `bloxster [at] proton.me`
 with your name, occupation, a brief explanation of why you want to join the Discord, and how you heard about Erigon.
-
-### Blog
-
-**[erigon.substack.com](https://erigon.substack.com/)**
-
-### Twitter
-
-[x.com/ErigonEth](https://x.com/ErigonEth)
 
 ### Reporting security issues/concerns
 

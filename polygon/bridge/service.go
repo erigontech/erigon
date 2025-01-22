@@ -418,7 +418,7 @@ func (s *Service) Synchronize(ctx context.Context, blockNum uint64) error {
 // Unwind delete unwindable bridge data.
 // The blockNum parameter is exclusive, i.e. only data in the range (blockNum, last] is deleted.
 func (s *Service) Unwind(ctx context.Context, blockNum uint64) error {
-	s.logger.Debug(bridgeLogPrefix("unwinding"), "blockNum", blockNum)
+	s.logger.Info(bridgeLogPrefix("unwinding"), "blockNum", blockNum)
 
 	s.unwindMu.Lock()
 	defer s.unwindMu.Unlock()

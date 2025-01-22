@@ -434,7 +434,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			if err != nil {
 				return 0, fmt.Errorf("%w: tuple addr len: %s", ErrParseTxn, err) //nolint
 			}
-			slot.AlAddrCount++
+			slot.AccessListAddrCount++
 			var storagePos, storageLen int
 			storagePos, storageLen, err = rlp.ParseList(payload, addrPos+20)
 			if err != nil {
@@ -446,7 +446,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 				if err != nil {
 					return 0, fmt.Errorf("%w: tuple storage key len: %s", ErrParseTxn, err) //nolint
 				}
-				slot.AlStorCount++
+				slot.AccessListStorCount++
 				sKeyPos += 32
 			}
 			if sKeyPos != storagePos+storageLen {
@@ -662,22 +662,22 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxiliary information, like ephemeral fields, and indices within priority queues
 type TxnSlot struct {
-	Rlp            []byte      // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
-	Value          uint256.Int // Value transferred by the transaction
-	Tip            uint256.Int // Maximum tip that transaction is giving to miner/block proposer
-	FeeCap         uint256.Int // Maximum fee that transaction burns and gives to the miner/block proposer
-	SenderID       uint64      // SenderID - require external mapping to it's address
-	Nonce          uint64      // Nonce of the transaction
-	DataLen        int         // Length of transaction's data (for calculation of intrinsic gas)
-	DataNonZeroLen int
-	AlAddrCount    int      // Number of addresses in the access list
-	AlStorCount    int      // Number of storage keys in the access list
-	Gas            uint64   // Gas limit of the transaction
-	IDHash         [32]byte // Transaction hash for the purposes of using it as a transaction Id
-	Traced         bool     // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
-	Creation       bool     // Set to true if "To" field of the transaction is not set
-	Type           byte     // Transaction type
-	Size           uint32   // Size of the payload (without the RLP string envelope for typed transactions)
+	Rlp                 []byte      // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
+	Value               uint256.Int // Value transferred by the transaction
+	Tip                 uint256.Int // Maximum tip that transaction is giving to miner/block proposer
+	FeeCap              uint256.Int // Maximum fee that transaction burns and gives to the miner/block proposer
+	SenderID            uint64      // SenderID - require external mapping to it's address
+	Nonce               uint64      // Nonce of the transaction
+	DataLen             int         // Length of transaction's data (for calculation of intrinsic gas)
+	DataNonZeroLen      int
+	AccessListAddrCount int      // Number of addresses in the access list
+	AccessListStorCount int      // Number of storage keys in the access list
+	Gas                 uint64   // Gas limit of the transaction
+	IDHash              [32]byte // Transaction hash for the purposes of using it as a transaction Id
+	Traced              bool     // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
+	Creation            bool     // Set to true if "To" field of the transaction is not set
+	Type                byte     // Transaction type
+	Size                uint32   // Size of the payload (without the RLP string envelope for typed transactions)
 
 	// EIP-4844: Shard Blob Transactions
 	BlobFeeCap  uint256.Int // max_fee_per_blob_gas
