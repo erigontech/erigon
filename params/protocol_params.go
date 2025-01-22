@@ -166,9 +166,9 @@ const (
 	Bls12381MapFp2ToG2Gas     uint64 = 23800 // Gas price for BLS12-381 mapping field element to G2 operation
 
 	// The Refund Quotient is the cap on how much of the used gas can be refunded. Before EIP-3529,
-	// up to half the consumed gas could be refunded. Redefined as 1/5th in EIP-3529
+	// up to half the consumed gas could be refunded.
 	RefundQuotient        uint64 = 2
-	RefundQuotientEIP3529 uint64 = 5
+	RefundQuotientEIP3529 uint64 = 5 // After EIP-3529: refunds are capped to gasUsed / 5
 
 	// EIP-4844: Shard Blob Transactions
 	PointEvaluationGas uint64 = 50000
