@@ -1142,7 +1142,7 @@ func hashKeysConcurrently(keys []string, hasher keyHasher) []*keyWithHash {
 	keysWithHash := make([]*keyWithHash, len(keys))
 	numWorkers := runtime.NumCPU()
 	// Split the keys slice into chunks and process in parallel.
-	chunkSize := (len(keys) + numWorkers - 1) / numWorkers
+	chunkSize := (len(keys) + numWorkers) / numWorkers
 	var wg sync.WaitGroup
 	for w := 0; w < numWorkers; w++ {
 		start := w * chunkSize
