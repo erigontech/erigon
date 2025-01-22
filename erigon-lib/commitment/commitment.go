@@ -135,7 +135,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 		fallthrough
 	default:
 
-		trie := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
+		trie := NewHexPatriciaHashed(length.Addr, nil)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	}
@@ -175,7 +175,6 @@ type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
-	tmpdir    string
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {

@@ -91,7 +91,7 @@ type HexPatriciaHashed struct {
 	accValBuf rlp.RlpEncodedBytes
 }
 
-func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
+func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHashed {
 	hph := &HexPatriciaHashed{
 		ctx:           ctx,
 		keccak:        sha3.NewLegacyKeccak256().(keccakState),
@@ -676,6 +676,7 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) ([length.Ha
 	return hashBuf, nil
 }
 
+// nolint - yet we do not compute cell hash length ahead of time
 func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int) int {
 	if cell.storageAddrLen > 0 && depth >= 64 {
 		if cell.stateHashLen > 0 {
@@ -1648,7 +1649,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		}
 		upCell.storageAddrLen = 0
 		upCell.hashLen = length.Hash
-		copy(upCell.hash[:], branchRoot[:])
+		copy(upCell.hash[:], branchRoot)
 
 		hph.currentKeyLen = max(upDepth-1, 0)
 		hph.activeRows--
