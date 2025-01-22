@@ -19,8 +19,8 @@ package temporal
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/state"
@@ -102,7 +102,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return f(tx)
 }
 
-func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
+func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	kvTx, err := db.RwDB.BeginRw(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
@@ -152,7 +152,15 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 	return tx.Commit()
 }
 
+func (db *DB) Close() {
+	db.RwDB.Close()
+	db.agg.Close()
+}
+
+func (db *DB) OnFreeze(f kv.OnFreezeFunc) { db.agg.OnFreeze(f) }
+
 type tx struct {
+	*mdbx.MdbxTx
 	db               *DB
 	filesTx          *state.AggregatorRoTx
 	resourcesToClose []kv.Closer
@@ -226,8 +234,12 @@ func (tx *RwTx) Commit() error {
 	return t.Commit()
 }
 
+func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.filesTx.HistoryStartFrom(name)
+}
+
 func (tx *tx) rangeAsOf(name kv.Domain, dbTx kv.Tx, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.filesTx.RangeAsOf(tx.ctx, dbTx, name, fromKey, toKey, asOfTs, asc, limit)
+	it, err := tx.filesTx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -243,8 +255,8 @@ func (tx *RwTx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	return tx.rangeAsOf(name, tx.RwTx, fromKey, toKey, asOfTs, asc, limit)
 }
 
-func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k, k2 []byte) (v []byte, step uint64, err error) {
-	v, step, ok, err := tx.filesTx.GetLatest(name, k, k2, dbTx)
+func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step uint64, err error) {
+	v, step, ok, err := tx.filesTx.GetLatest(name, k, dbTx)
 	if err != nil {
 		return nil, step, err
 	}
@@ -254,23 +266,20 @@ func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k, k2 []byte) (v []byte, ste
 	return v, step, nil
 }
 
-func (tx *Tx) GetLatest(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
-	return tx.getLatest(name, tx.Tx, k, k2)
+func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
+	return tx.getLatest(name, tx.Tx, k)
 }
 
-func (tx *RwTx) GetLatest(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
-	return tx.getLatest(name, tx.RwTx, k, k2)
+func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
+	return tx.getLatest(name, tx.RwTx, k)
 }
 
-func (tx *tx) getAsOf(name kv.Domain, dbTx kv.Tx, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	if key2 != nil {
-		key = append(common.Copy(key), key2...)
-	}
-	return tx.filesTx.GetAsOf(dbTx, name, key, ts)
+func (tx *tx) getAsOf(name kv.Domain, dbTx kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.filesTx.GetAsOf(tx.MdbxTx, name, key, ts)
 }
 
-func (tx *Tx) GetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.getAsOf(name, tx.Tx, key, key2, ts)
+func (tx *Tx) GetAsOf(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.getAsOf(name, tx.Tx, key, ts)
 }
 
 func (tx *RwTx) GetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {

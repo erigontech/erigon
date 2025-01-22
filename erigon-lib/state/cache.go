@@ -21,14 +21,13 @@ type DomainGetFromFileCache struct {
 	sync.RWMutex
 	*freelru.LRU[uint64, domainGetFromFileCacheItem]
 	enabled, trace bool
+	limit          uint32
 }
 
 // nolint
 type domainGetFromFileCacheItem struct {
-	lvl    uint8
-	exists bool
-	offset uint64
-	v      []byte
+	lvl uint8
+	v   []byte
 }
 
 var (
@@ -37,12 +36,12 @@ var (
 	domainGetFromFileCacheEnabled = dbg.EnvBool("D_LRU_ENABLED", true)
 )
 
-func NewDomainGetFromFileCache() *DomainGetFromFileCache {
-	c, err := freelru.New[uint64, domainGetFromFileCacheItem](domainGetFromFileCacheLimit, u64noHash)
+func NewDomainGetFromFileCache(limit uint32) *DomainGetFromFileCache {
+	c, err := freelru.New[uint64, domainGetFromFileCacheItem](limit, u64noHash)
 	if err != nil {
 		panic(err)
 	}
-	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace}
+	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace, limit: limit}
 }
 
 func (c *DomainGetFromFileCache) Add(key uint64, value domainGetFromFileCacheItem) (evicted bool) {
@@ -68,16 +67,22 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 		return
 	}
 	m := c.Metrics()
-	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", domainGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
+	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
 }
 
-func NewDomainGetFromFileCacheAny() any { return NewDomainGetFromFileCache() }
 func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 	d := &domainVisible{
-		name:   name,
-		files:  files,
-		caches: &sync.Pool{New: NewDomainGetFromFileCacheAny},
+		name:  name,
+		files: files,
 	}
+	limit := domainGetFromFileCacheLimit
+	if name == kv.CodeDomain {
+		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+	}
+	if limit == 0 {
+		domainGetFromFileCacheEnabled = false
+	}
+	d.caches = &sync.Pool{New: func() any { return NewDomainGetFromFileCache(limit) }}
 	return d
 }
 
@@ -102,7 +107,8 @@ var (
 )
 
 type IISeekInFilesCache struct {
-	*freelru.LRU[uint64, iiSeekInFilesCacheItem]
+	*freelru.LRU[uint64, iiSeekInFilesCacheItem] // murmur3(key) -> {requestedTxNum, foundTxNum}
+
 	hit, total int
 	trace      bool
 }
@@ -126,28 +132,19 @@ func (c *IISeekInFilesCache) LogStats(fileBaseName string) {
 		return
 	}
 	m := c.Metrics()
-	log.Warn("[dbg] IISeekInFilesCache", "a", fileBaseName, "hit", c.hit, "total", c.total, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", iiGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)))
+	log.Warn("[dbg] II_LRU", "a", fileBaseName, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)), "hit", c.hit, "collisions", m.Collisions, "evictions", m.Evictions, "inserts", m.Inserts, "removals", m.Removals, "limit", iiGetFromFileCacheLimit)
 }
 
-func NewIISeekInFilesCacheAny() any { return NewIISeekInFilesCache() }
 func newIIVisible(name string, files []visibleFile) *iiVisible {
+	if iiGetFromFileCacheLimit == 0 {
+		iiGetFromFileCacheEnabled = false
+	}
 	ii := &iiVisible{
 		name:   name,
 		files:  files,
-		caches: &sync.Pool{New: NewIISeekInFilesCacheAny},
+		caches: &sync.Pool{New: func() any { return NewIISeekInFilesCache() }},
 	}
-	// Not on hot-path: better pre-alloc here
-	ii.preAlloc()
 	return ii
-}
-func (v *iiVisible) preAlloc() {
-	var preAlloc [10]any
-	for i := 0; i < len(preAlloc); i++ {
-		preAlloc[i] = v.caches.Get()
-	}
-	for i := 0; i < len(preAlloc); i++ {
-		v.caches.Put(preAlloc[i])
-	}
 }
 func (v *iiVisible) newSeekInFilesCache() *IISeekInFilesCache {
 	return v.caches.Get().(*IISeekInFilesCache)

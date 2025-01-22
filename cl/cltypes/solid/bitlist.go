@@ -128,6 +128,50 @@ func (u *BitList) Set(index int, v byte) {
 	u.u[index] = v
 }
 
+func (u *BitList) removeMsb() {
+	for i := len(u.u) - 1; i >= 0; i-- {
+		if u.u[i] != 0 {
+			// find last bit, make a mask and clear it
+			u.u[i] &= ^(1 << uint(bits.Len8(u.u[i])-1))
+			break
+		}
+	}
+}
+
+func (u *BitList) addMsb() {
+	for i := len(u.u) - 1; i >= 0; i-- {
+		if u.u[i] != 0 {
+			msb := bits.Len8(u.u[i])
+			if msb == 7 {
+				if i == len(u.u)-1 {
+					u.u = append(u.u, 0)
+				}
+				u.u[i+1] |= 1
+			} else {
+				u.u[i] |= 1 << uint(msb+1)
+			}
+			break
+		}
+	}
+}
+
+func (u *BitList) SetOnBit(bitIndex int) {
+	if bitIndex >= u.c {
+		return
+	}
+	// remove the last on bit if necessary
+	u.removeMsb()
+	// expand the bitlist if necessary
+	for len(u.u)*8 <= bitIndex {
+		u.u = append(u.u, 0)
+	}
+	// set the bit
+	u.u[bitIndex/8] |= 1 << uint(bitIndex%8)
+	// set last bit
+	u.addMsb()
+	u.l = len(u.u)
+}
+
 // Length gives us the length of the bitlist, just like a roll call tells us how many Rangers there are.
 func (u *BitList) Length() int {
 	return u.l

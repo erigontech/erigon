@@ -403,6 +403,114 @@ func (c *MockBeaconStateMutatorAddValidatorCall) DoAndReturn(f func(solid.Valida
 	return c
 }
 
+// AppendPendingConsolidation mocks base method.
+func (m *MockBeaconStateMutator) AppendPendingConsolidation(consolidation *solid.PendingConsolidation) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "AppendPendingConsolidation", consolidation)
+}
+
+// AppendPendingConsolidation indicates an expected call of AppendPendingConsolidation.
+func (mr *MockBeaconStateMutatorMockRecorder) AppendPendingConsolidation(consolidation any) *MockBeaconStateMutatorAppendPendingConsolidationCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AppendPendingConsolidation", reflect.TypeOf((*MockBeaconStateMutator)(nil).AppendPendingConsolidation), consolidation)
+	return &MockBeaconStateMutatorAppendPendingConsolidationCall{Call: call}
+}
+
+// MockBeaconStateMutatorAppendPendingConsolidationCall wrap *gomock.Call
+type MockBeaconStateMutatorAppendPendingConsolidationCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateMutatorAppendPendingConsolidationCall) Return() *MockBeaconStateMutatorAppendPendingConsolidationCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateMutatorAppendPendingConsolidationCall) Do(f func(*solid.PendingConsolidation)) *MockBeaconStateMutatorAppendPendingConsolidationCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateMutatorAppendPendingConsolidationCall) DoAndReturn(f func(*solid.PendingConsolidation)) *MockBeaconStateMutatorAppendPendingConsolidationCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// AppendPendingDeposit mocks base method.
+func (m *MockBeaconStateMutator) AppendPendingDeposit(deposit *solid.PendingDeposit) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "AppendPendingDeposit", deposit)
+}
+
+// AppendPendingDeposit indicates an expected call of AppendPendingDeposit.
+func (mr *MockBeaconStateMutatorMockRecorder) AppendPendingDeposit(deposit any) *MockBeaconStateMutatorAppendPendingDepositCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AppendPendingDeposit", reflect.TypeOf((*MockBeaconStateMutator)(nil).AppendPendingDeposit), deposit)
+	return &MockBeaconStateMutatorAppendPendingDepositCall{Call: call}
+}
+
+// MockBeaconStateMutatorAppendPendingDepositCall wrap *gomock.Call
+type MockBeaconStateMutatorAppendPendingDepositCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateMutatorAppendPendingDepositCall) Return() *MockBeaconStateMutatorAppendPendingDepositCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateMutatorAppendPendingDepositCall) Do(f func(*solid.PendingDeposit)) *MockBeaconStateMutatorAppendPendingDepositCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateMutatorAppendPendingDepositCall) DoAndReturn(f func(*solid.PendingDeposit)) *MockBeaconStateMutatorAppendPendingDepositCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// AppendPendingPartialWithdrawal mocks base method.
+func (m *MockBeaconStateMutator) AppendPendingPartialWithdrawal(withdrawal *solid.PendingPartialWithdrawal) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "AppendPendingPartialWithdrawal", withdrawal)
+}
+
+// AppendPendingPartialWithdrawal indicates an expected call of AppendPendingPartialWithdrawal.
+func (mr *MockBeaconStateMutatorMockRecorder) AppendPendingPartialWithdrawal(withdrawal any) *MockBeaconStateMutatorAppendPendingPartialWithdrawalCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AppendPendingPartialWithdrawal", reflect.TypeOf((*MockBeaconStateMutator)(nil).AppendPendingPartialWithdrawal), withdrawal)
+	return &MockBeaconStateMutatorAppendPendingPartialWithdrawalCall{Call: call}
+}
+
+// MockBeaconStateMutatorAppendPendingPartialWithdrawalCall wrap *gomock.Call
+type MockBeaconStateMutatorAppendPendingPartialWithdrawalCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateMutatorAppendPendingPartialWithdrawalCall) Return() *MockBeaconStateMutatorAppendPendingPartialWithdrawalCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateMutatorAppendPendingPartialWithdrawalCall) Do(f func(*solid.PendingPartialWithdrawal)) *MockBeaconStateMutatorAppendPendingPartialWithdrawalCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateMutatorAppendPendingPartialWithdrawalCall) DoAndReturn(f func(*solid.PendingPartialWithdrawal)) *MockBeaconStateMutatorAppendPendingPartialWithdrawalCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // AppendValidator mocks base method.
 func (m *MockBeaconStateMutator) AppendValidator(in solid.Validator) {
 	m.ctrl.T.Helper()
@@ -727,6 +835,42 @@ func (c *MockBeaconStateMutatorSetBlockRootAtCall) DoAndReturn(f func(int, commo
 	return c
 }
 
+// SetConsolidationBalanceToConsume mocks base method.
+func (m *MockBeaconStateMutator) SetConsolidationBalanceToConsume(arg0 uint64) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetConsolidationBalanceToConsume", arg0)
+}
+
+// SetConsolidationBalanceToConsume indicates an expected call of SetConsolidationBalanceToConsume.
+func (mr *MockBeaconStateMutatorMockRecorder) SetConsolidationBalanceToConsume(arg0 any) *MockBeaconStateMutatorSetConsolidationBalanceToConsumeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetConsolidationBalanceToConsume", reflect.TypeOf((*MockBeaconStateMutator)(nil).SetConsolidationBalanceToConsume), arg0)
+	return &MockBeaconStateMutatorSetConsolidationBalanceToConsumeCall{Call: call}
+}
+
+// MockBeaconStateMutatorSetConsolidationBalanceToConsumeCall wrap *gomock.Call
+type MockBeaconStateMutatorSetConsolidationBalanceToConsumeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateMutatorSetConsolidationBalanceToConsumeCall) Return() *MockBeaconStateMutatorSetConsolidationBalanceToConsumeCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateMutatorSetConsolidationBalanceToConsumeCall) Do(f func(uint64)) *MockBeaconStateMutatorSetConsolidationBalanceToConsumeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateMutatorSetConsolidationBalanceToConsumeCall) DoAndReturn(f func(uint64)) *MockBeaconStateMutatorSetConsolidationBalanceToConsumeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetCurrentEpochParticipationFlags mocks base method.
 func (m *MockBeaconStateMutator) SetCurrentEpochParticipationFlags(flags []cltypes.ParticipationFlags) {
 	m.ctrl.T.Helper()
@@ -831,6 +975,114 @@ func (c *MockBeaconStateMutatorSetCurrentSyncCommitteeCall) Do(f func(*solid.Syn
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetCurrentSyncCommitteeCall) DoAndReturn(f func(*solid.SyncCommittee)) *MockBeaconStateMutatorSetCurrentSyncCommitteeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetDepositBalanceToConsume mocks base method.
+func (m *MockBeaconStateMutator) SetDepositBalanceToConsume(arg0 uint64) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetDepositBalanceToConsume", arg0)
+}
+
+// SetDepositBalanceToConsume indicates an expected call of SetDepositBalanceToConsume.
+func (mr *MockBeaconStateMutatorMockRecorder) SetDepositBalanceToConsume(arg0 any) *MockBeaconStateMutatorSetDepositBalanceToConsumeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetDepositBalanceToConsume", reflect.TypeOf((*MockBeaconStateMutator)(nil).SetDepositBalanceToConsume), arg0)
+	return &MockBeaconStateMutatorSetDepositBalanceToConsumeCall{Call: call}
+}
+
+// MockBeaconStateMutatorSetDepositBalanceToConsumeCall wrap *gomock.Call
+type MockBeaconStateMutatorSetDepositBalanceToConsumeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateMutatorSetDepositBalanceToConsumeCall) Return() *MockBeaconStateMutatorSetDepositBalanceToConsumeCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateMutatorSetDepositBalanceToConsumeCall) Do(f func(uint64)) *MockBeaconStateMutatorSetDepositBalanceToConsumeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateMutatorSetDepositBalanceToConsumeCall) DoAndReturn(f func(uint64)) *MockBeaconStateMutatorSetDepositBalanceToConsumeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetDepositRequestsStartIndex mocks base method.
+func (m *MockBeaconStateMutator) SetDepositRequestsStartIndex(arg0 uint64) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetDepositRequestsStartIndex", arg0)
+}
+
+// SetDepositRequestsStartIndex indicates an expected call of SetDepositRequestsStartIndex.
+func (mr *MockBeaconStateMutatorMockRecorder) SetDepositRequestsStartIndex(arg0 any) *MockBeaconStateMutatorSetDepositRequestsStartIndexCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetDepositRequestsStartIndex", reflect.TypeOf((*MockBeaconStateMutator)(nil).SetDepositRequestsStartIndex), arg0)
+	return &MockBeaconStateMutatorSetDepositRequestsStartIndexCall{Call: call}
+}
+
+// MockBeaconStateMutatorSetDepositRequestsStartIndexCall wrap *gomock.Call
+type MockBeaconStateMutatorSetDepositRequestsStartIndexCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateMutatorSetDepositRequestsStartIndexCall) Return() *MockBeaconStateMutatorSetDepositRequestsStartIndexCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateMutatorSetDepositRequestsStartIndexCall) Do(f func(uint64)) *MockBeaconStateMutatorSetDepositRequestsStartIndexCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateMutatorSetDepositRequestsStartIndexCall) DoAndReturn(f func(uint64)) *MockBeaconStateMutatorSetDepositRequestsStartIndexCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetEarlistConsolidationEpoch mocks base method.
+func (m *MockBeaconStateMutator) SetEarlistConsolidationEpoch(arg0 uint64) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetEarlistConsolidationEpoch", arg0)
+}
+
+// SetEarlistConsolidationEpoch indicates an expected call of SetEarlistConsolidationEpoch.
+func (mr *MockBeaconStateMutatorMockRecorder) SetEarlistConsolidationEpoch(arg0 any) *MockBeaconStateMutatorSetEarlistConsolidationEpochCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetEarlistConsolidationEpoch", reflect.TypeOf((*MockBeaconStateMutator)(nil).SetEarlistConsolidationEpoch), arg0)
+	return &MockBeaconStateMutatorSetEarlistConsolidationEpochCall{Call: call}
+}
+
+// MockBeaconStateMutatorSetEarlistConsolidationEpochCall wrap *gomock.Call
+type MockBeaconStateMutatorSetEarlistConsolidationEpochCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateMutatorSetEarlistConsolidationEpochCall) Return() *MockBeaconStateMutatorSetEarlistConsolidationEpochCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateMutatorSetEarlistConsolidationEpochCall) Do(f func(uint64)) *MockBeaconStateMutatorSetEarlistConsolidationEpochCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateMutatorSetEarlistConsolidationEpochCall) DoAndReturn(f func(uint64)) *MockBeaconStateMutatorSetEarlistConsolidationEpochCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -1335,6 +1587,114 @@ func (c *MockBeaconStateMutatorSetNextWithdrawalValidatorIndexCall) Do(f func(ui
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetNextWithdrawalValidatorIndexCall) DoAndReturn(f func(uint64)) *MockBeaconStateMutatorSetNextWithdrawalValidatorIndexCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetPendingConsolidations mocks base method.
+func (m *MockBeaconStateMutator) SetPendingConsolidations(consolidations *solid.ListSSZ[*solid.PendingConsolidation]) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetPendingConsolidations", consolidations)
+}
+
+// SetPendingConsolidations indicates an expected call of SetPendingConsolidations.
+func (mr *MockBeaconStateMutatorMockRecorder) SetPendingConsolidations(consolidations any) *MockBeaconStateMutatorSetPendingConsolidationsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPendingConsolidations", reflect.TypeOf((*MockBeaconStateMutator)(nil).SetPendingConsolidations), consolidations)
+	return &MockBeaconStateMutatorSetPendingConsolidationsCall{Call: call}
+}
+
+// MockBeaconStateMutatorSetPendingConsolidationsCall wrap *gomock.Call
+type MockBeaconStateMutatorSetPendingConsolidationsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateMutatorSetPendingConsolidationsCall) Return() *MockBeaconStateMutatorSetPendingConsolidationsCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateMutatorSetPendingConsolidationsCall) Do(f func(*solid.ListSSZ[*solid.PendingConsolidation])) *MockBeaconStateMutatorSetPendingConsolidationsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateMutatorSetPendingConsolidationsCall) DoAndReturn(f func(*solid.ListSSZ[*solid.PendingConsolidation])) *MockBeaconStateMutatorSetPendingConsolidationsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetPendingDeposits mocks base method.
+func (m *MockBeaconStateMutator) SetPendingDeposits(arg0 *solid.ListSSZ[*solid.PendingDeposit]) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetPendingDeposits", arg0)
+}
+
+// SetPendingDeposits indicates an expected call of SetPendingDeposits.
+func (mr *MockBeaconStateMutatorMockRecorder) SetPendingDeposits(arg0 any) *MockBeaconStateMutatorSetPendingDepositsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPendingDeposits", reflect.TypeOf((*MockBeaconStateMutator)(nil).SetPendingDeposits), arg0)
+	return &MockBeaconStateMutatorSetPendingDepositsCall{Call: call}
+}
+
+// MockBeaconStateMutatorSetPendingDepositsCall wrap *gomock.Call
+type MockBeaconStateMutatorSetPendingDepositsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateMutatorSetPendingDepositsCall) Return() *MockBeaconStateMutatorSetPendingDepositsCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateMutatorSetPendingDepositsCall) Do(f func(*solid.ListSSZ[*solid.PendingDeposit])) *MockBeaconStateMutatorSetPendingDepositsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateMutatorSetPendingDepositsCall) DoAndReturn(f func(*solid.ListSSZ[*solid.PendingDeposit])) *MockBeaconStateMutatorSetPendingDepositsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetPendingPartialWithdrawals mocks base method.
+func (m *MockBeaconStateMutator) SetPendingPartialWithdrawals(arg0 *solid.ListSSZ[*solid.PendingPartialWithdrawal]) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetPendingPartialWithdrawals", arg0)
+}
+
+// SetPendingPartialWithdrawals indicates an expected call of SetPendingPartialWithdrawals.
+func (mr *MockBeaconStateMutatorMockRecorder) SetPendingPartialWithdrawals(arg0 any) *MockBeaconStateMutatorSetPendingPartialWithdrawalsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPendingPartialWithdrawals", reflect.TypeOf((*MockBeaconStateMutator)(nil).SetPendingPartialWithdrawals), arg0)
+	return &MockBeaconStateMutatorSetPendingPartialWithdrawalsCall{Call: call}
+}
+
+// MockBeaconStateMutatorSetPendingPartialWithdrawalsCall wrap *gomock.Call
+type MockBeaconStateMutatorSetPendingPartialWithdrawalsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateMutatorSetPendingPartialWithdrawalsCall) Return() *MockBeaconStateMutatorSetPendingPartialWithdrawalsCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateMutatorSetPendingPartialWithdrawalsCall) Do(f func(*solid.ListSSZ[*solid.PendingPartialWithdrawal])) *MockBeaconStateMutatorSetPendingPartialWithdrawalsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateMutatorSetPendingPartialWithdrawalsCall) DoAndReturn(f func(*solid.ListSSZ[*solid.PendingPartialWithdrawal])) *MockBeaconStateMutatorSetPendingPartialWithdrawalsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

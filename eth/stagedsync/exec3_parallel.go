@@ -684,6 +684,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 					pe.lastExecutedTxNum = applyResult.txNum
 
 					pe.rs.SetTxNum(applyResult.txNum, applyResult.blockNum)
+
 					if err := pe.rs.ApplyState4(ctx, tx,
 						applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
 						nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,

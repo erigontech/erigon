@@ -21,7 +21,6 @@ import (
 	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -142,6 +141,11 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 			t.MerkleTree = &merkle_tree.MerkleTree{}
 		}
 		v.MerkleTree.CopyInto(t.MerkleTree)
+		t.MerkleTree.SetComputeLeafFn(func(idx int, out []byte) {
+			copy(out, t.buffer[idx*validatorSize:])
+		})
+	} else {
+		t.MerkleTree = nil
 	}
 	// skip copying (unsupported for phase0)
 	t.phase0Data = make([]Phase0Data, t.l)
@@ -208,27 +212,12 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	return utils.Sha256(coreRoot[:], lengthRoot[:]), nil
 }
 
-func computeFlatRootsToBuffer(depth uint8, layerBuffer, output []byte) error {
-	for i := uint8(0); i < depth; i++ {
-		// Sequential
-		if len(layerBuffer)%64 != 0 {
-			layerBuffer = append(layerBuffer, merkle_tree.ZeroHashes[i][:]...)
-		}
-		if err := merkle_tree.HashByteSlice(layerBuffer, layerBuffer); err != nil {
-			return err
-		}
-		layerBuffer = layerBuffer[:len(layerBuffer)/2]
-	}
-
-	copy(output, layerBuffer[:length.Hash])
-	return nil
-}
-
 func (v *ValidatorSet) Set(idx int, val Validator) {
 	if idx >= v.l {
 		panic("ValidatorSet -- Set: out of bounds")
 	}
 	copy(v.buffer[idx*validatorSize:(idx*validatorSize)+validatorSize], val)
+	v.zeroTreeHash(idx)
 }
 
 func (v *ValidatorSet) getPhase0(idx int) *Phase0Data {

@@ -77,7 +77,6 @@ type InvertedIndex struct {
 type iiCfg struct {
 	salt *uint32
 	dirs datadir.Dirs
-	db   kv.RoDB // global db pointer. mostly for background warmup.
 
 	filenameBase    string // filename base for all files of this inverted index
 	aggregationStep uint64 // amount of transactions inside single aggregation step
@@ -90,7 +89,7 @@ type iiCfg struct {
 
 	// external checker for integrity of inverted index ranges
 	integrity rangeIntegrityChecker
-	indexList idxList
+	indexList Accessors
 }
 
 type iiVisible struct {
@@ -101,12 +100,18 @@ type iiVisible struct {
 
 func NewInvertedIndex(cfg iiCfg, logger log.Logger) (*InvertedIndex, error) {
 	if cfg.dirs.SnapDomain == "" {
-		panic("empty `dirs` varialbe")
+		panic("assert: empty `dirs`")
+	}
+	if cfg.filenameBase == "" {
+		panic("assert: empty `filenameBase`")
+	}
+	if cfg.aggregationStep == 0 {
+		panic("assert: empty `aggregationStep`")
 	}
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
-		cfg.indexList = withHashMap
+		cfg.indexList = AccessorHashMap
 	}
 
 	ii := InvertedIndex{
@@ -177,6 +182,12 @@ func (ii *InvertedIndex) openFolder() error {
 }
 
 func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
+	if ii.filenameBase == "" {
+		panic("assert: empty `filenameBase`")
+	}
+	if ii.aggregationStep == 0 {
+		panic("assert: empty `aggregationStep`")
+	}
 	for _, dirtyFile := range scanDirtyFiles(fileNames, ii.aggregationStep, ii.filenameBase, "ef", ii.logger) {
 		startStep, endStep := dirtyFile.startTxNum/ii.aggregationStep, dirtyFile.endTxNum/ii.aggregationStep
 		if ii.integrity != nil && !ii.integrity(startStep, endStep) {
@@ -189,12 +200,14 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	}
 }
 
-type idxList int
+type Accessors int
 
-var (
-	withBTree     idxList = 0b1
-	withHashMap   idxList = 0b10
-	withExistence idxList = 0b100
+func (l Accessors) Has(target Accessors) bool { return l&target != 0 }
+
+const (
+	AccessorBTree     Accessors = 0b1
+	AccessorHashMap   Accessors = 0b10
+	AccessorExistence Accessors = 0b100
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
@@ -555,6 +568,10 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	if len(iit.files) == 0 {
 		return false, 0, nil
 	}
+
+	if txNum < iit.files[0].startTxNum {
+		return false, 0, fmt.Errorf("seek with txNum=%d but data before txNum=%d is not available", txNum, iit.files[0].startTxNum)
+	}
 	if iit.files[len(iit.files)-1].endTxNum <= txNum {
 		return false, 0, nil
 	}
@@ -572,7 +589,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 			if txNum <= fromCache.found {
 				iit.seekInFilesCache.hit++
 				return true, fromCache.found, nil
-			} else if fromCache.found == 0 {
+			} else if fromCache.found == 0 { //not found
 				iit.seekInFilesCache.hit++
 				return false, 0, nil
 			}
@@ -596,16 +613,17 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		}
 		eliasVal, _ := g.Next(nil)
 		equalOrHigherTxNum, found = eliasfano32.Seek(eliasVal, txNum)
-
-		if found {
-			if equalOrHigherTxNum < iit.files[i].startTxNum || equalOrHigherTxNum >= iit.files[i].endTxNum {
-				return false, equalOrHigherTxNum, fmt.Errorf("inverted_index(%s) at (%x, %d) returned value %d, but it out-of-bounds %d-%d. it may signal that .ef file is broke - can detect by `erigon seg integrity --check=InvertedIndex`, or re-download files", g.FileName(), key, txNum, iit.files[i].startTxNum, iit.files[i].endTxNum, equalOrHigherTxNum)
-			}
-			if iit.seekInFilesCache != nil {
-				iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum})
-			}
-			return true, equalOrHigherTxNum, nil
+		if !found {
+			continue
 		}
+
+		if equalOrHigherTxNum < iit.files[i].startTxNum || equalOrHigherTxNum >= iit.files[i].endTxNum {
+			return false, equalOrHigherTxNum, fmt.Errorf("inverted_index(%s) at (%x, %d) returned value %d, but it out-of-bounds %d-%d. it may signal that .ef file is broke - can detect by `erigon seg integrity --check=InvertedIndex`, or re-download files", g.FileName(), key, txNum, iit.files[i].startTxNum, iit.files[i].endTxNum, equalOrHigherTxNum)
+		}
+		if iit.seekInFilesCache != nil && equalOrHigherTxNum-txNum > 0 { // > 0 to improve cache hit-rate
+			iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum})
+		}
+		return true, equalOrHigherTxNum, nil
 	}
 
 	if iit.seekInFilesCache != nil {
@@ -713,7 +731,7 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 				break
 			}
 			if iit.files[i].src.index == nil { // assert
-				err := fmt.Errorf("why file has not index: %s\n", iit.files[i].src.decompressor.FileName())
+				err := fmt.Errorf("why file has not index: %s", iit.files[i].src.decompressor.FileName())
 				panic(err)
 			}
 			if iit.files[i].src.index.KeyCount() == 0 {
@@ -921,66 +939,6 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 
 	return stat, err
-}
-
-func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	fromTxNum := fromStep * iit.ii.aggregationStep
-	iterStep := func(item visibleFile) error {
-		g := item.src.decompressor.MakeGetter()
-		g.Reset(0)
-		defer item.src.decompressor.EnableReadAhead().DisableReadAhead()
-
-		for g.HasNext() {
-			k, _ := g.NextUncompressed()
-			_ = k
-			eliasVal, _ := g.NextUncompressed()
-			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-			if ef.Count() == 0 {
-				continue
-			}
-			if item.startTxNum > ef.Min() {
-				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), common.Shorten(k, 8))
-				if failFast {
-					return err
-				} else {
-					log.Warn(err.Error())
-				}
-			}
-			if item.endTxNum < ef.Max() {
-				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d < %d, %s, %x", item.endTxNum, ef.Max(), g.FileName(), common.Shorten(k, 8))
-				if failFast {
-					return err
-				} else {
-					log.Warn(err.Error())
-				}
-			}
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[integrity] InvertedIndex: %s, prefix=%x", g.FileName(), common.Shorten(k, 8)))
-			default:
-			}
-		}
-		return nil
-	}
-
-	for _, item := range iit.files {
-		if item.src.decompressor == nil {
-			continue
-		}
-		if item.endTxNum <= fromTxNum {
-			continue
-		}
-		if err := iterStep(item); err != nil {
-			return err
-		}
-		//log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d\n", item.src.decompressor.FileName(), ef.Min(), ef.Max(), last2, stream.ToArrU64Must(ef.Iterator())))
-	}
-	return nil
 }
 
 func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator1 {
@@ -1244,8 +1202,8 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Enums:              true,
 		LessFalsePositives: true,
 
-		BucketSize: 2000,
-		LeafSize:   8,
+		BucketSize: recsplit.DefaultBucketSize,
+		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     ii.dirs.Tmp,
 		IndexFile:  idxPath,
 		Salt:       ii.salt,

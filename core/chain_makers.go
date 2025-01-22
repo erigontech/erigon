@@ -366,7 +366,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 		}
 		if b.engine != nil {
-			err := InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger, nil)
+			err := InitializeBlockExecution(b.engine, nil, b.header, config, ibs, nil, logger, nil)
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
 			}
@@ -596,7 +596,7 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 	}
 
 	if chainConfig.IsCancun(header.Time) {
-		excessBlobGas := misc.CalcExcessBlobGas(chainConfig, parent)
+		excessBlobGas := misc.CalcExcessBlobGas(chainConfig, parent, header.Time)
 		header.ExcessBlobGas = &excessBlobGas
 		header.BlobGasUsed = new(uint64)
 	}

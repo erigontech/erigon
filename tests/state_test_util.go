@@ -44,7 +44,6 @@ import (
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
@@ -80,10 +79,10 @@ type stJSON struct {
 }
 
 type stPostState struct {
-	Root            common.UnprefixedHash `json:"hash"`
-	Logs            common.UnprefixedHash `json:"logs"`
-	Tx              hexutility.Bytes      `json:"txbytes"`
-	ExpectException string                `json:"expectException"`
+	Root            libcommon.UnprefixedHash `json:"hash"`
+	Logs            libcommon.UnprefixedHash `json:"logs"`
+	Tx              hexutility.Bytes         `json:"txbytes"`
+	ExpectException string                   `json:"expectException"`
 	Indexes         struct {
 		Data  int `json:"data"`
 		Gas   int `json:"gas"`
@@ -120,7 +119,7 @@ type stEnv struct {
 }
 
 type stEnvMarshaling struct {
-	Coinbase      common.UnprefixedAddress
+	Coinbase      libcommon.UnprefixedAddress
 	Difficulty    *math.HexOrDecimal256
 	Random        *math.HexOrDecimal256
 	GasLimit      math.HexOrDecimal64
@@ -260,7 +259,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		context.Difficulty = big.NewInt(0)
 	}
 	if config.IsCancun(block.Time()) && t.json.Env.ExcessBlobGas != nil {
-		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.json.Env.ExcessBlobGas)
+		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.json.Env.ExcessBlobGas, header.Time)
 		if err != nil {
 			return nil, libcommon.Hash{}, err
 		}
@@ -270,7 +269,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	// Execute the message.
 	snapshot := statedb.Snapshot()
 	gaspool := new(core.GasPool)
-	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock())
+	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
 	if _, err = core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */); err != nil {
 		statedb.RevertToSnapshot(snapshot, nil)
 	}

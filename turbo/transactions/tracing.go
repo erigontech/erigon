@@ -54,7 +54,7 @@ type BlockGetter interface {
 
 // ComputeBlockContext returns the execution environment of a certain block.
 func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, header *types.Header, cfg *chain.Config,
-	headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.Tx,
+	headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
 	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, header.Number.Uint64(), txIndex, cfg.ChainName)
 	if err != nil {
@@ -101,13 +101,15 @@ func TraceTx(
 	message core.Message,
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
+	blockHash libcommon.Hash,
+	txnIndex int,
 	ibs evmtypes.IntraBlockState,
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
 ) (usedGas uint64, err error) {
-	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, stream, callTimeout)
+	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, blockHash, txnIndex, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
 		return 0, err
@@ -133,6 +135,8 @@ func AssembleTracer(
 	ctx context.Context,
 	config *tracersConfig.TraceConfig,
 	txHash libcommon.Hash,
+	blockHash libcommon.Hash,
+	txnIndex int,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
 ) (vm.EVMLogger, bool, context.CancelFunc, error) {
@@ -154,7 +158,7 @@ func AssembleTracer(
 		if config != nil && config.TracerConfig != nil {
 			cfg = *config.TracerConfig
 		}
-		tracer, err := tracers.New(*config.Tracer, &tracers.Context{TxHash: txHash}, cfg)
+		tracer, err := tracers.New(*config.Tracer, &tracers.Context{TxHash: txHash, TxIndex: txnIndex, BlockHash: blockHash}, cfg)
 		if err != nil {
 			return nil, false, func() {}, err
 		}

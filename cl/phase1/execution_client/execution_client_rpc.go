@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -70,7 +71,13 @@ func NewExecutionClientRPC(jwtSecret []byte, addr string, port int) (*ExecutionC
 	}, nil
 }
 
-func (cc *ExecutionClientRpc) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (PayloadStatus, error) {
+func (cc *ExecutionClientRpc) NewPayload(
+	ctx context.Context,
+	payload *cltypes.Eth1Block,
+	beaconParentRoot *libcommon.Hash,
+	versionedHashes []libcommon.Hash,
+	executionRequestsList []hexutility.Bytes,
+) (PayloadStatus, error) {
 	if payload == nil {
 		return PayloadStatusValidated, nil
 	}
@@ -89,6 +96,8 @@ func (cc *ExecutionClientRpc) NewPayload(ctx context.Context, payload *cltypes.E
 		engineMethod = rpc_helper.EngineNewPayloadV2
 	case clparams.DenebVersion:
 		engineMethod = rpc_helper.EngineNewPayloadV3
+	case clparams.ElectraVersion:
+		engineMethod = rpc_helper.EngineNewPayloadV4
 	default:
 		return PayloadStatusNone, errors.New("invalid payload version")
 	}
@@ -131,6 +140,9 @@ func (cc *ExecutionClientRpc) NewPayload(ctx context.Context, payload *cltypes.E
 	if versionedHashes != nil {
 		args = append(args, versionedHashes, *beaconParentRoot)
 	}
+	if executionRequestsList != nil {
+		args = append(args, executionRequestsList)
+	}
 	if err := cc.client.CallContext(ctx, &payloadStatus, engineMethod, args...); err != nil {
 		err = fmt.Errorf("execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
 		return PayloadStatusNone, err
@@ -157,15 +169,13 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized li
 
 	err := cc.client.CallContext(ctx, forkChoiceResp, rpc_helper.ForkChoiceUpdatedV1, args...)
 	if err != nil {
+		if err.Error() == errContextExceeded {
+			// ignore timeouts
+			return nil, nil
+		}
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
-	// Ignore timeouts
-	if err != nil && err.Error() == errContextExceeded {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
+
 	if forkChoiceResp.PayloadId == nil {
 		return []byte{}, checkPayloadStatus(forkChoiceResp.PayloadStatus)
 	}

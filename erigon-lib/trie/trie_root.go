@@ -140,7 +140,7 @@ type RootHashAggregator struct {
 	accData        GenStructStepAccountData
 
 	// Used to construct an Account proof while calculating the tree root.
-	proofRetainer *ProofRetainer
+	proofRetainer ProofRetainer
 	cutoff        bool
 }
 
@@ -176,7 +176,7 @@ func NewFlatDBTrieLoader(logPrefix string, rd RetainDeciderWithMarker, hc HashCo
 }
 
 func (l *FlatDBTrieLoader) SetProofRetainer(pr *ProofRetainer) {
-	l.receiver.proofRetainer = pr
+	l.receiver.proofRetainer = *pr
 }
 
 // CalcTrieRoot algo:

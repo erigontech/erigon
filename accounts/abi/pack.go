@@ -25,8 +25,7 @@ import (
 	"math/big"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common"
-	common2 "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 )
 
@@ -34,7 +33,7 @@ import (
 // bytes slice.
 func packBytesSlice(bytes []byte, l int) []byte {
 	packedLen := packNum(reflect.ValueOf(l))
-	return append(packedLen, common.RightPadBytes(bytes, (l+31)/32*32)...)
+	return append(packedLen, libcommon.RightPadBytes(bytes, (l+31)/32*32)...)
 }
 
 // packElement packs the given reflect value according to the abi specification in
@@ -50,12 +49,12 @@ func packElement(t Type, reflectValue reflect.Value) ([]byte, error) {
 			reflectValue = mustArrayToByteSlice(reflectValue)
 		}
 
-		return common.LeftPadBytes(reflectValue.Bytes(), 32), nil
+		return libcommon.LeftPadBytes(reflectValue.Bytes(), 32), nil
 	case BoolTy:
 		if reflectValue.Bool() {
-			return math.PaddedBigBytes(common2.Big1, 32), nil
+			return math.PaddedBigBytes(libcommon.Big1, 32), nil
 		}
-		return math.PaddedBigBytes(common2.Big0, 32), nil
+		return math.PaddedBigBytes(libcommon.Big0, 32), nil
 	case BytesTy:
 		if reflectValue.Kind() == reflect.Array {
 			reflectValue = mustArrayToByteSlice(reflectValue)
@@ -68,7 +67,7 @@ func packElement(t Type, reflectValue reflect.Value) ([]byte, error) {
 		if reflectValue.Kind() == reflect.Array {
 			reflectValue = mustArrayToByteSlice(reflectValue)
 		}
-		return common.RightPadBytes(reflectValue.Bytes(), 32), nil
+		return libcommon.RightPadBytes(reflectValue.Bytes(), 32), nil
 	default:
 		return []byte{}, fmt.Errorf("could not pack element, unknown type: %v", t.T)
 	}

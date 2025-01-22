@@ -20,7 +20,8 @@ func TestAppendReceipt(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	doms, err := state.NewSharedDomains(tx, log.New())
+	ttx := tx.(kv.TemporalTx)
+	doms, err := state.NewSharedDomains(ttx, log.New())
 	require.NoError(err)
 	defer doms.Close()
 
@@ -47,7 +48,6 @@ func TestAppendReceipt(t *testing.T) {
 	err = doms.Flush(context.Background(), tx)
 	require.NoError(err)
 
-	ttx := tx.(kv.TemporalTx)
 	v, ok, err := ttx.HistorySeek(kv.ReceiptDomain, FirstLogIndexKey, 0)
 	require.NoError(err)
 	require.True(ok)

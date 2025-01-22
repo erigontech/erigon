@@ -164,9 +164,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	return nil
 }
 
-func (rs *StateV3) ApplyLogsAndTraces4(logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *state.SharedDomains, pruneNonEssentials bool, config *chain.Config) error {
-	shouldPruneNonEssentials := pruneNonEssentials && config != nil
-
+func (rs *StateV3) ApplyLogsAndTraces4(logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *state.SharedDomains) error {
 	for addr := range traceFroms {
 		if shouldPruneNonEssentials && addr != config.DepositContract {
 			continue
@@ -177,23 +175,17 @@ func (rs *StateV3) ApplyLogsAndTraces4(logs []*types.Log, traceFroms map[common.
 	}
 
 	for addr := range traceTos {
-		if shouldPruneNonEssentials && addr != config.DepositContract {
-			continue
-		}
 		if err := domains.IndexAdd(kv.TblTracesToIdx, addr[:]); err != nil {
 			return err
 		}
 	}
 
 	for _, lg := range logs {
-		if shouldPruneNonEssentials && lg.Address != config.DepositContract {
-			continue
-		}
 		if err := domains.IndexAdd(kv.TblLogAddressIdx, lg.Address[:]); err != nil {
 			return err
 		}
 		for _, topic := range lg.Topics {
-			if err := domains.IndexAdd(kv.TblLogTopicsIdx, topic[:]); err != nil {
+			if err := domains.IndexAdd(kv.LogTopicIdx, topic[:]); err != nil {
 				return err
 			}
 		}
@@ -570,8 +562,6 @@ func (w *StateWriterV3) CreateContract(address common.Address) error {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
 	}
-
-	//seems don't need delete code here. IntraBlockState take care of it.
 	//if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
 	//	return err
 	//}
@@ -607,7 +597,7 @@ func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, e
 }
 
 func (r *ReaderV3) readAccountData(address common.Address) ([]byte, *accounts.Account, error) {
-	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, r.tx, address[:], nil)
+	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, r.tx, address[:])
 	if err != nil {
 		return nil, nil, err
 	}
@@ -637,7 +627,7 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64
 	copy(composite[0:20], address[0:20])
 	copy(composite[20:], key.Bytes())
 
-	enc, _, err := r.sd.GetLatest(kv.StorageDomain, r.tx, composite[:], nil)
+	enc, _, err := r.sd.GetLatest(kv.StorageDomain, r.tx, composite[:])
 	if err != nil {
 		return nil, err
 	}
@@ -652,7 +642,7 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64
 }
 
 func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
-	enc, _, err := r.sd.GetLatest(kv.CodeDomain, r.tx, address[:], nil)
+	enc, _, err := r.sd.GetLatest(kv.CodeDomain, r.tx, address[:])
 	if err != nil {
 		return nil, err
 	}
@@ -663,7 +653,7 @@ func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64) (
 }
 
 func (r *ReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
-	enc, _, err := r.sd.GetLatest(kv.CodeDomain, r.tx, address[:], nil)
+	enc, _, err := r.sd.GetLatest(kv.CodeDomain, r.tx, address[:])
 	if err != nil {
 		return 0, err
 	}

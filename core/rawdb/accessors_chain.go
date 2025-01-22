@@ -21,6 +21,7 @@ package rawdb
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -33,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/core/rawdb/utils"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/ethdb/cbor"
 )
@@ -79,6 +80,10 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 			if err := tx.Put(kv.BadHeaderNumber, blockHash, blockNumBytes); err != nil {
 				return err
 			}
+
+			if bheapCache != nil {
+				heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
+			}
 		}
 		return tx.Delete(kv.HeaderCanonical, blockNumBytes)
 	}); err != nil {
@@ -86,6 +91,35 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 	}
 	return nil
 }
+
+/* latest bad blocks start */
+var bheapCache utils.ExtendedHeap
+
+func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
+	if bheapCache == nil {
+		ResetBadBlockCache(tx, 100)
+	}
+
+	blockIds := bheapCache.SortedValues()
+	blocks := make([]*types.Block, len(blockIds))
+	for i, blockId := range blockIds {
+		blocks[i] = ReadBlock(tx, blockId.Hash, blockId.Number)
+	}
+
+	return blocks, nil
+}
+
+// mainly for testing purposes
+func ResetBadBlockCache(tx kv.Tx, limit int) error {
+	bheapCache = utils.NewBlockMaxHeap(limit)
+	// load the heap
+	return tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
+		heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
+		return nil
+	})
+}
+
+/* latest bad blocks end */
 
 func IsCanonicalHash(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
 	canonicalHash, err := ReadCanonicalHash(db, number)
@@ -798,34 +832,6 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 		}
 	}
 
-	return receipts
-}
-
-// ReadReceipts retrieves all the transaction receipts belonging to a block, including
-// its corresponding metadata fields. If it is unable to populate these metadata
-// fields then nil is returned.
-//
-// The current implementation populates these metadata fields by reading the receipts'
-// corresponding block body, so if the block body is not found it will return nil even
-// if the receipt itself is stored.
-func ReadReceipts(db kv.Tx, block *types.Block, senders []common.Address) types.Receipts {
-	if block == nil {
-		return nil
-	}
-	// We're deriving many fields from the block body, retrieve beside the receipt
-	receipts := ReadRawReceipts(db, block.NumberU64())
-	if receipts == nil {
-		return nil
-	}
-	if len(senders) > 0 {
-		block.SendersToTxs(senders)
-	} else {
-		senders = block.Body().SendersFromTxs()
-	}
-	if err := receipts.DeriveFields(block.Hash(), block.NumberU64(), block.Transactions(), senders); err != nil {
-		log.Error("Failed to derive block receipts fields", "hash", block.Hash(), "number", block.NumberU64(), "err", err, "stack", dbg.Stack())
-		return nil
-	}
 	return receipts
 }
 

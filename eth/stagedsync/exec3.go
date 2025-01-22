@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -346,6 +347,14 @@ func ExecV3(ctx context.Context,
 	initialCycle bool,
 	isMining bool,
 ) error {
+	inMemExec := txc.Doms != nil
+
+	// TODO: e35 doesn't support parallel-exec yet
+	parallel = false //nolint
+	if parallel && cfg.chainConfig.ChainName == networkname.Gnosis {
+		panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
+	}
+
 	blockReader := cfg.blockReader
 	chainConfig := cfg.chainConfig
 	totalGasUsed := uint64(0)
@@ -374,15 +383,13 @@ func ExecV3(ctx context.Context,
 		}
 	}
 	agg := cfg.db.(libstate.HasAgg).Agg().(*libstate.Aggregator)
-	if initialCycle {
+	if !inMemExec && !isMining {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	} else {
 		agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(1)
 	}
-
-	pruneNonEssentials := cfg.prune.History.Enabled() && cfg.prune.History.PruneTo(execStage.BlockNumber) == execStage.BlockNumber
 
 	var err error
 	inMemExec := txc.Doms != nil
@@ -668,25 +675,6 @@ func ExecV3(ctx context.Context,
 					inputTxNum++
 					skipPostEvaluation = true
 					continue
-				}
-
-				if txIndex >= 0 && txIndex < len(txs) {
-					txTask.Tx = txs[txIndex]
-					txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
-					if err != nil {
-						return err
-					}
-
-					if sender, ok := txs[txIndex].GetSender(); ok {
-						txTask.Sender = &sender
-					} else {
-						sender, err := signer.Sender(txTask.Tx)
-						if err != nil {
-							return err
-						}
-						txTask.Sender = &sender
-						logger.Warn("[Execution] expensive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
-					}
 				}
 
 				txTasks = append(txTasks, txTask)

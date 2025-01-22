@@ -71,6 +71,8 @@ var (
 	Exec3Parallel = EnvBool("ERIGON_EXEC3_PARALLEL", false)
 	numWorkers    = runtime.NumCPU() / 2
 	Exec3Workers  = EnvInt("ERIGON_EXEC3_WORKERS", numWorkers)
+
+	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
