@@ -59,10 +59,11 @@ type Task interface {
 	VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites
 	Reset(ibs *state.IntraBlockState)
 
+	Tx() types.Transaction
 	TxType() uint8
 	TxHash() libcommon.Hash
 	TxSender() (*libcommon.Address, error)
-	TxMessage() types.Message
+	TxMessage() (*types.Message, error)
 
 	BlockHash() libcommon.Hash
 
@@ -171,12 +172,10 @@ type TxTask struct {
 	BlockNum           uint64
 	Rules              *chain.Rules
 	Header             *types.Header
-	Tx                 types.Transaction
 	Txs                types.Transactions
 	Uncles             []*types.Header
 	Withdrawals        types.Withdrawals
 	SkipAnalysis       bool
-	TxAsMessage        types.Message
 	EvmBlockContext    evmtypes.BlockContext
 	HistoryExecution   bool // use history reader for that txn instead of state reader
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
@@ -187,30 +186,44 @@ type TxTask struct {
 	Logger log.Logger
 	Trace  bool
 
-	sender *libcommon.Address
+	sender  *libcommon.Address
+	message *types.Message
+	signer  *types.Signer
+}
+
+func (t *TxTask) Tx() types.Transaction {
+	if t.TxIndex >= 0 {
+		return t.Txs[t.TxIndex]
+	}
+	return nil
 }
 
 func (t *TxTask) TxType() uint8 {
-	return t.Tx.Type()
+	return t.Tx().Type()
 }
 
 func (t *TxTask) TxHash() libcommon.Hash {
-	if t.Tx == nil {
+	if t.TxIndex < 0 || t.TxIndex >= len(t.Txs) {
 		return libcommon.Hash{}
 	}
-	return t.Tx.Hash()
+	return t.Tx().Hash()
 }
 
 func (t *TxTask) TxSender() (*libcommon.Address, error) {
 	if t.sender != nil {
 		return t.sender, nil
 	}
-	if sender, ok := t.Tx.GetSender(); ok {
+	if t.TxIndex < 0 || t.TxIndex >= len(t.Txs) {
+		return nil, nil
+	}
+	if sender, ok := t.Tx().GetSender(); ok {
 		t.sender = &sender
 		return t.sender, nil
 	}
-	signer := *types.MakeSigner(t.Config, t.BlockNum, t.Header.Time)
-	sender, err := signer.Sender(t.Tx)
+	if t.signer == nil {
+		t.signer = types.MakeSigner(t.Config, t.BlockNum, t.Header.Time)
+	}
+	sender, err := t.signer.Sender(t.Tx())
 	if err != nil {
 		return nil, err
 	}
@@ -219,8 +232,22 @@ func (t *TxTask) TxSender() (*libcommon.Address, error) {
 	return t.sender, nil
 }
 
-func (t *TxTask) TxMessage() types.Message {
-	return t.TxAsMessage
+func (t *TxTask) TxMessage() (*types.Message, error) {
+	if t.message == nil {
+		var err error
+		if t.signer == nil {
+			t.signer = types.MakeSigner(t.Config, t.BlockNum, t.Header.Time)
+		}
+		message, err := t.Tx().AsMessage(*t.signer, t.Header.BaseFee, t.Rules)
+
+		if err != nil {
+			return nil, err
+		}
+
+		t.message = &message
+	}
+
+	return t.message, nil
 }
 
 func (t *TxTask) BlockHash() libcommon.Hash {
@@ -323,9 +350,15 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[uncle.Coinbase] = struct{}{}
 		}
 	default:
-		gasPool.Reset(txTask.Tx.GetGas(), chainConfig.GetMaxBlobGasPerBlock(txTask.Header.Time))
+		gasPool.Reset(txTask.Tx().GetGas(), chainConfig.GetMaxBlobGasPerBlock(txTask.Header.Time))
 		vmCfg.SkipAnalysis = txTask.SkipAnalysis
-		msg := txTask.TxAsMessage
+		msg, err := txTask.TxMessage()
+
+		if err != nil {
+			result.Err = err
+			return &result
+		}
+
 		if msg.FeeCap().IsZero() && engine != nil {
 			// Only zero-gas transactions may be service ones
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
@@ -340,9 +373,15 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 		// MA applytx
 		result.ExecutionResult, result.Err = func() (*evmtypes.ExecutionResult, error) {
+			message, err := txTask.TxMessage()
+
+			if err != nil {
+				return nil, ErrExecAbortError{Dependency: ibs.DepTxIndex(), OriginError: err}
+			}
+
 			// Apply the transaction to the current state (included in the env).
 			if !calcFees {
-				applyRes, err := core.ApplyMessageNoFeeBurnOrTip(evm, txTask.TxMessage(), gasPool, true, false)
+				applyRes, err := core.ApplyMessageNoFeeBurnOrTip(evm, message, gasPool, true, false)
 
 				if applyRes == nil || err != nil {
 					return nil, ErrExecAbortError{Dependency: ibs.DepTxIndex(), OriginError: err}
@@ -363,7 +402,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 				return applyRes, err
 			}
 
-			return core.ApplyMessage(evm, txTask.TxMessage(), gasPool, true, false)
+			return core.ApplyMessage(evm, message, gasPool, true, false)
 		}()
 
 		if result.Err == nil {

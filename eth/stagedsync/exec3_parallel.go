@@ -192,9 +192,14 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 				execResult := *result.ExecutionResult
 				execResult.CoinbaseInitBalance = coinbaseBalance.Clone()
 
+				message, err := task.TxMessage()
+				if err != nil {
+					return nil, err
+				}
+
 				postApplyMessageFunc(
 					ibs,
-					task.TxMessage().From(),
+					message.From(),
 					result.Coinbase,
 					&execResult,
 				)
@@ -208,7 +213,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx.
 	result.Receipt = &types.Receipt{
-		Type:              txTask.Tx.Type(),
+		Type:              txTask.TxType(),
 		PostState:         nil,
 		CumulativeGasUsed: result.ExecutionResult.UsedGas,
 		GasUsed:           result.ExecutionResult.UsedGas,
@@ -231,8 +236,14 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	}
 
 	// If the transaction created a contract, store the creation address in the receipt.
-	if task.TxMessage().To() == nil {
-		result.Receipt.ContractAddress = crypto.CreateAddress(task.TxMessage().From(), txTask.Tx.GetNonce())
+	message, err := task.TxMessage()
+
+	if err != nil {
+		return nil, err
+	}
+
+	if message.To() == nil {
+		result.Receipt.ContractAddress = crypto.CreateAddress(message.From(), txTask.Tx().GetNonce())
 	}
 
 	result.Receipt.Bloom = types.CreateBloom(types.Receipts{result.Receipt})
@@ -898,10 +909,10 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			blockStatus.execTasks.clearPending(i)
 		} else {
 			sender, err := t.TxSender()
-			if err!=nil {
+			if err != nil {
 				return err
 			}
-			if  sender != nil {
+			if sender != nil {
 				if tx, ok := prevSenderTx[*sender]; ok {
 					blockStatus.execTasks.addDependencies(tx, i)
 					blockStatus.execTasks.clearPending(i)

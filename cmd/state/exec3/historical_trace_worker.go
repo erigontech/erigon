@@ -140,7 +140,8 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.execArgs.ChainDB.BeginTemporalRo(rw.ctx); err != nil {
-			panic(fmt.Errorf("BeginRo: %w", err))
+			result.Err = err
+			return &result
 		}
 		rw.stateReader.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.execArgs.ChainConfig, rw.chainTx, rw.execArgs.BlockReader, rw.logger)
@@ -179,14 +180,20 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 			break
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGas(), txTask.Tx.GetBlobGas())
+		rw.taskGasPool.Reset(txTask.Tx().GetGas(), txTask.Tx().GetBlobGas())
 		if tracer := rw.consumer.NewTracer(); tracer != nil {
 			rw.vmConfig.Debug = true
 			rw.vmConfig.Tracer = tracer
 		}
 		rw.vmConfig.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
-		msg := txTask.TxAsMessage
+		msg, err := txTask.TxMessage()
+
+		if err != nil {
+			result.Err = err
+			return &result
+		}
+
 		msg.SetCheckNonce(!rw.vmConfig.StatelessExec)
 		if msg.FeeCap().IsZero() {
 			// Only zero-gas transactions may be service ones
@@ -432,7 +439,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
-		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
@@ -461,13 +467,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
 			}
-			if txIndex >= 0 && txIndex < len(txs) {
-				txTask.Tx = txs[txIndex]
-				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
-				if err != nil {
-					return err
-				}
-			}
+
 			in.Add(ctx, txTask)
 			inputTxNum++
 

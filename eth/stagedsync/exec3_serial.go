@@ -64,7 +64,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 			mxExecTransactions.Add(1)
 
 			if txTask.Tx != nil {
-				se.blobGasUsed += txTask.Tx.GetBlobGas()
+				se.blobGasUsed += txTask.Tx().GetBlobGas()
 			}
 
 			if txTask.IsBlockEnd() {

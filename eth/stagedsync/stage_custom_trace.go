@@ -185,7 +185,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 
 			txTask := result.Task.(*exec.TxTask)
 			if txTask.Tx != nil {
-				cumulativeBlobGasUsedInBlock += txTask.Tx.GetBlobGas()
+				cumulativeBlobGasUsedInBlock += txTask.Tx().GetBlobGas()
 			}
 			//if txTask.Final {
 			//	cumulativeGasUsedTotal.AddUint64(cumulativeGasUsedTotal, cumulativeGasUsedInBlock)
