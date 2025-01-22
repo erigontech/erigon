@@ -26,22 +26,24 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 // BlockGen creates blocks for testing.
@@ -174,10 +176,18 @@ func (b *BlockGen) AddUncheckedReceipt(receipt *types.Receipt) {
 // TxNonce returns the next valid transaction nonce for the
 // account at addr. It panics if the account does not exist.
 func (b *BlockGen) TxNonce(addr libcommon.Address) uint64 {
-	if !b.ibs.Exist(addr) {
+	exist, err := b.ibs.Exist(addr)
+	if err != nil {
+		panic(fmt.Sprintf("can't get account: %s", err))
+	}
+	if !exist {
 		panic("account does not exist")
 	}
-	return b.ibs.GetNonce(addr)
+	nonce, err := b.ibs.GetNonce(addr)
+	if err != nil {
+		panic(fmt.Sprintf("can't get account: %s", err))
+	}
+	return nonce
 }
 
 // AddUncle adds an uncle header to the generated block.
@@ -356,7 +366,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 		}
 		if b.engine != nil {
-			err := InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger, nil)
+			err := InitializeBlockExecution(b.engine, nil, b.header, config, ibs, nil, logger, nil)
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
 			}
@@ -368,7 +378,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		txNumIncrement()
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, nil, logger); err != nil {
+			if _, _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, logger); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
@@ -392,7 +402,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			b.header.Root = libcommon.BytesToHash(stateRoot)
 
 			// Recreating block to make sure Root makes it into the header
-			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */, nil /*requests*/)
+			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */)
 			return block, b.receipts, nil
 		}
 		return nil, nil, errors.New("no engine to generate blocks")
@@ -451,10 +461,10 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	}
 	defer domains.Close()
 
-	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
+	if err := tx.ClearBucket(kv.HashedAccountsDeprecated); err != nil {
 		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
 	}
-	if err := tx.ClearBucket(kv.HashedStorage); err != nil {
+	if err := tx.ClearBucket(kv.HashedStorageDeprecated); err != nil {
 		return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
 	}
 	if err := tx.ClearBucket(kv.TrieOfAccounts); err != nil {
@@ -467,7 +477,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
 
-	it, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+	it, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
@@ -487,12 +497,12 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 		if err != nil {
 			return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
 		}
-		if err := tx.Put(kv.HashedAccounts, newK, v); err != nil {
+		if err := tx.Put(kv.HashedAccountsDeprecated, newK, v); err != nil {
 			return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
 		}
 	}
 
-	it, err = tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+	it, err = tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).RangeLatest(tx, kv.StorageDomain, nil, nil, -1)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
@@ -506,7 +516,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 			return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
 		}
 		fmt.Printf("storage %x -> %x\n", k, newK)
-		if err := tx.Put(kv.HashedStorage, newK, v); err != nil {
+		if err := tx.Put(kv.HashedStorageDeprecated, newK, v); err != nil {
 			return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
 		}
 
@@ -515,7 +525,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	if trace {
 		if GenerateTrace {
 			fmt.Printf("State after %d================\n", header.Number)
-			it, err := tx.Range(kv.HashedAccounts, nil, nil)
+			it, err := tx.Range(kv.HashedAccountsDeprecated, nil, nil, order.Asc, kv.Unlim)
 			if err != nil {
 				return hashRoot, err
 			}
@@ -527,7 +537,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 				fmt.Printf("%x: %x\n", k, v)
 			}
 			fmt.Printf("..................\n")
-			it, err = tx.Range(kv.HashedStorage, nil, nil)
+			it, err = tx.Range(kv.HashedStorageDeprecated, nil, nil, order.Asc, kv.Unlim)
 			if err != nil {
 				return hashRoot, err
 			}
@@ -586,7 +596,7 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 	}
 
 	if chainConfig.IsCancun(header.Time) {
-		excessBlobGas := misc.CalcExcessBlobGas(chainConfig, parent)
+		excessBlobGas := misc.CalcExcessBlobGas(chainConfig, parent, header.Time)
 		header.ExcessBlobGas = &excessBlobGas
 		header.BlobGasUsed = new(uint64)
 	}
@@ -644,7 +654,7 @@ func (cr *FakeChainReader) FrozenBorBlocks() uint64                             
 func (cr *FakeChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	return nil
 }
-func (cr *FakeChainReader) BorStartEventID(hash libcommon.Hash, number uint64) uint64 {
+func (cr *FakeChainReader) BorStartEventId(hash libcommon.Hash, number uint64) uint64 {
 	return 0
 }
-func (cr *FakeChainReader) BorSpan(spanId uint64) []byte { return nil }
+func (cr *FakeChainReader) BorSpan(spanId uint64) *heimdall.Span { return nil }

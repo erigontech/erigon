@@ -20,17 +20,16 @@ import (
 	"context"
 	"fmt"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
-
-	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type EventType string
@@ -107,12 +106,25 @@ func (e Event) AsNewMilestone() EventNewMilestone {
 }
 
 type p2pObserverRegistrar interface {
-	RegisterNewBlockObserver(polygoncommon.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockPacket]]) polygoncommon.UnregisterFunc
-	RegisterNewBlockHashesObserver(polygoncommon.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]) polygoncommon.UnregisterFunc
+	RegisterNewBlockObserver(event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockPacket]]) event.UnregisterFunc
+	RegisterNewBlockHashesObserver(event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]) event.UnregisterFunc
 }
 
 type heimdallObserverRegistrar interface {
-	RegisterMilestoneObserver(callback func(*heimdall.Milestone), opts ...heimdall.ObserverOption) polygoncommon.UnregisterFunc
+	RegisterMilestoneObserver(callback func(*heimdall.Milestone), opts ...heimdall.ObserverOption) event.UnregisterFunc
+}
+
+func NewTipEvents(logger log.Logger, p2pReg p2pObserverRegistrar, heimdallReg heimdallObserverRegistrar) *TipEvents {
+	heimdallEventsChannel := NewEventChannel[Event](10, WithEventChannelLogging(logger, log.LvlTrace, EventTopicHeimdall.String()))
+	p2pEventsChannel := NewEventChannel[Event](1000, WithEventChannelLogging(logger, log.LvlTrace, EventTopicP2P.String()))
+	compositeEventsChannel := NewTipEventsCompositeChannel(heimdallEventsChannel, p2pEventsChannel)
+	return &TipEvents{
+		logger:                    logger,
+		events:                    compositeEventsChannel,
+		p2pObserverRegistrar:      p2pReg,
+		heimdallObserverRegistrar: heimdallReg,
+		blockEventsSpamGuard:      newBlockEventsSpamGuard(logger),
+	}
 }
 
 type TipEvents struct {
@@ -123,29 +135,12 @@ type TipEvents struct {
 	blockEventsSpamGuard      blockEventsSpamGuard
 }
 
-func NewTipEvents(
-	logger log.Logger,
-	p2pObserverRegistrar p2pObserverRegistrar,
-	heimdallObserverRegistrar heimdallObserverRegistrar,
-) *TipEvents {
-	heimdallEventsChannel := NewEventChannel[Event](10, WithEventChannelLogging(logger, log.LvlTrace, EventTopicHeimdall.String()))
-	p2pEventsChannel := NewEventChannel[Event](1000, WithEventChannelLogging(logger, log.LvlTrace, EventTopicP2P.String()))
-	compositeEventsChannel := NewTipEventsCompositeChannel(heimdallEventsChannel, p2pEventsChannel)
-	return &TipEvents{
-		logger:                    logger,
-		events:                    compositeEventsChannel,
-		p2pObserverRegistrar:      p2pObserverRegistrar,
-		heimdallObserverRegistrar: heimdallObserverRegistrar,
-		blockEventsSpamGuard:      newBlockEventsSpamGuard(logger),
-	}
-}
-
 func (te *TipEvents) Events() <-chan Event {
 	return te.events.Events()
 }
 
 func (te *TipEvents) Run(ctx context.Context) error {
-	te.logger.Debug(syncLogPrefix("running tip events component"))
+	te.logger.Info(syncLogPrefix("running tip events component"))
 
 	newBlockObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
 		block := message.Decoded.Block

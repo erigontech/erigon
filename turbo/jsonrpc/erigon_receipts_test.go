@@ -27,16 +27,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
-
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
@@ -57,7 +55,7 @@ func TestGetLogs(t *testing.T) {
 		logs, err = ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 			FromBlock: big.NewInt(10),
 			ToBlock:   big.NewInt(10),
-			Addresses: common.Addresses{libcommon.Address{}},
+			Addresses: libcommon.Addresses{libcommon.Address{}},
 		})
 		assert.NoError(err)
 		assert.Equal(0, len(logs))

@@ -27,20 +27,18 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon/rpc/rpccfg"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
-	"github.com/erigontech/erigon/turbo/stages/mock"
-
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/gasprice"
+	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func newTestBackend(t *testing.T) *mock.MockSentry {
@@ -85,7 +83,7 @@ func TestSuggestPrice(t *testing.T) {
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
 
-	tx, _ := m.DB.BeginRo(m.Ctx)
+	tx, _ := m.DB.BeginTemporalRo(m.Ctx)
 	defer tx.Rollback()
 
 	cache := jsonrpc.NewGasPriceCache()

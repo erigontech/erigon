@@ -23,13 +23,26 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon/rlp"
 )
+
+type encodingBuf [32]byte
+
+var pooledBuf = sync.Pool{
+	New: func() interface{} { return new(encodingBuf) },
+}
+
+func newEncodingBuf() *encodingBuf {
+	b := pooledBuf.Get().(*encodingBuf)
+	*b = encodingBuf([32]byte{}) // reset, do we need to?
+	return b
+}
 
 //go:generate gencodec -type Withdrawal -field-override withdrawalMarshaling -out gen_withdrawal_json.go
 
@@ -54,10 +67,13 @@ func (obj *Withdrawal) EncodingSize() int {
 }
 
 func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
+
 	encodingSize := obj.EncodingSize()
 
-	var b [33]byte
-	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+
+	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 
@@ -72,7 +88,7 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(obj.Address.Bytes()); err != nil {
+	if _, err := w.Write(obj.Address[:]); err != nil {
 		return err
 	}
 

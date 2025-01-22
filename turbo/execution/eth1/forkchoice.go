@@ -187,25 +187,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 	defer e.semaphore.Release(1)
 
+	defer UpdateForkChoiceDuration(time.Now())
+
 	//if err := stages2.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
 	//	sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	//	e.logger.Warn("ProcessFrozenBlocks", "error", err)
 	//	return
 	//}
 	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
-
-	// Update the last new block seen.
-	// This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
-	if err := e.db.Update(ctx, func(tx kv.RwTx) error {
-		num, err := e.blockReader.HeaderNumber(ctx, tx, originalBlockHash)
-		if err != nil {
-			return err
-		}
-		return rawdb.WriteLastNewBlockSeen(tx, *num)
-	}); err != nil {
-		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		return
-	}
 
 	var validationError string
 	type canonicalEntry struct {
@@ -218,6 +207,17 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 	defer tx.Rollback()
+
+	{ // used by eth_syncing
+		num, err := e.blockReader.HeaderNumber(ctx, tx, originalBlockHash)
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
+		}
+		if num != nil {
+			e.hook.LastNewBlockSeen(*num) // used by eth_syncing
+		}
+	}
 
 	blockHash := originalBlockHash
 
@@ -242,6 +242,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash), false)
 		return
 	}
+
+	UpdateForkChoiceArrivalDelay(fcuHeader.Time)
 
 	limitedBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit-2)
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
@@ -274,15 +276,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 				LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
 				Status:          execution.ExecutionStatus_Success,
-			}, false)
-			return
-		}
-
-		// If we don't have it, too bad
-		if fcuHeader == nil {
-			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
-				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-				Status:          execution.ExecutionStatus_MissingSegment,
 			}, false)
 			return
 		}
@@ -339,16 +332,15 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			e.logger.Info("Reorg requested too low, capping to the minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
 			unwindTarget = minUnwindableBlock
 		}
+
 		// if unwindTarget <
 		if err := e.executionPipeline.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
 		}
-		if e.hook != nil {
-			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
-				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-				return
-			}
+		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
 		}
 		// Run the unwind
 		if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
@@ -356,6 +348,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
 		}
+
+		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
 
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
@@ -525,7 +519,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		blockTimings := e.forkValidator.GetTimings(blockHash)
-		logArgs := []interface{}{"head", headHash, "hash", blockHash}
+		logArgs := []interface{}{"age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0)), "head", headHash, "hash", blockHash}
 		if flushExtendingFork {
 			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
 			if !e.syncCfg.ParallelStateFlushing {
@@ -534,6 +528,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
 			mgasPerSec := gasUsedMgas / totalTime.Seconds()
 			metrics.ChainTipMgasPerSec.Add(mgasPerSec)
+			e.avgMgasSec = (e.avgMgasSec*float64(e.recordedMgasSec) + mgasPerSec) / float64(e.recordedMgasSec+1)
 			e.recordedMgasSec++
 			logArgs = append(logArgs, "number", fcuHeader.Number.Uint64(), "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
 			if !e.syncCfg.ParallelStateFlushing {

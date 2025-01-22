@@ -23,6 +23,7 @@ import (
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
+	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
@@ -76,12 +77,20 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload lib
 	}
 	defer tmpTx.Rollback()
 
-	memoryMutation := membatchwithdb.NewMemoryBatchWithCustomDB(tx, tmpDb, tmpTx, e.tmpdir)
+	memoryMutation := membatchwithdb.NewMemoryBatchWithCustomDB(tx, tmpDb, tmpTx)
 	defer memoryMutation.Rollback()
 
-	startBlock, endBlock, startHash, err := e.loadDownloadedHeaders(memoryMutation)
+	if block != nil {
+		err = rawdb.WriteCanonicalHash(memoryMutation, block.Hash(), block.NumberU64())
+		if err != nil {
+			e.logger.Warn("[EngineBlockDownloader] Could not make leading header canonical", "err", err)
+			e.status.Store(headerdownload.Idle)
+			return
+		}
+	}
+	startBlock, endBlock, err := e.loadDownloadedHeaders(memoryMutation)
 	if err != nil {
-		e.logger.Warn("[EngineBlockDownloader] Could load headers", "err", err)
+		e.logger.Warn("[EngineBlockDownloader] Could not load headers", "err", err)
 		e.status.Store(headerdownload.Idle)
 		return
 	}
@@ -93,11 +102,6 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload lib
 		return
 	}
 	tx.Rollback() // Discard the original db tx
-	if err := e.insertHeadersAndBodies(ctx, tmpTx, startBlock, startHash, endBlock); err != nil {
-		e.logger.Warn("[EngineBlockDownloader] Could not insert headers and bodies", "err", err)
-		e.status.Store(headerdownload.Idle)
-		return
-	}
 	e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
 	if block == nil {
 		e.status.Store(headerdownload.Idle)

@@ -5,27 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-	libcrypto "github.com/erigontech/erigon-lib/crypto"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
-
-	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 )
 
 type Authorization struct {
-	ChainID *uint256.Int      `json:"chainId"`
-	Address libcommon.Address `json:"address"`
-	Nonce   uint64            `json:"nonce"`
-	V       uint256.Int       `json:"v"`
-	R       uint256.Int       `json:"r"`
-	S       uint256.Int       `json:"s"`
+	ChainID uint256.Int
+	Address libcommon.Address
+	Nonce   uint64
+	YParity uint8
+	R       uint256.Int
+	S       uint256.Int
 }
 
 func (ath *Authorization) copy() *Authorization {
@@ -33,23 +30,27 @@ func (ath *Authorization) copy() *Authorization {
 		ChainID: ath.ChainID,
 		Address: ath.Address,
 		Nonce:   ath.Nonce,
-		V:       *ath.V.Clone(),
+		YParity: ath.YParity,
 		R:       *ath.R.Clone(),
 		S:       *ath.S.Clone(),
 	}
 }
 
 func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommon.Address, error) {
-	authLen := 1 + rlp.Uint256LenExcludingHead(ath.ChainID)
-	authLen += (1 + length.Addr)
-	authLen += rlp2.U64Len(ath.Nonce)
+	if ath.Nonce == math.MaxUint64 {
+		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
+	}
 
-	if err := EncodeStructSizePrefix(authLen, data, b); err != nil {
+	authLen := (1 + rlp.Uint256LenExcludingHead(&ath.ChainID))
+	authLen += 1 + length.Addr
+	authLen += rlp.U64Len(ath.Nonce)
+
+	if err := rlp.EncodeStructSizePrefix(authLen, data, b); err != nil {
 		return nil, err
 	}
 
 	// chainId, address, nonce
-	if err := ath.ChainID.EncodeRLP(data); err != nil {
+	if err := rlp.EncodeUint256(&ath.ChainID, data, b); err != nil {
 		return nil, err
 	}
 
@@ -61,45 +62,48 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 		return nil, err
 	}
 
+	return RecoverSignerFromRLP(data.Bytes(), ath.YParity, ath.R, ath.S)
+}
+
+func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*libcommon.Address, error) {
 	hashData := []byte{params.SetCodeMagicPrefix}
-	hashData = append(hashData, data.Bytes()...)
+	hashData = append(hashData, rlp...)
 	hash := crypto.Keccak256Hash(hashData)
 
 	var sig [65]byte
-	r := ath.R.Bytes()
-	s := ath.S.Bytes()
-	copy(sig[32-len(r):32], r)
-	copy(sig[64-len(s):64], s)
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	copy(sig[32-len(rBytes):32], rBytes)
+	copy(sig[64-len(sBytes):64], sBytes)
 
-	if ath.V.Eq(u256.Num0) || ath.V.Eq(u256.Num1) {
-		sig[64] = byte(ath.V.Uint64())
-	} else {
-		return nil, fmt.Errorf("invalid v value: %d", ath.V.Uint64())
+	if yParity > 1 {
+		return nil, fmt.Errorf("invalid y parity value: %d", yParity)
 	}
+	sig[64] = yParity
 
-	if !libcrypto.TransactionSignatureIsValid(sig[64], &ath.R, &ath.S, false /* allowPreEip2s */) {
+	if !crypto.TransactionSignatureIsValid(sig[64], &r, &s, false /* allowPreEip2s */) {
 		return nil, errors.New("invalid signature")
 	}
 
-	pubkey, err := crypto.Ecrecover(hash.Bytes(), sig[:])
+	pubKey, err := crypto.Ecrecover(hash.Bytes(), sig[:])
 	if err != nil {
 		return nil, err
 	}
-	if len(pubkey) == 0 || pubkey[0] != 4 {
+	if len(pubKey) == 0 || pubKey[0] != 4 {
 		return nil, errors.New("invalid public key")
 	}
 
 	var authority libcommon.Address
-	copy(authority[:], crypto.Keccak256(pubkey[1:])[12:])
+	copy(authority[:], crypto.Keccak256(pubKey[1:])[12:])
 	return &authority, nil
 }
 
 func authorizationSize(auth Authorization) (authLen int) {
-	authLen = 1 + rlp.Uint256LenExcludingHead(auth.ChainID)
-	authLen += rlp2.U64Len(auth.Nonce)
-	authLen += (1 + length.Addr)
+	authLen = (1 + rlp.Uint256LenExcludingHead(&auth.ChainID))
+	authLen += rlp.U64Len(auth.Nonce)
+	authLen += 1 + length.Addr
 
-	authLen += (1 + rlp.Uint256LenExcludingHead(&auth.V)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
+	authLen += rlp.U64Len(uint64(auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
 
 	return
 }
@@ -107,7 +111,7 @@ func authorizationSize(auth Authorization) (authLen int) {
 func authorizationsSize(authorizations []Authorization) (totalSize int) {
 	for _, auth := range authorizations {
 		authLen := authorizationSize(auth)
-		totalSize += rlp2.ListPrefixLen(authLen) + authLen
+		totalSize += rlp.ListPrefixLen(authLen) + authLen
 	}
 
 	return
@@ -123,11 +127,11 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		auth := Authorization{}
 
-		// chainId
-		if b, err = s.Uint256Bytes(); err != nil {
+		var chainId []byte
+		if chainId, err = s.Uint256Bytes(); err != nil {
 			return err
 		}
-		auth.ChainID = new(uint256.Int).SetBytes(b)
+		auth.ChainID.SetBytes(chainId)
 
 		// address
 		if b, err = s.Bytes(); err != nil {
@@ -144,11 +148,15 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 			return err
 		}
 
-		// v
-		if b, err = s.Uint256Bytes(); err != nil {
+		// yParity
+		var yParity uint64
+		if yParity, err = s.Uint(); err != nil {
 			return err
 		}
-		auth.V.SetBytes(b)
+		if yParity >= 1<<8 {
+			return fmt.Errorf("authorizations: y parity it too big: %d", yParity)
+		}
+		auth.YParity = uint8(yParity)
 
 		// r
 		if b, err = s.Uint256Bytes(); err != nil {
@@ -179,36 +187,34 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 }
 
 func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte) error {
-	for _, auth := range authorizations {
-		// 0. encode length of individual Authorization
-		authLen := authorizationSize(auth)
-		if err := EncodeStructSizePrefix(authLen, w, b); err != nil {
+	for i := 0; i < len(authorizations); i++ {
+		authLen := authorizationSize(authorizations[i])
+		if err := rlp.EncodeStructSizePrefix(authLen, w, b); err != nil {
 			return err
 		}
 
 		// 1. encode ChainId
-		if err := auth.ChainID.EncodeRLP(w); err != nil {
+		if err := rlp.EncodeUint256(&authorizations[i].ChainID, w, b); err != nil {
 			return err
 		}
 		// 2. encode Address
-		if err := rlp.EncodeOptionalAddress(&auth.Address, w, b); err != nil {
+		if err := rlp.EncodeOptionalAddress(&authorizations[i].Address, w, b); err != nil {
 			return err
 		}
 		// 3. encode Nonce
-		if err := rlp.EncodeInt(auth.Nonce, w, b); err != nil {
+		if err := rlp.EncodeInt(authorizations[i].Nonce, w, b); err != nil {
 			return err
 		}
-		// 4. encode V, R, S
-		if err := auth.V.EncodeRLP(w); err != nil {
+		// 4. encode YParity, R, S
+		if err := rlp.EncodeInt(uint64(authorizations[i].YParity), w, b); err != nil {
 			return err
 		}
-		if err := auth.R.EncodeRLP(w); err != nil {
+		if err := rlp.EncodeUint256(&authorizations[i].R, w, b); err != nil {
 			return err
 		}
-		if err := auth.S.EncodeRLP(w); err != nil {
+		if err := rlp.EncodeUint256(&authorizations[i].S, w, b); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }

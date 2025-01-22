@@ -17,20 +17,20 @@
 package statechange
 
 import (
-	"runtime"
-
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
 // ProcessInactivityScores will updates the inactivity registry of each validator.
 func ProcessInactivityScores(s abstract.BeaconState, eligibleValidatorsIndicies []uint64, unslashedIndicies [][]bool) error {
+	defer monitor.ObserveElaspedTime(monitor.ProcessInactivityScoresTime).End()
 	if state.Epoch(s) == s.BeaconConfig().GenesisEpoch {
 		return nil
 	}
 
-	return threading.ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidatorsIndicies), func(i int) error {
+	return threading.ParallellForLoop(1, 0, len(eligibleValidatorsIndicies), func(i int) error {
 		validatorIndex := eligibleValidatorsIndicies[i]
 
 		// retrieve validator inactivity score index.
@@ -50,6 +50,7 @@ func ProcessInactivityScores(s abstract.BeaconState, eligibleValidatorsIndicies 
 		if !state.InactivityLeaking(s) {
 			score -= min(s.BeaconConfig().InactivityScoreRecoveryRate, score)
 		}
+
 		if err := s.SetValidatorInactivityScore(int(validatorIndex), score); err != nil {
 			return err
 		}

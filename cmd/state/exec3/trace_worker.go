@@ -74,11 +74,12 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineR
 		stateReader:  stateReader,
 		tracer:       tracer,
 		evm:          vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, cc, vm.Config{}),
-		vmConfig:     &vm.Config{},
+		vmConfig:     &vm.Config{NoBaseFee: true},
 		ibs:          state.New(stateReader),
 	}
 	if tracer != nil {
-		ie.vmConfig = &vm.Config{Debug: true, Tracer: tracer}
+		ie.vmConfig.Debug = true
+		ie.vmConfig.Tracer = tracer
 	}
 	return ie
 }

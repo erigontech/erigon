@@ -31,8 +31,10 @@ func TestAttestationProducer(t *testing.T) {
 	attProducer := attestation_producer.New(context.Background(), &clparams.MainnetBeaconConfig)
 
 	_, _, headState := tests.GetPhase0Random()
+	root, err := headState.BlockRoot()
+	require.NoError(t, err)
 
-	att, err := attProducer.ProduceAndCacheAttestationData(headState, headState.Slot(), 0)
+	att, err := attProducer.ProduceAndCacheAttestationData(nil, headState, root, headState.Slot(), 0)
 	require.NoError(t, err)
 
 	attJson, err := json.Marshal(att)

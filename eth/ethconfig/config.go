@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core/types"
@@ -44,6 +43,8 @@ import (
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider/shutter"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
@@ -73,12 +74,12 @@ var LightClientGPO = gaspricecfg.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		ExecWorkerCount:            estimate.ReconstituteState.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
-		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
+		ExecWorkerCount:            estimate.BlocksExecution.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
 		//LoopBlockLimit:             100_000,
 		ParallelStateFlushing: true,
+		ChaosMonkey:           false,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -90,15 +91,14 @@ var Defaults = Config{
 	NetworkID: 1,
 	Prune:     prune.DefaultMode,
 	Miner: params.MiningConfig{
-		GasLimit: 30_000_000,
+		GasLimit: 36_000_000,
 		GasPrice: big.NewInt(params.GWei),
 		Recommit: 3 * time.Second,
 	},
-	DeprecatedTxPool: DeprecatedDefaultTxPoolConfig,
-	TxPool:           txpoolcfg.DefaultConfig,
-	RPCGasCap:        50000000,
-	GPO:              FullNodeGPO,
-	RPCTxFeeCap:      1, // 1 ether
+	TxPool:      txpoolcfg.DefaultConfig,
+	RPCGasCap:   50000000,
+	GPO:         FullNodeGPO,
+	RPCTxFeeCap: 1, // 1 ether
 
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
@@ -135,13 +135,14 @@ func init() {
 //go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
 
 type BlocksFreezing struct {
-	KeepBlocks     bool // produce new snapshots of blocks but don't remove blocks from DB
-	ProduceE2      bool // produce new block files
-	ProduceE3      bool // produce new state files
-	NoDownloader   bool // possible to use snapshots without calling Downloader
-	Verify         bool // verify snapshots on startup
-	DownloaderAddr string
-	ChainName      string
+	KeepBlocks        bool // produce new snapshots of blocks but don't remove blocks from DB
+	ProduceE2         bool // produce new block files
+	ProduceE3         bool // produce new state files
+	NoDownloader      bool // possible to use snapshots without calling Downloader
+	Verify            bool // verify snapshots on startup
+	DisableDownloadE3 bool // disable download state snapshots
+	DownloaderAddr    string
+	ChainName         string
 }
 
 func (s BlocksFreezing) String() string {
@@ -210,8 +211,8 @@ type Config struct {
 	Aura   chain.AuRaConfig
 
 	// Transaction pool options
-	DeprecatedTxPool DeprecatedTxPoolConfig
-	TxPool           txpoolcfg.Config
+	TxPool  txpoolcfg.Config
+	Shutter shutter.Config
 
 	// Gas Price Oracle options
 	GPO gaspricecfg.Config
@@ -258,8 +259,6 @@ type Config struct {
 	SilkwormRpcLogDumpResponse   bool
 	SilkwormRpcNumWorkers        uint32
 	SilkwormRpcJsonCompatibility bool
-
-	DisableTxPoolGossip bool
 }
 
 type Sync struct {
@@ -277,4 +276,7 @@ type Sync struct {
 	UploadLocation   string
 	UploadFrom       rpc.BlockNumber
 	FrozenBlockLimit uint64
+
+	ChaosMonkey              bool
+	AlwaysGenerateChangesets bool
 }

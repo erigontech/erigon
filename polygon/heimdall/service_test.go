@@ -136,8 +136,8 @@ type ServiceTestSuite struct {
 	ctx                          context.Context
 	cancel                       context.CancelFunc
 	eg                           errgroup.Group
-	client                       *MockHeimdallClient
-	service                      *service
+	client                       *MockClient
+	service                      *Service
 	observedMilestones           []*Milestone
 	observedSpans                []*Span
 	spansTestDataDir             string
@@ -152,19 +152,23 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	tempDir := suite.T().TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	logger := testlog.Logger(suite.T(), log.LvlCrit)
-	store := NewMdbxServiceStore(logger, dataDir, tempDir, 1)
+	store := NewMdbxStore(logger, dataDir, 1)
 	borConfig := suite.chainConfig.Bor.(*borcfg.BorConfig)
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.spansTestDataDir = filepath.Join(suite.testDataDir, "spans")
 	suite.checkpointsTestDataDir = filepath.Join(suite.testDataDir, "checkpoints")
 	suite.milestonesTestDataDir = filepath.Join(suite.testDataDir, "milestones")
 	suite.proposerSequencesTestDataDir = filepath.Join(suite.testDataDir, "getSnapshotProposerSequence")
-	suite.client = NewMockHeimdallClient(ctrl)
+	suite.client = NewMockClient(ctrl)
 	suite.setupSpans()
 	suite.setupCheckpoints()
 	suite.setupMilestones()
-	reader := NewReader(borConfig, store, logger)
-	suite.service = newService(borConfig, suite.client, store, logger, reader)
+	suite.service = NewService(ServiceConfig{
+		Store:     store,
+		BorConfig: borConfig,
+		Client:    suite.client,
+		Logger:    logger,
+	})
 
 	err := suite.service.store.Prepare(suite.ctx)
 	require.NoError(suite.T(), err)

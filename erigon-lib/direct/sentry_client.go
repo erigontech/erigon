@@ -89,8 +89,7 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	c.Lock()
 	defer c.Unlock()
 	switch reply.Protocol {
-	case sentryproto.Protocol_ETH65, sentryproto.Protocol_ETH66,
-		sentryproto.Protocol_ETH67, reply.Protocol:
+	case sentryproto.Protocol_ETH67, sentryproto.Protocol_ETH68:
 		c.protocol = reply.Protocol
 	default:
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
@@ -103,7 +102,9 @@ func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentryproto.Stat
 }
 
 func (c *SentryClientRemote) Messages(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
-	in.Ids = filterIds(in.Ids, c.protocol)
+	in = &sentryproto.MessagesRequest{
+		Ids: filterIds(in.Ids, c.protocol),
+	}
 	return c.SentryClient.Messages(ctx, in, opts...)
 }
 
@@ -179,7 +180,9 @@ func (c *SentryClientDirect) PeerById(ctx context.Context, in *sentryproto.PeerB
 // -- start Messages
 
 func (c *SentryClientDirect) Messages(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
-	in.Ids = filterIds(in.Ids, c.protocol)
+	in = &sentryproto.MessagesRequest{
+		Ids: filterIds(in.Ids, c.protocol),
+	}
 	ch := make(chan *inboundMessageReply, 16384)
 	streamServer := &SentryMessagesStreamS{ch: ch, ctx: ctx}
 	go func() {

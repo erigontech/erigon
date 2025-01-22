@@ -55,7 +55,7 @@ func TestBlockchain(t *testing.T) {
 	// dir := filepath.Join(".", "/testdata/BlockchainTests/InvalidBlocks")
 
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
-		// fmt.Println("-----------------------------------------------")
+		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
 			t.Error(err)

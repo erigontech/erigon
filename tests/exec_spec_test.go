@@ -31,18 +31,12 @@ func TestExecutionSpec(t *testing.T) {
 
 	bt := new(testMatcher)
 
-	dir := filepath.Join(".", "execution-spec-tests/prague/eip2537_bls_12_381_precompiles/bls12_g2mul")
-
-	bt.skipLoad(`^`)
-
-	// // TODO(yperbasis) make it work
-	// bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
-	// bt.skipLoad(`^prague/eip7251_consolidations/`)
-	// bt.skipLoad(`^prague/eip7685_general_purpose_el_requests/`)
-	// bt.skipLoad(`^prague/eip7002_el_triggerable_withdrawals/`)
+	dir := filepath.Join(".", "execution-spec-tests")
+	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
 	checkStateRoot := true
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
+		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
 			t.Error(err)

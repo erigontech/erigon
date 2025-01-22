@@ -81,9 +81,13 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	if !ok {
 		_, syncCommittee, ok = a.forkchoiceStore.GetSyncCommittees(period - 1)
 	}
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
 	// Read them from the archive node if we do not have them in the fast-access storage
 	if !ok {
-		syncCommittee, err = state_accessors.ReadCurrentSyncCommittee(tx, a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(startSlotAtEpoch))
+		syncCommittee, err = state_accessors.ReadCurrentSyncCommittee(
+			state_accessors.GetValFnTxAndSnapshot(tx, snRoTx),
+			a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(startSlotAtEpoch))
 		if syncCommittee == nil {
 			log.Warn("could not find sync committee for epoch", "epoch", epoch, "period", period)
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find sync committee for epoch %d", epoch))
@@ -99,7 +103,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	// Now we have the sync committee, we can initialize our response set
 	dutiesSet := map[uint64]*syncDutyResponse{}
 	for _, idx := range idxs {
-		publicKey, err := state_accessors.ReadPublicKeyByIndex(tx, idx)
+		publicKey, err := a.syncedData.ValidatorPublicKeyByIndex(int(idx))
 		if err != nil {
 			return nil, err
 		}
@@ -113,12 +117,9 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	}
 	// Now we can iterate over the sync committee and fill the response
 	for idx, committeeParticipantPublicKey := range syncCommittee.GetCommittee() {
-		committeeParticipantIndex, ok, err := state_accessors.ReadValidatorIndexByPublicKey(tx, committeeParticipantPublicKey)
+		committeeParticipantIndex, _, err := a.syncedData.ValidatorIndexByPublicKey(committeeParticipantPublicKey)
 		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with public key %x", committeeParticipantPublicKey))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with public key %x: %s", committeeParticipantPublicKey, err))
 		}
 		if _, ok := dutiesSet[committeeParticipantIndex]; !ok {
 			continue

@@ -6,7 +6,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
 )
 
 type IniticodeTx struct {

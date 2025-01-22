@@ -56,19 +56,23 @@ func (f *ForkChoiceStore) OnAttestation(
 			return err
 		}
 	}
-	headState := f.syncedDataManager.HeadState()
 	var attestationIndicies []uint64
 	var err error
 	target := data.Target
 
-	if headState == nil {
+	if f.syncedDataManager.Syncing() {
 		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
 			target,
 			attestation,
 			fromBlock,
 		)
 	} else {
-		attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
+		if err := f.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
+			return err
+		}); err != nil {
+			return err
+		}
 	}
 	if err != nil {
 		return err
@@ -112,10 +116,6 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 	}
 	if !fromBlock {
 		indexedAttestation := state.GetIndexedAttestation(attestation, attestationIndicies)
-		if err != nil {
-			return nil, err
-		}
-
 		valid, err := targetState.isValidIndexedAttestation(indexedAttestation)
 		if err != nil {
 			return nil, err
@@ -138,9 +138,6 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 	}
 	if !fromBlock {
 		indexedAttestation := state.GetIndexedAttestation(attestation, attestationIndicies)
-		if err != nil {
-			return nil, err
-		}
 		valid, err := state.IsValidIndexedAttestation(s, indexedAttestation)
 		if err != nil {
 			return nil, err
@@ -153,23 +150,11 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 }
 
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
-	if index >= uint64(len(f.latestMessages)) {
-		if index >= uint64(cap(f.latestMessages)) {
-			tmp := make([]LatestMessage, index+1, index*2)
-			copy(tmp, f.latestMessages)
-			f.latestMessages = tmp
-		}
-		f.latestMessages = f.latestMessages[:index+1]
-	}
-	f.latestMessages[index] = message
+	f.latestMessages.set(int(index), message)
 }
 
 func (f *ForkChoiceStore) getLatestMessage(validatorIndex uint64) (LatestMessage, bool) {
-	if validatorIndex >= uint64(len(f.latestMessages)) ||
-		f.latestMessages[validatorIndex] == (LatestMessage{}) {
-		return LatestMessage{}, false
-	}
-	return f.latestMessages[validatorIndex], true
+	return f.latestMessages.get(int(validatorIndex))
 }
 
 func (f *ForkChoiceStore) isUnequivocating(validatorIndex uint64) bool {

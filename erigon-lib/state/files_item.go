@@ -17,13 +17,16 @@
 package state
 
 import (
+	"fmt"
 	"os"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync/atomic"
 
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
@@ -44,12 +47,11 @@ type filesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
 	bindex               *BtIndex
-	bm                   *bitmapdb.FixedSizeBitmaps
 	existence            *ExistenceFilter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
-	// Frozen: file of size StepsInColdFile. Completely immutable.
-	// Cold: file of size < StepsInColdFile. Immutable, but can be closed/removed after merge to bigger file.
+	// Frozen: file of size StepsInFrozenFile. Completely immutable.
+	// Cold: file of size < StepsInFrozenFile. Immutable, but can be closed/removed after merge to bigger file.
 	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
 	frozen   bool         // immutable, don't need atomic
 	refcount atomic.Int32 // only for `frozen=false`
@@ -62,7 +64,7 @@ type filesItem struct {
 func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
-	frozen := endStep-startStep == StepsInColdFile
+	frozen := endStep-startStep == config3.StepsInFrozenFile
 	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
 
@@ -91,10 +93,6 @@ func (i *filesItem) closeFiles() {
 	if i.bindex != nil {
 		i.bindex.Close()
 		i.bindex = nil
-	}
-	if i.bm != nil {
-		i.bm.Close()
-		i.bm = nil
 	}
 	if i.existence != nil {
 		i.existence.Close()
@@ -139,16 +137,6 @@ func (i *filesItem) closeFilesAndRemove() {
 		}
 		i.bindex = nil
 	}
-	if i.bm != nil {
-		i.bm.Close()
-		if err := os.Remove(i.bm.FilePath()); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
-		}
-		if err := os.Remove(i.bm.FilePath() + ".torrent"); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
-		}
-		i.bm = nil
-	}
 	if i.existence != nil {
 		i.existence.Close()
 		if err := os.Remove(i.existence.FilePath); err != nil {
@@ -159,6 +147,61 @@ func (i *filesItem) closeFilesAndRemove() {
 		}
 		i.existence = nil
 	}
+}
+
+func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*filesItem) {
+	re := regexp.MustCompile("^v([0-9]+)-" + filenameBase + ".([0-9]+)-([0-9]+)." + ext + "$")
+	var err error
+
+	for _, name := range fileNames {
+		subs := re.FindStringSubmatch(name)
+		if len(subs) != 4 {
+			if len(subs) != 0 {
+				logger.Warn("File ignored by domain scan, more than 4 submatches", "name", name, "submatches", len(subs))
+			}
+			continue
+		}
+		var startStep, endStep uint64
+		if startStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
+			logger.Warn("File ignored by domain scan, parsing startTxNum", "error", err, "name", name)
+			continue
+		}
+		if endStep, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
+			logger.Warn("File ignored by domain scan, parsing endTxNum", "error", err, "name", name)
+			continue
+		}
+		if startStep > endStep {
+			logger.Warn("File ignored by domain scan, startTxNum > endTxNum", "name", name)
+			continue
+		}
+
+		// Semantic: [startTxNum, endTxNum)
+		// Example:
+		//   stepSize = 4
+		//   0-1.kv: [0, 8)
+		//   0-2.kv: [0, 16)
+		//   1-2.kv: [8, 16)
+		startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
+
+		var newFile = newFilesItem(startTxNum, endTxNum, stepSize)
+		res = append(res, newFile)
+	}
+	return res
+}
+
+func ParseStepsFromFileName(fileName string) (from, to uint64, err error) {
+	rangeString := strings.Split(fileName, ".")[1]
+	rangeNums := strings.Split(rangeString, "-")
+	// convert the range to uint64
+	from, err = strconv.ParseUint(rangeNums[0], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+	}
+	to, err = strconv.ParseUint(rangeNums[1], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+	}
+	return from, to, nil
 }
 
 func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, filenameBase string, logger log.Logger) {
@@ -200,7 +243,7 @@ type visibleFile struct {
 func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
 func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
 
-func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool, toTxNum uint64) (roItems []visibleFile) {
+func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
 	// trace = true
 	if trace {
@@ -228,21 +271,21 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool, t
 				}
 				continue
 			}
-			if (l&withBTree != 0) && item.bindex == nil {
+			if (l&AccessorBTree != 0) && item.bindex == nil {
 				if trace {
 					log.Warn("[dbg] calcVisibleFiles: BTindex not opened", "f", item.decompressor.FileName())
 				}
 				//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 				continue
 			}
-			if (l&withHashMap != 0) && item.index == nil {
+			if (l&AccessorHashMap != 0) && item.index == nil {
 				if trace {
 					log.Warn("[dbg] calcVisibleFiles: RecSplit not opened", "f", item.decompressor.FileName())
 				}
 				//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
 				continue
 			}
-			if (l&withExistence != 0) && item.existence == nil {
+			if (l&AccessorExistence != 0) && item.existence == nil {
 				if trace {
 					log.Warn("[dbg] calcVisibleFiles: Existence not opened", "f", item.decompressor.FileName())
 				}
@@ -293,7 +336,7 @@ func (files visibleFiles) LatestMergedRange() MergeRange {
 		return MergeRange{}
 	}
 	for i := len(files) - 1; i >= 0; i-- {
-		shardSize := (files[i].endTxNum - files[i].startTxNum) / config3.HistoryV3AggregationStep
+		shardSize := (files[i].endTxNum - files[i].startTxNum) / config3.DefaultStepSize
 		if shardSize > 2 {
 			return MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
 		}

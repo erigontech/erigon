@@ -31,10 +31,8 @@ import (
 	"testing"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto"
 )
 
 const jsondata = `
@@ -362,7 +360,7 @@ func TestInputVariableInputLength(t *testing.T) {
 	offset[31] = 32
 	length := make([]byte, 32)
 	length[31] = byte(len(strin))
-	value := common.RightPadBytes([]byte(strin), 32)
+	value := libcommon.RightPadBytes([]byte(strin), 32)
 	exp := append(offset, append(length, value...)...)
 
 	// ignore first 4 bytes of the output. This is the function identifier
@@ -394,13 +392,13 @@ func TestInputVariableInputLength(t *testing.T) {
 	offset1[31] = 64
 	length1 := make([]byte, 32)
 	length1[31] = byte(len(str1))
-	value1 := common.RightPadBytes([]byte(str1), 32)
+	value1 := libcommon.RightPadBytes([]byte(str1), 32)
 
 	offset2 := make([]byte, 32)
 	offset2[31] = 128
 	length2 := make([]byte, 32)
 	length2[31] = byte(len(str2))
-	value2 := common.RightPadBytes([]byte(str2), 32)
+	value2 := libcommon.RightPadBytes([]byte(str2), 32)
 
 	exp2 := append(offset1, offset2...)
 	exp2 = append(exp2, append(length1, value1...)...)
@@ -423,7 +421,7 @@ func TestInputVariableInputLength(t *testing.T) {
 	offset1[31] = 64
 	length1 = make([]byte, 32)
 	length1[31] = byte(len(str1))
-	value1 = common.RightPadBytes([]byte(str1), 64)
+	value1 = libcommon.RightPadBytes([]byte(str1), 64)
 	offset2[31] = 160
 
 	exp2 = append(offset1, offset2...)
@@ -448,13 +446,13 @@ func TestInputVariableInputLength(t *testing.T) {
 	offset1[31] = 64
 	length1 = make([]byte, 32)
 	length1[31] = byte(len(str1))
-	value1 = common.RightPadBytes([]byte(str1), 64)
+	value1 = libcommon.RightPadBytes([]byte(str1), 64)
 
 	offset2 = make([]byte, 32)
 	offset2[31] = 160
 	length2 = make([]byte, 32)
 	length2[31] = byte(len(str2))
-	value2 = common.RightPadBytes([]byte(str2), 64)
+	value2 = libcommon.RightPadBytes([]byte(str2), 64)
 
 	exp2 = append(offset1, offset2...)
 	exp2 = append(exp2, append(length1, value1...)...)
@@ -486,9 +484,9 @@ func TestInputFixedArrayAndVariableInputLength(t *testing.T) {
 	offset[31] = 96
 	length := make([]byte, 32)
 	length[31] = byte(len(strin))
-	strvalue := common.RightPadBytes([]byte(strin), 32)
-	arrinvalue1 := common.LeftPadBytes(arrin[0].Bytes(), 32)
-	arrinvalue2 := common.LeftPadBytes(arrin[1].Bytes(), 32)
+	strvalue := libcommon.RightPadBytes([]byte(strin), 32)
+	arrinvalue1 := libcommon.LeftPadBytes(arrin[0].Bytes(), 32)
+	arrinvalue2 := libcommon.LeftPadBytes(arrin[1].Bytes(), 32)
 	exp := append(offset, arrinvalue1...)
 	exp = append(exp, arrinvalue2...)
 	exp = append(exp, append(length, strvalue...)...)
@@ -512,9 +510,9 @@ func TestInputFixedArrayAndVariableInputLength(t *testing.T) {
 	offset[31] = 96
 	length = make([]byte, 32)
 	length[31] = byte(len(strin))
-	strvalue = common.RightPadBytes([]byte(strin), 32)
-	arrinvalue1 = common.LeftPadBytes(arrin[0].Bytes(), 32)
-	arrinvalue2 = common.LeftPadBytes(arrin[1].Bytes(), 32)
+	strvalue = libcommon.RightPadBytes([]byte(strin), 32)
+	arrinvalue1 = libcommon.LeftPadBytes(arrin[0].Bytes(), 32)
+	arrinvalue2 = libcommon.LeftPadBytes(arrin[1].Bytes(), 32)
 	exp = append(offset, arrinvalue1...)
 	exp = append(exp, arrinvalue2...)
 	exp = append(exp, append(length, strvalue...)...)
@@ -539,16 +537,16 @@ func TestInputFixedArrayAndVariableInputLength(t *testing.T) {
 	stroffset[31] = 128
 	strlength := make([]byte, 32)
 	strlength[31] = byte(len(strin))
-	strvalue = common.RightPadBytes([]byte(strin), 32)
-	fixedarrinvalue1 := common.LeftPadBytes(fixedarrin[0].Bytes(), 32)
-	fixedarrinvalue2 := common.LeftPadBytes(fixedarrin[1].Bytes(), 32)
+	strvalue = libcommon.RightPadBytes([]byte(strin), 32)
+	fixedarrinvalue1 := libcommon.LeftPadBytes(fixedarrin[0].Bytes(), 32)
+	fixedarrinvalue2 := libcommon.LeftPadBytes(fixedarrin[1].Bytes(), 32)
 	dynarroffset := make([]byte, 32)
 	dynarroffset[31] = byte(160 + ((len(strin)/32)+1)*32)
 	dynarrlength := make([]byte, 32)
 	dynarrlength[31] = byte(len(dynarrin))
-	dynarrinvalue1 := common.LeftPadBytes(dynarrin[0].Bytes(), 32)
-	dynarrinvalue2 := common.LeftPadBytes(dynarrin[1].Bytes(), 32)
-	dynarrinvalue3 := common.LeftPadBytes(dynarrin[2].Bytes(), 32)
+	dynarrinvalue1 := libcommon.LeftPadBytes(dynarrin[0].Bytes(), 32)
+	dynarrinvalue2 := libcommon.LeftPadBytes(dynarrin[1].Bytes(), 32)
+	dynarrinvalue3 := libcommon.LeftPadBytes(dynarrin[2].Bytes(), 32)
 	exp = append(stroffset, fixedarrinvalue1...)
 	exp = append(exp, fixedarrinvalue2...)
 	exp = append(exp, dynarroffset...)
@@ -578,12 +576,12 @@ func TestInputFixedArrayAndVariableInputLength(t *testing.T) {
 	stroffset[31] = 192
 	strlength = make([]byte, 32)
 	strlength[31] = byte(len(strin))
-	strvalue = common.RightPadBytes([]byte(strin), 32)
-	fixedarrin1value1 := common.LeftPadBytes(fixedarrin1[0].Bytes(), 32)
-	fixedarrin1value2 := common.LeftPadBytes(fixedarrin1[1].Bytes(), 32)
-	fixedarrin2value1 := common.LeftPadBytes(fixedarrin2[0].Bytes(), 32)
-	fixedarrin2value2 := common.LeftPadBytes(fixedarrin2[1].Bytes(), 32)
-	fixedarrin2value3 := common.LeftPadBytes(fixedarrin2[2].Bytes(), 32)
+	strvalue = libcommon.RightPadBytes([]byte(strin), 32)
+	fixedarrin1value1 := libcommon.LeftPadBytes(fixedarrin1[0].Bytes(), 32)
+	fixedarrin1value2 := libcommon.LeftPadBytes(fixedarrin1[1].Bytes(), 32)
+	fixedarrin2value1 := libcommon.LeftPadBytes(fixedarrin2[0].Bytes(), 32)
+	fixedarrin2value2 := libcommon.LeftPadBytes(fixedarrin2[1].Bytes(), 32)
+	fixedarrin2value3 := libcommon.LeftPadBytes(fixedarrin2[2].Bytes(), 32)
 	exp = append(stroffset, fixedarrin1value1...)
 	exp = append(exp, fixedarrin1value2...)
 	exp = append(exp, fixedarrin2value1...)
@@ -612,17 +610,17 @@ func TestInputFixedArrayAndVariableInputLength(t *testing.T) {
 	stroffset[31] = 224
 	strlength = make([]byte, 32)
 	strlength[31] = byte(len(strin))
-	strvalue = common.RightPadBytes([]byte(strin), 32)
-	fixedarrin1value1 = common.LeftPadBytes(fixedarrin1[0].Bytes(), 32)
-	fixedarrin1value2 = common.LeftPadBytes(fixedarrin1[1].Bytes(), 32)
+	strvalue = libcommon.RightPadBytes([]byte(strin), 32)
+	fixedarrin1value1 = libcommon.LeftPadBytes(fixedarrin1[0].Bytes(), 32)
+	fixedarrin1value2 = libcommon.LeftPadBytes(fixedarrin1[1].Bytes(), 32)
 	dynarroffset = math.U256Bytes(big.NewInt(int64(256 + ((len(strin)/32)+1)*32)))
 	dynarrlength = make([]byte, 32)
 	dynarrlength[31] = byte(len(dynarrin))
-	dynarrinvalue1 = common.LeftPadBytes(dynarrin[0].Bytes(), 32)
-	dynarrinvalue2 = common.LeftPadBytes(dynarrin[1].Bytes(), 32)
-	fixedarrin2value1 = common.LeftPadBytes(fixedarrin2[0].Bytes(), 32)
-	fixedarrin2value2 = common.LeftPadBytes(fixedarrin2[1].Bytes(), 32)
-	fixedarrin2value3 = common.LeftPadBytes(fixedarrin2[2].Bytes(), 32)
+	dynarrinvalue1 = libcommon.LeftPadBytes(dynarrin[0].Bytes(), 32)
+	dynarrinvalue2 = libcommon.LeftPadBytes(dynarrin[1].Bytes(), 32)
+	fixedarrin2value1 = libcommon.LeftPadBytes(fixedarrin2[0].Bytes(), 32)
+	fixedarrin2value2 = libcommon.LeftPadBytes(fixedarrin2[1].Bytes(), 32)
+	fixedarrin2value3 = libcommon.LeftPadBytes(fixedarrin2[2].Bytes(), 32)
 	exp = append(stroffset, fixedarrin1value1...)
 	exp = append(exp, fixedarrin1value2...)
 	exp = append(exp, dynarroffset...)

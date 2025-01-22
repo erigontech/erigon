@@ -27,9 +27,9 @@ type BorGenerator struct {
 	engine       consensus.EngineReader
 }
 
-func NewBorGenerator(cacheSize int, blockReader services.FullBlockReader,
+func NewBorGenerator(blockReader services.FullBlockReader,
 	engine consensus.EngineReader) *BorGenerator {
-	receiptCache, err := lru.New[libcommon.Hash, *types.Receipt](cacheSize)
+	receiptCache, err := lru.New[libcommon.Hash, *types.Receipt](receiptsCacheLimit)
 	if err != nil {
 		panic(err)
 	}
@@ -42,14 +42,14 @@ func NewBorGenerator(cacheSize int, blockReader services.FullBlockReader,
 }
 
 // GenerateBorReceipt generates the receipt for state sync transactions of a block
-func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.Tx, block *types.Block,
+func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx, block *types.Block,
 	msgs []*types.Message, chainConfig *chain.Config, blockReceipts []*types.Receipt) (*types.Receipt, error) {
 	if receipts, ok := g.receiptCache.Get(block.Hash()); ok {
 		return receipts, nil
 	}
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
-	ibs, blockContext, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block.HeaderNoCopy(), chainConfig, g.blockReader, txNumsReader, tx, len(blockReceipts)-1)
+	ibs, blockContext, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block.HeaderNoCopy(), chainConfig, g.blockReader, txNumsReader, tx, len(blockReceipts)) // we want to get the state at the end of the block
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.Tx, block *
 		return nil, err
 	}
 
-	g.receiptCache.Add(block.Hash(), receipt)
+	g.receiptCache.Add(block.Hash(), receipt.Copy())
 	return receipt, nil
 }
 

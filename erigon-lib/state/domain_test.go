@@ -24,7 +24,8 @@ import (
 	"fmt"
 	"io/fs"
 	"math"
-	"math/rand"
+	randOld "math/rand"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sort"
@@ -33,15 +34,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
-	btree2 "github.com/tidwall/btree"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -49,7 +47,23 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 )
+
+type rndGen struct {
+	*rand.Rand
+	oldGen *randOld.Rand
+}
+
+func newRnd(seed uint64) *rndGen {
+	return &rndGen{
+		Rand:   rand.New(rand.NewChaCha8([32]byte{byte(seed)})),
+		oldGen: randOld.New(randOld.NewSource(int64(seed))),
+	}
+}
+func (r *rndGen) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
+func (r *rndGen) Read(p []byte) (n int, err error) { return r.oldGen.Read(p) } // seems `go1.22` doesn't have `Read` method on `math/v2` generator
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
@@ -59,32 +73,17 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
-	keysTable := "Keys"
-	valsTable := "Vals"
-	historyKeysTable := "HistoryKeys"
-	historyValsTable := "HistoryVals"
-	settingsTable := "Settings" //nolint
-	indexTable := "Index"
-	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		tcfg := kv.TableCfg{
-			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
-			valsTable:             kv.TableCfgItem{Flags: kv.DupSort},
-			historyKeysTable:      kv.TableCfgItem{Flags: kv.DupSort},
-			historyValsTable:      kv.TableCfgItem{Flags: kv.DupSort},
-			settingsTable:         kv.TableCfgItem{},
-			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
-			kv.TblPruningProgress: kv.TableCfgItem{},
-		}
-		return tcfg
-	}).MustOpen()
+	cfg := Schema[kv.AccountsDomain]
+	cfg.crossDomainIntegrity = nil //no other domains
+
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := domainCfg{
-		hist: histCfg{
-			iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: true,
-		}}
-	d, err := NewDomain(cfg, aggStep, kv.AccountsDomain, valsTable, historyKeysTable, historyValsTable, indexTable, nil, logger)
+
+	cfg.hist.iiCfg.aggregationStep = aggStep
+	cfg.hist.iiCfg.dirs = dirs
+	cfg.hist.iiCfg.salt = &salt
+	d, err := NewDomain(cfg, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
 	t.Cleanup(d.Close)
@@ -136,7 +135,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	ctx := context.Background()
 
 	if compressDomainVals {
-		d.compression = seg.CompressKeys | seg.CompressVals
+		d.Compression = seg.CompressKeys | seg.CompressVals
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -207,7 +206,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		defer sf.CleanupOnError()
 		c.Close()
 
-		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.compression)
+		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.Compression)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
@@ -340,11 +339,11 @@ func TestDomain_AfterPrune(t *testing.T) {
 	var v []byte
 	dc = d.BeginFilesRo()
 	defer dc.Close()
-	v, _, found, err := dc.GetLatest(k1, nil, tx)
+	v, _, found, err := dc.GetLatest(k1, tx)
 	require.Truef(t, found, "key1 not found")
 	require.NoError(t, err)
 	require.Equal(t, p1, v)
-	v, _, found, err = dc.GetLatest(k2, nil, tx)
+	v, _, found, err = dc.GetLatest(k2, tx)
 	require.Truef(t, found, "key2 not found")
 	require.NoError(t, err)
 	require.Equal(t, p2, v)
@@ -356,12 +355,12 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, isEmpty)
 
-	v, _, found, err = dc.GetLatest(k1, nil, tx)
+	v, _, found, err = dc.GetLatest(k1, tx)
 	require.NoError(t, err)
 	require.Truef(t, found, "key1 not found")
 	require.Equal(t, p1, v)
 
-	v, _, found, err = dc.GetLatest(k2, nil, tx)
+	v, _, found, err = dc.GetLatest(k2, tx)
 	require.NoError(t, err)
 	require.Truef(t, found, "key2 not found")
 	require.Equal(t, p2, v)
@@ -446,7 +445,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 				require.Nil(val, label)
 			}
 			if txNum == txs {
-				val, _, found, err := dc.GetLatest(k[:], nil, roTx)
+				val, _, found, err := dc.GetLatest(k[:], roTx)
 				require.True(found, label)
 				require.NoError(err)
 				require.EqualValues(v[:], val, label)
@@ -499,7 +498,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 	}
 	var r DomainRanges
-	maxSpan := d.aggregationStep * StepsInColdFile
+	maxSpan := d.aggregationStep * config3.StepsInFrozenFile
 
 	for {
 		if stop := func() bool {
@@ -512,9 +511,9 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 			valuesOuts, indexOuts, historyOuts := dc.staticFilesInRange(r)
 			valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
 			require.NoError(t, err)
-			if valuesIn != nil && valuesIn.decompressor != nil {
-				fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
-			}
+			//if valuesIn != nil && valuesIn.decompressor != nil {
+			//fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
+			//}
 			d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
 			d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 			return false
@@ -551,7 +550,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 		dc.Close()
 	}
 
-	maxSpan := d.aggregationStep * StepsInColdFile
+	maxSpan := d.aggregationStep * config3.StepsInFrozenFile
 	for {
 		dc := d.BeginFilesRo()
 		r := dc.findMergeRange(dc.files.EndTxNum(), maxSpan)
@@ -599,6 +598,61 @@ func TestDomain_ScanFiles(t *testing.T) {
 	checkHistory(t, db, d, txs)
 }
 
+func TestDomainRoTx_CursorParentCheck(t *testing.T) {
+	asserts = true
+	defer func() { asserts = false }()
+
+	logger := log.New()
+	db, d := testDbAndDomain(t, logger)
+	ctx, require := context.Background(), require.New(t)
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	dc := d.BeginFilesRo()
+	defer dc.Close()
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	val := []byte("value1")
+	writer.SetTxNum(1)
+	writer.addValue([]byte("key1"), nil, val)
+
+	err = writer.Flush(ctx, tx)
+	require.NoError(err)
+	err = tx.Commit()
+	require.NoError(err)
+
+	tx, err = db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	_, _, _, err = dc.GetLatest([]byte("key1"), tx)
+	require.NoError(err)
+
+	cursor, err := dc.valsCursor(tx)
+	require.NoError(err)
+	require.NotNil(cursor)
+	tx.Rollback()
+
+	otherTx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer otherTx.Rollback()
+	//dc.valsC.Close()
+	//dc.valsC = nil
+
+	defer func() {
+		r := recover()
+		require.NotNil(r)
+		//re := r.(error)
+		//fmt.Println(re)
+		//require.ErrorIs(re, sdTxImmutabilityInvariant)
+	}()
+
+	_, _, _, err = dc.GetLatest([]byte("key1"), otherTx)
+	require.NoError(err)
+}
+
 func TestDomain_Delete(t *testing.T) {
 	t.Parallel()
 
@@ -616,7 +670,7 @@ func TestDomain_Delete(t *testing.T) {
 	// Put on even txNum, delete on odd txNum
 	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
 		writer.SetTxNum(txNum)
-		original, originalStep, _, err := dc.GetLatest([]byte("key1"), nil, tx)
+		original, originalStep, _, err := dc.GetLatest([]byte("key1"), tx)
 		require.NoError(err)
 		if txNum%2 == 0 {
 			err = writer.PutWithPrev([]byte("key1"), nil, []byte("value1"), original, originalStep)
@@ -696,7 +750,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	keyCount, txCount := uint64(4), uint64(64)
 	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
 	collateAndMerge(t, db, nil, dom, txCount)
-	maxFrozenFiles := (txCount / dom.aggregationStep) / StepsInColdFile
+	maxFrozenFiles := (txCount / dom.aggregationStep) / config3.StepsInFrozenFile
 
 	ctx := context.Background()
 	roTx, err := db.BeginRo(ctx)
@@ -753,7 +807,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount-1, keyNum)
 		binary.BigEndian.PutUint64(k[:], keyNum)
 
-		storedV, _, found, err := dc.GetLatest(k[:], nil, roTx)
+		storedV, _, found, err := dc.GetLatest(k[:], roTx)
 		require.Truef(t, found, label)
 		require.NoError(t, err, label)
 		require.EqualValues(t, v[:], storedV, label)
@@ -858,7 +912,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount, keyNum)
 		binary.BigEndian.PutUint64(k[:], keyNum)
 
-		storedV, _, found, err := dc.GetLatest(k[:], nil, tx)
+		storedV, _, found, err := dc.GetLatest(k[:], tx)
 		require.Truef(t, found, label)
 		require.NoErrorf(t, err, label)
 		require.EqualValues(t, v[:], storedV, label)
@@ -969,23 +1023,38 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	dom.Close()
 }
 
+func emptyTestDomain(aggStep uint64) *Domain {
+	cfg := Schema[kv.AccountsDomain]
+	cfg.crossDomainIntegrity = nil
+
+	salt := uint32(1)
+	cfg.hist.iiCfg.salt = &salt
+	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
+	cfg.hist.iiCfg.aggregationStep = aggStep
+
+	d, err := NewDomain(cfg, log.New())
+	if err != nil {
+		panic(err)
+	}
+	return d
+}
+
 func TestScanStaticFilesD(t *testing.T) {
 	t.Parallel()
 
-	ii := &Domain{History: &History{InvertedIndex: emptyTestInvertedIndex(1)},
-		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
-	}
+	d := emptyTestDomain(1)
+
 	files := []string{
-		"v1-test.0-1.kv",
-		"v1-test.1-2.kv",
-		"v1-test.0-4.kv",
-		"v1-test.2-3.kv",
-		"v1-test.3-4.kv",
-		"v1-test.4-5.kv",
+		"v1-accounts.0-1.kv",
+		"v1-accounts.1-2.kv",
+		"v1-accounts.0-4.kv",
+		"v1-accounts.2-3.kv",
+		"v1-accounts.3-4.kv",
+		"v1-accounts.4-5.kv",
 	}
-	ii.scanDirtyFiles(files)
+	d.scanDirtyFiles(files)
 	var found []string
-	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			found = append(found, fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
 		}
@@ -1053,7 +1122,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	defer sf.CleanupOnError()
 	c.Close()
 
-	g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.compression)
+	g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.Compression)
 	g.Reset(0)
 	var words []string
 	for g.HasNext() {
@@ -1064,7 +1133,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	// Check index
 	require.Equal(t, 3, int(sf.valuesBt.KeyCount()))
 	for i := 0; i < len(words); i += 2 {
-		c, _ := sf.valuesBt.Seek(g, []byte(words[i]))
+		c, err := sf.valuesBt.Seek(g, []byte(words[i]))
+		require.NoError(t, err)
+		require.NotNil(t, c)
 		require.Equal(t, words[i], string(c.Key()))
 		require.Equal(t, words[i+1], string(c.Value()))
 	}
@@ -1206,7 +1277,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 
 	var k [8]byte
 	var v [8]byte
-	maxFrozenFiles := (txCount / d.aggregationStep) / StepsInColdFile
+	maxFrozenFiles := (txCount / d.aggregationStep) / config3.StepsInFrozenFile
 	prev := map[string]string{}
 
 	// key 0: only in frozen file 0
@@ -1262,10 +1333,7 @@ func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, tota
 	tb.Helper()
 
 	doms := make(map[string]map[string][]upd)
-	seed := 31
-	//seed := time.Now().Unix()
-	defer tb.Logf("generated data with seed %d, keys %d", seed, keyLimit)
-	r := rand.New(rand.NewSource(0))
+	r := newRnd(31)
 
 	accs := make(map[string][]upd)
 	stor := make(map[string][]upd)
@@ -1293,11 +1361,7 @@ func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, k
 	tb.Helper()
 
 	data := make(map[string][]upd)
-	//seed := time.Now().Unix()
-	seed := 31
-	defer tb.Logf("generated data with seed %d, keys %d", seed, keyLimit)
-
-	r := rand.New(rand.NewSource(0))
+	r := newRnd(31)
 	if keyLimit == 1 {
 		key1 := generateRandomKey(r, keySize1)
 		data[key1] = generateUpdates(r, totalTx, keyTxsLimit)
@@ -1313,24 +1377,23 @@ func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, k
 	return data
 }
 
-func generateRandomKey(r *rand.Rand, size uint64) string {
+func generateRandomKey(r *rndGen, size uint64) string {
 	return string(generateRandomKeyBytes(r, size))
 }
 
-func generateRandomKeyBytes(r *rand.Rand, size uint64) []byte {
+func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
 	key := make([]byte, size)
 	r.Read(key)
-
 	return key
 }
 
-func generateAccountUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
+func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
 	for i := uint64(0); i < keyTxsLimit; i++ {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
-		jitter := r.Intn(10e7)
+		jitter := r.IntN(10e7)
 		value := types.EncodeAccountBytesV3(i, uint256.NewInt(i*10e4+uint64(jitter)), nil, 0)
 
 		updates = append(updates, upd{txNum: txNum, value: value})
@@ -1341,7 +1404,7 @@ func generateAccountUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
 	return updates
 }
 
-func generateArbitraryValueUpdates(r *rand.Rand, totalTx, keyTxsLimit, maxSize uint64) []upd {
+func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 	//maxStorageSize := 24 * (1 << 10) // limit on contract code
@@ -1349,7 +1412,7 @@ func generateArbitraryValueUpdates(r *rand.Rand, totalTx, keyTxsLimit, maxSize u
 	for i := uint64(0); i < keyTxsLimit; i++ {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 
-		value := make([]byte, r.Intn(int(maxSize)))
+		value := make([]byte, r.IntN(int(maxSize)))
 		r.Read(value)
 
 		updates = append(updates, upd{txNum: txNum, value: value})
@@ -1360,7 +1423,7 @@ func generateArbitraryValueUpdates(r *rand.Rand, totalTx, keyTxsLimit, maxSize u
 	return updates
 }
 
-func generateUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
+func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
@@ -1377,10 +1440,10 @@ func generateUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
 	return updates
 }
 
-func generateRandomTxNum(r *rand.Rand, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
-	txNum := uint64(r.Intn(int(maxTxNum)))
+func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
+	txNum := uint64(r.IntN(int(maxTxNum)))
 	for usedTxNums[txNum] {
-		txNum = uint64(r.Intn(int(maxTxNum)))
+		txNum = uint64(r.IntN(int(maxTxNum)))
 	}
 
 	return txNum
@@ -1395,8 +1458,8 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressKeys | seg.CompressVals
+	d.History.compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.FileCommitmentDomain
 
 	dc := d.BeginFilesRo()
@@ -1449,28 +1512,119 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		if len(updates) == 0 {
 			continue
 		}
-		v, _, ok, err := dc.GetLatest([]byte(key), nil, tx)
+		v, _, ok, err := dc.GetLatest([]byte(key), tx)
 		require.NoError(err)
 		require.EqualValuesf(updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(ok)
 	}
 }
 
+func TestDomainRange(t *testing.T) {
+	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	require, ctx := require.New(t), context.Background()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	d.historyLargeValues = false
+	d.History.compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
+	d.filenameBase = kv.FileAccountDomain
+
+	dc := d.BeginFilesRo()
+	defer d.Close()
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	keySize1 := uint64(2)
+	keySize2 := uint64(2)
+	totalTx := uint64(300)
+	keyTxsLimit := uint64(2)
+	keyLimit := uint64(10)
+
+	// put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		for i := 0; i < len(updates); i++ {
+			writer.SetTxNum(updates[i].txNum)
+			err = writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
+			require.NoError(err)
+			p = common.Copy(updates[i].value)
+		}
+	}
+	writer.SetTxNum(totalTx)
+
+	err = writer.Flush(ctx, tx)
+	require.NoError(err)
+
+	// aggregate
+	collateAndMerge(t, db, tx, d, totalTx)
+	require.NoError(tx.Commit())
+
+	tx, err = db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	dc.Close()
+
+	dc = d.BeginFilesRo()
+	defer dc.Close()
+
+	{
+		it, err := dc.ht.RangeAsOf(ctx, 190, nil, nil, order.Asc, -1, tx)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		require.NoError(err)
+		order.Asc.AssertList(keys)
+		require.Equal(3, len(keys))
+		require.Equal(3, len(vals))
+	}
+
+	{
+		it, err := dc.RangeLatest(tx, nil, nil, -1)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		require.NoError(err)
+		order.Asc.AssertList(keys)
+		require.Equal(5, len(keys))
+		require.Equal(5, len(vals))
+	}
+
+	{
+		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, 190, order.Asc, -1)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		require.NoError(err)
+		order.Asc.AssertList(keys)
+		require.Equal(5, len(keys))
+		require.Equal(5, len(vals))
+	}
+
+	{
+		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, 190, order.Asc, 4)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		require.NoError(err)
+		order.Asc.AssertList(keys)
+		require.Equal(4, len(keys))
+		require.Equal(4, len(vals))
+	}
+}
+
 func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	t.Parallel()
 
-	aggStep := uint64(25)
+	aggStep, ctx := uint64(25), context.Background()
 	db, d := testDbAndDomainOfStep(t, aggStep, log.New())
-	defer db.Close()
-	defer d.Close()
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.FileCommitmentDomain
 
 	dc := d.BeginFilesRo()
@@ -1566,7 +1720,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
@@ -1621,7 +1775,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 		if len(updates) == 0 {
 			continue
 		}
-		v, _, ok, err := dc.GetLatest([]byte(key), nil, tx)
+		v, _, ok, err := dc.GetLatest([]byte(key), tx)
 		require.NoError(t, err)
 		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(t, ok)
@@ -1709,7 +1863,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressKeys | seg.CompressVals
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
@@ -1768,11 +1922,11 @@ func TestDomain_PruneProgress(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	cancel()
 
-	key, err := GetExecV3PruneProgress(rwTx, dc.d.valsTable)
+	key, err := GetExecV3PruneProgress(rwTx, dc.d.valuesTable)
 	require.NoError(t, err)
 	require.NotNil(t, key)
 
-	keysCursor, err := rwTx.RwCursorDupSort(dc.d.valsTable)
+	keysCursor, err := rwTx.RwCursorDupSort(dc.d.valuesTable)
 	require.NoError(t, err)
 
 	k, istep, err := keysCursor.Seek(key)
@@ -1794,13 +1948,13 @@ func TestDomain_PruneProgress(t *testing.T) {
 		}
 		cancel()
 
-		key, err := GetExecV3PruneProgress(rwTx, dc.d.valsTable)
+		key, err := GetExecV3PruneProgress(rwTx, dc.d.valuesTable)
 		require.NoError(t, err)
 		if step == 0 && key == nil {
 
 			fmt.Printf("pruned in %d iterations\n", i)
 
-			keysCursor, err := rwTx.RwCursorDupSort(dc.d.valsTable)
+			keysCursor, err := rwTx.RwCursorDupSort(dc.d.valuesTable)
 			require.NoError(t, err)
 
 			// check there are no keys with 0 step left
@@ -1913,7 +2067,7 @@ func TestDomain_Unwind(t *testing.T) {
 		writeKeys(t, expected, tmpDb, unwindTo)
 
 		suf := fmt.Sprintf(";unwindTo=%d", unwindTo)
-		t.Run("DomainRangeLatest"+suf, func(t *testing.T) {
+		t.Run("RangeLatest"+suf, func(t *testing.T) {
 			t.Helper()
 
 			etx, err := tmpDb.BeginRo(ctx)
@@ -1928,15 +2082,15 @@ func TestDomain_Unwind(t *testing.T) {
 			defer ectx.Close()
 			uc := d.BeginFilesRo()
 			defer uc.Close()
-			et, err := ectx.DomainRangeLatest(etx, nil, nil, -1)
+			et, err := ectx.RangeLatest(etx, nil, nil, -1)
 			require.NoError(t, err)
 
-			ut, err := uc.DomainRangeLatest(utx, nil, nil, -1)
+			ut, err := uc.RangeLatest(utx, nil, nil, -1)
 			require.NoError(t, err)
 			compareIterators(t, et, ut)
 		})
 
-		t.Run("DomainRange"+suf, func(t *testing.T) {
+		t.Run("RangeAsOf"+suf, func(t *testing.T) {
 			t.Helper()
 
 			etx, err := tmpDb.BeginRo(ctx)
@@ -1951,15 +2105,15 @@ func TestDomain_Unwind(t *testing.T) {
 			defer ectx.Close()
 			uc := d.BeginFilesRo()
 			defer uc.Close()
-			et, err := ectx.DomainRange(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
+			et, err := ectx.RangeAsOf(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
 			require.NoError(t, err)
 
-			ut, err := uc.DomainRange(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
+			ut, err := uc.RangeAsOf(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
 		})
-		t.Run("WalkAsOf"+suf, func(t *testing.T) {
+		t.Run("RangeAsOf"+suf, func(t *testing.T) {
 			t.Helper()
 
 			etx, err := tmpDb.BeginRo(ctx)
@@ -1975,10 +2129,10 @@ func TestDomain_Unwind(t *testing.T) {
 			uc := d.BeginFilesRo()
 			defer uc.Close()
 
-			et, err := ectx.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, etx, -1)
+			et, err := ectx.ht.RangeAsOf(context.Background(), unwindTo-1, nil, nil, order.Asc, -1, etx)
 			require.NoError(t, err)
 
-			ut, err := uc.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, utx, -1)
+			ut, err := uc.ht.RangeAsOf(context.Background(), unwindTo-1, nil, nil, order.Asc, -1, utx)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
@@ -2204,7 +2358,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 
 		dc := d.BeginFilesRo()
-		v, vs, ok, err := dc.GetLatest(pruningKey, nil, rotx)
+		v, vs, ok, err := dc.GetLatest(pruningKey, rotx)
 		require.NoError(t, err)
 		require.True(t, ok)
 		t.Logf("v=%s vs=%d", v, vs)
@@ -2227,7 +2381,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		defer rotx.Rollback()
 		require.NoError(t, err)
 
-		v, vs, ok, err = dc.GetLatest(pruningKey, nil, rotx)
+		v, vs, ok, err = dc.GetLatest(pruningKey, rotx)
 		require.NoError(t, err)
 		require.True(t, ok)
 		t.Logf("v=%s vs=%d", v, vs)
@@ -2325,7 +2479,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		lastFile := findFile(st, en)
 		require.NotNilf(t, lastFile, "%d-%d", st/dc.d.aggregationStep, en/dc.d.aggregationStep)
 
-		lf := seg.NewReader(lastFile.decompressor.MakeGetter(), d.compression)
+		lf := seg.NewReader(lastFile.decompressor.MakeGetter(), d.Compression)
 
 		shortenedKey, found := dc.findShortenedKey([]byte(key), lf, lastFile)
 		require.Truef(t, found, "key %d/%d %x file %d %d %s", ki, len(data), []byte(key), lastFile.startTxNum, lastFile.endTxNum, lastFile.decompressor.FileName())

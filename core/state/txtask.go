@@ -19,8 +19,12 @@ package state
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
@@ -29,8 +33,8 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
@@ -38,25 +42,24 @@ import (
 // which is processed by a single thread that writes into the ReconState1 and
 // flushes to the database
 type TxTask struct {
-	TxNum              uint64
-	BlockNum           uint64
-	Rules              *chain.Rules
-	Header             *types.Header
-	Txs                types.Transactions
-	Uncles             []*types.Header
-	Coinbase           libcommon.Address
-	Withdrawals        types.Withdrawals
-	BlockHash          libcommon.Hash
-	Sender             *libcommon.Address
-	SkipAnalysis       bool
-	PruneNonEssentials bool
-	TxIndex            int // -1 for block initialisation
-	Final              bool
-	Failed             bool
-	Tx                 types.Transaction
-	GetHashFn          func(n uint64) libcommon.Hash
-	TxAsMessage        types.Message
-	EvmBlockContext    evmtypes.BlockContext
+	TxNum           uint64
+	BlockNum        uint64
+	Rules           *chain.Rules
+	Header          *types.Header
+	Txs             types.Transactions
+	Uncles          []*types.Header
+	Coinbase        libcommon.Address
+	Withdrawals     types.Withdrawals
+	BlockHash       libcommon.Hash
+	sender          *libcommon.Address
+	SkipAnalysis    bool
+	TxIndex         int // -1 for block initialisation
+	Final           bool
+	Failed          bool
+	Tx              types.Transaction
+	GetHashFn       func(n uint64) libcommon.Hash
+	TxAsMessage     types.Message
+	EvmBlockContext evmtypes.BlockContext
 
 	HistoryExecution bool // use history reader for that txn instead of state reader
 
@@ -81,8 +84,25 @@ type TxTask struct {
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
 
-	Requests types.Requests
-	Config   *chain.Config
+	Config *chain.Config
+}
+
+func (t *TxTask) Sender() *libcommon.Address {
+	if t.sender != nil {
+		return t.sender
+	}
+	if sender, ok := t.Tx.GetSender(); ok {
+		t.sender = &sender
+		return t.sender
+	}
+	signer := *types.MakeSigner(t.Config, t.BlockNum, t.Header.Time)
+	sender, err := signer.Sender(t.Tx)
+	if err != nil {
+		panic(err)
+	}
+	t.sender = &sender
+	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNum, "txIdx", t.TxIndex)
+	return t.sender
 }
 
 func (t *TxTask) CreateReceipt(tx kv.Tx) {
@@ -107,6 +127,10 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 	}
 
 	cumulativeGasUsed += t.UsedGas
+	if t.UsedGas == 0 {
+		msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
+		panic(msg)
+	}
 
 	r := t.createReceipt(cumulativeGasUsed)
 	r.FirstLogIndexWithinBlock = firstLogIndex
@@ -141,7 +165,7 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	//}
 	return receipt
 }
-func (t *TxTask) Reset() {
+func (t *TxTask) Reset() *TxTask {
 	t.BalanceIncreaseSet = nil
 	returnReadList(t.ReadLists)
 	t.ReadLists = nil
@@ -150,6 +174,9 @@ func (t *TxTask) Reset() {
 	t.Logs = nil
 	t.TraceFroms = nil
 	t.TraceTos = nil
+	t.Error = nil
+	t.Failed = false
+	return t
 }
 
 // TxTaskQueue non-thread-safe priority-queue
@@ -323,7 +350,7 @@ type ResultsQueue struct {
 	//tick
 	ticker *time.Ticker
 
-	sync.Mutex
+	m       sync.Mutex
 	results *TxTaskQueue
 }
 
@@ -348,9 +375,9 @@ func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	}
 	return nil
 }
-func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) error {
-	q.Lock()
-	defer q.Unlock()
+func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (closed bool, err error) {
+	q.m.Lock()
+	defer q.m.Unlock()
 	if task != nil {
 		heap.Push(q.results, task)
 	}
@@ -358,26 +385,26 @@ func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return q.closed, ctx.Err()
 		case txTask, ok := <-q.resultCh:
 			if !ok {
-				return nil
+				return q.closed, nil
 			}
 			if txTask == nil {
 				continue
 			}
 			heap.Push(q.results, txTask)
 			if q.results.Len() > q.limit {
-				return nil
+				return q.closed, nil
 			}
 		default: // we are inside mutex section, can't block here
-			return nil
+			return q.closed, nil
 		}
 	}
 }
 
 func (q *ResultsQueue) Iter() *ResultsQueueIter {
-	q.Lock()
+	q.m.Lock()
 	return q.iter
 }
 
@@ -387,7 +414,7 @@ type ResultsQueueIter struct {
 }
 
 func (q *ResultsQueueIter) Close() {
-	q.q.Unlock()
+	q.q.m.Unlock()
 }
 func (q *ResultsQueueIter) HasNext(outputTxNum uint64) bool {
 	return len(*q.results) > 0 && (*q.results)[0].TxNum == outputTxNum
@@ -404,7 +431,7 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 		if !ok {
 			return nil
 		}
-		if err := q.drainNoBlock(ctx, txTask); err != nil {
+		if _, err := q.drainNoBlock(ctx, txTask); err != nil {
 			return err
 		}
 	case <-q.ticker.C:
@@ -420,11 +447,14 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 	return nil
 }
 
-func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) error { return q.drainNoBlock(ctx, nil) }
+// DrainNonBlocking - does drain batch of results to heap. Immediately stops at `q.limit` or if nothing to drain
+func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) (closed bool, err error) {
+	return q.drainNoBlock(ctx, nil)
+}
 
 func (q *ResultsQueue) DropResults(ctx context.Context, f func(t *TxTask)) {
-	q.Lock()
-	defer q.Unlock()
+	q.m.Lock()
+	defer q.m.Unlock()
 Loop:
 	for {
 		select {
@@ -458,9 +488,9 @@ func (q *ResultsQueue) ResultChLen() int { return len(q.resultCh) }
 func (q *ResultsQueue) ResultChCap() int { return cap(q.resultCh) }
 func (q *ResultsQueue) Limit() int       { return q.limit }
 func (q *ResultsQueue) Len() (l int) {
-	q.Lock()
+	q.m.Lock()
 	l = q.results.Len()
-	q.Unlock()
+	q.m.Unlock()
 	return l
 }
 func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].TxNum }
@@ -468,9 +498,9 @@ func (q *ResultsQueue) LenLocked() (l int)       { return q.results.Len() }
 func (q *ResultsQueue) HasLocked() bool          { return len(*q.results) > 0 }
 func (q *ResultsQueue) PushLocked(t *TxTask)     { heap.Push(q.results, t) }
 func (q *ResultsQueue) Push(t *TxTask) {
-	q.Lock()
+	q.m.Lock()
 	heap.Push(q.results, t)
-	q.Unlock()
+	q.m.Unlock()
 }
 func (q *ResultsQueue) PopLocked() (t *TxTask) {
 	return heap.Pop(q.results).(*TxTask)

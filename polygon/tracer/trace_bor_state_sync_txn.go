@@ -48,12 +48,13 @@ func TraceBorStateSyncTxnDebugAPI(
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
 	msgs []*types.Message,
-) error {
+	txIndex int,
+) (usedGas uint64, err error) {
 	txCtx := initStateSyncTxContext(blockNum, blockHash)
-	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, stream, callTimeout)
+	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, blockHash, txIndex, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
-		return err
+		return usedGas, err
 	}
 
 	defer cancel()
@@ -62,10 +63,16 @@ func TraceBorStateSyncTxnDebugAPI(
 	rules := chainConfig.Rules(blockNum, blockTime)
 	stateWriter := state.NewNoopWriter()
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
-		return traceBorStateSyncTxn(ctx, ibs, stateWriter, msgs, evm, rules, txCtx, refunds)
+		res, err := traceBorStateSyncTxn(ctx, ibs, stateWriter, msgs, evm, rules, txCtx, refunds)
+		if err != nil {
+			return res, err
+		}
+		usedGas = res.UsedGas
+		return res, nil
 	}
 
-	return transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, execCb)
+	err = transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, execCb)
+	return usedGas, err
 }
 
 func TraceBorStateSyncTxnTraceAPI(

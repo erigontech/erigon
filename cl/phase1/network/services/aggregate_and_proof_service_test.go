@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,11 +35,11 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 )
 
-func getAggregateAndProofAndState(t *testing.T) (*cltypes.SignedAggregateAndProofData, *state.CachingBeaconState) {
+func getAggregateAndProofAndState(t *testing.T) (*SignedAggregateAndProofForGossip, *state.CachingBeaconState) {
 	_, _, s := tests.GetBellatrixRandom()
 	br, _ := s.BlockRoot()
 	checkpoint := s.CurrentJustifiedCheckpoint()
-	a := &cltypes.SignedAggregateAndProofData{
+	a := &SignedAggregateAndProofForGossip{
 		SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{
 			Message: &cltypes.AggregateAndProof{
 				AggregatorIndex: 141,
@@ -61,7 +62,6 @@ func getAggregateAndProofAndState(t *testing.T) (*cltypes.SignedAggregateAndProo
 				},
 			},
 		},
-		GossipData: nil,
 	}
 
 	a.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = s.Slot() / 32
@@ -73,7 +73,7 @@ func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced
 	ctx, cn := context.WithCancel(context.Background())
 	cn()
 	cfg := &clparams.MainnetBeaconConfig
-	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
+	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	p := pool.OperationsPool{}
 	p.AttestationsPool = pool.NewOperationPool[libcommon.Bytes96, *solid.Attestation](100, "test")
@@ -199,4 +199,16 @@ func TestAggregateAndProofSuccess(t *testing.T) {
 	fcu.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	require.NoError(t, aggService.ProcessMessage(context.Background(), nil, agg))
+}
+
+func TestSyncMapRangeDeadlock(t *testing.T) {
+	var m sync.Map
+	m.Store(1, 1)
+	m.Store(2, 2)
+	m.Store(3, 3)
+
+	m.Range(func(key, value any) bool {
+		m.Store(4, 5)
+		return true
+	})
 }

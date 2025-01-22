@@ -57,8 +57,8 @@ const (
 
 	StateV3Collate = EstimatedRamPerWorker(5 * datasize.GB)
 
-	//state-reconstitution is multi-threaded
-	ReconstituteState = EstimatedRamPerWorker(512 * datasize.MB)
+	//BlocksExecution - in multi-threaded mode
+	BlocksExecution = EstimatedRamPerWorker(512 * datasize.MB)
 )
 
 // AlmostAllCPUs - return all-but-one cpus. Leaving 1 cpu for "work producer", also cloud-providers do recommend leave 1 CPU for their IO software

@@ -398,6 +398,8 @@ func (b *BeaconState) AddInactivityScore(score uint64) {
 }
 
 func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if index >= b.inactivityScores.Length() {
 		return ErrInvalidValidatorIndex
 	}
@@ -512,4 +514,63 @@ func (b *BeaconState) SetBalances(balances solid.Uint64VectorSSZ) {
 func (b *BeaconState) SetSlashings(slashings solid.Uint64VectorSSZ) {
 	b.markLeaf(SlashingsLeafIndex)
 	b.slashings = slashings
+}
+
+func (b *BeaconState) SetEarliestExitEpoch(epoch uint64) {
+	b.earliestExitEpoch = epoch
+	b.markLeaf(EarliestExitEpochLeafIndex)
+}
+
+func (b *BeaconState) SetExitBalanceToConsume(balance uint64) {
+	b.exitBalanceToConsume = balance
+	b.markLeaf(ExitBalanceToConsumeLeafIndex)
+}
+
+func (b *BeaconState) SetPendingPartialWithdrawals(pendingWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) {
+	b.pendingPartialWithdrawals = pendingWithdrawals
+	b.markLeaf(PendingPartialWithdrawalsLeafIndex)
+}
+
+func (b *BeaconState) AppendPendingDeposit(deposit *solid.PendingDeposit) {
+	b.pendingDeposits.Append(deposit)
+	b.markLeaf(PendingDepositsLeafIndex)
+}
+
+func (b *BeaconState) AppendPendingPartialWithdrawal(withdrawal *solid.PendingPartialWithdrawal) {
+	b.pendingPartialWithdrawals.Append(withdrawal)
+	b.markLeaf(PendingPartialWithdrawalsLeafIndex)
+}
+
+func (b *BeaconState) AppendPendingConsolidation(consolidation *solid.PendingConsolidation) {
+	b.pendingConsolidations.Append(consolidation)
+	b.markLeaf(PendingConsolidationsLeafIndex)
+}
+
+func (b *BeaconState) SetPendingDeposits(deposits *solid.ListSSZ[*solid.PendingDeposit]) {
+	b.pendingDeposits = deposits
+	b.markLeaf(PendingDepositsLeafIndex)
+}
+
+func (b *BeaconState) SetPendingConsolidations(consolidations *solid.ListSSZ[*solid.PendingConsolidation]) {
+	b.pendingConsolidations = consolidations
+	b.markLeaf(PendingConsolidationsLeafIndex)
+}
+
+func (b *BeaconState) SetDepositBalanceToConsume(balance uint64) {
+	b.depositBalanceToConsume = balance
+	b.markLeaf(DepositBalanceToConsumeLeafIndex)
+}
+
+func (b *BeaconState) SetDepositRequestsStartIndex(index uint64) {
+	b.depositRequestsStartIndex = index
+	b.markLeaf(DepositRequestsStartIndexLeafIndex)
+}
+
+func (b *BeaconState) SetConsolidationBalanceToConsume(balance uint64) {
+	b.consolidationBalanceToConsume = balance
+	b.markLeaf(ConsolidationBalanceToConsumeLeafIndex)
+}
+func (b *BeaconState) SetEarlistConsolidationEpoch(epoch uint64) {
+	b.earliestConsolidationEpoch = epoch
+	b.markLeaf(EarliestConsolidationEpochLeafIndex)
 }

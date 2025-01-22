@@ -19,9 +19,9 @@ package kv
 import (
 	"context"
 	"errors"
-	"fmt"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -77,9 +77,6 @@ import (
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 
-// const Unbounded []byte = nil
-const Unlim int = -1
-
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
 
@@ -88,6 +85,7 @@ var (
 	TxSpill   = metrics.GetOrCreateGauge(`tx_spill`)   //nolint
 	TxUnspill = metrics.GetOrCreateGauge(`tx_unspill`) //nolint
 	TxDirty   = metrics.GetOrCreateGauge(`tx_dirty`)   //nolint
+	TxRetired = metrics.GetOrCreateGauge(`tx_retired`) //nolint
 
 	DbCommitPreparation = metrics.GetOrCreateSummary(`db_commit_seconds{phase="preparation"}`) //nolint
 	//DbGCWallClock       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_wall_clock"}`) //nolint
@@ -146,68 +144,21 @@ var (
 )
 
 type DBVerbosityLvl int8
-type Label uint8
+type Label string
 
 const (
-	ChainDB         Label = 0
-	TxPoolDB        Label = 1
-	SentryDB        Label = 2
-	ConsensusDB     Label = 3
-	DownloaderDB    Label = 4
-	InMem           Label = 5
-	HeimdallDB      Label = 6
-	DiagnosticsDB   Label = 7
-	PolygonBridgeDB Label = 8
+	Unknown         = "unknown"
+	ChainDB         = "chaindata"
+	TxPoolDB        = "txpool"
+	SentryDB        = "sentry"
+	ConsensusDB     = "consensus"
+	DownloaderDB    = "downloader"
+	HeimdallDB      = "heimdall"
+	DiagnosticsDB   = "diagnostics"
+	PolygonBridgeDB = "polygon-bridge"
+	CaplinDB        = "caplin"
+	TemporaryDB     = "temporary"
 )
-
-func (l Label) String() string {
-	switch l {
-	case ChainDB:
-		return "chaindata"
-	case TxPoolDB:
-		return "txpool"
-	case SentryDB:
-		return "sentry"
-	case ConsensusDB:
-		return "consensus"
-	case DownloaderDB:
-		return "downloader"
-	case InMem:
-		return "inMem"
-	case HeimdallDB:
-		return "heimdall"
-	case DiagnosticsDB:
-		return "diagnostics"
-	case PolygonBridgeDB:
-		return "polygon-bridge"
-	default:
-		return "unknown"
-	}
-}
-func UnmarshalLabel(s string) Label {
-	switch s {
-	case "chaindata":
-		return ChainDB
-	case "txpool":
-		return TxPoolDB
-	case "sentry":
-		return SentryDB
-	case "consensus":
-		return ConsensusDB
-	case "downloader":
-		return DownloaderDB
-	case "inMem":
-		return InMem
-	case "heimdall":
-		return HeimdallDB
-	case "diagnostics":
-		return DiagnosticsDB
-	case "polygon-bridge":
-		return PolygonBridgeDB
-	default:
-		panic(fmt.Sprintf("unexpected label: %s", s))
-	}
-}
 
 type GetPut interface {
 	Getter
@@ -279,28 +230,21 @@ type Closer interface {
 	Close()
 }
 
+type OnFreezeFunc func(frozenFileNames []string)
+type SnapshotNotifier interface {
+	OnFreeze(f OnFreezeFunc)
+}
+
 // RoDB - Read-only version of KV.
 type RoDB interface {
 	Closer
 	ReadOnly() bool
 	View(ctx context.Context, f func(tx Tx) error) error
 
-	// BeginRo - creates transaction
-	// 	tx may be discarded by .Rollback() method
-	//
-	// A transaction and its cursors must only be used by a single
-	// 	thread (not goroutine), and a thread may only have a single transaction at a time.
-	//  It happen automatically by - because this method calls runtime.LockOSThread() inside (Rollback/Commit releases it)
-	//  By this reason application code can't call runtime.UnlockOSThread() - it leads to undefined behavior.
-	//
-	// If this `parent` is non-NULL, the new transaction
-	//	will be a nested transaction, with the transaction indicated by parent
-	//	as its parent. Transactions may be nested to any level. A parent
-	//	transaction and its cursors may not issue any other operations than
-	//	Commit and Rollback while it has active child transactions.
+	// BeginRo - creates transaction, must not be moved between gorotines
 	BeginRo(ctx context.Context) (Tx, error)
 	AllTables() TableCfg
-	PageSize() uint64
+	PageSize() datasize.ByteSize
 
 	// Pointer to the underlying C environment handle, if applicable (e.g. *C.MDBX_env)
 	CHandle() unsafe.Pointer
@@ -336,6 +280,19 @@ type RwDB interface {
 	Update(ctx context.Context, f func(tx RwTx) error) error
 	UpdateNosync(ctx context.Context, f func(tx RwTx) error) error
 
+	// BeginRw - creates transaction
+	// 	tx may be discarded by .Rollback() method
+	//
+	// A transaction and its cursors must only be used by a single
+	// 	thread (not goroutine), and a thread may only have a single transaction at a time.
+	//  It happen automatically by - because this method calls runtime.LockOSThread() inside (Rollback/Commit releases it)
+	//  By this reason application code can't call runtime.UnlockOSThread() - it leads to undefined behavior.
+	//
+	// If this `parent` is non-NULL, the new transaction
+	//	will be a nested transaction, with the transaction indicated by parent
+	//	as its parent. Transactions may be nested to any level. A parent
+	//	transaction and its cursors may not issue any other operations than
+	//	Commit and Rollback while it has active child transactions.
 	BeginRw(ctx context.Context) (RwTx, error)
 	BeginRwNosync(ctx context.Context) (RwTx, error)
 }
@@ -344,6 +301,9 @@ type StatelessRwTx interface {
 	Getter
 	Putter
 }
+
+// const Unbounded/EOF/EndOfTable []byte = nil
+const Unlim int = -1
 
 // Tx
 // WARNING:
@@ -366,23 +326,16 @@ type Tx interface {
 	Cursor(table string) (Cursor, error)
 	CursorDupSort(table string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has mdbx.DupSort flag
 
-	DBSize() (uint64, error)
-
 	// --- High-Level methods: 1request -> stream of server-side pushes ---
 
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
 	// Range(nil, to)   means [StartOfTable, to)
-	Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error)
-	// Stream is like Range, but for requesting huge data (Example: full table scan). Client can't stop it.
-	// Stream(table string, fromPrefix, toPrefix []byte) (stream.KV, error)
-	// RangeAscend - like Range [from, to) but also allow pass Limit parameters
+	// if `order.Desc` expecing `from`<`to`
 	// Limit -1 means Unlimited
-	RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
-	// StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
-	// RangeDescend - is like Range [from, to), but expecing `from`<`to`
-	// example: RangeDescend("Table", "B", "A", -1)
-	RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
+	// Designed for requesting huge data (Example: full table scan). Client can't stop it.
+	// Example: RangeDescend("Table", "B", "A", order.Asc, -1)
+	Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error)
 	//StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
 	// Prefix - is exactly Range(Table, prefix, kv.NextSubtree(prefix))
 	Prefix(table string, prefix []byte) (stream.KV, error)
@@ -507,26 +460,24 @@ type (
 	Appendable  uint16
 	History     string
 	InvertedIdx string
-
-	InvertedIdxPos uint16
 )
 
 type TemporalGetter interface {
-	DomainGet(name Domain, k, k2 []byte) (v []byte, step uint64, err error)
+	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
 }
 type TemporalTx interface {
 	Tx
 	TemporalGetter
 
+	// return the earliest known txnum in history of a given domain
+	HistoryStartFrom(domainName Domain) uint64
+
 	// DomainGetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - retuns account's value before `txNum` transaction changed it
-	// Means if you want re-execute `txNum` on historical state - do `GetAsOf(key, txNum)` to read state
+	// Means if you want re-execute `txNum` on historical state - do `DomainGetAsOf(key, txNum)` to read state
 	// `ok = false` means: key not found. or "future txNum" passed.
-	DomainGetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
-
-	// HistorySeek - like `DomainGetAsOf` but without latest state - only for `History`
-	// `ok == true && v != nil && len(v) == 0` means key-creation even
-	HistorySeek(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
+	GetAsOf(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)
+	RangeAsOf(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
 
 	// IndexRange - return iterator over range of inverted index for given key `k`
 	// Asc semantic:  [from, to) AND from > to
@@ -536,11 +487,14 @@ type TemporalTx interface {
 	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error)
-	DomainRange(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
+
+	// HistorySeek - like `GetAsOf` but without latest state - only for `History`
+	// `ok == true && v != nil && len(v) == 0` means key-creation even
+	HistorySeek(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)
 
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
-	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
+	HistoryRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
 }
 
 type TemporalRwTx interface {
@@ -565,14 +519,22 @@ type TemporalPutDel interface {
 	DomainDelPrefix(domain Domain, prefix []byte) error
 }
 
+type TemporalRoDB interface {
+	RoDB
+	SnapshotNotifier
+	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
+	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
+}
+type TemporalRwDB interface {
+	RwDB
+	TemporalRoDB
+	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
+}
+
 // ---- non-importnt utilites
 
 type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum
 
-type CanWarmupDB interface {
-	WarmupDB(force bool) error
-	LockDBInRam() error
-}
 type HasSpaceDirty interface {
 	SpaceDirty() (uint64, uint64, error)
 }

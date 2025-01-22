@@ -30,21 +30,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-
-	// "github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/turbo/stages/mock"
-
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // Tests block header storage and retrieval operations.
@@ -465,99 +460,6 @@ func TestHeadStorage(t *testing.T) {
 	}
 }
 
-// Tests that receipts associated with a single block can be stored and retrieved.
-func TestBlockReceiptStorage(t *testing.T) {
-	t.Parallel()
-	m := mock.Mock(t)
-	tx, err := m.DB.BeginRw(m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	br := m.BlockReader
-	require := require.New(t)
-	ctx := m.Ctx
-
-	// Create a live block since we need metadata to reconstruct the receipt
-	tx1 := types.NewTransaction(1, libcommon.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
-	tx2 := types.NewTransaction(2, libcommon.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil)
-
-	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
-
-	// Create the two receipts to manage afterwards
-	receipt1 := &types.Receipt{
-		Status:            types.ReceiptStatusFailed,
-		CumulativeGasUsed: 1,
-		Logs: []*types.Log{
-			{Address: libcommon.BytesToAddress([]byte{0x11})},
-			{Address: libcommon.BytesToAddress([]byte{0x01, 0x11})},
-		},
-		TxHash:          tx1.Hash(),
-		ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
-		GasUsed:         111111,
-	}
-	//receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
-
-	receipt2 := &types.Receipt{
-		PostState:         libcommon.Hash{2}.Bytes(),
-		CumulativeGasUsed: 2,
-		Logs: []*types.Log{
-			{Address: libcommon.BytesToAddress([]byte{0x22})},
-			{Address: libcommon.BytesToAddress([]byte{0x02, 0x22})},
-		},
-		TxHash:          tx2.Hash(),
-		ContractAddress: libcommon.BytesToAddress([]byte{0x02, 0x22, 0x22}),
-		GasUsed:         222222,
-	}
-	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
-	receipts := []*types.Receipt{receipt1, receipt2}
-	header := &types.Header{Number: big.NewInt(1)}
-
-	// Check that no receipt entries are in a pristine database
-	hash := header.Hash() //libcommon.BytesToHash([]byte{0x03, 0x14})
-
-	rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64())
-	rawdb.WriteHeader(tx, header)
-	// Insert the body that corresponds to the receipts
-	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
-	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
-
-	// Insert the receipt slice into the database and check presence
-	require.NoError(rawdb.WriteReceipts(tx, 1, receipts))
-
-	b, senders, err := br.BlockWithSenders(ctx, tx, hash, 1)
-	require.NoError(err)
-	require.NotNil(b)
-	if rs := rawdb.ReadReceipts(tx, b, senders); len(rs) == 0 {
-		t.Fatalf("no receipts returned")
-	} else {
-		if err := checkReceiptsRLP(rs, receipts); err != nil {
-			t.Fatalf(err.Error())
-		}
-	}
-	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
-	rawdb.DeleteHeader(tx, hash, 1)
-	rawdb.DeleteBody(tx, hash, 1)
-	b, senders, err = br.BlockWithSenders(ctx, tx, hash, 1)
-	require.NoError(err)
-	require.Nil(b)
-	if rs := rawdb.ReadReceipts(tx, b, senders); rs != nil {
-		t.Fatalf("receipts returned when body was deleted: %v", rs)
-	}
-	// Ensure that receipts without metadata can be returned without the block body too
-	if err := checkReceiptsRLP(rawdb.ReadRawReceipts(tx, 1), receipts); err != nil {
-		t.Fatal(err)
-	}
-	rawdb.WriteHeader(tx, header)
-	// Sanity check that body alone without the receipt is a full purge
-	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
-	require.NoError(rawdb.TruncateReceipts(tx, 1))
-	b, senders, err = br.BlockWithSenders(ctx, tx, hash, 1)
-	require.NoError(err)
-	require.NotNil(b)
-	if rs := rawdb.ReadReceipts(tx, b, senders); len(rs) != 0 {
-		t.Fatalf("deleted receipts returned: %v", rs)
-	}
-}
-
 // Tests block storage and retrieval operations with withdrawals.
 func TestBlockWithdrawalsStorage(t *testing.T) {
 	t.Parallel()
@@ -588,33 +490,6 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	withdrawals = append(withdrawals, &w)
 	withdrawals = append(withdrawals, &w2)
 
-	pk := [48]byte{}
-	copy(pk[:], libcommon.Hex2Bytes("3d1291c96ad36914068b56d93974c1b1d5afcb3fcd37b2ac4b144afd3f6fec5b"))
-	sig := [96]byte{}
-	copy(sig[:], libcommon.Hex2Bytes("20a0a807c717055ecb60dc9d5071fbd336f7f238d61a288173de20f33f79ebf4"))
-	r1 := types.DepositRequest{
-		Pubkey:                pk,
-		WithdrawalCredentials: libcommon.Hash(hexutility.Hex2Bytes("15095f80cde9763665d2eee3f8dfffc4a4405544c6fece33130e6e98809c4b98")),
-		Amount:                12324,
-		Signature:             sig,
-		Index:                 0,
-	}
-	pk2 := [48]byte{}
-	copy(pk2[:], libcommon.Hex2Bytes("d40ffb510bfc52b058d5e934026ce3eddaf0a4b1703920f03b32b97de2196a93"))
-	sig2 := [96]byte{}
-	copy(sig2[:], libcommon.Hex2Bytes("dc40cf2c33c6fb17e11e3ffe455063f1bf2280a3b08563f8b33aa359a16a383c"))
-	r2 := types.DepositRequest{
-		Pubkey:                pk2,
-		WithdrawalCredentials: libcommon.Hash(hexutility.Hex2Bytes("d73d9332eb1229e58aa7e33e9a5079d9474f68f747544551461bf3ff9f7ccd64")),
-		Amount:                12324,
-		Signature:             sig2,
-		Index:                 0,
-	}
-	deposits := make(types.DepositRequests, 0)
-	deposits = append(deposits, &r1)
-	deposits = append(deposits, &r2)
-	var reqs types.Requests
-	reqs = deposits.Requests()
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
 		Number:      big.NewInt(1),
@@ -634,7 +509,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	}
 
 	// Write withdrawals to block
-	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals, reqs)
+	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals)
 	if err := rawdb.WriteHeader(tx, wBlock.HeaderNoCopy()); err != nil {
 		t.Fatalf("Could not write body: %v", err)
 	}
@@ -687,28 +562,6 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Equal(uint64(5501), rw2.Validator)
 	require.Equal(libcommon.Address{0: 0xff}, rw2.Address)
 	require.Equal(uint64(1001), rw2.Amount)
-
-	readRequests := entry.Requests
-	require.True(len(entry.Requests) == 2)
-	rd1 := readRequests[0]
-	rd2 := readRequests[1]
-	require.True(rd1.RequestType() == types.DepositRequestType)
-	require.True(rd2.RequestType() == types.DepositRequestType)
-
-	readDeposits := readRequests.Deposits()
-	d1 := readDeposits[0]
-	d2 := readDeposits[1]
-	require.Equal(d1.Pubkey, r1.Pubkey)
-	require.Equal(d1.Amount, r1.Amount)
-	require.Equal(d1.Signature, r1.Signature)
-	require.Equal(d1.WithdrawalCredentials, r1.WithdrawalCredentials)
-	require.Equal(d1.Index, r1.Index)
-
-	require.Equal(d2.Pubkey, r2.Pubkey)
-	require.Equal(d2.Amount, r2.Amount)
-	require.Equal(d2.Signature, r2.Signature)
-	require.Equal(d2.WithdrawalCredentials, r2.WithdrawalCredentials)
-	require.Equal(d2.Index, r2.Index)
 
 	// Delete the block and verify the execution
 	if err := rawdb.TruncateBlocks(context.Background(), tx, block.NumberU64()); err != nil {
@@ -810,6 +663,72 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 	require.NotNil(body.Withdrawals)
 	require.Equal(0, len(body.Withdrawals))
 	require.Equal(uint32(2), body.TxCount)
+}
+
+func TestBadBlocks(t *testing.T) {
+	t.Parallel()
+	m := mock.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	require := require.New(t)
+	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+
+	mustSign := func(tx types.Transaction, s types.Signer) types.Transaction {
+		r, err := types.SignTx(tx, s, testKey)
+		require.NoError(err)
+		return r
+	}
+
+	putBlock := func(number uint64) libcommon.Hash {
+		// prepare db so it works with our test
+		signer1 := types.MakeSigner(params.MainnetChainConfig, number, number-1)
+		body := &types.Body{
+			Transactions: []types.Transaction{
+				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number+1, testAddr, u256.Num1, 2, u256.Num1, nil), *signer1),
+			},
+			Uncles: []*types.Header{{Extra: []byte("test header")}},
+		}
+
+		header := &types.Header{Number: big.NewInt(int64(number))}
+		require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), number))
+		require.NoError(rawdb.WriteHeader(tx, header))
+		require.NoError(rawdb.WriteBody(tx, header.Hash(), number, body))
+
+		return header.Hash()
+	}
+	rawdb.ResetBadBlockCache(tx, 4)
+
+	// put some blocks
+	for i := 1; i <= 6; i++ {
+		putBlock(uint64(i))
+	}
+	hash1 := putBlock(7)
+	hash2 := putBlock(8)
+	hash3 := putBlock(9)
+	hash4 := putBlock(10)
+
+	// mark some blocks as bad
+	require.NoError(rawdb.TruncateCanonicalHash(tx, 7, true))
+	badBlks, err := rawdb.GetLatestBadBlocks(tx)
+	require.NoError(err)
+	require.Len(badBlks, 4)
+
+	require.Equal(badBlks[0].Hash(), hash4)
+	require.Equal(badBlks[1].Hash(), hash3)
+	require.Equal(badBlks[2].Hash(), hash2)
+	require.Equal(badBlks[3].Hash(), hash1)
+
+	// testing the "limit"
+	rawdb.ResetBadBlockCache(tx, 2)
+	badBlks, err = rawdb.GetLatestBadBlocks(tx)
+	require.NoError(err)
+	require.Len(badBlks, 2)
+	require.Equal(badBlks[0].Hash(), hash4)
+	require.Equal(badBlks[1].Hash(), hash3)
 }
 
 func checkReceiptsRLP(have, want types.Receipts) error {

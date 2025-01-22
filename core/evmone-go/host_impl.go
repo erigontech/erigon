@@ -9,11 +9,11 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 	"github.com/holiman/uint256"
 )
@@ -83,8 +83,11 @@ func NewEvmOneHost(env ExecEnv, bailout bool) *HostImpl {
 
 func (h *HostImpl) AccountExists(addr common.Address) bool {
 	// // fmt.Println("calling 1")
-	r := h.ibs.Exist(common.Address(addr))
-	return r
+	exists, err := h.ibs.Exist(common.Address(addr))
+	if err != nil {
+		panic(err)
+	}
+	return exists
 }
 
 func (h *HostImpl) GetStorage(addr common.Address, key common.Hash) common.Hash {
@@ -141,33 +144,59 @@ func (h *HostImpl) SetStorage(addr common.Address, key common.Hash, value common
 }
 func (h *HostImpl) GetBalance(addr common.Address) common.Hash {
 	// fmt.Println("calling 4")
-	return h.ibs.GetBalance(addr).Bytes32()
+	balance, err := h.ibs.GetBalance(addr)
+	if err != nil {
+		panic(err)
+	}
+	return balance.Bytes32()
 }
 func (h *HostImpl) GetCodeSize(addr common.Address) int {
 	// fmt.Println("calling 5")
-	return h.ibs.GetCodeSize(addr)
+	codeSize, err := h.ibs.GetCodeSize(addr)
+	if err != nil {
+		panic(err)
+	}
+	return codeSize
 }
 func (h *HostImpl) GetCodeHash(addr common.Address) common.Hash {
 	// fmt.Println("calling 6")
-	return h.ibs.GetCodeHash(addr)
+	codeHash, err := h.ibs.GetCodeHash(addr)
+	if err != nil {
+		panic(err)
+	}
+	return codeHash
 }
 func (h *HostImpl) GetCode(addr common.Address) []byte {
 	// fmt.Println("calling 7")
-	return h.ibs.GetCode(addr)
+	code, err := h.ibs.GetCode(addr)
+	if err != nil {
+		panic(err)
+	}
+	return code
 }
 func (h *HostImpl) Selfdestruct(addr common.Address, beneficiary common.Address) bool {
 	// fmt.Println("calling 8")
-	balance := *h.ibs.GetBalance(addr)
+	balance, err := h.ibs.GetBalance(addr)
+	if err != nil {
+		panic(err)
+	}
 	if h.rev >= Cancun {
-		h.ibs.SubBalance(addr, &balance, tracing.BalanceDecreaseSelfdestruct)
-		h.ibs.AddBalance(beneficiary, &balance, tracing.BalanceIncreaseSelfdestruct)
+		h.ibs.SubBalance(addr, balance, tracing.BalanceDecreaseSelfdestruct)
+		h.ibs.AddBalance(beneficiary, balance, tracing.BalanceIncreaseSelfdestruct)
 		h.ibs.Selfdestruct6780(addr)
-		r := h.ibs.HasSelfdestructed(addr)
+		r, err := h.ibs.HasSelfdestructed(addr)
+		if err != nil {
+			panic(err)
+		}
 		return r
 	}
-	h.ibs.AddBalance(beneficiary, &balance, tracing.BalanceIncreaseSelfdestruct)
+	h.ibs.AddBalance(beneficiary, balance, tracing.BalanceIncreaseSelfdestruct)
 	h.ibs.Selfdestruct(addr)
-	return h.ibs.HasSelfdestructed(addr)
+	s, err := h.ibs.HasSelfdestructed(addr)
+	if err != nil {
+		panic(err)
+	}
+	return s
 }
 func (h *HostImpl) GetTxContext() TxContext {
 	// fmt.Println("calling 9")
@@ -231,7 +260,11 @@ func (h *HostImpl) handleCall(kind CallKind,
 	// fmt.Printf("start gas: %v\n", gas)
 	if kind == Call || kind == CallCode {
 		// Fail if we're trying to transfer more than the available balance
-		if !value.IsZero() && !h.evm.Context.CanTransfer(h.ibs, sender, value) {
+		canTransfer, err := h.evm.Context.CanTransfer(h.ibs, sender, value)
+		if err != nil {
+			panic(err)
+		}
+		if !value.IsZero() && !canTransfer {
 			if !h.bailout {
 				return nil, gasLeft, 0, common.Address{}, vm.ErrInsufficientBalance
 			}
@@ -241,14 +274,21 @@ func (h *HostImpl) handleCall(kind CallKind,
 	p, isPrecompile := h.evm.Precompile(codeAddress)
 	var code []byte
 	if !isPrecompile {
-		code = h.ibs.GetCode(codeAddress)
+		code, err = h.ibs.GetCode(codeAddress)
+		if err != nil {
+			panic(err)
+		}
 	}
 	// fmt.Printf("code: 0x%x\n", code)
 	// // fmt.Println("isPrecompile: ", isPrecompile)
 	snapshot := h.ibs.Snapshot()
 
 	if kind == Call {
-		if !h.ibs.Exist(recipient) {
+		exists, err := h.ibs.Exist(recipient)
+		if err != nil {
+			panic(err)
+		}
+		if !exists {
 			if !isPrecompile && h.evm.ChainRules().IsSpuriousDragon && value.IsZero() {
 				// // fmt.Println("HITTING THIS")
 				return output, gasLeft, 0, common.Address{}, err
@@ -309,7 +349,11 @@ func (h *HostImpl) handleCreate(kind CallKind,
 	var createAddr common.Address
 	var err error
 	if kind == Create {
-		createAddr = crypto.CreateAddress(sender, h.ibs.GetNonce(sender))
+		nonce, err := h.ibs.GetNonce(sender)
+		if err != nil {
+			panic(err)
+		}
+		createAddr = crypto.CreateAddress(sender, nonce)
 		code = input
 	} else if kind == Create2 {
 		createAddr = crypto.CreateAddress2(sender, salt, crypto.Keccak256Hash(input).Bytes())
@@ -324,11 +368,18 @@ func (h *HostImpl) handleCreate(kind CallKind,
 	// fmt.Printf("salt: 0x%x\n", salt)
 	// fmt.Printf("input: 0x%x\n", input)
 	// fmt.Printf("recipient: 0x%x\n", recipient)
-	if !h.evm.Context.CanTransfer(h.ibs, sender, value) {
+	canTransfer, err := h.evm.Context.CanTransfer(h.ibs, sender, value)
+	if err != nil {
+		panic(err)
+	}
+	if !canTransfer {
 		err = vm.ErrInsufficientBalance
 		return nil, 0, 0, common.Address{}, err
 	}
-	nonce := h.ibs.GetNonce(sender)
+	nonce, err := h.ibs.GetNonce(sender)
+	if err != nil {
+		panic(err)
+	}
 	if nonce+1 < nonce {
 		err = vm.ErrNonceUintOverflow
 		return nil, 0, 0, common.Address{}, err
@@ -341,8 +392,15 @@ func (h *HostImpl) handleCreate(kind CallKind,
 		h.ibs.AddAddressToAccessList(recipient)
 	}
 	// Ensure there's no existing contract already at the designated address
-	contractHash := h.ibs.GetCodeHash(recipient)
-	if h.ibs.GetNonce(recipient) != 0 || (contractHash != (common.Hash{}) && contractHash != emptyCodeHash) {
+	contractHash, err := h.ibs.GetCodeHash(recipient)
+	if err != nil {
+		panic(err)
+	}
+	nonce, err = h.ibs.GetNonce(sender)
+	if err != nil {
+		panic(err)
+	}
+	if nonce != 0 || (contractHash != (common.Hash{}) && contractHash != emptyCodeHash) {
 		// fmt.Println("Hitting this error")
 		err = vm.ErrContractAddressCollision
 		return nil, int64(gas), 0, common.Address{}, err

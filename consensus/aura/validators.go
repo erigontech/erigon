@@ -29,17 +29,15 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/aura/auraabi"
 	"github.com/erigontech/erigon/consensus/aura/aurainterfaces"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/rlp"
 )
 
 // nolint
@@ -672,7 +670,7 @@ func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call cons
 }
 
 func (s *ValidatorSafeContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error {
-	data := common.FromHex("75286211") // s.abi.Pack("finalizeChange")
+	data := libcommon.FromHex("75286211") // s.abi.Pack("finalizeChange")
 	_, err := caller(s.contractAddress, data)
 	if err != nil {
 		return err

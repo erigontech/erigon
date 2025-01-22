@@ -24,22 +24,19 @@ import (
 	"math/big"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/rlp"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -121,14 +118,26 @@ func TestGenerateChain(t *testing.T) {
 	if big.NewInt(5).Cmp(current(m, tx).Number()) != 0 {
 		t.Errorf("wrong block number: %d", current(m, tx).Number())
 	}
-	if !uint256.NewInt(989000).Eq(st.GetBalance(addr1)) {
-		t.Errorf("wrong balance of addr1: %s", st.GetBalance(addr1))
+	balance, err := st.GetBalance(addr1)
+	if err != nil {
+		t.Error(err)
 	}
-	if !uint256.NewInt(10000).Eq(st.GetBalance(addr2)) {
-		t.Errorf("wrong balance of addr2: %s", st.GetBalance(addr2))
+	if !uint256.NewInt(989000).Eq(balance) {
+		t.Errorf("wrong balance of addr1: %s", balance)
 	}
-	if fmt.Sprintf("%s", st.GetBalance(addr3)) != "19687500000000001000" { //nolint
-		t.Errorf("wrong balance of addr3: %s", st.GetBalance(addr3))
+	balance, err = st.GetBalance(addr2)
+	if err != nil {
+		t.Error(err)
+	}
+	if !uint256.NewInt(10000).Eq(balance) {
+		t.Errorf("wrong balance of addr2: %s", balance)
+	}
+	balance, err = st.GetBalance(addr3)
+	if err != nil {
+		t.Error(err)
+	}
+	if fmt.Sprintf("%s", balance) != "19687500000000001000" { //nolint
+		t.Errorf("wrong balance of addr3: %s", balance)
 	}
 
 	if sentry_multi_client.EnableP2PReceipts {

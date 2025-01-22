@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
-	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 // Switch to the second version of download.lock.
@@ -69,7 +69,7 @@ var ProhibitNewDownloadsLock2 = Migration{
 				locked = append(locked, t.Name())
 			}
 
-			for _, t := range borsnaptype.BorSnapshotTypes() {
+			for _, t := range heimdall.SnapshotTypes() {
 				locked = append(locked, t.Name())
 			}
 

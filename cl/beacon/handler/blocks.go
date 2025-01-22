@@ -35,17 +35,13 @@ type headerResponse struct {
 	Header    *cltypes.SignedBeaconBlockHeader `json:"header"`
 }
 
-type getHeadersRequest struct {
-	Slot       *uint64         `json:"slot,omitempty,string"`
-	ParentRoot *libcommon.Hash `json:"root,omitempty"`
-}
-
 func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *beaconhttp.SegmentID) (root libcommon.Hash, err error) {
 	switch {
 	case blockId.Head():
-		root, _, err = a.forkchoiceStore.GetHead()
+		var statusCode int
+		root, _, statusCode, err = a.getHead()
 		if err != nil {
-			return libcommon.Hash{}, err
+			return libcommon.Hash{}, beaconhttp.NewEndpointError(statusCode, err)
 		}
 	case blockId.Finalized():
 		root = a.forkchoiceStore.FinalizedCheckpoint().Root
@@ -201,6 +197,7 @@ func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Requ
 		return nil, err
 	}
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
+
 	// check if the root exist
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {

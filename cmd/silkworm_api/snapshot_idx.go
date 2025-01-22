@@ -21,6 +21,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
@@ -87,7 +88,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 
 	dirs := datadir.New(dataDir)
 
-	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
+	chainDB := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -114,7 +115,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				return segment.Type.BuildIndexes(ctx, segment, chainConfig, dirs.Tmp, jobProgress, logLevel, logger)
+				return segment.Type.BuildIndexes(ctx, segment, nil, chainConfig, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		}
 	}

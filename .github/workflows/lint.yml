@@ -26,14 +26,14 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.23'
 
       - name: Install golangci-lint
         if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.59.1
-          args: --help
+          version: v1.62.2
+          skip-cache: true
 
       - name: Lint
         if: runner.os == 'Linux'

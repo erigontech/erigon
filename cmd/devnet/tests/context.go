@@ -38,18 +38,18 @@ func initDevnet(chainName string, dataDir string, producerCount int, gasLimit ui
 	const baseRpcPort = 9545
 
 	switch chainName {
-	case networkname.BorDevnetChainName:
+	case networkname.BorDevnet:
 		heimdallURL := polygon.HeimdallURLDefault
 		const sprintSize uint64 = 0
 		return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallURL, sprintSize, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 
-	case networkname.DevChainName:
+	case networkname.Dev:
 		return networks.NewDevDevnet(dataDir, baseRpcHost, baseRpcPort, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 
 	case "":
 		envChainName, _ := os.LookupEnv("DEVNET_CHAIN")
 		if envChainName == "" {
-			envChainName = networkname.DevChainName
+			envChainName = networkname.Dev
 		}
 		return initDevnet(envChainName, dataDir, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel)
 

@@ -76,7 +76,15 @@ type Config struct {
 	TargetBlobGasPerBlock      *uint64 `json:"targetBlobGasPerBlock,omitempty"`
 	BlobGasPriceUpdateFraction *uint64 `json:"blobGasPriceUpdateFraction,omitempty"`
 
-	// (Optional) governance contract where EIP-1559 fees will be sent to that otherwise would be burnt since the London fork
+	// EIP-7691
+	MaxBlobGasPerBlockPrague         *uint64 `json:"maxBlobGasPerBlockPrague,omitempty"`
+	TargetBlobGasPerBlockPrague      *uint64 `json:"targetBlobGasPerBlockPrague,omitempty"`
+	BlobGasPriceUpdateFractionPrague *uint64 `json:"blobGasPriceUpdateFractionPrague,omitempty"`
+
+	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
+	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
+	// Starting from Prague, EIP-4844 fees might be collected as well:
+	// see https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra.
 	BurntContract map[string]common.Address `json:"burntContract,omitempty"`
 
 	// (Optional) deposit contract of PoS chains
@@ -101,6 +109,7 @@ type BorConfig interface {
 	IsAhmedabad(number uint64) bool
 	StateReceiverContractAddress() common.Address
 	CalculateSprintNumber(number uint64) uint64
+	CalculateSprintLength(number uint64) uint64
 }
 
 func (c *Config) String() string {
@@ -250,7 +259,7 @@ func (c *Config) GetBurntContract(num uint64) *common.Address {
 	if len(c.BurntContract) == 0 {
 		return nil
 	}
-	addr := borKeyValueConfigHelper(c.BurntContract, num)
+	addr := ConfigValueLookup(c.BurntContract, num)
 	return &addr
 }
 
@@ -261,29 +270,61 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
-func (c *Config) GetMaxBlobGasPerBlock() uint64 {
-	if c != nil && c.MaxBlobGasPerBlock != nil {
-		return *c.MaxBlobGasPerBlock
+func (c *Config) GetMaxBlobGasPerBlock(t uint64) uint64 {
+	if c != nil {
+		if c.IsPrague(t) {
+			if c.MaxBlobGasPerBlockPrague != nil {
+				return *c.MaxBlobGasPerBlockPrague
+			}
+			return 1179648 // EIP-7691
+		} else if c.MaxBlobGasPerBlock != nil {
+			return *c.MaxBlobGasPerBlock
+		}
 	}
 	return 786432 // MAX_BLOB_GAS_PER_BLOCK (EIP-4844)
 }
 
-func (c *Config) GetTargetBlobGasPerBlock() uint64 {
-	if c != nil && c.TargetBlobGasPerBlock != nil {
-		return *c.TargetBlobGasPerBlock
+func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
+	if c != nil {
+		if c.IsPrague(t) {
+			if c.TargetBlobGasPerBlockPrague != nil {
+				return *c.TargetBlobGasPerBlockPrague
+			}
+			return 786432
+		} else if c.TargetBlobGasPerBlock != nil {
+			return *c.TargetBlobGasPerBlock
+		}
 	}
 	return 393216 // TARGET_BLOB_GAS_PER_BLOCK (EIP-4844)
 }
 
-func (c *Config) GetBlobGasPriceUpdateFraction() uint64 {
-	if c != nil && c.BlobGasPriceUpdateFraction != nil {
-		return *c.BlobGasPriceUpdateFraction
+func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
+	if c != nil {
+		if c.IsPrague(t) {
+			if c.BlobGasPriceUpdateFractionPrague != nil {
+				return *c.BlobGasPriceUpdateFractionPrague
+			}
+			return 5007716
+
+		} else if c.BlobGasPriceUpdateFraction != nil {
+			return *c.BlobGasPriceUpdateFraction
+		}
 	}
 	return 3338477 // BLOB_GASPRICE_UPDATE_FRACTION (EIP-4844)
 }
 
-func (c *Config) GetMaxBlobsPerBlock() uint64 {
-	return c.GetMaxBlobGasPerBlock() / fixedgas.BlobGasPerBlob
+func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
+	return c.GetMaxBlobGasPerBlock(time) / fixedgas.BlobGasPerBlob
+}
+
+func (c *Config) SecondsPerSlot() uint64 {
+	if c.Bor != nil {
+		return 2 // Polygon
+	}
+	if c.Aura != nil {
+		return 5 // Gnosis
+	}
+	return 12 // Ethereum
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -479,7 +520,12 @@ func (c *CliqueConfig) String() string {
 	return "clique"
 }
 
-func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, number uint64) T {
+// Looks up a config value as of a given block number (or time).
+// The assumption here is that config is a càdlàg map of starting_from_block -> value.
+// For example, config of {"0": "0xA", "10": "0xB", "20": "0xC"}
+// means that the config value is 0xA for blocks 0–9,
+// 0xB for blocks 10–19, and 0xC for block 20 and above.
+func ConfigValueLookup[T uint64 | common.Address](field map[string]T, number uint64) T {
 	fieldUint := make(map[uint64]T)
 	for k, v := range field {
 		keyUint, err := strconv.ParseUint(k, 10, 64)

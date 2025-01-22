@@ -17,30 +17,43 @@
 package synced_data
 
 import (
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
-	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
+var ErrNotSynced = errors.New("not synced")
+
 var _ SyncedData = (*SyncedDataManager)(nil)
 
-type SyncedDataManager struct {
-	enabled   bool
-	cfg       *clparams.BeaconChainConfig
-	headState atomic.Value
+func EmptyCancel() {}
 
-	copyBuffer      *state.CachingBeaconState
-	copyBufferMutex sync.Mutex
+type SyncedDataManager struct {
+	enabled bool
+	cfg     *clparams.BeaconChainConfig
+
+	headRoot atomic.Value
+	headSlot atomic.Uint64
+
+	headState *state.CachingBeaconState
+
+	accessLock sync.RWMutex // lock used for accessing atomic methods
+
+	mu sync.RWMutex
 }
 
-func NewSyncedDataManager(enabled bool, cfg *clparams.BeaconChainConfig) *SyncedDataManager {
+func NewSyncedDataManager(cfg *clparams.BeaconChainConfig, enabled bool) *SyncedDataManager {
 	return &SyncedDataManager{
-		enabled:    enabled,
-		cfg:        cfg,
-		copyBuffer: state.New(cfg),
+		enabled: enabled,
+		cfg:     cfg,
 	}
 }
 
@@ -48,66 +61,135 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if !s.enabled {
 		return
 	}
-	s.copyBufferMutex.Lock()
-	defer s.copyBufferMutex.Unlock()
-	newPtr := s.copyBuffer
-	if err := newState.CopyInto(newPtr); err != nil {
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.accessLock.Lock()
+	defer s.accessLock.Unlock()
+
+	var blkRoot common.Hash
+
+	if s.headState == nil {
+		s.headState, err = newState.Copy()
+	} else {
+		err = newState.CopyInto(s.headState)
+	}
+	if err != nil {
 		return err
 	}
-	curPtr, ok := s.headState.Load().(*state.CachingBeaconState)
-	if !ok {
-		// No head state yet
-		s.headState.Store(newPtr)
-		s.copyBuffer = state.New(s.cfg) // acquire new buffer
-		return
+	blkRoot, err = newState.BlockRoot()
+	if err != nil {
+		return err
 	}
-
-	// swap buffers
-	s.headState.Store(newPtr)
-	s.copyBuffer = curPtr
-	return
+	s.headSlot.Store(newState.Slot())
+	s.headRoot.Store(blkRoot)
+	return err
 }
 
-func (s *SyncedDataManager) HeadState() *state.CachingBeaconState {
-	if !s.enabled {
-		return nil
+func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
+	_, synced := s.headRoot.Load().(common.Hash)
+	if !s.enabled || !synced {
+		return ErrNotSynced
 	}
-	if ret, ok := s.headState.Load().(*state.CachingBeaconState); ok {
-		return ret
+	s.mu.RLock()
+	if dbg.CaplinSyncedDataMangerDeadlockDetection {
+		trace := dbg.Stack()
+		ch := make(chan struct{})
+		go func() {
+			select {
+			case <-time.After(100 * time.Second):
+				fmt.Println("ViewHeadState timeout", trace)
+			case <-ch:
+				return
+			}
+		}()
+		defer close(ch)
+	}
+	defer s.mu.RUnlock()
+	if err := fn(s.headState); err != nil {
+		return err
 	}
 	return nil
 }
 
-func (s *SyncedDataManager) HeadStateReader() abstract.BeaconStateReader {
-	headstate := s.HeadState()
-	if headstate == nil {
-		return nil
-	}
-	return headstate
-}
-
-func (s *SyncedDataManager) HeadStateMutator() abstract.BeaconStateMutator {
-	headstate := s.HeadState()
-	if headstate == nil {
-		return nil
-	}
-	return headstate
-}
-
 func (s *SyncedDataManager) Syncing() bool {
-	if !s.enabled {
-		return false
-	}
-	return s.headState.Load() == nil
+	_, synced := s.headRoot.Load().(common.Hash)
+	return !synced
 }
 
 func (s *SyncedDataManager) HeadSlot() uint64 {
 	if !s.enabled {
 		return 0
 	}
-	st, ok := s.headState.Load().(*state.CachingBeaconState)
-	if !ok {
-		return 0
+	return s.headSlot.Load()
+}
+
+func (s *SyncedDataManager) HeadRoot() common.Hash {
+	if !s.enabled {
+		return common.Hash{}
 	}
-	return st.Slot()
+	root, ok := s.headRoot.Load().(common.Hash)
+	if !ok {
+		return common.Hash{}
+	}
+	return root
+}
+
+func (s *SyncedDataManager) CommitteeCount(epoch uint64) uint64 {
+	return s.headState.CommitteeCount(epoch)
+}
+
+func (s *SyncedDataManager) UnsetHeadState() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.accessLock.Lock()
+	defer s.accessLock.Unlock()
+	s.headRoot = atomic.Value{}
+	s.headSlot.Store(uint64(0))
+	s.headState = nil
+}
+
+func (s *SyncedDataManager) ValidatorPublicKeyByIndex(index int) (common.Bytes48, error) {
+	s.accessLock.RLock()
+	defer s.accessLock.RUnlock()
+	if s.headState == nil {
+		return common.Bytes48{}, ErrNotSynced
+	}
+	return s.headState.ValidatorPublicKey(index)
+}
+
+func (s *SyncedDataManager) ValidatorIndexByPublicKey(pubkey common.Bytes48) (uint64, bool, error) {
+	s.accessLock.RLock()
+	defer s.accessLock.RUnlock()
+	if s.headState == nil {
+		return 0, false, ErrNotSynced
+	}
+	ret, found := s.headState.ValidatorIndexByPubkey(pubkey)
+	return ret, found, nil
+}
+
+func (s *SyncedDataManager) HistoricalRootElementAtIndex(index int) (common.Hash, error) {
+	s.accessLock.RLock()
+	defer s.accessLock.RUnlock()
+	if s.headState == nil {
+		return common.Hash{}, ErrNotSynced
+	}
+	if s.headState.HistoricalRootsLength() <= uint64(index) {
+		return common.Hash{}, errors.New("HistoricalRootElementAtIndex: index out of range")
+	}
+
+	return s.headState.HistoricalRoot(index), nil
+}
+
+func (s *SyncedDataManager) HistoricalSummaryElementAtIndex(index int) (*cltypes.HistoricalSummary, error) {
+	s.accessLock.RLock()
+	defer s.accessLock.RUnlock()
+	if s.headState == nil {
+		return nil, ErrNotSynced
+	}
+	if s.headState.HistoricalSummariesLength() <= uint64(index) {
+		return nil, errors.New("HistoricalSummaryElementAtIndex: index out of range")
+	}
+
+	return s.headState.HistoricalSummary(index), nil
 }

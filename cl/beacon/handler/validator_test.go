@@ -23,12 +23,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	mockaggregation "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/pool"
-	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -75,6 +75,8 @@ func (t *validatorTestSuite) SetupTest() {
 		nil,
 		nil,
 		nil,
+		nil,
+		false,
 	)
 	t.gomockCtrl = gomockCtrl
 }

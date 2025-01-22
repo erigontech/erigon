@@ -118,18 +118,16 @@ func verify(cliCtx *cli.Context) error {
 	switch dst.LType {
 	case sync.TorrentFs:
 		config := sync.NewTorrentClientConfigFromCobra(cliCtx, dst.Chain)
-		torrentCli, err = sync.NewTorrentClient(config)
+		torrentCli, err = sync.NewTorrentClient(cliCtx.Context, config)
 		if err != nil {
 			return fmt.Errorf("can't create torrent: %w", err)
 		}
 
 	case sync.RemoteFs:
-		if rcCli == nil {
-			rcCli, err = downloader.NewRCloneClient(logger)
+		rcCli, err = downloader.NewRCloneClient(logger)
 
-			if err != nil {
-				return err
-			}
+		if err != nil {
+			return err
 		}
 
 		if err = sync.CheckRemote(rcCli, src.Src); err != nil {
@@ -145,7 +143,7 @@ func verify(cliCtx *cli.Context) error {
 	case sync.TorrentFs:
 		if torrentCli == nil {
 			config := sync.NewTorrentClientConfigFromCobra(cliCtx, dst.Chain)
-			torrentCli, err = sync.NewTorrentClient(config)
+			torrentCli, err = sync.NewTorrentClient(cliCtx.Context, config)
 			if err != nil {
 				return fmt.Errorf("can't create torrent: %w", err)
 			}

@@ -37,7 +37,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 // Keys in the node database.
@@ -101,9 +101,8 @@ func bucketsConfig(_ kv.TableCfg) kv.TableCfg {
 
 // newMemoryDB creates a new in-memory node database without a persistent backend.
 func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, error) {
-	db, err := mdbx.NewMDBX(logger).
+	db, err := mdbx.New(kv.SentryDB, logger).
 		InMem(tmpDir).
-		Label(kv.SentryDB).
 		WithTableCfg(bucketsConfig).
 		MapSize(1 * datasize.GB).
 		Open(ctx)
@@ -120,9 +119,8 @@ func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, er
 // newPersistentDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, error) {
-	db, err := mdbx.NewMDBX(logger).
+	db, err := mdbx.New(kv.SentryDB, logger).
 		Path(path).
-		Label(kv.SentryDB).
 		WithTableCfg(bucketsConfig).
 		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
@@ -143,6 +141,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		_, v, errGet := c.SeekExact([]byte(dbVersionKey))
 		if errGet != nil {
 			return errGet
@@ -383,6 +382,7 @@ func deleteRangeInBucket(tx kv.RwTx, prefix []byte, bucket string) error {
 	if err != nil {
 		return err
 	}
+	defer c.Close()
 	var k []byte
 	for k, _, err = c.Seek(prefix); (err == nil) && (k != nil) && bytes.HasPrefix(k, prefix); k, _, err = c.Next() {
 		if err = c.DeleteCurrent(); err != nil {
@@ -433,6 +433,7 @@ func (db *DB) expireNodes() {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		p := []byte(dbNodePrefix)
 		var prevId ID
 		var empty = true
@@ -566,6 +567,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 	seek:
 		for seeks := 0; len(nodes) < n && seeks < n*5; seeks++ {
 			// seekInFiles to a random entry. The first byte is incremented by a

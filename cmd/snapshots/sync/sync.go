@@ -200,7 +200,7 @@ func NewDefaultTorrentClientConfig(chain string, torrentDir string, logger log.L
 	}
 }
 
-func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, error) {
+func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) (*TorrentClient, error) {
 	logger := config.Logger
 	tempDir := config.TempDir
 
@@ -232,7 +232,7 @@ func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, erro
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 
-	cfg, err := downloadercfg.New(dirs, version, logLevel, downloadRate, uploadRate,
+	cfg, err := downloadercfg.New(ctx, dirs, version, logLevel, downloadRate, uploadRate,
 		config.TorrentPort,
 		config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true, true)
 

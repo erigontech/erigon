@@ -17,7 +17,6 @@
 package handler
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -86,41 +85,51 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	}
 	resp := make([]*committeeResponse, 0, a.beaconChainCfg.SlotsPerEpoch*a.beaconChainCfg.MaxCommitteesPerSlot)
 	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
+	// s, cn := a.syncedData.HeadState()
+	// defer cn()
+
 	if a.forkchoiceStore.LowestAvailableSlot() <= slot {
 		// non-finality case
-		s := a.syncedData.HeadState()
-		if s == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
-		}
-		if epoch > state.Epoch(s)+1 {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d is too far in the future", epoch))
-		}
-		// get active validator indicies
-		committeeCount := s.CommitteeCount(epoch)
-		// now start obtaining the committees from the head state
-		for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
-			if slotFilter != nil && currSlot != *slotFilter {
-				continue
+		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+			if epoch > state.Epoch(s)+1 {
+				return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d is too far in the future", epoch))
 			}
-			for committeeIndex := uint64(0); committeeIndex < committeeCount; committeeIndex++ {
-				if index != nil && committeeIndex != *index {
+			// get active validator indicies
+			committeeCount := s.CommitteeCount(epoch)
+			// now start obtaining the committees from the head state
+			for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
+				if slotFilter != nil && currSlot != *slotFilter {
 					continue
 				}
-				data := &committeeResponse{Index: committeeIndex, Slot: currSlot}
-				idxs, err := s.GetBeaconCommitee(currSlot, committeeIndex)
-				if err != nil {
-					return nil, err
+				for committeeIndex := uint64(0); committeeIndex < committeeCount; committeeIndex++ {
+					if index != nil && committeeIndex != *index {
+						continue
+					}
+					data := &committeeResponse{Index: committeeIndex, Slot: currSlot}
+					idxs, err := s.GetBeaconCommitee(currSlot, committeeIndex)
+					if err != nil {
+						return err
+					}
+					for _, idx := range idxs {
+						data.Validators = append(data.Validators, strconv.FormatUint(idx, 10))
+					}
+					resp = append(resp, data)
 				}
-				for _, idx := range idxs {
-					data.Validators = append(data.Validators, strconv.FormatUint(idx, 10))
-				}
-				resp = append(resp, data)
 			}
+			return nil
+		}); err != nil {
+			return nil, err
 		}
+
 		return newBeaconResponse(resp).WithFinalized(isFinalized).WithOptimistic(isOptimistic), nil
 	}
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 	// finality case
-	activeIdxs, err := state_accessors.ReadActiveIndicies(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
+	activeIdxs, err := state_accessors.ReadActiveIndicies(
+		stateGetter,
+		epoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +143,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	}
 
 	mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) % a.beaconChainCfg.EpochsPerHistoricalVector
-	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(tx, epoch*a.beaconChainCfg.SlotsPerEpoch, mixPosition)
+	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(tx, stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch, mixPosition)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read randao mix: %v", err))
 	}

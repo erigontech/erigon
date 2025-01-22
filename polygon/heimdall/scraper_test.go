@@ -72,7 +72,7 @@ func TestScrapper_Run_TransientErr(t *testing.T) {
 	)
 
 	transientErrs := []error{ErrNotInMilestoneList, ErrBadGateway}
-	scrapper := newScraper[*Milestone](store, fetcher, time.Millisecond, transientErrs, logger)
+	scrapper := NewScraper[*Milestone]("test", store, fetcher, time.Millisecond, transientErrs, logger)
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {

@@ -45,11 +45,11 @@ type ParityAPI interface {
 // ParityAPIImpl data structure to store things needed for parity_ commands
 type ParityAPIImpl struct {
 	*BaseAPI
-	db kv.RoDB
+	db kv.TemporalRoDB
 }
 
 // NewParityAPIImpl returns ParityAPIImpl instance
-func NewParityAPIImpl(base *BaseAPI, db kv.RoDB) *ParityAPIImpl {
+func NewParityAPIImpl(base *BaseAPI, db kv.TemporalRoDB) *ParityAPIImpl {
 	return &ParityAPIImpl{
 		BaseAPI: base,
 		db:      db,
@@ -63,7 +63,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 	}
 	keys := make([]hexutility.Bytes, 0)
 
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
 	}
@@ -87,7 +87,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		from = append(from, *offset...)
 	}
 	to, _ := kv.NextSubtree(account[:])
-	r, err := tx.(kv.TemporalTx).DomainRange(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
+	r, err := tx.RangeAsOf(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
 	if err != nil {
 		return nil, err
 	}

@@ -80,12 +80,7 @@ func (m *Mapmutation) DBSize() (uint64, error) {
 	panic("implement me")
 }
 
-func (m *Mapmutation) Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (m *Mapmutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
+func (m *Mapmutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	//TODO implement me
 	panic("implement me")
 }

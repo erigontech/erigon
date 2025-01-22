@@ -33,77 +33,23 @@ import (
 	"github.com/erigontech/erigon/eth/protocols/eth"
 )
 
-type RequestIdGenerator func() uint64
-
-type Fetcher interface {
-	// FetchHeaders fetches [start,end) headers from a peer. Blocks until data is received.
-	FetchHeaders(
-		ctx context.Context,
-		start uint64,
-		end uint64,
-		peerId *PeerId,
-		opts ...FetcherOption,
-	) (FetcherResponse[[]*types.Header], error)
-
-	// FetchBodies fetches block bodies for the given headers from a peer. Blocks until data is received.
-	FetchBodies(
-		ctx context.Context,
-		headers []*types.Header,
-		peerId *PeerId,
-		opts ...FetcherOption,
-	) (FetcherResponse[[]*types.Body], error)
-
-	// FetchBlocksBackwardsByHash fetches a number of blocks backwards starting from a block hash. Max amount is 1024
-	// blocks back. Blocks until data is received.
-	FetchBlocksBackwardsByHash(
-		ctx context.Context,
-		hash common.Hash,
-		amount uint64,
-		peerId *PeerId,
-		opts ...FetcherOption,
-	) (FetcherResponse[[]*types.Block], error)
-}
-
-func NewFetcher(
-	logger log.Logger,
-	config FetcherConfig,
-	messageListener MessageListener,
-	messageSender MessageSender,
-	requestIdGenerator RequestIdGenerator,
-) Fetcher {
-	return newFetcher(logger, config, messageListener, messageSender, requestIdGenerator)
-}
-
-func newFetcher(
-	logger log.Logger,
-	config FetcherConfig,
-	messageListener MessageListener,
-	messageSender MessageSender,
-	requestIdGenerator RequestIdGenerator,
-) *fetcher {
-	return &fetcher{
-		logger:             logger,
-		config:             config,
-		messageListener:    messageListener,
-		messageSender:      messageSender,
-		requestIdGenerator: requestIdGenerator,
+func NewFetcher(logger log.Logger, ml *MessageListener, ms *MessageSender, opts ...FetcherOption) *FetcherBase {
+	return &FetcherBase{
+		logger:          logger,
+		config:          defaultFetcherConfig.CopyWithOptions(opts...),
+		messageListener: ml,
+		messageSender:   ms,
 	}
 }
 
-type fetcher struct {
-	logger             log.Logger
-	config             FetcherConfig
-	messageListener    MessageListener
-	messageSender      MessageSender
-	requestIdGenerator RequestIdGenerator
+type FetcherBase struct {
+	logger          log.Logger
+	config          FetcherConfig
+	messageListener *MessageListener
+	messageSender   *MessageSender
 }
 
-type FetcherResponse[T any] struct {
-	Data      T
-	TotalSize int
-}
-
-func (f *fetcher) FetchHeaders(
+func (f *FetcherBase) FetchHeaders(
 	ctx context.Context,
 	start uint64,
 	end uint64,
@@ -169,7 +115,7 @@ func (f *fetcher) FetchHeaders(
 	}, nil
 }
 
-func (f *fetcher) FetchBodies(
+func (f *FetcherBase) FetchBodies(
 	ctx context.Context,
 	headers []*types.Header,
 	peerId *PeerId,
@@ -209,7 +155,7 @@ func (f *fetcher) FetchBodies(
 	}, nil
 }
 
-func (f *fetcher) FetchBlocksBackwardsByHash(
+func (f *FetcherBase) FetchBlocksBackwardsByHash(
 	ctx context.Context,
 	hash common.Hash,
 	amount uint64,
@@ -277,7 +223,7 @@ func (f *fetcher) FetchBlocksBackwardsByHash(
 	return response, nil
 }
 
-func (f *fetcher) fetchHeadersWithRetry(
+func (f *FetcherBase) fetchHeadersWithRetry(
 	ctx context.Context,
 	request *eth.GetBlockHeadersPacket,
 	peerId *PeerId,
@@ -294,7 +240,7 @@ func (f *fetcher) fetchHeadersWithRetry(
 	})
 }
 
-func (f *fetcher) fetchHeaders(
+func (f *FetcherBase) fetchHeaders(
 	ctx context.Context,
 	request *eth.GetBlockHeadersPacket,
 	peerId *PeerId,
@@ -316,7 +262,7 @@ func (f *fetcher) fetchHeaders(
 	unregister := f.messageListener.RegisterBlockHeadersObserver(observer)
 	defer unregister()
 
-	requestId := f.requestIdGenerator()
+	requestId := f.config.requestIdGenerator()
 	err := f.messageSender.SendGetBlockHeaders(ctx, peerId, eth.GetBlockHeadersPacket66{
 		RequestId:             requestId,
 		GetBlockHeadersPacket: request,
@@ -336,7 +282,7 @@ func (f *fetcher) fetchHeaders(
 	}, nil
 }
 
-func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount uint64) error {
+func (f *FetcherBase) validateHeadersResponse(headers []*types.Header, start, amount uint64) error {
 	headersLen := uint64(len(headers))
 	if headersLen > amount {
 		return &ErrTooManyHeaders{
@@ -383,7 +329,7 @@ func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount
 	return nil
 }
 
-func (f *fetcher) fetchBodiesWithRetry(
+func (f *FetcherBase) fetchBodiesWithRetry(
 	ctx context.Context,
 	headers []*types.Header,
 	peerId *PeerId,
@@ -400,7 +346,7 @@ func (f *fetcher) fetchBodiesWithRetry(
 	})
 }
 
-func (f *fetcher) fetchBodies(
+func (f *FetcherBase) fetchBodies(
 	ctx context.Context,
 	headers []*types.Header,
 	peerId *PeerId,
@@ -423,7 +369,7 @@ func (f *fetcher) fetchBodies(
 	unregister := f.messageListener.RegisterBlockBodiesObserver(observer)
 	defer unregister()
 
-	requestId := f.requestIdGenerator()
+	requestId := f.config.requestIdGenerator()
 	hashes := make([]common.Hash, len(headers))
 	for i, header := range headers {
 		hashes[i] = header.Hash()
@@ -452,7 +398,7 @@ func (f *fetcher) fetchBodies(
 	}, nil
 }
 
-func (f *fetcher) validateBodies(bodies []*types.Body, headers []*types.Header) error {
+func (f *FetcherBase) validateBodies(bodies []*types.Body, headers []*types.Header) error {
 	if len(bodies) > len(headers) {
 		return &ErrTooManyBodies{
 			requested: len(headers),

@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 
-// Bitlist is like a dynamic binary string. It's like a flipbook of 1s and 0s!
+// BitList is like a dynamic binary string. It's like a flipbook of 1s and 0s!
 // And just like a flipbook, we can add (Append), remove (Pop), or look at any bit (Get) we want.
 type BitList struct {
 	// the underlying bytes that store the data
@@ -126,6 +126,50 @@ func (u *BitList) Get(index int) byte {
 // Set is like the Red Ranger giving an order - we set a bit to a certain value.
 func (u *BitList) Set(index int, v byte) {
 	u.u[index] = v
+}
+
+func (u *BitList) removeMsb() {
+	for i := len(u.u) - 1; i >= 0; i-- {
+		if u.u[i] != 0 {
+			// find last bit, make a mask and clear it
+			u.u[i] &= ^(1 << uint(bits.Len8(u.u[i])-1))
+			break
+		}
+	}
+}
+
+func (u *BitList) addMsb() {
+	for i := len(u.u) - 1; i >= 0; i-- {
+		if u.u[i] != 0 {
+			msb := bits.Len8(u.u[i])
+			if msb == 7 {
+				if i == len(u.u)-1 {
+					u.u = append(u.u, 0)
+				}
+				u.u[i+1] |= 1
+			} else {
+				u.u[i] |= 1 << uint(msb+1)
+			}
+			break
+		}
+	}
+}
+
+func (u *BitList) SetOnBit(bitIndex int) {
+	if bitIndex >= u.c {
+		return
+	}
+	// remove the last on bit if necessary
+	u.removeMsb()
+	// expand the bitlist if necessary
+	for len(u.u)*8 <= bitIndex {
+		u.u = append(u.u, 0)
+	}
+	// set the bit
+	u.u[bitIndex/8] |= 1 << uint(bitIndex%8)
+	// set last bit
+	u.addMsb()
+	u.l = len(u.u)
 }
 
 // Length gives us the length of the bitlist, just like a roll call tells us how many Rangers there are.

@@ -30,12 +30,10 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/core/vm/stack"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/tracers"
 	jsassets "github.com/erigontech/erigon/eth/tracers/js/internal/tracers"
 )
@@ -76,7 +74,7 @@ func fromBuf(vm *goja.Runtime, bufType goja.Value, buf goja.Value, allowString b
 		if !allowString {
 			break
 		}
-		return common.FromHex(obj.String()), nil
+		return libcommon.FromHex(obj.String()), nil
 
 	case "Array":
 		var b []byte
@@ -677,8 +675,12 @@ func (do *dbObj) GetBalance(addrSlice goja.Value) goja.Value {
 		return nil
 	}
 	addr := libcommon.BytesToAddress(a)
-	value := do.ibs.GetBalance(addr).ToBig()
-	res, err := do.toBig(do.vm, value.String())
+	value, err := do.ibs.GetBalance(addr)
+	if err != nil {
+		do.vm.Interrupt(err)
+		return nil
+	}
+	res, err := do.toBig(do.vm, value.ToBig().String())
 	if err != nil {
 		do.vm.Interrupt(err)
 		return nil
@@ -693,7 +695,12 @@ func (do *dbObj) GetNonce(addrSlice goja.Value) uint64 {
 		return 0
 	}
 	addr := libcommon.BytesToAddress(a)
-	return do.ibs.GetNonce(addr)
+	nonce, err := do.ibs.GetNonce(addr)
+	if err != nil {
+		do.vm.Interrupt(err)
+		return 0
+	}
+	return nonce
 }
 
 func (do *dbObj) GetCode(addrSlice goja.Value) goja.Value {
@@ -703,7 +710,11 @@ func (do *dbObj) GetCode(addrSlice goja.Value) goja.Value {
 		return nil
 	}
 	addr := libcommon.BytesToAddress(a)
-	code := do.ibs.GetCode(addr)
+	code, err := do.ibs.GetCode(addr)
+	if err != nil {
+		do.vm.Interrupt(err)
+		return nil
+	}
 	res, err := do.toBuf(do.vm, code)
 	if err != nil {
 		do.vm.Interrupt(err)
@@ -742,7 +753,12 @@ func (do *dbObj) Exists(addrSlice goja.Value) bool {
 		return false
 	}
 	addr := libcommon.BytesToAddress(a)
-	return do.ibs.Exist(addr)
+	exists, err := do.ibs.Exist(addr)
+	if err != nil {
+		do.vm.Interrupt(err)
+		return false
+	}
+	return exists
 }
 
 func (do *dbObj) setupObject() *goja.Object {

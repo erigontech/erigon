@@ -19,8 +19,11 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"maps"
 	"math"
 	"sort"
+	"strings"
+	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -40,7 +43,7 @@ func (s *StateChangeSet) Copy() *StateChangeSet {
 }
 
 type DomainEntryDiff struct {
-	Key           []byte
+	Key           string
 	Value         []byte
 	PrevStepBytes []byte
 }
@@ -51,46 +54,36 @@ type StateDiffDomain struct {
 	keys          map[string][]byte
 	prevValues    map[string][]byte
 	prevValsSlice []DomainEntryDiff
+
+	prevStepBuf, keyBuf []byte
 }
 
 func (d *StateDiffDomain) Copy() *StateDiffDomain {
-	res := &StateDiffDomain{}
-	res.keys = make(map[string][]byte)
-	res.prevValues = make(map[string][]byte)
-	for k, v := range d.keys {
-		res.keys[k] = v
-	}
-	for k, v := range d.prevValues {
-		res.prevValues[k] = v
-	}
-	return res
+	return &StateDiffDomain{keys: maps.Clone(d.keys), prevValues: maps.Clone(d.prevValues)}
 }
 
 // RecordDelta records a state change.
 func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, prevStep uint64) {
 	if d.keys == nil {
-		d.keys = make(map[string][]byte)
+		d.keys = make(map[string][]byte, 16)
+		d.prevValues = make(map[string][]byte, 16)
+		d.prevStepBuf = make([]byte, 8)
 	}
-	if d.prevValues == nil {
-		d.prevValues = make(map[string][]byte)
-	}
-	prevStepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(prevStepBytes, ^prevStep)
+	binary.BigEndian.PutUint64(d.prevStepBuf, ^prevStep)
 
-	key := append(common.Copy(key1), key2...)
-
-	if _, ok := d.keys[string(key)]; !ok {
-		d.keys[string(key)] = prevStepBytes
+	d.keyBuf = append(append(append(d.keyBuf[:0], key1...), key2...), stepBytes...)
+	key := toStringZeroCopy(d.keyBuf[:len(key1)+len(key2)])
+	if _, ok := d.keys[key]; !ok {
+		d.keys[strings.Clone(key)] = common.Copy(d.prevStepBuf)
 	}
 
-	prevValue = common.Copy(prevValue)
-
-	valsKey := string(append(common.Copy(key), stepBytes...))
+	valsKey := toStringZeroCopy(d.keyBuf)
 	if _, ok := d.prevValues[valsKey]; !ok {
-		if bytes.Equal(stepBytes, prevStepBytes) {
-			d.prevValues[valsKey] = prevValue
+		valsKeySCopy := strings.Clone(valsKey)
+		if bytes.Equal(stepBytes, d.prevStepBuf) {
+			d.prevValues[valsKeySCopy] = common.Copy(prevValue)
 		} else {
-			d.prevValues[valsKey] = []byte{} // We need to delete the current step but restore the previous one
+			d.prevValues[valsKeySCopy] = []byte{} // We need to delete the current step but restore the previous one
 		}
 		d.prevValsSlice = nil
 	}
@@ -100,18 +93,17 @@ func (d *StateDiffDomain) GetDiffSet() (keysToValue []DomainEntryDiff) {
 	if len(d.prevValsSlice) != 0 {
 		return d.prevValsSlice
 	}
-	d.prevValsSlice = make([]DomainEntryDiff, 0, len(d.prevValues))
+	d.prevValsSlice = make([]DomainEntryDiff, len(d.prevValues))
+	i := 0
 	for k, v := range d.prevValues {
-		d.prevValsSlice = append(d.prevValsSlice, DomainEntryDiff{
-			Key:           []byte(k),
-			Value:         v,
-			PrevStepBytes: d.keys[k[:len(k)-8]],
-		})
+		d.prevValsSlice[i].Key = k
+		d.prevValsSlice[i].Value = v
+		d.prevValsSlice[i].PrevStepBytes = d.keys[k[:len(k)-8]]
+		i++
 	}
 	sort.Slice(d.prevValsSlice, func(i, j int) bool {
-		return string(d.prevValsSlice[i].Key) < string(d.prevValsSlice[j].Key)
+		return d.prevValsSlice[i].Key < d.prevValsSlice[j].Key
 	})
-
 	return d.prevValsSlice
 }
 
@@ -121,10 +113,11 @@ func SerializeDiffSet(diffSet []DomainEntryDiff, out []byte) []byte {
 	dict := make(map[string]byte)
 	id := byte(0x00)
 	for _, diff := range diffSet {
-		if _, ok := dict[string(diff.PrevStepBytes)]; ok {
+		prevStepS := toStringZeroCopy(diff.PrevStepBytes)
+		if _, ok := dict[prevStepS]; ok {
 			continue
 		}
-		dict[string(diff.PrevStepBytes)] = id
+		dict[prevStepS] = id
 		id++
 	}
 	// Write the dictionary
@@ -134,18 +127,18 @@ func SerializeDiffSet(diffSet []DomainEntryDiff, out []byte) []byte {
 		ret = append(ret, v)            // v is always 1 byte
 	}
 	// Write the diffSet
-	tmp := make([]byte, 4)
-	binary.BigEndian.PutUint32(tmp, uint32(len(diffSet)))
-	ret = append(ret, tmp...)
+	var tmp [4]byte
+	binary.BigEndian.PutUint32(tmp[:], uint32(len(diffSet)))
+	ret = append(ret, tmp[:]...)
 	for _, diff := range diffSet {
 		// write uint32(len(key)) + key + uint32(len(value)) + value + prevStepBytes
-		binary.BigEndian.PutUint32(tmp, uint32(len(diff.Key)))
-		ret = append(ret, tmp...)
+		binary.BigEndian.PutUint32(tmp[:], uint32(len(diff.Key)))
+		ret = append(ret, tmp[:]...)
 		ret = append(ret, diff.Key...)
-		binary.BigEndian.PutUint32(tmp, uint32(len(diff.Value)))
-		ret = append(ret, tmp...)
+		binary.BigEndian.PutUint32(tmp[:], uint32(len(diff.Value)))
+		ret = append(ret, tmp[:]...)
 		ret = append(ret, diff.Value...)
-		ret = append(ret, dict[string(diff.PrevStepBytes)])
+		ret = append(ret, dict[toStringZeroCopy(diff.PrevStepBytes)])
 	}
 	return ret
 }
@@ -155,10 +148,11 @@ func SerializeDiffSetBufLen(diffSet []DomainEntryDiff) int {
 	dict := make(map[string]byte)
 	id := byte(0x00)
 	for _, diff := range diffSet {
-		if _, ok := dict[string(diff.PrevStepBytes)]; ok {
+		prevStepS := toStringZeroCopy(diff.PrevStepBytes)
+		if _, ok := dict[prevStepS]; ok {
 			continue
 		}
-		dict[string(diff.PrevStepBytes)] = id
+		dict[prevStepS] = id
 		id++
 	}
 	// Write the dictionary
@@ -199,7 +193,7 @@ func DeserializeDiffSet(in []byte) []DomainEntryDiff {
 		prevStepBytes := dict[in[0]]
 		in = in[1:]
 		diffSet[i] = DomainEntryDiff{
-			Key:           key,
+			Key:           toStringZeroCopy(key),
 			Value:         value,
 			PrevStepBytes: prevStepBytes,
 		}
@@ -218,7 +212,7 @@ func MergeDiffSets(newer, older []DomainEntryDiff) []DomainEntryDiff {
 	var result []DomainEntryDiff
 	i, j := 0, 0
 	for i < len(newer) && j < len(older) {
-		cmp := bytes.Compare(older[j].Key, newer[i].Key)
+		cmp := strings.Compare(older[j].Key, newer[i].Key)
 		if cmp < 0 {
 			result = append(result, older[j])
 			j++
@@ -267,11 +261,22 @@ func DeserializeKeys(in []byte) [kv.DomainLen][]DomainEntryDiff {
 	return ret
 }
 
+const diffChunkKeyLen = 48
 const diffChunkLen = 4*1024 - 32
 
+type threadSafeBuf struct {
+	b []byte
+	sync.Mutex
+}
+
+var writeDiffsetBuf = &threadSafeBuf{}
+
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
-	// Write the diffSet to the database
-	keys := diffSet.SerializeKeys(nil)
+	writeDiffsetBuf.Lock()
+	defer writeDiffsetBuf.Unlock()
+	writeDiffsetBuf.b = diffSet.SerializeKeys(writeDiffsetBuf.b[:0])
+	keys := writeDiffsetBuf.b
+
 	chunkCount := (len(keys) + diffChunkLen - 1) / diffChunkLen
 	// Data Format
 	// dbutils.BlockBodyKey(blockNumber, blockHash) -> chunkCount
@@ -281,7 +286,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 		return err
 	}
 
-	key := make([]byte, 48)
+	key := make([]byte, diffChunkKeyLen)
 	for i := 0; i < chunkCount; i++ {
 		start := i * diffChunkLen
 		end := (i + 1) * diffChunkLen

@@ -23,9 +23,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
-
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/params"
 )
@@ -49,6 +48,6 @@ func TestHandshake(t *testing.T) {
 	assert.Contains(t, hello.ClientID, "erigon")
 
 	require.NotNil(t, status)
-	assert.Equal(t, uint32(direct.ETH66), status.ProtocolVersion)
+	assert.Equal(t, uint32(direct.ETH67), status.ProtocolVersion)
 	assert.Equal(t, uint64(1), status.NetworkID)
 }

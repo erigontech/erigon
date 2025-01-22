@@ -30,7 +30,7 @@ func IdxStepsCountV3(tx kv.Tx) float64 {
 		fstTxNum := binary.BigEndian.Uint64(fst)
 		lstTxNum := binary.BigEndian.Uint64(lst)
 
-		return float64(lstTxNum-fstTxNum) / float64(config3.HistoryV3AggregationStep)
+		return float64(lstTxNum-fstTxNum) / float64(config3.DefaultStepSize)
 	}
 	return 0
 }

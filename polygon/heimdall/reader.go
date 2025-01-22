@@ -16,32 +16,30 @@ import (
 
 type Reader struct {
 	logger                    log.Logger
-	store                     ServiceStore
+	store                     Store
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
 type ReaderConfig struct {
-	Ctx       context.Context
+	Store     Store
 	BorConfig *borcfg.BorConfig
 	DataDir   string
-	TempDir   string
 	Logger    log.Logger
-	RoTxLimit int64
 }
 
 // AssembleReader creates and opens the MDBX store. For use cases where the store is only being read from. Must call Close.
-func AssembleReader(config ReaderConfig) (*Reader, error) {
-	store := NewMdbxServiceStore(config.Logger, config.DataDir, config.TempDir, config.RoTxLimit)
+func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
+	reader := NewReader(config.BorConfig, config.Store, config.Logger)
 
-	err := store.Prepare(config.Ctx)
+	err := reader.Prepare(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return NewReader(config.BorConfig, store, config.Logger), nil
+	return reader, nil
 }
 
-func NewReader(borConfig *borcfg.BorConfig, store ServiceStore, logger log.Logger) *Reader {
+func NewReader(borConfig *borcfg.BorConfig, store Store, logger log.Logger) *Reader {
 	return &Reader{
 		logger:                    logger,
 		store:                     store,
@@ -49,15 +47,19 @@ func NewReader(borConfig *borcfg.BorConfig, store ServiceStore, logger log.Logge
 	}
 }
 
+func (r *Reader) Prepare(ctx context.Context) error {
+	return r.store.Prepare(ctx)
+}
+
 func (r *Reader) Span(ctx context.Context, id uint64) (*Span, bool, error) {
 	return r.store.Spans().Entity(ctx, id)
 }
 
-func (r *Reader) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Checkpoints, error) {
+func (r *Reader) CheckpointsFromBlock(ctx context.Context, startBlock uint64) ([]*Checkpoint, error) {
 	return r.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
 }
 
-func (r *Reader) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Milestones, error) {
+func (r *Reader) MilestonesFromBlock(ctx context.Context, startBlock uint64) ([]*Milestone, error) {
 	return r.store.Milestones().RangeFromBlockNum(ctx, startBlock)
 }
 
@@ -110,7 +112,6 @@ func (r *RemoteReader) Producers(ctx context.Context, blockNum uint64) (*valset.
 
 // Close implements bridge.ReaderService. It's a noop as there is no attached store.
 func (r *RemoteReader) Close() {
-	return
 }
 
 func (r *RemoteReader) EnsureVersionCompatibility() bool {

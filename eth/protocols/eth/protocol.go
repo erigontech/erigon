@@ -27,15 +27,13 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
 
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/forkid"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rlp"
 )
 
 var ProtocolToString = map[uint]string{
-	direct.ETH66: "eth66",
 	direct.ETH67: "eth67",
 	direct.ETH68: "eth68",
 }
@@ -58,8 +56,6 @@ const (
 	GetBlockBodiesMsg  = 0x05
 	BlockBodiesMsg     = 0x06
 	NewBlockMsg        = 0x07
-	GetNodeDataMsg     = 0x0d
-	NodeDataMsg        = 0x0e
 	GetReceiptsMsg     = 0x0f
 	ReceiptsMsg        = 0x10
 
@@ -70,22 +66,6 @@ const (
 )
 
 var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
-	direct.ETH66: {
-		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
-		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
-		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_66,
-		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES_66,
-		GetNodeDataMsg:                proto_sentry.MessageId_GET_NODE_DATA_66,
-		NodeDataMsg:                   proto_sentry.MessageId_NODE_DATA_66,
-		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS_66,
-		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS_66,
-		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
-		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_66,
-		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_66,
-		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
-		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
-		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
-	},
 	direct.ETH67: {
 		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
 		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
@@ -110,29 +90,13 @@ var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
 		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_66,
 		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_66,
-		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, // Modified since ETH66
+		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, // Modified in eth/68
 		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
 		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
 	},
 }
 
 var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
-	direct.ETH66: {
-		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
-		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
-		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
-		proto_sentry.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
-		proto_sentry.MessageId_GET_NODE_DATA_66:                 GetNodeDataMsg,
-		proto_sentry.MessageId_NODE_DATA_66:                     NodeDataMsg,
-		proto_sentry.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
-		proto_sentry.MessageId_RECEIPTS_66:                      ReceiptsMsg,
-		proto_sentry.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
-		proto_sentry.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
-		proto_sentry.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
-		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
-		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
-		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
-	},
 	direct.ETH67: {
 		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
 		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
@@ -193,7 +157,7 @@ type GetBlockHeadersPacket struct {
 	Reverse bool         // Query direction (false = rising towards latest, true = falling towards genesis)
 }
 
-// GetBlockHeadersPacket represents a block header query over eth/66
+// GetBlockHeadersPacket66 represents a block header query over eth/66
 type GetBlockHeadersPacket66 struct {
 	RequestId uint64
 	*GetBlockHeadersPacket
@@ -238,7 +202,7 @@ func (hn *HashOrNumber) DecodeRLP(s *rlp.Stream) error {
 // BlockHeadersPacket represents a block header response.
 type BlockHeadersPacket []*types.Header
 
-// BlockHeadersPacket represents a block header response over eth/66.
+// BlockHeadersPacket66 represents a block header response over eth/66.
 type BlockHeadersPacket66 struct {
 	RequestId uint64
 	BlockHeadersPacket
@@ -254,7 +218,7 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	encodingSize := 0
 	// size of Block
 	blockLen := nbp.Block.EncodingSize()
-	encodingSize += rlp2.ListPrefixLen(blockLen) + blockLen
+	encodingSize += rlp.ListPrefixLen(blockLen) + blockLen
 	// size of TD
 	encodingSize++
 	var tdBitLen, tdLen int
@@ -267,7 +231,7 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	encodingSize += tdLen
 	var b [33]byte
 	// prefix
-	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Block
@@ -336,13 +300,13 @@ type BlockBodiesPacket []*types.Body
 // BlockRawBodiesPacket is the network packet for block content distribution.
 type BlockRawBodiesPacket []*types.RawBody
 
-// BlockBodiesPacket is the network packet for block content distribution over eth/66.
+// BlockBodiesPacket66 is the network packet for block content distribution over eth/66.
 type BlockBodiesPacket66 struct {
 	RequestId uint64
 	BlockBodiesPacket
 }
 
-// BlockBodiesPacket is the network packet for block content distribution over eth/66.
+// BlockRawBodiesPacket66 is the network packet for block content distribution over eth/66.
 type BlockRawBodiesPacket66 struct {
 	RequestId uint64
 	BlockRawBodiesPacket
@@ -359,25 +323,24 @@ type BlockBodiesRLPPacket66 struct {
 	BlockBodiesRLPPacket
 }
 
-// Unpack retrieves the transactions, uncles, withdrawals, and requests from the range packet and returns
+// Unpack retrieves the transactions, uncles, withdrawals from the range packet and returns
 // them in a split flat format that's more consistent with the internal data structures.
-func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.Withdrawals, []types.Requests) {
+func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.Withdrawals) {
 	var (
 		txSet         = make([][][]byte, len(*p))
 		uncleSet      = make([][]*types.Header, len(*p))
 		withdrawalSet = make([]types.Withdrawals, len(*p))
-		requestSet    = make([]types.Requests, len(*p))
 	)
 	for i, body := range *p {
-		txSet[i], uncleSet[i], withdrawalSet[i], requestSet[i] = body.Transactions, body.Uncles, body.Withdrawals, body.Requests
+		txSet[i], uncleSet[i], withdrawalSet[i] = body.Transactions, body.Uncles, body.Withdrawals
 	}
-	return txSet, uncleSet, withdrawalSet, requestSet
+	return txSet, uncleSet, withdrawalSet
 }
 
 // GetReceiptsPacket represents a block receipts query.
 type GetReceiptsPacket []libcommon.Hash
 
-// GetReceiptsPacket represents a block receipts query over eth/66.
+// GetReceiptsPacket66 represents a block receipts query over eth/66.
 type GetReceiptsPacket66 struct {
 	RequestId uint64
 	GetReceiptsPacket
@@ -386,7 +349,7 @@ type GetReceiptsPacket66 struct {
 // ReceiptsPacket is the network packet for block receipts distribution.
 type ReceiptsPacket [][]*types.Receipt
 
-// ReceiptsPacket is the network packet for block receipts distribution over eth/66.
+// ReceiptsPacket66 is the network packet for block receipts distribution over eth/66.
 type ReceiptsPacket66 struct {
 	RequestId uint64
 	ReceiptsPacket
@@ -395,7 +358,7 @@ type ReceiptsPacket66 struct {
 // ReceiptsRLPPacket is used for receipts, when we already have it encoded
 type ReceiptsRLPPacket []rlp.RawValue
 
-// ReceiptsPacket66 is the eth-66 version of ReceiptsRLPPacket
+// ReceiptsRLPPacket66 is the eth-66 version of ReceiptsRLPPacket
 type ReceiptsRLPPacket66 struct {
 	RequestId uint64
 	ReceiptsRLPPacket
