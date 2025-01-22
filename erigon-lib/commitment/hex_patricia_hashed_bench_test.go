@@ -28,6 +28,7 @@ import (
 )
 
 func buildUpdates(b *testing.B, mode Mode) (*MockState, *Updates, [][]byte, []Update) {
+	b.Helper()
 	keysCount := 4_000_000
 	// generate updates
 	b.Logf("keys count: %d", keysCount)
