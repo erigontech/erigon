@@ -50,6 +50,7 @@ func (bs *CachingBeaconState) reinitCaches() error {
 	for k, idx := range bs.publicKeyIndicies {
 		if idx >= uint64(bs.ValidatorSet().Length()) {
 			delete(bs.publicKeyIndicies, k)
+			continue
 		}
 		pk := bs.ValidatorSet().Get(int(idx)).PublicKey()
 		if pk != k {
