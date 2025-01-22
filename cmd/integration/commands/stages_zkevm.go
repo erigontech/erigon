@@ -2,10 +2,9 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
+	"github.com/ledgerwatch/erigon/zk/zk_config"
+	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_dynamic_genesis"
 	"math/big"
-	"os"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -24,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
@@ -43,22 +40,11 @@ func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *
 		if config == "" {
 			panic("Config file is required for dynamic chain")
 		}
+		zk_config.ZKDynamicConfigPath = filepath.Dir(config)
 
-		params.DynamicChainConfigPath = filepath.Dir(config)
 		genesis = core.GenesisBlockByChainName(chain)
-		filename := path.Join(params.DynamicChainConfigPath, chain+"-conf.json")
 
-		dConf := utils.DynamicConfig{}
-
-		if _, err := os.Stat(filename); err == nil {
-			dConfBytes, err := os.ReadFile(filename)
-			if err != nil {
-				panic(err)
-			}
-			if err := json.Unmarshal(dConfBytes, &dConf); err != nil {
-				panic(err)
-			}
-		}
+		dConf := cfg_dynamic_genesis.NewDynamicGenesisConfig(chain)
 
 		genesis.Timestamp = dConf.Timestamp
 		genesis.GasLimit = dConf.GasLimit

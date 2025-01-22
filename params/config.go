@@ -20,8 +20,8 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_chain"
 	"math/big"
-	"os"
 	"path"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -209,8 +209,6 @@ var (
 	}
 
 	TestRules = TestChainConfig.Rules(0, 0)
-
-	DynamicChainConfigPath string
 )
 
 type ConsensusSnapshotConfig struct {
@@ -222,49 +220,6 @@ type ConsensusSnapshotConfig struct {
 }
 
 const cliquePath = "clique"
-
-func DynamicChainConfig(ch string) *chain.Config {
-	filename := path.Join(DynamicChainConfigPath, ch+"-chainspec.json")
-
-	f, err := os.Open(filename)
-	if err != nil {
-		panic(fmt.Sprintf("could not open chainspec for %s: %v", filename, err))
-	}
-	defer f.Close()
-	decoder := json.NewDecoder(f)
-	spec := &chain.Config{}
-	err = decoder.Decode(&spec)
-	if err != nil {
-		panic(fmt.Sprintf("could not parse chainspec for %s: %v", filename, err))
-	}
-
-	chainId := spec.ChainID.Uint64()
-	chain.SetDynamicChainDetails(chainId, spec.ChainName)
-
-	return spec
-}
-
-func DynamicChainTimestamp(ch string) uint64 {
-	filename := path.Join(DynamicChainConfigPath, ch+"-conf.json")
-
-	f, err := os.Open(filename)
-	if err != nil {
-		panic(fmt.Sprintf("could not open timestamp for %s: %v", filename, err))
-	}
-	defer f.Close()
-	decoder := json.NewDecoder(f)
-	type confFile struct {
-		Timestamp uint64 `json:"timestamp"`
-	}
-	var conf confFile
-	err = decoder.Decode(&conf)
-	if err != nil {
-		panic(fmt.Sprintf("could not parse timestamp for %s: %v", filename, err))
-	}
-
-	return conf.Timestamp
-
-}
 
 func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemorySignatures int, inmemory bool, dbPath string) *ConsensusSnapshotConfig {
 	if len(dbPath) == 0 {
@@ -323,7 +278,7 @@ func ChainConfigByChainName(chain string) *chain.Config {
 	case networkname.XLayerMainnetChainName:
 		return XLayerMainnetChainConfig
 	default:
-		return DynamicChainConfig(chain)
+		return cfg_chain.NewDynamicChainConfig(chain)
 	}
 }
 

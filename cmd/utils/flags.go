@@ -19,11 +19,10 @@ package utils
 
 import (
 	"crypto/ecdsa"
-	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon/zk/zk_config"
+	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_dynamic_genesis"
 	"math/big"
-	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -858,6 +857,10 @@ var (
 		Name:  "zkevm.sync-limit-unverified-count",
 		Usage: "The number of unverified batches to sync to past verified batch height. Used in combination with zkevm.sync-limit-verified-enabled. Default 5.",
 		Value: 5,
+	}
+	ZKGenesisConfigPathFlag = cli.StringFlag{
+		Name:  "zkevm.genesis-config-path",
+		Usage: "File path for the zk config containing allocs, chainspec, and other zk specific configurations.",
 	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
@@ -2159,13 +2162,6 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 }
 
-type DynamicConfig struct {
-	Root       string `json:"root"`
-	Timestamp  uint64 `json:"timestamp"`
-	GasLimit   uint64 `json:"gasLimit"`
-	Difficulty int64  `json:"difficulty"`
-}
-
 func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) error {
 	allowed := ctx.StringSlice(BeaconAPIFlag.Name)
 	if err := cfg.BeaconRouter.UnwrapEndpointsList(allowed); err != nil {
@@ -2354,28 +2350,21 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	// Override any default configs for hard coded networks.
 	chain = ctx.String(ChainFlag.Name)
 	if strings.HasPrefix(chain, "dynamic") {
-		configFilePath := ctx.String(ConfigFlag.Name)
-		if configFilePath == "" {
+		dynamicConfigFilePath := ctx.String(ConfigFlag.Name)
+		if dynamicConfigFilePath == "" {
 			Fatalf("Config file is required for dynamic chain")
 		}
+		zk_config.ZKDynamicConfigPath = filepath.Dir(dynamicConfigFilePath)
 
-		// Be sure to set this first
-		params.DynamicChainConfigPath = filepath.Dir(configFilePath)
-		filename := path.Join(params.DynamicChainConfigPath, chain+"-conf.json")
+		// Union path is not needed if dynamic config is provided
+		unionConfigFilePath := ctx.String(ZKGenesisConfigPathFlag.Name)
+		if unionConfigFilePath != "" {
+			zk_config.ZkUnionConfigPath = unionConfigFilePath
+		}
 
 		genesis := core.GenesisBlockByChainName(chain)
 
-		dConf := DynamicConfig{}
-
-		if _, err := os.Stat(filename); err == nil {
-			dConfBytes, err := os.ReadFile(filename)
-			if err != nil {
-				panic(err)
-			}
-			if err := json.Unmarshal(dConfBytes, &dConf); err != nil {
-				panic(err)
-			}
-		}
+		dConf := cfg_dynamic_genesis.NewDynamicGenesisConfig(chain)
 
 		genesis.Timestamp = dConf.Timestamp
 		genesis.GasLimit = dConf.GasLimit

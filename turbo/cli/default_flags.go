@@ -250,6 +250,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.OtsSearchMaxCapFlag,
 	&utils.PanicOnReorg,
 	&utils.ShadowSequencer,
+	&utils.ZKGenesisConfigPathFlag,
 
 	&utils.SilkwormExecutionFlag,
 	&utils.SilkwormRpcDaemonFlag,
