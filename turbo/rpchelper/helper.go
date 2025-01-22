@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
@@ -175,23 +174,23 @@ func CreateHistoryStateReader(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReade
 	return r, nil
 }
 
-func NewLatestDomainStateReader(sd *state2.SharedDomains) state.StateReader {
-	return state.NewReaderV3(sd)
+func NewLatestDomainStateReader(sd *state2.SharedDomains, tx kv.Tx) state.StateReader {
+	return state.NewReaderV3(sd, tx)
 }
 
-func NewLatestDomainStateWriter(domains *state2.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
-	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)
+func NewLatestDomainStateWriter(domains *state2.SharedDomains, tx kv.Tx, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
+	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)).Min(tx, blockNum)
 	if err != nil {
 		panic(err)
 	}
 	domains.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1))
-	return state.NewWriterV4(domains)
-
+	return state.NewWriterV4(domains, tx)
 }
 
-func NewLatestStateReader(tx kv.Tx) state.StateReader {
-	return state.NewReaderV3(tx.(kv.TemporalGetter))
+func NewLatestStateReader(domains *state2.SharedDomains, tx kv.Tx) state.StateReader {
+	return state.NewReaderV3(domains, tx)
 }
+
 func NewLatestStateWriter(txc wrap.TxContainer, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
 	domains := txc.Doms
 	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)).Min(txc.Tx, blockNum)

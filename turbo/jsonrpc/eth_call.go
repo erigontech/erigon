@@ -557,7 +557,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	if err != nil {
 		return nil, err
 	}
-	sdCtx := libstate.NewSharedDomainsCommitmentContext(domains, commitment.ModeUpdate, commitment.VariantHexPatriciaTrie)
+	sdCtx := libstate.NewSharedDomainsCommitmentContext(domains, roTx2, commitment.ModeUpdate, commitment.VariantHexPatriciaTrie)
 	patricieTrie := sdCtx.Trie()
 	hph, ok := patricieTrie.(*commitment.HexPatriciaHashed)
 	if !ok {

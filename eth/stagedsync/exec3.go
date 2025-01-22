@@ -392,7 +392,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	var err error
-	inMemExec := txc.Doms != nil
 	var doms *libstate.SharedDomains
 	if inMemExec {
 		doms = txc.Doms
@@ -621,7 +620,6 @@ func ExecV3(ctx context.Context,
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
 			skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
-			signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
 			totalGasUsed += b.GasUsed()
 			getHashFnMutex := sync.Mutex{}
 
@@ -659,7 +657,6 @@ func ExecV3(ctx context.Context,
 					SkipAnalysis:       skipAnalysis,
 					EvmBlockContext:    blockContext,
 					Withdrawals:        b.Withdrawals(),
-					PruneNonEssentials: pruneNonEssentials,
 
 					// use history reader instead of state reader to catch up to the tx where we left off
 					HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),

@@ -514,8 +514,12 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 				if !ok {
 					return nil
 				}
-				if err := pe.rws.Drain(ctx, nextResult); err != nil {
+				closed, err := pe.rws.Drain(ctx, nextResult)
+				if err != nil {
 					return err
+				}
+				if closed {
+					return nil
 				}
 			}
 
@@ -688,8 +692,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 					if err := pe.rs.ApplyState4(ctx, tx,
 						applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
 						nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
-						pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime),
-						false, false); err != nil {
+						pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false); err != nil {
 						return err
 					}
 
@@ -893,13 +896,19 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 				blockStatus.execTasks.addDependencies(val, i)
 			}
 			blockStatus.execTasks.clearPending(i)
-		} else if t.TxSender() != nil {
-			if tx, ok := prevSenderTx[*t.TxSender()]; ok {
-				blockStatus.execTasks.addDependencies(tx, i)
-				blockStatus.execTasks.clearPending(i)
+		} else {
+			sender, err := t.TxSender()
+			if err!=nil {
+				return err
 			}
+			if  sender != nil {
+				if tx, ok := prevSenderTx[*sender]; ok {
+					blockStatus.execTasks.addDependencies(tx, i)
+					blockStatus.execTasks.clearPending(i)
+				}
 
-			prevSenderTx[*t.TxSender()] = i
+				prevSenderTx[*sender] = i
+			}
 		}
 
 		if t.IsBlockEnd() {

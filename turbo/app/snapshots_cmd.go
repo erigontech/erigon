@@ -1386,7 +1386,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger.Info("Prune state history")
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
+			ac := libstate.AggTx(tx)
 			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
 			if err != nil {
 				return err
@@ -1443,7 +1443,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
+			ac := libstate.AggTx(tx)
 			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
 			if err != nil {
 				return err

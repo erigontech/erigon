@@ -246,7 +246,7 @@ func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
 	return tx.historyStartFrom(name)
 }
 
-func (tx *tx) rangeAsOf(name kv.Domain, dbTx kv.Tx, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
+func (tx *tx) rangeAsOf(name kv.Domain, _ kv.Tx, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.filesTx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
@@ -282,7 +282,7 @@ func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err 
 	return tx.getLatest(name, tx.RwTx, k)
 }
 
-func (tx *tx) getAsOf(name kv.Domain, dbTx kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *tx) getAsOf(name kv.Domain, _ kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return tx.filesTx.GetAsOf(tx.MdbxTx, name, key, ts)
 }
 

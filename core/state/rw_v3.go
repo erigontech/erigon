@@ -89,7 +89,7 @@ func (rs *StateV3) applyState(roTx kv.Tx, writeLists map[string]*state.KvList, b
 	for addr, increase := range balanceIncreases {
 		increase := increase
 		addrBytes := addr.Bytes()
-		enc0, step0, err := domains.GetLatest(kv.AccountsDomain, roTx, addrBytes, nil)
+		enc0, step0, err := domains.GetLatest(kv.AccountsDomain, roTx, addrBytes)
 		if err != nil {
 			return err
 		}
@@ -134,7 +134,6 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	traceTos map[common.Address]struct{},
 	config *chain.Config,
 	rules *chain.Rules,
-	pruneNonEssentials bool,
 	historyExecution bool) error {
 	if historyExecution {
 		return nil
@@ -146,7 +145,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	}
 	writeLists.Return()
 
-	if err := rs.ApplyLogsAndTraces4(logs, traceFroms, traceTos, rs.domains, pruneNonEssentials, config); err != nil {
+	if err := rs.ApplyLogsAndTraces4(logs, traceFroms, traceTos, rs.domains); err != nil {
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
 	}
 
@@ -166,9 +165,6 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 
 func (rs *StateV3) ApplyLogsAndTraces4(logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *state.SharedDomains) error {
 	for addr := range traceFroms {
-		if shouldPruneNonEssentials && addr != config.DepositContract {
-			continue
-		}
 		if err := domains.IndexAdd(kv.TblTracesFromIdx, addr[:]); err != nil {
 			return err
 		}

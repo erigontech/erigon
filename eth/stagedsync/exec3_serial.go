@@ -169,7 +169,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 		// MA applystate
 		if err := se.rs.ApplyState4(ctx, se.applyTx, txTask.BlockNum, txTask.TxNum, nil,
 			txTask.BalanceIncreaseSet, result.Logs, result.TraceFroms, result.TraceTos,
-			txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution); err != nil {
+			txTask.Config, txTask.Rules, txTask.HistoryExecution); err != nil {
 			return false, err
 		}
 

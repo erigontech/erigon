@@ -1079,7 +1079,7 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 		}
 		stats[iikey] = stat
 	}
-	for iikey, _ := range ac.a.iis {
+	for iikey := range ac.a.iis {
 		aggStat.Indices[ac.iis[iikey].ii.filenameBase] = stats[iikey]
 	}
 

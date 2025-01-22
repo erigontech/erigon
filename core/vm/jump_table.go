@@ -230,6 +230,7 @@ func newByzantiumInstructionSet() JumpTable {
 		numPop:      3,
 		numPush:     0,
 		memorySize:  memoryReturnDataCopy,
+		string:      stReturnDataCopy,
 	}
 	instructionSet[REVERT] = &operation{
 		execute:    opRevert,
@@ -611,12 +612,14 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: params.SloadGasFrontier,
 			numPop:      1,
 			numPush:     1,
+			string:      stSload,
 		},
 		SSTORE: {
 			execute:    opSstore,
 			dynamicGas: gasSStore,
 			numPop:     2,
 			numPush:    0,
+			string:     stSstore,
 		},
 		JUMP: {
 			execute:     opJump,

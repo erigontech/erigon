@@ -50,7 +50,7 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 			//txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
 			rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
 			if err := rs.ApplyState4(context.Background(), tx, txTask.BlockNum, txTask.TxNum, nil, txTask.BalanceIncreaseSet,
-				nil, nil, nil, txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution); err != nil {
+				nil, nil, nil, txTask.Config, txTask.Rules, txTask.HistoryExecution); err != nil {
 				panic(err)
 			}
 			_, err := rs.Domains().ComputeCommitment(context.Background(), tx, true, txTask.BlockNum, "")

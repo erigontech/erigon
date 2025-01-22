@@ -27,8 +27,8 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
@@ -634,7 +634,7 @@ func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	if empty {
 		slot.Clear()
 	} else {
-		var codeHash libcommon.Hash
+		var codeHash common.Hash
 		_, ok, err := interpreter.evm.IntraBlockState().GetDelegatedDesignation(address)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -770,7 +770,7 @@ func opMstore8(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 
 func opSload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	loc := scope.Stack.Peek()
-	err := interpreter.evm.IntraBlockState().GetState(scope.Contract.Address(),  loc.Bytes32(), loc)
+	err := interpreter.evm.IntraBlockState().GetState(scope.Contract.Address(), loc.Bytes32(), loc)
 	return nil, err
 }
 
@@ -1234,7 +1234,7 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		}
 
 		integer := new(uint256.Int)
-		scope.Stack.Push(integer.SetBytes(libcommon.RightPadBytes(
+		scope.Stack.Push(integer.SetBytes(common.RightPadBytes(
 			// So it doesn't matter what we push onto the stack.
 			scope.Contract.Code[startMin:endMin], pushByteSize)))
 

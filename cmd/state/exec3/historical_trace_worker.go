@@ -238,7 +238,7 @@ type ExecArgs struct {
 	Workers     int
 }
 
-func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {
+func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *exec.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {
 	g, ctx := errgroup.WithContext(ctx)
 
 	// can afford big limits - because historical execution doesn't need conflicts-resolution
@@ -266,7 +266,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	return g
 }
 
-func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue) error {
+func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *exec.ResultsQueue) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -280,7 +280,7 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 			return err
 		}
 
-		processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), tx, true)
+		processedTxNum, _, err := processResultQueueHistorical(&consumer, rws, outputTxNum.Load(), tx, true)
 		if err != nil {
 			return fmt.Errorf("processResultQueueHistorical: %w", err)
 		}
@@ -290,7 +290,7 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 	}
 	return nil
 }
-func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in *state.QueueWithRetry, workerCount int, rws *state.ResultsQueue, logger log.Logger) error {
+func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in *exec.QueueWithRetry, workerCount int, rws *exec.ResultsQueue, logger log.Logger) error {
 	workers := make([]*HistoricalTraceWorker, workerCount)
 	mapGroup, ctx := errgroup.WithContext(ctx)
 	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
@@ -316,12 +316,12 @@ func processResultQueueHistorical(consumer *TraceConsumer, rws *exec.ResultsQueu
 
 	outputTxNum = outputTxNumIn
 	for rwsIt.Has(outputTxNum) {
-		txTask := rwsIt.PopNext()
+		result := rwsIt.PopNext()
 		outputTxNum++
-		stopedAtBlockEnd = txTask.Final
+		stopedAtBlockEnd = result.IsBlockEnd()
 
-		if txTask.Error != nil {
-			return outputTxNum, false, txTask.Error
+		if result.Err != nil {
+			return outputTxNum, false, result.Err
 		}
 
 		txTask := result.Task.(*exec.TxTask)
@@ -339,7 +339,7 @@ func processResultQueueHistorical(consumer *TraceConsumer, rws *exec.ResultsQueu
 			}
 			consumer.blockReciepts = append(consumer.blockReciepts, receipt)
 		}
-		if err := consumer.Reduce(txTask, tx); err != nil {
+		if err := consumer.Reduce(result, tx); err != nil {
 			return outputTxNum, false, err
 		}
 
@@ -436,7 +436,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
-		getHashFn := func(n uint64) (common.Hash,error) {
+		getHashFn := func(n uint64) (common.Hash, error) {
 			getHashFnMute.Lock()
 			defer getHashFnMute.Unlock()
 			return f(n)
@@ -444,7 +444,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.Engine, nil /* author */, chainConfig)
 
 		rules := chainConfig.Rules(blockNum, b.Time())
-		blockReceipts := make([]*types.Receipt, 0, len(txs))
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &exec.TxTask{

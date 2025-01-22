@@ -230,7 +230,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			refunds = false
 		}
 
-		if refunds == true && block.GasUsed() != usedGas {
+		if refunds && block.GasUsed() != usedGas {
 			panic(fmt.Errorf("assert: block.GasUsed() %d != usedGas %d. blockNum=%d", block.GasUsed(), usedGas, blockNumber))
 		}
 	}
@@ -283,7 +283,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			stream.WriteNil()
 			return nil
 		}
-		if config == nil || config.BorTraceEnabled == nil || *config.BorTraceEnabled == false {
+		if config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled {
 			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
 			return nil
 		}

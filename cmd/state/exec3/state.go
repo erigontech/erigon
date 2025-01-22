@@ -50,7 +50,7 @@ type Worker struct {
 	lock        sync.Locker
 	logger      log.Logger
 	chainDb     kv.RoDB
-	chainTx     kv.TemporalTx
+	chainTx     kv.Tx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
 	in          *exec.QueueWithRetry
@@ -74,8 +74,6 @@ type Worker struct {
 	vmCfg vm.Config
 
 	dirs datadir.Dirs
-
-	isMining bool
 }
 
 func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs) *Worker {
@@ -127,8 +125,8 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, stateReader state.Resett
 	}
 }
 
-func (rw *Worker) Tx() kv.TemporalTx { return rw.chainTx }
-func (rw *Worker) DiscardReadList()  { rw.stateReader.DiscardReadList() }
+func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
+func (rw *Worker) DiscardReadList() { rw.stateReader.DiscardReadList() }
 func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()

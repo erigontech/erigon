@@ -132,5 +132,5 @@ func (t *fourByteTracer) Stop(err error) {
 }
 
 func bytesToHex(s []byte) string {
-	return "0x" + libcommon.Bytes2Hex(s)
+	return "0x" + common.Bytes2Hex(s)
 }

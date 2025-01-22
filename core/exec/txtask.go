@@ -175,7 +175,6 @@ type TxTask struct {
 	Txs                types.Transactions
 	Uncles             []*types.Header
 	Withdrawals        types.Withdrawals
-	Sender             *libcommon.Address
 	SkipAnalysis       bool
 	TxAsMessage        types.Message
 	EvmBlockContext    evmtypes.BlockContext
@@ -187,6 +186,8 @@ type TxTask struct {
 	Config *chain.Config
 	Logger log.Logger
 	Trace  bool
+
+	sender *libcommon.Address
 }
 
 func (t *TxTask) TxType() uint8 {
@@ -322,7 +323,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[uncle.Coinbase] = struct{}{}
 		}
 	default:
-		gasPool.Reset(txTask.Tx.GetGas(), chainConfig.GetMaxBlobGasPerBlock())
+		gasPool.Reset(txTask.Tx.GetGas(), chainConfig.GetMaxBlobGasPerBlock(txTask.Header.Time))
 		vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		msg := txTask.TxAsMessage
 		if msg.FeeCap().IsZero() && engine != nil {
@@ -602,9 +603,14 @@ func (q *ResultsQueue) Add(ctx context.Context, task *Result) error {
 	return nil
 }
 
-func (q *ResultsQueue) Drain(ctx context.Context, task *Result) error {
+func (q *ResultsQueue) Drain(ctx context.Context, task *Result) (bool, error) {
 	q.Lock()
 	defer q.Unlock()
+
+	if q.resultCh == nil {
+		return true, nil
+	}
+
 	if task != nil {
 		heap.Push(q.results, task)
 	}
@@ -612,20 +618,20 @@ func (q *ResultsQueue) Drain(ctx context.Context, task *Result) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return q.resultCh == nil, ctx.Err()
 		case txTask, ok := <-q.resultCh:
 			if !ok {
-				return nil
+				return true, nil
 			}
 			if txTask == nil {
 				continue
 			}
 			heap.Push(q.results, txTask)
 			if q.results.Len() > q.limit {
-				return nil
+				return q.resultCh == nil, nil
 			}
 		default: // we are inside mutex section, can't block here
-			return nil
+			return q.resultCh == nil, nil
 		}
 	}
 }
@@ -660,7 +666,7 @@ func (q *ResultsQueue) ResultCh() chan *Result {
 	return q.resultCh
 }
 
-func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) error { return q.Drain(ctx, nil) }
+func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) (bool, error) { return q.Drain(ctx, nil) }
 
 func (q *ResultsQueue) DropResults(ctx context.Context, f func(t *Result)) {
 	q.Lock()
