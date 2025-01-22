@@ -27,7 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -349,12 +348,6 @@ func ExecV3(ctx context.Context,
 ) error {
 	inMemExec := txc.Doms != nil
 
-	// TODO: e35 doesn't support parallel-exec yet
-	parallel = false //nolint
-	if parallel && cfg.chainConfig.ChainName == networkname.Gnosis {
-		panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
-	}
-
 	blockReader := cfg.blockReader
 	chainConfig := cfg.chainConfig
 	totalGasUsed := uint64(0)
@@ -647,16 +640,16 @@ func ExecV3(ctx context.Context,
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
 				// Do not oversend, wait for the result heap to go under certain size
 				txTask := &exec.TxTask{
-					TxNum:              inputTxNum,
-					TxIndex:            txIndex,
-					BlockNum:           blockNum,
-					Header:             header,
-					Uncles:             b.Uncles(),
-					Rules:              rules,
-					Txs:                txs,
-					SkipAnalysis:       skipAnalysis,
-					EvmBlockContext:    blockContext,
-					Withdrawals:        b.Withdrawals(),
+					TxNum:           inputTxNum,
+					TxIndex:         txIndex,
+					BlockNum:        blockNum,
+					Header:          header,
+					Uncles:          b.Uncles(),
+					Rules:           rules,
+					Txs:             txs,
+					SkipAnalysis:    skipAnalysis,
+					EvmBlockContext: blockContext,
+					Withdrawals:     b.Withdrawals(),
 
 					// use history reader instead of state reader to catch up to the tx where we left off
 					HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),

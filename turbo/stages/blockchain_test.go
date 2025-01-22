@@ -1514,23 +1514,23 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	// If all is correct, then slot 1 and 2 are zero
 	key1 := libcommon.HexToHash("01")
 	var got uint256.Int
-	statedb.GetState(aa, &key1, &got)
+	statedb.GetState(aa, key1, &got)
 	if !got.IsZero() {
 		t.Errorf("got %d exp %d", got.Uint64(), 0)
 	}
 	key2 := libcommon.HexToHash("02")
-	statedb.GetState(aa, &key2, &got)
+	statedb.GetState(aa, key2, &got)
 	if !got.IsZero() {
 		t.Errorf("got %d exp %d", got.Uint64(), 0)
 	}
 	// Also, 3 and 4 should be set
 	key3 := libcommon.HexToHash("03")
-	statedb.GetState(aa, &key3, &got)
+	statedb.GetState(aa, key3, &got)
 	if got.Uint64() != 3 {
 		t.Errorf("got %d exp %d", got.Uint64(), 3)
 	}
 	key4 := libcommon.HexToHash("04")
-	statedb.GetState(aa, &key4, &got)
+	statedb.GetState(aa, key4, &got)
 	if got.Uint64() != 4 {
 		t.Errorf("got %d exp %d", got.Uint64(), 4)
 	}
