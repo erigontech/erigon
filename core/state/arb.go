@@ -450,3 +450,13 @@ func (s *IntraBlockState) IntermediateRoot(deleteEmptyObjects bool) common.Hash 
 	log.Warn("need shared domains and writer to calculate intermediate root", "caller", fmt.Sprintf("%s:%d", fn, ln))
 	return common.Hash{}
 }
+
+// GetStorageRoot retrieves the storage root from the given address or empty
+// if object not found.
+func (s *IntraBlockState) GetStorageRoot(addr common.Address) common.Hash {
+	stateObject, err := s.getStateObject(addr)
+	if err == nil && stateObject != nil {
+		return stateObject.data.Root
+	}
+	return common.Hash{}
+}
