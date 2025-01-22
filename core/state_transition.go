@@ -518,7 +518,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		}
 		st.gasRemaining = st.initialGas - gasUsed
 		st.refundGas()
-	} else {
+	} else if rules.IsPrague {
 		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
 	}
 
