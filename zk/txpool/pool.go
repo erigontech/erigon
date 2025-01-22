@@ -720,7 +720,7 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs types.TxSlots) {
 func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.CacheView, from common.Address) DiscardReason {
 	isShanghai := p.isShanghai()
 	if isShanghai {
-		if txn.DataLen > fixedgas.MaxInitCodeSize {
+		if txn.Creation && txn.DataLen > fixedgas.MaxInitCodeSize {
 			return InitCodeTooLarge
 		}
 	}
