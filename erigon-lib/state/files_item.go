@@ -356,6 +356,8 @@ func (files visibleFiles) MergedRanges() []MergeRange {
 	return res
 }
 
+// fileItemsWithMissingAccessors returns list of files with missing accessors
+// here "accessors" are generated dynamically by `accessorsFor`
 func fileItemsWithMissingAccessors(dirtyFiles *btree2.BTreeG[*filesItem], aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*filesItem) {
 	dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
