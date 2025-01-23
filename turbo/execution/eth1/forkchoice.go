@@ -538,7 +538,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		logArgs = append(logArgs, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		if log {
 			go func() {
+				ts := time.Now()
 				bR, err := common.PruneReceiptsCheck(tx.(kv.TemporalTx))
+				e.logger.Info("check time:", time.Since(ts).Milliseconds())
 				if err != nil {
 					e.logger.Error("prune check err", err.Error())
 					return
