@@ -29,65 +29,68 @@ hack [flags]
 
 ### Flags
 
-| Flag           | Description                                                                 |
-|----------------|-----------------------------------------------------------------------------|
-| `-action`      | Specifies the action to perform. Supported actions are listed below.        |
-| `-cpuprofile`  | Specifies the file to write proof CPU profile data to.                      |
+| Flag           | Description                                                                                               |
+|----------------|-----------------------------------------------------------------------------------------------------------|
+| `-action`      | Specifies the action to perform. Supported actions are listed below.                                      |
+| `-cpuprofile`  | Specifies the file to write proof CPU profile data to.                                                    |
 | `-chaindata`   | Specifies the path to the chain data. ( this is not datadir root, you have to specify chaindata folder ). |
-| `-output`      | Specifies the output file.                                                  |
-| `-block`       | Specifies the block number.                                                 |
-| `-blockTotal`  | Specifies the total number of blocks.                                       |
-| `-hash`        | Specifies the hash value.                                                   |
-| `-account`     | Specifies the account address.                                              |
-| `-bucket`      | Specifies the bucket name.                                                  |
-| `-name`        | Specifies the name.                                                         |
+| `-output`      | Specifies the output file.                                                                                |
+| `-block`       | Specifies the block number.                                                                               |
+| `-blockTotal`  | Specifies the total number of blocks.                                                                     |
+| `-hash`        | Specifies the hash value.                                                                                 |
+| `-account`     | Specifies the account address.                                                                            |
+| `-bucket`      | Specifies the bucket name.                                                                                |
+| `-name`        | Specifies the name.                                                                                       |
+| `-cfglocation` | Specifies the location where the dynamic config lies for zkCfgMerge.                                      |
+| `-chain`       | Specifies the chain name for zkCfgMerge. Should the on the filenames of the dynamic config.               |
 
 ### Supported Actions
 
-| Action                    | Description                                |
-|---------------------------|--------------------------------------------|
-| `cfg`                     | Generate a test configuration.             |
-| `defrag`                  | Defragment the database.                   |
-| `textInfo`                | Get text information about the database.   |
-| `fixTd`                   | Fix total difficulty.                      |
-| `fixState`                | Fix the state.                             |
-| `advanceExec`             | Advance execution.                         |
-| `backExec`                | Rollback execution.                        |
-| `extractCode`             | Extract code from the database.            |
-| `iterateOverCode`         | Iterate over code in the database.         |
-| `nextIncarnation`         | Get the next incarnation of an account.    |
-| `dumpStorage`             | Dump storage data.                         |
-| `countAccounts`           | Count the number of accounts.              |
-| `extractBodies`           | Extract block bodies.                      |
-| `repairCurrent`           | Repair the current state.                  |
-| `snapSizes`               | Get snapshot sizes.                        |
-| `current`                 | Print the current block number.            |
-| `bucket`                  | Print a specific bucket.                   |
-| `buckets`                 | Print all buckets.                         |
-| `slice`                   | Slice the database.                        |
-| `searchChangeSet`         | Search the change set.                     |
-| `readCallTraces`          | Read call traces of a block                |
-| `extractHeaders`          | Extract block headers.                     |
-| `extractHashes`           | Extract block hashes.                      |
-| `printTxHashes`           | Print transaction hashes.                  |
-| `testBlockHashes`         | Test block hashes.( needs hash and block ) |
-| `readAccount`             | Read account information.                  |
-| `readAccountAtVersion`    | Read account information at a specific block.|
-| `searchStorageChangeSet`  | Search the storage change set. (needs hash and block) |
-| `trimTxs`                 | Trim transactions.                         |
-| `scanTxs`                 | Scan transactions.                         |
-| `scanReceipts2`           | Scan receipts (method 2).                  |
-| `scanReceipts3`           | Scan receipts (method 3). (use a block)   |
-| `devTx`                   | Perform a development transaction.         |
-| `chainConfig`             | Get chain configuration.                   |
-| `findPrefix`              | Find a prefix in the database.             |
-| `findLogs`                | Find logs in a block range.                |
-| `iterate`                 | Iterate over the database.                 |
-| `rmSnKey`                 | Remove a specific key.                     |
-| `readSeg`                 | Read a segment.                            |
-| `dumpState`               | Dump the state.                            |
-| `getOldAccInputHash`      | Get the old account input hash.            |
-| `dumpAll`                 | Dump all data to an output file.           |
+| Action                   | Description                                           |
+|--------------------------|-------------------------------------------------------|
+| `cfg`                    | Generate a test configuration.                        |
+| `defrag`                 | Defragment the database.                              |
+| `textInfo`               | Get text information about the database.              |
+| `fixTd`                  | Fix total difficulty.                                 |
+| `fixState`               | Fix the state.                                        |
+| `advanceExec`            | Advance execution.                                    |
+| `backExec`               | Rollback execution.                                   |
+| `extractCode`            | Extract code from the database.                       |
+| `iterateOverCode`        | Iterate over code in the database.                    |
+| `nextIncarnation`        | Get the next incarnation of an account.               |
+| `dumpStorage`            | Dump storage data.                                    |
+| `countAccounts`          | Count the number of accounts.                         |
+| `extractBodies`          | Extract block bodies.                                 |
+| `repairCurrent`          | Repair the current state.                             |
+| `snapSizes`              | Get snapshot sizes.                                   |
+| `current`                | Print the current block number.                       |
+| `bucket`                 | Print a specific bucket.                              |
+| `buckets`                | Print all buckets.                                    |
+| `slice`                  | Slice the database.                                   |
+| `searchChangeSet`        | Search the change set.                                |
+| `readCallTraces`         | Read call traces of a block                           |
+| `extractHeaders`         | Extract block headers.                                |
+| `extractHashes`          | Extract block hashes.                                 |
+| `printTxHashes`          | Print transaction hashes.                             |
+| `testBlockHashes`        | Test block hashes.( needs hash and block )            |
+| `readAccount`            | Read account information.                             |
+| `readAccountAtVersion`   | Read account information at a specific block.         |
+| `searchStorageChangeSet` | Search the storage change set. (needs hash and block) |
+| `trimTxs`                | Trim transactions.                                    |
+| `scanTxs`                | Scan transactions.                                    |
+| `scanReceipts2`          | Scan receipts (method 2).                             |
+| `scanReceipts3`          | Scan receipts (method 3). (use a block)               |
+| `devTx`                  | Perform a development transaction.                    |
+| `chainConfig`            | Get chain configuration.                              |
+| `findPrefix`             | Find a prefix in the database.                        |
+| `findLogs`               | Find logs in a block range.                           |
+| `iterate`                | Iterate over the database.                            |
+| `rmSnKey`                | Remove a specific key.                                |
+| `readSeg`                | Read a segment.                                       |
+| `dumpState`              | Dump the state.                                       |
+| `getOldAccInputHash`     | Get the old account input hash.                       |
+| `dumpAll`                | Dump all data to an output file.                      |
+| `zkCfgMerge`               | Merge dynamic config files into 1 file.               |
 
 ### Examples
 ```sh
@@ -96,6 +99,7 @@ hack [flags]
 .cmd/hack -action=readAccount -chaindata=/path/to/chaindata -account=0xabc...
 .cmd/hack -action=extractHeaders -chaindata=/path/to/chaindata -block=12345 -blockTotal=100
 .cmd/hack -action=dumpAll -chaindata=/path/to/chaindata -output=/path/to/output
+.cmd/hack -action=zkCfgMerge -cfglocation=/config/location -chain=mychain-testnet -output=/path/to/output.json
 ```
 
 ### Note
