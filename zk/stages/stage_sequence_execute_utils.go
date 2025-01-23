@@ -337,16 +337,6 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, batchState *BatchState, prop
 	return
 }
 
-func prepareTickers(cfg *SequenceBlockCfg) (*time.Ticker, *time.Ticker, *time.Ticker, *time.Ticker, *time.Ticker) {
-	batchTicker := time.NewTicker(cfg.zk.SequencerBatchSealTime)
-	logTicker := time.NewTicker(10 * time.Second)
-	blockTicker := time.NewTicker(cfg.zk.SequencerBlockSealTime)
-	emptyBlockTicker := time.NewTicker(cfg.zk.SequencerEmptyBlockSealTime)
-	infoTreeTicker := time.NewTicker(cfg.zk.InfoTreeUpdateInterval)
-
-	return batchTicker, logTicker, blockTicker, emptyBlockTicker, infoTreeTicker
-}
-
 // will be called at the start of every new block created within a batch to figure out if there is a new GER
 // we can use or not.  In the special case that this is the first block we just return 0 as we need to use the
 // 0 index first before we can use 1+
