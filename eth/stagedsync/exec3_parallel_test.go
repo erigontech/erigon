@@ -50,8 +50,8 @@ type Op struct {
 type testExecTask struct {
 	*exec.TxTask
 	ops          []Op
-	readMap      map[state.VersionKey]state.VersionedRead
-	writeMap     map[state.VersionKey]state.VersionedWrite
+	readMap      map[state.VersionKey]*state.VersionedRead
+	writeMap     map[state.VersionKey]*state.VersionedWrite
 	sender       common.Address
 	nonce        int
 	dependencies []int
@@ -75,8 +75,8 @@ func NewTestExecTask(txIdx int, ops []Op, sender common.Address, nonce int) *tes
 			TxIndex:  txIdx,
 		},
 		ops:          ops,
-		readMap:      make(map[state.VersionKey]state.VersionedRead),
-		writeMap:     make(map[state.VersionKey]state.VersionedWrite),
+		readMap:      make(map[state.VersionKey]*state.VersionedRead),
+		writeMap:     make(map[state.VersionKey]*state.VersionedWrite),
 		sender:       sender,
 		nonce:        nonce,
 		dependencies: []int{},
@@ -107,8 +107,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 	version := t.Version()
 
-	t.readMap = make(map[state.VersionKey]state.VersionedRead)
-	t.writeMap = make(map[state.VersionKey]state.VersionedWrite)
+	t.readMap = make(map[state.VersionKey]*state.VersionedRead)
+	t.writeMap = make(map[state.VersionKey]*state.VersionedWrite)
 
 	dep := -1
 
@@ -148,9 +148,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			sleep(op.duration)
 
-			t.readMap[k] = state.VersionedRead{Path: k, Kind: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}}
+			t.readMap[k] = &state.VersionedRead{Path: k, Kind: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}}
 		case writeType:
-			t.writeMap[k] = state.VersionedWrite{Path: k, Version: version, Val: op.val}
+			t.writeMap[k] = &state.VersionedWrite{Path: k, Version: version, Val: op.val}
 		case otherType:
 			sleep(op.duration)
 		default:

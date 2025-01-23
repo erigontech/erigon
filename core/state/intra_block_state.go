@@ -324,10 +324,7 @@ func (sdb *IntraBlockState) TxnIndex() int {
 func (sdb *IntraBlockState) GetCode(addr libcommon.Address) ([]byte, error) {
 	return versionedRead(sdb, SubpathKey(addr, CodePath), false, nil,
 		func(v []byte) []byte {
-			if v == nil {
-				return nil
-			}
-			return append([]byte{}, v...)
+			return v
 		},
 		func(s *stateObject) ([]byte, error) {
 			if s != nil && !s.deleted {
@@ -1329,12 +1326,12 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 		// this is not used by the version map wich works
 		// at the level of individual account elements
 		if s.versionedReads == nil {
-			s.versionedReads = map[VersionKey]VersionedRead{}
+			s.versionedReads = map[VersionKey]*VersionedRead{}
 		}
 
 		k := AddressKey(addr)
 
-		s.versionedReads[k] = VersionedRead{
+		s.versionedReads[k] = &VersionedRead{
 			Path:    k,
 			Kind:    ReadKindStorage,
 			Version: s.Version(),
@@ -1409,12 +1406,12 @@ func (ibs *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 	for key, v := range ibs.versionedWrites {
 		if checkDirty {
 			if _, isDirty := ibs.journal.dirties[key.GetAddress()]; isDirty {
-				writes = append(writes, *v)
+				writes = append(writes, v)
 			} else {
 				ibs.versionMap.Delete(key, ibs.txIndex, false)
 			}
 		} else {
-			writes = append(writes, *v)
+			writes = append(writes, v)
 		}
 	}
 
@@ -1423,7 +1420,7 @@ func (ibs *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 
 // Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set
 // of the current StateDB.
-func (s *IntraBlockState) ApplyVersionedWrites(writes []VersionedWrite) error {
+func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 	for i := range writes {
 		path := writes[i].Path
 		val := writes[i].Val

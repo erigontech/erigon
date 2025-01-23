@@ -63,34 +63,34 @@ func TestFlushMVWrite(t *testing.T) {
 
 	var res ReadResult
 
-	wd := []VersionedWrite{}
+	wd := VersionedWrites{}
 
-	wd = append(wd, VersionedWrite{
+	wd = append(wd, &VersionedWrite{
 		Path:    ap1,
 		Version: Version{0, 0, 0, 1},
 		Val:     valueFor(0, 1),
 	})
-	wd = append(wd, VersionedWrite{
+	wd = append(wd, &VersionedWrite{
 		Path:    ap1,
 		Version: Version{0, 0, 0, 2},
 		Val:     valueFor(0, 2),
 	})
-	wd = append(wd, VersionedWrite{
+	wd = append(wd, &VersionedWrite{
 		Path:    ap2,
 		Version: Version{0, 0, 1, 1},
 		Val:     valueFor(1, 1),
 	})
-	wd = append(wd, VersionedWrite{
+	wd = append(wd, &VersionedWrite{
 		Path:    ap2,
 		Version: Version{0, 0, 1, 2},
 		Val:     valueFor(1, 2),
 	})
-	wd = append(wd, VersionedWrite{
+	wd = append(wd, &VersionedWrite{
 		Path:    ap1,
 		Version: Version{0, 0, 2, 1},
 		Val:     valueFor(2, 1),
 	})
-	wd = append(wd, VersionedWrite{
+	wd = append(wd, &VersionedWrite{
 		Path:    ap1,
 		Version: Version{0, 0, 2, 2},
 		Val:     valueFor(2, 2),

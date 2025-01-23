@@ -343,7 +343,7 @@ func (vm *VersionMap) Read(k VersionKey, txIdx int) (res ReadResult) {
 	return
 }
 
-func (vm *VersionMap) FlushVersionedWrites(writes []VersionedWrite, complete bool) {
+func (vm *VersionMap) FlushVersionedWrites(writes VersionedWrites, complete bool) {
 	for _, v := range writes {
 		if vm.trace {
 			fmt.Println("WRT", v.Path, v.Version)

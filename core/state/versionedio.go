@@ -33,7 +33,7 @@ type VersionedWrite struct {
 	Reason  tracing.BalanceChangeReason
 }
 
-type VersionedReads map[VersionKey]VersionedRead
+type VersionedReads map[VersionKey]*VersionedRead
 
 type versionedStateReader struct {
 	reads       VersionedReads
@@ -128,10 +128,10 @@ func (vr versionedStateReader) ReadAccountIncarnation(address common.Address) (u
 	return 0, nil
 }
 
-type VersionedWrites []VersionedWrite
+type VersionedWrites []*VersionedWrite
 
 // hasNewWrite: returns true if the current set has a new write compared to the input
-func (writes VersionedWrites) HasNewWrite(cmpSet []VersionedWrite) bool {
+func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
 	if len(writes) == 0 {
 		return false
 	} else if len(cmpSet) == 0 || len(writes) > len(cmpSet) {
@@ -330,16 +330,16 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 	}
 
 	if s.versionedReads == nil {
-		s.versionedReads = map[VersionKey]VersionedRead{}
+		s.versionedReads = map[VersionKey]*VersionedRead{}
 	}
 
-	s.versionedReads[k] = vr
+	s.versionedReads[k] = &vr
 
 	return v, nil
 }
 
-func ApplyVersionedWrites(chainRules *chain.Rules, writes []VersionedWrite, stateWriter StateWriter) error {
-	stateObjects, err := VersionedWrites(writes).stateObjects()
+func ApplyVersionedWrites(chainRules *chain.Rules, writes VersionedWrites, stateWriter StateWriter) error {
+	stateObjects, err := writes.stateObjects()
 
 	if err != nil {
 		return err
@@ -375,14 +375,14 @@ func (io *VersionedIO) ReadSet(txnIdx int) VersionedReads {
 	return io.inputs[txnIdx+1]
 }
 
-func (io *VersionedIO) WriteSet(txnIdx int) []VersionedWrite {
+func (io *VersionedIO) WriteSet(txnIdx int) VersionedWrites {
 	if len(io.outputs) <= txnIdx+1 {
 		return nil
 	}
 	return io.outputs[txnIdx+1]
 }
 
-func (io *VersionedIO) AllWriteSet(txnIdx int) []VersionedWrite {
+func (io *VersionedIO) AllWriteSet(txnIdx int) VersionedWrites {
 	if len(io.allOutputs) <= txnIdx+1 {
 		return nil
 	}
@@ -429,7 +429,7 @@ func (io *VersionedIO) RecordReads(txId int, input VersionedReads) {
 	io.inputs[txId+1] = input
 }
 
-func (io *VersionedIO) RecordWrites(txId int, output []VersionedWrite) {
+func (io *VersionedIO) RecordWrites(txId int, output VersionedWrites) {
 	if len(io.outputs) <= txId+1 {
 		io.outputs = append(io.outputs, make([]VersionedWrites, txId+2-len(io.outputs))...)
 	}
@@ -445,7 +445,7 @@ func (io *VersionedIO) RecordWrites(txId int, output []VersionedWrite) {
 	}
 }
 
-func (io *VersionedIO) RecordAllWrites(txId int, output []VersionedWrite) {
+func (io *VersionedIO) RecordAllWrites(txId int, output VersionedWrites) {
 	if len(io.allOutputs) <= txId+1 {
 		io.allOutputs = append(io.allOutputs, make([]VersionedWrites, txId+2-len(io.allOutputs))...)
 	}
@@ -459,7 +459,7 @@ type DAG struct {
 type TxDep struct {
 	Index         int
 	Reads         VersionedReads
-	FullWriteList [][]VersionedWrite
+	FullWriteList []VersionedWrites
 }
 
 func HasReadDep(txFrom VersionedWrites, txTo VersionedReads) bool {
