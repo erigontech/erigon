@@ -18,9 +18,10 @@ package temporal
 
 import (
 	"context"
+	"fmt"
+	"sync"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/state"
@@ -160,11 +161,11 @@ func (db *DB) Close() {
 func (db *DB) OnFreeze(f kv.OnFreezeFunc) { db.agg.OnFreeze(f) }
 
 type tx struct {
-	*mdbx.MdbxTx
 	db               *DB
 	filesTx          *state.AggregatorRoTx
 	resourcesToClose []kv.Closer
 	ctx              context.Context
+	mu               sync.RWMutex
 }
 
 type Tx struct {
@@ -196,9 +197,41 @@ func (tx *Tx) Rollback() {
 	if tx.Tx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
+	tx.mu.Lock()
 	rb := tx.Tx
 	tx.Tx = nil
+	tx.mu.Unlock()
 	rb.Rollback()
+}
+
+func (tx *Tx) Apply(f func(tx kv.Tx) error) error {
+	tx.tx.mu.RLock()
+	applyTx := tx.Tx
+	tx.tx.mu.RUnlock()
+	if applyTx == nil {
+		return fmt.Errorf("can't apply: transaction closed")
+	}
+	return applyTx.Apply(f)
+}
+
+func (tx *RwTx) Apply(f func(tx kv.Tx) error) error {
+	tx.tx.mu.RLock()
+	applyTx := tx.RwTx
+	tx.tx.mu.RUnlock()
+	if applyTx == nil {
+		return fmt.Errorf("can't apply: transaction closed")
+	}
+	return applyTx.Apply(f)
+}
+
+func (tx *RwTx) ApplyRW(f func(tx kv.RwTx) error) error {
+	tx.tx.mu.RLock()
+	applyTx := tx.RwTx
+	tx.tx.mu.RUnlock()
+	if applyTx == nil {
+		return fmt.Errorf("can't apply: transaction closed")
+	}
+	return applyTx.ApplyRw(f)
 }
 
 func (tx *RwTx) Rollback() {
@@ -246,8 +279,8 @@ func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
 	return tx.historyStartFrom(name)
 }
 
-func (tx *tx) rangeAsOf(name kv.Domain, _ kv.Tx, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.filesTx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
+func (tx *tx) rangeAsOf(name kv.Domain, rtx kv.Tx, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
+	it, err := tx.filesTx.RangeAsOf(tx.ctx, rtx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -282,8 +315,8 @@ func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err 
 	return tx.getLatest(name, tx.RwTx, k)
 }
 
-func (tx *tx) getAsOf(name kv.Domain, _ kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.filesTx.GetAsOf(tx.MdbxTx, name, key, ts)
+func (tx *tx) getAsOf(name kv.Domain, gtx kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.filesTx.GetAsOf(gtx, name, key, ts)
 }
 
 func (tx *Tx) GetAsOf(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {

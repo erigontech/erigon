@@ -63,7 +63,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 			mxExecGas.Add(float64(result.ExecutionResult.UsedGas))
 			mxExecTransactions.Add(1)
 
-			if txTask.Tx != nil {
+			if txTask.Tx() != nil {
 				se.blobGasUsed += txTask.Tx().GetBlobGas()
 			}
 

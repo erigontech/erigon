@@ -494,20 +494,25 @@ type parallelExecutor struct {
 
 func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan applyResult) {
 	defer pe.applyLoopWg.Done()
+
+	tx, err := pe.cfg.db.BeginRo(ctx)
+	if err != nil {
+		return
+	}
+
+	defer tx.Rollback()
+
 	defer func() {
 		if rec := recover(); rec != nil {
 			pe.logger.Warn("[dbg] apply loop panic", "rec", rec)
+		} else if err != nil {
+			pe.logger.Warn("[dbg] apply loop error", "err", err)
+		} else {
+			pe.logger.Warn("[dbg] apply loop exit")
 		}
-		pe.logger.Warn("[dbg] apply loop exit")
 	}()
 
-	err := func(ctx context.Context) error {
-		tx, err := pe.cfg.db.BeginRo(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-
+	err = func(ctx context.Context) error {
 		for i := 0; i < len(pe.execWorkers); i++ {
 			pe.execWorkers[i].ResetTx(tx)
 		}
@@ -541,9 +546,8 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 			}
 
 			if blockResult.complete {
-				if /*blockResult.BlockNum == 14850205 ||*/
-				blockResult.BlockNum == 14935178 || blockResult.BlockNum == 14935090 || blockResult.BlockNum == 14898492 {
-					//fmt.Println("Block Complete", blockResult.BlockNum)
+				if true /*blockResult.BlockNum == 14935178 || blockResult.BlockNum == 14935090 || blockResult.BlockNum == 14898492*/ {
+					fmt.Println("Block Complete", blockResult.BlockNum)
 					//panic(blockResult.BlockNum)
 				}
 
@@ -616,7 +620,7 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 					blockStatus.cntExec++
 					execTask := blockStatus.tasks[nextTx]
 
-					//fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
+					fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
 					if /*blockResult.BlockNum+1 == 14748605 || blockResult.BlockNum+1 == 14734485 ||*/
 					blockResult.BlockNum+1 == 14935178 || blockResult.BlockNum+1 == 14935090 || blockResult.BlockNum+1 == 14898492 {
 						//vm.Trace = true
@@ -649,9 +653,13 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 // Now rwLoop closing both (because applyLoop we completely restart)
 // Maybe need split channels? Maybe don't exit from ApplyLoop? Maybe current way is also ok?
 
-func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error {
+func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) (err error) {
 	defer func() {
-		fmt.Println("rwLoop done")
+		if err != nil {
+			fmt.Println("rwLoop done:", err)
+		} else {
+			fmt.Println("rwLoop done")
+		}
 	}()
 
 	tx := pe.applyTx
@@ -688,7 +696,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 	var lastBlockResult blockResult
 	var uncommittedGas uint64
 
-	err := func() error {
+	err = func() error {
 		for {
 			select {
 			case applyResult := <-applyResults:
@@ -923,7 +931,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		}
 
 		if t.IsBlockEnd() {
-			if pe.blockStatus == nil {
+			if len(pe.blockStatus) == 0 {
 				pe.blockStatus = map[uint64]*blockExecStatus{
 					blockNum: blockStatus,
 				}

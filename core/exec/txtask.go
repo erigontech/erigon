@@ -192,10 +192,10 @@ type TxTask struct {
 }
 
 func (t *TxTask) Tx() types.Transaction {
-	if t.TxIndex >= 0 {
-		return t.Txs[t.TxIndex]
+	if t.TxIndex < 0 || t.TxIndex >= len(t.Txs) {
+		return nil
 	}
-	return nil
+	return t.Txs[t.TxIndex]
 }
 
 func (t *TxTask) TxType() uint8 {

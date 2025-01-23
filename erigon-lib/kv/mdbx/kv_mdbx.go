@@ -760,6 +760,12 @@ type applyTx struct {
 }
 
 func (a *applyTx) Apply() {
+	defer func() { // Would prefer this not to crash but rather log the error
+		r := recover()
+		if r != nil {
+			a.err <- fmt.Errorf("apply paniced: %s", r)
+		}
+	}()
 	a.err <- a.f(a.tx)
 }
 
@@ -770,6 +776,12 @@ type applyRwTx struct {
 }
 
 func (a *applyRwTx) Apply() {
+	defer func() { // Would prefer this not to crash but rather log the error
+		r := recover()
+		if r != nil {
+			a.err <- fmt.Errorf("apply paniced: %s", r)
+		}
+	}()
 	a.err <- a.f(a.tx)
 }
 

@@ -165,19 +165,19 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 
 func (rs *StateV3) ApplyLogsAndTraces4(logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *state.SharedDomains) error {
 	for addr := range traceFroms {
-		if err := domains.IndexAdd(kv.TblTracesFromIdx, addr[:]); err != nil {
+		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:]); err != nil {
 			return err
 		}
 	}
 
 	for addr := range traceTos {
-		if err := domains.IndexAdd(kv.TblTracesToIdx, addr[:]); err != nil {
+		if err := domains.IndexAdd(kv.TracesToIdx, addr[:]); err != nil {
 			return err
 		}
 	}
 
 	for _, lg := range logs {
-		if err := domains.IndexAdd(kv.TblLogAddressIdx, lg.Address[:]); err != nil {
+		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
 			return err
 		}
 		for _, topic := range lg.Topics {
