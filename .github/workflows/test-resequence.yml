@@ -3,9 +3,11 @@ on:
   push:
     branches:
       - zkevm
+      - stable/**
   pull_request:
     branches:
       - zkevm
+      - stable/**
     types:
       - opened
       - reopened
@@ -30,7 +32,7 @@ jobs:
         run: .github/scripts/test_resequence.sh
           
       - name: Upload logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: evm-rpc-tests-logs-${{ github.run_id }}
           path: ./cdk-erigon/logs/evm-rpc-tests.log
@@ -49,7 +51,7 @@ jobs:
           kurtosis service logs cdk-v1 zkevm-bridge-service-001 --all > zkevm-bridge-service-001.log
       - name: Upload logs
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: logs_${{ github.run_id }}
           path: ./kurtosis-cdk/ci_logs

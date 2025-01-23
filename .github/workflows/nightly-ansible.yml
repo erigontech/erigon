@@ -37,7 +37,7 @@ jobs:
           cd zk/tests/ansible/evm-rpc-tests && docker compose build --quiet && docker compose up --exit-code-from ansible
 
       - name: Upload logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: evm-rpc-tests-logs-${{ matrix.nodes.name }}
           path: ./logs/evm-rpc-tests.log
