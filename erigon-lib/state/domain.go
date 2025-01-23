@@ -1620,7 +1620,7 @@ func (dt *DomainRoTx) statelessFileIndex(txFrom uint64, txTo uint64) int {
 
 func (dt *DomainRoTx) reader(i int) *seg.Reader {
 	// readers are not stateless - getters contain the current data pointer
-	return seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.compression)
+	return seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.Compression)
 }
 
 func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {

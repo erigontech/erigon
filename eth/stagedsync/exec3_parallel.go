@@ -546,8 +546,8 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 			}
 
 			if blockResult.complete {
-				if true /*blockResult.BlockNum == 14935178 || blockResult.BlockNum == 14935090 || blockResult.BlockNum == 14898492*/ {
-					fmt.Println("Block Complete", blockResult.BlockNum)
+				if blockResult.BlockNum == 14935178 || blockResult.BlockNum == 14935090 || blockResult.BlockNum == 14898492 {
+					//fmt.Println("Block Complete", blockResult.BlockNum)
 					//panic(blockResult.BlockNum)
 				}
 
@@ -620,7 +620,7 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 					blockStatus.cntExec++
 					execTask := blockStatus.tasks[nextTx]
 
-					fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
+					//fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
 					if /*blockResult.BlockNum+1 == 14748605 || blockResult.BlockNum+1 == 14734485 ||*/
 					blockResult.BlockNum+1 == 14935178 || blockResult.BlockNum+1 == 14935090 || blockResult.BlockNum+1 == 14898492 {
 						//vm.Trace = true

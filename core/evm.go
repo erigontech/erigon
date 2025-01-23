@@ -171,9 +171,10 @@ func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uin
 			}
 
 			header, err := func() (*types.Header, error) {
+				hash, num := lastKnownHash, lastKnownNumber
 				hashLookupCacheLock.Unlock()
 				defer hashLookupCacheLock.Lock()
-				return getHeader(lastKnownHash, lastKnownNumber)
+				return getHeader(hash, num)
 			}()
 
 			if err != nil {
