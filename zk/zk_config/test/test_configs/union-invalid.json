@@ -1,0 +1,43 @@
+{
+  "invalid": {
+    "0x0000000000000000000000000000000000000000": {
+      "contractName": "TestContract",
+      "balance": "0",
+      "nonce": "0",
+      "code": "0x0000000000000000000000000000000000000000",
+      "storage": {
+        "0x0000000000000000000000000000000000000000000000000000000000000000": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  },
+  "chainspec" : {
+    "ChainName": "testchain",
+    "ChainID": 1,
+    "consensus": "ethash",
+    "homesteadBlock": 0,
+    "daoForkBlock": 0,
+    "eip150Block": 0,
+    "eip155Block": 0,
+    "byzantiumBlock": 0,
+    "constantinopleBlock": 0,
+    "petersburgBlock": 0,
+    "istanbulBlock": 0,
+    "muirGlacierBlock": 0,
+    "berlinBlock": 0,
+    "londonBlock": 9999999999999999999999999999999999999999999999999,
+    "arrowGlacierBlock": 9999999999999999999999999999999999999999999999999,
+    "grayGlacierBlock": 9999999999999999999999999999999999999999999999999,
+    "terminalTotalDifficulty": 0,
+    "terminalTotalDifficultyPassed": false,
+    "shanghaiTime": 9999999999999999999999999999999999999999999999999,
+    "cancunTime": 9999999999999999999999999999999999999999999999999,
+    "pragueTime": 9999999999999999999999999999999999999999999999999,
+    "ethash": {}
+  },
+  "conf" : {
+    "root": "0x0",
+    "timestamp": 1730487324,
+    "gasLimit": 0,
+    "difficulty": 0
+  }
+}
