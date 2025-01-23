@@ -354,6 +354,13 @@ func (I *impl) ProcessWithdrawals(
 	}
 	if withdrawals.Len() > 0 {
 		log.Info("Withdrawals processed", "num_withdrawals", withdrawals.Len())
+		if s.Slot() == 509729 {
+			// print withdrawal data for debugging
+			for i := 0; i < withdrawals.Len(); i++ {
+				w := withdrawals.Get(i)
+				log.Info("Withdrawal data", "index", w.Index, "validator", w.Validator, "amount", w.Amount, "address", w.Address)
+			}
+		}
 	}
 	return nil
 }
