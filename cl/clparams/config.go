@@ -346,9 +346,9 @@ func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
 	return b.MinValidatorWithdrawabilityDelay + (b.ChurnLimitQuotient)/2
 }
 
-// MinSlotsForBlobRequests  equal to MIN_EPOCHS_FOR_BLOBS_SIDECARS_REQUEST * SLOTS_PER_EPOCH
+// MinSlotsForBlobRequests  equal to MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS * SLOTS_PER_EPOCH
 func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
-	return b.MinEpochsForBlobsSidecarsRequest * b.SlotsPerEpoch
+	return b.MinEpochsForBlobSidecarsRequests * b.SlotsPerEpoch
 }
 
 type ConfigByte byte
@@ -395,7 +395,7 @@ type BeaconChainConfig struct {
 	HysteresisQuotient               uint64 `yaml:"HYSTERESIS_QUOTIENT" spec:"true" json:"HYSTERESIS_QUOTIENT,string"`                                     // HysteresisQuotient defines the hysteresis quotient for effective balance calculations.
 	HysteresisDownwardMultiplier     uint64 `yaml:"HYSTERESIS_DOWNWARD_MULTIPLIER" spec:"true" json:"HYSTERESIS_DOWNWARD_MULTIPLIER,string"`               // HysteresisDownwardMultiplier defines the hysteresis downward multiplier for effective balance calculations.
 	HysteresisUpwardMultiplier       uint64 `yaml:"HYSTERESIS_UPWARD_MULTIPLIER" spec:"true" json:"HYSTERESIS_UPWARD_MULTIPLIER,string"`                   // HysteresisUpwardMultiplier defines the hysteresis upward multiplier for effective balance calculations.
-	MinEpochsForBlobsSidecarsRequest uint64 `yaml:"MIN_EPOCHS_FOR_BLOBS_SIDECARS_REQUEST" spec:"true" json:"MIN_EPOCHS_FOR_BLOBS_SIDECARS_REQUEST,string"` // MinEpochsForBlobsSidecarsRequest defines the minimum number of epochs to wait before requesting blobs sidecars.
+	MinEpochsForBlobSidecarsRequests uint64 `yaml:"MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS" spec:"true" json:"MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS,string"` // MinEpochsForBlobSidecarsRequests defines the minimum number of epochs to wait before requesting blobs sidecars.
 
 	// Gwei value constants.
 	MinDepositAmount           uint64 `yaml:"MIN_DEPOSIT_AMOUNT" spec:"true" json:"MIN_DEPOSIT_AMOUNT,string"`                       // MinDepositAmount is the minimum amount of Gwei a validator can send to the deposit contract at once (lower amounts will be reverted).
@@ -668,7 +668,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	HysteresisQuotient:               4,
 	HysteresisDownwardMultiplier:     1,
 	HysteresisUpwardMultiplier:       5,
-	MinEpochsForBlobsSidecarsRequest: 4096,
+	MinEpochsForBlobSidecarsRequests: 4096,
 
 	// Gwei value constants.
 	MinDepositAmount:           1 * 1e9,
@@ -974,7 +974,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
 	cfg.MaxBlobsPerBlock = 2
-	cfg.MinEpochsForBlobsSidecarsRequest = 16384
+	cfg.MinEpochsForBlobSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.InitializeForkSchedule()
 	return cfg
@@ -1010,7 +1010,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
 	cfg.MaxBlobsPerBlock = 2
-	cfg.MinEpochsForBlobsSidecarsRequest = 16384
+	cfg.MinEpochsForBlobSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.InitializeForkSchedule()
 	return cfg
