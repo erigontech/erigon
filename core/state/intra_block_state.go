@@ -118,6 +118,12 @@ func New(stateReader StateReader) *IntraBlockState {
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
 		txIndex:           0,
+		arbExtraData: &ArbitrumExtraData{
+			unexpectedBalanceDelta: new(uint256.Int),
+			userWasms:              map[libcommon.Hash]ActivatedWasm{},
+			activatedWasms:         map[libcommon.Hash]ActivatedWasm{},
+			recentWasms:            NewRecentWasms(),
+		},
 		//trace:             true,
 	}
 }
@@ -1009,8 +1015,17 @@ func (sdb *IntraBlockState) SetTxContext(ti int) {
 	sdb.txIndex = ti
 
 	// Arbitrum: clear memory charging state for new tx
-	sdb.arbExtraData.openWasmPages = 0
-	sdb.arbExtraData.everWasmPages = 0
+	if sdb.arbExtraData == nil {
+		sdb.arbExtraData = &ArbitrumExtraData{
+			unexpectedBalanceDelta: new(uint256.Int),
+			userWasms:              map[libcommon.Hash]ActivatedWasm{},
+			activatedWasms:         map[libcommon.Hash]ActivatedWasm{},
+			recentWasms:            NewRecentWasms(),
+		}
+	} else {
+		sdb.arbExtraData.openWasmPages = 0
+		sdb.arbExtraData.everWasmPages = 0
+	}
 }
 
 // no not lock

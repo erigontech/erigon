@@ -105,7 +105,7 @@ func WriteActivation(db kv.Putter, moduleHash common.Hash, asmMap map[WasmTarget
 	}
 }
 
-const WasmActivationTable = "wasm_activation"
+const ArbWasmActivationBucket = "wasm_activation" // arbitrum bucket for wasm activations
 
 // Stores the activated asm for a given moduleHash and target
 func writeActivatedAsm(db kv.Putter, target WasmTarget, moduleHash common.Hash, asm []byte) {
@@ -114,7 +114,7 @@ func writeActivatedAsm(db kv.Putter, target WasmTarget, moduleHash common.Hash, 
 		log.Crit("Failed to store activated wasm asm", "err", err)
 	}
 	key := activatedKey(prefix, moduleHash)
-	if err := db.Put(WasmActivationTable, key[:], asm); err != nil {
+	if err := db.Put(ArbWasmActivationBucket, key[:], asm); err != nil {
 		log.Crit("Failed to store activated wasm asm", "err", err)
 	}
 }
@@ -126,7 +126,7 @@ func ReadActivatedAsm(db kv.Getter, target WasmTarget, moduleHash common.Hash) [
 		log.Crit("Failed to read activated wasm asm", "err", err)
 	}
 	key := activatedKey(prefix, moduleHash)
-	asm, err := db.GetOne(WasmActivationTable, key[:])
+	asm, err := db.GetOne(ArbWasmActivationBucket, key[:])
 	if err != nil {
 		return nil
 	}
@@ -135,14 +135,14 @@ func ReadActivatedAsm(db kv.Getter, target WasmTarget, moduleHash common.Hash) [
 
 // Stores wasm schema version
 func WriteWasmSchemaVersion(db kv.Putter) {
-	if err := db.Put(WasmActivationTable, wasmSchemaVersionKey, []byte{WasmSchemaVersion}); err != nil {
+	if err := db.Put(ArbWasmActivationBucket, wasmSchemaVersionKey, []byte{WasmSchemaVersion}); err != nil {
 		log.Crit("Failed to store wasm schema version", "err", err)
 	}
 }
 
 // Retrieves wasm schema version
 func ReadWasmSchemaVersion(db kv.Getter) ([]byte, error) {
-	return db.GetOne(WasmActivationTable, wasmSchemaVersionKey)
+	return db.GetOne(ArbWasmActivationBucket, wasmSchemaVersionKey)
 }
 
 const WasmSchemaVersion byte = 0x01
