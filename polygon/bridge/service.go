@@ -280,7 +280,7 @@ func (s *Service) ReplayInitialBlock(ctx context.Context, block *types.Block) er
 	}
 
 	s.lastProcessedBlockInfo.Store(&lastProcessedBlockInfo)
-	return s.store.PutProcessedBlockInfo(ctx, lastProcessedBlockInfo)
+	return s.store.PutProcessedBlockInfo(ctx, []ProcessedBlockInfo{lastProcessedBlockInfo})
 }
 
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
@@ -304,18 +304,19 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 		return errors.New("lastProcessedBlockInfo must be set before bridge processing")
 	}
 
+	from := blocks[0].NumberU64()
 	s.logger.Debug(
 		bridgeLogPrefix("processing new blocks"),
-		"from", blocks[0].NumberU64(),
+		"from", from,
 		"to", blocks[len(blocks)-1].NumberU64(),
 		"lastProcessedBlockNum", lastProcessedBlockInfo.BlockNum,
 		"lastProcessedBlockTime", lastProcessedBlockInfo.BlockTime,
 		"lastProcessedEventId", lastProcessedEventId,
 	)
 
-	var processedBlock bool
 	blockNumToEventId := make(map[uint64]uint64)
 	eventTxnToBlockNum := make(map[libcommon.Hash]uint64)
+	processedBlocks := make([]ProcessedBlockInfo, 0, 1+len(blocks)/int(s.borConfig.CalculateSprintLength(from)))
 	for _, block := range blocks {
 		// check if block is start of span and > 0
 		blockNum := block.NumberU64()
@@ -371,14 +372,16 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 			blockNumToEventId[blockNum] = endId
 		}
 
-		processedBlock = true
 		lastProcessedBlockInfo = ProcessedBlockInfo{
 			BlockNum:  blockNum,
 			BlockTime: blockTime,
 		}
+
+		// keep track for updating at the end as a last step (once all other updates have successfully been applied)
+		processedBlocks = append(processedBlocks, lastProcessedBlockInfo)
 	}
 
-	if !processedBlock {
+	if len(processedBlocks) == 0 {
 		return nil
 	}
 
@@ -390,7 +393,7 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 		return err
 	}
 
-	if err := s.store.PutProcessedBlockInfo(ctx, lastProcessedBlockInfo); err != nil {
+	if err := s.store.PutProcessedBlockInfo(ctx, processedBlocks); err != nil {
 		return err
 	}
 
@@ -434,6 +437,12 @@ func (s *Service) Unwind(ctx context.Context, blockNum uint64) error {
 	if !ok {
 		return errors.New("no last processed block info after unwind")
 	}
+
+	s.logger.Debug(
+		bridgeLogPrefix("last processed block after unwind"),
+		"blockNum", lastProcessedBlockInfo.BlockNum,
+		"blockTime", lastProcessedBlockInfo.BlockTime,
+	)
 
 	s.lastProcessedBlockInfo.Store(&lastProcessedBlockInfo)
 	return nil
