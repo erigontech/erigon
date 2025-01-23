@@ -227,7 +227,7 @@ func (p *Progress) LogComplete(rs *state.StateV3, tx *txExecutor) {
 	txSec := uint64(float64(lastTxNum-p.initialTxNum) / interval.Seconds())
 	diffBlocks := max(int(lastBlockNum)-int(p.initialBlockNum), 0)
 
-	p.log("done", "", tx, rs, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, true, nil)
+	p.log("", "done", tx, rs, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, true, nil)
 }
 
 func (p *Progress) log(mode string, suffix string, tx *txExecutor, rs *state.StateV3, interval time.Duration,
