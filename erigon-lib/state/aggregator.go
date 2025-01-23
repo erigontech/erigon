@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/checker"
 	"math"
 	"os"
 	"path/filepath"
@@ -892,7 +893,7 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		}
 		fullStat.Accumulate(stat)
 
-		bR, err := common2.PruneReceiptsCheck(tx.(kv.TemporalTx))
+		bR, err := checker.PruneReceiptsCheck(tx.(kv.TemporalTx))
 		if err != nil {
 			println("receipt check err", err.Error())
 			return false, err
