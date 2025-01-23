@@ -537,6 +537,17 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 		logArgs = append(logArgs, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		if log {
+			go func() {
+				bR, err := common.PruneReceiptsCheck(tx.(kv.TemporalTx))
+				if err != nil {
+					e.logger.Error("prune check err", err.Error())
+					return
+				}
+				if bR {
+					e.logger.Error("bad receipts")
+					return
+				}
+			}()
 			e.logger.Info("head updated", logArgs...)
 		}
 	}
