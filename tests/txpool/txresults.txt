@@ -1,0 +1,90 @@
+Running tool: /usr/local/go/bin/go test -timeout 30s -run ^TestSimpleLocalTxThroughputBenchmark$ github.com/erigontech/erigon/tests/txpool -v -count=1
+
+=== RUN   TestSimpleLocalTxThroughputBenchmark
+Tx/s: (1000 txs processed): 1515.71 / s
+Tx/s: (1000 txs processed): 1365.07 / s
+Tx/s: (1000 txs processed): 1261.87 / s
+Tx/s: (1000 txs processed): 989.61 / s
+Tx/s: (1000 txs processed): 894.40 / s
+Tx/s: (1000 txs processed): 806.75 / s
+Tx/s: (1000 txs processed): 781.95 / s
+Tx/s: (1000 txs processed): 717.35 / s
+Tx/s: (1000 txs processed): 686.41 / s
+Tx/s: (1000 txs processed): 660.53 / s
+Tx/s: (1000 txs processed): 618.96 / s
+Tx/s: (1000 txs processed): 589.59 / s
+Tx/s: (1000 txs processed): 564.51 / s
+Tx/s: (1000 txs processed): 533.77 / s
+Tx/s: (1000 txs processed): 507.76 / s
+
+Tx/s: (total 15000 txs processed): 745.42 / s
+Processed time: 20.122838084s
+--- PASS: TestSimpleLocalTxThroughputBenchmark (20.26s)
+PASS
+ok  	github.com/erigontech/erigon/tests/txpool	21.007s
+
+
+
+
+
+
+
+
+
+
+Running tool: /usr/local/go/bin/go test -timeout 30s -run ^TestSimpleLocalTxLatencyBenchmark$ github.com/erigontech/erigon/tests/txpool -v -count=1
+
+=== RUN   TestSimpleLocalTxLatencyBenchmark
+Avg latency: 732.965µs
+--- PASS: TestSimpleLocalTxLatencyBenchmark (0.96s)
+PASS
+ok  	github.com/erigontech/erigon/tests/txpool	1.737s
+
+
+
+
+
+
+
+
+
+
+Running tool: /usr/local/go/bin/go test -timeout 30s -run ^TestRemoteTxThroughputBenchmark$ github.com/erigontech/erigon/tests/txpool -v -count=1
+
+=== RUN   TestRemoteTxThroughputBenchmark
+Tx/s: (1000 txs processed): 1432.40 / s
+Tx/s: (1000 txs processed): 1439.73 / s
+Tx/s: (1000 txs processed): 1417.61 / s
+Tx/s: (1000 txs processed): 1111.90 / s
+Tx/s: (1000 txs processed): 1000.89 / s
+Tx/s: (1000 txs processed): 909.01 / s
+Tx/s: (1000 txs processed): 833.63 / s
+Tx/s: (1000 txs processed): 769.03 / s
+Tx/s: (1000 txs processed): 713.82 / s
+Tx/s: (1000 txs processed): 666.88 / s
+Tx/s: (1000 txs processed): 667.13 / s
+Tx/s: (1000 txs processed): 624.51 / s
+Tx/s: (1000 txs processed): 625.36 / s
+Tx/s: (1000 txs processed): 555.48 / s
+Tx/s: (1000 txs processed): 556.79 / s
+
+Tx/s: (total 15000 txs processed): 798.19 / s
+Processed time: 18.792636209s
+--- PASS: TestRemoteTxThroughputBenchmark (18.93s)
+PASS
+ok  	github.com/erigontech/erigon/tests/txpool	19.702s
+
+
+
+
+
+
+
+
+Running tool: /usr/local/go/bin/go test -timeout 30s -run ^TestSimpleRemoteTxLatencyBenchmark$ github.com/erigontech/erigon/tests/txpool -v -count=1
+
+=== RUN   TestSimpleRemoteTxLatencyBenchmark
+Avg latency: 99.495601ms
+--- PASS: TestSimpleRemoteTxLatencyBenchmark (10.11s)
+PASS
+ok  	github.com/erigontech/erigon/tests/txpool	10.866s

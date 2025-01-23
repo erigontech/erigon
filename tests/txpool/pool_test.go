@@ -1,5 +1,3 @@
-//go:build integration
-
 package txpool
 
 import (
@@ -14,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/tests/txpool/helper"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -37,7 +36,6 @@ var (
 // This test sends transaction to node1 RPC which means they are local for node1
 // P2P helper is binded to node1 port, that's why we measure performance of local txs processing
 func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
-	t.Skip()
 
 	txToSendCount := 15000
 	measureAtEvery := 1000
@@ -112,8 +110,6 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 // This test sends transaction to node1 RPC which means they are local for node1
 // P2P helper is binded to node1 port, that's why we measure performance of local txs processing
 func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
-	t.Skip()
-
 	txToSendCount := 1000
 
 	p2p := helper.NewP2P(fmt.Sprintf("http://%s/", rpcAddressNode1))
@@ -167,3 +163,152 @@ func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
 	averageLatency = averageLatency / time.Duration(txToSendCount)
 	fmt.Println("Avg latency:", averageLatency)
 }
+
+// Topology of the network:
+// p2p_helper ---> node1 ---> node2 <-- RPC txns
+//
+// This test sends transaction to node2 RPC which means they are remote for node1 and local for node2
+// P2P helper is binded to node1 port, that's why we measure performance of remote txs processing
+func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
+	nonce := 0
+
+	txToSendCount := 15000
+	measureAtEvery := 1000
+
+	p2p := helper.NewP2P(fmt.Sprintf("http://%s/", rpcAddressNode1))
+
+	gotTxCh, errCh, err := p2p.Connect()
+	require.NoError(t, err)
+
+	start := time.Now()
+
+	// sender part
+	go func() {
+		rpcClient := requests.NewRequestGenerator(
+			rpcAddressNode2,
+			log.New(),
+		)
+
+		for i := 0; i < txToSendCount; i++ {
+			signedTx, err := types.SignTx(
+				&types.LegacyTx{
+					CommonTx: types.CommonTx{
+						Nonce: uint64(nonce + i),
+						Gas:   21000,
+						To:    &addr2,
+						Value: uint256.NewInt(100),
+						Data:  nil,
+					},
+					GasPrice: uint256.NewInt(1),
+				},
+				*types.LatestSignerForChainID(big.NewInt(1337)),
+				pkey1,
+			)
+			require.NoError(t, err)
+
+			_, err = rpcClient.SendTransaction(signedTx)
+			require.NoError(t, err)
+		}
+	}()
+
+	lastMeasureTime := time.Now()
+	gotTx := 0
+
+	for gotTx < txToSendCount {
+		select {
+		case msg := <-gotTxCh:
+			if msg.MessageID != sentryproto.MessageId_TRANSACTIONS_66 {
+				continue
+			}
+
+			txns := txpool.TxnSlots{}
+
+			_, err := txpool.ParseTransactions(msg.Payload, 0, txpool.NewTxnParseContext(*uint256.MustFromDecimal("1337")), &txns, func(b []byte) error {
+				return nil
+			})
+			require.NoError(t, err)
+
+			for i := 0; i < len(txns.Txns); i++ {
+				gotTx += 1
+
+				if gotTx%measureAtEvery != 0 {
+					continue
+				}
+
+				fmt.Printf("Tx/s: (%d txs processed): %.2f / s \n", measureAtEvery, float64(measureAtEvery)*float64(time.Second)/float64(time.Since(lastMeasureTime)))
+				lastMeasureTime = time.Now()
+			}
+
+		case err := <-errCh:
+			require.NoError(t, err)
+		}
+	}
+
+	fmt.Printf("\nTx/s: (total %d txs processed): %.2f / s \n", txToSendCount, float64(txToSendCount)*float64(time.Second)/float64(time.Since(start)))
+	fmt.Println("Processed time:", time.Since(start))
+}
+
+// Topology of the network:
+// p2p_helper ---> node1 ---> node2 <-- RPC txns
+//
+// This test sends transaction to node2 RPC which means they are remote for node1 and local for node2
+// P2P helper is binded to node1 port, that's why we measure performance of remote txs processing
+func TestSimpleRemoteTxLatencyBenchmark(t *testing.T) {
+	txToSendCount := 100
+
+	p2p := helper.NewP2P(fmt.Sprintf("http://%s/", rpcAddressNode1))
+
+	gotTxCh, errCh, err := p2p.Connect()
+	require.NoError(t, err)
+
+	rpcClient := requests.NewRequestGenerator(
+		rpcAddressNode2,
+		log.New(),
+	)
+
+	averageLatency := time.Duration(0)
+
+	for i := 0; i < txToSendCount; i++ {
+		signedTx, err := types.SignTx(
+			&types.LegacyTx{
+				CommonTx: types.CommonTx{
+					Nonce: uint64(i),
+					Gas:   21000,
+					To:    &addr2,
+					Value: uint256.NewInt(100),
+					Data:  nil,
+				},
+				GasPrice: uint256.NewInt(1),
+			},
+			*types.LatestSignerForChainID(big.NewInt(1337)),
+			pkey1,
+		)
+		require.NoError(t, err)
+
+		start := time.Now()
+
+		_, err = rpcClient.SendTransaction(signedTx)
+		require.NoError(t, err)
+
+		for stop := false; !stop; {
+			select {
+			case msg := <-gotTxCh:
+				if msg.MessageID == sentryproto.MessageId_TRANSACTIONS_66 {
+					stop = true
+				}
+			case err := <-errCh:
+				require.NoError(t, err)
+			}
+		}
+
+		averageLatency += time.Since(start)
+	}
+
+	averageLatency = averageLatency / time.Duration(txToSendCount)
+	fmt.Println("Avg latency:", averageLatency)
+}
+
+// max tps
+// if 10K what the latency if 100 what the latency
+// ~1000/s
+// simple + blobs tx to measure ()
