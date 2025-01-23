@@ -2,11 +2,61 @@ package checker
 
 import (
 	"encoding/binary"
+	"fmt"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 )
 
-func PruneReceiptsCheck(tx kv.TemporalTx) (badReceipts bool, err error) {
+type SeekResponse struct {
+	StartTxNum    uint64
+	EndTxNum      uint64
+	StartBlockNum uint64
+	EndBlockNum   uint64
+}
+
+func wrongTxNumSeeker(tx kv.TemporalTx, txNum uint64) (resp SeekResponse, err error) {
+	wrongGas, _, _, err := ReceiptAsOf(tx, txNum)
+	if err != nil {
+		return resp, err
+	}
+	for i := uint64(1); ; i++ {
+		gas, _, _, err := ReceiptAsOf(tx, txNum-i)
+		if err != nil {
+			return resp, err
+		}
+
+		if gas != wrongGas {
+			resp.StartTxNum = txNum - i
+			ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, txNum-i)
+			if err != nil {
+				return resp, err
+			}
+			if !ok {
+				return resp, fmt.Errorf("not found %d", txNum-i)
+			}
+			resp.StartBlockNum = blockNum
+		}
+
+		gas, _, _, err = ReceiptAsOf(tx, txNum+i)
+		if err != nil {
+			return resp, err
+		}
+
+		if gas != wrongGas {
+			resp.EndTxNum = txNum + i
+			ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, txNum+i)
+			if err != nil {
+				return resp, err
+			}
+			if !ok {
+				return resp, fmt.Errorf("not found %d", txNum-i)
+			}
+			resp.EndBlockNum = blockNum
+		}
+	}
+}
+
+func ReceiptsCheck(tx kv.TemporalTx) (badReceipts bool, err error) {
 	blockNumStart := uint64(1_000_000)
 	latestBlock, _, err := rawdbv3.TxNums.Last(tx)
 	if err != nil {
@@ -29,6 +79,11 @@ func PruneReceiptsCheck(tx kv.TemporalTx) (badReceipts bool, err error) {
 			}
 			if int(gas) == prevGas {
 				println("bad block:", txNum, blockNum)
+				resp, err := wrongTxNumSeeker(tx, txNum)
+				if err != nil {
+					return true, err
+				}
+				println(fmt.Sprintf("wrong stat: %+v", resp))
 				return true, nil
 			}
 			prevGas = int(gas)

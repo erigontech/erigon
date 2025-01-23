@@ -893,7 +893,7 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		}
 		fullStat.Accumulate(stat)
 
-		bR, err := checker.PruneReceiptsCheck(tx.(kv.TemporalTx))
+		bR, err := checker.ReceiptsCheck(tx.(kv.TemporalTx))
 		if err != nil {
 			println("receipt check err", err.Error())
 			return false, err

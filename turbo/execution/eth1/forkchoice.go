@@ -540,7 +540,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		if log {
 			go func() {
 				ts := time.Now()
-				bR, err := checker.PruneReceiptsCheck(tx.(kv.TemporalTx))
+				bR, err := checker.ReceiptsCheck(tx.(kv.TemporalTx))
 				e.logger.Info("check time:", time.Since(ts).Milliseconds())
 				if err != nil {
 					e.logger.Error("prune check err", err.Error())
