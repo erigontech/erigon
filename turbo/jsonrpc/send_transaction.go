@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/utils"
 )
@@ -47,6 +48,25 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 	if err != nil {
 		return common.Hash{}, err
 	}
+
+	latestBlockNumber, err := rpchelper.GetLatestFinishedBlockNumber(tx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	header, err := api.blockByNumber(ctx, rpc.BlockNumber(latestBlockNumber), tx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	// now get the sender and put a lock in place for them
+	signer := types.MakeSigner(cc, latestBlockNumber, header.Time())
+	sender, err := txn.Sender(*signer)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	api.SenderLocks.AddLock(sender)
+	defer api.SenderLocks.ReleaseLock(sender)
 
 	if txn.Type() != types.LegacyTxType {
 		latestBlock, err := api.blockByNumber(ctx, rpc.LatestBlockNumber, tx)

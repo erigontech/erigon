@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
@@ -13,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/log/v3"
 
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 
@@ -63,6 +65,8 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address libcommon.A
 	}
 
 	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
+		api.waitForSenderLockToRelease(address)
+
 		reply, err := api.txPool.Nonce(ctx, &txpool_proto.NonceRequest{
 			Address: gointerfaces.ConvertAddressToH160(address),
 		}, &grpc.EmptyCallOption{})
@@ -177,4 +181,21 @@ func (api *APIImpl) Exist(ctx context.Context, address libcommon.Address, blockN
 	}
 
 	return true, nil
+}
+
+func (api *APIImpl) waitForSenderLockToRelease(address libcommon.Address) {
+	waits := 0
+	for {
+		lock := api.SenderLocks.GetLock(address)
+		if lock > 0 {
+			time.Sleep(2 * time.Millisecond)
+			waits++
+			if waits > 250 {
+				log.Debug("waiting too long for transaction processing, returning default behaviour for nonce", "address", address.String())
+				break
+			}
+			continue
+		}
+		break
+	}
 }

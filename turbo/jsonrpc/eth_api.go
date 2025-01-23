@@ -381,6 +381,7 @@ type APIImpl struct {
 	RejectLowGasPriceTolerance    float64
 	logLevel                      utils.LogLevel
 	BadTxAllowance                uint64
+	SenderLocks                   *SenderLock
 }
 
 // NewEthAPI returns APIImpl instance
@@ -419,6 +420,7 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		RejectLowGasPriceTransactions: ethCfg.RejectLowGasPriceTransactions,
 		RejectLowGasPriceTolerance:    ethCfg.RejectLowGasPriceTolerance,
 		BadTxAllowance:                ethCfg.BadTxAllowance,
+		SenderLocks:                   NewSenderLock(),
 	}
 }
 
