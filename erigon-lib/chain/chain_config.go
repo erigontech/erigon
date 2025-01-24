@@ -101,38 +101,47 @@ type BlobConfig struct {
 
 // See EIP-7840: Add blob schedule to EL config files
 type BlobSchedule struct {
-	Cancun BlobConfig  `json:"cancun"`
+	Cancun *BlobConfig `json:"cancun,omitempty"`
 	Prague *BlobConfig `json:"prague,omitempty"`
 }
 
 func (b *BlobSchedule) TargetBlobsPerBlock(isPrague bool) uint64 {
-	if b == nil {
-		return 3 // EIP-4844 default
+	if isPrague {
+		if b != nil && b.Prague != nil {
+			return b.Prague.Target
+		}
+		return 6 // EIP-7691
 	}
-	if isPrague && b.Prague != nil {
-		return b.Prague.Target
+	if b != nil && b.Cancun != nil {
+		return b.Cancun.Max
 	}
-	return b.Cancun.Target
+	return 3 // EIP-4844
 }
 
 func (b *BlobSchedule) MaxBlobsPerBlock(isPrague bool) uint64 {
-	if b == nil {
-		return 6 // EIP-4844 default
+	if isPrague {
+		if b != nil && b.Prague != nil {
+			return b.Prague.Max
+		}
+		return 9 // EIP-7691
 	}
-	if isPrague && b.Prague != nil {
-		return b.Prague.Max
+	if b != nil && b.Cancun != nil {
+		return b.Cancun.Max
 	}
-	return b.Cancun.Max
+	return 6 // EIP-4844
 }
 
 func (b *BlobSchedule) BaseFeeUpdateFraction(isPrague bool) uint64 {
-	if b == nil {
-		return 3338477 // EIP-4844 default
+	if isPrague {
+		if b != nil && b.Prague != nil {
+			return b.Prague.BaseFeeUpdateFraction
+		}
+		return 5007716 // EIP-7691
 	}
-	if isPrague && b.Prague != nil {
-		return b.Prague.BaseFeeUpdateFraction
+	if b != nil && b.Cancun != nil {
+		return b.Cancun.BaseFeeUpdateFraction
 	}
-	return b.Cancun.BaseFeeUpdateFraction
+	return 3338477 // EIP-4844
 }
 
 type BorConfig interface {

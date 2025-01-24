@@ -70,10 +70,16 @@ func TestConfigValueLookup(t *testing.T) {
 // Check that EIP-4844 values are returned for a nil BlobSchedule
 func TestNilBlobSchedule(t *testing.T) {
 	var b *BlobSchedule
-	assert.Equal(t, uint64(3), b.TargetBlobsPerBlock(false /* isPrague */))
-	assert.Equal(t, uint64(6), b.MaxBlobsPerBlock(false /* isPrague */))
-	assert.Equal(t, uint64(3338477), b.BaseFeeUpdateFraction(false /* isPrague */))
-	assert.Equal(t, uint64(3), b.TargetBlobsPerBlock(true /* isPrague */))
-	assert.Equal(t, uint64(6), b.MaxBlobsPerBlock(true /* isPrague */))
-	assert.Equal(t, uint64(3338477), b.BaseFeeUpdateFraction(true /* isPrague */))
+
+	// Original EIP-4844 values
+	isPrague := false
+	assert.Equal(t, uint64(3), b.TargetBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(6), b.MaxBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(3338477), b.BaseFeeUpdateFraction(isPrague))
+
+	// EIP-7691: Blob throughput increase
+	isPrague = true
+	assert.Equal(t, uint64(6), b.TargetBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(9), b.MaxBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(5007716), b.BaseFeeUpdateFraction(isPrague))
 }
