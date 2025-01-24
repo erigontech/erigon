@@ -19,9 +19,10 @@ package math
 import (
 	"bytes"
 	"encoding/hex"
-	"github.com/erigontech/erigon-lib/common"
 	"math/big"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func TestHexOrDecimal256(t *testing.T) {
@@ -323,4 +324,10 @@ func TestExp(t *testing.T) {
 			t.Errorf("Exp(%d, %d) = %d, want %d", test.base, test.exponent, result, test.result)
 		}
 	}
+}
+
+func TestHexOrDecimal256UnmarshalJSON(t *testing.T) {
+	input := []byte{'"'}
+	var num HexOrDecimal256
+	_ = num.UnmarshalJSON(input)
 }
