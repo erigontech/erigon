@@ -4,29 +4,25 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"strings"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
 type EncryptedTxnsPool struct {
-	config              Config
-	sequencerAbi        abi.ABI
-	contractBackend     bind.ContractBackend
-	submissionEventId   libcommon.Hash
-	submissionEventName string
-	submissions         *lru.Cache[TxnIndex, EncryptedTxnSubmission]
+	config            Config
+	sequencerContract *contracts.Sequencer
+	submissions       *lru.Cache[TxnIndex, EncryptedTxnSubmission]
 }
 
 func NewEncryptedTxnsPool(config Config, contractBackend bind.ContractBackend) EncryptedTxnsPool {
-	sequencerAbi, err := abi.JSON(strings.NewReader(contracts.SequencerABI))
+	sequencerContractAddress := libcommon.HexToAddress(config.SequencerContractAddress)
+	sequencerContract, err := contracts.NewSequencer(sequencerContractAddress, contractBackend)
 	if err != nil {
-		panic(fmt.Errorf("failed to parse shutter Sequencer ABI: %w", err))
+		panic(fmt.Errorf("failed to create shutter sequencer contract: %w", err))
 	}
 
 	submissions, err := lru.New[TxnIndex, EncryptedTxnSubmission](int(config.MaxPooledEncryptedTxns))
@@ -34,26 +30,16 @@ func NewEncryptedTxnsPool(config Config, contractBackend bind.ContractBackend) E
 		panic(fmt.Errorf("failed to create shutter submissions LRU cache: %w", err))
 	}
 
-	const submissionEventName = "TransactionSubmitted"
 	return EncryptedTxnsPool{
-		config:              config,
-		sequencerAbi:        sequencerAbi,
-		contractBackend:     contractBackend,
-		submissionEventId:   sequencerAbi.Events[submissionEventName].ID,
-		submissionEventName: submissionEventName,
-		submissions:         submissions,
+		config:            config,
+		sequencerContract: sequencerContract,
+		submissions:       submissions,
 	}
 }
 
 func (utp EncryptedTxnsPool) Run(ctx context.Context) error {
-	sequencerContractAddress := libcommon.HexToAddress(utp.config.SequencerContractAddress)
-	sequencer, err := contracts.NewSequencer(sequencerContractAddress, utp.contractBackend)
-	if err != nil {
-		return fmt.Errorf("failed to create shutter sequencer contract: %w", err)
-	}
-
 	submissionEventC := make(chan *contracts.SequencerTransactionSubmitted)
-	submissionEventSub, err := sequencer.WatchTransactionSubmitted(&bind.WatchOpts{}, submissionEventC)
+	submissionEventSub, err := utp.sequencerContract.WatchTransactionSubmitted(&bind.WatchOpts{}, submissionEventC)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to sequencer TransactionSubmitted event: %w", err)
 	}

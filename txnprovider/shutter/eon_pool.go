@@ -11,14 +11,30 @@ import (
 )
 
 type EonPool struct {
-	config          Config
-	contractBackend bind.ContractBackend
+	config               Config
+	contractBackend      bind.ContractBackend
+	ksmContract          *contracts.KeyperSetManager
+	keyBroadcastContract *contracts.KeyBroadcastContract
 }
 
 func NewEonPool(config Config, contractBackend bind.ContractBackend) EonPool {
+	ksmContractAddr := libcommon.HexToAddress(config.KeyperSetManagerContractAddress)
+	ksmContract, err := contracts.NewKeyperSetManager(ksmContractAddr, contractBackend)
+	if err != nil {
+		panic(fmt.Errorf("failed to create KeyperSetManager: %w", err))
+	}
+
+	keyBroadcastContractAddr := libcommon.HexToAddress(config.KeyBroadcastContractAddress)
+	keyBroadcastContract, err := contracts.NewKeyBroadcastContract(keyBroadcastContractAddr, contractBackend)
+	if err != nil {
+		panic(fmt.Errorf("failed to create KeyBroadcastContract: %w", err))
+	}
+
 	return EonPool{
-		config:          config,
-		contractBackend: contractBackend,
+		config:               config,
+		contractBackend:      contractBackend,
+		ksmContract:          ksmContract,
+		keyBroadcastContract: keyBroadcastContract,
 	}
 }
 
@@ -35,19 +51,14 @@ func (ep EonPool) Eon(blockNum uint64) (Eon, error) {
 	//
 	// TODO - check if we have it in the pool first, if not then fallback
 	//
-	addr := libcommon.HexToAddress(ep.config.KeyperSetManagerContractAddress)
-	ksm, err := contracts.NewKeyperSetManager(addr, ep.contractBackend)
-	if err != nil {
-		return Eon{}, fmt.Errorf("failed to create KeyperSetManager: %w", err)
-	}
 
 	callOpts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNum)}
-	eonIndex, err := ksm.GetKeyperSetIndexByBlock(callOpts, blockNum)
+	eonIndex, err := ep.ksmContract.GetKeyperSetIndexByBlock(callOpts, blockNum)
 	if err != nil {
 		return Eon{}, fmt.Errorf("failed to get KeyperSetIndexByBlock: %w", err)
 	}
 
-	keyperSetAddress, err := ksm.GetKeyperSetAddress(&bind.CallOpts{}, eonIndex)
+	keyperSetAddress, err := ep.ksmContract.GetKeyperSetAddress(&bind.CallOpts{}, eonIndex)
 	if err != nil {
 		return Eon{}, fmt.Errorf("failed to get KeyperSetAddress: %w", err)
 	}
@@ -67,8 +78,14 @@ func (ep EonPool) Eon(blockNum uint64) (Eon, error) {
 		return Eon{}, fmt.Errorf("failed to get KeyperSet members: %w", err)
 	}
 
+	key, err := ep.keyBroadcastContract.GetEonKey(callOpts, eonIndex)
+	if err != nil {
+		return Eon{}, fmt.Errorf("failed to get EonKey: %w", err)
+	}
+
 	eon := Eon{
 		Index:     eonIndex,
+		Key:       key,
 		Threshold: threshold,
 		Members:   members,
 	}
@@ -78,6 +95,7 @@ func (ep EonPool) Eon(blockNum uint64) (Eon, error) {
 
 type Eon struct {
 	Index     uint64
+	Key       []byte
 	Threshold uint64
 	Members   []libcommon.Address
 }
