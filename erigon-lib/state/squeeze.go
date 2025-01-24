@@ -114,19 +114,19 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		domain: [5]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
-				values:  MergeRange{true, 0, math.MaxUint64},
+				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
 				aggStep: ac.a.StepSize(),
 			},
 			kv.StorageDomain: {
 				name:    kv.StorageDomain,
-				values:  MergeRange{true, 0, math.MaxUint64},
+				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
 				aggStep: ac.a.StepSize(),
 			},
 			kv.CommitmentDomain: {
 				name:    kv.CommitmentDomain,
-				values:  MergeRange{true, 0, math.MaxUint64},
+				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
 				aggStep: ac.a.StepSize(),
 			},
@@ -325,7 +325,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 		domain: [5]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
-				values:  MergeRange{true, 0, math.MaxUint64},
+				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
 				aggStep: a.StepSize(),
 			},

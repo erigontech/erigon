@@ -214,7 +214,7 @@ func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.D
 		keysTable:       indexKeysTable,
 		valuesTable:     indexTable,
 		compression:     seg.CompressNone,
-		iiId:            idx,
+		name:            idx,
 	}
 
 	if ii := a.searchII(idx); ii != nil {
@@ -766,7 +766,7 @@ func (a *Aggregator) InvertedIndexTables(indices ...kv.InvertedIdx) (tables []st
 
 func (a *Aggregator) searchII(name kv.InvertedIdx) *InvertedIndex {
 	for _, ii := range a.iis {
-		if ii.iiId == name {
+		if ii.name == name {
 			return ii
 		}
 	}

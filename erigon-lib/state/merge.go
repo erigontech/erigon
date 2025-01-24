@@ -132,7 +132,7 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		fromTxNum := item.endTxNum - span
 		if fromTxNum < item.startTxNum {
 			if !r.values.needMerge || fromTxNum < r.values.from {
-				r.values = MergeRange{true, fromTxNum, item.endTxNum}
+				r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
 			}
 		}
 	}
@@ -155,10 +155,10 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 
 		foundSuperSet := r.history.from == item.startTxNum && item.endTxNum >= r.history.to
 		if foundSuperSet {
-			r.history = MergeRange{false, startTxNum, item.endTxNum}
+			r.history = MergeRange{from: startTxNum, to: item.endTxNum}
 		} else if startTxNum < item.startTxNum {
 			if !r.history.needMerge || startTxNum < r.history.from {
-				r.history = MergeRange{true, startTxNum, item.endTxNum}
+				r.history = MergeRange{"", true, startTxNum, item.endTxNum}
 			}
 		}
 	}
@@ -211,7 +211,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 			}
 		}
 	}
-	return &MergeRange{minFound, startTxNum, endTxNum}
+	return &MergeRange{string(iit.name), minFound, startTxNum, endTxNum}
 }
 
 type HistoryRanges struct {
@@ -1085,7 +1085,7 @@ func (ac *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return 
 func (ac *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return ac.searchII(idx) }
 func (ac *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
 	for _, iit := range ac.iis {
-		if iit.iiId == idx {
+		if iit.name == idx {
 			return iit
 		}
 	}
