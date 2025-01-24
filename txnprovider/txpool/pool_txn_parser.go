@@ -769,12 +769,9 @@ type TxnSlot struct {
 
 	// EIP-7702: set code tx
 	Authorizations []Signature
-<<<<<<< HEAD
 
 	RollupCostData opstack.RollupCostData
-=======
 	AuthRaw        [][]byte // rlp encoded chainID+address+nonce, used to recover authorization address in txpool
->>>>>>> origin/main
 }
 
 // nolint

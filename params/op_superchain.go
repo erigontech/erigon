@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/ethereum-optimism/superchain-registry/superchain"
 )
@@ -41,8 +40,6 @@ var OPStackSupport = ProtocolVersionV0{Build: [8]byte{}, Major: 9, Minor: 0, Pat
 // OPStackChainConfigByName loads chain config corresponding to the chain name from superchain registry.
 // This implementation is based on optimism monorepo(https://github.com/ethereum-optimism/optimism/blob/op-node/v1.4.1/op-node/chaincfg/chains.go#L59)
 func OPStackChainConfigByName(name string) *superchain.ChainConfig {
-	// Handle legacy name aliases
-	name = networkname.HandleLegacyName(name)
 	for _, chainCfg := range superchain.OPChains {
 		if strings.EqualFold(chainCfg.Chain+"-"+chainCfg.Superchain, name) {
 			return chainCfg
