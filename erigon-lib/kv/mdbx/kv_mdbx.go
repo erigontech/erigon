@@ -116,9 +116,10 @@ func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts       { opts.mergeTh
 func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts        { opts.bucketsCfg = f; return opts }
 
 // Flags
-func (opts MdbxOpts) HasFlag(flag uint) bool          { return opts.flags&flag != 0 }
-func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts    { opts.flags = opts.flags | flags; return opts }
-func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts { opts.flags = opts.flags &^ flags; return opts }
+func (opts MdbxOpts) HasFlag(flag uint) bool           { return opts.flags&flag != 0 }
+func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts { opts.flags = f(opts.flags); return opts }
+func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts     { opts.flags = opts.flags | flags; return opts }
+func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts  { opts.flags = opts.flags &^ flags; return opts }
 func (opts MdbxOpts) boolToFlag(enabled bool, flag uint) MdbxOpts {
 	if enabled {
 		return opts.AddFlags(flag)
@@ -202,7 +203,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	}
 
-	env, err := mdbx.NewEnv()
+	env, err := mdbx.NewEnv(mdbx.Label(opts.label))
 	if err != nil {
 		return nil, err
 	}
@@ -701,6 +702,7 @@ func (tx *MdbxTx) CollectMetrics() {
 	}
 
 	kv.TxDirty.SetUint64(txInfo.SpaceDirty)
+	kv.TxRetired.SetUint64(txInfo.SpaceRetired)
 	kv.TxLimit.SetUint64(tx.db.txSize)
 	kv.TxSpill.SetUint64(txInfo.Spill)
 	kv.TxUnspill.SetUint64(txInfo.Unspill)

@@ -788,12 +788,14 @@ var (
 		Usage: "Ignore the bor block period and wait for 'blocksize' transactions (for testing purposes)",
 	}
 
+	// TODO - this is a depricated flag - should be removed
 	WithHeimdallMilestones = cli.BoolFlag{
 		Name:  "bor.milestone",
 		Usage: "Enabling bor milestone processing",
 		Value: true,
 	}
 
+	// TODO - this is a depricated flag - should be removed
 	WithHeimdallWaypoints = cli.BoolFlag{
 		Name:  "bor.waypoints",
 		Usage: "Enabling bor waypont recording",
@@ -803,8 +805,10 @@ var (
 	PolygonSyncFlag = cli.BoolFlag{
 		Name:  "polygon.sync",
 		Usage: "Enabling syncing using the new polygon sync component",
+		Value: true,
 	}
 
+	// TODO - this is a depricated flag - should be removed
 	PolygonSyncStageFlag = cli.BoolFlag{
 		Name:  "polygon.sync.stage",
 		Usage: "Enabling syncing with a stage that uses the polygon sync component",
@@ -890,6 +894,11 @@ var (
 	SentinelBootnodes = cli.StringSliceFlag{
 		Name:  "sentinel.bootnodes",
 		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
+		Value: cli.NewStringSlice(),
+	}
+	SentinelStaticPeers = cli.StringSliceFlag{
+		Name:  "sentinel.staticpeers",
+		Usage: "connect to comma-separated Consensus static peers",
 		Value: cli.NewStringSlice(),
 	}
 
@@ -1092,13 +1101,17 @@ var (
 		Usage: "Enable 'chaos monkey' to generate spontaneous network/consensus/etc failures. Use ONLY for testing",
 		Value: false,
 	}
-	ShutterEnabled = cli.BoolFlag{
+	ShutterEnabledFlag = cli.BoolFlag{
 		Name:  "shutter",
 		Usage: "Enable the Shutter encrypted transactions mempool (defaults to false)",
 	}
-	ShutterKeyperBootnodes = cli.StringSliceFlag{
-		Name:  "shutter.keyper.bootnodes",
-		Usage: "Use to override the default keyper bootnodes (defaults to using the bootnodes from the embedded config)",
+	ShutterP2pBootstrapNodesFlag = cli.StringSliceFlag{
+		Name:  "shutter.p2p.bootstrap.nodes",
+		Usage: "Use to override the default p2p bootstrap nodes (defaults to using the values in the embedded config)",
+	}
+	ShutterP2pListenPortFlag = cli.UintFlag{
+		Name:  "shutter.p2p.listen.port",
+		Usage: "Use to override the default p2p listen port (defaults to 23102)",
 	}
 )
 
@@ -1582,18 +1595,22 @@ func setTxPool(ctx *cli.Context, dbDir string, fullCfg *ethconfig.Config) {
 	fullCfg.TxPool = cfg
 }
 
-func setShutter(ctx *cli.Context, chainName string, cfg *ethconfig.Config) {
-	if enabled := ctx.Bool(ShutterEnabled.Name); !enabled {
+func setShutter(ctx *cli.Context, chainName string, nodeConfig *nodecfg.Config, ethConfig *ethconfig.Config) {
+	if enabled := ctx.Bool(ShutterEnabledFlag.Name); !enabled {
 		return
 	}
 
 	config := shutter.ConfigByChainName(chainName)
+	config.PrivateKey = nodeConfig.P2P.PrivateKey
 	// check for cli overrides
-	if ctx.IsSet(ShutterKeyperBootnodes.Name) {
-		config.KeyperBootnodes = ctx.StringSlice(ShutterKeyperBootnodes.Name)
+	if ctx.IsSet(ShutterP2pBootstrapNodesFlag.Name) {
+		config.BootstrapNodes = ctx.StringSlice(ShutterP2pBootstrapNodesFlag.Name)
+	}
+	if ctx.IsSet(ShutterP2pListenPortFlag.Name) {
+		config.ListenPort = ctx.Uint64(ShutterP2pListenPortFlag.Name)
 	}
 
-	cfg.Shutter = config
+	ethConfig.Shutter = config
 }
 
 func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
@@ -1685,6 +1702,12 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
 	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
 	cfg.PolygonSyncStage = ctx.Bool(PolygonSyncStageFlag.Name)
+
+	if cfg.PolygonSync {
+		cfg.WithHeimdallMilestones = false
+		cfg.WithHeimdallWaypointRecording = true
+	}
+
 	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync || cfg.PolygonSyncStage)
 
 	chainConfig := params.ChainConfigByChainName(ctx.String(ChainFlag.Name))
@@ -1862,6 +1885,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
 	cfg.CaplinConfig.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 	cfg.CaplinConfig.BootstrapNodes = ctx.StringSlice(SentinelBootnodes.Name)
+	cfg.CaplinConfig.StaticPeers = ctx.StringSlice(SentinelStaticPeers.Name)
 
 	chain := ctx.String(ChainFlag.Name) // mainnet by default
 	if ctx.IsSet(NetworkIdFlag.Name) {
@@ -1898,7 +1922,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setGPO(ctx, &cfg.GPO)
 
 	setTxPool(ctx, nodeConfig.Dirs.TxPool, cfg)
-	setShutter(ctx, chain, cfg)
+	setShutter(ctx, chain, nodeConfig, cfg)
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
 	setClique(ctx, &cfg.Clique, nodeConfig.Dirs.DataDir)

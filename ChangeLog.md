@@ -5,17 +5,11 @@ ChangeLog
 
 ### Breaking changes
 
-- `--prune.mode` default is `full`. For compatibility with `geth` and other clients. Plz set explicit
-  `--prune.mode` flag to your Erigon3 setups - to simplify future upgrade/downgrade.
 - Bor chains: enable our internal Consensus Layer by default (name: Astrid)
-- Released binaries for Linux are now dynamically linked (
-  Issues: https://github.com/erigontech/erigon/issues/12570, https://github.com/erigontech/erigon/issues/12556 )
-
-### New features:
-
-- Decided to fix snapshots format and go for `beta1`. Main focus: fast bug-reports fixes, chain-tip/rpc perf, validator
-  mode.
-- Erigon3 book: https://development.erigon-documentation-preview.pages.dev/
+    - The process should auto upgrade - in which case you may find that it starts creating new snapshots for checkpoints and milestones.
+    - This may however fail, as there are a number of potential edge cases.  If this happens the process will likely stop with a failure message.
+    - In this situation you will need to do a clean sync, in which case the complete snapshot set will be downloaded and astrid will sync.
+    - If you want to prevent this and retain the old behaviour start erigon with --polygon.sync=false
 
 ### TODO
 

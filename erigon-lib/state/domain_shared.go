@@ -31,6 +31,7 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/trie"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/sha3"
 
@@ -98,7 +99,7 @@ type SharedDomains struct {
 	storage *btree2.Map[string, dataWithPrevStep]
 
 	domainWriters [kv.DomainLen]*domainBufferedWriter
-	iiWriters     [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
+	iiWriters     map[kv.InvertedIdx]*invertedIndexBufferedWriter
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
@@ -114,8 +115,9 @@ type HasAgg interface {
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
 	sd := &SharedDomains{
-		logger:  logger,
-		storage: btree2.NewMap[string, dataWithPrevStep](128),
+		logger:    logger,
+		storage:   btree2.NewMap[string, dataWithPrevStep](128),
+		iiWriters: map[kv.InvertedIdx]*invertedIndexBufferedWriter{},
 		//trace:   true,
 	}
 	sd.SetTx(tx)
@@ -159,6 +161,10 @@ func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blo
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
 	sd.pastChangesAccumulator[toStringZeroCopy(key)] = acc
+}
+
+func (sd *SharedDomains) GetCommitmentContext() *SharedDomainsCommitmentContext {
+	return sd.sdCtx
 }
 
 func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]DomainEntryDiff, bool, error) {
@@ -661,19 +667,10 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
-	switch table {
-	case kv.LogAddrIdx, kv.TblLogAddressIdx:
-		err = sd.iiWriters[kv.LogAddrIdxPos].Add(key)
-	case kv.LogTopicIdx, kv.TblLogTopicsIdx, kv.LogTopicIndex:
-		err = sd.iiWriters[kv.LogTopicIdxPos].Add(key)
-	case kv.TblTracesToIdx:
-		err = sd.iiWriters[kv.TracesToIdxPos].Add(key)
-	case kv.TblTracesFromIdx:
-		err = sd.iiWriters[kv.TracesFromIdxPos].Add(key)
-	default:
-		panic(fmt.Errorf("unknown shared index %s", table))
+	if writer, ok := sd.iiWriters[table]; ok {
+		return writer.Add(key)
 	}
-	return err
+	panic(fmt.Errorf("unknown index %s", table))
 }
 
 func (sd *SharedDomains) SetTx(tx kv.Tx) {
@@ -1316,6 +1313,15 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	default:
 		panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
+}
+
+func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expectedRoot []byte, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
+	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	if ok {
+		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, nil, expectedRoot, logPrefix)
+	}
+
+	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 }
 
 // Evaluates commitment for processed state.
