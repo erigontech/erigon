@@ -68,16 +68,7 @@ func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *ht
 		if slot != nil && atts[i].Data.Slot != *slot {
 			continue
 		}
-		attVersion := a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetEpochAtSlot(atts[i].Data.Slot))
 		cIndex := atts[i].Data.CommitteeIndex
-		if attVersion.AfterOrEqual(clparams.ElectraVersion) {
-			index, err := atts[i].GetCommitteeIndexFromBits()
-			if err != nil {
-				log.Warn("[Beacon REST] failed to get committee bits", "err", err)
-				continue
-			}
-			cIndex = index
-		}
 		if committeeIndex != nil && cIndex != *committeeIndex {
 			continue
 		}
@@ -87,6 +78,35 @@ func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *ht
 	return newBeaconResponse(ret), nil
 }
 
+func (a *ApiHandler) GetEthV2BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	slot, err := beaconhttp.Uint64FromQueryParams(r, "slot")
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	atts := a.operationsPool.AttestationsPool.Raw()
+	if slot == nil && committeeIndex == nil {
+		return newBeaconResponse(atts), nil
+	}
+	ret := make([]any, 0, len(atts))
+	for i := range atts {
+		if slot != nil && atts[i].Data.Slot != *slot {
+			continue
+		}
+		if committeeIndex != nil {
+			indices := atts[i].CommitteeBits.GetOnIndices()
+			if len(indices) != 1 || uint64(indices[0]) != *committeeIndex {
+				continue
+			}
+		}
+		ret = append(ret, atts[i])
+	}
+
+	return newBeaconResponse(ret), nil
+}
 func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
 	req := []*solid.Attestation{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

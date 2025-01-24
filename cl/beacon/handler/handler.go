@@ -346,6 +346,9 @@ func (a *ApiHandler) init() {
 						r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
 						r.Get("/{block_id}/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlockAttestations))
 					})
+					r.Route("/pool", func(r chi.Router) {
+						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV2BeaconPoolAttestations))
+					})
 					if a.routerCfg.Builder {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BlindedBlocks))
 					}
