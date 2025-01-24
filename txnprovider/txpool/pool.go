@@ -505,13 +505,24 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		return err
 	}
 
-	announcements, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
+	announcements, reasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
 		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
 	if err != nil {
 		return err
 	}
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
+
+	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
+	for i, reason := range reasons {
+		if reason == txpoolcfg.Success {
+			txn := newTxns.Txns[i]
+			if txn.Traced {
+				p.logger.Info(fmt.Sprintf("TX TRACING: processRemoteTxns promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
+			}
+			p.promoted.Append(txn.Type, txn.Size, txn.IDHash[:])
+		}
+	}
 
 	if p.promoted.Len() > 0 {
 		select {
