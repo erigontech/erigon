@@ -321,7 +321,7 @@ func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
 	if c != nil {
 		b = c.BlobSchedule
 	}
-	return b.TargetBlobsPerBlock(c.IsPrague(t))
+	return b.TargetBlobsPerBlock(c.IsPrague(t)) * fixedgas.BlobGasPerBlob
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
