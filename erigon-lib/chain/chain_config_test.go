@@ -67,7 +67,6 @@ func TestConfigValueLookup(t *testing.T) {
 	assert.Equal(t, ConfigValueLookup(burntContract, 41874000+1), address2)
 }
 
-// Check that EIP-4844 values are returned for a nil BlobSchedule
 func TestNilBlobSchedule(t *testing.T) {
 	var b *BlobSchedule
 
