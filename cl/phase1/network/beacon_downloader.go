@@ -94,11 +94,11 @@ Loop:
 				if f.highestSlotProcessed > 2 {
 					reqSlot = f.highestSlotProcessed - 2
 				}
-				// double the request count every 30 seconds. This is inspired by the mekong network, which has many consecutive missing blocks.
+				// double the request count every 10 seconds. This is inspired by the mekong network, which has many consecutive missing blocks.
 				reqCount := count
 				if !f.highestSlotUpdateTime.IsZero() {
 					multiplier := int(time.Since(f.highestSlotUpdateTime).Seconds()) / 10
-					multiplier = min(multiplier, 4)
+					multiplier = min(multiplier, 6)
 					reqCount *= uint64(1 << uint(multiplier))
 				}
 				// leave a warning if we are stuck for more than 90 seconds
