@@ -22,6 +22,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/txnprovider"
@@ -37,13 +38,21 @@ type Pool struct {
 	decryptionKeysListener  DecryptionKeysListener
 	decryptionKeysProcessor DecryptionKeysProcessor
 	encryptedTxnsPool       EncryptedTxnsPool
+	eonPool                 EonPool
 }
 
-func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.TxnProvider, chainEvents *shards.Events) *Pool {
+func NewPool(
+	logger log.Logger,
+	config Config,
+	secondaryTxnProvider txnprovider.TxnProvider,
+	chainEvents *shards.Events,
+	contractBackend bind.ContractBackend,
+) *Pool {
 	logger = logger.New("component", "shutter")
 	decryptionKeysListener := NewDecryptionKeysListener(logger, config)
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
 	encryptedTxnsPool := NewEncryptedTxnsPool(config, chainEvents)
+	eonPool := NewEonPool(config, contractBackend)
 	return &Pool{
 		logger:                  logger,
 		config:                  config,
@@ -51,6 +60,7 @@ func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.
 		decryptionKeysListener:  decryptionKeysListener,
 		decryptionKeysProcessor: decryptionKeysProcessor,
 		encryptedTxnsPool:       encryptedTxnsPool,
+		eonPool:                 eonPool,
 	}
 }
 
@@ -66,6 +76,7 @@ func (p Pool) Run(ctx context.Context) error {
 	eg.Go(func() error { return p.decryptionKeysListener.Run(ctx) })
 	eg.Go(func() error { return p.decryptionKeysProcessor.Run(ctx) })
 	eg.Go(func() error { return p.encryptedTxnsPool.Run(ctx) })
+	eg.Go(func() error { return p.eonPool.Run(ctx) })
 	return eg.Wait()
 }
 
