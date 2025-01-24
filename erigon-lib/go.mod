@@ -4,7 +4,6 @@ go 1.22.0
 
 require (
 	github.com/erigontech/mdbx-go v0.27.24
-	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 )
 
@@ -17,7 +16,6 @@ require (
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
-	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/erigontech/erigon-snapshot v1.3.0
 	github.com/erigontech/interfaces v0.0.0-20241211040849-58b88a185510
@@ -25,7 +23,6 @@ require (
 	github.com/gofrs/flock v0.8.1
 	github.com/google/btree v1.1.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
-	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/holiman/uint256 v1.2.4
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml/v2 v2.2.1
