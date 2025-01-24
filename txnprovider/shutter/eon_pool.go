@@ -7,15 +7,15 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/contracts"
-	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
+	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
 type EonPool struct {
-	config Config
+	config          Config
+	contractBackend bind.ContractBackend
 }
 
-func NewEonPool(config Config) EonPool {
+func NewEonPool(config Config, contractBackend bind.ContractBackend) EonPool {
 	return EonPool{
 		config: config,
 	}
@@ -34,9 +34,8 @@ func (ep EonPool) Eon(blockNum uint64) (Eon, error) {
 	//
 	// TODO - check if we have it in the pool first, if not then fallback
 	//
-	backend := contracts.Backend{}
 	addr := libcommon.HexToAddress(ep.config.KeyperSetManagerContractAddress)
-	ksm, err := shuttercontracts.NewKeyperSetManager(addr, backend)
+	ksm, err := contracts.NewKeyperSetManager(addr, ep.contractBackend)
 	if err != nil {
 		return Eon{}, fmt.Errorf("failed to create KeyperSetManager: %w", err)
 	}
@@ -52,7 +51,7 @@ func (ep EonPool) Eon(blockNum uint64) (Eon, error) {
 		return Eon{}, fmt.Errorf("failed to get KeyperSetAddress: %w", err)
 	}
 
-	keyperSet, err := shuttercontracts.NewKeyperSet(keyperSetAddress, backend)
+	keyperSet, err := contracts.NewKeyperSet(keyperSetAddress, ep.contractBackend)
 	if err != nil {
 		return Eon{}, fmt.Errorf("failed to create KeyperSet: %w", err)
 	}

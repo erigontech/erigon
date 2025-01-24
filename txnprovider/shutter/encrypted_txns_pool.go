@@ -13,7 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/turbo/shards"
-	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
+	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
 type EncryptedTxnsPool struct {
@@ -26,7 +26,7 @@ type EncryptedTxnsPool struct {
 }
 
 func NewEncryptedTxnsPool(config Config, chainEvents *shards.Events) EncryptedTxnsPool {
-	sequencerAbi, err := abi.JSON(strings.NewReader(shuttercontracts.SequencerABI))
+	sequencerAbi, err := abi.JSON(strings.NewReader(contracts.SequencerABI))
 	if err != nil {
 		panic(fmt.Errorf("failed to parse shutter Sequencer ABI: %w", err))
 	}
@@ -80,7 +80,7 @@ func (utp EncryptedTxnsPool) processLogs(logs []*remoteproto.SubscribeLogsReply)
 			continue
 		}
 
-		event := shuttercontracts.SequencerTransactionSubmitted{}
+		event := contracts.SequencerTransactionSubmitted{}
 		err := utp.sequencerAbi.UnpackIntoInterface(&event, "TransactionSubmitted", l.Data)
 		if err != nil {
 			return fmt.Errorf("failed to unpack log data: %w", err)
