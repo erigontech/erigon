@@ -113,7 +113,7 @@ func (b *BlobSchedule) TargetBlobsPerBlock(isPrague bool) uint64 {
 		return 6 // EIP-7691
 	}
 	if b != nil && b.Cancun != nil {
-		return b.Cancun.Max
+		return b.Cancun.Target
 	}
 	return 3 // EIP-4844
 }
