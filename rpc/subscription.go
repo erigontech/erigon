@@ -144,8 +144,6 @@ func (n LocalNotifier) Notify(id ID, data interface{}) error {
 		return errDead
 	case n.resc <- data:
 		return nil
-	default:
-		return ErrSubscriptionQueueOverflow
 	}
 }
 
