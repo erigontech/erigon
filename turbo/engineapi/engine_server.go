@@ -602,6 +602,13 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 	}
+	if s.config.IsOptimism() {
+		req.Transactions = [][]byte{}
+		for _, transaction := range payloadAttributes.Transactions {
+			req.Transactions = append(req.Transactions, transaction)
+		}
+		req.NoTxPool = payloadAttributes.NoTxPool
+	}
 
 	if version >= clparams.CapellaVersion {
 		req.Withdrawals = engine_types.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
