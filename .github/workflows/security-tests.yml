@@ -21,4 +21,4 @@ jobs:
           echo "RPC_URL=$(kurtosis port print cdk-v1 cdk-erigon-rpc-001 rpc)" >> $GITHUB_ENV  
 
       - name: Pull Docker Image & Run Security Tests
-        run: docker run --rm -e RPC_URL=$RPC_URL c7toc5154/rnd_tests:latest pytest -m "security"
+        run: docker run --rm --network host -e RPC_URL=$RPC_URL c7toc5154/rnd_tests:latest pytest -m "security"
