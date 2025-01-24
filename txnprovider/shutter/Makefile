@@ -1,5 +1,6 @@
 GOBINREL = build/bin
 GOBIN = $(CURDIR)/$(GOBINREL)
+OPENZEPPELINDIR = $(CURDIR)/../../contracts/openzeppelin
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -50,6 +51,7 @@ contracts: solc abigen
 .PHONY: solc
 solc:
 	@type "solc" 2> /dev/null || (echo 'Please install solc'; exit 1)
+	@if [ ! -d "$(OPENZEPPELINDIR)" ] || [ -z "$$(ls $(OPENZEPPELINDIR) 2>/dev/null)" ]; then echo 'Please pull openzeppelin contracts by running `git submodule update --init --recursive --force`'; exit 1; fi
 	PATH="$(GOBIN):$(PATH)" go generate -run "solc" ./...
 
 .PHONY: abigen
