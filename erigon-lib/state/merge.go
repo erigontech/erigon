@@ -1085,7 +1085,7 @@ func (ac *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return 
 func (ac *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return ac.searchII(idx) }
 func (ac *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
 	for _, iit := range ac.iis {
-		if iit.ii.iiId == idx {
+		if iit.iiId == idx {
 			return iit
 		}
 	}

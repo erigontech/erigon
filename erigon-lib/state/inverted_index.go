@@ -457,7 +457,7 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIn
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
 		indexKeys: etl.NewCollector(iit.ii.filenameBase+".flush.ii.keys", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
 		index:     etl.NewCollector(iit.ii.filenameBase+".flush.ii.vals", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
-		iiId:      iit.ii.iiId,
+		iiId:      iit.iiId,
 	}
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
@@ -475,6 +475,7 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		ii:      ii,
 		visible: ii._visible,
 		files:   files,
+		iiId:    ii.iiId,
 	}
 }
 func (iit *InvertedIndexRoTx) Close() {
@@ -528,6 +529,7 @@ func (mr *MergeRange) Equal(other *MergeRange) bool {
 
 type InvertedIndexRoTx struct {
 	ii      *InvertedIndex
+	iiId    kv.InvertedIdx
 	files   visibleFiles
 	visible *iiVisible
 	getters []*seg.Reader
