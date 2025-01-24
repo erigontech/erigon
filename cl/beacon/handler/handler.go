@@ -348,6 +348,7 @@ func (a *ApiHandler) init() {
 					})
 					r.Route("/pool", func(r chi.Router) {
 						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV2BeaconPoolAttestations))
+						r.Post("/attestations", a.PostEthV1BeaconPoolAttestations)
 					})
 					if a.routerCfg.Builder {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BlindedBlocks))

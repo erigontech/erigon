@@ -128,16 +128,16 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			committeeCountPerSlot = a.syncedData.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
 		)
 
-		if attClVersion.AfterOrEqual(clparams.ElectraVersion) {
-			index, err := attestation.GetCommitteeIndexFromBits()
-			if err != nil {
+		if attClVersion >= clparams.ElectraVersion {
+			indices := attestation.CommitteeBits.GetOnIndices()
+			if len(indices) != 1 {
 				failures = append(failures, poolingFailure{
 					Index:   i,
-					Message: err.Error(),
+					Message: "invalid number of on bits in committee bits",
 				})
 				continue
 			}
-			cIndex = index
+			cIndex = uint64(indices[0])
 		}
 
 		subnet := subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
