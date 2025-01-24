@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter/proto"
 )
@@ -45,13 +44,12 @@ func NewPool(
 	logger log.Logger,
 	config Config,
 	secondaryTxnProvider txnprovider.TxnProvider,
-	chainEvents *shards.Events,
 	contractBackend bind.ContractBackend,
 ) *Pool {
 	logger = logger.New("component", "shutter")
 	decryptionKeysListener := NewDecryptionKeysListener(logger, config)
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
-	encryptedTxnsPool := NewEncryptedTxnsPool(config, chainEvents)
+	encryptedTxnsPool := NewEncryptedTxnsPool(config, contractBackend)
 	eonPool := NewEonPool(config, contractBackend)
 	return &Pool{
 		logger:                  logger,
