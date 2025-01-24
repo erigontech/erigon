@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -240,7 +241,7 @@ func New(ctx context.Context, dirs datadir.Dirs, version string, verbosity lg.Le
 // LoadSnapshotsHashes checks local preverified.toml. If file exists, used local hashes.
 // If there are no such file, try to fetch hashes from the web and create local file.
 func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
-	if !networkname.IsKnownNetwork(chainName) {
+	if !slices.Contains(networkname.All, chainName) {
 		log.Root().Warn("No snapshot hashes for chain", "chain", chainName)
 		return snapcfg.NewNonSeededCfg(chainName), nil
 	}

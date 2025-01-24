@@ -43,7 +43,7 @@ type Store interface {
 	PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[libcommon.Hash]uint64) error
 	PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error
 	PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error
-	PutProcessedBlockInfo(ctx context.Context, info ProcessedBlockInfo) error
+	PutProcessedBlockInfo(ctx context.Context, info []ProcessedBlockInfo) error
 
 	Unwind(ctx context.Context, blockNum uint64) error
 
