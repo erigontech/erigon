@@ -145,10 +145,10 @@ func TestSpawnSequencingStage(t *testing.T) {
 	zkCfg := &ethconfig.Zk{
 		SequencerResequence: false,
 		// lower batch close time ensures only 1 block will be created on 1 turn, as the test expects
-		SequencerBatchSealTime:      4 * time.Second,
-		SequencerBlockSealTime:      5 * time.Second,
-		SequencerEmptyBlockSealTime: 5 * time.Second,
-		InfoTreeUpdateInterval:      5 * time.Second,
+		SequencerBatchSealTime:      3 * time.Millisecond, // normally it is greater that block seal time, allows one more block to be added to the batch
+		SequencerBlockSealTime:      2 * time.Millisecond,
+		SequencerEmptyBlockSealTime: 2 * time.Millisecond,
+		InfoTreeUpdateInterval:      2 * time.Millisecond,
 	}
 
 	legacyVerifier := verifier.NewLegacyExecutorVerifier(*zkCfg, nil, db1, nil, nil)
@@ -175,27 +175,29 @@ func TestSpawnSequencingStage(t *testing.T) {
 	tx = memdb.BeginRw(t, db1)
 	hDB = hermez_db.NewHermezDb(tx)
 
+	expectedBlockNum := latestL1BlockNumber.Uint64() + 1
 	// WriteBlockL1InfoTreeIndex
-	l1InfoTreeIndex, err := hDB.GetBlockL1InfoTreeIndex(101)
+	l1InfoTreeIndex, err := hDB.GetBlockL1InfoTreeIndex(expectedBlockNum)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(1), l1InfoTreeIndex)
 
 	// WriteBlockL1InfoTreeIndexProgress
 	blockNumber, l1InfoTreeIndex, err := hDB.GetLatestBlockL1InfoTreeIndexProgress()
 	require.NoError(t, err)
-	assert.Equal(t, uint64(101), blockNumber)
+	assert.Equal(t, expectedBlockNum, blockNumber)
 	assert.Equal(t, uint64(1), l1InfoTreeIndex)
 
 	// WriteBlockInfoRoot
-	root, err := hDB.GetBlockInfoRoot(101)
+	root, err := hDB.GetBlockInfoRoot(expectedBlockNum)
 	require.NoError(t, err)
-	assert.Equal(t, uint64(101), blockNumber)
 	assert.NotEmpty(t, root.String())
 
 	// IncrementStateVersionByBlockNumberIfNeeded
 	blockNumber, stateVersion, err := rawdb.GetLatestStateVersion(tx)
 	require.NoError(t, err)
-	assert.Equal(t, uint64(101), blockNumber)
+	// batch/block sealing timeouts are small, so it could happen that an extra block is not added to the batch
+	// No requirement prevents adding and extra block to the batch or not adding it. For more specific cases, create a separate test.
+	assert.True(t, expectedBlockNum <= blockNumber && blockNumber <= expectedBlockNum+1, "value is not in range")
 	assert.Equal(t, uint64(1), stateVersion)
 	tx.Rollback()
 }
