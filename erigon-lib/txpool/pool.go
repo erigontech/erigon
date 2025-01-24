@@ -232,8 +232,7 @@ type TxPool struct {
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
 	isPostPrague            atomic.Bool
-	maxBlobsPerBlock        uint64
-	maxBlobsPerBlockPrague  *uint64
+	blobSchedule            *chain.BlobSchedule
 	feeCalculator           FeeCalculator
 	logger                  log.Logger
 }
@@ -243,8 +242,7 @@ type FeeCalculator interface {
 }
 
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
-	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime, pragueTime *big.Int, maxBlobsPerBlock uint64,
-	maxBlobsPerBlockPrague *uint64,
+	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime, pragueTime *big.Int, blobSchedule *chain.BlobSchedule,
 	feeCalculator FeeCalculator, logger log.Logger,
 ) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
@@ -290,8 +288,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		unprocessedRemoteByHash: map[string]int{},
 		minedBlobTxsByBlock:     map[uint64][]*metaTx{},
 		minedBlobTxsByHash:      map[string]*metaTx{},
-		maxBlobsPerBlock:        maxBlobsPerBlock,
-		maxBlobsPerBlockPrague:  maxBlobsPerBlockPrague,
+		blobSchedule:            blobSchedule,
 		feeCalculator:           feeCalculator,
 		// builderNotifyNewTxns:    builderNotifyNewTxns,
 		// newSlotsStreams:         newSlotsStreams,
@@ -1079,14 +1076,7 @@ func (p *TxPool) isPrague() bool {
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
-	if p.isPrague() {
-		if p.maxBlobsPerBlockPrague != nil {
-			return *p.maxBlobsPerBlockPrague
-		}
-		return 9 // EIP-7691 default
-	} else {
-		return p.maxBlobsPerBlock
-	}
+	return p.blobSchedule.MaxBlobsPerBlock(p.isPrague())
 }
 
 // Check that the serialized txn should not exceed a certain max size
