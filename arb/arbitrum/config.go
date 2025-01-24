@@ -327,7 +327,15 @@ func GetBlockChain(chainDb kv.TemporalRwTx, cacheConfig *CachingConfig, chainCon
 	return core.NewBlockChain(chainDb, cacheConfig, chainConfig, nil, nil, engine, vmConfig, shouldPreserveFalse, &txLookupLimit)
 }
 
-func WriteOrTestBlockChain(chainDb kv.TemporalRwTx, cacheConfig *CachingConfig, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, txLookupLimit uint64, accountsPerSync uint) (*core.BlockChain, error) {
+func WriteOrTestBlockChain(
+	chainDb kv.TemporalRwTx,
+	cacheConfig *CachingConfig,
+	initData statetransfer.InitDataReader,
+	chainConfig *chain.Config,
+	initMessage *arbostypes.ParsedInitMessage,
+	txLookupLimit uint64,
+	accountsPerSync uint,
+) (*core.BlockChain, error) {
 	// emptyBlockChain := rawdb.ReadHeadHeader(chainDb) == nil
 	// if !emptyBlockChain && (cacheConfig.StateScheme == rawdb.PathScheme) {
 	// 	// When using path scheme, and the stored state trie is not empty,

@@ -9,7 +9,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/bloombits"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
 
@@ -36,10 +35,10 @@ type Backend struct {
 	chanClose    chan struct{} //close coroutine
 	chanNewBlock chan struct{} //create new L2 block unless empty
 
-	filterSystem *filters.FilterSystem
+	// filterSystem *filters.FilterSystem
 }
 
-func NewBackend(stack *node.Node, config *Config, chainDb kv.TemporalRwDB, publisher ArbInterface, filterConfig filters.Config) (*Backend, *filters.FilterSystem, error) {
+func NewBackend(stack *node.Node, config *Config, chainDb kv.TemporalRwDB, publisher ArbInterface /*, filterConfig filters.Config*/) (*Backend /**filters.FilterSystem,*/, error) {
 	backend := &Backend{
 		arb:     publisher,
 		stack:   stack,
@@ -71,12 +70,12 @@ func NewBackend(stack *node.Node, config *Config, chainDb kv.TemporalRwDB, publi
 	// }
 	// backend.filterSystem = filterSystem
 	// return backend, filterSystem, nil //
-	return backend, nil, nil
+	return backend, nil
 }
 
 // func (b *Backend) AccountManager() *accounts.Manager { return b.stack.AccountManager() }
 func (b *Backend) APIBackend() *APIBackend                             { return b.apiBackend }
-func (b *Backend) APIs() []rpc.API                                     { return b.apiBackend.GetAPIs(b.filterSystem) }
+func (b *Backend) APIs() []rpc.API                                     { return nil /*b.apiBackend.GetAPIs(b.filterSystem) */ }
 func (b *Backend) ArbInterface() ArbInterface                          { return b.arb }
 func (b *Backend) BlockChain() eth1_chain_reader.ChainReaderWriterEth1 { return b.arb.BlockChain() }
 

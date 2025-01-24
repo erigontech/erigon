@@ -223,7 +223,7 @@ func (r *RecordingDatabase) WriteStateToDatabase(header *types.Header) error {
 // lock must be held when calling that
 func (r *RecordingDatabase) referenceRootLockHeld(root common.Hash) {
 	r.references++
-	recordingDbReferences.Update(r.references)
+	recordingDbReferences.SetUint64(uint64(r.references))
 	r.db.TrieDB().Reference(root, common.Hash{})
 }
 
@@ -231,7 +231,7 @@ func (r *RecordingDatabase) dereferenceRoot(root common.Hash) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	r.references--
-	recordingDbReferences.Update(r.references)
+	recordingDbReferences.SetUint64(uint64(r.references))
 	r.db.TrieDB().Dereference(root)
 }
 
@@ -249,12 +249,12 @@ func (r *RecordingDatabase) addStateVerify(statedb *state.IntraBlockState, expec
 
 	_, size, _ := r.db.TrieDB().Size()
 	limit := common.StorageSize(r.config.TrieDirtyCache) * 1024 * 1024
-	recordingDbSize.Update(int64(size))
+	recordingDbSize.SetUint64(uint64(size))
 	if size > limit {
 		log.Info("Recording DB: flushing to disk", "size", size, "limit", limit)
 		r.db.TrieDB().Cap(limit - ethdb.IdealBatchSize)
 		_, size, _ = r.db.TrieDB().Size()
-		recordingDbSize.Update(int64(size))
+		recordingDbSize.SetUint64(uint64(size))
 	}
 	return statedb, nil
 	//return state.New(result, statedb.Database(), nil)

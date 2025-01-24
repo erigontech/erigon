@@ -81,6 +81,10 @@ type Receipt struct {
 	FirstLogIndexWithinBlock uint32 `json:"-"` // field which used to store in db and re-calc
 }
 
+func (r *Receipt) GasUsedForL2() uint64 {
+	return r.GasUsed - r.GasUsedForL1
+}
+
 type receiptMarshaling struct {
 	Type              hexutil.Uint64
 	PostState         hexutility.Bytes

@@ -43,6 +43,7 @@ type SignerFn func(libcommon.Address, types.Transaction) (types.Transaction, err
 type CallOpts struct {
 	Pending     bool              // Whether to operate on the pending state or the last known one
 	From        libcommon.Address // Optional the sender address, otherwise the first account is used
+	BlockHash   libcommon.Hash    // Optional the block hash on which the call should be performed
 	BlockNumber *big.Int          // Optional the block number on which the call should be performed
 	Context     context.Context   // Network context to support cancellation and timeouts (nil = no timeout)
 }
