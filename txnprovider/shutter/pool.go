@@ -22,7 +22,9 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter/proto"
 )
@@ -37,7 +39,13 @@ type Pool struct {
 	decryptionKeysProcessor DecryptionKeysProcessor
 }
 
-func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.TxnProvider) *Pool {
+func NewPool(
+	logger log.Logger,
+	config Config,
+	secondaryTxnProvider txnprovider.TxnProvider,
+	chainEvents *shards.Events,
+	contractBackend bind.ContractBackend,
+) *Pool {
 	logger = logger.New("component", "shutter")
 	decryptionKeysListener := NewDecryptionKeysListener(logger, config)
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
