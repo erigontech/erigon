@@ -143,8 +143,7 @@ type TxPool struct {
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
 	isPostPrague            atomic.Bool
-	maxBlobsPerBlock        uint64
-	maxBlobsPerBlockPrague  *uint64
+	blobSchedule            *chain.BlobSchedule
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -170,8 +169,7 @@ func New(
 	agraBlock *big.Int,
 	cancunTime *big.Int,
 	pragueTime *big.Int,
-	maxBlobsPerBlock uint64,
-	maxBlobsPerBlockPrague *uint64,
+	blobSchedule *chain.BlobSchedule,
 	sentryClients []sentryproto.SentryClient,
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
@@ -224,8 +222,7 @@ func New(
 		unprocessedRemoteByHash: map[string]int{},
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
-		maxBlobsPerBlock:        maxBlobsPerBlock,
-		maxBlobsPerBlockPrague:  maxBlobsPerBlockPrague,
+		blobSchedule:            blobSchedule,
 		feeCalculator:           options.feeCalculator,
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
@@ -1097,14 +1094,7 @@ func (p *TxPool) isPrague() bool {
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
-	if p.isPrague() {
-		if p.maxBlobsPerBlockPrague != nil {
-			return *p.maxBlobsPerBlockPrague
-		}
-		return 9 // EIP-7691 default
-	} else {
-		return p.maxBlobsPerBlock
-	}
+	return p.blobSchedule.MaxBlobsPerBlock(p.isPrague())
 }
 
 // Check that the serialized txn should not exceed a certain max size
