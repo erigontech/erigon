@@ -12,7 +12,7 @@ cdk-erigon is a fork of Erigon, currently in Alpha, optimized for syncing with t
 
 ## Hardware requirements
 
-* A Linux-based OS (e.g., Ubuntu Server 22.04 LTS).
+* A Linux-based OS (e.g., Ubuntu Server 22.04 LTS), with g++ 12+ being necessary, meaning Ubuntu 22.04 LTS or a more recent version is required.
 * At least 32GB RAM with a 4-core CPU.
 * Both Apple Silicon and AMD64 are supported.
 
