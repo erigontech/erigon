@@ -279,10 +279,8 @@ func (p *BatchesProcessor) processFullBlock(blockEntry *types.FullL2Block) (endL
 		return false, ErrorTriggeredUnwind
 	}
 
-	blockToIgnore := uint64(7579383)
-
 	// unwind if we already have this block
-	if blockEntry.L2BlockNumber != blockToIgnore && blockEntry.L2BlockNumber < p.lastBlockHeight+1 {
+	if blockEntry.L2BlockNumber < p.lastBlockHeight+1 {
 		log.Warn(fmt.Sprintf("[%s] Block %d, already processed unwinding...", p.logPrefix, blockEntry.L2BlockNumber))
 		if _, err := p.unwind(blockEntry.L2BlockNumber); err != nil {
 			return false, err

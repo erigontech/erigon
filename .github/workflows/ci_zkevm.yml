@@ -4,12 +4,12 @@ on:
     branches:
       - zkevm
       - zkevm-2.60
-      - stable*
+      - stable/**
   pull_request:
     branches:
       - zkevm
       - zkevm-2.60
-      - stable*
+      - stable/**
     types:
       - opened
       - reopened
@@ -143,7 +143,7 @@ jobs:
           docker run --network=host  --volume "./tmp/:/config/" --env BRIDGE_TEST_CONFIG_FILE=/config/test.toml bridge-e2e-realnetwork-erc20
 
       - name: Upload logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: evm-rpc-tests-logs-${{ github.run_id }}
           path: ./cdk-erigon/logs/evm-rpc-tests.log
@@ -163,7 +163,7 @@ jobs:
 
       - name: Upload logs
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: logs_${{ github.run_id }}
           path: ./kurtosis-cdk/ci_logs
@@ -186,7 +186,7 @@ jobs:
         run: /usr/local/bin/polycli loadtest --rpc-url "$(kurtosis port print cdk-v1 cdk-erigon-rpc-001 rpc)" --private-key "0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625" --verbosity 700 --requests 500 --rate-limit 50  --mode uniswapv3 --legacy
 
       - name: Upload logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: evm-rpc-tests-logs-${{ github.run_id }}
           path: ./cdk-erigon/logs/evm-rpc-tests.log
@@ -202,7 +202,7 @@ jobs:
 
       - name: Upload logs
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: logs_${{ github.run_id }}
           path: ./kurtosis-cdk/ci_logs
