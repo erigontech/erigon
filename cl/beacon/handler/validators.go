@@ -792,3 +792,38 @@ func (a *ApiHandler) GetEthV1ValidatorAggregateAttestation(w http.ResponseWriter
 
 	return newBeaconResponse(att), nil
 }
+
+func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	attDataRoot := r.URL.Query().Get("attestation_data_root")
+	if attDataRoot == "" {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation_data_root is required"))
+	}
+	slot := r.URL.Query().Get("slot")
+	if slot == "" {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is required"))
+	}
+	slotNum, err := strconv.ParseUint(slot, 10, 64)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.WithMessage(err, "invalid slot"))
+	}
+	committeeIndex := r.URL.Query().Get("committee_index")
+	if committeeIndex == "" {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("committee_index is required"))
+	}
+	committeeIndexNum, err := strconv.ParseUint(committeeIndex, 10, 64)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.WithMessage(err, "invalid committee_index"))
+	}
+
+	attDataRootHash := libcommon.HexToHash(attDataRoot)
+	att := a.aggregatePool.GetAggregatationByRootAndCommittee(attDataRootHash, committeeIndexNum)
+	if att == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))
+	}
+	if slotNum != att.Data.Slot {
+		log.Debug("attestation slot does not match", "attestation_data_root", attDataRoot, "slot_inquire", slot)
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation slot mismatch"))
+	}
+
+	return newBeaconResponse(att), nil
+}

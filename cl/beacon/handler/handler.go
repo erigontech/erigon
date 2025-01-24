@@ -351,6 +351,7 @@ func (a *ApiHandler) init() {
 			if a.routerCfg.Validator {
 				r.Route("/validator", func(r chi.Router) {
 					r.Get("/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock)) // deprecate
+					r.Get("/aggregate_attestation", beaconhttp.HandleEndpointFunc(a.GetEthV2ValidatorAggregateAttestation))
 				})
 			}
 		})
