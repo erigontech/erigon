@@ -21,8 +21,8 @@ import (
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/crypto/cryptopool"
 	"github.com/erigontech/erigon/rlp"
-	"github.com/holiman/uint256"
 	"github.com/erigontech/erigon/txnprovider/txpool"
+	"github.com/holiman/uint256"
 )
 
 func init() {

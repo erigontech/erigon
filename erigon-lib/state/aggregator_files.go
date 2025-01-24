@@ -17,7 +17,6 @@
 package state
 
 import (
-
 	"math/bits"
 
 	"github.com/erigontech/erigon-lib/common"

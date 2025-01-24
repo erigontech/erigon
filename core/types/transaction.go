@@ -33,8 +33,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 
-	"github.com/erigontech/erigon/common/math"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/rlp"
 )
 

@@ -229,13 +229,12 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint
 		return 0, uint256.Int{}, nil
 	}
 	nonce, balance, err = DecodeSender(encoded)
-	
+
 	if err != nil {
 		return 0, uint256.Int{}, err
 	}
 	return nonce, balance, nil
 }
-
 
 func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger) (err error) {
 	for i, txn := range newTxns.Txns {
