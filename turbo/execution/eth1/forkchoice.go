@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/checker"
 	"runtime"
 	"time"
 
@@ -538,19 +537,19 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 		logArgs = append(logArgs, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		if log {
-			go func() {
-				ts := time.Now()
-				bR, err := checker.ReceiptsCheck(tx.(kv.TemporalTx))
-				e.logger.Info("check time:", time.Since(ts).Milliseconds())
-				if err != nil {
-					e.logger.Error("prune check err", err.Error())
-					return
-				}
-				if bR {
-					e.logger.Error("bad receipts")
-					return
-				}
-			}()
+			//go func() {
+			//	ts := time.Now()
+			//	bR, err := checker.ReceiptsCheck(tx.(kv.TemporalTx))
+			//	e.logger.Info("check time:", time.Since(ts).Milliseconds())
+			//	if err != nil {
+			//		e.logger.Error("prune check err", err.Error())
+			//		return
+			//	}
+			//	if bR {
+			//		e.logger.Error("bad receipts")
+			//		return
+			//	}
+			//}()
 			e.logger.Info("head updated", logArgs...)
 		}
 	}
