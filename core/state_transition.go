@@ -615,14 +615,7 @@ func (st *StateTransition) innerTransitionDB(refunds bool, gasBailout bool) (*ev
 		}, nil
 	}
 
-	gasUsed := st.gasUsed()
-	if gasUsed < floorGas7623 && rules.IsPrague {
-		gasUsed = floorGas7623
-		st.gasRemaining = st.initialGas - gasUsed
-	}
-=======
 
->>>>>>> origin/main
 	if refunds && !gasBailout {
 		refundQuotient := params.RefundQuotient
 		if rules.IsLondon {
