@@ -341,8 +341,11 @@ func (a *ApiHandler) init() {
 			}
 			if a.routerCfg.Beacon {
 				r.Route("/beacon", func(r chi.Router) {
-					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
-					r.Post("/blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BeaconBlocks))
+					r.Route("/blocks", func(r chi.Router) {
+						r.Post("/", beaconhttp.HandleEndpointFunc(a.PostEthV2BeaconBlocks))
+						r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
+						r.Get("/{block_id}/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlockAttestations))
+					})
 					if a.routerCfg.Builder {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BlindedBlocks))
 					}
