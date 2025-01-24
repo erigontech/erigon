@@ -238,10 +238,6 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		Requests:         requestsBundle,
 	}
 
-	if header.ParentBeaconBlockRoot != nil {
-		data.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*header.ParentBeaconBlockRoot)
-	}
-
 	return &execution.GetAssembledBlockResponse{
 		Data: data,
 		Busy: false,
