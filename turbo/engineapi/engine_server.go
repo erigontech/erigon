@@ -614,8 +614,16 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		req.Withdrawals = engine_types.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
 	}
 
-	if version >= clparams.DenebVersion {
+	if payloadAttributes.ParentBeaconBlockRoot != nil && version >= clparams.DenebVersion {
 		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
+	}
+
+	if s.config.Optimism != nil && payloadAttributes.GasLimit == nil {
+		return nil, &engine_helpers.InvalidPayloadAttributesErr
+	}
+
+	if payloadAttributes.GasLimit != nil {
+		req.GasLimit = (*uint64)(payloadAttributes.GasLimit)
 	}
 
 	var resp *execution.AssembleBlockResponse
