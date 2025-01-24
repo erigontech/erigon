@@ -208,18 +208,18 @@ func (a *ProtoAppendable) IsBaseAppendable() bool {
  queries can be PointQueries, RangedQueries, MarkedQueries
 */
 
-type AppendableRoTx struct {
-	files VisibleSegments
-	a     Appendable
-	name  ApEnum
+// type AppendableRoTx struct {
+// 	files VisibleSegments
+// 	a     Appendable
+// 	name  ApEnum
 
-	getters    []*seg.Reader
-	idxReaders [][]*recsplit.IndexReader
-}
+// 	getters    []*seg.Reader
+// 	idxReaders [][]*recsplit.IndexReader
+// }
 
-func (a *AppendableRoTx) Unwind(ctx context.Context, baseTsNumFrom TsNum, rwTx kv.RwTx) error {
-	return a.a.Unwind(ctx, baseTsNumFrom, rwTx)
-}
+// func (a *AppendableRoTx) Unwind(ctx context.Context, baseTsNumFrom TsNum, rwTx kv.RwTx) error {
+// 	return a.a.Unwind(ctx, baseTsNumFrom, rwTx)
+// }
 
 ///
 

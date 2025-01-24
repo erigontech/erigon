@@ -49,39 +49,19 @@ type Appendable interface {
 	// call BeginFilesRo on that
 }
 
-// appendableRoTx extensions...providing different query patterns
-// idea is that aggregator "return" a *Queries interface, and user can do Get/Put/Range on that.
-// alternate is to expose eveything, but that means exposing tsId/forkId etc. even for appendables
-// for which it is not relevant. Plus, sometimes base appendable tsNum should also be managed...
-
-// each appendable kind has a different query pattern
-
-// 1:1
-type PointQueries interface {
-	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
-	Put(tsNum TsNum, value VVType, tx kv.RwTx) error
-}
-
-// many:1
-type RangedQueries interface {
-	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
-	Put(tsNum TsNum, value VVType, tx kv.RwTx) error
-	PutEntityEnd(startBaseTsNum TsNum, tsNum TsNum, tx kv.RwTx) error
-}
-
-// 1:many
-type BindQueries interface {
-	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
-	Put(tsId TsId, value VVType, tx kv.RwTx) error
-	PutMaxTsNum(baseTsNum TsNum, maxTsNum TsNum, tx kv.RwTx) error
-}
-
 // canonicalTbl + valTbl
 // headers, bodies, beaconblocks
 type MarkedQueries interface {
 	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
 	GetNc(tsNum TsNum, forkId []byte, tx kv.Tx) (VVType, error)
 	Put(tsNum TsNum, forkId []byte, value VVType, tx kv.RwTx) error
+}
+
+// in queries, it's eitther MarkedQueries (for marked appendables) or RelationalQueries
+type RelationalQueries interface {
+	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
+	GetNc(tsId TsId, tx kv.Tx) (VVType, error)
+	Put(tsId TsId, value VVType, tx kv.RwTx) error
 }
 
 type AppEnum string
