@@ -596,7 +596,7 @@ func (st *StateTransition) innerTransitionDB(refunds bool, gasBailout bool) (*ev
 	} else {
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
-<<<<<<< HEAD
+
 	// if deposit: skip refunds, skip tipping coinbase
 	// Regolith changes this behaviour to report the actual gasUsed instead of always reporting all gas used.
 	if st.msg.IsOptimismDepositTx() && !rules.IsOptimismRegolith {
@@ -614,7 +614,6 @@ func (st *StateTransition) innerTransitionDB(refunds bool, gasBailout bool) (*ev
 			ReturnData: ret,
 		}, nil
 	}
-
 
 	if refunds && !gasBailout {
 		refundQuotient := params.RefundQuotient
