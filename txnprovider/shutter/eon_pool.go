@@ -17,7 +17,8 @@ type EonPool struct {
 
 func NewEonPool(config Config, contractBackend bind.ContractBackend) EonPool {
 	return EonPool{
-		config: config,
+		config:          config,
+		contractBackend: contractBackend,
 	}
 }
 

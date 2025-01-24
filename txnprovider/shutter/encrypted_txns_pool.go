@@ -16,8 +16,8 @@ import (
 
 type EncryptedTxnsPool struct {
 	config              Config
-	contractBacked      bind.ContractBackend
 	sequencerAbi        abi.ABI
+	contractBackend     bind.ContractBackend
 	submissionEventId   libcommon.Hash
 	submissionEventName string
 	submissions         *lru.Cache[TxnIndex, EncryptedTxnSubmission]
@@ -37,8 +37,8 @@ func NewEncryptedTxnsPool(config Config, contractBackend bind.ContractBackend) E
 	const submissionEventName = "TransactionSubmitted"
 	return EncryptedTxnsPool{
 		config:              config,
-		contractBacked:      contractBackend,
 		sequencerAbi:        sequencerAbi,
+		contractBackend:     contractBackend,
 		submissionEventId:   sequencerAbi.Events[submissionEventName].ID,
 		submissionEventName: submissionEventName,
 		submissions:         submissions,
@@ -47,7 +47,7 @@ func NewEncryptedTxnsPool(config Config, contractBackend bind.ContractBackend) E
 
 func (utp EncryptedTxnsPool) Run(ctx context.Context) error {
 	sequencerContractAddress := libcommon.HexToAddress(utp.config.SequencerContractAddress)
-	sequencer, err := contracts.NewSequencer(sequencerContractAddress, utp.contractBacked)
+	sequencer, err := contracts.NewSequencer(sequencerContractAddress, utp.contractBackend)
 	if err != nil {
 		return fmt.Errorf("failed to create shutter sequencer contract: %w", err)
 	}
