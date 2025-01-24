@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TesIsPush(t *testing.T) {
+func TestIsPushWithImmediateArgs(t *testing.T) {
 	assert.False(t, MCOPY.IsPushWithImmediateArgs())
 	assert.False(t, PUSH0.IsPushWithImmediateArgs())
 	assert.True(t, PUSH1.IsPushWithImmediateArgs())
