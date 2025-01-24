@@ -40,7 +40,7 @@ func (e *EngineLogsSpammer) Start(ctx context.Context) {
 				return
 			case <-intervalSpam.C:
 				if time.Since(e.lastRequestTime.Load().(time.Time)) > logSpamInterval {
-					e.logger.Warn("externalcl is needed, but no CL seems to be connected.")
+					e.logger.Warn("an External Consensus Layer is needed, but none seems to be connected.")
 				}
 			}
 		}
