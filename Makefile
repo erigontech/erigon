@@ -153,6 +153,7 @@ COMMANDS += sentinel
 COMMANDS += caplin
 COMMANDS += snapshots
 COMMANDS += diag
+COMMANDS += arbutil
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
