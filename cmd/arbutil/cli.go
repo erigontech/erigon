@@ -18,14 +18,26 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/holiman/uint256"
 )
 
 var CLI struct {
@@ -50,7 +62,7 @@ type ContractInfoStateFile struct {
 }
 
 func (g *GenerateStateFromAccountFile) Run(ctx *Context) error {
-	//dir := datadir.New(g.OutputDir)
+	dirs := datadir.New(g.OutputDir)
 	// read accounts.json
 	fileContent, err := os.ReadFile(g.AccountsFile)
 	if err != nil {
@@ -61,8 +73,44 @@ func (g *GenerateStateFromAccountFile) Run(ctx *Context) error {
 		Contracts    int
 		StorageSlots int
 	}{}
+
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	logger := log.Root()
+	var statedb *state.IntraBlockState // reader behind this statedb is dead at the moment of return, tx is rolled back
+
+	// some users creaing > 1Gb custome genesis by `erigon init`
+	genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
+	defer genesisTmpDB.Close()
+
+	agg, err := state2.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, genesisTmpDB, logger)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+
+	tdb, err := temporal.New(genesisTmpDB, agg)
+	if err != nil {
+		return err
+	}
+	defer tdb.Close()
+
+	tx, err := tdb.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	sd, err := state2.NewSharedDomains(tx, logger)
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
 	// Scan the content line by line
 	var account AccountFileEntry
+
+	r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
+	statedb = state.New(r)
+	statedb.SetTrace(false)
 
 	for i, line := range bytes.Split(fileContent, []byte{'\n'}) {
 		if len(line) == 0 {
@@ -84,7 +132,59 @@ func (g *GenerateStateFromAccountFile) Run(ctx *Context) error {
 			dbg.ReadMemStats(&m)
 			fmt.Println("Processed accounts", i, "alloc", datasize.ByteSize(m.Alloc).HR(), "sys", datasize.ByteSize(m.Sys).HR())
 		}
+
+		balance, err := uint256.FromDecimal(account.Balance.String())
+		if err != nil {
+			panic(fmt.Errorf("failed to parse balance: %w", err))
+		}
+
+		statedb.AddBalance(account.Addr, balance, tracing.BalanceIncreaseGenesisBalance)
+		statedb.SetNonce(account.Addr, account.Nonce)
+		if account.ContractInfo != nil {
+			statedb.SetCode(account.Addr, account.ContractInfo.Code)
+			if account.ContractInfo.ContractStorage != nil {
+				for key, value := range account.ContractInfo.ContractStorage {
+					val := uint256.NewInt(0).SetBytes(value.Bytes())
+					statedb.SetState(account.Addr, &key, *val)
+				}
+			}
+
+		}
+
 	}
-	fmt.Println("Stats", "Accounts", stats.Accounts, "Contracts", stats.Contracts, "StorageSlots", stats.StorageSlots)
+
+	// for _, key := range keys {
+	// 	addr := libcommon.BytesToAddress([]byte(key))
+	// 	account := g.Alloc[addr]
+
+	// 	balance, overflow := uint256.FromBig(account.Balance)
+	// 	if overflow {
+	// 		panic("overflow at genesis allocs")
+	// 	}
+
+	// 	for key, value := range account.Storage {
+	// 		key := key
+	// 		val := uint256.NewInt(0).SetBytes(value.Bytes())
+	// 		statedb.SetState(addr, &key, *val)
+	// 	}
+
+	// 	if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
+	// 		statedb.SetIncarnation(addr, 1)
+	// 	}
+	// }
+
+	//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
+
+	if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
+		return err
+	}
+
+	rh, err := sd.ComputeCommitment(context.Background(), true, 0, "genesis")
+	if err != nil {
+		return err
+	}
+	root := common.BytesToHash(rh)
+
+	fmt.Println("Stats", "Accounts", stats.Accounts, "Contracts", stats.Contracts, "StorageSlots", stats.StorageSlots, "Root", root)
 	return nil
 }
