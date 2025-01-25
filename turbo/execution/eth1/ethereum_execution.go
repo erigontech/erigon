@@ -291,6 +291,8 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 		return err
 	}
 
+	dbHeadHash := rawdb.ReadHeadBlockHash(tx)
+
 	currentHash := headHash
 	currentNumber := *tip
 	for currentHash != latestValidHash {
@@ -298,6 +300,11 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 		if err != nil {
 			return err
 		}
+		if currentHash == dbHeadHash {
+			// We can't delete the head block stored in the database as that is our canonical reconnection point.
+			return nil
+		}
+
 		rawdb.DeleteHeader(tx, currentHash, currentNumber)
 		currentHash = currentHeader.ParentHash
 		currentNumber--
