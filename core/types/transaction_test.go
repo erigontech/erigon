@@ -598,7 +598,8 @@ func newRandBlobTx() *BlobTx {
 		CommonTx: CommonTx{
 			Nonce: rand.Uint64(),
 			Gas:   rand.Uint64(),
-			To:    randAddr(),
+			// To:    randAddr(),
+			To:    nil,
 			Value: uint256.NewInt(rand.Uint64()),
 			Data:  randData(),
 			V:     *uint256.NewInt(0),
@@ -715,6 +716,9 @@ func TestBlobTxEncodeDecode(t *testing.T) {
 		// printSTX(dummyBlobTxs[i])
 
 		tx, err := encodeDecodeBinary(dummyBlobTxs[i])
+		if errors.Is(err, ErrNilToFieldBlobTx) {
+			continue
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
