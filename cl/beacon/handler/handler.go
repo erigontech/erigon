@@ -348,7 +348,9 @@ func (a *ApiHandler) init() {
 					})
 					r.Route("/pool", func(r chi.Router) {
 						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV2BeaconPoolAttestations))
-						r.Post("/attestations", a.PostEthV1BeaconPoolAttestations)
+						r.Post("/attestations", a.PostEthV1BeaconPoolAttestations)                                         // reuse
+						r.Get("/attester_slashings", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttesterSlashings)) // reuse
+						r.Post("/attester_slashings", a.PostEthV1BeaconPoolAttesterSlashings)                              // resue
 					})
 					if a.routerCfg.Builder {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BlindedBlocks))
