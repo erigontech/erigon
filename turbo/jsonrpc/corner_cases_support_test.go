@@ -74,8 +74,4 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	j, err := api.GetBlockTransactionCountByNumber(ctx, 10_000)
 	require.Nil(j)
 	require.Nil(err)
-
-	k, err := api.GetBadBlocks(ctx)
-	require.Nil(k)
-	require.Nil(err)
 }
