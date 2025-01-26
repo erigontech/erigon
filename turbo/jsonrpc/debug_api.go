@@ -471,7 +471,13 @@ func (api *PrivateDebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]
 			blockRlp = fmt.Sprintf("%#x", rlpBytes)
 		}
 
-		blockJson, err := ethapi.RPCMarshalBlock(block, true, true, nil)
+		receipts, err := api.getReceiptsForOptimismBlockMarshalling(ctx, tx, block)
+		if err != nil {
+			log.Error("Failed to get receipts for block", "block", block.Hash(), "err", err)
+			continue
+		}
+
+		blockJson, err := ethapi.RPCMarshalBlock(block, true, true, nil, receipts)
 		if err != nil {
 			log.Error("Failed to marshal block", "err", err)
 			blockJson = map[string]interface{}{}

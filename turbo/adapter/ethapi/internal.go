@@ -24,8 +24,8 @@ import (
 )
 
 // nolint
-func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]interface{}) (map[string]interface{}, error) {
-	fields, err := RPCMarshalBlockDeprecated(b, inclTx, fullTx)
+func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]interface{}, receipts types.Receipts) (map[string]interface{}, error) {
+	fields, err := RPCMarshalBlockDeprecated(b, inclTx, fullTx, receipts)
 	if err != nil {
 		return nil, err
 	}
@@ -38,8 +38,8 @@ func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[st
 }
 
 // nolint
-func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash libcommon.Hash, additional map[string]interface{}) (map[string]interface{}, error) {
-	fields, err := RPCMarshalBlockExDeprecated(b, inclTx, fullTx, borTx, borTxHash)
+func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash libcommon.Hash, additional map[string]interface{}, receipts types.Receipts) (map[string]interface{}, error) {
+	fields, err := RPCMarshalBlockExDeprecated(b, inclTx, fullTx, borTx, borTxHash, receipts)
 	if err != nil {
 		return nil, err
 	}

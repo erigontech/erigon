@@ -3,6 +3,7 @@ package rawtemporaldb
 import (
 	"encoding/binary"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/types"
@@ -15,7 +16,7 @@ var (
 )
 
 // `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
-func ReceiptAsOfWithApply(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int, blockHash common.Hash, blockNum uint64, txn types.Transaction) (*types.Receipt, error) {
+func ReceiptAsOfWithApply(tx kv.TemporalTx, config *chain.Config, txNum uint64, rawLogs types.Logs, txnIdx int, blockHash common.Hash, blockNum, time uint64, txn types.Transaction) (*types.Receipt, error) {
 	cumulativeGasUsedBeforeTxn, cumulativeBlobGasUsed, firstLogIndexWithinBlock, err := ReceiptAsOf(tx, txNum+1)
 	if err != nil {
 		return nil, err
@@ -31,7 +32,7 @@ func ReceiptAsOfWithApply(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, tx
 	}
 	_ = cumulativeBlobGasUsed
 
-	if err := r.DeriveFieldsV3ForSingleReceipt(txnIdx, blockHash, blockNum, txn, cumulativeGasUsedBeforeTxn); err != nil {
+	if err := r.DeriveFieldsV3ForSingleReceipt(config, txnIdx, blockHash, blockNum, time, txn, cumulativeGasUsedBeforeTxn); err != nil {
 		return nil, err
 	}
 	return r, nil

@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
@@ -121,7 +122,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	firstHeaderTime := firstHeader.Time
 
 	if currentHeaderTime <= uintTimestamp {
-		blockResponse, err := buildBlockResponse(ctx, api._blockReader, tx, highestNumber, fullTx)
+		blockResponse, err := api.buildBlockResponse(ctx, api._blockReader, tx, highestNumber, fullTx)
 		if err != nil {
 			return nil, err
 		}
@@ -130,7 +131,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	if firstHeaderTime >= uintTimestamp {
-		blockResponse, err := buildBlockResponse(ctx, api._blockReader, tx, 0, fullTx)
+		blockResponse, err := api.buildBlockResponse(ctx, api._blockReader, tx, 0, fullTx)
 		if err != nil {
 			return nil, err
 		}
@@ -174,7 +175,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		resultingHeader = beforeHeader
 	}
 
-	response, err := buildBlockResponse(ctx, api._blockReader, tx, uint64(blockNum), fullTx)
+	response, err := api.buildBlockResponse(ctx, api._blockReader, tx, uint64(blockNum), fullTx)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +183,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	return response, nil
 }
 
-func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (map[string]interface{}, error) {
+func (api *ErigonImpl) buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.TemporalTx, blockNum uint64, fullTx bool) (map[string]interface{}, error) {
 	header, err := br.HeaderByNumber(ctx, db, blockNum)
 	if err != nil {
 		return nil, err
@@ -201,7 +202,13 @@ func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.
 
 	additionalFields := make(map[string]interface{})
 
-	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields)
+	receipts, err := api.getReceiptsForOptimismBlockMarshalling(ctx, db, block)
+	if err != nil {
+		log.Error("Failed to get receipts for block", "block", block.Hash(), "err", err)
+		return nil, err
+	}
+
+	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields, receipts)
 
 	if err == nil && rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields

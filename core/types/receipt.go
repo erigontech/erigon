@@ -116,6 +116,17 @@ type receiptMarshaling struct {
 	GasUsed           hexutil.Uint64
 	BlockNumber       *hexutil.Big
 	TransactionIndex  hexutil.Uint
+
+	// Optimism
+	L1GasPrice            *hexutil.Big
+	L1BlobBaseFee         *hexutil.Big
+	L1GasUsed             *hexutil.Big
+	L1Fee                 *hexutil.Big
+	FeeScalar             *big.Float
+	L1BaseFeeScalar       *hexutil.Uint64
+	L1BlobBaseFeeScalar   *hexutil.Uint64
+	DepositNonce          *hexutil.Uint64
+	DepositReceiptVersion *hexutil.Uint64
 }
 
 // receiptRLP is the consensus encoding of a receipt.
@@ -631,7 +642,7 @@ func u32ptrTou64ptr(a *uint32) *uint64 {
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevCumulativeGasUsed uint64) error {
+func (r *Receipt) DeriveFieldsV3ForSingleReceipt(config *chain.Config, txnIdx int, blockHash libcommon.Hash, blockNum, time uint64, txn Transaction, prevCumulativeGasUsed uint64) error {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	sender, ok := txn.cachedSender()
@@ -673,23 +684,22 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 		logIndex++
 	}
 
-	// TODO: implement properly
-	// if config.IsOptimismBedrock(blockNum) { // need at least an info tx and a non-info tx
-	// 	gasParams, err := opstack.ExtractL1GasParams(config, time, txn.GetData())
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	if txn.Type() != OptimismDepositTxType {
-	// 		r.L1GasPrice = gasParams.L1BaseFee.ToBig()
-	// 		l1Fee, l1GasUsed := gasParams.CostFunc(txn.RollupCostData())
-	// 		r.L1Fee = l1Fee.ToBig()
-	// 		r.L1GasUsed = l1GasUsed.ToBig()
-	// 		r.FeeScalar = gasParams.FeeScalar
-	// 		r.L1BlobBaseFee = gasParams.L1BlobBaseFee.ToBig()
-	// 		r.L1BaseFeeScalar = u32ptrTou64ptr(gasParams.L1BaseFeeScalar)
-	// 		r.L1BlobBaseFeeScalar = u32ptrTou64ptr(gasParams.L1BlobBaseFeeScalar)
-	// 	}
-	// }
+	if config.IsOptimismBedrock(blockNum) { // need at least an info tx and a non-info tx
+		gasParams, err := opstack.ExtractL1GasParams(config, time, txn.GetData())
+		if err != nil {
+			return err
+		}
+		if txn.Type() != OptimismDepositTxType {
+			r.L1GasPrice = gasParams.L1BaseFee.ToBig()
+			l1Fee, l1GasUsed := gasParams.CostFunc(txn.RollupCostData())
+			r.L1Fee = l1Fee.ToBig()
+			r.L1GasUsed = l1GasUsed.ToBig()
+			r.FeeScalar = gasParams.FeeScalar
+			r.L1BlobBaseFee = gasParams.L1BlobBaseFee.ToBig()
+			r.L1BaseFeeScalar = u32ptrTou64ptr(gasParams.L1BaseFeeScalar)
+			r.L1BlobBaseFeeScalar = u32ptrTou64ptr(gasParams.L1BlobBaseFeeScalar)
+		}
+	}
 
 	return nil
 }

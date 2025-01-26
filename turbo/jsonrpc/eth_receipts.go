@@ -328,7 +328,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		rawLogs := exec.GetRawLogs(txIndex)
 
 		// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
-		r, err := rawtemporaldb.ReceiptAsOfWithApply(tx, txNum, rawLogs, txIndex, blockHash, blockNum, txn)
+		r, err := rawtemporaldb.ReceiptAsOfWithApply(tx, chainConfig, txNum, rawLogs, txIndex, blockHash, blockNum, header.Time, txn)
 		if err != nil {
 			return nil, err
 		}

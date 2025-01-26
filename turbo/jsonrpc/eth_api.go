@@ -320,6 +320,21 @@ func (api *BaseAPI) stateSyncEvents(ctx context.Context, tx kv.Tx, blockHash com
 	return stateSyncEvents, nil
 }
 
+func (api *BaseAPI) getReceiptsForOptimismBlockMarshalling(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
+	config, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		return nil, errors.New("missing chain config")
+	}
+
+	if !config.IsOptimism() {
+		return nil, nil
+	}
+	return api.receiptsGenerator.GetReceipts(ctx, config, tx, block)
+}
+
 // checks the pruning state to see if we would hold information about this
 // block in state history or not.  Some strange issues arise getting account
 // history for blocks that have been pruned away giving nonce too low errors

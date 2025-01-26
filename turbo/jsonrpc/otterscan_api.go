@@ -272,9 +272,14 @@ func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Addres
 	return results[:totalBlocksTraced], hasMore, nil
 }
 
-func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
+func (api *OtterscanAPIImpl) delegateGetBlockByNumber(tx kv.TemporalTx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
 	additionalFields := make(map[string]interface{})
-	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
+	receipts, err := api.getReceiptsForOptimismBlockMarshalling(context.Background(), tx, b)
+	if err != nil {
+		return nil, fmt.Errorf("getReceiptsForOptimismBlockMarshalling error: %w", err)
+	}
+
+	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields, receipts)
 	if !inclTx {
 		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
@@ -394,7 +399,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, err
 	}
 
-	getBlockRes, err := delegateGetBlockByNumber(tx, b, number, true)
+	getBlockRes, err := api.delegateGetBlockByNumber(tx, b, number, true)
 	if err != nil {
 		return nil, err
 	}
