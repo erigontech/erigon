@@ -25,6 +25,7 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/trie"
 
 	"github.com/erigontech/erigon-lib/common"
