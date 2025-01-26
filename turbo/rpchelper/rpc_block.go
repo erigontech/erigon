@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 var UnknownBlockError = &rpc.CustomError{
@@ -49,7 +50,7 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 	return blockNum, nil
 }
 
-func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
+func GetFinalizedBlockNumber(tx kv.Tx, br services.FullBlockReader) (uint64, error) {
 	forkchoiceFinalizedHash := rawdb.ReadForkchoiceFinalized(tx)
 	if forkchoiceFinalizedHash != (libcommon.Hash{}) {
 		forkchoiceFinalizedNum := rawdb.ReadHeaderNumber(tx, forkchoiceFinalizedHash)
@@ -57,11 +58,14 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 			return *forkchoiceFinalizedNum, nil
 		}
 	}
+	if br.FrozenBlocks() > 0 {
+		return br.FrozenBlocks() - 1, nil
+	}
 
-	return 0, UnknownBlockError
+	return 0, nil
 }
 
-func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {
+func GetSafeBlockNumber(tx kv.Tx, br services.FullBlockReader) (uint64, error) {
 	forkchoiceSafeHash := rawdb.ReadForkchoiceSafe(tx)
 	if forkchoiceSafeHash != (libcommon.Hash{}) {
 		forkchoiceSafeNum := rawdb.ReadHeaderNumber(tx, forkchoiceSafeHash)
@@ -69,7 +73,11 @@ func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {
 			return *forkchoiceSafeNum, nil
 		}
 	}
-	return 0, UnknownBlockError
+	if br.FrozenBlocks() > 0 {
+		return br.FrozenBlocks() - 1, nil
+	}
+
+	return 0, nil
 }
 
 func GetLatestExecutedBlockNumber(tx kv.Tx) (uint64, error) {
