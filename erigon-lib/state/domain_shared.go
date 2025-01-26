@@ -31,6 +31,7 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/trie"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/sha3"
 
@@ -160,6 +161,10 @@ func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blo
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
 	sd.pastChangesAccumulator[toStringZeroCopy(key)] = acc
+}
+
+func (sd *SharedDomains) GetCommitmentContext() *SharedDomainsCommitmentContext {
+	return sd.sdCtx
 }
 
 func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]DomainEntryDiff, bool, error) {
@@ -1308,6 +1313,15 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	default:
 		panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
+}
+
+func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expectedRoot []byte, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
+	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	if ok {
+		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, nil, expectedRoot, logPrefix)
+	}
+
+	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 }
 
 // Evaluates commitment for processed state.

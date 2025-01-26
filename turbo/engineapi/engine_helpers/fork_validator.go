@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 
@@ -343,7 +342,7 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 	// If we do not have the body we can recover it from the batch.
 	if body != nil {
 		if _, criticalError = rawdb.WriteRawBodyIfNotExists(txc.Tx, header.Hash(), header.Number.Uint64(), body); criticalError != nil {
-			return
+			return //nolint:nilnesserr
 		}
 	}
 

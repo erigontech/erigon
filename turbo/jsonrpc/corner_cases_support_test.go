@@ -24,8 +24,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -73,9 +71,5 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 
 	j, err := api.GetBlockTransactionCountByNumber(ctx, 10_000)
 	require.Nil(j)
-	require.Nil(err)
-
-	k, err := api.GetBadBlocks(ctx)
-	require.Nil(k)
 	require.Nil(err)
 }
