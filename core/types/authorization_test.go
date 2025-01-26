@@ -38,7 +38,7 @@ func TestRecoverSigner(t *testing.T) {
 		R:       uint256.Int{11238962557009670571, 14017651393191758745, 18358999445216475025, 5549385460848219779},
 		S:       uint256.Int{6390522493159340108, 17630603794136184458, 14442462445950880280, 846710983706847255},
 	}
-	var b [33]byte
+	var b [32]byte
 	data := bytes.NewBuffer(nil)
 	authorityPtr, err := auth.RecoverSigner(data, b[:])
 	if err != nil {

@@ -380,7 +380,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		if contractCreation {
 			return nil, errors.New("contract creation not allowed with type4 txs")
 		}
-		var b [33]byte
+		var b [32]byte
 		data := bytes.NewBuffer(nil)
 		for i, auth := range auths {
 			data.Reset()
@@ -392,7 +392,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			}
 
 			// 2. authority recover
-			authorityPtr, err := auth.RecoverSigner(data, b[:])
+			authorityPtr, err := auth.RecoverSigner(data,b[:])
 			if err != nil {
 				log.Debug("authority recover failed, skipping", "err", err, "auth index", i)
 				continue
