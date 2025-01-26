@@ -847,12 +847,12 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 	}
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 
-	// Check if we are pointing to head
 	var (
 		validators  *solid.ValidatorSet
 		isFinalized bool
 	)
 	if blockId.Head() {
+		// If we are looking at the head, we can just read the validators from the head state
 		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
 			validators = s.Validators()
 			return nil
