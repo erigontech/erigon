@@ -150,6 +150,15 @@ func (a *Antiquary) Loop() error {
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
 	}
+	logInterval := time.NewTicker(30 * time.Second)
+	if err := a.sn.OpenFolder(); err != nil {
+		return err
+	}
+	if a.stateSn != nil {
+		if err := a.stateSn.OpenFolder(); err != nil {
+			return err
+		}
+	}
 	// Here we need to start mdbx transaction and lock the thread
 	tx, err := a.mainDB.BeginRw(a.ctx)
 	if err != nil {
@@ -160,16 +169,6 @@ func (a *Antiquary) Loop() error {
 	from, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
 	if err != nil {
 		return err
-	}
-
-	logInterval := time.NewTicker(30 * time.Second)
-	if err := a.sn.OpenFolder(); err != nil {
-		return err
-	}
-	if a.stateSn != nil {
-		if err := a.stateSn.OpenFolder(); err != nil {
-			return err
-		}
 	}
 
 	defer logInterval.Stop()
