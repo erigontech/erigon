@@ -29,8 +29,8 @@ const (
 	blobJobsIntervalTick          = 5 * time.Millisecond
 	singleAttestationIntervalTick = 10 * time.Millisecond
 	attestationJobsIntervalTick   = 100 * time.Millisecond
-	blockJobExpiry                = 4 * time.Second
-	blobJobExpiry                 = 4 * time.Second
+	blockJobExpiry                = 30 * time.Second
+	blobJobExpiry                 = 30 * time.Second
 	attestationJobExpiry          = 30 * time.Minute
 	singleAttestationJobExpiry    = 6 * time.Second
 )

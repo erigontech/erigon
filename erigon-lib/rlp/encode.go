@@ -725,3 +725,29 @@ func EncodeStructSizePrefix(size int, w io.Writer, buffer []byte) error {
 	}
 	return nil
 }
+
+func ByteSliceSliceSize(bb [][]byte) int {
+	size := 0
+	for i := 0; i < len(bb); i++ {
+		size += StringLen(bb[i])
+	}
+	return size + ListPrefixLen(size)
+}
+
+func EncodeByteSliceSlice(bb [][]byte, w io.Writer, b []byte) error {
+	totalSize := 0
+	for i := 0; i < len(bb); i++ {
+		totalSize += StringLen(bb[i])
+	}
+
+	if err := EncodeStructSizePrefix(totalSize, w, b); err != nil {
+		return err
+	}
+
+	for i := 0; i < len(bb); i++ {
+		if err := EncodeString(bb[i], w, b); err != nil {
+			return err
+		}
+	}
+	return nil
+}

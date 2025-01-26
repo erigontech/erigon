@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/ethereum-optimism/superchain-registry/superchain"
 )
@@ -28,12 +27,6 @@ var (
 	OptimismGoerliRegolithTime = big.NewInt(1679079600)
 	// May 4, 2023 @ 5:00:00 pm UTC
 	BaseGoerliRegolithTime = big.NewInt(1683219600)
-	// Apr 21, 2023 @ 6:30:00 pm UTC
-	baseGoerliDevnetRegolithTime = big.NewInt(1682101800)
-	// March 5, 2023 @ 2:48:00 am UTC
-	devnetRegolithTime = big.NewInt(1677984480)
-	// August 16, 2023 @ 3:34:22 am UTC
-	chaosnetRegolithTime = big.NewInt(1692156862)
 )
 
 var OPStackSupport = ProtocolVersionV0{Build: [8]byte{}, Major: 9, Minor: 0, Patch: 0, PreRelease: 0}.Encode()
@@ -41,8 +34,6 @@ var OPStackSupport = ProtocolVersionV0{Build: [8]byte{}, Major: 9, Minor: 0, Pat
 // OPStackChainConfigByName loads chain config corresponding to the chain name from superchain registry.
 // This implementation is based on optimism monorepo(https://github.com/ethereum-optimism/optimism/blob/op-node/v1.4.1/op-node/chaincfg/chains.go#L59)
 func OPStackChainConfigByName(name string) *superchain.ChainConfig {
-	// Handle legacy name aliases
-	name = networkname.HandleLegacyName(name)
 	for _, chainCfg := range superchain.OPChains {
 		if strings.EqualFold(chainCfg.Chain+"-"+chainCfg.Superchain, name) {
 			return chainCfg

@@ -14,19 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package txpoolcfg
+package types
 
 import (
 	"testing"
-
-	"github.com/erigontech/erigon-lib/common/fixedgas"
-	"github.com/stretchr/testify/assert"
 )
 
-func TestZeroDataIntrinsicGas(t *testing.T) {
-	assert := assert.New(t)
-	gas, floorGas7623, discardReason := CalcIntrinsicGas(0, 0, 0, nil, false, true, true, true, true)
-	assert.Equal(discardReason, Success)
-	assert.Equal(gas, fixedgas.TxGas)
-	assert.Equal(floorGas7623, fixedgas.TxGas)
+func TestEmptyRequestsHashCalculation(t *testing.T) {
+	reqs := make(FlatRequests, 0)
+	h := reqs.Hash()
+	testH := EmptyRequestsHash
+	if *h != testH {
+		t.Errorf("Requests Hash calculation error for empty hash, expected: %v, got: %v", testH, h)
+	}
 }

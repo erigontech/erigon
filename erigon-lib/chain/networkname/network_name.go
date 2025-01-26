@@ -48,21 +48,3 @@ var All = []string{
 	OPMainnetChainName,
 	BaseMainnetChainName,
 }
-
-func IsKnownNetwork(s string) bool {
-	for _, n := range All {
-		if n == s {
-			return true
-		}
-	}
-	return false
-}
-
-func HandleLegacyName(name string) string {
-	switch name {
-	case LegacyOPMainnetChainName:
-		return OPMainnetChainName
-	default:
-		return name
-	}
-}

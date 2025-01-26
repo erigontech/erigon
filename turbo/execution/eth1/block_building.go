@@ -70,9 +70,11 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.SuggestedFeeRecipient),
 		Withdrawals:           eth1_utils.ConvertWithdrawalsFromRpc(req.Withdrawals),
-		// Transactions:          req.Transactions,
-		// NoTxPool:              req.NoTxPool,
-		// GasLimit:              req.GasLimit,
+	}
+	if e.config.IsOptimism() {
+		param.Transactions = req.Transactions
+		param.NoTxPool = req.NoTxPool
+		param.GasLimit = req.GasLimit
 	}
 
 	if err := e.checkWithdrawalsPresence(param.Timestamp, param.Withdrawals); err != nil {
@@ -218,33 +220,23 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		}
 	}
 
-	var requestsBundle types2.RequestsBundle
+	var requestsBundle *types2.RequestsBundle
 	if blockWithReceipts.Requests != nil {
-		requests := make([][]byte, len(types.KnownRequestTypes))
-		if len(blockWithReceipts.Requests) == len(types.KnownRequestTypes) {
-			for i, r := range blockWithReceipts.Requests {
-				requests[i] = make([]byte, 0)
-				requests[i] = append(requests[i], r.RequestData...)
-			}
-		} else {
-			e.logger.Error("Requests len SHOULD BE", "equal to", len(types.KnownRequestTypes), "got", len(blockWithReceipts.Requests))
-			for i := 0; i < len(types.KnownRequestTypes); i++ {
-				requests[i] = make([]byte, 0)
-			}
+		requestsBundle = &types2.RequestsBundle{}
+		requests := make([][]byte, 0)
+		for i, r := range blockWithReceipts.Requests {
+			requests[i] = make([]byte, 0)
+			requests[i] = append(requests[i], r.RequestData...)
 		}
-		requestsBundle = types2.RequestsBundle{Requests: requests}
+		requestsBundle.Requests = requests
 	}
 
 	data := &execution.AssembledBlockData{
 		ExecutionPayload: payload,
 		BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
 		BlobsBundle:      blobsBundle,
-		Requests:         &requestsBundle,
+		Requests:         requestsBundle,
 	}
-
-	// if header.ParentBeaconBlockRoot != nil {
-	// 	data.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*header.ParentBeaconBlockRoot)
-	// }
 
 	return &execution.GetAssembledBlockResponse{
 		Data: data,
