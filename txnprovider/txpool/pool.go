@@ -326,7 +326,10 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	pendingPre := p.pending.Len()
 	defer func() {
-		p.logger.Debug("[txpool] New block", "block", block, "unwound", len(unwindTxns.Txns), "mined", len(minedTxns.Txns), "baseFee", baseFee, "pending-pre", pendingPre, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len(), "err", err)
+		p.logger.Debug("[txpool] New block", "block", block,
+			"unwound", len(unwindTxns.Txns), "mined", len(minedTxns.Txns), "baseFee", baseFee,
+			"pending-pre", pendingPre, "pending", p.pending.Len(), "baseFeeQueue", p.baseFee.Len(), "queued", p.queued.Len(),
+			"err", err)
 	}()
 
 	if assert.Enable {
