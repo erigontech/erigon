@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anacrolix/dht/v2"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 
 	lg "github.com/anacrolix/log"
