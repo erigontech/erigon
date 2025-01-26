@@ -182,7 +182,7 @@ func minUnwindableBlock(tx kv.Tx, number uint64) (uint64, error) {
 }
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) {
-	if !e.semaphore.TryAcquire(1) {
+	if e.isBusy() {
 		if e.config.IsOptimism() {
 			// op-node does not handle SYNCING as asynchronous forkChoiceUpdated.
 			// return an error and make op-node retry

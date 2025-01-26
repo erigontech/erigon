@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -35,6 +36,18 @@ import (
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 )
+
+func (e *EthereumExecutionModule) isBusy() bool {
+	waitUntilBusySignal := 5 * time.Second
+	checkInterval := 10 * time.Millisecond
+	for i := 0; i < int(waitUntilBusySignal/checkInterval); i++ {
+		if e.semaphore.TryAcquire(1) {
+			return false
+		}
+		time.Sleep(checkInterval)
+	}
+	return !e.semaphore.TryAcquire(1)
+}
 
 func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
 	if !e.config.IsShanghai(time) && withdrawals != nil {
@@ -57,7 +70,7 @@ func (e *EthereumExecutionModule) evictOldBuilders() {
 
 // Missing: NewPayload, AssembleBlock
 func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execution.AssembleBlockRequest) (*execution.AssembleBlockResponse, error) {
-	if !e.semaphore.TryAcquire(1) {
+	if e.isBusy() {
 		return &execution.AssembleBlockResponse{
 			Id:   0,
 			Busy: true,
@@ -128,7 +141,7 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 }
 
 func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *execution.GetAssembledBlockRequest) (*execution.GetAssembledBlockResponse, error) {
-	if !e.semaphore.TryAcquire(1) {
+	if e.isBusy() {
 		return &execution.GetAssembledBlockResponse{
 			Busy: true,
 		}, nil
