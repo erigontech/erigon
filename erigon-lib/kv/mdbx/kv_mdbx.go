@@ -598,6 +598,7 @@ func (db *MdbxKV) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 }
 
 func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err error) {
+	log.Warn("[dbg] beginRw", "lable", db.opts.label, "stack", dbg.Stack())
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
