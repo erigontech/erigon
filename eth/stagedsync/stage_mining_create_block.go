@@ -122,7 +122,10 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
-	parent := rawdb.ReadHeaderByNumber(txc.Tx, executionAt)
+	parent, err := cfg.blockReader.HeaderByNumber(context.Background(), txc.Tx, executionAt)
+	if err != nil {
+		return fmt.Errorf("getting parent block: %w", err)
+	}
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf("empty block %d", executionAt)
 	}
