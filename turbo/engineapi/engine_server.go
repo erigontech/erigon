@@ -231,12 +231,18 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
-		if req.BlobGasUsed == nil || req.ExcessBlobGas == nil || parentBeaconBlockRoot == nil {
-			return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas/beaconRoot missing"}
+		if parentBeaconBlockRoot == nil {
+			return nil, &rpc.InvalidParamsError{Message: "beaconRoot missing"}
 		}
-		header.BlobGasUsed = (*uint64)(req.BlobGasUsed)
-		header.ExcessBlobGas = (*uint64)(req.ExcessBlobGas)
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
+		if !s.config.IsOptimism() {
+			if req.BlobGasUsed == nil || req.ExcessBlobGas == nil {
+				return nil, &rpc.InvalidParamsError{Message: "blobGasUsed and excessBlobGas are required"}
+			}
+			header.BlobGasUsed = (*uint64)(req.BlobGasUsed)
+			header.ExcessBlobGas = (*uint64)(req.ExcessBlobGas)
+		}
+
 	}
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
