@@ -150,7 +150,10 @@ func (a *Antiquary) Loop() error {
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
 	}
+
 	logInterval := time.NewTicker(30 * time.Second)
+	defer logInterval.Stop()
+
 	if err := a.sn.OpenFolder(); err != nil {
 		return err
 	}
@@ -171,7 +174,6 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 
-	defer logInterval.Stop()
 	if from != a.sn.BlocksAvailable() && a.sn.BlocksAvailable() != 0 {
 		a.logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
 	}
@@ -179,6 +181,7 @@ func (a *Antiquary) Loop() error {
 	// Now write the snapshots as indicies
 	for i := from; i < a.sn.BlocksAvailable(); i++ {
 		// read the snapshot
+		log.Warn("[dbg] iter", "i", i)
 		header, elBlockNumber, elBlockHash, err := a.sn.ReadHeader(i)
 		if err != nil {
 			return err
