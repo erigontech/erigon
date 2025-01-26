@@ -392,7 +392,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			}
 
 			// 2. authority recover
-			authorityPtr, err := auth.RecoverSigner(data,b[:])
+			authorityPtr, err := auth.RecoverSigner(data, b[:])
 			if err != nil {
 				log.Debug("authority recover failed, skipping", "err", err, "auth index", i)
 				continue
