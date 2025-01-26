@@ -81,7 +81,7 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 	case rpc.EarliestBlockNumber:
 		blockNum = 0
 	case rpc.SafeBlockNumber:
-		blockNum, err = rpchelper.GetSafeBlockNumber(tx)
+		blockNum, err = rpchelper.GetSafeBlockNumber(tx, api._blockReader)
 		if err != nil {
 			return 0, err
 		}
@@ -96,7 +96,7 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 			return hexutil.Uint64(blockNum), nil
 		}
 
-		blockNum, err = rpchelper.GetFinalizedBlockNumber(tx)
+		blockNum, err = rpchelper.GetFinalizedBlockNumber(tx, api._blockReader)
 		if err != nil {
 			return 0, err
 		}

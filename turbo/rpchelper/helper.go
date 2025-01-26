@@ -87,12 +87,12 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 				blockHash := rawdb.ReadHeaderByNumber(tx, blockNum).Hash()
 				return blockNum, blockHash, false, false, nil
 			}
-			blockNumber, err = GetFinalizedBlockNumber(tx)
+			blockNumber, err = GetFinalizedBlockNumber(tx, br)
 			if err != nil {
 				return 0, libcommon.Hash{}, false, false, err
 			}
 		case rpc.SafeBlockNumber:
-			blockNumber, err = GetSafeBlockNumber(tx)
+			blockNumber, err = GetSafeBlockNumber(tx, br)
 			if err != nil {
 				return 0, libcommon.Hash{}, false, false, err
 			}

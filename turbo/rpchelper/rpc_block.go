@@ -58,7 +58,8 @@ func GetFinalizedBlockNumber(tx kv.Tx, br services.FullBlockReader) (uint64, err
 			return *forkchoiceFinalizedNum, nil
 		}
 	}
-	if br.FrozenBlocks() > 0 {
+
+	if br != nil && br.FrozenBlocks() > 0 {
 		return br.FrozenBlocks() - 1, nil
 	}
 
@@ -73,7 +74,7 @@ func GetSafeBlockNumber(tx kv.Tx, br services.FullBlockReader) (uint64, error) {
 			return *forkchoiceSafeNum, nil
 		}
 	}
-	if br.FrozenBlocks() > 0 {
+	if br != nil && br.FrozenBlocks() > 0 {
 		return br.FrozenBlocks() - 1, nil
 	}
 
