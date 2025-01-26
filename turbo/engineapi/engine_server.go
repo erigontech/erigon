@@ -511,13 +511,20 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+	response := &engine_types.GetPayloadResponse{
+		ExecutionPayload: engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
+		BlockValue:       (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
+		BlobsBundle:      engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
+	}
+	if s.config.IsOptimism() && s.config.IsCancun(ts) && version >= clparams.DenebVersion {
+		if data.ParentBeaconBlockRoot == nil {
+			return nil, &rpc.UnsupportedForkError{Message: "missing ParentBeaconBlockRoot in Ecotone block"}
+		}
+		parentBeaconBlockRoot := libcommon.Hash(gointerfaces.ConvertH256ToHash(data.ParentBeaconBlockRoot))
+		response.ParentBeaconBlockRoot = &parentBeaconBlockRoot
+	}
 
-	return &engine_types.GetPayloadResponse{
-		ExecutionPayload:  engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
-		BlockValue:        (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
-		BlobsBundle:       engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
-		ExecutionRequests: executionRequests,
-	}, nil
+	return response, nil
 }
 
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
