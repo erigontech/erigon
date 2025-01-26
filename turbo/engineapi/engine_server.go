@@ -81,6 +81,10 @@ const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 func NewEngineServer(logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
 	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing bool) *EngineServer {
+	fcuTimeout := uint64(fcuTimeout)
+	if config.IsOptimism() {
+		fcuTimeout = 10_000
+	}
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	return &EngineServer{
 		logger:           logger,

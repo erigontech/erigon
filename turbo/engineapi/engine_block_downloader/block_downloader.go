@@ -46,10 +46,18 @@ import (
 )
 
 const (
-	logInterval                 = 30 * time.Second
-	requestLoopCutOff       int = 1
-	forkchoiceTimeoutMillis     = 5000
+	logInterval                         = 30 * time.Second
+	requestLoopCutOff               int = 1
+	forkchoiceTimeoutMillis             = 5000
+	optimismForkchoiceTimeoutMillis     = 10_000
 )
+
+func forkChoiceTimeMillis(config *chain.Config) uint64 {
+	if config.IsOptimism() {
+		return optimismForkchoiceTimeoutMillis
+	}
+	return forkchoiceTimeoutMillis
+}
 
 type RequestBodyFunction func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool)
 
@@ -107,7 +115,7 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 		blockPropagator: blockPropagator,
 		timeout:         timeout,
 		bodyReqSend:     bodyReqSend,
-		chainRW:         eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
+		chainRW:         eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkChoiceTimeMillis(config)),
 	}
 }
 
