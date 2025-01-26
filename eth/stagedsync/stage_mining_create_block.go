@@ -122,7 +122,8 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
-	parent, err := cfg.blockReader.HeaderByNumber(context.Background(), txc.Tx, executionAt)
+	ctx := context.Background()
+	parent, err := cfg.blockReader.HeaderByNumber(ctx, txc.Tx, executionAt)
 	if err != nil {
 		return fmt.Errorf("getting parent block: %w", err)
 	}
@@ -135,7 +136,8 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 			// In Optimism, self re-org via engine_forkchoiceUpdatedV1 is allowed
 
 			log.Warn("wrong head block", "current", parent.Hash(), "requested", cfg.blockBuilderParameters.ParentHash, "executionAt", executionAt)
-			exectedParent, err := rawdb.ReadHeaderByHash(txc.Tx, cfg.blockBuilderParameters.ParentHash)
+
+			exectedParent, err := cfg.blockReader.HeaderByHash(ctx, txc.Tx, cfg.blockBuilderParameters.ParentHash)
 			if err != nil {
 				return err
 			}
