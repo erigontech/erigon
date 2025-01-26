@@ -154,14 +154,11 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 
 	var bindIP net.IP
 	var networkVersion string
-
 	// If the IP is an IPv4 address, bind to the correct zero address.
 	if ip.To4() != nil {
-		bindIP = net.IPv4zero
-		networkVersion = "udp4"
+		bindIP, networkVersion = ip.To4(), "udp4"
 	} else {
-		bindIP = net.IPv6zero
-		networkVersion = "udp6"
+		bindIP, networkVersion = ip.To16(), "udp6"
 	}
 
 	udpAddr := &net.UDPAddr{
@@ -179,11 +176,11 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	// Start stream handlers
-
 	net, err := discover.ListenV5(s.ctx, "any", conn, localNode, discCfg)
 	if err != nil {
 		return nil, err
 	}
+
 	handlers.NewConsensusHandlers(s.ctx, s.blockReader, s.indiciesDB, s.host, s.peers, s.cfg.NetworkConfig, localNode, s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.cfg.EnableBlocks).Start()
 
 	return net, err
