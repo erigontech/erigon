@@ -111,7 +111,6 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	current := cfg.miner.MiningBlock
 	var txPoolLocals []libcommon.Address //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := cfg.miner.MiningConfig.Etherbase
-	// TODO cfg.miner.MiningBlock.ForceTxs = type
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
 		staleThreshold = 7
@@ -239,6 +238,14 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 		current.Header = header
 		current.Uncles = nil
 		current.Withdrawals = cfg.blockBuilderParameters.Withdrawals
+		current.ForceTxs = make(types.Transactions, 0, len(cfg.blockBuilderParameters.Transactions))
+		for _, tx := range cfg.blockBuilderParameters.Transactions {
+			decodedTx, err := types.DecodeTransaction(tx)
+			if err != nil {
+				return err
+			}
+			current.ForceTxs = append(current.ForceTxs, decodedTx)
+		}
 		return nil
 	}
 
