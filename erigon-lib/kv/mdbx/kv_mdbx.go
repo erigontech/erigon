@@ -598,7 +598,6 @@ func (db *MdbxKV) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 }
 
 func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err error) {
-	log.Warn("[dbg] beginRw", "lable", db.opts.label, "stack", dbg.Stack())
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -609,6 +608,7 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 		return nil, errors.New("db closed")
 	}
 
+	log.Warn("[dbg] beginRw", "lable", db.opts.label, "stack", dbg.Stack())
 	runtime.LockOSThread()
 	tx, err := db.env.BeginTxn(nil, flags)
 	if err != nil {
