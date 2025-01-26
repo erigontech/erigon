@@ -460,9 +460,9 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		s.logger.Crit("[NewPayload] caplin is enabled")
 		return nil, errCaplinEnabled
 	}
-	if s.config.IsOptimism() {
-		return nil, &rpc.UnsupportedForkError{Message: "Optimism is unsupported on block building"}
-	}
+	// if s.config.IsOptimism() {
+	// 	return nil, &rpc.UnsupportedForkError{Message: "Optimism is unsupported on block building"}
+	// }
 	s.engineLogSpamer.RecordRequest()
 
 	if !s.proposing {
