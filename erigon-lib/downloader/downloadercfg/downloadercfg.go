@@ -28,9 +28,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anacrolix/dht/v2"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 
+	"github.com/anacrolix/dht/v2"
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"

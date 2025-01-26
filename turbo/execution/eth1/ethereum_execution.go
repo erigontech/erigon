@@ -23,7 +23,6 @@ import (
 	"math/big"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -34,6 +33,7 @@ import (
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/wrap"
 
 	"github.com/erigontech/erigon/consensus"
