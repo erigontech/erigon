@@ -35,8 +35,6 @@ type Appendable interface {
 	DirtySegmentsMaxNum() Num
 	VisibleSegmentsMaxNum() Num
 	RecalcVisibleFiles(baseNumTo Num)
-	Prune(ctx context.Context, baseNumTo Num, limit uint64, rwTx kv.RwTx) error
-	Unwind(ctx context.Context, baseNumFrom Num, rwTx kv.RwTx) error
 	// don't put BeginFilesRo here, since it returns PointAppendableRo, RangedAppendableRo etc. (each has different query patterns)
 	// so anyway aggregator has to recover concrete type, and then it can
 	// call BeginFilesRo on that
@@ -46,17 +44,27 @@ var (
 	_ Appendable = &MarkedAppendable{}
 	_ Appendable = &RelationalAppendable{}
 	//_ MarkedQueries     = &MarkedAppendableRoTx{}
-	//_ RelationalQueries = &RelationalAppendableRoTx{}
+	_ RelationalRoQueries = &RelationalAppendableRoTx{}
+	_ RelationalRwQueries = &RelationalAppendableRwTx{}
 )
 
 // canonicalTbl + valTbl
 // headers, bodies, beaconblocks
+type maintenanceQueries interface {
+	Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error
+	Unwind(ctx context.Context, baseKeyFrom Num, limit uint64, rwTx kv.RwTx) error
+}
+
+// the following queries are satisfied by RelationalAppendableRoTx, RelationalAppendableRwTx
+// similarly, MarkedAppendableRoTx, MarkedAppendableRwTx
+
 type MarkedRoQueries interface {
 	Get(num Num, tx kv.Tx) (VVType, error)                // db + snapshots
 	GetNc(num Num, hash []byte, tx kv.Tx) (VVType, error) // db only
 }
 
 type MarkedRwQueries interface {
+	maintenanceQueries
 	MarkedRoQueries
 	Put(num Num, hash []byte, value VVType, tx kv.RwTx) error
 }
@@ -68,6 +76,7 @@ type RelationalRoQueries interface {
 }
 
 type RelationalRwQueries interface {
+	maintenanceQueries
 	RelationalRoQueries
 	Put(id Id, value VVType, tx kv.RwTx) error
 }
@@ -98,6 +107,8 @@ type AggTx[R1 MarkedRoQueries, R2 RelationalRoQueries] interface {
 	// he can interact with. So is fine.
 	RelationalQueries(app AppEnum) R2
 	MarkedQueries(app AppEnum) R1
+
+	// more methods on level of aggtx
 }
 
 func WriteRawBody(tx TemporalRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
@@ -145,5 +156,13 @@ func WriteRawTransactions(tx TemporalRwTx, txs [][]byte, baseTxnID uint64) error
 		txq.Put(Id(stx), VVType(txn), tx)
 		stx++
 	}
+	return nil
+}
+
+func IwannaBuildFiles(ctx context.Context, tx TemporalRwTx) error {
+	// get the aggregator from temporaldb (no use of temporalrwtx)
+	// appenadable.freezer.SetCollector()
+	// then call appenadable.freezer.Freeze(ctx, baseNumFrom, baseNumTo, tx)
+	// integrate dirty files
 	return nil
 }

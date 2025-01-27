@@ -87,30 +87,42 @@ func (a *RelationalAppendableRoTx) GetNc(id Id, tx kv.Tx) (VVType, error) {
 	return tx.GetOne(a.a.valsTbl, a.a.encTs(uint64(id)))
 }
 
-func (a *RelationalAppendableRoTx) Put(id Id, value VVType, tx kv.RwTx) error {
-	return tx.Append(a.a.valsTbl, a.a.encTs(uint64(id)), value)
-}
-
-func (a *RelationalAppendableRoTx) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
-	fromKey := a.a.encTs(uint64(1)) // config driven
-	toKey := a.a.encTs(uint64(baseKeyTo))
-	return DeleteRangeFromTbl(a.a.valsTbl, fromKey, toKey, limit, rwTx)
-}
-
-func (a *RelationalAppendableRoTx) Unwind(ctx context.Context, baseKeyFrom Num, limit uint64, rwTx kv.RwTx) error {
-	if a.a.noUnwind {
-		return nil
-	}
-	fromKey := a.a.encTs(uint64(baseKeyFrom))
-	return DeleteRangeFromTbl(a.a.valsTbl, fromKey, nil, MaxUint64, rwTx)
-}
-
 func (a *RelationalAppendableRoTx) Close() {
 	if a.files == nil {
 		return
 	}
 
 	a.ProtoAppendableRoTx.Close()
+}
+
+// RelationalAppendableRwTx
+
+type RelationalAppendableRwTx struct {
+	*RelationalAppendableRoTx
+}
+
+func (a *RelationalAppendable) BeginFilesRw() *RelationalAppendableRwTx {
+	return &RelationalAppendableRwTx{
+		RelationalAppendableRoTx: a.BeginFilesRo(),
+	}
+}
+
+func (a *RelationalAppendableRwTx) Put(id Id, value VVType, tx kv.RwTx) error {
+	return tx.Append(a.a.valsTbl, a.a.encTs(uint64(id)), value)
+}
+
+func (a *RelationalAppendableRwTx) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
+	fromKey := a.a.encTs(uint64(1)) // config driven
+	toKey := a.a.encTs(uint64(baseKeyTo))
+	return DeleteRangeFromTbl(a.a.valsTbl, fromKey, toKey, limit, rwTx)
+}
+
+func (a *RelationalAppendableRwTx) Unwind(ctx context.Context, baseKeyFrom Num, limit uint64, rwTx kv.RwTx) error {
+	if a.a.noUnwind {
+		return nil
+	}
+	fromKey := a.a.encTs(uint64(baseKeyFrom))
+	return DeleteRangeFromTbl(a.a.valsTbl, fromKey, nil, MaxUint64, rwTx)
 }
 
 ///// appendable writers
