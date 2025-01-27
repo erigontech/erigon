@@ -180,9 +180,14 @@ func sequencingBatchStep(
 		shouldCheckForExecutionAndDataStreamAlignment = false
 	}
 
-	needsUnwind, err := tryHaltSequencer(batchContext, batchState, streamWriter, u, executionAt)
+	needsUnwind, exitStage, err := tryHaltSequencer(batchContext, batchState, streamWriter, u, executionAt)
 	if needsUnwind || err != nil {
 		return err
+	}
+	if exitStage {
+		log.Info(fmt.Sprintf("[%s] Exiting stage during halted sequencer", logPrefix))
+		// commit the tx so any updates to the stream etc are persisted
+		return sdb.tx.Commit()
 	}
 
 	if err := utils.UpdateZkEVMBlockCfg(cfg.chainConfig, sdb.hermezDb, logPrefix, cfg.zk.LogLevel == log.LvlTrace); err != nil {
