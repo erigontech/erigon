@@ -5,16 +5,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/ethereum/go-ethereum/common"
 )
-
-// 3 appendable categories:
-// 1. CanonicalAppendable: only valsTbl; only canonical data stored (unwind removes all non-canonical data)
-// 2. MarkedAppendables: canonicalMarkerTbl and valsTbl
-// 3. IncrementingAppendable: tsId always increments...provenance coming from some other structure;
-//            (useful when you don't want data to be lost on unwind..e.g. transactions)
 
 // --------------------------------------------------------------------
 
@@ -43,7 +37,6 @@ type Appendable interface {
 	RecalcVisibleFiles(baseTsNumTo TsNum)
 	Prune(ctx context.Context, baseTsNumTo TsNum, limit uint64, rwTx kv.RwTx) error
 	Unwind(ctx context.Context, baseTsNumFrom TsNum, rwTx kv.RwTx) error
-
 	// don't put BeginFilesRo here, since it returns PointAppendableRo, RangedAppendableRo etc. (each has different query patterns)
 	// so anyway aggregator has to recover concrete type, and then it can
 	// call BeginFilesRo on that
@@ -53,8 +46,8 @@ type Appendable interface {
 // headers, bodies, beaconblocks
 type MarkedQueries interface {
 	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
-	GetNc(tsNum TsNum, forkId []byte, tx kv.Tx) (VVType, error)
-	Put(tsNum TsNum, forkId []byte, value VVType, tx kv.RwTx) error
+	GetNc(tsNum TsNum, hash []byte, tx kv.Tx) (VVType, error)
+	Put(tsNum TsNum, hash []byte, value VVType, tx kv.RwTx) error
 }
 
 // in queries, it's eitther MarkedQueries (for marked appendables) or RelationalQueries
@@ -82,10 +75,8 @@ type AggTx interface {
 	// pick out the right one; else runtime failure
 	// user needs to be anyway aware of what set of queries
 	// he can interact with. So is fine.
-	RangedQueries(app AppEnum) RangedQueries
-	PointQueries(app AppEnum) PointQueries
+	RangedQueries(app AppEnum) RelationalQueries
 	MarkedQueries(app AppEnum) MarkedQueries
-	BindQueries(app AppEnum) BindQueries
 }
 
 func WriteRawBody(db TemporalRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
@@ -121,14 +112,13 @@ func WriteBodyForStorage(db TemporalRwTx, hash common.Hash, number uint64, body 
 	markedQueries := aggTx.MarkedQueries(Bodies)
 
 	// write bodies
-	markedQueries.Put(TsNum(number), hash, b.Bytes(), db)
-	return nil
+	return markedQueries.Put(TsNum(number), hash.Bytes(), b.Bytes(), db)
 }
 
 func WriteRawTransactions(db TemporalRwTx, txs [][]byte, baseTxnID uint64) error {
 	aggTx := db.AggTx(Headers) // or temporalTx.AggTx(baseAppendableEnum); gives aggtx for entityset
 	stx := baseTxnID
-	txq := aggTx.BindQueries(Transactions)
+	txq := aggTx.RangedQueries(Transactions)
 
 	for _, txn := range txs {
 		txq.Put(TsId(stx), VVType(txn), db)

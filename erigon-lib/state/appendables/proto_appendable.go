@@ -29,6 +29,7 @@ type ProtoAppendable struct {
 	// put these in config
 	stepSize           uint64
 	baseKeySameAsTsNum bool // if the tsNum of this appendable is the same as the tsNum of the base appendable
+	standalone     bool // regenerate snapshots, so ignore base appendable dirtyfiles progress
 
 	dirs   datadir.Dirs
 	logger log.Logger
@@ -36,8 +37,9 @@ type ProtoAppendable struct {
 
 func NewProtoAppendable(enum ApEnum, stepSize uint64) *ProtoAppendable {
 	return &ProtoAppendable{
-		enum:     enum,
-		stepSize: stepSize,
+		enum:           enum,
+		stepSize:       stepSize,
+		baseAppendable: nil,
 	}
 }
 
@@ -74,7 +76,7 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, baseTsNumFrom, baseTsN
 		from, to := TsNum(step*a.stepSize), TsNum((step+1)*a.stepSize)
 
 		// can it freeze? just follow base appendable
-		if to > a.baseAppendable.DirtySegmentsMaxTsNum() {
+		if !a.standalone && to > a.baseAppendable.DirtySegmentsMaxTsNum() {
 			break
 		}
 		// maybe also check if segment is already built
