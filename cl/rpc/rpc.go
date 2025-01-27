@@ -239,7 +239,7 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByRangerReq(ctx context.Context, start, c
 	}
 
 	data := libcommon.CopyBytes(buffer.Bytes())
-	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRangeProtocolV2, data, count*b.beaconConfig.MaxBlobsPerBlock)
+	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRangeProtocolV1, data, count*b.beaconConfig.MaxBlobsPerBlock)
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
