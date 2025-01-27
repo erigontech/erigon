@@ -299,55 +299,14 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 		}
 
 		if bitmap&bit != 0 {
-			var fields cellFields
-			if cell.extLen > 0 && cell.storageAddrLen == 0 {
-				fields |= fieldExtension
-			}
-			if cell.accountAddrLen > 0 {
-				fields |= fieldAccountAddr
-			}
-			if cell.storageAddrLen > 0 {
-				fields |= fieldStorageAddr
-			}
-			if cell.hashLen > 0 {
-				fields |= fieldHash
-			}
-			if cell.stateHashLen == 32 && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
-				fields |= fieldStateHash
-			}
-			if err := be.buf.WriteByte(byte(fields)); err != nil {
+			if err := cell.EncodeInto(be); err != nil {
 				return nil, 0, err
-			}
-			if fields&fieldExtension != 0 {
-				if err := be.putUvarAndVal(uint64(cell.extLen), cell.extension[:cell.extLen]); err != nil {
-					return nil, 0, err
-				}
-			}
-			if fields&fieldAccountAddr != 0 {
-				if err := be.putUvarAndVal(uint64(cell.accountAddrLen), cell.accountAddr[:cell.accountAddrLen]); err != nil {
-					return nil, 0, err
-				}
-			}
-			if fields&fieldStorageAddr != 0 {
-				if err := be.putUvarAndVal(uint64(cell.storageAddrLen), cell.storageAddr[:cell.storageAddrLen]); err != nil {
-					return nil, 0, err
-				}
-			}
-			if fields&fieldHash != 0 {
-				if err := be.putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
-					return nil, 0, err
-				}
-			}
-			if fields&fieldStateHash != 0 {
-				if err := be.putUvarAndVal(uint64(cell.stateHashLen), cell.stateHash[:cell.stateHashLen]); err != nil {
-					return nil, 0, err
-				}
 			}
 		}
 		bitset ^= bit
 	}
 	//fmt.Printf("EncodeBranch [%x] size: %d\n", be.buf.Bytes(), be.buf.Len())
-	return be.buf.Bytes(), lastNibble, nil
+	return be.EncodedBranch(), lastNibble, nil
 }
 
 type BranchData []byte
@@ -376,27 +335,7 @@ func (branchData BranchData) String() string {
 				// This is used for test output, so ok to panic
 				panic(err)
 			}
-			sb.WriteString("{")
-			var comma string
-			if cell.hashedExtLen > 0 {
-				fmt.Fprintf(&sb, "hashedExtension=[%x]", cell.hashedExtension[:cell.hashedExtLen])
-				comma = ","
-			}
-			if cell.accountAddrLen > 0 {
-				fmt.Fprintf(&sb, "%saccountAddr=[%x]", comma, cell.accountAddr[:cell.accountAddrLen])
-				comma = ","
-			}
-			if cell.storageAddrLen > 0 {
-				fmt.Fprintf(&sb, "%sstorageAddr=[%x]", comma, cell.storageAddr[:cell.storageAddrLen])
-				comma = ","
-			}
-			if cell.hashLen > 0 {
-				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.hash[:cell.hashLen])
-			}
-			if cell.stateHashLen > 0 {
-				fmt.Fprintf(&sb, "%sleafHash=[%x]", comma, cell.stateHash[:cell.stateHashLen])
-			}
-			sb.WriteString("}\n")
+			sb.WriteString(cell.String())
 		}
 		bitset ^= bit
 	}
