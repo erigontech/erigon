@@ -42,18 +42,33 @@ type Appendable interface {
 	// call BeginFilesRo on that
 }
 
+var (
+	_ Appendable        = &MarkedAppendable{}
+	_ Appendable        = &RelationalAppendable{}
+	_ MarkedQueries     = &MarkedAppendableRoTx{}
+	_ RelationalQueries = &RelationalAppendableRoTx{}
+)
+
 // canonicalTbl + valTbl
 // headers, bodies, beaconblocks
-type MarkedQueries interface {
-	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
-	GetNc(tsNum TsNum, hash []byte, tx kv.Tx) (VVType, error)
+type MarkedRoQueries interface {
+	Get(tsNum TsNum, tx kv.Tx) (VVType, error)                // db + snapshots
+	GetNc(tsNum TsNum, hash []byte, tx kv.Tx) (VVType, error) // db only
+}
+
+type MarkedRwQueries interface {
+	MarkedRoQueries
 	Put(tsNum TsNum, hash []byte, value VVType, tx kv.RwTx) error
 }
 
 // in queries, it's eitther MarkedQueries (for marked appendables) or RelationalQueries
-type RelationalQueries interface {
-	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
-	GetNc(tsId TsId, tx kv.Tx) (VVType, error)
+type RelationalRoQueries interface {
+	Get(tsNum TsNum, tx kv.Tx) (VVType, error) // db + snapshots
+	GetNc(tsId TsId, tx kv.Tx) (VVType, error) // db only
+}
+
+type RelationalRwQueries interface {
+	RelationalRoQueries
 	Put(tsId TsId, value VVType, tx kv.RwTx) error
 }
 
@@ -65,22 +80,28 @@ const (
 	Transactions AppEnum = "transactions"
 )
 
-type TemporalRwTx interface {
-	kv.RwTx
+// ro
+type TemporalTx interface {
 	kv.TemporalTx
-	AggTx(baseAppendable AppEnum) AggTx // gets aggtx for entity-set represented by baseAppendable
+	AggRoTx(baseAppendable AppEnum) AggTx[MarkedRoQueries, RelationalRoQueries]
 }
 
-type AggTx interface {
+type TemporalRwTx interface {
+	kv.RwTx
+	TemporalTx
+	AggRwTx(baseAppendable AppEnum) AggTx[MarkedRwQueries, RelationalRwQueries] // gets aggtx for entity-set represented by baseAppendable
+}
+
+type AggTx[R1 MarkedRoQueries, R2 RelationalRoQueries] interface {
 	// pick out the right one; else runtime failure
 	// user needs to be anyway aware of what set of queries
 	// he can interact with. So is fine.
-	RangedQueries(app AppEnum) RelationalQueries
-	MarkedQueries(app AppEnum) MarkedQueries
+	RelationalQueries(app AppEnum) R2
+	MarkedQueries(app AppEnum) R1
 }
 
-func WriteRawBody(db TemporalRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
-	baseTxnID, err := db.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
+func WriteRawBody(tx TemporalRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
+	baseTxnID, err := tx.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
 	if err != nil {
 		return err
 	}
@@ -92,17 +113,17 @@ func WriteRawBody(db TemporalRwTx, hash common.Hash, number uint64, body *types.
 		Withdrawals: body.Withdrawals,
 	}
 
-	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
+	if err = WriteBodyForStorage(tx, hash, number, &data); err != nil {
 		return fmt.Errorf("WriteBodyForStorage: %w", err)
 	}
-	if err = WriteRawTransactions(db, body.Transactions, data.BaseTxnID.First()); err != nil {
+	if err = WriteRawTransactions(tx, body.Transactions, data.BaseTxnID.First()); err != nil {
 		return fmt.Errorf("WriteRawTransactions: %w", err)
 	}
 	return nil
 }
 
-func WriteBodyForStorage(db TemporalRwTx, hash common.Hash, number uint64, body *types.BodyForStorage) error {
-	aggTx := db.AggTx(Headers) // or temporalTx.AggTx(baseAppendableEnum); gives aggtx for entityset
+func WriteBodyForStorage(tx TemporalRwTx, hash common.Hash, number uint64, body *types.BodyForStorage) error {
+	aggTx := tx.AggRwTx(Headers) // or temporalTx.AggTx(baseAppendableEnum); gives aggtx for entityset
 
 	b := bytes.Buffer{}
 	if err := body.EncodeRLP(&b); err != nil {
@@ -112,16 +133,16 @@ func WriteBodyForStorage(db TemporalRwTx, hash common.Hash, number uint64, body 
 	markedQueries := aggTx.MarkedQueries(Bodies)
 
 	// write bodies
-	return markedQueries.Put(TsNum(number), hash.Bytes(), b.Bytes(), db)
+	return markedQueries.Put(TsNum(number), hash.Bytes(), b.Bytes(), tx)
 }
 
-func WriteRawTransactions(db TemporalRwTx, txs [][]byte, baseTxnID uint64) error {
-	aggTx := db.AggTx(Headers) // or temporalTx.AggTx(baseAppendableEnum); gives aggtx for entityset
+func WriteRawTransactions(tx TemporalRwTx, txs [][]byte, baseTxnID uint64) error {
+	aggTx := tx.AggRwTx(Headers) // or temporalTx.AggTx(baseAppendableEnum); gives aggtx for entityset
 	stx := baseTxnID
-	txq := aggTx.RangedQueries(Transactions)
+	txq := aggTx.RelationalQueries(Transactions)
 
 	for _, txn := range txs {
-		txq.Put(TsId(stx), VVType(txn), db)
+		txq.Put(TsId(stx), VVType(txn), tx)
 		stx++
 	}
 	return nil

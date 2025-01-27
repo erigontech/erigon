@@ -82,6 +82,11 @@ func (a *RelationalAppendableRoTx) Get(tsNum TsNum, tx kv.Tx) (VVType, error) {
 	return tx.GetOne(ap.valsTbl, ap.encTs(uint64(tsId)))
 }
 
+// only db
+func (a *RelationalAppendableRoTx) GetNc(tsId TsId, tx kv.Tx) (VVType, error) {
+	return tx.GetOne(a.a.valsTbl, a.a.encTs(uint64(tsId)))
+}
+
 func (a *RelationalAppendableRoTx) Put(tsId TsId, value VVType, tx kv.RwTx) error {
 	return tx.Append(a.a.valsTbl, a.a.encTs(uint64(tsId)), value)
 }
@@ -106,6 +111,17 @@ func (a *RelationalAppendableRoTx) Close() {
 	}
 
 	a.ProtoAppendableRoTx.Close()
+}
+
+///// appendable writers
+
+
+// NewWriter returns a writer for write ops on the appendbale
+// buffered=true => writes written to db via etl pipeline => read after write not available
+// buffered=false => writes written to db via direct write => read after write is available
+func (r *RelationalAppendable) NewWriter(buffered bool) *AppendableWriterer {
+	if 
+
 }
 
 ///////

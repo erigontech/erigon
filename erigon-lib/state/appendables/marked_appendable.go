@@ -12,7 +12,7 @@ import (
 // 1. canonicalMarkerTbl: stores tsId -> forkId
 // 2. valsTbl: maps `bigendian(tsId) + forkId -> value`
 // common for base appendables to be marked, as it provides quick way to unwind.
-// so headers are marked; but also bodies.
+// headers are marked; and also bodies. caplin blockbodies too.
 type MarkedAppendable struct {
 	*ProtoAppendable
 	canonicalTbl string
@@ -129,4 +129,10 @@ func (a *MarkedAppendable) combK(ts uint64, forkId []byte) []byte {
 	binary.BigEndian.PutUint64(k, ts)
 	copy(k[tsLength:], forkId)
 	return k
+}
+
+// rotx
+type MarkedAppendableRoTx struct {
+	*ProtoAppendableRoTx
+	m *MarkedAppendable
 }

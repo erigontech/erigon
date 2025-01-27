@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
+	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 )
 
@@ -52,3 +53,15 @@ func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, r
 
 	return nil
 }
+
+
+// appendable writer
+
+
+type AppendableWriter struct {
+	buffered bool
+
+	values *etl.Collector
+}
+
+func (w *AppendableWriter) Append()
