@@ -10,21 +10,21 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon/cl/merkle_tree"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/crypto"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/trie"
 )
 
@@ -106,7 +106,7 @@ func (pg *ProofGenerator) getChainBlockInfo(ctx context.Context, burnTxHash libc
 	var wg sync.WaitGroup
 
 	var lastChild *big.Int
-	var burnTransaction *jsonrpc.RPCTransaction
+	var burnTransaction *ethapi.RPCTransaction
 	var err [2]error
 
 	// err group
