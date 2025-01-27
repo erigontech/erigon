@@ -864,16 +864,16 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
-	rh, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), e.LogPrefix())
+	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), e.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
 	if cfg.blockProduction {
-		header.Root = common.BytesToHash(rh)
+		header.Root = common.BytesToHash(computedRootHash)
 		return true, nil
 	}
-	if !bytes.Equal(rh, header.Root.Bytes()) {
-		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
+		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
 		handleIncorrectRootHashError(header, applyTx, cfg, e, maxBlockNum, logger, u)
 	}
 	if !inMemExec {
