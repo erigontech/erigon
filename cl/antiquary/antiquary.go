@@ -24,8 +24,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -183,8 +181,6 @@ func (a *Antiquary) Loop() error {
 	// Now write the snapshots as indicies
 	for i := from; i < a.sn.BlocksAvailable(); i++ {
 		// read the snapshot
-		SpaceDirty, txSize, err := tx.(*mdbx.MdbxTx).SpaceDirty()
-		log.Warn("[dbg] iter", "i", i, "dirt", datasize.ByteSize(SpaceDirty).HumanReadable(), "txSize", datasize.ByteSize(txSize).HumanReadable(), "err", err)
 		header, elBlockNumber, elBlockHash, err := a.sn.ReadHeader(i)
 		if err != nil {
 			return err
