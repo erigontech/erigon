@@ -10,13 +10,14 @@ replace (
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250121111444-6cc4c0c1fb89
 	github.com/erigontech/interfaces v0.0.0-20241120074553-214b5fd396ed
-	github.com/erigontech/mdbx-go v0.39.2-0.20250126013249-44b59c643b5d
+	github.com/erigontech/mdbx-go v0.39.2-0.20250127103351-b81e66861543
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 )
 
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.4.2
+	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.15.2
 	github.com/anacrolix/torrent v1.52.6-0.20231201115409-7ea994b6bbd8
@@ -60,7 +61,6 @@ require (
 
 require (
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
-	github.com/anacrolix/dht/v2 v2.21.1 // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20241129212102-9c50ad6b591e // indirect
