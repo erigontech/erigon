@@ -190,6 +190,9 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		rs = make(types.FlatRequests, 0)
 		allLogs := make(types.Logs, 0)
 		for _, rec := range receipts {
+			if rec == nil || rec.Logs == nil {
+				continue
+			}
 			allLogs = append(allLogs, rec.Logs...)
 		}
 		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
