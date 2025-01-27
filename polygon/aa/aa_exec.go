@@ -106,11 +106,11 @@ func ValidateAATransaction(
 			return errors.New("invalid call to EntryPoint contract from a wrong account address")
 		}
 
-		validityTimeRange, err := types.AbiDecodeAcceptAccount(epc.Input, false)
+		validityTimeRange, err := DecodeAcceptAccount(epc.Input)
 		if err != nil {
 			return err
 		}
-		return validateValidityTimeRange(header.Time, validityTimeRange.ValidAfter.Uint64(), validityTimeRange.ValidUntil.Uint64())
+		return validateValidityTimeRange(header.Time, validityTimeRange.ValidAfter, validityTimeRange.ValidUntil)
 	}
 	applyRes, err = core.ApplyFrame(evm, msg, gasPool, validateValidation)
 	if err != nil {
@@ -144,12 +144,12 @@ func ValidateAATransaction(
 			if bytes.Compare(epc.From[:], tx.Paymaster[:]) != 0 {
 				return errors.New("invalid call to EntryPoint contract from a wrong paymaster address")
 			}
-			paymasterValidity, err := types.AbiDecodeAcceptPaymaster(epc.Input, false) // TODO: find better name
+			paymasterValidity, err := DecodeAcceptPaymaster(epc.Input) // TODO: find better name
 			if err != nil {
 				return err
 			}
 
-			if err = validateValidityTimeRange(header.Time, paymasterValidity.ValidAfter.Uint64(), paymasterValidity.ValidUntil.Uint64()); err != nil {
+			if err = validateValidityTimeRange(header.Time, paymasterValidity.ValidAfter, paymasterValidity.ValidUntil); err != nil {
 				return err
 			}
 
@@ -291,7 +291,7 @@ func injectRIP7560AccountDeployedEvent(
 	blockNum uint64,
 	ibs *state.IntraBlockState,
 ) error {
-	topics, data, err := txn.AbiEncodeRIP7560AccountDeployedEvent()
+	topics, data, err := EncodeRIP7560AccountDeployedEvent(txn.Paymaster, txn.Deployer, txn.SenderAddress)
 	if err != nil {
 		return err
 	}
@@ -308,7 +308,7 @@ func injectRIP7560TransactionRevertReasonEvent(
 	blockNum uint64,
 	ibs *state.IntraBlockState,
 ) error {
-	topics, data, err := txn.AbiEncodeRIP7560TransactionRevertReasonEvent(revertData)
+	topics, data, err := EncodeRIP7560TransactionRevertReasonEvent(revertData, txn.Nonce, txn.NonceKey, txn.SenderAddress)
 	if err != nil {
 		return err
 	}
@@ -325,7 +325,7 @@ func injectRIP7560TransactionPostOpRevertReasonEvent(
 	blockNum uint64,
 	ibs *state.IntraBlockState,
 ) error {
-	topics, data, err := txn.AbiEncodeRIP7560TransactionPostOpRevertReasonEvent(revertData)
+	topics, data, err := EncodeRIP7560TransactionPostOpRevertReasonEvent(revertData, txn.Nonce, txn.NonceKey, txn.Paymaster, txn.SenderAddress)
 	if err != nil {
 		return err
 	}
@@ -342,7 +342,7 @@ func injectRIP7560TransactionEvent(
 	blockNum uint64,
 	ibs *state.IntraBlockState,
 ) error {
-	topics, data, err := txn.AbiEncodeRIP7560TransactionEvent(executionStatus)
+	topics, data, err := EncodeRIP7560TransactionEvent(executionStatus, txn.Nonce, txn.NonceKey, txn.Paymaster, txn.Deployer, txn.SenderAddress)
 	if err != nil {
 		return err
 	}

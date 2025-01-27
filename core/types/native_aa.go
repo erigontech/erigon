@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 	"math/big"
-	"strings"
 
 	"github.com/holiman/uint256"
 
@@ -17,6 +16,7 @@ import (
 	emath "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/polygon/aa"
 )
 
 const (
@@ -219,7 +219,21 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 }
 
 func (tx *AccountAbstractionTransaction) SigningHash(chainID *big.Int) common.Hash {
-	return tx.Hash()
+	hash := prefixedRlpHash(AccountAbstractionTxType, []interface{}{
+		chainID,
+		tx.NonceKey, tx.Nonce,
+		tx.SenderAddress,
+		tx.Deployer, tx.DeployerData,
+		tx.Paymaster, tx.PaymasterData,
+		tx.ExecutionData,
+		tx.BuilderFee,
+		tx.Tip, tx.FeeCap,
+		tx.ValidationGasLimit, tx.PaymasterValidationGasLimit, tx.PostOpGasLimit,
+		tx.Gas,
+		tx.AccessList, // authorization data is not included for signing hash
+	})
+
+	return hash
 }
 
 func (tx *AccountAbstractionTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
@@ -675,7 +689,7 @@ func (tx *AccountAbstractionTransaction) ExecutionFrame() *Message {
 }
 
 func (tx *AccountAbstractionTransaction) PaymasterPostOp(paymasterContext []byte, gasUsed uint64, executionSuccess bool) (*Message, error) {
-	postOpData, err := AccountAbstractionABI.Pack("postPaymasterTransaction", executionSuccess, big.NewInt(int64(gasUsed)), paymasterContext)
+	postOpData, err := aa.EncodePostOpFrame(paymasterContext, big.NewInt(int64(gasUsed)), executionSuccess)
 	if err != nil {
 		return nil, errors.New("unable to encode postPaymasterTransaction")
 	}
@@ -700,7 +714,7 @@ func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Mess
 		return nil, err
 	}
 
-	validatePaymasterData, err := AccountAbstractionABI.Pack("validatePaymasterTransaction", big.NewInt(AccountAbstractionABIVersion), signingHash, txAbiEncoding)
+	validatePaymasterData, err := aa.EncodeTxnForFrame("validatePaymasterTransaction", signingHash, txAbiEncoding)
 	if err != nil {
 		return nil, err
 	}
@@ -712,8 +726,31 @@ func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Mess
 	}, nil
 }
 
+func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deploymentUsedGas uint64) (*Message, error) {
+	signingHash := tx.SigningHash(chainID)
+	txAbiEncoding, err := tx.AbiEncode()
+	if err != nil {
+		return nil, err
+	}
+
+	validateTransactionData, err := aa.EncodeTxnForFrame("validateTransaction", signingHash, txAbiEncoding)
+	if err != nil {
+		return nil, err
+	}
+
+	intrinsicGas, _ := tx.PreTransactionGasCost()
+	accountGasLimit := tx.ValidationGasLimit - intrinsicGas - deploymentUsedGas
+
+	return &Message{
+		to:       tx.SenderAddress,
+		from:     AA_ENTRY_POINT,
+		gasLimit: accountGasLimit,
+		data:     validateTransactionData,
+	}, nil
+}
+
 func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
-	structThing, _ := abi.NewType("tuple", "struct thing", []abi.ArgumentMarshaling{
+	abiType, _ := abi.NewType("tuple", "tuple", []abi.ArgumentMarshaling{ // internaltype does not matter
 		{Name: "sender", Type: "address"},
 		{Name: "nonceKey", Type: "uint256"},
 		{Name: "nonce", Type: "uint256"},
@@ -733,7 +770,7 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 	})
 
 	args := abi.Arguments{
-		{Type: structThing, Name: "param_one"},
+		{Type: abiType, Name: "param_one"}, // name does not matter
 	}
 
 	paymaster := tx.Paymaster
@@ -773,29 +810,6 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 	return packed, err
 }
 
-func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deploymentUsedGas uint64) (*Message, error) {
-	signingHash := tx.SigningHash(chainID)
-	txAbiEncoding, err := tx.AbiEncode()
-	if err != nil {
-		return nil, err
-	}
-
-	validateTransactionData, err := AccountAbstractionABI.Pack("validateTransaction", big.NewInt(AccountAbstractionABIVersion), signingHash, txAbiEncoding)
-	if err != nil {
-		return nil, err
-	}
-
-	intrinsicGas, _ := tx.PreTransactionGasCost()
-	accountGasLimit := tx.ValidationGasLimit - intrinsicGas - deploymentUsedGas
-
-	return &Message{
-		to:       tx.SenderAddress,
-		from:     AA_ENTRY_POINT,
-		gasLimit: accountGasLimit,
-		data:     validateTransactionData,
-	}, nil
-}
-
 // ABIAccountAbstractTxn an equivalent of a solidity struct only used to encode the 'transaction' parameter
 type ABIAccountAbstractTxn struct {
 	// NOTE: these were big.Int and were changed to uint256
@@ -815,152 +829,4 @@ type ABIAccountAbstractTxn struct {
 	DeployerData                []byte
 	ExecutionData               []byte
 	AuthorizationData           []byte
-}
-
-const AccountAbstractionABIJSON = `[{"type":"function","name":"validateTransaction","inputs":[{"name":"version","type":"uint256"},{"name":"txHash","type":"bytes32"},{"name":"transaction","type":"bytes"}]},{"type":"function","name":"validatePaymasterTransaction","inputs":[{"name":"version","type":"uint256"},{"name":"txHash","type":"bytes32"},{"name":"transaction","type":"bytes"}]},{"type":"function","name":"postPaymasterTransaction","inputs":[{"name":"success","type":"bool"},{"name":"actualGasCost","type":"uint256"},{"name":"context","type":"bytes"}]},{"type":"function","name":"acceptAccount","inputs":[{"name":"validAfter","type":"uint256"},{"name":"validUntil","type":"uint256"}]},{"type":"function","name":"acceptPaymaster","inputs":[{"name":"validAfter","type":"uint256"},{"name":"validUntil","type":"uint256"},{"name":"context","type":"bytes"}]},{"type":"function","name":"sigFailAccount","inputs":[{"name":"validAfter","type":"uint256"},{"name":"validUntil","type":"uint256"}]},{"type":"function","name":"sigFailPaymaster","inputs":[{"name":"validAfter","type":"uint256"},{"name":"validUntil","type":"uint256"},{"name":"context","type":"bytes"}]},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"sender","type":"address"},{"indexed":true,"internalType":"address","name":"paymaster","type":"address"},{"indexed":false,"internalType":"uint256","name":"nonceKey","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"nonceSequence","type":"uint256"},{"indexed":false,"internalType":"bool","name":"executionStatus","type":"uint256"}],"name":"RIP7560TransactionEvent","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"sender","type":"address"},{"indexed":false,"internalType":"uint256","name":"nonceKey","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"nonceSequence","type":"uint256"},{"indexed":false,"internalType":"bytes","name":"revertReason","type":"bytes"}],"name":"RIP7560TransactionRevertReason","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"sender","type":"address"},{"indexed":true,"internalType":"address","name":"paymaster","type":"address"},{"indexed":false,"internalType":"uint256","name":"nonceKey","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"nonceSequence","type":"uint256"},{"indexed":false,"internalType":"bytes","name":"revertReason","type":"bytes"}],"name":"RIP7560TransactionPostOpRevertReason","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"sender","type":"address"},{"indexed":true,"internalType":"address","name":"paymaster","type":"address"},{"indexed":true,"internalType":"address","name":"deployer","type":"address"}],"name":"RIP7560AccountDeployed","type":"event"}]`
-const AccountAbstractionABIVersion = 0
-const PaymasterMaxContextSize = 65536
-
-var AccountAbstractionABI, _ = abi.JSON(strings.NewReader(AccountAbstractionABIJSON))
-
-func decodeMethodParamsToInterface(output interface{}, methodName string, input []byte) error {
-	m, err := AccountAbstractionABI.MethodById(input)
-	if err != nil {
-		return fmt.Errorf("unable to decode %s: %w", methodName, err)
-	}
-	if methodName != m.Name {
-		return fmt.Errorf("unable to decode %s: got wrong method %s", methodName, m.Name)
-	}
-	params, err := m.Inputs.Unpack(input[4:])
-	if err != nil {
-		return fmt.Errorf("unable to decode %s: %w", methodName, err)
-	}
-	err = m.Inputs.Copy(output, params)
-	if err != nil {
-		return fmt.Errorf("unable to decode %s: %v", methodName, err)
-	}
-	return nil
-}
-
-type AcceptAccountData struct {
-	ValidAfter *uint256.Int
-	ValidUntil *uint256.Int
-}
-
-type AcceptPaymasterData struct {
-	ValidAfter *uint256.Int
-	ValidUntil *uint256.Int
-	Context    []byte
-}
-
-func AbiDecodeAcceptAccount(input []byte, allowSigFail bool) (*AcceptAccountData, error) {
-	acceptAccountData := &AcceptAccountData{}
-	err := decodeMethodParamsToInterface(acceptAccountData, "acceptAccount", input)
-	if err != nil && allowSigFail {
-		err = decodeMethodParamsToInterface(acceptAccountData, "sigFailAccount", input)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return acceptAccountData, nil
-}
-
-func AbiDecodeAcceptPaymaster(input []byte, allowSigFail bool) (*AcceptPaymasterData, error) {
-	acceptPaymasterData := &AcceptPaymasterData{}
-	err := decodeMethodParamsToInterface(acceptPaymasterData, "acceptPaymaster", input)
-	if err != nil && allowSigFail {
-		err = decodeMethodParamsToInterface(acceptPaymasterData, "sigFailPaymaster", input)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if len(acceptPaymasterData.Context) > PaymasterMaxContextSize {
-		return nil, errors.New("paymaster return data: context too large")
-	}
-	return acceptPaymasterData, err
-}
-
-func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560TransactionEvent(
-	executionStatus uint64,
-) (topics []common.Hash, data []byte, error error) {
-	id := AccountAbstractionABI.Events["RIP7560TransactionEvent"].ID
-	paymaster := tx.Paymaster
-	if paymaster == nil {
-		paymaster = &common.Address{}
-	}
-	deployer := tx.Deployer
-	if deployer == nil {
-		deployer = &common.Address{}
-	}
-	inputs := AccountAbstractionABI.Events["RIP7560TransactionEvent"].Inputs
-	data, error = inputs.NonIndexed().Pack(
-		tx.NonceKey,
-		big.NewInt(int64(tx.Nonce)),
-		big.NewInt(int64(executionStatus)),
-	)
-	if error != nil {
-		return nil, nil, error
-	}
-	topics = []common.Hash{id, {}, {}}
-	topics[1] = [32]byte(common.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
-	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes()[:], 32))
-	return topics, data, nil
-}
-
-func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560AccountDeployedEvent() (topics []common.Hash, data []byte, err error) {
-	id := AccountAbstractionABI.Events["RIP7560AccountDeployed"].ID
-	paymaster := tx.Paymaster
-	if paymaster == nil {
-		paymaster = &common.Address{}
-	}
-	deployer := tx.Deployer
-	if deployer == nil {
-		deployer = &common.Address{}
-	}
-	topics = []common.Hash{id, {}, {}, {}}
-	topics[1] = [32]byte(common.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
-	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes()[:], 32))
-	topics[3] = [32]byte(common.LeftPadBytes(deployer.Bytes()[:], 32))
-	return topics, make([]byte, 0), nil
-}
-
-func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560TransactionRevertReasonEvent(
-	revertData []byte,
-) (topics []common.Hash, data []byte, error error) {
-	id := AccountAbstractionABI.Events["RIP7560TransactionRevertReason"].ID
-	inputs := AccountAbstractionABI.Events["RIP7560TransactionRevertReason"].Inputs
-	data, error = inputs.NonIndexed().Pack(
-		tx.NonceKey,
-		big.NewInt(int64(tx.Nonce)),
-		revertData,
-	)
-	if error != nil {
-		return nil, nil, error
-	}
-	topics = []common.Hash{id, {}}
-	topics[1] = [32]byte(common.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
-	return topics, data, nil
-}
-
-func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560TransactionPostOpRevertReasonEvent(
-	revertData []byte,
-) (topics []common.Hash, data []byte, error error) {
-	id := AccountAbstractionABI.Events["RIP7560TransactionPostOpRevertReason"].ID
-	paymaster := tx.Paymaster
-	if paymaster == nil {
-		paymaster = &common.Address{}
-	}
-	inputs := AccountAbstractionABI.Events["RIP7560TransactionPostOpRevertReason"].Inputs
-	data, error = inputs.NonIndexed().Pack(
-		tx.NonceKey,
-		big.NewInt(int64(tx.Nonce)),
-		revertData,
-	)
-	if error != nil {
-		return nil, nil, error
-	}
-	topics = []common.Hash{id, {}, {}}
-	topics[1] = [32]byte(common.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
-	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes()[:], 32))
-	return topics, data, nil
 }
