@@ -119,7 +119,11 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	e.lastParameters = &param
 
 	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param)
-	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
+	if e.config.IsOptimism() {
+		e.logger.Debug("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
+	} else {
+		e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
+	}
 
 	return &execution.AssembleBlockResponse{
 		Id:   e.nextPayloadId,
