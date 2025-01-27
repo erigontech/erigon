@@ -7,16 +7,12 @@ import (
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
 )
 
 const FlagDone = 0
 const FlagEstimate = 1
 
-const addressType = 1
-const stateType = 2
-const subpathType = 3
-
+const AddressPath = 0
 const BalancePath = 1
 const NoncePath = 2
 const CodePath = 3
@@ -24,24 +20,26 @@ const CodeHashPath = 4
 const CodeSizePath = 5
 const SelfDestructPath = 6
 
-const KeyLength = length.Addr + length.Hash + 2
-
-type VersionKey [KeyLength]byte
+type VersionKey struct {
+	addr    *common.Address
+	key     *common.Hash
+	subpath int8
+}
 
 func (k VersionKey) String() string {
 	var keyType string
 	var subpath string
 	var key string
 
-	switch k[KeyLength-1] {
-	case addressType:
-		keyType = "Address"
-		key = fmt.Sprintf("%x", k[0:length.Addr])
-	case stateType:
+	if k.key != nil {
 		keyType = "State"
-		key = fmt.Sprintf("%x %x", k[0:length.Addr], k[length.Addr:KeyLength-2])
-	case subpathType:
-		switch k[KeyLength-2] {
+		key = fmt.Sprintf("%x %x", k.addr, k.key)
+	} else {
+		key = fmt.Sprintf("%x", k.addr)
+
+		switch k.subpath {
+		case AddressPath:
+			keyType = "Address"
 		case BalancePath:
 			keyType = "Balance"
 		case NoncePath:
@@ -54,79 +52,103 @@ func (k VersionKey) String() string {
 			keyType = "Code Size"
 		case SelfDestructPath:
 			keyType = "Destruct"
-		case 0:
 		default:
 			keyType = "Path"
-			subpath = fmt.Sprintf(" Unknown %d", k[KeyLength-2])
+			subpath = fmt.Sprintf(" Unknown %d", k.subpath)
 		}
-		key = fmt.Sprintf("%x", k[0:length.Addr])
-	default:
-		keyType = "Unkwnown"
-		key = fmt.Sprintf("%x %x", k[0:length.Addr], k[length.Addr:KeyLength-2])
 	}
 
 	return fmt.Sprintf("%-9s %s%s", keyType, key, subpath)
 }
 
 func (k VersionKey) IsAddress() bool {
-	return k[KeyLength-1] == addressType
+	return k.subpath == AddressPath && k.key == nil
 }
 
 func (k VersionKey) IsState() bool {
-	return k[KeyLength-1] == stateType
+	return k.key != nil
 }
 
 func (k VersionKey) IsSubpath() bool {
-	return k[KeyLength-1] == subpathType
+	return k.subpath != AddressPath && k.key == nil
 }
 
 func (k VersionKey) IsCode() bool {
-	return k[KeyLength-1] == subpathType && k[KeyLength-2] == CodePath
+	return k.subpath == CodePath && k.key == nil
+}
+
+func (k VersionKey) IsNonce() bool {
+	return k.subpath == NoncePath && k.key == nil
+}
+
+func (k VersionKey) IsBalance() bool {
+	return k.subpath == BalancePath && k.key == nil
 }
 
 func (k VersionKey) GetAddress() common.Address {
-	return common.BytesToAddress(k[:length.Addr])
+	if k.addr == nil {
+		return common.Address{}
+	}
+	return *k.addr
 }
 
 func (k VersionKey) GetStateKey() common.Hash {
-	return common.BytesToHash(k[length.Addr : KeyLength-2])
-}
-
-func (k VersionKey) GetSubpath() byte {
-	return k[KeyLength-2]
-}
-
-func newVersionKey(addr common.Address, hash common.Hash, subpath byte, keyType byte) VersionKey {
-	var k VersionKey
-
-	copy(k[:length.Addr], addr.Bytes())
-	copy(k[length.Addr:KeyLength-2], hash.Bytes())
-	k[KeyLength-2] = subpath
-	k[KeyLength-1] = keyType
-
-	return k
-}
-
-func AddressKey(addr common.Address) VersionKey {
-	return newVersionKey(addr, common.Hash{}, 0, addressType)
-}
-
-func StateKey(addr common.Address, hash common.Hash) VersionKey {
-	k := newVersionKey(addr, hash, 0, stateType)
-	if !k.IsState() {
-		panic(fmt.Errorf("key is not a state key"))
+	if k.key == nil {
+		return common.Hash{}
 	}
-
-	return k
+	return *k.key
 }
 
-func SubpathKey(addr common.Address, subpath byte) VersionKey {
-	return newVersionKey(addr, common.Hash{}, subpath, subpathType)
+func (k VersionKey) GetSubpath() int8 {
+	return k.subpath
+}
+
+func AddressKey(addr *common.Address) VersionKey {
+	return VersionKey{
+		addr: addr,
+	}
+}
+
+func StateKey(addr *common.Address, hash *common.Hash) VersionKey {
+	return VersionKey{
+		addr: addr,
+		key:  hash}
+}
+
+func SubpathKey(addr *common.Address, subpath int8) VersionKey {
+	return VersionKey{
+		addr:    addr,
+		subpath: subpath,
+	}
+}
+
+func VersionKeyLess(a, b *VersionKey) bool {
+	sdiff := a.subpath - b.subpath
+	switch {
+	case sdiff > 0:
+		return true
+	case sdiff < 0:
+		return false
+	default:
+		switch a.addr.Cmp(*b.addr) {
+		case 1:
+			return false
+		case -1:
+			return true
+		default:
+			if a.key == nil {
+				return b.key != nil
+			} else if b.key == nil {
+				return false
+			}
+
+			return a.key.Cmp(*b.key) < 0
+		}
+	}
 }
 
 type VersionMap struct {
-	m     sync.Map
-	s     sync.Map
+	s     *btree.BTreeG[vmItem]
 	trace bool
 }
 
@@ -134,6 +156,15 @@ type WriteCell struct {
 	flag        uint
 	incarnation int
 	data        interface{}
+}
+
+type vmItem struct {
+	k *VersionKey
+	v *TxIndexCells
+}
+
+func vmiLess(a, b vmItem) bool {
+	return VersionKeyLess(a.k, b.k)
 }
 
 type TxIndexCells struct {
@@ -148,27 +179,35 @@ type Version struct {
 	Incarnation int
 }
 
-func (vm *VersionMap) getKeyCells(k VersionKey, fNoKey func(kenc VersionKey) *TxIndexCells) (cells *TxIndexCells) {
-	val, ok := vm.m.Load(k)
+func NewVersionMap() *VersionMap {
+	return &VersionMap{
+		s: btree.NewBTreeG[vmItem](vmiLess),
+	}
+}
+
+func (vm *VersionMap) getKeyCells(k *VersionKey, fNoKey func(kenc *VersionKey) *TxIndexCells) (cells *TxIndexCells) {
+	it, ok := vm.s.Get(vmItem{k: k})
 
 	if !ok {
 		cells = fNoKey(k)
 	} else {
-		cells = val.(*TxIndexCells)
+		cells = it.v
 	}
 
 	return
 }
 
-func (vm *VersionMap) Write(k VersionKey, v Version, data interface{}, complete bool) {
-	cells := vm.getKeyCells(k, func(kenc VersionKey) (cells *TxIndexCells) {
-		n := &TxIndexCells{
-			rw: sync.RWMutex{},
-			tm: &btree.Map[int, *WriteCell]{},
+func (vm *VersionMap) Write(k *VersionKey, v Version, data interface{}, complete bool) {
+	cells := vm.getKeyCells(k, func(kenc *VersionKey) (cells *TxIndexCells) {
+		if it, ok := vm.s.Get(vmItem{k: k}); ok {
+			cells = it.v
+		} else {
+			cells = &TxIndexCells{
+				rw: sync.RWMutex{},
+				tm: &btree.Map[int, *WriteCell]{},
+			}
+			vm.s.Set(vmItem{k: k, v: cells})
 		}
-		cells = n
-		val, _ := vm.m.LoadOrStore(kenc, n)
-		cells = val.(*TxIndexCells)
 		return
 	})
 
@@ -206,18 +245,8 @@ func (vm *VersionMap) Write(k VersionKey, v Version, data interface{}, complete 
 	}
 }
 
-func (vm *VersionMap) ReadStorage(k VersionKey, fallBack func() any) any {
-	data, ok := vm.s.Load(string(k[:]))
-	if !ok {
-		data = fallBack()
-		data, _ = vm.s.LoadOrStore(string(k[:]), data)
-	}
-
-	return data
-}
-
-func (vm *VersionMap) MarkEstimate(k VersionKey, txIdx int) {
-	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells {
+func (vm *VersionMap) MarkEstimate(k *VersionKey, txIdx int) {
+	cells := vm.getKeyCells(k, func(_ *VersionKey) *TxIndexCells {
 		panic(fmt.Errorf("path must already exist"))
 	})
 
@@ -230,8 +259,8 @@ func (vm *VersionMap) MarkEstimate(k VersionKey, txIdx int) {
 	}
 }
 
-func (vm *VersionMap) MarkComplete(k VersionKey, txIdx int) {
-	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells {
+func (vm *VersionMap) MarkComplete(k *VersionKey, txIdx int) {
+	cells := vm.getKeyCells(k, func(_ *VersionKey) *TxIndexCells {
 		panic(fmt.Errorf("path must already exist"))
 	})
 
@@ -244,9 +273,8 @@ func (vm *VersionMap) MarkComplete(k VersionKey, txIdx int) {
 	}
 }
 
-func (vm *VersionMap) Delete(k VersionKey, txIdx int, checkExists bool) {
-
-	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells { return nil })
+func (vm *VersionMap) Delete(k *VersionKey, txIdx int, checkExists bool) {
+	cells := vm.getKeyCells(k, func(_ *VersionKey) *TxIndexCells { return nil })
 
 	if cells == nil {
 		if !checkExists {
@@ -297,11 +325,15 @@ func (mvr ReadResult) Status() int {
 	return MVReadResultNone
 }
 
-func (vm *VersionMap) Read(k VersionKey, txIdx int) (res ReadResult) {
+func (vm *VersionMap) Read(k *VersionKey, txIdx int) (res ReadResult) {
+	if vm == nil {
+		return res
+	}
+
 	res.depIdx = -1
 	res.incarnation = -1
 
-	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells {
+	cells := vm.getKeyCells(k, func(_ *VersionKey) *TxIndexCells {
 		return nil
 	})
 	if cells == nil {
@@ -352,50 +384,50 @@ func (vm *VersionMap) FlushVersionedWrites(writes VersionedWrites, complete bool
 	}
 }
 
-func ValidateVersion(txIdx int, lastInputOutput *VersionedIO, versionMap *VersionMap) (valid bool) {
+func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap) (valid bool) {
 	valid = true
 
-	for _, rd := range lastInputOutput.ReadSet(txIdx) {
-		mvResult := versionMap.Read(rd.Path, txIdx)
-		switch mvResult.Status() {
-		case MVReadResultDone:
-			// Having a write record for a path in VersionedMap doesn't necessarily mean there is a conflict,
-			// because VersionedMap is a superset of the actual write set.
-			// Check if the write record is actually in write set. If not, skip the key.
-			// if mvResult.depIdx >= 0 && !lastInputOutput.HasWritten(mvResult.depIdx, rd.Path) {
-			// 	continue
-			// }
+	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
+		readSet.Scan(func(rd *VersionedRead) bool {
+			mvResult := versionMap.Read(rd.Path, txIdx)
+			switch mvResult.Status() {
+			case MVReadResultDone:
+				// Having a write record for a path in VersionedMap doesn't necessarily mean there is a conflict,
+				// because VersionedMap is a superset of the actual write set.
+				// Check if the write record is actually in write set. If not, skip the key.
+				// if mvResult.depIdx >= 0 && !lastInputOutput.HasWritten(mvResult.depIdx, rd.Path) {
+				// 	continue
+				// }
 
-			valid = rd.Kind == ReadKindMap && rd.Version == Version{
-				TxIndex:     mvResult.depIdx,
-				Incarnation: mvResult.incarnation,
-			}
-		case MVReadResultDependency:
-			valid = false
-		case MVReadResultNone:
-			valid = rd.Kind == ReadKindStorage
-		default:
-			panic(fmt.Errorf("should not happen - undefined vm read status: %ver", mvResult.Status()))
-		}
-
-		if versionMap.trace {
-			fmt.Println("RD", rd.Path, txIdx, func() string {
-				switch mvResult.Status() {
-				case MVReadResultDone:
-					return "done"
-				case MVReadResultDependency:
-					return "dependency"
-				case MVReadResultNone:
-					return "none"
-				default:
-					return "unknown"
+				valid = rd.Kind == ReadKindMap && rd.Version == Version{
+					TxIndex:     mvResult.depIdx,
+					Incarnation: mvResult.incarnation,
 				}
-			}(), rd.Version, mvResult.depIdx, valid)
-		}
+			case MVReadResultDependency:
+				valid = false
+			case MVReadResultNone:
+				valid = rd.Kind == ReadKindStorage
+			default:
+				panic(fmt.Errorf("should not happen - undefined vm read status: %ver", mvResult.Status()))
+			}
 
-		if !valid {
-			break
-		}
+			if versionMap.trace {
+				fmt.Println("RD", rd.Path, txIdx, func() string {
+					switch mvResult.Status() {
+					case MVReadResultDone:
+						return "done"
+					case MVReadResultDependency:
+						return "dependency"
+					case MVReadResultNone:
+						return "none"
+					default:
+						return "unknown"
+					}
+				}(), rd.Version, mvResult.depIdx, valid)
+			}
+
+			return valid
+		})
 	}
 
 	return

@@ -89,8 +89,8 @@ func ApplyDAOHardFork(statedb *state.IntraBlockState) error {
 		if err != nil {
 			return err
 		}
-		statedb.AddBalance(params.DAORefundContract, balance, tracing.BalanceIncreaseDaoContract)
-		statedb.SetBalance(addr, new(uint256.Int), tracing.BalanceDecreaseDaoAccount)
+		statedb.AddBalance(params.DAORefundContract, &balance, tracing.BalanceIncreaseDaoContract)
+		statedb.SetBalance(addr, &uint256.Int{}, tracing.BalanceDecreaseDaoAccount)
 	}
 	return nil
 }

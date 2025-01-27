@@ -177,7 +177,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash comm
 
 	for i, txn := range block.Transactions() {
 
-		ibs.SetTxContext(i)
+		ibs.SetTxContext(block.NumberU64(), i)
 
 		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, &usedGas, &usedBlobGas, vm.Config{})
 

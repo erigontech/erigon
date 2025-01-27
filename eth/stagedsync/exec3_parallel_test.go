@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/params"
 	"github.com/stretchr/testify/assert"
+	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -50,8 +51,8 @@ type Op struct {
 type testExecTask struct {
 	*exec.TxTask
 	ops          []Op
-	readMap      map[state.VersionKey]*state.VersionedRead
-	writeMap     map[state.VersionKey]*state.VersionedWrite
+	readMap      *btree.BTreeG[*state.VersionedRead]
+	writeMap     *btree.BTreeG[*state.VersionedWrite]
 	sender       common.Address
 	nonce        int
 	dependencies []int
@@ -75,8 +76,8 @@ func NewTestExecTask(txIdx int, ops []Op, sender common.Address, nonce int) *tes
 			TxIndex:  txIdx,
 		},
 		ops:          ops,
-		readMap:      make(map[state.VersionKey]*state.VersionedRead),
-		writeMap:     make(map[state.VersionKey]*state.VersionedWrite),
+		readMap:      btree.NewBTreeGOptions(state.VersionedReadLess, btree.Options{NoLocks: true}),
+		writeMap:     btree.NewBTreeGOptions(state.VersionedWriteLess, btree.Options{NoLocks: true}),
 		sender:       sender,
 		nonce:        nonce,
 		dependencies: []int{},
@@ -107,8 +108,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 	version := t.Version()
 
-	t.readMap = make(map[state.VersionKey]*state.VersionedRead)
-	t.writeMap = make(map[state.VersionKey]*state.VersionedWrite)
+	t.readMap = btree.NewBTreeGOptions(state.VersionedReadLess, btree.Options{NoLocks: true})
+	t.writeMap = btree.NewBTreeGOptions(state.VersionedWriteLess, btree.Options{NoLocks: true})
 
 	dep := -1
 
@@ -117,12 +118,12 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 		switch op.opType {
 		case readType:
-			if _, ok := t.writeMap[k]; ok {
+			if _, ok := t.writeMap.Get(&state.VersionedWrite{Path: &k}); ok {
 				sleep(op.duration)
 				continue
 			}
 
-			result := ibs.ReadVersion(k, version.TxIndex)
+			result := ibs.ReadVersion(&k, version.TxIndex)
 
 			val := result.Value()
 
@@ -148,9 +149,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			sleep(op.duration)
 
-			t.readMap[k] = &state.VersionedRead{Path: k, Kind: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}}
+			t.readMap.Set(&state.VersionedRead{Path: &k, Kind: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
-			t.writeMap[k] = &state.VersionedWrite{Path: k, Version: version, Val: op.val}
+			t.writeMap.Set(&state.VersionedWrite{Path: &k, Version: version, Val: op.val})
 		case otherType:
 			sleep(op.duration)
 		default:
@@ -166,16 +167,17 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 }
 
 func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) state.VersionedWrites {
-	writes := make(state.VersionedWrites, 0, len(t.writeMap))
+	writes := make(state.VersionedWrites, 0, t.writeMap.Len())
 
-	for _, v := range t.writeMap {
+	t.writeMap.Scan(func(v *state.VersionedWrite) bool {
 		writes = append(writes, v)
-	}
+		return true
+	})
 
 	return writes
 }
 
-func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) state.VersionedReads {
+func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) *btree.BTreeG[*state.VersionedRead] {
 	return t.readMap
 }
 
@@ -208,14 +210,18 @@ func longTailTimeGenerator(min time.Duration, max time.Duration, i int, j int) f
 }
 
 var randomPathGenerator = func(sender common.Address, i int, j int, total int) state.VersionKey {
-	return state.StateKey(common.BigToAddress((big.NewInt(int64(i % 10)))), common.BigToHash((big.NewInt(int64(total)))))
+	addr := common.BigToAddress((big.NewInt(int64(i % 10))))
+	hash := common.BigToHash((big.NewInt(int64(total))))
+	return state.StateKey(&addr, &hash)
 }
 
 var dexPathGenerator = func(sender common.Address, i int, j int, total int) state.VersionKey {
 	if j == total-1 || j == 2 {
-		return state.SubpathKey(common.BigToAddress(big.NewInt(int64(0))), 1)
+		addr := common.BigToAddress(big.NewInt(int64(0)))
+		return state.SubpathKey(&addr, 1)
 	} else {
-		return state.SubpathKey(common.BigToAddress(big.NewInt(int64(j))), 1)
+		addr := common.BigToAddress(big.NewInt(int64(j)))
+		return state.SubpathKey(&addr, 1)
 	}
 }
 
@@ -236,11 +242,11 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 		// Set first two ops to always read and write nonce
 		ops := make([]Op, 0, readsPerT+writesPerT+nonIOPerT)
 
-		ops = append(ops, Op{opType: readType, key: state.SubpathKey(s, 2), duration: readTime(i, 0), val: senderNonces[s]})
+		ops = append(ops, Op{opType: readType, key: state.SubpathKey(&s, 2), duration: readTime(i, 0), val: senderNonces[s]})
 
 		senderNonces[s]++
 
-		ops = append(ops, Op{opType: writeType, key: state.SubpathKey(s, 2), duration: writeTime(i, 1), val: senderNonces[s]})
+		ops = append(ops, Op{opType: writeType, key: state.SubpathKey(&s, 2), duration: writeTime(i, 1), val: senderNonces[s]})
 
 		for j := 0; j < readsPerT-1; j++ {
 			ops = append(ops, Op{opType: readType})
@@ -494,20 +500,26 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 
 	// Need to apply the final write set to storage
 
-	finalWriteSet := make(map[state.VersionKey]time.Duration)
+	type it struct {
+		k *state.VersionKey
+		d time.Duration
+	}
+
+	finalWriteSet := btree.NewBTreeGOptions(func(a, b it) bool { return state.VersionKeyLess(a.k, b.k) }, btree.Options{NoLocks: true})
 
 	for _, task := range tasks {
 		task := task.(*testExecTask)
 		for _, op := range task.ops {
 			if op.opType == writeType {
-				finalWriteSet[op.key] = op.duration
+				finalWriteSet.Set(it{&op.key, op.duration})
 			}
 		}
 	}
 
-	for _, v := range finalWriteSet {
-		sleep(v)
-	}
+	finalWriteSet.Scan(func(i it) bool {
+		sleep(i.d)
+		return true
+	})
 
 	duration := time.Since(start)
 
@@ -968,10 +980,16 @@ func TestDexScenario(t *testing.T) {
 		for blockNum, blockStatus := range pe.blockStatus {
 			if blockStatus.validateTasks.maxAllComplete() == len(blockStatus.tasks) {
 				for i, inputs := range blockStatus.result.TxIO.Inputs() {
-					for _, input := range inputs {
+					var err error
+					inputs.Scan(func(input *state.VersionedRead) bool {
 						if input.Version.TxIndex != i-1 {
-							return fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.Version.TxIndex)
+							err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.Version.TxIndex)
+							return false
 						}
+						return true
+					})
+					if err != nil {
+						return err
 					}
 				}
 			}
@@ -1005,10 +1023,16 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 		for blockNum, blockStatus := range pe.blockStatus {
 			if blockStatus.validateTasks.maxAllComplete() == len(blockStatus.tasks) {
 				for i, inputs := range blockStatus.result.TxIO.Inputs() {
-					for _, input := range inputs {
+					var err error
+					inputs.Scan(func(input *state.VersionedRead) bool {
 						if input.Version.TxIndex != i-1 {
-							return fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.Version.TxIndex)
+							err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.Version.TxIndex)
+							return false
 						}
+						return true
+					})
+					if err != nil {
+						return err
 					}
 				}
 			}

@@ -280,41 +280,14 @@ func (so *stateObject) printTrie() {
 	}
 }
 
-// AddBalance adds amount to so's balance.
-// It is used to add funds to the destination account of a transfer.
-func (so *stateObject) AddBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) bool {
-	// EIP161: We must check emptiness for the objects such that the account
-	// clearing (0,0,0 objects) can take effect.
-	if amount.IsZero() {
-		if so.empty() {
-			so.touch()
-			return true
-		}
-
-		return false
-	}
-
-	so.SetBalance(new(uint256.Int).Add(so.Balance(), amount), reason)
-	return true
-}
-
-// SubBalance removes amount from so's balance.
-// It is used to remove funds from the origin account of a transfer.
-func (so *stateObject) SubBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) bool {
-	if amount.IsZero() {
-		return false
-	}
-	so.SetBalance(new(uint256.Int).Sub(so.Balance(), amount), reason)
-	return true
-}
-
 func (so *stateObject) SetBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	so.db.journal.append(balanceChange{
 		account: &so.address,
 		prev:    so.data.Balance,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
-		so.db.tracingHooks.OnBalanceChange(so.address, so.Balance(), amount, reason)
+		balance := so.data.Balance
+		so.db.tracingHooks.OnBalanceChange(so.address, &balance, amount, reason)
 	}
 	so.setBalance(amount)
 }
@@ -394,9 +367,8 @@ func (so *stateObject) setNonce(nonce uint64) {
 	so.data.Nonce = nonce
 }
 
-func (so *stateObject) Balance() *uint256.Int {
-	balance := so.data.Balance
-	return &balance
+func (so *stateObject) Balance() uint256.Int {
+	return so.data.Balance
 }
 
 func (so *stateObject) Nonce() uint64 {

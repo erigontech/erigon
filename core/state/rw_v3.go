@@ -750,6 +750,10 @@ func NewBufferedReader(bufferedState *StateV3Buffered, reader ResettableStateRea
 	return &bufferedReader{reader: reader, bufferedState: bufferedState}
 }
 
+func (r *bufferedReader) SetTrace(trace bool) {
+	r.reader.(*ReaderParallelV3).trace = trace
+}
+
 func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	var data *accounts.Account
 
@@ -760,6 +764,10 @@ func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Acco
 	r.bufferedState.accountsMutex.RUnlock()
 
 	if data != nil {
+		if reader, ok := r.reader.(*ReaderParallelV3); ok && reader.trace {
+			fmt.Printf("ReadAccountData (buf) [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, data.Nonce, &data.Balance, data.CodeHash, reader.txNum)
+		}
+
 		result := *data
 		return &result, nil
 	}

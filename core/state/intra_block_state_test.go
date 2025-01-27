@@ -480,7 +480,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	mvhm := &VersionMap{}
+	mvhm := NewVersionMap()
 
 	s := NewWithVersionMap(NewReaderV3(domains, tx), mvhm)
 
@@ -570,7 +570,7 @@ func TestVersionMapRevert(t *testing.T) {
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
 	assert.NoError(t, err)
-	mvhm := &VersionMap{}
+	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains, tx), mvhm)
 
 	states := []*IntraBlockState{s}
@@ -649,7 +649,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
 	assert.NoError(t, err)
-	mvhm := &VersionMap{}
+	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains, tx), mvhm)
 	states := []*IntraBlockState{s}
 
@@ -736,7 +736,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
 	assert.NoError(t, err)
-	mvhm := &VersionMap{}
+	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains, tx), mvhm)
 
 	states := []*IntraBlockState{s}
@@ -782,11 +782,11 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance2, b)
 
 	// Tx1 delete
-	for _, v := range states[1].versionedWrites {
+	states[1].versionedWrites.Scan(func(v *VersionedWrite) bool {
 		mvhm.Delete(v.Path, 1, true)
-
-		states[1].versionedWrites = nil
-	}
+		return true
+	})
+	states[1].versionedWrites = nil
 
 	// Tx2 read should get Tx0's value
 	states[2].GetState(addr, key, &v)
@@ -803,11 +803,11 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx0 delete
-	for _, v := range states[0].versionedWrites {
-		mvhm.Delete(v.Path, 0, true)
-
-		states[0].versionedWrites = nil
-	}
+	states[0].versionedWrites.Scan(func(v *VersionedWrite) bool {
+		mvhm.Delete(v.Path, 1, true)
+		return true
+	})
+	states[0].versionedWrites = nil
 
 	// Tx2 read again should get default vals
 	states[2].GetState(addr, key, &v)
@@ -841,7 +841,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
 	assert.NoError(t, err)
-	mvhm := &VersionMap{}
+	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains, tx), mvhm)
 
 	states := []*IntraBlockState{s}
@@ -906,11 +906,11 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx2 delete
-	for _, v := range states[2].versionedWrites {
-		mvhm.Delete(v.Path, 2, true)
-
-		states[2].versionedWrites = nil
-	}
+	states[2].versionedWrites.Scan(func(v *VersionedWrite) bool {
+		mvhm.Delete(v.Path, 1, true)
+		return true
+	})
+	states[2].versionedWrites = nil
 
 	// Tx3 read
 	states[3].GetState(addr, key1, &v)
@@ -936,11 +936,11 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, uint256.NewInt(0), b)
 
 	// Tx1 delete
-	for _, v := range states[1].versionedWrites {
+	states[1].versionedWrites.Scan(func(v *VersionedWrite) bool {
 		mvhm.Delete(v.Path, 1, true)
-
-		states[1].versionedWrites = nil
-	}
+		return true
+	})
+	states[1].versionedWrites = nil
 
 	// Tx3 read
 	states[3].GetState(addr, key1, &v)
@@ -976,7 +976,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
 	assert.NoError(t, err)
-	mvhm := &VersionMap{}
+	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains, tx), mvhm)
 
 	sClean := s.Copy()

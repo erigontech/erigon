@@ -255,7 +255,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			continue
 		}
 
-		_, err = exec.ExecTxn(txNum, txIndex, txn, true)
+		_, err = exec.ExecTxn(txNum, blockNum, txIndex, txn, true)
 		if err != nil {
 			return nil, err
 		}

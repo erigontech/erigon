@@ -1659,12 +1659,12 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Addres
 	if err != nil {
 		return err
 	}
-	input1 = input1.Clone()
+	input1 = input1
 	input2, err := db.GetBalance(recipient)
 	if err != nil {
 		return err
 	}
-	input2 = input2.Clone()
+	input2 = input2
 	if !bailout {
 		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
 		if err != nil {
@@ -1680,14 +1680,12 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Addres
 	if err != nil {
 		return err
 	}
-	output1 = output1.Clone()
 	output2, err := db.GetBalance(recipient)
 	if err != nil {
 		return err
 	}
-	output2 = output2.Clone()
 	// add transfer log into state
-	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
+	addTransferLog(db, transferLogSig, sender, recipient, amount, &input1, &input2, &output1, &output2)
 	return nil
 }
 

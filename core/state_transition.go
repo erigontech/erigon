@@ -221,7 +221,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			return err
 		}
 		if have, want := balance, balanceCheck; have.Cmp(want) < 0 {
-			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
+			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), &have, want)
 		}
 		st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy)
 		st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy)
@@ -333,15 +333,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
-	senderInitBalance = senderInitBalance.Clone()
 
-	var coinbaseInitBalance *uint256.Int
+	var coinbaseInitBalance uint256.Int
 	if !st.noFeeBurnAndTip {
 		coinbaseInitBalance, err = st.state.GetBalance(coinbase)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
-		coinbaseInitBalance = coinbaseInitBalance.Clone()
 	}
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
@@ -572,8 +570,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		Err:                 vmerr,
 		Reverted:            vmerr == vm.ErrExecutionReverted,
 		ReturnData:          ret,
-		SenderInitBalance:   senderInitBalance,
-		CoinbaseInitBalance: coinbaseInitBalance,
+		SenderInitBalance:   &senderInitBalance,
+		CoinbaseInitBalance: &coinbaseInitBalance,
 		FeeTipped:           tipAmount,
 		FeeBurnt:            burnAmount,
 	}

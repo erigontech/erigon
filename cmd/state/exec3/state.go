@@ -222,7 +222,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 	txTask.Reset(rw.ibs)
 
 	if txIndex >= 0 {
-		rw.ibs.SetTxContext(txIndex)
+		rw.ibs.SetTxContext(txTask.Version().BlockNum, txIndex)
 	}
 
 	result := txTask.Execute(rw.evm, rw.vmCfg, rw.engine, rw.genesis, rw.taskGasPool, rw.rs, rw.ibs,

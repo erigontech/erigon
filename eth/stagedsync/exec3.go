@@ -681,12 +681,17 @@ func ExecV3(ctx context.Context,
 				se := executor.(*serialExecutor)
 				se.skipPostEvaluation = skipPostEvaluation
 
+				//fmt.Println("Block",  blockNum)
+
 				continueLoop, err := se.execute(ctx, txTasks, false)
 
 				if err != nil {
 					return err
 				}
 
+				if blockNum == /*16857761, 16853722, 16883726,*/ 16844690 {
+					fmt.Println("Complete", blockNum)
+				}
 				uncommittedGas = se.executedGas - se.committedGas
 				mxExecBlocks.Add(1)
 

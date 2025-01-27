@@ -1018,7 +1018,7 @@ func TestEip2200Gas(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	var balanceBefore *uint256.Int
+	var balanceBefore uint256.Int
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(address); err != nil {

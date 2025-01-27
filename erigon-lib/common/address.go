@@ -72,6 +72,10 @@ func (a Address) String() string {
 	return a.Hex()
 }
 
+func (a Address) Cmp(o Address) int {
+	return bytes.Compare(a[:], o[:])
+}
+
 func (a *Address) checksumHex() []byte {
 	buf := a.hex()
 

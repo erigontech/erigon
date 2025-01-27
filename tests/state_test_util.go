@@ -298,7 +298,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 
 	r := rpchelper.NewLatestStateReader(domains, tx)
 	statedb := state.New(r)
-	statedb.SetTxContext(0)
+	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)

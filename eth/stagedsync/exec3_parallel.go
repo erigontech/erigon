@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
+	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -149,9 +150,9 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 	//fmt.Printf("(%d.%d) Finalize\n", txIndex, task.version.Incarnation)
 
-	versionedReader := state.NewVersionedStateReader(result.TxIn)
+	versionedReader := state.NewVersionedStateReader(txIndex, result.TxIn, vm)
 	ibs := state.New(versionedReader)
-	ibs.SetTxContext(txIndex)
+	ibs.SetTxContext(task.Version().BlockNum, txIndex)
 	ibs.SetVersion(task.version.Incarnation)
 	ibs.ApplyVersionedWrites(result.TxOut)
 	versionedReader.SetStateReader(stateReader)
@@ -277,7 +278,9 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	defer func() {
 		if r := recover(); r != nil {
 			// Recover from dependency panic and retry the execution.
-			log.Debug("Recovered from EVM failure.", "Error:", r)
+			if r != state.ErrDependency {
+				log.Debug("Recovered from EVM failure.", "Error:", r)
+			}
 			var err error
 			if ibs.DepTxIndex() < 0 {
 				err = fmt.Errorf("EVM failure: %s", r)
@@ -468,7 +471,7 @@ func newBlockStatus(profile bool) *blockExecStatus {
 		estimateDeps: map[int][]int{},
 		preValidated: map[int]bool{},
 		blockIO:      &state.VersionedIO{},
-		versionMap:   &state.VersionMap{},
+		versionMap:   state.NewVersionMap(),
 		profile:      profile,
 	}
 }
@@ -546,7 +549,7 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 			}
 
 			if blockResult.complete {
-				if blockResult.BlockNum == 14935178 || blockResult.BlockNum == 14935090 || blockResult.BlockNum == 14898492 {
+				if blockResult.BlockNum == 16841967 {
 					//fmt.Println("Block Complete", blockResult.BlockNum)
 					//panic(blockResult.BlockNum)
 				}
@@ -564,7 +567,7 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 						txTask := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
 						ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderParallelV3(pe.rs.Domains(), tx)))
-						ibs.SetTxContext(txTask.TxIndex)
+						ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
 						ibs.SetVersion(txTask.Version().Incarnation)
 
 						syscall := func(contract common.Address, data []byte) ([]byte, error) {
@@ -621,10 +624,9 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 					execTask := blockStatus.tasks[nextTx]
 
 					//fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
-					if /*blockResult.BlockNum+1 == 14748605 || blockResult.BlockNum+1 == 14734485 ||*/
-					blockResult.BlockNum+1 == 14935178 || blockResult.BlockNum+1 == 14935090 || blockResult.BlockNum+1 == 14898492 {
+					if blockResult.BlockNum+1 == 16862608 {
 						//vm.Trace = true
-						//fmt.Println(blockResult.BlockNum + 1)
+						//fmt.Println(blockResult.BlockNum+1, len(blockStatus.tasks))
 					} else {
 						vm.Trace = false
 					}
@@ -644,6 +646,7 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
+			fmt.Println(err)
 			pe.blockResults <- &blockResult{Err: err}
 		}
 	}
@@ -1071,14 +1074,14 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 
 			// Remove entries that were previously written but are no longer written
 
-			cmpMap := make(map[state.VersionKey]bool)
+			cmpMap := btree.NewBTreeGOptions(state.VersionKeyLess, btree.Options{NoLocks: true})
 
 			for _, w := range res.TxOut {
-				cmpMap[w.Path] = true
+				cmpMap.Set(w.Path)
 			}
 
 			for _, v := range prevWrite {
-				if _, ok := cmpMap[v.Path]; !ok {
+				if _, ok := cmpMap.Get(v.Path); !ok {
 					blockStatus.versionMap.Delete(v.Path, txIndex, true)
 				}
 			}

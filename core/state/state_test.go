@@ -58,7 +58,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	// generate a few entries
 	obj1, err := s.state.GetOrNewStateObject(toAddr([]byte{0x01}))
 	c.Check(err, checker.IsNil)
-	obj1.AddBalance(uint256.NewInt(22), tracing.BalanceChangeUnspecified)
+	s.state.AddBalance(toAddr([]byte{0x01}), uint256.NewInt(22), tracing.BalanceChangeUnspecified)
 	obj2, err := s.state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	c.Check(err, checker.IsNil)
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
@@ -344,7 +344,9 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	if so0.Address() != so1.Address() {
 		t.Fatalf("Address mismatch: have %v, want %v", so0.address, so1.address)
 	}
-	if so0.Balance().Cmp(so1.Balance()) != 0 {
+	bal0 := so0.Balance()
+	bal1 := so1.Balance()
+	if bal0.Cmp(&bal1) != 0 {
 		t.Fatalf("Balance mismatch: have %v, want %v", so0.Balance(), so1.Balance())
 	}
 	if so0.Nonce() != so1.Nonce() {
@@ -429,7 +431,7 @@ func TestDump(t *testing.T) {
 	// generate a few entries
 	obj1, err := st.GetOrNewStateObject(toAddr([]byte{0x01}))
 	require.NoError(t, err)
-	obj1.AddBalance(uint256.NewInt(22), tracing.BalanceChangeUnspecified)
+	st.AddBalance(toAddr([]byte{0x01}), uint256.NewInt(22), tracing.BalanceChangeUnspecified)
 	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	require.NoError(t, err)
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
