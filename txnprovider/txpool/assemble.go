@@ -19,6 +19,7 @@ package txpool
 import (
 	"context"
 	"math/big"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -55,6 +56,7 @@ func Assemble(
 	}
 
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	maxBlobsPerBlock := chainConfig.GetMaxBlobsPerBlock(uint64(time.Now().Second()))
 
 	shanghaiTime := chainConfig.ShanghaiTime
 	var agraBlock *big.Int
@@ -66,6 +68,7 @@ func Assemble(
 	if cfg.OverridePragueTime != nil {
 		pragueTime = cfg.OverridePragueTime
 	}
+	maxBlobsPerBlockPrague := chainConfig.MaxBlobGasPerBlockPrague
 
 	newTxns := make(chan Announcements, 1024)
 	newSlotsStreams := &NewSlotsStreams{}
@@ -81,7 +84,8 @@ func Assemble(
 		agraBlock,
 		cancunTime,
 		pragueTime,
-		chainConfig.BlobSchedule,
+		maxBlobsPerBlock,
+		maxBlobsPerBlockPrague,
 		sentryClients,
 		stateChangesClient,
 		builderNotifyNewTxns,
