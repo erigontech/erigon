@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"math/big"
 
-	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
-
+	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
 type BlockNumber string
@@ -71,7 +69,7 @@ func (b *BlockWithTxHashes) UnmarshalJSON(input []byte) error {
 
 type Block struct {
 	BlockWithTxHashes
-	Transactions []*jsonrpc.RPCTransaction `json:"transactions"`
+	Transactions []*ethapi.RPCTransaction `json:"transactions"`
 }
 
 func (b *Block) UnmarshalJSON(input []byte) error {
@@ -81,8 +79,8 @@ func (b *Block) UnmarshalJSON(input []byte) error {
 	}
 
 	var bd struct {
-		Hash         libcommon.Hash            `json:"hash"`
-		Transactions []*jsonrpc.RPCTransaction `json:"transactions"`
+		Hash         libcommon.Hash           `json:"hash"`
+		Transactions []*ethapi.RPCTransaction `json:"transactions"`
 	}
 	if err := json.Unmarshal(input, &bd); err != nil {
 		return err

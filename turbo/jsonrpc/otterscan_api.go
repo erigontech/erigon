@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
@@ -18,6 +17,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/iter"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -35,7 +35,7 @@ import (
 const API_LEVEL = 8
 
 type TransactionsWithReceipts struct {
-	Txs       []*RPCTransaction        `json:"txs"`
+	Txs       []*ethapi.RPCTransaction `json:"txs"`
 	Receipts  []map[string]interface{} `json:"receipts"`
 	FirstPage bool                     `json:"firstPage"`
 	LastPage  bool                     `json:"lastPage"`
@@ -220,7 +220,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 	callToProvider := NewCallCursorBackwardBlockProvider(callToCursor, addr, blockNum)
 	callFromToProvider := newCallFromToBlockProvider(false, callFromProvider, callToProvider)
 
-	txs := make([]*RPCTransaction, 0, pageSize)
+	txs := make([]*ethapi.RPCTransaction, 0, pageSize)
 	receipts := make([]map[string]interface{}, 0, pageSize)
 
 	resultCount := uint16(0)
@@ -289,7 +289,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)
 	var blockHash common.Hash
 	var header *types.Header
-	txs := make([]*RPCTransaction, 0, pageSize)
+	txs := make([]*ethapi.RPCTransaction, 0, pageSize)
 	receipts := make([]map[string]interface{}, 0, pageSize)
 	resultCount := uint16(0)
 
@@ -326,7 +326,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		if err != nil {
 			return nil, err
 		}
-		rpcTx := NewRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
+		rpcTx := ethapi.NewRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
 		txs = append(txs, rpcTx)
 		receipt := &types.Receipt{
 			Type: txn.Type(), CumulativeGasUsed: res.UsedGas,
@@ -395,7 +395,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	callToProvider := NewCallCursorForwardBlockProvider(callToCursor, addr, blockNum)
 	callFromToProvider := newCallFromToBlockProvider(true, callFromProvider, callToProvider)
 
-	txs := make([]*RPCTransaction, 0, pageSize)
+	txs := make([]*ethapi.RPCTransaction, 0, pageSize)
 	receipts := make([]map[string]interface{}, 0, pageSize)
 
 	resultCount := uint16(0)
