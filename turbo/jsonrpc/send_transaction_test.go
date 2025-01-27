@@ -8,15 +8,15 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpool"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/holiman/uint256"
-
-	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
-	"github.com/erigontech/erigon-lib/gointerfaces/txpool"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common/u256"

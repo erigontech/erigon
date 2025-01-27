@@ -9,6 +9,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/holiman/uint256"
 	"golang.org/x/net/context"
 
@@ -17,7 +18,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatch"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -46,7 +46,7 @@ type MiningExecCfg struct {
 }
 
 type TxPoolForMining interface {
-	YieldBest(n uint16, txs *types2.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error)
+	YieldBest(n uint16, txns *txpool.TxnsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error)
 }
 
 func StageMiningExecCfg(
@@ -189,7 +189,7 @@ func getNextTransactions(
 	alreadyYielded mapset.Set[[32]byte],
 	logger log.Logger,
 ) (types.TransactionsStream, int, error) {
-	txSlots := types2.TxsRlp{}
+	txnsRlp := txpool.TxnsRlp{}
 	count := 0
 	if err := cfg.txPoolDB.View(context.Background(), func(poolTx kv.Tx) error {
 		var err error
@@ -200,7 +200,7 @@ func getNextTransactions(
 			remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed
 		}
 
-		if _, count, err = cfg.txPool.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, remainingBlobGas, alreadyYielded); err != nil {
+		if _, count, err = cfg.txPool.YieldBest(amount, &txnsRlp, poolTx, executionAt, remainingGas, remainingBlobGas, alreadyYielded); err != nil {
 			return err
 		}
 
@@ -209,34 +209,32 @@ func getNextTransactions(
 		return nil, 0, err
 	}
 
-	var txs []types.Transaction //nolint:prealloc
-	for i := range txSlots.Txs {
-		transaction, err := types.DecodeWrappedTransaction(txSlots.Txs[i])
+	var txns []types.Transaction //nolint:prealloc
+	for i := range txnsRlp.Txns {
+		txn, err := types.DecodeWrappedTransaction(txnsRlp.Txns[i])
 		if err == io.EOF {
 			continue
 		}
 		if err != nil {
 			return nil, 0, err
 		}
-		if !transaction.GetChainID().IsZero() && transaction.GetChainID().Cmp(chainID) != 0 {
+		if !txn.GetChainID().IsZero() && txn.GetChainID().Cmp(chainID) != 0 {
 			continue
 		}
 
 		var sender libcommon.Address
-		copy(sender[:], txSlots.Senders.At(i))
-
-		// Check if tx nonce is too low
-		txs = append(txs, transaction)
-		txs[len(txs)-1].SetSender(sender)
+		copy(sender[:], txnsRlp.Senders.At(i))
+		txn.SetSender(sender)
+		txns = append(txns, txn)
 	}
 
 	blockNum := executionAt + 1
-	txs, err := filterBadTransactions(txs, cfg.chainConfig, blockNum, header, stateReader, simulationTx, logger)
+	txns, err := filterBadTransactions(txns, cfg.chainConfig, blockNum, header, stateReader, simulationTx, logger)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	return types.NewTransactionsFixedOrder(txs), count, nil
+	return types.NewTransactionsFixedOrder(txns), count, nil
 }
 
 func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, header *types.Header, stateReader state.StateReader, simulationTx kv.StatelessRwTx, logger log.Logger) ([]types.Transaction, error) {

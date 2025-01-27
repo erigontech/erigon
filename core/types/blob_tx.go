@@ -12,8 +12,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
-	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -321,7 +319,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode AccessList
-	stx.AccessList = types2.AccessList{}
+	stx.AccessList = AccessList{}
 	if err = decodeAccessList(&stx.AccessList, s); err != nil {
 		return err
 	}

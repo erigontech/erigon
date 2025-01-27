@@ -34,8 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
-	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
@@ -95,7 +93,7 @@ type stTransaction struct {
 	To                   string                    `json:"to"`
 	Data                 []string                  `json:"data"`
 	Value                []string                  `json:"value"`
-	AccessLists          []*types2.AccessList      `json:"accessLists,omitempty"`
+	AccessLists          []*types.AccessList       `json:"accessLists,omitempty"`
 	BlobGasFeeCap        *math.HexOrDecimal256     `json:"maxFeePerBlobGas,omitempty"`
 	Authorizations       []types.JsonAuthorization `json:"authorizationList,omitempty"`
 }
@@ -427,7 +425,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message
 	if err != nil {
 		return nil, fmt.Errorf("invalid txn data %q", dataHex)
 	}
-	var accessList types2.AccessList
+	var accessList types.AccessList
 	if tx.AccessLists != nil && tx.AccessLists[ps.Indexes.Data] != nil {
 		accessList = *tx.AccessLists[ps.Indexes.Data]
 	}

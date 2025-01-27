@@ -23,7 +23,6 @@ import (
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/core/types"
@@ -126,7 +125,7 @@ type CallMsg struct {
 
 	FeeCap         *uint256.Int          // EIP-1559 fee cap per gas.
 	Tip            *uint256.Int          // EIP-1559 tip per gas.
-	AccessList     types2.AccessList     // EIP-2930 access list.
+	AccessList     types.AccessList      // EIP-2930 access list.
 	BlobHashes     []libcommon.Hash      // EIP-4844 versioned blob hashes.
 	Authorizations []types.Authorization // EIP-3074 authorizations.
 }

@@ -27,7 +27,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	types2 "github.com/erigontech/erigon-lib/types"
 
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/common/math"
@@ -49,7 +48,7 @@ type CallArgs struct {
 	Nonce                *hexutil.Uint64    `json:"nonce"`
 	Data                 *hexutility.Bytes  `json:"data"`
 	Input                *hexutility.Bytes  `json:"input"`
-	AccessList           *types2.AccessList `json:"accessList"`
+	AccessList           *types.AccessList  `json:"accessList"`
 	ChainID              *hexutil.Big       `json:"chainId,omitempty"`
 }
 
@@ -153,7 +152,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 	} else if args.Data != nil {
 		data = *args.Data
 	}
-	var accessList types2.AccessList
+	var accessList types.AccessList
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
@@ -407,7 +406,7 @@ type RPCTransaction struct {
 	TransactionIndex *hexutil.Uint64    `json:"transactionIndex"`
 	Value            *hexutil.Big       `json:"value"`
 	Type             hexutil.Uint64     `json:"type"`
-	Accesses         *types2.AccessList `json:"accessList,omitempty"`
+	Accesses         *types.AccessList  `json:"accessList,omitempty"`
 	ChainID          *hexutil.Big       `json:"chainId,omitempty"`
 	V                *hexutil.Big       `json:"v"`
 	YParity          *hexutil.Big       `json:"yParity,omitempty"`

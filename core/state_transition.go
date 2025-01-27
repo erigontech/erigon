@@ -22,13 +22,12 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
-	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/crypto"
 
 	cmath "github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
@@ -36,8 +35,8 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -95,7 +94,7 @@ type Message interface {
 	Nonce() uint64
 	CheckNonce() bool
 	Data() []byte
-	AccessList() types2.AccessList
+	AccessList() types.AccessList
 	BlobHashes() []libcommon.Hash
 	Authorizations() []types.Authorization
 
@@ -104,7 +103,7 @@ type Message interface {
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
 // TODO: convert the input to a struct
-func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860, isPrague bool, authorizationsLen uint64) (uint64, uint64, error) {
+func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860, isPrague bool, authorizationsLen uint64) (uint64, uint64, error) {
 	// Zero and non-zero bytes are priced differently
 	dataLen := uint64(len(data))
 	dataNonZeroLen := uint64(0)
@@ -344,7 +343,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
-	accessTuples := slices.Clone[types2.AccessList](msg.AccessList())
+	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	if !contractCreation {
 		// Increment the nonce for the next transaction

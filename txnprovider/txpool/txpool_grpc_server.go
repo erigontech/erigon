@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/holiman/uint256"
@@ -38,23 +37,26 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
+	typesproto "github.com/erigontech/erigon-lib/gointerfaces/types"
+
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpool"
-	types2 "github.com/erigontech/erigon-lib/gointerfaces/types"
+
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types"
 )
 
 // TxPoolAPIVersion
-var TxPoolAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
+var TxPoolAPIVersion = &typesproto.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 type txPool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
-	PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error)
+	PeekBest(n uint16, txns *TxnsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error)
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	AddLocalTxs(ctx context.Context, newTxs types.TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error)
+	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
@@ -70,7 +72,7 @@ type GrpcDisabled struct {
 	txpool_proto.UnimplementedTxpoolServer
 }
 
-func (*GrpcDisabled) Version(ctx context.Context, empty *emptypb.Empty) (*types2.VersionReply, error) {
+func (*GrpcDisabled) Version(ctx context.Context, empty *emptypb.Empty) (*typesproto.VersionReply, error) {
 	return nil, ErrPoolDisabled
 }
 func (*GrpcDisabled) FindUnknown(ctx context.Context, hashes *txpool_proto.TxHashes) (*txpool_proto.TxHashes, error) {
@@ -113,7 +115,7 @@ func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, chainID uint2
 	return &GrpcServer{ctx: ctx, txPool: txPool, db: db, NewSlotsStreams: &NewSlotsStreams{}, chainID: chainID, logger: logger}
 }
 
-func (s *GrpcServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
+func (s *GrpcServer) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
 	return TxPoolAPIVersion, nil
 }
 func convertSubPoolType(t SubPoolType) txpool_proto.AllReply_TxnType {
@@ -154,24 +156,24 @@ func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpool_pro
 	defer tx.Rollback()
 	reply := &txpool_proto.PendingReply{}
 	reply.Txs = make([]*txpool_proto.PendingReply_Tx, 0, 32)
-	txSlots := types.TxsRlp{}
-	if _, err := s.txPool.PeekBest(math.MaxInt16, &txSlots, tx, 0 /* onTopOf */, math.MaxUint64 /* availableGas */, math.MaxUint64 /* availableBlobGas */); err != nil {
+	txnsRlp := TxnsRlp{}
+	if _, err := s.txPool.PeekBest(math.MaxInt16, &txnsRlp, tx, 0 /* onTopOf */, math.MaxUint64 /* availableGas */, math.MaxUint64 /* availableBlobGas */); err != nil {
 		return nil, err
 	}
 	var senderArr [20]byte
-	for i := range txSlots.Txs {
-		copy(senderArr[:], txSlots.Senders.At(i)) // TODO: optimize
+	for i := range txnsRlp.Txns {
+		copy(senderArr[:], txnsRlp.Senders.At(i)) // TODO: optimize
 		reply.Txs = append(reply.Txs, &txpool_proto.PendingReply_Tx{
 			Sender:  gointerfaces.ConvertAddressToH160(senderArr),
-			RlpTx:   txSlots.Txs[i],
-			IsLocal: txSlots.IsLocal[i],
+			RlpTx:   txnsRlp.Txns[i],
+			IsLocal: txnsRlp.IsLocal[i],
 		})
 	}
 	return reply, nil
 }
 
 func (s *GrpcServer) FindUnknown(ctx context.Context, in *txpool_proto.TxHashes) (*txpool_proto.TxHashes, error) {
-	return nil, fmt.Errorf("unimplemented")
+	return nil, errors.New("unimplemented")
 }
 
 func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txpool_proto.AddReply, error) {
@@ -181,28 +183,28 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	}
 	defer tx.Rollback()
 
-	var slots types.TxSlots
-	parseCtx := types.NewTxParseContext(s.chainID).ChainIDRequired()
+	var slots TxnSlots
+	parseCtx := NewTxnParseContext(s.chainID).ChainIDRequired()
 	parseCtx.ValidateRLP(s.txPool.ValidateSerializedTxn)
 
 	reply := &txpool_proto.AddReply{Imported: make([]txpool_proto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 
 	for i := 0; i < len(in.RlpTxs); i++ {
-		j := len(slots.Txs) // some incoming txs may be rejected, so - need second index
+		j := len(slots.Txns) // some incoming txns may be rejected, so - need second index
 		slots.Resize(uint(j + 1))
-		slots.Txs[j] = &types.TxSlot{}
+		slots.Txns[j] = &TxnSlot{}
 		slots.IsLocal[j] = true
-		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txs[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
+		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
 			if known, _ := s.txPool.IdHashKnown(tx, hash); known {
-				return types.ErrAlreadyKnown
+				return ErrAlreadyKnown
 			}
 			return nil
 		}); err != nil {
-			slots.Resize(uint(j))                      // remove erroneous transaction
-			if errors.Is(err, types.ErrAlreadyKnown) { // Noop, but need to handle to not count these
+			slots.Resize(uint(j))                // remove erroneous transaction
+			if errors.Is(err, ErrAlreadyKnown) { // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.AlreadyKnown.String()
 				reply.Imported[i] = txpool_proto.ImportResult_ALREADY_EXISTS
-			} else if errors.Is(err, types.ErrRlpTooBig) { // Noop, but need to handle to not count these
+			} else if errors.Is(err, ErrRlpTooBig) { // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.RLPTooLong.String()
 				reply.Imported[i] = txpool_proto.ImportResult_INVALID
 			} else {
@@ -212,7 +214,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 		}
 	}
 
-	discardReasons, err := s.txPool.AddLocalTxs(ctx, slots, tx)
+	discardReasons, err := s.txPool.AddLocalTxns(ctx, slots)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +253,7 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpool_proto.Import
 }
 
 func (s *GrpcServer) OnAdd(req *txpool_proto.OnAddRequest, stream txpool_proto.Txpool_OnAddServer) error {
-	s.logger.Info("New txs subscriber joined")
+	s.logger.Info("New txns subscriber joined")
 	//txpool.Loop does send messages to this streams
 	remove := s.NewSlotsStreams.Add(stream)
 	defer remove()

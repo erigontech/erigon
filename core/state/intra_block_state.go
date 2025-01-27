@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
@@ -798,7 +797,7 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // - Add authorities to access list (EIP-7702)
 // - Add delegated designation (if it exists for dst) to access list (EIP-7702)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
-	precompiles []libcommon.Address, list types2.AccessList, authorities []libcommon.Address) {
+	precompiles []libcommon.Address, list types.AccessList, authorities []libcommon.Address) {
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		al := newAccessList()
