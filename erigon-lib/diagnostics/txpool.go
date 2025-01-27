@@ -51,8 +51,8 @@ func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.Notify(DiagMessages{
-					Type:    "incomming_transaction",
-					Message: string(info.Txn.Hash),
+					MessageType: "txpool",
+					Message:     string(info.Txn.Hash),
 				})
 			}
 		}

@@ -138,6 +138,10 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 	return ConnectDiagnostics(cliCtx, log.Root())
 }
 
+// Setting up the connection to the diagnostics system
+// by creating a tunnel between the diagnostics system and the debug endpoints
+// (Erigon node)  <-------->  (  Support cmd  )  <--->  (diagnostics system)
+// (debug.addrs)  (wss,http)  (current program)  (wss)  ( diagnostics.addr )
 func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -172,6 +176,10 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 	}
 }
 
+// Setting up connections to erigon nodes (if more then one is specified in (debug.addrs)
+// and send nodes info to diagnostics to notify about connection and nodes details like: enode, enr, ports, listener_addr
+//
+// Listen for incoming requests from diagnostics system and send them to the incommitg request channel
 func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
 	ctx1, cancel1 := context.WithCancel(ctx)
 	defer cancel1()
@@ -183,6 +191,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 			cancel1()
 		case <-ctx1.Done():
 			logger.Info("Context done")
+			return
 		}
 	}()
 
@@ -251,7 +260,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	}
 }
 
-// Establishes a WebSocket connection and creates a codec for communication.
+// Establishes a WebSocket connection with diagnostics system (flag: diagnostics.addr) and creates a codec for communication.
 // This function connects to the diagnostics server using a WebSocket and initializes an RPC codec for bidirectional communication.
 func createCodec(ctx context.Context, diagnosticsUrl string) (rpc.ServerCodec, error) {
 	conn, err := establishConnection(ctx, diagnosticsUrl)
@@ -264,6 +273,9 @@ func createCodec(ctx context.Context, diagnosticsUrl string) (rpc.ServerCodec, e
 	return codec, nil
 }
 
+// Establishes a WebSocket connection with the diagnostics system.
+// Trying to establish secure wss:// connection first, if it fails, fallback to ws://.
+// Returns the WebSocket connection if successful, otherwise an error.
 func establishConnection(ctx context.Context, diagnosticsUrl string) (*websocket.Conn, error) {
 	dialer := websocket.Dialer{
 		ReadBufferSize:  wsReadBuffer,
@@ -298,6 +310,9 @@ func establishConnection(ctx context.Context, diagnosticsUrl string) (*websocket
 	return conn, nil
 }
 
+// Creates connections to the nodes specified by the flag debug.addrs.
+// Returns a map of node connections, where the key is the node ID.
+// As soon as connection created for a node, it starts processing requests and responses.
 func createConnections(ctx context.Context, codec rpc.ServerCodec, metricsClient *http.Client, debugURLs []string) (map[string]*nodeConnection, error) {
 	nodes := map[string]*nodeConnection{}
 
@@ -334,7 +349,9 @@ func createConnections(ctx context.Context, codec rpc.ServerCodec, metricsClient
 	return nodes, nil
 }
 
-// get node info from debug endpoint
+// Attempt to query nodes specified by flag debug.addrs and return the response.
+// If the request fails, an error is returned, as we expect all nodes to be reachable.
+// TODO: maybe it make sense to think about allowing some nodes to be unreachable
 func queryNode(metricsClient *http.Client, debugURL string) (*remote.NodesInfoReply, error) {
 	debugResponse, err := metricsClient.Get(debugURL + "/debug/diag/nodeinfo")
 
@@ -359,7 +376,8 @@ func queryNode(metricsClient *http.Client, debugURL string) (*remote.NodesInfoRe
 	return &reply, nil
 }
 
-// Send nodes info to diagnostics
+// Send nodes info to diagnostics to notify about connection and nodes details like: enode, enr, ports, listener_addr
+// This info will tell diagnostics about the nodes that are connected to the diagnostics system
 func sendNodesInfoToDiagnostics(ctx context.Context, codec rpc.ServerCodec, sessionIds []string, nodes map[string]*nodeConnection) error {
 	type connectionInfo struct {
 		Version  uint64        `json:"version"`
@@ -393,6 +411,8 @@ type nodeConnection struct {
 	codec           rpc.ServerCodec
 }
 
+// Connects to the WebSocket endpoint of the node and starts listening for incoming messages.
+// (erigon nodes) ----> (support cmd)
 func (nc *nodeConnection) connectSocket(requestId string) error {
 	//already connected
 	if nc.connection != nil {
@@ -414,8 +434,36 @@ func (nc *nodeConnection) connectSocket(requestId string) error {
 	return nil
 }
 
+func (nc *nodeConnection) closeWebSocket() error {
+	if nc.connection == nil {
+		return nil
+	}
+
+	err := nc.connection.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "closing connection"))
+	if err != nil {
+		fmt.Printf("Failed to send close message: %v\n", err)
+	}
+
+	err = nc.connection.Close()
+	if err != nil {
+		fmt.Printf("Failed to close connection: %v\n", err)
+		return err
+	}
+
+	nc.connection = nil
+	fmt.Println("WebSocket connection closed successfully")
+	return nil
+}
+
+// Starts listening for incoming messages from the WebSocket connection.
+// (erigon nodes) ----> (support cmd)
 func (nc *nodeConnection) startListening() {
 	for {
+		select {
+		case <-nc.ctx.Done():
+			return
+		default:
+		}
 		if nc.connection == nil {
 			fmt.Println("connection closed, exiting read loop")
 			return
@@ -442,29 +490,21 @@ func (nc *nodeConnection) startListening() {
 	}
 }
 
-func (nc *nodeConnection) closeWebSocket() error {
-	if nc.connection == nil {
-		return nil
-	}
-
-	err := nc.connection.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "closing connection"))
-	if err != nil {
-		fmt.Printf("Failed to send close message: %v\n", err)
-	}
-
-	err = nc.connection.Close()
-	if err != nil {
-		fmt.Printf("Failed to close connection: %v\n", err)
-		return err
-	}
-
-	nc.connection = nil
-	fmt.Println("WebSocket connection closed successfully")
-	return nil
+type subscrigeResponse struct {
+	MessageType string `json:"type"`
+	Message     string `json:"message"`
 }
 
+// Processes the incoming requests from the diagnostics system.
+// Handle subscribe/unsubscribe and all other messages.
 func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
 	for action := range nc.requestChannel {
+		select {
+		case <-nc.ctx.Done():
+			return
+		default:
+		}
+
 		switch {
 		case isSubscribe(action.method):
 			err := nc.connectSocket(action.requestId)
@@ -474,9 +514,22 @@ func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
 			}
 
 			fmt.Println("Subscribed to", nc.debugURL)
+
+			response := subscrigeResponse{
+				MessageType: "subscribe",
+				Message:     "subscribed",
+			}
+
+			bytes := &bytes.Buffer{}
+
+			if err := json.NewEncoder(bytes).Encode(response); err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusInternalServerError, "Failed to encode response: "+err.Error())
+				continue
+			}
+
 			nc.responseChannel <- nodeResponse{
 				Id:     action.requestId,
-				Result: json.RawMessage(`"subscribed"`),
+				Result: json.RawMessage(bytes.Bytes()),
 				Last:   true,
 			}
 
@@ -488,9 +541,21 @@ func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
 			}
 
 			fmt.Println("Unsubscribed from", nc.debugURL)
+			response := subscrigeResponse{
+				MessageType: "subscribe",
+				Message:     "unsubscribed",
+			}
+
+			bytes := &bytes.Buffer{}
+
+			if err := json.NewEncoder(bytes).Encode(response); err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusInternalServerError, "Failed to encode response: "+err.Error())
+				continue
+			}
+
 			nc.responseChannel <- nodeResponse{
 				Id:     action.requestId,
-				Result: json.RawMessage(`"unsubscribed"`),
+				Result: json.RawMessage(bytes.Bytes()),
 				Last:   true,
 			}
 
@@ -527,8 +592,16 @@ func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
 	}
 }
 
+// Sends responses to the diagnostics system.
+// (support cmd) ----> (diagnostics system)
 func (nc *nodeConnection) processResponses() {
 	for response := range nc.responseChannel {
+		select {
+		case <-nc.ctx.Done():
+			return
+		default:
+		}
+
 		if err := nc.codec.WriteJSON(nc.ctx, response); err != nil {
 			fmt.Println("Failed to send response", err)
 		}
@@ -539,11 +612,11 @@ func (nc *nodeConnection) processResponses() {
 // TODO: implementation of othere subscribtions (e.g. downloader)
 // TODO: change subscribe from plain string to something more structured
 func isSubscribe(method string) bool {
-	return method == "txpool/subscribe"
+	return method == "subscribe/txpool"
 }
 
 func isUnsubscribe(method string) bool {
-	return method == "txpool/unsubscribe"
+	return method == "unsubscribe/txpool"
 }
 
 func errorResponseMessage(requestId string, code int64, message string) nodeResponse {
