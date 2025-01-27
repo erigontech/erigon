@@ -34,36 +34,36 @@ func NewMarkedAppendable(enum ApEnum, stepSize uint64, canonicalTbl, valsTbl str
 	}
 }
 
-func (a *MarkedAppendable) Get(tsNum TsNum, tx kv.Tx) (VVType, error) {
+func (a *MarkedAppendable) Get(num Num, tx kv.Tx) (VVType, error) {
 	// first look into snapshots..
-	lastTsNum := a.VisibleSegmentsMaxTsNum()
-	if tsNum <= lastTsNum {
-		if a.baseKeySameAsTsNum {
-			// can do binary search or loop over visible segments and find which segment contains tsNum
+	lastNum := a.VisibleSegmentsMaxNum()
+	if num <= lastNum {
+		if a.baseNumSameAsNum {
+			// can do binary search or loop over visible segments and find which segment contains num
 			// and then get from there
 			var v *VisibleSegment
 
-			// Note: Get assumes that the first index allows ordinal lookup on tsNum. Is this valid assumption?
+			// Note: Get assumes that the first index allows ordinal lookup on num. Is this valid assumption?
 			// for borevents this is not a valid assumption
-			if a.indexBuilders[0].AllowsOrdinalLookupByTsNum() {
-				return v.Get(tsNum)
+			if a.indexBuilders[0].AllowsOrdinalLookupByNum() {
+				return v.Get(num)
 			} else {
-				return nil, fmt.Errorf("ordinal lookup by tsNum not supported for %s", a.enum)
+				return nil, fmt.Errorf("ordinal lookup by num not supported for %s", a.enum)
 			}
 		} else {
-			// TODO: loop over all visible segments and find which segment contains tsNum
+			// TODO: loop over all visible segments and find which segment contains num
 		}
 	}
 
 	// then db
-	itsNum := uint64(tsNum)
-	forkId, err := tx.GetOne(a.canonicalTbl, a.encTs(itsNum))
+	iNum := uint64(num)
+	forkId, err := tx.GetOne(a.canonicalTbl, a.encTs(iNum))
 	if err != nil {
 		return nil, err
 	}
 	// if forkId == nil....
 
-	key := a.combK(itsNum, forkId)
+	key := a.combK(iNum, forkId)
 	return tx.GetOne(a.valsTbl, key)
 }
 
@@ -86,7 +86,7 @@ func (a *MarkedAppendable) Put(tsId uint64, forkId []byte, value VVType, tx kv.R
 	return tx.Put(a.valsTbl, key, value)
 }
 
-func (a *MarkedAppendable) Prune(ctx context.Context, baseKeyTo TsNum, limit uint64, rwTx kv.RwTx) error {
+func (a *MarkedAppendable) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
 	// from 1 to baseKeyTo (exclusive)
 
 	// probably fromKey value needs to be in configuration...starts from 1 because we want to keep genesis block
@@ -105,7 +105,7 @@ func (a *MarkedAppendable) Prune(ctx context.Context, baseKeyTo TsNum, limit uin
 	return nil
 }
 
-func (a *MarkedAppendable) Unwind(ctx context.Context, baseKeyFrom TsNum, rwTx kv.RwTx) error {
+func (a *MarkedAppendable) Unwind(ctx context.Context, baseKeyFrom Num, rwTx kv.RwTx) error {
 	fromKey := a.encTs(uint64(baseKeyFrom))
 	if err := DeleteRangeFromTbl(a.canonicalTbl, fromKey, nil, MaxUint64, rwTx); err != nil {
 		return err

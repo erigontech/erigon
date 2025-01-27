@@ -27,9 +27,9 @@ type ProtoAppendable struct {
 	baseAppendable Appendable
 
 	// put these in config
-	stepSize           uint64
-	baseKeySameAsTsNum bool // if the tsNum of this appendable is the same as the tsNum of the base appendable
-	standalone     bool // regenerate snapshots, so ignore base appendable dirtyfiles progress
+	stepSize         uint64
+	baseNumSameAsNum bool // if the num of this appendable is the same as the num of the base appendable
+	standalone       bool // regenerate snapshots, so ignore base appendable dirtyfiles progress
 
 	dirs   datadir.Dirs
 	logger log.Logger
@@ -51,32 +51,32 @@ func (a *ProtoAppendable) SetIndexBuilders(indexBuilders []AccessorIndexBuilder)
 	a.indexBuilders = indexBuilders
 }
 
-func (a *ProtoAppendable) BaseKeySameAsTsNum() {
-	a.baseKeySameAsTsNum = true
+func (a *ProtoAppendable) BaseKeySameAsNum() {
+	a.baseNumSameAsNum = true
 }
 
-func (a *ProtoAppendable) VisibleSegmentsMaxTsNum() TsNum {
-	// if snapshots store the last tsNum
+func (a *ProtoAppendable) VisibleSegmentsMaxNum() Num {
+	// if snapshots store the last num
 	latest := a._visible[len(a._visible)-1]
-	return TsNum(latest.Src().GetLastTsNum())
+	return Num(latest.Src().GetLastNum())
 }
 
-func (a *ProtoAppendable) DirtySegmentsMaxTsNum() TsNum {
-	// if snapshots store the last tsNum
+func (a *ProtoAppendable) DirtySegmentsMaxNum() Num {
+	// if snapshots store the last num
 	latest, ok := a.dirtyFiles.Max()
 	if !ok {
 		return 0
 	}
-	return TsNum(latest.GetLastTsNum())
+	return Num(latest.GetLastNum())
 }
 
-func (a *ProtoAppendable) BuildFiles(ctx context.Context, baseTsNumFrom, baseTsNumTo TsNum, db kv.RoDB, ps *background.ProgressSet) error {
-	stepFrom, stepTo := uint64(baseTsNumFrom)/a.stepSize, uint64(baseTsNumTo)/a.stepSize
+func (a *ProtoAppendable) BuildFiles(ctx context.Context, baseNumFrom, baseNumTo Num, db kv.RoDB, ps *background.ProgressSet) error {
+	stepFrom, stepTo := uint64(baseNumFrom)/a.stepSize, uint64(baseNumTo)/a.stepSize
 	for step := stepFrom; step <= stepTo; step++ {
-		from, to := TsNum(step*a.stepSize), TsNum((step+1)*a.stepSize)
+		from, to := Num(step*a.stepSize), Num((step+1)*a.stepSize)
 
 		// can it freeze? just follow base appendable
-		if !a.standalone && to > a.baseAppendable.DirtySegmentsMaxTsNum() {
+		if !a.standalone && to > a.baseAppendable.DirtySegmentsMaxNum() {
 			break
 		}
 		// maybe also check if segment is already built
@@ -142,8 +142,8 @@ func (a *ProtoAppendable) BuildMissedIndexes(ctx context.Context, g *errgroup.Gr
 	// caller must "refresh" like OpenFolder to refresh the dirty files
 }
 
-func (a *ProtoAppendable) RecalcVisibleFiles(baseTsNumTo TsNum) {
-	a._visible = calcVisibleFiles(a.dirtyFiles, baseTsNumTo)
+func (a *ProtoAppendable) RecalcVisibleFiles(baseNumTo Num) {
+	a._visible = calcVisibleFiles(a.dirtyFiles, baseNumTo)
 }
 
 func (a *ProtoAppendable) Close() {
@@ -153,10 +153,10 @@ func (a *ProtoAppendable) Close() {
 	a.closeWhatNotInList([]string{})
 }
 
-func (a *ProtoAppendable) Prune(ctx context.Context, baseTsNumTo TsNum, limit uint64, rwTx kv.RwTx) error {
+func (a *ProtoAppendable) Prune(ctx context.Context, baseNumTo Num, limit uint64, rwTx kv.RwTx) error {
 	return nil
 }
-func (a *ProtoAppendable) Unwind(ctx context.Context, baseTsNumFrom TsNum, rwTx kv.RwTx) error {
+func (a *ProtoAppendable) Unwind(ctx context.Context, baseNumFrom Num, rwTx kv.RwTx) error {
 	return nil
 }
 
@@ -219,18 +219,18 @@ func (a *ProtoAppendable) IsBaseAppendable() bool {
 // 	idxReaders [][]*recsplit.IndexReader
 // }
 
-// func (a *AppendableRoTx) Unwind(ctx context.Context, baseTsNumFrom TsNum, rwTx kv.RwTx) error {
-// 	return a.a.Unwind(ctx, baseTsNumFrom, rwTx)
+// func (a *AppendableRoTx) Unwind(ctx context.Context, baseNumFrom Num, rwTx kv.RwTx) error {
+// 	return a.a.Unwind(ctx, baseNumFrom, rwTx)
 // }
 
 ///
 
-func calcVisibleFiles(files *btree.BTreeG[*DirtySegment], toTsNum TsNum) VisibleSegments {
+func calcVisibleFiles(files *btree.BTreeG[*DirtySegment], toNum Num) VisibleSegments {
 	newVisibleFiles := make([]VisibleSegment, 0, files.Len())
-	iToTsNum := uint64(toTsNum)
+	iToNum := uint64(toNum)
 	files.Walk(func(items []*DirtySegment) bool {
 		for _, item := range items {
-			if item.To() > iToTsNum {
+			if item.To() > iToNum {
 				continue
 			}
 			if item.canDelete.Load() {

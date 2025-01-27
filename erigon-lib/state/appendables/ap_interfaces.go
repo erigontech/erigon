@@ -15,61 +15,61 @@ import (
 // vals table k,v types
 type VKType []byte
 type VVType []byte
-type TsNum uint64
-type TsId uint64
+type Num uint64
+type Id uint64
 
 type Collector func(values []byte) error
 
 // pattern is SetCollector ; and then call Freeze
 type Freezer interface {
-	// stepKeyFrom/To represent tsNum which the snapshot should range
+	// stepKeyFrom/To represent num which the snapshot should range
 	// this doesn't check if the snapshot can be created or not. It's the responsibilty of the caller
 	// to ensure this.
-	Freeze(ctx context.Context, baseTsNumFrom, baseTsNumTo TsNum, tx kv.Tx) error
+	Freeze(ctx context.Context, baseNumFrom, baseNumTo Num, tx kv.Tx) error
 	SetCollector(coll Collector)
 }
 
 type Appendable interface {
 	SetFreezer(Freezer)
 	SetIndexBuilders([]AccessorIndexBuilder)
-	DirtySegmentsMaxTsNum() TsNum
-	VisibleSegmentsMaxTsNum() TsNum
-	RecalcVisibleFiles(baseTsNumTo TsNum)
-	Prune(ctx context.Context, baseTsNumTo TsNum, limit uint64, rwTx kv.RwTx) error
-	Unwind(ctx context.Context, baseTsNumFrom TsNum, rwTx kv.RwTx) error
+	DirtySegmentsMaxNum() Num
+	VisibleSegmentsMaxNum() Num
+	RecalcVisibleFiles(baseNumTo Num)
+	Prune(ctx context.Context, baseNumTo Num, limit uint64, rwTx kv.RwTx) error
+	Unwind(ctx context.Context, baseNumFrom Num, rwTx kv.RwTx) error
 	// don't put BeginFilesRo here, since it returns PointAppendableRo, RangedAppendableRo etc. (each has different query patterns)
 	// so anyway aggregator has to recover concrete type, and then it can
 	// call BeginFilesRo on that
 }
 
 var (
-	_ Appendable        = &MarkedAppendable{}
-	_ Appendable        = &RelationalAppendable{}
-	_ MarkedQueries     = &MarkedAppendableRoTx{}
-	_ RelationalQueries = &RelationalAppendableRoTx{}
+	_ Appendable = &MarkedAppendable{}
+	_ Appendable = &RelationalAppendable{}
+	//_ MarkedQueries     = &MarkedAppendableRoTx{}
+	//_ RelationalQueries = &RelationalAppendableRoTx{}
 )
 
 // canonicalTbl + valTbl
 // headers, bodies, beaconblocks
 type MarkedRoQueries interface {
-	Get(tsNum TsNum, tx kv.Tx) (VVType, error)                // db + snapshots
-	GetNc(tsNum TsNum, hash []byte, tx kv.Tx) (VVType, error) // db only
+	Get(num Num, tx kv.Tx) (VVType, error)                // db + snapshots
+	GetNc(num Num, hash []byte, tx kv.Tx) (VVType, error) // db only
 }
 
 type MarkedRwQueries interface {
 	MarkedRoQueries
-	Put(tsNum TsNum, hash []byte, value VVType, tx kv.RwTx) error
+	Put(num Num, hash []byte, value VVType, tx kv.RwTx) error
 }
 
 // in queries, it's eitther MarkedQueries (for marked appendables) or RelationalQueries
 type RelationalRoQueries interface {
-	Get(tsNum TsNum, tx kv.Tx) (VVType, error) // db + snapshots
-	GetNc(tsId TsId, tx kv.Tx) (VVType, error) // db only
+	Get(num Num, tx kv.Tx) (VVType, error) // db + snapshots
+	GetNc(id Id, tx kv.Tx) (VVType, error) // db only
 }
 
 type RelationalRwQueries interface {
 	RelationalRoQueries
-	Put(tsId TsId, value VVType, tx kv.RwTx) error
+	Put(id Id, value VVType, tx kv.RwTx) error
 }
 
 type AppEnum string
@@ -133,7 +133,7 @@ func WriteBodyForStorage(tx TemporalRwTx, hash common.Hash, number uint64, body 
 	markedQueries := aggTx.MarkedQueries(Bodies)
 
 	// write bodies
-	return markedQueries.Put(TsNum(number), hash.Bytes(), b.Bytes(), tx)
+	return markedQueries.Put(Num(number), hash.Bytes(), b.Bytes(), tx)
 }
 
 func WriteRawTransactions(tx TemporalRwTx, txs [][]byte, baseTxnID uint64) error {
@@ -142,7 +142,7 @@ func WriteRawTransactions(tx TemporalRwTx, txs [][]byte, baseTxnID uint64) error
 	txq := aggTx.RelationalQueries(Transactions)
 
 	for _, txn := range txs {
-		txq.Put(TsId(stx), VVType(txn), tx)
+		txq.Put(Id(stx), VVType(txn), tx)
 		stx++
 	}
 	return nil

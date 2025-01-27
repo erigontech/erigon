@@ -43,13 +43,13 @@ type VisibleSegment struct {
 
 type VisibleSegments []VisibleSegment
 
-func (v *VisibleSegment) Get(tsNum TsNum) ([]byte, error) {
+func (v *VisibleSegment) Get(num Num) ([]byte, error) {
 	idxSlot := v.src.indexes[0]
 
 	if idxSlot == nil {
 		return nil, nil
 	}
-	offset := idxSlot.OrdinalLookup(uint64(tsNum) - idxSlot.BaseDataID())
+	offset := idxSlot.OrdinalLookup(uint64(num) - idxSlot.BaseDataID())
 
 	gg := v.src.Decompressor.MakeGetter()
 	gg.Reset(offset)
@@ -69,17 +69,17 @@ func (v *VisibleSegment) Src() *DirtySegment {
 	return v.src
 }
 
-func (v *VisibleSegment) GetFirstTsNum() uint64 {
-	// TODO: store first tsnum in snapshot...
-	// https://github.com/erigontech/erigon/issues/13342 talks about storing first tsNum
-	// in snapshots, but lastTsNum can be easily gotten from count and firstTsNum.
+func (v *VisibleSegment) GetFirstNum() uint64 {
+	// TODO: store first num in snapshot...
+	// https://github.com/erigontech/erigon/issues/13342 talks about storing first num
+	// in snapshots, but lastNum can be easily gotten from count and firstNum.
 	return 0
 }
 
-func (v *DirtySegment) GetLastTsNum() uint64 {
-	// TODO: store first tsnum in snapshot...
-	// https://github.com/erigontech/erigon/issues/13342 talks about storing first tsNum
-	// in snapshots, but lastTsNum can be easily gotten from count and firstTsNum.
+func (v *DirtySegment) GetLastNum() uint64 {
+	// TODO: store first num in snapshot...
+	// https://github.com/erigontech/erigon/issues/13342 talks about storing first num
+	// in snapshots, but lastNum can be easily gotten from count and firstNum.
 	return 0
 }
 

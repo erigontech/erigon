@@ -30,9 +30,9 @@ type IndexKeyFactory interface {
 }
 
 type AccessorIndexBuilder interface {
-	Build(ctx context.Context, baseTsNumFrom, baseTsNumTo TsNum, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error)
+	Build(ctx context.Context, baseNumFrom, baseNumTo Num, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error)
 	SetAccessorArgs(*AccessorArgs)
-	AllowsOrdinalLookupByTsNum() bool
+	AllowsOrdinalLookupByNum() bool
 }
 
 type AccessorArgs struct {
@@ -88,7 +88,7 @@ func (s *SimpleAccessorBuilder) SetIndexKeyFactory(factory IndexKeyFactory) {
 	s.kf = factory
 }
 
-func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByTsNum() bool {
+func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 	return s.args.enums
 }
 

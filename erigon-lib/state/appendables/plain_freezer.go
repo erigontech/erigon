@@ -11,7 +11,7 @@ import (
 
 type ValueKeyFetcher interface {
 	// stream of valsTbl keys
-	GetKeys(baseTsNumFrom, baseTsNumTo TsNum, tx kv.Tx) stream.Uno[VKType]
+	GetKeys(baseNumFrom, baseNumTo Num, tx kv.Tx) stream.Uno[VKType]
 }
 
 type PlainFreezer struct {
@@ -21,8 +21,8 @@ type PlainFreezer struct {
 }
 
 // what does this do?
-func (sf *PlainFreezer) Freeze(ctx context.Context, baseTsNumFrom, baseTsNumTo TsNum, tx kv.Tx) error {
-	can_stream := sf.fetcher.GetKeys(baseTsNumFrom, baseTsNumTo, tx)
+func (sf *PlainFreezer) Freeze(ctx context.Context, baseNumFrom, baseNumTo Num, tx kv.Tx) error {
+	can_stream := sf.fetcher.GetKeys(baseNumFrom, baseNumTo, tx)
 	for can_stream.HasNext() {
 		key, err := can_stream.Next()
 		if err != nil {
