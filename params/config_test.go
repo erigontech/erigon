@@ -141,3 +141,39 @@ func TestGetBurntContract(t *testing.T) {
 	require.NotNil(t, addr)
 	assert.Equal(t, common.HexToAddress("0x000000000000000000000000000000000000dead"), *addr)
 }
+
+func TestMainnetBlobSchedule(t *testing.T) {
+	// Original EIP-4844 values
+	assert.Equal(t, uint64(6), MainnetChainConfig.GetMaxBlobsPerBlock(0))
+	assert.Equal(t, uint64(786432), MainnetChainConfig.GetMaxBlobGasPerBlock(0))
+	assert.Equal(t, uint64(393216), MainnetChainConfig.GetTargetBlobGasPerBlock(0))
+	assert.Equal(t, uint64(3338477), MainnetChainConfig.GetBlobGasPriceUpdateFraction(0))
+
+	b := MainnetChainConfig.BlobSchedule
+	isPrague := false
+	assert.Equal(t, uint64(3), b.TargetBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(6), b.MaxBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(3338477), b.BaseFeeUpdateFraction(isPrague))
+
+	// EIP-7691: Blob throughput increase
+	isPrague = true
+	assert.Equal(t, uint64(6), b.TargetBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(9), b.MaxBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(5007716), b.BaseFeeUpdateFraction(isPrague))
+}
+
+func TestGnosisBlobSchedule(t *testing.T) {
+	b := GnosisChainConfig.BlobSchedule
+
+	// Cancun values
+	isPrague := false
+	assert.Equal(t, uint64(1), b.TargetBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(2), b.MaxBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(1112826), b.BaseFeeUpdateFraction(isPrague))
+
+	// should remain the same in Pectra for Gnosis
+	isPrague = true
+	assert.Equal(t, uint64(1), b.TargetBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(2), b.MaxBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(1112826), b.BaseFeeUpdateFraction(isPrague))
+}
