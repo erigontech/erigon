@@ -49,7 +49,7 @@ func (ep EonPool) Run(ctx context.Context) error {
 
 func (ep EonPool) Eon(blockNum uint64) (Eon, error) {
 	//
-	// TODO - check if we have it in the pool first, if not then fallback
+	// TODO - check if we have it in the pool first, if not then fallback (fallback should make sure to wait until blockNum has been observed)
 	//
 
 	callOpts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNum)}

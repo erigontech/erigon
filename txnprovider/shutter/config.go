@@ -18,6 +18,7 @@ package shutter
 
 import (
 	"crypto/ecdsa"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
@@ -38,6 +39,8 @@ type Config struct {
 	KeyperSetManagerContractAddress  string
 	MaxNumKeysPerMessage             uint64
 	MaxPooledEncryptedTxns           uint64
+	MaxDecryptionKeysDelay           time.Duration
+	DecryptionGasLimit               uint64
 }
 
 type P2pConfig struct {
@@ -88,6 +91,8 @@ var (
 		KeyperSetManagerContractAddress:  "0xC4DE9FAf4ec882b33dA0162CBE628B0D8205D0c0",
 		MaxNumKeysPerMessage:             defaultMaxNumKeysPerMessage,
 		MaxPooledEncryptedTxns:           defaultMaxPooledEncryptedTxns,
+		MaxDecryptionKeysDelay:           defaultMaxDecryptionKeysDelay,
+		DecryptionGasLimit:               defaultDecryptionGasLimit,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -108,6 +113,8 @@ var (
 		KeyperSetManagerContractAddress:  "0x7C2337f9bFce19d8970661DA50dE8DD7d3D34abb",
 		MaxNumKeysPerMessage:             defaultMaxNumKeysPerMessage,
 		MaxPooledEncryptedTxns:           defaultMaxPooledEncryptedTxns,
+		MaxDecryptionKeysDelay:           defaultMaxDecryptionKeysDelay,
+		DecryptionGasLimit:               defaultDecryptionGasLimit,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -122,4 +129,6 @@ const (
 	defaultP2PListenPort          = 23_102
 	defaultMaxNumKeysPerMessage   = 500
 	defaultMaxPooledEncryptedTxns = 10_000
+	defaultMaxDecryptionKeysDelay = 1_666 * time.Millisecond
+	defaultDecryptionGasLimit     = 10_000_000
 )

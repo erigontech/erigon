@@ -2,6 +2,7 @@ package shutter
 
 import (
 	"errors"
+	"time"
 )
 
 var ErrTimestampBeforeGenesis = errors.New("timestamp before genesis")
@@ -24,4 +25,9 @@ func (sc SlotCalculator) CalcSlot(timestamp uint64) (uint64, error) {
 	}
 
 	return timestamp - sc.genesisTimestamp/sc.secondsPerSlot, nil
+}
+
+func (sc SlotCalculator) CalcSlotAge(slot uint64) time.Duration {
+	slotBeginningTimestamp := sc.genesisTimestamp + slot*sc.secondsPerSlot
+	return time.Since(time.Unix(int64(slotBeginningTimestamp), 0))
 }
