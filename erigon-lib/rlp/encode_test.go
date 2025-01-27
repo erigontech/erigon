@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 )
@@ -524,4 +525,21 @@ func TestStringLen56(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, dataPos, 2)
 	assert.Equal(t, dataLen, 56)
+}
+
+// Any buffer of 32 bytes or more should be fine for EncodeUint256.
+// See https://github.com/erigontech/erigon/pull/13574
+func TestEncodeUint256Buffer(t *testing.T) {
+	i := uint256.NewInt(128)
+	output := "8180"
+
+	var writer1 bytes.Buffer
+	var buf32 [32]byte
+	require.NoError(t, EncodeUint256(i, &writer1, buf32[:]))
+	assert.Equal(t, output, common.Bytes2Hex(writer1.Bytes()))
+
+	var writer2 bytes.Buffer
+	var buf33 [33]byte
+	require.NoError(t, EncodeUint256(i, &writer2, buf33[:]))
+	assert.Equal(t, output, common.Bytes2Hex(writer2.Bytes()))
 }
