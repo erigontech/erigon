@@ -105,25 +105,6 @@ type Message interface {
 	IsFree() bool
 }
 
-// IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-// TODO: convert the input to a struct
-func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860, isPrague bool, authorizationsLen uint64) (uint64, uint64, error) {
-	// Zero and non-zero bytes are priced differently
-	dataLen := uint64(len(data))
-	dataNonZeroLen := uint64(0)
-	for _, byt := range data {
-		if byt != 0 {
-			dataNonZeroLen++
-		}
-	}
-
-	gas, floorGas7623, overflow := fixedgas.CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, uint64(len(accessList)), uint64(accessList.StorageKeys()), isContractCreation, isHomestead, isEIP2028, isEIP3860, isPrague)
-	if overflow != false {
-		return 0, 0, ErrGasUintOverflow
-	}
-	return gas, floorGas7623, nil
-}
-
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition {
 	return &StateTransition{
@@ -459,9 +440,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, floorGas7623, err := IntrinsicGas(st.data, accessTuples, contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, uint64(len(auths)))
-	if err != nil {
-		return nil, err
+	gas, floorGas7623, overflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, uint64(len(auths)))
+	if overflow {
+		return nil, ErrGasUintOverflow
 	}
 	if st.gasRemaining < gas || st.gasRemaining < floorGas7623 {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(gas, floorGas7623))

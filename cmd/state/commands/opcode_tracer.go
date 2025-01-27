@@ -370,7 +370,7 @@ func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 
 		lseg := len(currentEntry.Bblocks)
 		isFirstBblock := lseg == 0
-		isContinuous := pc16 == currentEntry.lastPc16+1 || currentEntry.lastOp.IsPush()
+		isContinuous := pc16 == currentEntry.lastPc16+1 || currentEntry.lastOp.IsPushWithImmediateArgs()
 		if isFirstBblock || !isContinuous {
 			// Record the end of the past bblock, if there is one
 			if !isFirstBblock {
