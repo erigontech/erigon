@@ -24,6 +24,7 @@ zkevm.executor-urls: 51.210.116.237:50071
 
 zkevm.l1-contract-address-check: false
 zkevm.l1-contract-address-retrieve: false
+zkevm.shadow-sequencer: true
 
 externalcl: true
 http.api: [eth, debug, net, trace, web3, erigon, txpool, zkevm]
