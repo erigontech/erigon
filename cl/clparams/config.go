@@ -579,10 +579,10 @@ type BeaconChainConfig struct {
 	// Constants for the Electra fork.
 	UnsetDepositRequestsStartIndex uint64 `yaml:"UNSET_DEPOSIT_REQUESTS_START_INDEX" spec:"true" json:"UNSET_DEPOSIT_REQUESTS_START_INDEX,string"` // UnsetDepositRequestsStartIndex defines the start index for unset deposit requests.
 	FullExitRequestAmount          uint64 `yaml:"FULL_EXIT_REQUEST_AMOUNT" spec:"true" json:"FULL_EXIT_REQUEST_AMOUNT,string"`                     // FullExitRequestAmount defines the amount for a full exit request.
-	CompoundingWithdrawalPrefix    byte   `yaml:"COMPOUNDING_WITHDRAWAL_PREFIX" spec:"true" json:"COMPOUNDING_WITHDRAWAL_PREFIX"`                  // CompoundingWithdrawalPrefix is the prefix for compounding withdrawals.
-	DepositRequestType             byte   `yaml:"DEPOSIT_REQUEST_TYPE" spec:"true" json:"DEPOSIT_REQUEST_TYPE"`                                    // DepositRequestType is the type for deposit requests.
-	WithdrawalRequestType          byte   `yaml:"WITHDRAWAL_REQUEST_TYPE" spec:"true" json:"WITHDRAWAL_REQUEST_TYPE"`                              // WithdrawalRequestType is the type for withdrawal requests.
-	ConsolidationRequestType       byte   `yaml:"CONSOLIDATION_REQUEST_TYPE" spec:"true" json:"CONSOLIDATION_REQUEST_TYPE"`                        // ConsolidationRequestType is the type for consolidation requests.
+	CompoundingWithdrawalPrefix    byte   `yaml:"COMPOUNDING_WITHDRAWAL_PREFIX" spec:"true" json:"COMPOUNDING_WITHDRAWAL_PREFIX,string"`           // CompoundingWithdrawalPrefix is the prefix for compounding withdrawals.
+	DepositRequestType             byte   `yaml:"DEPOSIT_REQUEST_TYPE" spec:"true" json:"DEPOSIT_REQUEST_TYPE,string"`                             // DepositRequestType is the type for deposit requests.
+	WithdrawalRequestType          byte   `yaml:"WITHDRAWAL_REQUEST_TYPE" spec:"true" json:"WITHDRAWAL_REQUEST_TYPE,string"`                       // WithdrawalRequestType is the type for withdrawal requests.
+	ConsolidationRequestType       byte   `yaml:"CONSOLIDATION_REQUEST_TYPE" spec:"true" json:"CONSOLIDATION_REQUEST_TYPE,string"`                 // ConsolidationRequestType is the type for consolidation requests.
 
 }
 
