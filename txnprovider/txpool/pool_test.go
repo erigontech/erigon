@@ -81,7 +81,6 @@ func TestNonceFromAddress(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(err)
 
 	{
