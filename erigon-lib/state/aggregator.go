@@ -1241,7 +1241,7 @@ type RangesV3 struct {
 
 func (r RangesV3) String() string {
 	ss := []string{}
-	for _, d := range r.domain {
+	for _, d := range &r.domain {
 		if d.any() {
 			ss = append(ss, fmt.Sprintf("%s(%s)", d.name, d.String()))
 		}
@@ -1257,7 +1257,7 @@ func (r RangesV3) String() string {
 }
 
 func (r RangesV3) any() bool {
-	for _, d := range r.domain {
+	for _, d := range &r.domain {
 		if d.any() {
 			return true
 		}
@@ -1292,7 +1292,7 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *RangesV3 
 		cr := r.domain[kv.CommitmentDomain]
 
 		restorePrevRange := false
-		for k, dr := range r.domain {
+		for k, dr := range &r.domain {
 			kd := kv.Domain(k)
 			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
 				continue
@@ -1311,7 +1311,7 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *RangesV3 
 			}
 		}
 		if restorePrevRange {
-			for k, dr := range r.domain {
+			for k, dr := range &r.domain {
 				r.domain[k].values = MergeRange{}
 				ac.a.logger.Debug("findMergeRange: commitment range is different than accounts or storage, cancel kv merge",
 					ac.d[k].d.filenameBase, dr.values.String("", ac.a.StepSize()))
