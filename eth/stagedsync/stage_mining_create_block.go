@@ -193,6 +193,11 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 		timestamp = cfg.blockBuilderParameters.Timestamp
 	}
 
+	targetGasLimit := &cfg.miner.MiningConfig.GasLimit
+	if cfg.chainConfig.IsOptimism() {
+		targetGasLimit = cfg.blockBuilderParameters.GasLimit
+	}
+
 	type envT struct {
 		signer    *types.Signer
 		ancestors mapset.Set[libcommon.Hash] // ancestor set (used for checking uncle parent validity)
@@ -206,7 +211,7 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 		uncles:    mapset.NewSet[libcommon.Hash](),
 	}
 
-	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
+	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, targetGasLimit)
 	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
 		header.GasLimit = parent.GasLimit
