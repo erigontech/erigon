@@ -235,7 +235,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
-		fmt.Println(s.config.IsEcotone(header.Time), s.config.IsEcotone(header.Time-2), header.Number.Uint64(), parentBeaconBlockRoot, req.BlobGasUsed, req.ExcessBlobGas)
 		if req.BlobGasUsed == nil || req.ExcessBlobGas == nil || parentBeaconBlockRoot == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas/beaconRoot missing"}
 		}
