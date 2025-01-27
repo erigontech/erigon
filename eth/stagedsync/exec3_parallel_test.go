@@ -52,7 +52,7 @@ type testExecTask struct {
 	*exec.TxTask
 	ops          []Op
 	readMap      *btree.BTreeG[*state.VersionedRead]
-	writeMap     *btree.BTreeG[*state.VersionedWrite]
+	writeMap     *btree.BTreeG[state.VersionedWrite]
 	sender       common.Address
 	nonce        int
 	dependencies []int
@@ -118,12 +118,12 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 		switch op.opType {
 		case readType:
-			if _, ok := t.writeMap.Get(&state.VersionedWrite{Path: &k}); ok {
+			if _, ok := t.writeMap.Get(state.VersionedWrite{Path: k}); ok {
 				sleep(op.duration)
 				continue
 			}
 
-			result := ibs.ReadVersion(&k, version.TxIndex)
+			result := ibs.ReadVersion(k, version.TxIndex)
 
 			val := result.Value()
 
@@ -149,9 +149,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			sleep(op.duration)
 
-			t.readMap.Set(&state.VersionedRead{Path: &k, Kind: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
+			t.readMap.Set(&state.VersionedRead{Path: k, Kind: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
-			t.writeMap.Set(&state.VersionedWrite{Path: &k, Version: version, Val: op.val})
+			t.writeMap.Set(state.VersionedWrite{Path: k, Version: version, Val: op.val})
 		case otherType:
 			sleep(op.duration)
 		default:
@@ -169,7 +169,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) state.VersionedWrites {
 	writes := make(state.VersionedWrites, 0, t.writeMap.Len())
 
-	t.writeMap.Scan(func(v *state.VersionedWrite) bool {
+	t.writeMap.Scan(func(v state.VersionedWrite) bool {
 		writes = append(writes, v)
 		return true
 	})

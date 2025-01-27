@@ -391,13 +391,13 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 				reads := ibs.VersionedReads()
 				coinbaseKey := state.SubpathKey(&evm.Context.Coinbase, state.BalancePath)
 
-				if _, ok := reads.Get(&state.VersionedRead{Path: &coinbaseKey}); ok {
+				if _, ok := reads.Get(&state.VersionedRead{Path: coinbaseKey}); ok {
 					log.Debug("Coinbase is in versiopnedMap", "address", evm.Context.Coinbase)
 					result.ShouldRerunWithoutFeeDelay = true
 				}
 
 				burnKey := state.SubpathKey(&applyRes.BurntContractAddress, state.BalancePath)
-				if _, ok := reads.Get(&state.VersionedRead{Path: &burnKey}); ok {
+				if _, ok := reads.Get(&state.VersionedRead{Path: burnKey}); ok {
 					log.Debug("BurntContractAddress is in versiopnedMap", "address", applyRes.BurntContractAddress)
 					result.ShouldRerunWithoutFeeDelay = true
 				}

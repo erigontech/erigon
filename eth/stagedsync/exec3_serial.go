@@ -32,6 +32,18 @@ type serialExecutor struct {
 	lastBlockResult *blockResult
 }
 
+func (se *serialExecutor) LogExecuted() {
+	se.progress.LogExecuted(se.rs.StateV3, se)
+}
+
+func (se *serialExecutor) LogCommitted(commitStart time.Time) {
+	se.progress.LogCommitted(commitStart, se.rs.StateV3, se)
+}
+
+func (se *serialExecutor) LogComplete() {
+	se.progress.LogComplete(se.rs.StateV3, se)
+}
+
 func (se *serialExecutor) wait(ctx context.Context) error {
 	return nil
 }

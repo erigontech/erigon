@@ -230,12 +230,12 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 	if s.versionMap != nil {
 		if obj.original.Balance == ch.prev {
 			key := SubpathKey(ch.account, BalancePath)
-			s.versionedWrites.Delete(&VersionedWrite{Path: &key})
+			s.versionedWrites.Delete(VersionedWrite{Path: key})
 		} else {
 			key := SubpathKey(ch.account, BalancePath)
-			if wv, ok := s.versionedWrites.Get(&VersionedWrite{Path: &key}); ok {
-				val := ch.prev
-				wv.Val = val
+			if v, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+				v.Val = ch.prev
+				s.versionedWrites.Set(v)
 			}
 		}
 	}
@@ -279,10 +279,10 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 	if s.versionMap != nil {
 		if obj.original.Nonce == ch.prev {
 			key := SubpathKey(ch.account, NoncePath)
-			s.versionedWrites.Delete(&VersionedWrite{Path: &key})
+			s.versionedWrites.Delete(VersionedWrite{Path: key})
 		} else {
 			key := SubpathKey(ch.account, NoncePath)
-			if wv, ok := s.versionedWrites.Get(&VersionedWrite{Path: &key}); ok {
+			if wv, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
 				wv.Val = ch.prev
 			}
 		}

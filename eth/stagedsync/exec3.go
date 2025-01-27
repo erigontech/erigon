@@ -109,20 +109,17 @@ type Progress struct {
 	logger    log.Logger
 }
 
-func (p *Progress) LogExecuted(rs *state.StateV3, tx *txExecutor) {
+func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevExecTime)
 
 	var suffix string
-
-	executedGasSec := uint64(float64(tx.executedGas-p.prevExecutedGas) / interval.Seconds())
-	executedTxSec := uint64(float64(tx.lastExecutedTxNum-p.prevExecutedTxNum) / interval.Seconds())
-	executedDiffBlocks := max(int(tx.lastExecutedBlockNum)-int(p.prevExecutedBlockNum), 0)
-	executedDiffTxs := uint64(max(int(tx.lastExecutedTxNum)-int(p.prevExecutedTxNum), 0))
-
 	var parallelExecVals []interface{}
+	var tx *txExecutor
 
-	if tx.execCount.Load() > 0 {
+	switch ex := ex.(type) {
+	case *parallelExecutor:
+		tx = &ex.txExecutor
 		suffix = " parallel"
 
 		execCount := uint64(tx.execCount.Load())
@@ -133,7 +130,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, tx *txExecutor) {
 
 		execDiff := execCount - p.prevExecCount
 
-		var repeats = max(int(execDiff)-int(executedDiffTxs), 0)
+		var repeats = max(int(execDiff)-int(max(int(tx.lastExecutedTxNum)-int(p.prevExecutedTxNum), 0)), 0)
 		var repeatRatio float64
 
 		if repeats > 0 {
@@ -157,9 +154,15 @@ func (p *Progress) LogExecuted(rs *state.StateV3, tx *txExecutor) {
 		p.prevInvalidCount = invalidCount
 		p.prevReadCount = readCount
 		p.prevWriteCount = writeCount
-	} else {
+	case *serialExecutor:
+		tx = &ex.txExecutor
 		suffix = " serial"
 	}
+
+	executedGasSec := uint64(float64(tx.executedGas-p.prevExecutedGas) / interval.Seconds())
+	executedTxSec := uint64(float64(tx.lastExecutedTxNum-p.prevExecutedTxNum) / interval.Seconds())
+	executedDiffBlocks := max(int(tx.lastExecutedBlockNum)-int(p.prevExecutedBlockNum), 0)
+	executedDiffTxs := uint64(max(int(tx.lastExecutedTxNum)-int(p.prevExecutedTxNum), 0))
 
 	p.log("executed", suffix, tx, rs, interval, tx.lastExecutedBlockNum, executedDiffBlocks,
 		executedDiffTxs, executedTxSec, executedGasSec, false, parallelExecVals)
@@ -173,7 +176,19 @@ func (p *Progress) LogExecuted(rs *state.StateV3, tx *txExecutor) {
 	}
 }
 
-func (p *Progress) LogCommitted(suffix string, commitStart time.Time, rs *state.StateV3, tx *txExecutor) {
+func (p *Progress) LogCommitted(commitStart time.Time, rs *state.StateV3, ex executor) {
+	var tx *txExecutor
+	var suffix string
+
+	switch ex := ex.(type) {
+	case *parallelExecutor:
+		tx = &ex.txExecutor
+		suffix = " parallel"
+
+	case *serialExecutor:
+		tx = &ex.txExecutor
+		suffix = " serial"
+	}
 
 	if p.prevCommitTime.Before(commitStart) {
 		p.prevCommitTime = commitStart
@@ -202,8 +217,20 @@ func (p *Progress) LogCommitted(suffix string, commitStart time.Time, rs *state.
 	}
 }
 
-func (p *Progress) LogComplete(rs *state.StateV3, tx *txExecutor) {
+func (p *Progress) LogComplete(rs *state.StateV3, ex executor) {
 	interval := time.Since(p.initialTime)
+	var tx *txExecutor
+	var suffix string
+
+	switch ex := ex.(type) {
+	case *parallelExecutor:
+		tx = &ex.txExecutor
+		suffix = " parallel"
+
+	case *serialExecutor:
+		tx = &ex.txExecutor
+		suffix = " serial"
+	}
 
 	gas := tx.committedGas
 
@@ -226,14 +253,6 @@ func (p *Progress) LogComplete(rs *state.StateV3, tx *txExecutor) {
 	gasSec := uint64(float64(gas) / interval.Seconds())
 	txSec := uint64(float64(lastTxNum-p.initialTxNum) / interval.Seconds())
 	diffBlocks := max(int(lastBlockNum)-int(p.initialBlockNum), 0)
-
-	var suffix string
-
-	if tx.execCount.Load() > 0 {
-		suffix = " parallel"
-	} else {
-		suffix = " serial"
-	}
 
 	p.log("done", suffix, tx, rs, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, true, nil)
 }
@@ -803,7 +822,7 @@ func ExecV3(ctx context.Context,
 						uncommittedGas = 0
 					}
 
-					executor.LogCommitted("serial", commitStart)
+					executor.LogCommitted(commitStart)
 
 					t1 = time.Since(tt) + ts
 
@@ -881,7 +900,7 @@ func ExecV3(ctx context.Context,
 				se.committedGas += uncommittedGas
 				uncommittedGas = 0
 
-				executor.LogCommitted("serial", commitStart)
+				executor.LogCommitted(commitStart)
 			}
 
 		} else {

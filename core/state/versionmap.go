@@ -159,12 +159,12 @@ type WriteCell struct {
 }
 
 type vmItem struct {
-	k *VersionKey
+	k VersionKey
 	v *TxIndexCells
 }
 
 func vmiLess(a, b vmItem) bool {
-	return VersionKeyLess(a.k, b.k)
+	return VersionKeyLess(&a.k, &b.k)
 }
 
 type TxIndexCells struct {
@@ -185,7 +185,7 @@ func NewVersionMap() *VersionMap {
 	}
 }
 
-func (vm *VersionMap) getKeyCells(k *VersionKey, fNoKey func(kenc *VersionKey) *TxIndexCells) (cells *TxIndexCells) {
+func (vm *VersionMap) getKeyCells(k VersionKey, fNoKey func(kenc VersionKey) *TxIndexCells) (cells *TxIndexCells) {
 	it, ok := vm.s.Get(vmItem{k: k})
 
 	if !ok {
@@ -197,8 +197,8 @@ func (vm *VersionMap) getKeyCells(k *VersionKey, fNoKey func(kenc *VersionKey) *
 	return
 }
 
-func (vm *VersionMap) Write(k *VersionKey, v Version, data interface{}, complete bool) {
-	cells := vm.getKeyCells(k, func(kenc *VersionKey) (cells *TxIndexCells) {
+func (vm *VersionMap) Write(k VersionKey, v Version, data interface{}, complete bool) {
+	cells := vm.getKeyCells(k, func(kenc VersionKey) (cells *TxIndexCells) {
 		if it, ok := vm.s.Get(vmItem{k: k}); ok {
 			cells = it.v
 		} else {
@@ -245,8 +245,8 @@ func (vm *VersionMap) Write(k *VersionKey, v Version, data interface{}, complete
 	}
 }
 
-func (vm *VersionMap) MarkEstimate(k *VersionKey, txIdx int) {
-	cells := vm.getKeyCells(k, func(_ *VersionKey) *TxIndexCells {
+func (vm *VersionMap) MarkEstimate(k VersionKey, txIdx int) {
+	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells {
 		panic(fmt.Errorf("path must already exist"))
 	})
 
@@ -259,8 +259,8 @@ func (vm *VersionMap) MarkEstimate(k *VersionKey, txIdx int) {
 	}
 }
 
-func (vm *VersionMap) MarkComplete(k *VersionKey, txIdx int) {
-	cells := vm.getKeyCells(k, func(_ *VersionKey) *TxIndexCells {
+func (vm *VersionMap) MarkComplete(k VersionKey, txIdx int) {
+	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells {
 		panic(fmt.Errorf("path must already exist"))
 	})
 
@@ -273,8 +273,8 @@ func (vm *VersionMap) MarkComplete(k *VersionKey, txIdx int) {
 	}
 }
 
-func (vm *VersionMap) Delete(k *VersionKey, txIdx int, checkExists bool) {
-	cells := vm.getKeyCells(k, func(_ *VersionKey) *TxIndexCells { return nil })
+func (vm *VersionMap) Delete(k VersionKey, txIdx int, checkExists bool) {
+	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells { return nil })
 
 	if cells == nil {
 		if !checkExists {
@@ -325,7 +325,7 @@ func (mvr ReadResult) Status() int {
 	return MVReadResultNone
 }
 
-func (vm *VersionMap) Read(k *VersionKey, txIdx int) (res ReadResult) {
+func (vm *VersionMap) Read(k VersionKey, txIdx int) (res ReadResult) {
 	if vm == nil {
 		return res
 	}
@@ -333,7 +333,7 @@ func (vm *VersionMap) Read(k *VersionKey, txIdx int) (res ReadResult) {
 	res.depIdx = -1
 	res.incarnation = -1
 
-	cells := vm.getKeyCells(k, func(_ *VersionKey) *TxIndexCells {
+	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells {
 		return nil
 	})
 	if cells == nil {

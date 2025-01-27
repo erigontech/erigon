@@ -98,7 +98,7 @@ type IntraBlockState struct {
 	// are maintaned across transactions until they are reset
 	// at the block level
 	versionMap      *VersionMap
-	versionedWrites *btree.BTreeG[*VersionedWrite]
+	versionedWrites *btree.BTreeG[VersionedWrite]
 	versionedReads  *btree.BTreeG[*VersionedRead]
 	version         int
 	dep             int
@@ -486,7 +486,7 @@ func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) (bool, err
 		})
 }
 
-func (sdb *IntraBlockState) ReadVersion(k *VersionKey, txIdx int) ReadResult {
+func (sdb *IntraBlockState) ReadVersion(k VersionKey, txIdx int) ReadResult {
 	return sdb.versionMap.Read(k, txIdx)
 }
 
@@ -1016,10 +1016,10 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 	sdb.validRevisions = sdb.validRevisions[:idx]
 
 	if sdb.versionMap != nil {
-		var revertedWrites []*VersionKey
+		var revertedWrites []VersionKey
 
 		if sdb.versionedWrites != nil {
-			sdb.versionedWrites.Scan(func(v *VersionedWrite) bool {
+			sdb.versionedWrites.Scan(func(v VersionedWrite) bool {
 				if _, isDirty := sdb.journal.dirties[v.Path.GetAddress()]; !isDirty {
 					revertedWrites = append(revertedWrites, v.Path)
 				}
@@ -1029,7 +1029,7 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 
 		for _, key := range revertedWrites {
 			sdb.versionMap.Delete(key, sdb.txIndex, false)
-			sdb.versionedWrites.Delete(&VersionedWrite{Path: key})
+			sdb.versionedWrites.Delete(VersionedWrite{Path: key})
 		}
 	}
 
@@ -1179,7 +1179,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		if traceAccount(addr) {
 			key := SubpathKey(&addr, BalancePath)
-			if w, ok := sdb.versionedWrites.Get(&VersionedWrite{Path: &key}); ok {
+			if w, ok := sdb.versionedWrites.Get(VersionedWrite{Path: key}); ok {
 				updated := w.Val.(uint256.Int)
 				fmt.Printf("%d (%d.%d) Balance: %x (%v): %d (%d)\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, isDirty, &stateObject.data.Balance, &updated)
 			} else {
@@ -1191,10 +1191,10 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		}
 	}
 
-	var revertedWrites []*VersionKey
+	var revertedWrites []VersionKey
 
 	if sdb.versionedWrites != nil {
-		sdb.versionedWrites.Scan(func(v *VersionedWrite) bool {
+		sdb.versionedWrites.Scan(func(v VersionedWrite) bool {
 			if _, isDirty := sdb.stateObjectsDirty[v.Path.GetAddress()]; !isDirty {
 				revertedWrites = append(revertedWrites, v.Path)
 			}
@@ -1204,7 +1204,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 
 	for _, key := range revertedWrites {
 		sdb.versionMap.Delete(key, sdb.txIndex, false)
-		sdb.versionedWrites.Delete(&VersionedWrite{Path: key})
+		sdb.versionedWrites.Delete(VersionedWrite{Path: key})
 	}
 
 	// Invalidate journal because reverting across transactions is not allowed.
@@ -1362,7 +1362,7 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 		k := AddressKey(&addr)
 
 		s.versionedReads.Set(&VersionedRead{
-			Path:    &k,
+			Path:    k,
 			Kind:    ReadKindStorage,
 			Version: s.Version(),
 			Val:     *account,
@@ -1376,27 +1376,27 @@ func (s *IntraBlockState) versionWritten(k VersionKey, val any) {
 			s.versionedWrites = btree.NewBTreeGOptions(VersionedWriteLess, btree.Options{NoLocks: true})
 		}
 
-		s.versionedWrites.Set(&VersionedWrite{
-			Path:    &k,
+		s.versionedWrites.Set(VersionedWrite{
+			Path:    k,
 			Version: s.Version(),
 			Val:     val,
 		})
 	}
 }
 
-func (sdb *IntraBlockState) versionedWrite(k VersionKey) (*VersionedWrite, bool) {
+func (sdb *IntraBlockState) versionedWrite(k VersionKey) (VersionedWrite, bool) {
 	if sdb.versionMap == nil || sdb.versionedWrites == nil {
-		return nil, false
+		return VersionedWrite{}, false
 	}
 
-	v, ok := sdb.versionedWrites.Get(&VersionedWrite{Path: &k})
+	v, ok := sdb.versionedWrites.Get(VersionedWrite{Path: k})
 
 	if !ok {
-		return nil, ok
+		return VersionedWrite{}, ok
 	}
 
 	if _, isDirty := sdb.journal.dirties[k.GetAddress()]; !isDirty {
-		return nil, false
+		return VersionedWrite{}, false
 	}
 
 	return v, ok
@@ -1436,7 +1436,7 @@ func (ibs *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 	if ibs.versionedWrites != nil {
 		writes = make(VersionedWrites, 0, ibs.versionedWrites.Len())
 
-		ibs.versionedWrites.Scan(func(v *VersionedWrite) bool {
+		ibs.versionedWrites.Scan(func(v VersionedWrite) bool {
 			if checkDirty {
 				if _, isDirty := ibs.journal.dirties[v.Path.GetAddress()]; isDirty {
 					writes = append(writes, v)

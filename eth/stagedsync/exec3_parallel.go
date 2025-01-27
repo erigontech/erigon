@@ -93,7 +93,7 @@ type executor interface {
 	domains() *libstate.SharedDomains
 
 	LogExecuted()
-	LogCommitted(label string, commitStart time.Time)
+	LogCommitted(commitStart time.Time)
 	LogComplete()
 }
 
@@ -396,18 +396,6 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 	return h, nil
 }
 
-func (te *txExecutor) LogExecuted() {
-	te.progress.LogExecuted(te.rs.StateV3, te)
-}
-
-func (te *txExecutor) LogCommitted(label string, commitStart time.Time) {
-	te.progress.LogCommitted(label, commitStart, te.rs.StateV3, te)
-}
-
-func (te *txExecutor) LogComplete() {
-	te.progress.LogComplete(te.rs.StateV3, te)
-}
-
 type execRequest struct {
 	tasks   []exec.Task
 	profile bool
@@ -494,6 +482,18 @@ type parallelExecutor struct {
 	blockStatus map[uint64]*blockExecStatus
 
 	execRequests chan *execRequest
+}
+
+func (pe *parallelExecutor) LogExecuted() {
+	pe.progress.LogExecuted(pe.rs.StateV3, pe)
+}
+
+func (pe *parallelExecutor) LogCommitted(commitStart time.Time) {
+	pe.progress.LogCommitted(commitStart, pe.rs.StateV3, pe)
+}
+
+func (pe *parallelExecutor) LogComplete() {
+	pe.progress.LogComplete(pe.rs.StateV3, pe)
 }
 
 func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan applyResult) {
@@ -1070,7 +1070,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 
 			// Remove entries that were previously written but are no longer written
 
-			cmpMap := btree.NewBTreeGOptions(state.VersionKeyLess, btree.Options{NoLocks: true})
+			cmpMap := btree.NewBTreeGOptions(func(a, b state.VersionKey) bool { return state.VersionKeyLess(&a, &b) }, btree.Options{NoLocks: true})
 
 			for _, w := range res.TxOut {
 				cmpMap.Set(w.Path)
