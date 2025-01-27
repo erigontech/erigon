@@ -108,23 +108,24 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 	gasSec := uint64(float64(gas-p.prevGasUsed) / interval.Seconds())
 	txSec := uint64(float64(txCount-p.prevTxCount) / interval.Seconds())
 	diffBlocks := max(int(outputBlockNum)-int(p.prevOutputBlockNum)+1, 0)
-
-	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
-		"blk", outputBlockNum,
-		"blks", diffBlocks,
-		"blk/s", fmt.Sprintf("%.1f", float64(diffBlocks)/interval.Seconds()),
-		"txs", txCount-p.prevTxCount,
-		"tx/s", common.PrettyCounter(txSec),
-		"gas/s", common.PrettyCounter(gasSec),
-		//"pipe", fmt.Sprintf("(%d+%d)->%d/%d->%d/%d", in.NewTasksLen(), in.RetriesLen(), rws.ResultChLen(), rws.ResultChCap(), rws.Len(), rws.Limit()),
-		//"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
-		//"workers", p.workersCount,
-		"buf", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
-		"stepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
-		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(config3.DefaultStepSize)),
-		"inMem", inMemExec,
-		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-	)
+	if !inMemExec {
+		p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
+			"blk", outputBlockNum,
+			"blks", diffBlocks,
+			"blk/s", fmt.Sprintf("%.1f", float64(diffBlocks)/interval.Seconds()),
+			"txs", txCount-p.prevTxCount,
+			"tx/s", common.PrettyCounter(txSec),
+			"gas/s", common.PrettyCounter(gasSec),
+			//"pipe", fmt.Sprintf("(%d+%d)->%d/%d->%d/%d", in.NewTasksLen(), in.RetriesLen(), rws.ResultChLen(), rws.ResultChCap(), rws.Len(), rws.Limit()),
+			//"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
+			//"workers", p.workersCount,
+			"buf", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
+			"stepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
+			"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(config3.DefaultStepSize)),
+			"inMem", inMemExec,
+			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+		)
+	}
 
 	p.prevTime = currentTime
 	p.prevTxCount = txCount
