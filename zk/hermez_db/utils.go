@@ -3,6 +3,7 @@ package hermez_db
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 )
@@ -79,4 +80,15 @@ func SplitGerKey(data []byte) (uint64, *common.Hash, error) {
 	l1BlockHash := common.BytesToHash(data[8:])
 
 	return blockNo, &l1BlockHash, nil
+}
+
+func TimeToBytes(t time.Time) []byte {
+	buf := make([]byte, 16)
+	binary.BigEndian.PutUint64(buf[:8], uint64(t.Unix()))
+	binary.BigEndian.PutUint64(buf[8:], uint64(t.UnixNano()))
+	return buf
+}
+
+func BytesToTime(data []byte) time.Time {
+	return time.Unix(int64(binary.BigEndian.Uint64(data[:8])), int64(binary.BigEndian.Uint64(data[8:])))
 }
