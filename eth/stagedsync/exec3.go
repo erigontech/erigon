@@ -227,7 +227,15 @@ func (p *Progress) LogComplete(rs *state.StateV3, tx *txExecutor) {
 	txSec := uint64(float64(lastTxNum-p.initialTxNum) / interval.Seconds())
 	diffBlocks := max(int(lastBlockNum)-int(p.initialBlockNum), 0)
 
-	p.log("", "done", tx, rs, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, true, nil)
+	var suffix string
+
+	if tx.execCount.Load() > 0 {
+		suffix = " parallel"
+	} else {
+		suffix = " serial"
+	}
+
+	p.log("done", suffix, tx, rs, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, true, nil)
 }
 
 func (p *Progress) log(mode string, suffix string, tx *txExecutor, rs *state.StateV3, interval time.Duration,

@@ -137,7 +137,8 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address common.Address) (
 func (vr versionedStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	path := StateKey(&address, key)
 	if r, ok := vr.reads.Get(&VersionedRead{Path: &path}); ok && r.Val != nil {
-		return r.Val.(*uint256.Int).Bytes(), nil
+		val := r.Val.(uint256.Int)
+		return (&val).Bytes(), nil
 	}
 
 	if vr.stateReader != nil {
@@ -309,7 +310,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 	if s.versionMap == nil {
 		so, err := s.getStateObject(k.GetAddress())
 
-		if err != nil || readStorage==nil {
+		if err != nil || readStorage == nil {
 			return defaultV, err
 		}
 
@@ -318,7 +319,8 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 
 	if !commited {
 		if vw, ok := s.versionedWrite(k); ok {
-			return vw.Val.(T), nil
+			val := vw.Val.(T)
+			return val, nil
 		}
 	}
 

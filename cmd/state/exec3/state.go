@@ -204,6 +204,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 			rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains(), rw.chainTx)))
 		}
 	}
+
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.chainDb.(kv.TemporalRoDB).BeginTemporalRo(rw.ctx); err != nil {

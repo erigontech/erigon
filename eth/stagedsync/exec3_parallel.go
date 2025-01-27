@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/temporal"
@@ -279,11 +280,11 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		if r := recover(); r != nil {
 			// Recover from dependency panic and retry the execution.
 			if r != state.ErrDependency {
-				log.Debug("Recovered from EVM failure.", "Error:", r)
+				log.Debug("Recovered from EVM failure.", "Error:", r, "stack", dbg.Stack())
 			}
 			var err error
 			if ibs.DepTxIndex() < 0 {
-				err = fmt.Errorf("EVM failure: %s", r)
+				err = fmt.Errorf("EVM failure: %s at: %s", r, dbg.Stack())
 			}
 			result = &exec.Result{Err: exec.ErrExecAbortError{Dependency: ibs.DepTxIndex(), OriginError: err}}
 		}
@@ -502,7 +503,6 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 	if err != nil {
 		return
 	}
-
 	defer tx.Rollback()
 
 	defer func() {
@@ -516,10 +516,6 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 	}()
 
 	err = func(ctx context.Context) error {
-		for i := 0; i < len(pe.execWorkers); i++ {
-			pe.execWorkers[i].ResetTx(tx)
-		}
-
 		for {
 			select {
 			case exec := <-pe.execRequests:
