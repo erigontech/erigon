@@ -36,7 +36,6 @@ var (
 // This test sends transaction to node1 RPC which means they are local for node1
 // P2P helper is binded to node1 port, that's why we measure performance of local txs processing
 func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
-
 	txToSendCount := 15000
 	measureAtEvery := 1000
 
@@ -45,36 +44,47 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 	gotTxCh, errCh, err := p2p.Connect()
 	require.NoError(t, err)
 
-	start := time.Now()
+	rpcClient := requests.NewRequestGenerator(
+		rpcAddressNode1,
+		log.New(),
+	)
 
-	// sender part
-	go func() {
-		rpcClient := requests.NewRequestGenerator(
-			rpcAddressNode1,
-			log.New(),
-		)
+	toSend := make([]types.Transaction, 0, txToSendCount)
 
-		for i := 0; i < txToSendCount; i++ {
-			signedTx, err := types.SignTx(
-				&types.LegacyTx{
-					CommonTx: types.CommonTx{
-						Nonce: uint64(i),
-						Gas:   21000,
-						To:    &addr2,
-						Value: uint256.NewInt(100),
-						Data:  nil,
-					},
-					GasPrice: uint256.NewInt(1),
+	for i := 0; i < txToSendCount; i++ {
+		signedTx, err := types.SignTx(
+			&types.LegacyTx{
+				CommonTx: types.CommonTx{
+					Nonce: uint64(i),
+					Gas:   21000,
+					To:    &addr2,
+					Value: uint256.NewInt(100),
+					Data:  nil,
 				},
-				*types.LatestSignerForChainID(big.NewInt(1337)),
-				pkey1,
-			)
-			require.NoError(t, err)
+				GasPrice: uint256.NewInt(1),
+			},
+			*types.LatestSignerForChainID(big.NewInt(1337)),
+			pkey1,
+		)
+		require.NoError(t, err)
 
-			_, err = rpcClient.SendTransaction(signedTx)
+		toSend = append(toSend, signedTx)
+	}
+
+	parallelSenders := 20
+
+	sender := func(nonceFrom, nonceTo int) {
+		for i := nonceFrom; i < nonceTo; i++ {
+			_, err = rpcClient.SendTransaction(toSend[i])
 			require.NoError(t, err)
 		}
-	}()
+	}
+
+	for i := 0; i < parallelSenders; i++ {
+		go sender(i*txToSendCount/parallelSenders, (i+1)*txToSendCount/parallelSenders)
+	}
+
+	start := time.Now()
 
 	lastMeasureTime := time.Now()
 	gotTx := 0
@@ -86,14 +96,23 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 				continue
 			}
 
-			gotTx += 1
+			txns := txpool.TxnSlots{}
 
-			if gotTx%measureAtEvery != 0 {
-				continue
+			_, err := txpool.ParseTransactions(msg.Payload, 0, txpool.NewTxnParseContext(*uint256.MustFromDecimal("1337")), &txns, func(b []byte) error {
+				return nil
+			})
+			require.NoError(t, err)
+
+			for i := 0; i < len(txns.Txns); i++ {
+				gotTx += 1
+
+				if gotTx%measureAtEvery != 0 {
+					continue
+				}
+
+				fmt.Printf("Tx/s: (%d txs processed): %.2f / s \n", measureAtEvery, float64(measureAtEvery)*float64(time.Second)/float64(time.Since(lastMeasureTime)))
+				lastMeasureTime = time.Now()
 			}
-
-			fmt.Printf("Tx/s: (%d txs processed): %.2f / s \n", measureAtEvery, float64(measureAtEvery)*float64(time.Second)/float64(time.Since(lastMeasureTime)))
-			lastMeasureTime = time.Now()
 
 		case err := <-errCh:
 			require.NoError(t, err)
