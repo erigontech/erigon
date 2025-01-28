@@ -379,8 +379,11 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
 	}
 	if checkReceipts {
-		for _, r := range receipts {
+		for i, r := range receipts {
 			r.Bloom = types.CreateBloom(types.Receipts{r})
+			if i > 0 && receipts[i-1].CumulativeGasUsed == receipts[i].CumulativeGasUsed {
+				return fmt.Errorf("wrong cum gas used at block %d", h.Number.Uint64())
+			}
 		}
 		receiptHash := types.DeriveSha(receipts)
 		if receiptHash != h.ReceiptHash {
