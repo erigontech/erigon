@@ -637,7 +637,7 @@ func EncodeUint256(i *uint256.Int, w io.Writer, buffer []byte) error {
 	if _, err := w.Write(buffer[:1]); err != nil {
 		return err
 	}
-	i.PutUint256(buffer[:])
+	i.PutUint256(buffer)
 	_, err := w.Write(buffer[32-nBytes : 32])
 	return err
 }

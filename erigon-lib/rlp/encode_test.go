@@ -21,6 +21,7 @@ package rlp
 
 import (
 	"bytes"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -546,4 +547,25 @@ func TestEncodeUint256Buffer(t *testing.T) {
 	var writer3 bytes.Buffer
 	var buf31 [31]byte
 	require.Panics(t, func() { EncodeUint256(i, &writer3, buf31[:]) })
+}
+
+func TestEncodeUint256Random(t *testing.T) {
+	for size := 1; size <= 32; size++ {
+		t.Run(fmt.Sprintf("size=%d", size), func(t *testing.T) {
+			randomBytes := make([]byte, size)
+			_, err := rand.Read(randomBytes)
+			require.NoError(t, err)
+
+			i := new(uint256.Int).SetBytes(randomBytes)
+			var writer bytes.Buffer
+			var buf [32]byte
+			require.NoError(t, EncodeUint256(i, &writer, buf[:]))
+			encoded := bytes.NewReader(writer.Bytes())
+
+			s := NewStream(encoded, 0)
+			decoded, err := s.Uint256Bytes()
+			require.NoError(t, err)
+			assert.Equal(t, i, uint256.NewInt(0).SetBytes(decoded))
+		})
+	}
 }
