@@ -34,7 +34,7 @@ $(GOBINREL)/protoc-gen-go: $(GOBINREL)
 	go build -o "$(GOBIN)/protoc-gen-go" google.golang.org/protobuf/cmd/protoc-gen-go
 
 $(GOBINREL)/abigen: $(GOBINREL)
-	go build -o "$(GOBIN)/abigen" ../../cmd/abigen
+	go build -tags abigen -o "$(GOBIN)/abigen" ../../cmd/abigen
 
 .PHONY: devtools
 devtools: $(GOBINREL)/protoc $(GOBINREL)/protoc-gen-go $(GOBINREL)/abigen

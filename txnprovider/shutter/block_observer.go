@@ -1,3 +1,19 @@
+// Copyright 2025 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package shutter
 
 import (
@@ -7,7 +23,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 )
 
 type BlockObserver struct {
@@ -36,13 +52,13 @@ func (bo BlockObserver) Run(ctx context.Context) error {
 		bo.blockChangeMu.Unlock()
 	}()
 
-	changes, err := bo.stateChangesClient.StateChanges(ctx, &remote.StateChangeRequest{})
+	changes, err := bo.stateChangesClient.StateChanges(ctx, &remoteproto.StateChangeRequest{})
 	if err != nil {
 		return err
 	}
 
 	// note the changes stream is ctx-aware so changes.Recv() should terminate with err if ctx gets done
-	var batch *remote.StateChangeBatch
+	var batch *remoteproto.StateChangeBatch
 	for batch, err = changes.Recv(); err != nil; batch, err = changes.Recv() {
 		if batch == nil || len(batch.ChangeBatch) == 0 {
 			continue
@@ -73,5 +89,5 @@ func (bo BlockObserver) WaitUntil(blockNum uint64) error {
 }
 
 type StateChangesClient interface {
-	StateChanges(ctx context.Context, in *remote.StateChangeRequest, opts ...grpc.CallOption) (remote.KV_StateChangesClient, error)
+	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
 }
