@@ -555,9 +555,9 @@ func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
 			return nil
 		}
 		// type + ssz
-		// ret = append(ret, append(hexutility.Bytes{requestType}, ssz...))
-		// in Mekong devnet-4, we don't need to add type
-		ret = append(ret, ssz)
+		if len(ssz) > 0 {
+			ret = append(ret, append(hexutility.Bytes{r.typ}, ssz...))
+		}
 	}
 	return ret
 }
@@ -569,7 +569,7 @@ type DenebBeaconBlock struct {
 }
 
 func NewDenebBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *DenebBeaconBlock {
-	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlock)
+	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlockByVersion(version))
 	b := &DenebBeaconBlock{
 		Block:     NewBeaconBlock(beaconCfg, version),
 		KZGProofs: solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
@@ -630,7 +630,7 @@ func NewDenebSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version cl
 		log.Warn("DenebSignedBeaconBlock: version is not after DenebVersion")
 		return nil
 	}
-	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlock)
+	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlockByVersion(version))
 	b := &DenebSignedBeaconBlock{
 		SignedBlock: NewSignedBeaconBlock(beaconCfg, version),
 		KZGProofs:   solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
