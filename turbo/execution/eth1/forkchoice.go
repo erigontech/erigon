@@ -270,7 +270,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 
 	unwindingOptimismToCanonical := false
-	if e.config.IsOptimism() {
+	if e.config.IsOptimism() && false { // block this
 		headHash := rawdb.ReadHeadBlockHash(tx)
 		unwindingOptimismToCanonical = (blockHash != headHash) && (canonicalHash == blockHash)
 		if unwindingOptimismToCanonical {
