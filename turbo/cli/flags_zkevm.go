@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"math"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -63,6 +64,14 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		default:
 			panic(fmt.Sprintf("Unsupported type for flag check: %T", value))
 		}
+	}
+
+	verifyAddressFlag := func(name, value string) string {
+		_, _, err := net.SplitHostPort(value)
+		if err != nil {
+			panic(fmt.Sprintf("invalid address for flag %s: %s", name, value))
+		}
+		return value
 	}
 
 	l2DataStreamTimeoutVal := ctx.String(utils.L2DataStreamerTimeout.Name)
@@ -309,4 +318,6 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	checkFlag(utils.TxPoolRejectSmartContractDeployments.Name, cfg.TxPoolRejectSmartContractDeployments)
 	checkFlag(utils.L1ContractAddressCheckFlag.Name, cfg.L1ContractAddressCheck)
 	checkFlag(utils.L1ContractAddressRetrieveFlag.Name, cfg.L1ContractAddressCheck)
+
+	verifyAddressFlag(utils.L2DataStreamerUrlFlag.Name, cfg.L2DataStreamerUrl)
 }
