@@ -25,33 +25,41 @@ type RelationalAppendable struct {
 	noUnwind bool // if true, don't delete on unwind; tsId keeps increasing
 }
 
-type RelationalAppendableOption func(*RelationalAppendable)
+type RAOpts func(a *RelationalAppendable)
 
-func WithFreezer(freezer Freezer) RelationalAppendableOption {
+// making this a method on RelationalAppendableOption to allow namespacing; since MarkedAppendableOptions
+// have same functions.
+func (r *RAOpts) WithFreezer(freezer Freezer) RAOpts {
 	return func(a *RelationalAppendable) {
 		a.SetFreezer(freezer)
 	}
 }
 
-func WithIndexBuilders(builders ...AccessorIndexBuilder) RelationalAppendableOption {
+func (r *RAOpts) WithIndexBuilders(builders ...AccessorIndexBuilder) RAOpts {
 	return func(a *RelationalAppendable) {
 		a.SetIndexBuilders(builders...)
 	}
 }
 
-func WithStepSize(stepSize uint64) RelationalAppendableOption {
+func (r *RAOpts) WithStepSize(stepSize uint64) RAOpts {
 	return func(a *RelationalAppendable) {
 		a.stepSize = stepSize
 	}
 }
 
-func WithNoUnwind() RelationalAppendableOption {
+func (r *RAOpts) WithNoUnwind() RAOpts {
 	return func(a *RelationalAppendable) {
 		a.noUnwind = true
 	}
 }
 
-func NewRelationalAppendable(relation RelationI, enum ApEnum, dirs datadir.Dirs, options ...RelationalAppendableOption) (*RelationalAppendable, error) {
+func (r *RAOpts) WithDataDir(dirs datadir.Dirs) RAOpts {
+	return func(a *RelationalAppendable) {
+		a.dirs = dirs
+	}
+}
+
+func NewRelationalAppendable(relation RelationI, enum ApEnum, options ...RAOpts) (*RelationalAppendable, error) {
 	a := &RelationalAppendable{
 		ProtoAppendable: NewProtoAppendable(enum, 500),
 		relation:        relation,
@@ -69,7 +77,7 @@ func NewRelationalAppendable(relation RelationI, enum ApEnum, dirs datadir.Dirs,
 
 	if a.indexBuilders == nil {
 		// mapping num -> offset (ordinal map)
-		salt, err := snaptype.GetIndexSalt(dirs.Snap) // this is bad; ApEnum should know it;s own Dirs
+		salt, err := snaptype.GetIndexSalt(a.dirs.Snap) // this is bad; ApEnum should know it;s own Dirs, current specified via RAOpts
 		if err != nil {
 			return nil, err
 		}

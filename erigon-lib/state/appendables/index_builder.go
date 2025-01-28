@@ -14,8 +14,8 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-// interfaces defined here (with the exception of IndexBuilder) are not required to be implemented by
-// appendables. These are just helpers when SimpleAccessorBuilder is used or provides some structure
+// interfaces defined here (with the exception of AccessorIndexBuilder) are not required to be implemented by
+// appendables. These are just helpers when SimpleAccessorBuilder is used. Also can be used to provide some structure
 // to build more custom indexes.
 
 type IndexInputDataQuery interface {
@@ -40,6 +40,8 @@ type AccessorArgs struct {
 	lessFalsePositives bool
 	salt               uint32
 	nofsync            bool
+
+	// other config options for recsplit
 }
 
 func NewAccessorArgs(enums, lessFalsePositives, nofsync bool, salt uint32) *AccessorArgs {
@@ -127,10 +129,12 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, baseNumFrom, baseNumT
 			}
 			select {
 			case <-ctx.Done():
+				stream.Close()
 				return nil, ctx.Err()
 			default:
 			}
 		}
+		stream.Close()
 		if err = rs.Build(ctx); err != nil {
 			// collision handling
 			if errors.Is(err, recsplit.ErrCollision) {
@@ -197,7 +201,7 @@ func (s *seg_stream) Close() {
 	s.g = nil
 }
 
-// index key factory "manufactoring" index keys only
+// index key factory "manufacturing" index keys only
 var simpleIndexKeyFactoryInstance = &SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
 
 type SimpleIndexKeyFactory struct {
