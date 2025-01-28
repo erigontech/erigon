@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/erigontech/erigon-lib/state"
 	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/big"
@@ -926,17 +927,22 @@ func TestShanghaiValidateTxn(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			t.Cleanup(cancel)
-			cache := &kvcache.DummyCache{}
-			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
-			asrt.NoError(err)
-			tx, err := coreDB.BeginRw(ctx)
+			tx, err := coreDB.BeginTemporalRw(ctx)
 			defer tx.Rollback()
 			asrt.NoError(err)
+			sd, err := state.NewSharedDomains(tx, logger)
+			defer sd.Close()
+			asrt.NoError(err)
+			cache := kvcache.NewDummy()
+			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
+			asrt.NoError(err)
 
-			sndr := sender{nonce: 0, balance: *uint256.NewInt(math.MaxUint64)}
-			sndrBytes := make([]byte, EncodeSenderLengthForStorage(sndr.nonce, sndr.balance))
-			EncodeSender(sndr.nonce, sndr.balance, sndrBytes)
-			err = tx.Put(kv.PlainState, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes)
+			sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
+			sndrBytes := accounts3.SerialiseV3(&sndr)
+			err = sd.DomainPut(kv.AccountsDomain, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, nil, sndrBytes, nil, 0)
+			asrt.NoError(err)
+
+			err = sd.Flush(ctx, tx)
 			asrt.NoError(err)
 
 			txn := &TxnSlot{
@@ -1037,7 +1043,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
 	chainID := *maxUint256
-	cache := &kvcache.DummyCache{}
+	cache := kvcache.NewDummy()
 	logger := log.New()
 	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil, /* agraBlock */
 		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
@@ -1046,11 +1052,16 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	tx, err := coreDB.BeginRw(ctx)
 	defer tx.Rollback()
 	assert.NoError(t, err)
+	sd, err := state.NewSharedDomains(tx, logger)
+	defer sd.Close()
+	assert.NoError(t, err)
 
-	sndr := sender{nonce: 0, balance: *uint256.NewInt(math.MaxUint64)}
-	sndrBytes := make([]byte, EncodeSenderLengthForStorage(sndr.nonce, sndr.balance))
-	EncodeSender(sndr.nonce, sndr.balance, sndrBytes)
-	err = tx.Put(kv.PlainState, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes)
+	sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
+	sndrBytes := accounts3.SerialiseV3(&sndr)
+	err = sd.DomainPut(kv.AccountsDomain, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, nil, sndrBytes, nil, 0)
+	assert.NoError(t, err)
+
+	err = sd.Flush(ctx, tx)
 	assert.NoError(t, err)
 
 	txn := &TxnSlot{
