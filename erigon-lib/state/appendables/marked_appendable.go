@@ -171,14 +171,14 @@ func (m *MarkedAppendable) BeginFilesRw() *MarkedAppendableRwTx {
 	}
 }
 
-func (r *MarkedAppendableRwTx) Put(tsId Id, forkId []byte, value VVType, tx kv.RwTx) error {
+func (r *MarkedAppendableRwTx) Put(num Num, forkId []byte, value VVType, tx kv.RwTx) error {
 	// can then val
 	a := r.a
-	if err := tx.Append(a.canonicalTbl, a.encTs(uint64(tsId)), forkId); err != nil {
+	if err := tx.Append(a.canonicalTbl, a.encTs(uint64(num)), forkId); err != nil {
 		return err
 	}
 
-	key := a.combK(uint64(tsId), forkId)
+	key := a.combK(uint64(num), forkId)
 	return tx.Put(a.valsTbl, key, value)
 }
 

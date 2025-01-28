@@ -2,6 +2,7 @@ package appendables
 
 import (
 	"context"
+	"sync"
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -21,8 +22,9 @@ type ProtoAppendable struct {
 	enum          ApEnum
 	indexBuilders []AccessorIndexBuilder
 
-	dirtyFiles *btree.BTreeG[*DirtySegment]
-	_visible   VisibleSegments
+	dirtyFiles  *btree.BTreeG[*DirtySegment]
+	_visible    VisibleSegments
+	visibleLock sync.RWMutex
 
 	baseAppendable Appendable
 
@@ -269,6 +271,8 @@ type ProtoAppendableRoTx struct {
 }
 
 func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableRoTx {
+	a.visibleLock.Lock()
+	defer a.visibleLock.RUnlock()
 	for i := 0; i < len(a._visible); i++ {
 		if a._visible[i].src.frozen {
 			a._visible[i].src.refcount.Add(1)

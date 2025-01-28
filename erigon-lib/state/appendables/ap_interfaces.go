@@ -68,17 +68,28 @@ type TemporalRwTx interface {
 	AggRwTx(baseAppendable AppEnum) *AggregatorRwTx // gets aggtx for entity-set represented by baseAppendable
 }
 
+// use Marked(enum) or Relational(enum) to get the right ro/rw tx.
+// each enum is either marked or relational, so must choose the right one
+// else code should panic.
 type AggregatorRoTx struct{}
 
-func (a *AggregatorRoTx) MarkedQueries(app AppEnum) *MarkedAppendableRoTx         { return nil }
-func (a *AggregatorRoTx) RelationalQueries(app AppEnum) *RelationalAppendableRoTx { return nil }
+func (a *AggregatorRoTx) Marked(app AppEnum) *MarkedAppendableRoTx         { return nil }
+func (a *AggregatorRoTx) Relational(app AppEnum) *RelationalAppendableRoTx { return nil }
 
 type AggregatorRwTx struct {
 	*AggregatorRoTx
 }
 
-func (a *AggregatorRwTx) MarkedQueries(app AppEnum) *MarkedAppendableRwTx         { return nil }
-func (a *AggregatorRwTx) RelationalQueries(app AppEnum) *RelationalAppendableRwTx { return nil }
+func (a *AggregatorRwTx) Marked(app AppEnum) *MarkedAppendableRwTx         { return nil }
+func (a *AggregatorRwTx) Relational(app AppEnum) *RelationalAppendableRwTx { return nil }
+
+type Aggregator struct{}
+
+func (a *Aggregator) ViewSingleFile(ap AppEnum, baseNum Num) (segment *VisibleSegment, ok bool, close func()) {
+	// TODO
+	// similar to RoSnapshots#ViewSingleFile etc.
+	return nil, false, nil
+}
 
 // /
 func WriteRawBody(tx TemporalRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
@@ -111,7 +122,7 @@ func WriteBodyForStorage(tx TemporalRwTx, hash common.Hash, number uint64, body 
 		panic(err)
 	}
 
-	markedQueries := aggTx.MarkedQueries(Bodies)
+	markedQueries := aggTx.Marked(Bodies)
 
 	// write bodies
 	return markedQueries.Put(Num(number), hash.Bytes(), b.Bytes(), tx)
@@ -120,7 +131,7 @@ func WriteBodyForStorage(tx TemporalRwTx, hash common.Hash, number uint64, body 
 func WriteRawTransactions(tx TemporalRwTx, txs [][]byte, baseTxnID uint64) error {
 	aggTx := tx.AggRwTx(Headers) // or temporalTx.AggTx(baseAppendableEnum); gives aggtx for entityset
 	stx := baseTxnID
-	txq := aggTx.RelationalQueries(Transactions)
+	txq := aggTx.Relational(Transactions)
 
 	for _, txn := range txs {
 		txq.Put(Id(stx), VVType(txn), tx)
