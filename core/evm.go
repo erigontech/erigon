@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package core
 
@@ -22,16 +25,19 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
-func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address) evmtypes.BlockContext {
+func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libcommon.Hash,
+	engine consensus.EngineReader, author *libcommon.Address, config *chain.Config) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary libcommon.Address
 	if author == nil {
@@ -54,10 +60,13 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		*prevRandDao = header.MixDigest
 	}
 
-	var excessBlobGas *uint64
+	var blobBaseFee *uint256.Int
 	if header.ExcessBlobGas != nil {
-		excessBlobGas = new(uint64)
-		*excessBlobGas = *header.ExcessBlobGas
+		var err error
+		blobBaseFee, err = misc.GetBlobGasPrice(config, *header.ExcessBlobGas, header.Time)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	var transferFunc evmtypes.TransferFunc
@@ -81,7 +90,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		BaseFee:          &baseFee,
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
-		ExcessBlobGas:    excessBlobGas,
+		BlobBaseFee:      blobBaseFee,
 	}
 }
 

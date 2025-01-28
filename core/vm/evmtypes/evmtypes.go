@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package evmtypes
 
 import (
@@ -25,15 +41,15 @@ type BlockContext struct {
 	PostApplyMessage PostApplyMessageFunc
 
 	// Block information
-	Coinbase      common.Address // Provides information for COINBASE
-	GasLimit      uint64         // Provides information for GASLIMIT
-	MaxGasLimit   bool           // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
-	BlockNumber   uint64         // Provides information for NUMBER
-	Time          uint64         // Provides information for TIME
-	Difficulty    *big.Int       // Provides information for DIFFICULTY
-	BaseFee       *uint256.Int   // Provides information for BASEFEE
-	PrevRanDao    *common.Hash   // Provides information for PREVRANDAO
-	ExcessBlobGas *uint64        // Provides information for handling data blobs
+	Coinbase    common.Address // Provides information for COINBASE
+	GasLimit    uint64         // Provides information for GASLIMIT
+	MaxGasLimit bool           // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
+	BlockNumber uint64         // Provides information for NUMBER
+	Time        uint64         // Provides information for TIME
+	Difficulty  *big.Int       // Provides information for DIFFICULTY
+	BaseFee     *uint256.Int   // Provides information for BASEFEE
+	PrevRanDao  *common.Hash   // Provides information for PREVRANDAO
+	BlobBaseFee *uint256.Int   // Provides information for BLOBBASEFEE
 }
 
 // TxContext provides the EVM with information about a transaction.

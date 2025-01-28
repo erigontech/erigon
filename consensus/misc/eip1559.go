@@ -84,10 +84,17 @@ func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) 
 		}
 
 		if currentHeader.ExcessBlobGas != nil {
-			excessBlobGas := CalcExcessBlobGas(chainConfig, currentHeader)
-			b, err := GetBlobGasPrice(chainConfig, excessBlobGas)
+			var nextHeaderTime = currentHeader.Time + 1 // Speculative - Next header must be at least 1 second ahead
+			parentHeader := rawdb.ReadHeaderByNumber(db, currentHeader.Number.Uint64()-1)
+			if parentHeader != nil {
+				nextHeaderTime = currentHeader.Time + (currentHeader.Time - parentHeader.Time) // This difference should be close enough to seconds per slot
+			}
+			excessBlobGas := CalcExcessBlobGas(chainConfig, currentHeader, nextHeaderTime)
+			b, err := GetBlobGasPrice(chainConfig, excessBlobGas, nextHeaderTime)
 			if err == nil {
 				blobFee = b.Uint64()
+			} else {
+				return 0, 0, 0, 0, err
 			}
 		}
 	}

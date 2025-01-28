@@ -233,6 +233,7 @@ type TxPool struct {
 	pragueTime              *uint64
 	isPostPrague            atomic.Bool
 	maxBlobsPerBlock        uint64
+	maxBlobsPerBlockPrague  *uint64
 	feeCalculator           FeeCalculator
 	logger                  log.Logger
 }
@@ -243,6 +244,7 @@ type FeeCalculator interface {
 
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
 	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime, pragueTime *big.Int, maxBlobsPerBlock uint64,
+	maxBlobsPerBlockPrague *uint64,
 	feeCalculator FeeCalculator, logger log.Logger,
 ) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
@@ -289,8 +291,11 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		minedBlobTxsByBlock:     map[uint64][]*metaTx{},
 		minedBlobTxsByHash:      map[string]*metaTx{},
 		maxBlobsPerBlock:        maxBlobsPerBlock,
+		maxBlobsPerBlockPrague:  maxBlobsPerBlockPrague,
 		feeCalculator:           feeCalculator,
-		logger:                  logger,
+		// builderNotifyNewTxns:    builderNotifyNewTxns,
+		// newSlotsStreams:         newSlotsStreams,
+		logger: logger,
 	}
 
 	if shanghaiTime != nil {
@@ -864,7 +869,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		if blobCount == 0 {
 			return txpoolcfg.NoBlobs
 		}
-		if blobCount > p.maxBlobsPerBlock {
+		if blobCount > p.GetMaxBlobsPerBlock() {
 			return txpoolcfg.TooManyBlobs
 		}
 		equalNumber := len(txn.BlobHashes) == len(txn.Blobs) &&
@@ -1071,6 +1076,17 @@ func (p *TxPool) isCancun() bool {
 
 func (p *TxPool) isPrague() bool {
 	return isTimeBasedForkActivated(&p.isPostPrague, p.pragueTime)
+}
+
+func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
+	if p.isPrague() {
+		if p.maxBlobsPerBlockPrague != nil {
+			return *p.maxBlobsPerBlockPrague
+		}
+		return 9 // EIP-7691 default
+	} else {
+		return p.maxBlobsPerBlock
+	}
 }
 
 // Check that the serialized txn should not exceed a certain max size

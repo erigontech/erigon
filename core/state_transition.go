@@ -32,7 +32,6 @@ import (
 
 	cmath "github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -172,12 +171,9 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	// compute blob fee for eip-4844 data blobs if any
 	blobGasVal := new(uint256.Int)
 	if st.evm.ChainRules().IsCancun {
-		if st.evm.Context.ExcessBlobGas == nil {
+		blobGasPrice := st.evm.Context.BlobBaseFee
+		if blobGasPrice == nil {
 			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
-		}
-		blobGasPrice, err := misc.GetBlobGasPrice(st.evm.ChainConfig(), *st.evm.Context.ExcessBlobGas)
-		if err != nil {
-			return err
 		}
 		blobGasVal, overflow = blobGasVal.MulOverflow(blobGasPrice, new(uint256.Int).SetUint64(st.msg.BlobGas()))
 		if overflow {
@@ -211,7 +207,8 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 				}
 			}
 		}
-		if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
+		balance := st.state.GetBalance(st.msg.From())
+		if have, want := balance, balanceCheck; have.Cmp(want) < 0 {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 		}
 		st.state.SubBalance(st.msg.From(), gasVal)
@@ -280,18 +277,14 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 	if st.msg.BlobGas() > 0 && st.evm.ChainRules().IsCancun {
-		if st.evm.Context.ExcessBlobGas == nil {
+		blobGasPrice := st.evm.Context.BlobBaseFee
+		if blobGasPrice == nil {
 			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
-		}
-		blobGasPrice, err := misc.GetBlobGasPrice(st.evm.ChainConfig(), *st.evm.Context.ExcessBlobGas)
-		if err != nil {
-			return err
 		}
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
 		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
-			return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v blobGasPrice: %v, excessBlobGas: %v",
-				ErrMaxFeePerBlobGas,
-				st.msg.From().Hex(), st.msg.MaxFeePerBlobGas(), blobGasPrice, st.evm.Context.ExcessBlobGas)
+			return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v < blobGasPrice: %v",
+				ErrMaxFeePerBlobGas, st.msg.From().Hex(), st.msg.MaxFeePerBlobGas(), blobGasPrice)
 		}
 	}
 

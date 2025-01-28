@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2025 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package tracers_test
 
@@ -72,18 +75,17 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Origin:   origin,
 		GasPrice: uint256.NewInt(1),
 	}
-	excessBlobGas := uint64(50000)
 	context := evmtypes.BlockContext{
-		CanTransfer:   core.CanTransfer,
-		Transfer:      consensus.Transfer,
-		Coinbase:      libcommon.Address{},
-		BlockNumber:   8000000,
-		Time:          5,
-		Difficulty:    big.NewInt(0x30000),
-		GasLimit:      uint64(6000000),
-		ExcessBlobGas: &excessBlobGas,
+		CanTransfer: core.CanTransfer,
+		Transfer:    consensus.Transfer,
+		Coinbase:    libcommon.Address{},
+		BlockNumber: 8000000,
+		Time:        5,
+		Difficulty:  big.NewInt(0x30000),
+		GasLimit:    uint64(6000000),
+		BaseFee:     uint256.NewInt(0),
+		BlobBaseFee: uint256.NewInt(50000),
 	}
-	context.BaseFee = uint256.NewInt(0)
 	alloc := types.GenesisAlloc{}
 
 	// The code pushes 'deadbeef' into memory, then the other params, and calls CREATE2, then returns

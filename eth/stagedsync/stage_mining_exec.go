@@ -197,7 +197,7 @@ func getNextTransactions(
 		remainingGas := header.GasLimit - header.GasUsed
 		remainingBlobGas := uint64(0)
 		if header.BlobGasUsed != nil {
-			remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed
+			remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed
 		}
 
 		if _, count, err = cfg.txPool.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, remainingBlobGas, alreadyYielded); err != nil {
@@ -377,7 +377,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
-		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed)
+		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
 	}
 	signer := types.MakeSigner(&chainConfig, header.Number.Uint64(), header.Time)
 
