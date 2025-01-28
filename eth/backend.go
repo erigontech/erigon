@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/huandu/xstrings"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"io/fs"
 	"math/big"
@@ -2222,9 +2221,9 @@ func l1ContractAddressCheck(ctx context.Context, cfg *ethconfig.Zk, l1BlockSynce
 }
 
 func createClientVersionMetric() {
-	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{name="%s"}`, xstrings.ToSnakeCase("cdk_erigon")))
-	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{version="%s"}`, xstrings.ToSnakeCase(utils.GetVersion())))
-	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{os="%s"}`, xstrings.ToSnakeCase(runtime.GOOS)))
-	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{arch="%s"}`, xstrings.ToSnakeCase(runtime.GOARCH)))
-	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{go_version="%s"}`, xstrings.ToSnakeCase(runtime.Version())))
+	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{name="cdk-erigon"}`))
+	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{version="%s"}`, utils.GetVersion()))
+	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{os="%s"}`, runtime.GOOS))
+	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{arch="%s"}`, runtime.GOARCH))
+	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{go_version="%s"}`, runtime.Version()))
 }
