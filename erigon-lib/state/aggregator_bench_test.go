@@ -287,3 +287,15 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 		require.EqualValues(b, keys[p], key)
 	}
 }
+
+func BenchmarkAggregator_BeginFilesRo(b *testing.B) {
+	// BenchmarkAggregator_BeginFilesRo/begin_files_ro-16 1490890 850.0 ns/op 3280 B/op 22 allocs/op
+	aggStep := uint64(100_00)
+	_, agg := testDbAndAggregatorBench(b, aggStep)
+
+	b.Run("begin_files_ro", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			agg.BeginFilesRo()
+		}
+	})
+}
