@@ -166,29 +166,29 @@ jobs:
           
             # Save test results to a directory with timestamp and commit hash
             cp -r ${{runner.workspace}}/rpc-tests/perf/reports/mainnet $past_test_dir
-        }
+          }
 
-        # Launch the RPC performance test runner
-        failed_test=0
-        run_perf mainnet eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20
-        run_perf mainnet eth_getLogs stress_test_eth_getLogs_15M 1:1,100:30,1000:20,10000:20,20000:20
-        run_perf mainnet eth_getBalance stress_test_eth_getBalance_15M 1:1,100:30,1000:20,10000:20,20000:20
-        run_perf mainnet eth_getBlockByHash stress_test_eth_getBlockByHash_14M 1:1,100:30,1000:20,10000:20
-        run_perf mainnet eth_getBlockByNumber stress_test_eth_getBlockByNumber_13M 1:1,100:30,1000:20,5000:20
-        run_perf mainnet eth_getTransactionByHash stress_test_eth_getTransactionByHash_13M 1:1,100:30,1000:20,10000:20
-        run_perf mainnet eth_getTransactionReceipt stress_test_eth_getTransactionReceipt_14M 1:1,100:30,1000:20,5000:20,10000:20,20000:20
-        run_perf mainnet eth_createAccessList stress_test_eth_createAccessList_16M 1:1,100:30,1000:20,10000:20,20000:20          
-        
-        # Save the subsection reached status
-        echo "::set-output name=test_executed::true"
-        
-        if [ $failed_test -eq 0 ]; then
-                echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
-                echo "Tests completed successfully"
-        else
-                echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-                echo "Error detected during tests"
-        fi
+          # Launch the RPC performance test runner
+          failed_test=0
+          run_perf mainnet eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20
+          run_perf mainnet eth_getLogs stress_test_eth_getLogs_15M 1:1,100:30,1000:20,10000:20,20000:20
+          run_perf mainnet eth_getBalance stress_test_eth_getBalance_15M 1:1,100:30,1000:20,10000:20,20000:20
+          run_perf mainnet eth_getBlockByHash stress_test_eth_getBlockByHash_14M 1:1,100:30,1000:20,10000:20
+          run_perf mainnet eth_getBlockByNumber stress_test_eth_getBlockByNumber_13M 1:1,100:30,1000:20,5000:20
+          run_perf mainnet eth_getTransactionByHash stress_test_eth_getTransactionByHash_13M 1:1,100:30,1000:20,10000:20
+          run_perf mainnet eth_getTransactionReceipt stress_test_eth_getTransactionReceipt_14M 1:1,100:30,1000:20,5000:20,10000:20,20000:20
+          run_perf mainnet eth_createAccessList stress_test_eth_createAccessList_16M 1:1,100:30,1000:20,10000:20,20000:20          
+          
+          # Save the subsection reached status
+          echo "::set-output name=test_executed::true"
+          
+          if [ $failed_test -eq 0 ]; then
+                  echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+                  echo "Tests completed successfully"
+          else
+                  echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+                  echo "Error detected during tests"
+          fi
 
       - name: Stop Erigon RpcDaemon
         working-directory: ${{ github.workspace }}/build/bin
@@ -206,19 +206,19 @@ jobs:
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
-      - name: Run change point analysis
-        if: steps.test_step.outputs.TEST_RESULT == 'success'
-        working-directory: ${{runner.workspace}}/rpc-tests/perf/reports/mainnet
-        run: |
-          set +e # Disable exit on error
-          open_change_points=0
-          python3 $ERIGON_QA_PATH/test_system/qa-tests/change-points/change_point_analysis.py
-          open_change_points=$?
-          cp change_point_analysis.pdf $past_test_dir
-          if [ $open_change_points -ne 0 ]; then
-            echo "Change point analysis found points that need to be investigated"
-            #echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"  -- enable in the future
-          fi
+      #- name: Run change point analysis
+      #  if: steps.test_step.outputs.TEST_RESULT == 'success'
+      #  working-directory: ${{runner.workspace}}/rpc-tests/perf/reports/mainnet
+      #  run: |
+      #    set +e # Disable exit on error
+      #    open_change_points=0
+      #   python3 $ERIGON_QA_PATH/test_system/qa-tests/change-points/change_point_analysis.py
+      #    open_change_points=$?
+      #    cp change_point_analysis.pdf $past_test_dir
+      #    if [ $open_change_points -ne 0 ]; then
+      #      echo "Change point analysis found points that need to be investigated"
+      #      #echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"  -- enable in the future
+      #    fi
 
       - name: Upload test results
         if: steps.test_step.outputs.test_executed == 'true'
