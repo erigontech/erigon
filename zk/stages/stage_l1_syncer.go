@@ -85,6 +85,11 @@ func SpawnStageL1Syncer(
 	// 	return nil
 	// }
 	defer log.Info(fmt.Sprintf("[%s] Finished L1 sync stage ", logPrefix))
+	defer func() {
+		if err := UpdateZkSyncMetrics(ctx, cfg.db); err != nil {
+			log.Warn(fmt.Sprintf("[%s] Failed to update metric for stage %s: %v", logPrefix, s.ID, err))
+		}
+	}()
 
 	var internalTxOpened bool
 	if tx == nil {

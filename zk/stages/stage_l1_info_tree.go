@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 	"fmt"
-
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -36,6 +35,11 @@ func SpawnL1InfoTreeStage(
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting L1 Info Tree stage", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Finished L1 Info Tree stage", logPrefix))
+	defer func() {
+		if err := UpdateZkSyncMetrics(ctx, cfg.db); err != nil {
+			log.Warn(fmt.Sprintf("[%s] Failed to update metric for stage %s: %v", logPrefix, s.ID, err))
+		}
+	}()
 
 	freshTx := tx == nil
 	if freshTx {

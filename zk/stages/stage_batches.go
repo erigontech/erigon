@@ -411,11 +411,9 @@ func saveStageProgress(tx kv.RwTx, logPrefix string, highestHashableL2BlockNo, h
 	if err := stages.SaveStageProgress(tx, stages.HighestHashableL2BlockNo, highestHashableL2BlockNo); err != nil {
 		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
-
 	if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, highestSeenBatchNo); err != nil {
 		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
-
 	// store the highest seen forkid
 	if err := stages.SaveStageProgress(tx, stages.ForkId, lastForkId); err != nil {
 		return fmt.Errorf("SaveStageProgress: %w", err)
