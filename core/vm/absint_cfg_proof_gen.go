@@ -106,7 +106,7 @@ func toProgram(code []byte) *Program {
 		stmt.ends = stmt.operation == nil
 		//fmt.Printf("%v %v %v", pc, stmt.opcode, stmt.operation.valid)
 
-		if op.IsPush() {
+		if op.IsPushWithImmediateArgs() {
 			pushByteSize := stmt.operation.opNum
 			startMin := pc + 1
 			if startMin >= codeLen {
@@ -334,7 +334,7 @@ func post(cfg *Cfg, st0 *astate, edge edge, maxStackLen int) (*astate, error) {
 
 		stack1 := stack0.Copy()
 
-		if stmt.opcode.IsPush() {
+		if stmt.opcode.IsPushWithImmediateArgs() {
 			if cfg.Program.isJumpDest(&stmt.value) || isFF(&stmt.value) {
 				stack1.Push(AbsValueConcrete(stmt.value))
 			} else {
@@ -530,7 +530,7 @@ func (cfg *Cfg) PrintAnlyState() {
 		}
 
 		var valueStr string
-		if stmt.opcode.IsPush() {
+		if stmt.opcode.IsPushWithImmediateArgs() {
 			valueStr = fmt.Sprintf("%v %v", stmt.opcode, stmt.value.Hex())
 		} else {
 			valueStr = fmt.Sprintf("%v", stmt.opcode)

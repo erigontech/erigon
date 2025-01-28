@@ -127,7 +127,7 @@ func (s *MdbxStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockI
 	return txStore{tx}.LastProcessedBlockInfo(ctx)
 }
 
-func (s *MdbxStore) PutProcessedBlockInfo(ctx context.Context, info ProcessedBlockInfo) error {
+func (s *MdbxStore) PutProcessedBlockInfo(ctx context.Context, info []ProcessedBlockInfo) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -418,14 +418,19 @@ func (s txStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockInfo
 	return info, true, nil
 }
 
-func (s txStore) PutProcessedBlockInfo(ctx context.Context, info ProcessedBlockInfo) error {
+func (s txStore) PutProcessedBlockInfo(ctx context.Context, info []ProcessedBlockInfo) error {
 	tx, ok := s.tx.(kv.RwTx)
-
 	if !ok {
 		return errors.New("expected RW tx")
 	}
 
-	return putProcessedBlockInfo(tx, info)
+	for _, i := range info {
+		if err := putProcessedBlockInfo(tx, i); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s txStore) LastFrozenEventBlockNum() uint64 {
