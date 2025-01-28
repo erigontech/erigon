@@ -18,6 +18,7 @@ package core
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -26,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 // Installs an Arbitrum TxProcessor, enabling ArbOS for this state transition (see vm/evm_arbitrum.go)
@@ -60,3 +62,40 @@ type NodeInterfaceBackendAPI interface {
 	GetLogs(ctx context.Context, blockHash common.Hash, number uint64) ([][]*types.Log, error)
 	GetEVM(ctx context.Context, msg *types.Message, state *state.IntraBlockState, header *types.Header, vmConfig *vm.Config, blockCtx *evmtypes.BlockContext) *vm.EVM
 }
+
+// Arbitrum widely uses BlockChain structure so better to wrap interface here
+type BlockChain interface {
+	services.FullBlockReader
+
+	// Config retrieves the chain's fork configuration.
+	Config() *chain.Config
+
+	// Stop stops the blockchain service. If any imports are currently in progress
+	// it will abort them using the procInterrupt.
+	Stop()
+
+	// State returns a new mutable state based on the current HEAD block.
+	State() (state.IntraBlockStateArbitrum, error)
+
+	// StateAt returns a new mutable state based on a particular point in time.
+	StateAt(root common.Hash) (state.IntraBlockStateArbitrum, error)
+
+	ClipToPostNitroGenesis(blockNum rpc.BlockNumber) (rpc.BlockNumber, rpc.BlockNumber)
+
+	RecoverState(block *types.Block) error
+
+	ReorgToOldBlock(newHead *types.Block) error
+
+	// WriteBlockAndSetHeadWithTime also counts processTime, which will cause intermittent TrieDirty cache writes
+	WriteBlockAndSetHeadWithTime(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.IntraBlockState, emitHeadEvent bool, processTime time.Duration) (status WriteStatus, err error)
+}
+
+// // State returns a new mutable state based on the current HEAD block.
+// func (bc *BlockChain) State() (*state.StateDB, error) {
+// 	return bc.StateAt(bc.CurrentBlock().Root)
+// }
+
+// // StateAt returns a new mutable state based on a particular point in time.
+// func (bc *BlockChain) StateAt(root common.Hash) (*state.StateDB, error) {
+// 	return state.New(root, bc.stateCache, bc.snaps)
+// }

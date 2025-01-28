@@ -28,7 +28,7 @@ type StateForHeaderFunction func(header *types.Header) (*state.IntraBlockState, 
 // if maxDepthInL2Gas is positive, it constitutes a limit for cumulative l2 gas used of the traversed blocks
 // else if maxDepthInL2Gas is -1, the traversal depth is not limited
 // otherwise only targetHeader state is checked and no search is performed
-func FindLastAvailableState(ctx context.Context, bc *core.BlockChain, stateFor StateForHeaderFunction, targetHeader *types.Header, logFunc StateBuildingLogFunction, maxDepthInL2Gas int64) (*state.IntraBlockState, *types.Header, StateReleaseFunc, error) {
+func FindLastAvailableState(ctx context.Context, bc core.BlockChain, stateFor StateForHeaderFunction, targetHeader *types.Header, logFunc StateBuildingLogFunction, maxDepthInL2Gas int64) (*state.IntraBlockState, *types.Header, StateReleaseFunc, error) {
 	genesis := bc.Config().ArbitrumChainParams.GenesisBlockNum
 	currentHeader := targetHeader
 	var statedb *state.IntraBlockState
@@ -69,7 +69,7 @@ func FindLastAvailableState(ctx context.Context, bc *core.BlockChain, stateFor S
 	return statedb, currentHeader, release, ctx.Err()
 }
 
-func AdvanceStateByBlock(ctx context.Context, bc *core.BlockChain, state *state.IntraBlockState, targetHeader *types.Header, blockToRecreate uint64, prevBlockHash common.Hash, logFunc StateBuildingLogFunction) (*state.IntraBlockState, *types.Block, error) {
+func AdvanceStateByBlock(ctx context.Context, bc core.BlockChain, state *state.IntraBlockState, targetHeader *types.Header, blockToRecreate uint64, prevBlockHash common.Hash, logFunc StateBuildingLogFunction) (*state.IntraBlockState, *types.Block, error) {
 	block := bc.GetBlockByNumber(blockToRecreate)
 	if block == nil {
 		return nil, nil, fmt.Errorf("block not found while recreating: %d", blockToRecreate)
@@ -87,7 +87,7 @@ func AdvanceStateByBlock(ctx context.Context, bc *core.BlockChain, state *state.
 	return state, block, nil
 }
 
-func AdvanceStateUpToBlock(ctx context.Context, bc *core.BlockChain, state *state.IntraBlockState, targetHeader *types.Header, lastAvailableHeader *types.Header, logFunc StateBuildingLogFunction) (*state.IntraBlockState, error) {
+func AdvanceStateUpToBlock(ctx context.Context, bc core.BlockChain, state *state.IntraBlockState, targetHeader *types.Header, lastAvailableHeader *types.Header, logFunc StateBuildingLogFunction) (*state.IntraBlockState, error) {
 	returnedBlockNumber := targetHeader.Number.Uint64()
 	blockToRecreate := lastAvailableHeader.Number.Uint64() + 1
 	prevHash := lastAvailableHeader.Hash()

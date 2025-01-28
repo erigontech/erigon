@@ -171,12 +171,12 @@ type RecordingDatabase struct {
 	config     *RecordingDatabaseConfig
 	sd         *state2.SharedDomains
 	db         state.Database
-	bc         *core.BlockChain
+	bc         core.BlockChain
 	mutex      sync.Mutex // protects StateFor and Dereference
 	references int64
 }
 
-func NewRecordingDatabase(config *RecordingDatabaseConfig, sd *state2.SharedDomains, ethdb kv.TemporalRwDB, blockchain *core.BlockChain) *RecordingDatabase {
+func NewRecordingDatabase(config *RecordingDatabaseConfig, sd *state2.SharedDomains, ethdb kv.TemporalRwDB, blockchain core.BlockChain) *RecordingDatabase {
 	//hashConfig := *hashdb.Defaults
 	//hashConfig.CleanCacheSize = config.TrieCleanCache
 	//trieConfig := triedb.Config{
