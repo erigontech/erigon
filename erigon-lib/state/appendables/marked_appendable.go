@@ -136,3 +136,7 @@ type MarkedAppendableRoTx struct {
 	*ProtoAppendableRoTx
 	m *MarkedAppendable
 }
+
+type MarkedAppendableRwTx struct {
+	*MarkedAppendableRoTx
+}

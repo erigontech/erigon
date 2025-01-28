@@ -44,42 +44,51 @@ var (
 	_ Appendable = &MarkedAppendable{}
 	_ Appendable = &RelationalAppendable{}
 	//_ MarkedQueries     = &MarkedAppendableRoTx{}
-	_ RelationalRoQueries = &RelationalAppendableRoTx{}
-	_ RelationalRwQueries = &RelationalAppendableRwTx{}
+	// _ RelationalRoQueries = &RelationalAppendableRoTx{}
+	// _ RelationalRwQueries = &RelationalAppendableRwTx{}
 )
 
-// canonicalTbl + valTbl
-// headers, bodies, beaconblocks
-type maintenanceQueries interface {
-	Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error
-	Unwind(ctx context.Context, baseKeyFrom Num, limit uint64, rwTx kv.RwTx) error
-}
+// // canonicalTbl + valTbl
+// // headers, bodies, beaconblocks
+// type maintenanceQueries interface {
+// 	Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error
+// 	Unwind(ctx context.Context, baseKeyFrom Num, limit uint64, rwTx kv.RwTx) error
+// }
 
-// the following queries are satisfied by RelationalAppendableRoTx, RelationalAppendableRwTx
-// similarly, MarkedAppendableRoTx, MarkedAppendableRwTx
+// // the following queries are satisfied by RelationalAppendableRoTx, RelationalAppendableRwTx
+// // similarly, MarkedAppendableRoTx, MarkedAppendableRwTx
 
-type MarkedRoQueries interface {
-	Get(num Num, tx kv.Tx) (VVType, error)                // db + snapshots
-	GetNc(num Num, hash []byte, tx kv.Tx) (VVType, error) // db only
-}
+// type MarkedRoQueries interface {
+// 	Get(num Num, tx kv.Tx) (VVType, error)                // db + snapshots
+// 	GetNc(num Num, hash []byte, tx kv.Tx) (VVType, error) // db only
+// }
 
-type MarkedRwQueries interface {
-	maintenanceQueries
-	MarkedRoQueries
-	Put(num Num, hash []byte, value VVType, tx kv.RwTx) error
-}
+// type MarkedRwQueries interface {
+// 	maintenanceQueries
+// 	MarkedRoQueries
+// 	Put(num Num, hash []byte, value VVType, tx kv.RwTx) error
+// }
 
-// in queries, it's eitther MarkedQueries (for marked appendables) or RelationalQueries
-type RelationalRoQueries interface {
-	Get(num Num, tx kv.Tx) (VVType, error) // db + snapshots
-	GetNc(id Id, tx kv.Tx) (VVType, error) // db only
-}
+// // in queries, it's eitther MarkedQueries (for marked appendables) or RelationalQueries
+// type RelationalRoQueries interface {
+// 	Get(num Num, tx kv.Tx) (VVType, error) // db + snapshots
+// 	GetNc(id Id, tx kv.Tx) (VVType, error) // db only
+// }
 
-type RelationalRwQueries interface {
-	maintenanceQueries
-	RelationalRoQueries
-	Put(id Id, value VVType, tx kv.RwTx) error
-}
+// type RelationalRwQueries interface {
+// 	maintenanceQueries
+// 	RelationalRoQueries
+// 	Put(id Id, value VVType, tx kv.RwTx) error
+// }
+// type AggTx[R1 MarkedRoQueries, R2 RelationalRoQueries] interface {
+// 	// pick out the right one; else runtime failure
+// 	// user needs to be anyway aware of what set of queries
+// 	// he can interact with. So is fine.
+// 	RelationalQueries(app AppEnum) R2
+// 	MarkedQueries(app AppEnum) R1
+
+// 	// more methods on level of aggtx
+// }
 
 type AppEnum string
 
@@ -92,25 +101,28 @@ const (
 // ro
 type TemporalTx interface {
 	kv.TemporalTx
-	AggRoTx(baseAppendable AppEnum) AggTx[MarkedRoQueries, RelationalRoQueries]
+	AggRoTx(baseAppendable AppEnum) *AggregatorRoTx
 }
 
 type TemporalRwTx interface {
 	kv.RwTx
 	TemporalTx
-	AggRwTx(baseAppendable AppEnum) AggTx[MarkedRwQueries, RelationalRwQueries] // gets aggtx for entity-set represented by baseAppendable
+	AggRwTx(baseAppendable AppEnum) *AggregatorRwTx // gets aggtx for entity-set represented by baseAppendable
 }
 
-type AggTx[R1 MarkedRoQueries, R2 RelationalRoQueries] interface {
-	// pick out the right one; else runtime failure
-	// user needs to be anyway aware of what set of queries
-	// he can interact with. So is fine.
-	RelationalQueries(app AppEnum) R2
-	MarkedQueries(app AppEnum) R1
+type AggregatorRoTx struct{}
 
-	// more methods on level of aggtx
+func (a *AggregatorRoTx) MarkedQueries(app AppEnum) *MarkedAppendableRoTx         { return nil }
+func (a *AggregatorRoTx) RelationalQueries(app AppEnum) *RelationalAppendableRoTx { return nil }
+
+type AggregatorRwTx struct {
+	*AggregatorRoTx
 }
 
+func (a *AggregatorRwTx) MarkedQueries(app AppEnum) *MarkedAppendableRwTx         { return nil }
+func (a *AggregatorRwTx) RelationalQueries(app AppEnum) *RelationalAppendableRwTx { return nil }
+
+///
 func WriteRawBody(tx TemporalRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	baseTxnID, err := tx.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
 	if err != nil {

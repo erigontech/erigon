@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/stream"
 )
@@ -87,6 +88,10 @@ func (a *RelationalAppendableRoTx) GetNc(id Id, tx kv.Tx) (VVType, error) {
 	return tx.GetOne(a.a.valsTbl, a.a.encTs(uint64(id)))
 }
 
+func (a *RelationalAppendableRoTx) NewWriter() *RelationalAppendableWriter {
+	return &RelationalAppendableWriter{}
+}
+
 func (a *RelationalAppendableRoTx) Close() {
 	if a.files == nil {
 		return
@@ -150,81 +155,48 @@ func (f *ValueKeyFetcherFromRelation) GetKeys(baseNumFrom, baseNumTo Num, tx kv.
 	return NewSequentialStream(uint64(from), uint64(to))
 }
 
-//// relations
+///
 
-// 1:1; baseNum = Num
-type PointRelation struct{}
-
-func (r *PointRelation) BaseNum2Id(fromBaseNum Num, tx kv.Tx) (Id, error) {
-	return Id(fromBaseNum), nil
+// / buffered write into etl collector, and then flush to db
+// can't perform unwinds on this writer
+type RelationalAppendableWriter struct {
+	values    *etl.Collector
+	valsTable string
+	encFn     func(ts uint64) []byte
 }
 
-func (r *PointRelation) Num2Id(num Num, tx kv.Tx) (Id, error) {
-	return Id(num), nil
-}
-
-// many:1; EntityEnds tbl: start baseNum -> num
-// also id == num here (only canonical data)
-type ManyToOneRelation struct {
-	entityEndsTbl string
-}
-
-func (r *ManyToOneRelation) BaseNum2Id(fromBaseNum Num, tx kv.Tx) (Id, error) {
-	c, err := tx.Cursor(r.entityEndsTbl)
-	if err != nil {
-		return 0, err
+func NewRelationalAppendableWriter(r *RelationalAppendable, valsTable string, values *etl.Collector) *RelationalAppendableWriter {
+	return &RelationalAppendableWriter{
+		values:    values,
+		valsTable: valsTable,
+		encFn:     r.encTs,
 	}
-	defer c.Close()
+}
 
-	_, v, err := c.Seek(Encode64ToBytes(uint64(fromBaseNum), true))
-	if err != nil {
-		return 0, err
+func (w *RelationalAppendableWriter) Close() {
+	if w == nil {
+		return
 	}
-
-	return Id(Decode64FromBytes(v, true)), nil
+	if w.values != nil {
+		w.values.Close()
+	}
 }
 
-func (r *ManyToOneRelation) Num2Id(num Num, tx kv.Tx) (Id, error) {
-	return Id(num), nil
-}
-
-// 1:many; with MaxNumTbl
-// e.g. txs, borevents
-type OneToManyRelation struct {
-	maxNumTbl         string
-	strictlyAppending bool // i.e. no delete on unwind
-}
-
-func (r *OneToManyRelation) BaseNum2Id(fromBaseNum Num, tx kv.Tx) (Id, error) {
-	prevMaxNum, err := tx.GetOne(r.maxNumTbl, Encode64ToBytes(uint64(fromBaseNum)-1, true))
-	if err != nil {
-		return 0, err
+func (w *RelationalAppendableWriter) Add(id Id, value VVType) error {
+	key := w.encFn(uint64(id))
+	if err := w.values.Collect(key, value); err != nil {
+		return err
 	}
 
-	return Id(Decode64FromBytes(prevMaxNum, true) + 1), nil
+	return nil
 }
 
-func (r *OneToManyRelation) Num2Id(num Num, tx kv.Tx) (Id, error) {
-	if !r.strictlyAppending {
-		// id == num
-		return Id(num), nil
+func (w *RelationalAppendableWriter) Flush(ctx context.Context, tx kv.RwTx) error {
+	if w.values == nil {
+		return nil
 	}
-
-	// TODO: else, it's case like txs and we need to binary search over the maxNumTbl
-	return 0, nil
-}
-
-// 1: many; pure function
-// e.g: spans
-// no non-canonical data (id == num)
-type OneToManyRelationPure struct {
-	fn func(baseNum Num) Id
-}
-
-func (r *OneToManyRelationPure) BaseNum2Id(fromBaseNum Num, tx kv.Tx) (Id, error) {
-	return r.fn(fromBaseNum), nil
-}
-
-func (r *OneToManyRelationPure) Num2Id(num Num, tx kv.Tx) (Id, error) {
-	return Id(num), nil
+	// load uses Append since identityLoadFunc is used.
+	// might want to configure other TransformArgs here?
+	// 
+	return w.values.Load(tx, w.valsTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()})
 }
