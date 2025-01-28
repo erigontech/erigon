@@ -271,7 +271,7 @@ func WriteOrTestGenblock(chainDb kv.TemporalRwTx, initData statetransfer.InitDat
 	return nil
 }
 
-func TryReadStoredChainConfig(chainDb kv.TemporalTx) *chain.Config {
+func TryReadStoredChainConfig(chainDb kv.Tx) *chain.Config {
 	EmptyHash := common.Hash{}
 
 	block0Hash, err := rawdb.ReadCanonicalHash(chainDb, 0)
@@ -315,7 +315,7 @@ func WriteOrTestChainConfig(tx kv.TemporalRwTx, config *chain.Config) error {
 	return nil
 }
 
-func GetBlockChain(chainDb kv.TemporalRwTx, cacheConfig *CachingConfig, chainConfig *chain.Config, txLookupLimit uint64) (*core.BlockChain, error) {
+func GetBlockChain(chainDb kv.TemporalRwDB, cacheConfig *CachingConfig, chainConfig *chain.Config, txLookupLimit uint64) (core.BlockChain, error) {
 	engine := arbos.Engine{
 		IsSequencer: true,
 	}

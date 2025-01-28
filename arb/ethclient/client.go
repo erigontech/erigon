@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	//"net/http"
-	//"net/url"
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
@@ -21,7 +19,7 @@ import (
 
 // Client defines typed wrappers for the Ethereum RPC API.
 type Client struct {
-	c *rpc.Client
+	c ClientInterface
 }
 
 // Dial connects a client to the given URL.
@@ -38,8 +36,15 @@ func DialContext(ctx context.Context, rawurl string) (*Client, error) {
 	return NewClient(c), nil
 }
 
+type ClientInterface interface {
+	CallContext(ctx_in context.Context, result interface{}, method string, args ...interface{}) error
+	EthSubscribe(ctx context.Context, channel interface{}, args ...interface{}) (*rpc.ClientSubscription, error)
+	BatchCallContext(ctx context.Context, b []rpc.BatchElem) error
+	Close()
+}
+
 // NewClient creates a client that uses the given RPC client.
-func NewClient(c *rpc.Client) *Client {
+func NewClient(c ClientInterface) *Client {
 	return &Client{c}
 }
 
@@ -50,7 +55,7 @@ func (ec *Client) Close() {
 
 // Client gets the underlying RPC client.
 func (ec *Client) Client() *rpc.Client {
-	return ec.c
+	return ec.c.(*rpc.Client)
 }
 
 // Blockchain Access

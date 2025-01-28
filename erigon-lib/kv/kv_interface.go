@@ -158,6 +158,7 @@ const (
 	PolygonBridgeDB = "polygon-bridge"
 	CaplinDB        = "caplin"
 	TemporaryDB     = "temporary"
+	ArbitrumDB      = "arbitrum"
 )
 
 type GetPut interface {
