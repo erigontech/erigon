@@ -124,8 +124,10 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	}
 
 	for id, d := range sd.aggTx.d {
-		sd.domains[id] = map[string]dataWithPrevStep{}
-		sd.domainWriters[id] = d.NewWriter()
+		if d != nil {
+			sd.domains[id] = map[string]dataWithPrevStep{}
+			sd.domainWriters[id] = d.NewWriter()
+		}
 	}
 
 	sd.SetTxNum(0)
@@ -451,6 +453,10 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 }
 
 func (sd *SharedDomains) LatestCommitment(roTx kv.Tx, prefix []byte) ([]byte, uint64, error) {
+	if sd.aggTx.d[kv.CommitmentDomain] == nil {
+		return nil, 0, nil
+	}
+
 	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
 		return v, prevStep, nil

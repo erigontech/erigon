@@ -327,7 +327,9 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 }
 
 func (a *Aggregator) DiscardHistory(name kv.Domain) *Aggregator {
-	a.d[name].historyDisabled = true
+	if domain := a.d[name]; domain != nil {
+		domain.historyDisabled = true
+	}
 	return a
 }
 
@@ -783,10 +785,12 @@ func (ac *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64
 	if len(entitySet) == 0 {
 		panic("assert: missed arguments")
 	}
-	for i, domain := range entitySet {
-		domainEnd := ac.d[domain].files.EndTxNum()
-		if i == 0 || domainEnd < minTxNum {
-			minTxNum = domainEnd
+	for i, entity := range entitySet {
+		if domain := ac.d[entity]; domain != nil {
+			domainEnd := domain.files.EndTxNum()
+			if i == 0 || domainEnd < minTxNum {
+				minTxNum = domainEnd
+			}
 		}
 	}
 	return minTxNum
@@ -1649,7 +1653,9 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 		ac.iis[id] = ii.BeginFilesRo()
 	}
 	for id, d := range a.d {
-		ac.d[id] = d.BeginFilesRo()
+		if d != nil {
+			ac.d[id] = d.BeginFilesRo()
+		}
 	}
 	a.visibleFilesLock.RUnlock()
 

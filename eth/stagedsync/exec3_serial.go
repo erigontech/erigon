@@ -106,8 +106,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 					// add this to the executor
 					se.cfg.notifications.RecentLogs.Add(blockReceipts)
 				}
-				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNum) && !se.cfg.vmConfig.NoReceipts && !se.isMining
-				if txTask.BlockNum > 0 && !se.skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining
+				if txTask.BlockNumber() > 0 && !se.skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					if err := core.BlockPostValidation(se.usedGas, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
@@ -115,7 +115,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 
 				stateWriter := state.NewStateWriterV3(se.rs.StateV3, se.applyTx, se.accumulator)
 
-				if err = ibs.MakeWriteSet(txTask.Rules, stateWriter); err != nil {
+				if err = ibs.MakeWriteSet(se.cfg.chainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter); err != nil {
 					panic(err)
 				}
 
@@ -145,7 +145,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 				return false, err
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.execStage.LogPrefix()),
-				"block", txTask.BlockNum, "txNum", txTask.TxNum, "hash", txTask.Header.Hash().String(), "err", err, "inMem", se.inMemExec)
+				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "hash", txTask.Header.Hash().String(), "err", err, "inMem", se.inMemExec)
 			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
 			}
@@ -154,13 +154,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 			}
 			if errors.Is(err, consensus.ErrInvalidBlock) {
 				if se.u != nil {
-					if err := se.u.UnwindTo(txTask.BlockNum-1, BadBlock(txTask.Header.Hash(), err), se.applyTx); err != nil {
+					if err := se.u.UnwindTo(txTask.BlockNumber()-1, BadBlock(txTask.Header.Hash(), err), se.applyTx); err != nil {
 						return false, err
 					}
 				}
 			} else {
 				if se.u != nil {
-					if err := se.u.UnwindTo(txTask.BlockNum-1, ExecUnwind, se.applyTx); err != nil {
+					if err := se.u.UnwindTo(txTask.BlockNumber()-1, ExecUnwind, se.applyTx); err != nil {
 						return false, err
 					}
 				}
@@ -179,20 +179,20 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 		}
 
 		// MA applystate
-		if err := se.rs.ApplyState4(ctx, se.applyTx, txTask.BlockNum, txTask.TxNum, nil,
+		if err := se.rs.ApplyState4(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, nil,
 			txTask.BalanceIncreaseSet, result.Logs, result.TraceFroms, result.TraceTos,
-			txTask.Config, txTask.Rules, txTask.HistoryExecution); err != nil {
+			se.cfg.chainConfig, se.cfg.chainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime()), txTask.HistoryExecution); err != nil {
 			return false, err
 		}
 
 		se.doms.SetTxNum(txTask.TxNum)
-		se.doms.SetBlockNum(txTask.BlockNum)
+		se.doms.SetBlockNum(txTask.BlockNumber())
 		se.lastBlockResult = &blockResult{
-			BlockNum:  txTask.BlockNum,
+			BlockNum:  txTask.BlockNumber(),
 			lastTxNum: txTask.TxNum,
 		}
 		se.lastExecutedTxNum = txTask.TxNum
-		se.lastExecutedBlockNum = txTask.BlockNum
+		se.lastExecutedBlockNum = txTask.BlockNumber()
 
 		if task.IsBlockEnd() {
 			se.executedGas += se.usedGas

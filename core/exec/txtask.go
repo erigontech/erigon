@@ -66,7 +66,10 @@ type Task interface {
 	TxSender() (*libcommon.Address, error)
 	TxMessage() (*types.Message, error)
 
+	BlockNumber() uint64
 	BlockHash() libcommon.Hash
+	BlockTime() uint64
+	BlockRoot() libcommon.Hash
 
 	IsBlockEnd() bool
 	IsHistoric() bool
@@ -170,8 +173,6 @@ type Tx struct {
 type TxTask struct {
 	TxNum              uint64
 	TxIndex            int // -1 for block initialisation
-	BlockNum           uint64
-	Rules              *chain.Rules
 	Header             *types.Header
 	Txs                types.Transactions
 	Uncles             []*types.Header
@@ -222,14 +223,14 @@ func (t *TxTask) TxSender() (*libcommon.Address, error) {
 		return t.sender, nil
 	}
 	if t.signer == nil {
-		t.signer = types.MakeSigner(t.Config, t.BlockNum, t.Header.Time)
+		t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
 	}
 	sender, err := t.signer.Sender(t.Tx())
 	if err != nil {
 		return nil, err
 	}
 	t.sender = &sender
-	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNum, "txIdx", t.TxIndex)
+	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
 	return t.sender, nil
 }
 
@@ -237,9 +238,9 @@ func (t *TxTask) TxMessage() (*types.Message, error) {
 	if t.message == nil {
 		var err error
 		if t.signer == nil {
-			t.signer = types.MakeSigner(t.Config, t.BlockNum, t.Header.Time)
+			t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
 		}
-		message, err := t.Tx().AsMessage(*t.signer, t.Header.BaseFee, t.Rules)
+		message, err := t.Tx().AsMessage(*t.signer, t.Header.BaseFee, t.Config.Rules(t.BlockNumber(), t.BlockTime()))
 
 		if err != nil {
 			return nil, err
@@ -251,6 +252,13 @@ func (t *TxTask) TxMessage() (*types.Message, error) {
 	return t.message, nil
 }
 
+func (t *TxTask) BlockNumber() uint64 {
+	if t.Header == nil {
+		return 0
+	}
+	return t.Header.Number.Uint64()
+}
+
 func (t *TxTask) BlockHash() libcommon.Hash {
 	if t.Header == nil {
 		return libcommon.Hash{}
@@ -258,8 +266,22 @@ func (t *TxTask) BlockHash() libcommon.Hash {
 	return t.Header.Hash()
 }
 
+func (t *TxTask) BlockRoot() libcommon.Hash {
+	if t.Header == nil {
+		return libcommon.Hash{}
+	}
+	return t.Header.Root
+}
+
+func (t *TxTask) BlockTime() uint64 {
+	if t.Header == nil {
+		return 0
+	}
+	return t.Header.Time
+}
+
 func (t *TxTask) Version() state.Version {
-	return state.Version{BlockNum: t.BlockNum, TxNum: t.TxNum, TxIndex: t.TxIndex}
+	return state.Version{BlockNum: t.BlockNumber(), TxNum: t.TxNum, TxIndex: t.TxIndex}
 }
 
 func (t *TxTask) Dependencies() []int {
@@ -308,14 +330,14 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 	ibs.SetTrace(txTask.Trace)
 
-	rules := txTask.Rules
+	rules := chainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime())
 	var err error
 	header := txTask.Header
 	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
 
 	switch {
 	case txTask.TxIndex == -1:
-		if txTask.BlockNum == 0 {
+		if txTask.BlockNumber() == 0 {
 
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 			_, ibs, err = core.GenesisToBlock(genesis, dirs, txTask.Logger)
@@ -336,7 +358,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		result.ExecutionResult = &evmtypes.ExecutionResult{}
 	case txTask.IsBlockEnd():
-		if txTask.BlockNum == 0 {
+		if txTask.BlockNumber() == 0 {
 			break
 		}
 
@@ -413,7 +435,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
-			result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNum, txTask.BlockHash())
+			result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 		}
 
 	}

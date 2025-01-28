@@ -152,13 +152,13 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 	rw.ibs.Reset()
 	ibs := rw.ibs
 
-	rules := txTask.Rules
+	rules := rw.execArgs.ChainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime())
 	var err error
 	header := txTask.Header
 
 	switch {
 	case txTask.TxIndex == -1:
-		if txTask.BlockNum == 0 {
+		if txTask.BlockNumber() == 0 {
 			// Genesis block
 			_, ibs, err = core.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
 			if err != nil {
@@ -176,7 +176,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 		rw.execArgs.Engine.Initialize(rw.execArgs.ChainConfig, rw.chain, header, ibs, syscall, rw.logger, nil)
 		result.Err = ibs.FinalizeTx(rules, noop)
 	case txTask.IsBlockEnd():
-		if txTask.BlockNum == 0 {
+		if txTask.BlockNumber() == 0 {
 			break
 		}
 	default:
@@ -186,7 +186,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 			rw.vmConfig.Tracer = tracer
 		}
 		rw.vmConfig.SkipAnalysis = txTask.SkipAnalysis
-		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
+		ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 		msg, err := txTask.TxMessage()
 
 		if err != nil {
@@ -449,16 +449,13 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.Engine, nil /* author */, chainConfig)
 
-		rules := chainConfig.Rules(blockNum, b.Time())
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &exec.TxTask{
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,
-				BlockNum:        blockNum,
 				Header:          header,
 				Uncles:          b.Uncles(),
-				Rules:           rules,
 				Txs:             txs,
 				SkipAnalysis:    skipAnalysis,
 				EvmBlockContext: blockContext,

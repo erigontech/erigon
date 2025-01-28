@@ -1703,6 +1703,10 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 }
 
 func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
+	if dt == nil {
+		return nil, 0, false, nil
+	}
+
 	var v, foundInvStep []byte
 	var found bool
 

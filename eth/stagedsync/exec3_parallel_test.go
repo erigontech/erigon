@@ -71,9 +71,11 @@ type Sender func(int) common.Address
 func NewTestExecTask(txIdx int, ops []Op, sender common.Address, nonce int) *testExecTask {
 	return &testExecTask{
 		TxTask: &exec.TxTask{
-			BlockNum: 1,
-			TxNum:    1 + uint64(txIdx),
-			TxIndex:  txIdx,
+			Header: &types.Header{
+				Number: big.NewInt(1),
+			},
+			TxNum:   1 + uint64(txIdx),
+			TxIndex: txIdx,
 		},
 		ops:          ops,
 		readMap:      btree.NewBTreeGOptions(state.VersionedReadLess, btree.Options{NoLocks: true}),

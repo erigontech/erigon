@@ -18,12 +18,14 @@ package stagedsync
 
 import (
 	"context"
+	"math/big"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -41,19 +43,20 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 			stateWriter.ResetWriteSet()
 		}, func(n, from, numberOfBlocks uint64) {
 			txTask := &exec.TxTask{
-				TxNum:    n,
-				TxIndex:  0,
-				BlockNum: n,
-				Rules:    params.TestRules,
+				TxNum:   n,
+				TxIndex: 0,
+				Header: &types.Header{
+					Number: big.NewInt(int64(n)),
+				},
 			}
 			// Unused
 			//txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
-			rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
-			if err := rs.ApplyState4(context.Background(), tx, txTask.BlockNum, txTask.TxNum, nil, txTask.BalanceIncreaseSet,
-				nil, nil, nil, txTask.Config, txTask.Rules, txTask.HistoryExecution); err != nil {
+			rs.SetTxNum(txTask.TxNum, txTask.BlockNumber())
+			if err := rs.ApplyState4(context.Background(), tx, txTask.BlockNumber(), txTask.TxNum, nil, txTask.BalanceIncreaseSet,
+				nil, nil, nil, txTask.Config, params.TestRules, txTask.HistoryExecution); err != nil {
 				panic(err)
 			}
-			_, err := rs.Domains().ComputeCommitment(context.Background(), tx, true, txTask.BlockNum, "")
+			_, err := rs.Domains().ComputeCommitment(context.Background(), tx, true, txTask.BlockNumber(), "")
 			if err != nil {
 				panic(err)
 			}

@@ -184,7 +184,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			txTask := result.Task.(*exec.TxTask)
-			if txTask.Tx != nil {
+			if txTask.Tx() != nil {
 				cumulativeBlobGasUsedInBlock += txTask.Tx().GetBlobGas()
 			}
 			//if txTask.Final {
@@ -223,7 +223,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			case <-logEvery.C:
 				if prevTxNumLog > 0 {
 					dbg.ReadMemStats(&m)
-					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", txTask.BlockNum, "txs/sec", (txTask.TxNum-prevTxNumLog)/uint64(logPeriod.Seconds()), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", txTask.BlockNumber(), "txs/sec", (txTask.TxNum-prevTxNumLog)/uint64(logPeriod.Seconds()), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 				}
 				prevTxNumLog = txTask.TxNum
 			default:

@@ -657,7 +657,6 @@ func ExecV3(ctx context.Context,
 				accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
 			}
 
-			rules := chainConfig.Rules(blockNum, b.Time())
 			// During the first block execution, we may have half-block data in the snapshots.
 			// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 			// So we skip that check for the first block, if we find half-executed data.
@@ -669,10 +668,8 @@ func ExecV3(ctx context.Context,
 				txTask := &exec.TxTask{
 					TxNum:           inputTxNum,
 					TxIndex:         txIndex,
-					BlockNum:        blockNum,
 					Header:          header,
 					Uncles:          b.Uncles(),
-					Rules:           rules,
 					Txs:             txs,
 					SkipAnalysis:    skipAnalysis,
 					EvmBlockContext: blockContext,
