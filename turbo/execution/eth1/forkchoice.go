@@ -269,15 +269,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 
-	unwindingOptimismToCanonical := false
-	if e.config.IsOptimism() && false { // block this
-		headHash := rawdb.ReadHeadBlockHash(tx)
-		unwindingOptimismToCanonical = (blockHash != headHash) && (canonicalHash == blockHash)
-		if unwindingOptimismToCanonical {
-			e.logger.Info("Optimism ForkChoice is choosing to unwind to a previously canonical block", "blockHash", blockHash, "blockNumber", fcuHeader.Number.Uint64(), "headHash", headHash)
-		}
-	}
-
 	if fcuHeader.Number.Uint64() > 0 {
 		if canonicalHash == blockHash {
 			// if block hash is part of the canonical chain treat it as no-op.
@@ -294,13 +285,13 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				}, false)
 				return
 			}
-			if !unwindingOptimismToCanonical {
-				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
-					LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
-					Status:          execution.ExecutionStatus_Success,
-				}, false)
-				return
-			}
+
+			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+				LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
+				Status:          execution.ExecutionStatus_Success,
+			}, false)
+			return
+
 		}
 
 		currentParentHash := fcuHeader.ParentHash
@@ -313,13 +304,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		// Find such point, and collect all hashes
 		newCanonicals := make([]*canonicalEntry, 0, 64)
 
-		if !unwindingOptimismToCanonical {
-			newCanonicals = append(newCanonicals, &canonicalEntry{
-				hash:   fcuHeader.Hash(),
-				number: fcuHeader.Number.Uint64(),
-			})
-		}
-		for !isCanonicalHash && !unwindingOptimismToCanonical {
+		newCanonicals = append(newCanonicals, &canonicalEntry{
+			hash:   fcuHeader.Hash(),
+			number: fcuHeader.Number.Uint64(),
+		})
+
+		for !isCanonicalHash {
 			newCanonicals = append(newCanonicals, &canonicalEntry{
 				hash:   currentParentHash,
 				number: currentParentNumber,
@@ -359,9 +349,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			unwindTarget = minUnwindableBlock
 		}
 
-		if unwindingOptimismToCanonical {
-			unwindTarget = fcuHeader.Number.Uint64()
-		}
 		// if unwindTarget <
 		if err := e.executionPipeline.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
