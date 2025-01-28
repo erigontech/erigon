@@ -11,8 +11,8 @@ import (
 )
 
 // marked appendable has two tables
-// 1. canonicalMarkerTbl: stores tsId -> forkId
-// 2. valsTbl: maps `bigendian(tsId) + forkId -> value`
+// 1. canonicalMarkerTbl: stores tsId -> hash
+// 2. valsTbl: maps `bigendian(tsId) + hash -> value`
 // common for base appendables to be marked, as it provides quick way to unwind.
 // headers are marked; and also bodies. caplin blockbodies too.
 type MarkedAppendable struct {
@@ -21,8 +21,8 @@ type MarkedAppendable struct {
 	valsTbl      string
 
 	//tsBytes     int
-	ts8Bytes    bool // slots are encoded in 4 bytes; block number in 8 bytes
-	forkIdBytes int
+	ts8Bytes  bool // slots are encoded in 4 bytes; block number in 8 bytes
+	hashBytes int
 	//comb         CombinedKey
 }
 
@@ -64,7 +64,7 @@ func NewMarkedAppendable(enum ApEnum, canonicalTbl, valsTbl string, opts ...MAOp
 		canonicalTbl:    canonicalTbl,
 		valsTbl:         valsTbl,
 		ts8Bytes:        true,
-		forkIdBytes:     32, // assuming common.Hash
+		hashBytes:       32, // assuming common.Hash
 	}
 
 	for _, opt := range opts {
@@ -97,14 +97,14 @@ func (a *MarkedAppendable) encTs(ts uint64) []byte {
 
 // TODO: slots are encoded 4 bytes in canonicalTbl (CanonicalBlockRoots);
 // but 8 bytes in prefix of key in valsTbl (BeaconBlocks) -- I think we can be consistent here
-// i.e. use a.ts8Bytes instead of a.forkIdBytes....but this needs some kind of migration
+// i.e. use a.ts8Bytes instead of a.hashBytes....but this needs some kind of migration
 // of existing BeaconBlocks table.
 const tsLength = 8
 
-func (a *MarkedAppendable) combK(ts uint64, forkId []byte) []byte {
-	k := make([]byte, tsLength+a.forkIdBytes)
+func (a *MarkedAppendable) combK(ts uint64, hash []byte) []byte {
+	k := make([]byte, tsLength+a.hashBytes)
 	binary.BigEndian.PutUint64(k, ts)
-	copy(k[tsLength:], forkId)
+	copy(k[tsLength:], hash)
 	return k
 }
 
@@ -145,13 +145,13 @@ func (r *MarkedAppendableRoTx) Get(num Num, tx kv.Tx) (VVType, error) {
 
 	// then db
 	iNum := uint64(num)
-	forkId, err := tx.GetOne(a.canonicalTbl, a.encTs(iNum))
+	canHash, err := tx.GetOne(a.canonicalTbl, a.encTs(iNum))
 	if err != nil {
 		return nil, err
 	}
-	// if forkId == nil....
+	// if canHash == nil....
 
-	key := a.combK(iNum, forkId)
+	key := a.combK(iNum, canHash)
 	return tx.GetOne(a.valsTbl, key)
 }
 
@@ -171,14 +171,14 @@ func (r *MarkedAppendableRoTx) GetNc(id Id, hash []byte, tx kv.Tx) (VVType, erro
 // 	}
 // }
 
-func (r *MarkedAppendableRoTx) Put(num Num, forkId []byte, value VVType, tx kv.RwTx) error {
+func (r *MarkedAppendableRoTx) Put(num Num, hash []byte, value VVType, tx kv.RwTx) error {
 	// can then val
 	a := r.a
-	if err := tx.Append(a.canonicalTbl, a.encTs(uint64(num)), forkId); err != nil {
+	if err := tx.Append(a.canonicalTbl, a.encTs(uint64(num)), hash); err != nil {
 		return err
 	}
 
-	key := a.combK(uint64(num), forkId)
+	key := a.combK(uint64(num), hash)
 	return tx.Put(a.valsTbl, key, value)
 }
 
