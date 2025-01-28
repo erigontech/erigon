@@ -289,7 +289,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 }
 
 func BenchmarkAggregator_BeginFilesRo(b *testing.B) {
-	// BenchmarkAggregator_BeginFilesRo/begin_files_ro-16 1490890 850.0 ns/op 3280 B/op 22 allocs/op
+	//BenchmarkAggregator_BeginFilesRo/begin_files_ro-16 1688707 712.3 ns/op 3216 B/op 21 allocs/op
 	aggStep := uint64(100_00)
 	_, agg := testDbAndAggregatorBench(b, aggStep)
 
