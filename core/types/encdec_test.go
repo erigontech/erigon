@@ -522,7 +522,7 @@ func TestTransactionEncodeDecodeRLP(t *testing.T) {
 		enc := tr.RandTransaction(-1)
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
-			if enc.Type() == BlobTxType && errors.Is(err, ErrNilToFieldBlobTx) {
+			if enc.Type() >= BlobTxType && errors.Is(err, ErrNilToFieldTx) {
 				continue
 			}
 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
@@ -591,7 +591,7 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 		enc := tr.RandBody()
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
-			if errors.Is(err, ErrNilToFieldBlobTx) {
+			if errors.Is(err, ErrNilToFieldTx) {
 				continue
 			}
 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)

@@ -97,6 +97,9 @@ func (tx *SetCodeTransaction) WithSignature(signer Signer, sig []byte) (Transact
 }
 
 func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
+	if tx.To == nil {
+		return ErrNilToFieldTx
+	}
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
@@ -201,6 +204,9 @@ func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 }
 
 func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
+	if tx.To == nil {
+		return ErrNilToFieldTx
+	}
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize()
 	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
@@ -245,13 +251,11 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
-	if len(b) > 0 && len(b) != 20 {
+	if len(b) != 20 {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
-	if len(b) > 0 {
-		tx.To = &libcommon.Address{}
-		copy((*tx.To)[:], b)
-	}
+	tx.To = &libcommon.Address{}
+	copy((*tx.To)[:], b)
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
