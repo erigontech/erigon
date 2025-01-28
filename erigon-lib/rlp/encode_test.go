@@ -542,4 +542,8 @@ func TestEncodeUint256Buffer(t *testing.T) {
 	var buf33 [33]byte
 	require.NoError(t, EncodeUint256(i, &writer2, buf33[:]))
 	assert.Equal(t, output, common.Bytes2Hex(writer2.Bytes()))
+
+	var writer3 bytes.Buffer
+	var buf31 [31]byte
+	require.Panics(t, func() { EncodeUint256(i, &writer3, buf31[:]) })
 }
