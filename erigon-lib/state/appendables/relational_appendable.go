@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/stream"
@@ -23,19 +25,60 @@ type RelationalAppendable struct {
 	noUnwind bool // if true, don't delete on unwind; tsId keeps increasing
 }
 
-func NewRelationalAppendable(relation RelationI, enum ApEnum, stepSize uint64) *RelationalAppendable {
+type RelationalAppendableOption func(*RelationalAppendable)
+
+func WithFreezer(freezer Freezer) RelationalAppendableOption {
+	return func(a *RelationalAppendable) {
+		a.SetFreezer(freezer)
+	}
+}
+
+func WithIndexBuilders(builders ...AccessorIndexBuilder) RelationalAppendableOption {
+	return func(a *RelationalAppendable) {
+		a.SetIndexBuilders(builders...)
+	}
+}
+
+func WithStepSize(stepSize uint64) RelationalAppendableOption {
+	return func(a *RelationalAppendable) {
+		a.stepSize = stepSize
+	}
+}
+
+func WithNoUnwind() RelationalAppendableOption {
+	return func(a *RelationalAppendable) {
+		a.noUnwind = true
+	}
+}
+
+func NewRelationalAppendable(relation RelationI, enum ApEnum, dirs datadir.Dirs, options ...RelationalAppendableOption) (*RelationalAppendable, error) {
 	a := &RelationalAppendable{
-		ProtoAppendable: NewProtoAppendable(enum, stepSize),
+		ProtoAppendable: NewProtoAppendable(enum, 500),
 		relation:        relation,
 	}
 
-	//freezer := &PlainFreezer{fetcher:
-	freezer := &PlainFreezer{fetcher: &ValueKeyFetcherFromRelation{relation: relation}}
-	a.SetFreezer(freezer)
+	for _, opt := range options {
+		opt(a)
+	}
 
-	// default index builders can also be used...these map num -> offset
+	if a.freezer == nil {
+		// default freezer
+		freezer := &PlainFreezer{fetcher: &ValueKeyFetcherFromRelation{relation: relation}}
+		a.SetFreezer(freezer)
+	}
 
-	return a
+	if a.indexBuilders == nil {
+		// mapping num -> offset (ordinal map)
+		salt, err := snaptype.GetIndexSalt(dirs.Snap) // this is bad; ApEnum should know it;s own Dirs
+		if err != nil {
+			return nil, err
+		}
+		builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false, false, salt), enum)
+		a.SetIndexBuilders([]AccessorIndexBuilder{builder}...)
+
+	}
+
+	return a, nil
 }
 
 func (a *RelationalAppendable) encTs(ts uint64) []byte {
@@ -197,6 +240,6 @@ func (w *RelationalAppendableWriter) Flush(ctx context.Context, tx kv.RwTx) erro
 	}
 	// load uses Append since identityLoadFunc is used.
 	// might want to configure other TransformArgs here?
-	// 
+	//
 	return w.values.Load(tx, w.valsTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()})
 }

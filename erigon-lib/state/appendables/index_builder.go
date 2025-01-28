@@ -63,23 +63,26 @@ type SimpleAccessorBuilder struct {
 	kf       IndexKeyFactory
 }
 
-func NewSimpleAccessorBuilder(args *AccessorArgs, enum ApEnum, indexPos uint64) *SimpleAccessorBuilder {
+func NewSimpleAccessorBuilder(args *AccessorArgs, enum ApEnum) *SimpleAccessorBuilder {
 	return &SimpleAccessorBuilder{
-		args:     args,
-		enum:     enum,
-		indexPos: indexPos,
-		kf:       simpleIndexKeyFactoryInstance,
+		args: args,
+		enum: enum,
+		kf:   simpleIndexKeyFactoryInstance,
 		//version:
 	}
+}
+
+func (s *SimpleAccessorBuilder) SetIndexPos(indexPos uint64) {
+	s.indexPos = indexPos
 }
 
 func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 	s.args = args
 }
 
-func (s *SimpleAccessorBuilder) GetInputDataQuery(stepKeyFrom, stepKeyTo uint64) *DecompressorIndexInputDataQuery {
+func (s *SimpleAccessorBuilder) GetInputDataQuery(baseNumFrom, baseNumTo Num) *DecompressorIndexInputDataQuery {
 	// just segname?
-	sgname := AppeSegName(s.enum, 1, stepKeyFrom, stepKeyTo)
+	sgname := AppeSegName(s.enum, 1, uint64(baseNumFrom), uint64(baseNumTo))
 	decomp, _ := seg.NewDecompressor(sgname)
 	return &DecompressorIndexInputDataQuery{decomp: decomp}
 }
@@ -92,9 +95,9 @@ func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 	return s.args.enums
 }
 
-func (s *SimpleAccessorBuilder) Build(ctx context.Context, stepFrom, stepTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
-	iidq := s.GetInputDataQuery(stepFrom, stepTo)
-	idxFile := AppeIdxName(s.enum, snaptype.Version(1), stepFrom, stepTo, s.indexPos)
+func (s *SimpleAccessorBuilder) Build(ctx context.Context, baseNumFrom, baseNumTo Num, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
+	iidq := s.GetInputDataQuery(baseNumFrom, baseNumTo)
+	idxFile := AppeIdxName(s.enum, snaptype.Version(1), uint64(baseNumFrom), uint64(baseNumTo), s.indexPos)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:           int(iidq.GetCount()),
 		Enums:              true,

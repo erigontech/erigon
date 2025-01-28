@@ -47,7 +47,7 @@ func (a *ProtoAppendable) SetFreezer(freezer Freezer) {
 	a.freezer = freezer
 }
 
-func (a *ProtoAppendable) SetIndexBuilders(indexBuilders []AccessorIndexBuilder) {
+func (a *ProtoAppendable) SetIndexBuilders(indexBuilders ...AccessorIndexBuilder) {
 	a.indexBuilders = indexBuilders
 }
 

@@ -22,7 +22,7 @@ type Collector func(values []byte) error
 
 // pattern is SetCollector ; and then call Freeze
 type Freezer interface {
-	// stepKeyFrom/To represent num which the snapshot should range
+	// baseNumFrom/To represent num which the snapshot should range
 	// this doesn't check if the snapshot can be created or not. It's the responsibilty of the caller
 	// to ensure this.
 	Freeze(ctx context.Context, baseNumFrom, baseNumTo Num, tx kv.Tx) error
@@ -31,7 +31,7 @@ type Freezer interface {
 
 type Appendable interface {
 	SetFreezer(Freezer)
-	SetIndexBuilders([]AccessorIndexBuilder)
+	SetIndexBuilders(...AccessorIndexBuilder)
 	DirtySegmentsMaxNum() Num
 	VisibleSegmentsMaxNum() Num
 	RecalcVisibleFiles(baseNumTo Num)
@@ -47,48 +47,6 @@ var (
 	// _ RelationalRoQueries = &RelationalAppendableRoTx{}
 	// _ RelationalRwQueries = &RelationalAppendableRwTx{}
 )
-
-// // canonicalTbl + valTbl
-// // headers, bodies, beaconblocks
-// type maintenanceQueries interface {
-// 	Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error
-// 	Unwind(ctx context.Context, baseKeyFrom Num, limit uint64, rwTx kv.RwTx) error
-// }
-
-// // the following queries are satisfied by RelationalAppendableRoTx, RelationalAppendableRwTx
-// // similarly, MarkedAppendableRoTx, MarkedAppendableRwTx
-
-// type MarkedRoQueries interface {
-// 	Get(num Num, tx kv.Tx) (VVType, error)                // db + snapshots
-// 	GetNc(num Num, hash []byte, tx kv.Tx) (VVType, error) // db only
-// }
-
-// type MarkedRwQueries interface {
-// 	maintenanceQueries
-// 	MarkedRoQueries
-// 	Put(num Num, hash []byte, value VVType, tx kv.RwTx) error
-// }
-
-// // in queries, it's eitther MarkedQueries (for marked appendables) or RelationalQueries
-// type RelationalRoQueries interface {
-// 	Get(num Num, tx kv.Tx) (VVType, error) // db + snapshots
-// 	GetNc(id Id, tx kv.Tx) (VVType, error) // db only
-// }
-
-// type RelationalRwQueries interface {
-// 	maintenanceQueries
-// 	RelationalRoQueries
-// 	Put(id Id, value VVType, tx kv.RwTx) error
-// }
-// type AggTx[R1 MarkedRoQueries, R2 RelationalRoQueries] interface {
-// 	// pick out the right one; else runtime failure
-// 	// user needs to be anyway aware of what set of queries
-// 	// he can interact with. So is fine.
-// 	RelationalQueries(app AppEnum) R2
-// 	MarkedQueries(app AppEnum) R1
-
-// 	// more methods on level of aggtx
-// }
 
 type AppEnum string
 
@@ -122,7 +80,7 @@ type AggregatorRwTx struct {
 func (a *AggregatorRwTx) MarkedQueries(app AppEnum) *MarkedAppendableRwTx         { return nil }
 func (a *AggregatorRwTx) RelationalQueries(app AppEnum) *RelationalAppendableRwTx { return nil }
 
-///
+// /
 func WriteRawBody(tx TemporalRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	baseTxnID, err := tx.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
 	if err != nil {
@@ -178,3 +136,47 @@ func IwannaBuildFiles(ctx context.Context, tx TemporalRwTx) error {
 	// integrate dirty files
 	return nil
 }
+
+// graveyard
+
+// // canonicalTbl + valTbl
+// // headers, bodies, beaconblocks
+// type maintenanceQueries interface {
+// 	Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error
+// 	Unwind(ctx context.Context, baseKeyFrom Num, limit uint64, rwTx kv.RwTx) error
+// }
+
+// // the following queries are satisfied by RelationalAppendableRoTx, RelationalAppendableRwTx
+// // similarly, MarkedAppendableRoTx, MarkedAppendableRwTx
+
+// type MarkedRoQueries interface {
+// 	Get(num Num, tx kv.Tx) (VVType, error)                // db + snapshots
+// 	GetNc(num Num, hash []byte, tx kv.Tx) (VVType, error) // db only
+// }
+
+// type MarkedRwQueries interface {
+// 	maintenanceQueries
+// 	MarkedRoQueries
+// 	Put(num Num, hash []byte, value VVType, tx kv.RwTx) error
+// }
+
+// // in queries, it's eitther MarkedQueries (for marked appendables) or RelationalQueries
+// type RelationalRoQueries interface {
+// 	Get(num Num, tx kv.Tx) (VVType, error) // db + snapshots
+// 	GetNc(id Id, tx kv.Tx) (VVType, error) // db only
+// }
+
+// type RelationalRwQueries interface {
+// 	maintenanceQueries
+// 	RelationalRoQueries
+// 	Put(id Id, value VVType, tx kv.RwTx) error
+// }
+// type AggTx[R1 MarkedRoQueries, R2 RelationalRoQueries] interface {
+// 	// pick out the right one; else runtime failure
+// 	// user needs to be anyway aware of what set of queries
+// 	// he can interact with. So is fine.
+// 	RelationalQueries(app AppEnum) R2
+// 	MarkedQueries(app AppEnum) R1
+
+// 	// more methods on level of aggtx
+// }

@@ -34,8 +34,39 @@ func NewMarkedAppendable(enum ApEnum, stepSize uint64, canonicalTbl, valsTbl str
 	}
 }
 
-func (a *MarkedAppendable) Get(num Num, tx kv.Tx) (VVType, error) {
+func (a *MarkedAppendable) encTs(ts uint64) []byte {
+	return Encode64ToBytes(ts, a.ts8Bytes)
+}
+
+// TODO: slots are encoded 4 bytes in canonicalTbl (CanonicalBlockRoots);
+// but 8 bytes in prefix of key in valsTbl (BeaconBlocks) -- I think we can be consistent here
+// i.e. use a.ts8Bytes instead of a.forkIdBytes....but this needs some kind of migration
+// of existing BeaconBlocks table.
+const tsLength = 8
+
+func (a *MarkedAppendable) combK(ts uint64, forkId []byte) []byte {
+	k := make([]byte, tsLength+a.forkIdBytes)
+	binary.BigEndian.PutUint64(k, ts)
+	copy(k[tsLength:], forkId)
+	return k
+}
+
+// rotx
+type MarkedAppendableRoTx struct {
+	*ProtoAppendableRoTx
+	a *MarkedAppendable
+}
+
+func (m *MarkedAppendable) BeginFilesRo() *MarkedAppendableRoTx {
+	return &MarkedAppendableRoTx{
+		ProtoAppendableRoTx: m.ProtoAppendable.BeginFilesRo(),
+		a:                   m,
+	}
+}
+
+func (r *MarkedAppendableRoTx) Get(num Num, tx kv.Tx) (VVType, error) {
 	// first look into snapshots..
+	a := r.a
 	lastNum := a.VisibleSegmentsMaxNum()
 	if num <= lastNum {
 		if a.baseNumSameAsNum {
@@ -67,30 +98,39 @@ func (a *MarkedAppendable) Get(num Num, tx kv.Tx) (VVType, error) {
 	return tx.GetOne(a.valsTbl, key)
 }
 
-func (a *MarkedAppendable) encTs(ts uint64) []byte {
-	return Encode64ToBytes(ts, a.ts8Bytes)
-}
-
-func (a *MarkedAppendable) GetNc(tsId uint64, forkId []byte, tx kv.Tx) (VVType, error) {
-	key := a.combK(tsId, forkId)
+func (r *MarkedAppendableRoTx) GetNc(id Id, hash []byte, tx kv.Tx) (VVType, error) {
+	a := r.a
+	key := a.combK(uint64(id), hash)
 	return tx.GetOne(a.valsTbl, key)
 }
 
-func (a *MarkedAppendable) Put(tsId uint64, forkId []byte, value VVType, tx kv.RwTx) error {
+type MarkedAppendableRwTx struct {
+	*MarkedAppendableRoTx
+}
+
+func (m *MarkedAppendable) BeginFilesRw() *MarkedAppendableRwTx {
+	return &MarkedAppendableRwTx{
+		MarkedAppendableRoTx: m.BeginFilesRo(),
+	}
+}
+
+func (r *MarkedAppendableRwTx) Put(tsId Id, forkId []byte, value VVType, tx kv.RwTx) error {
 	// can then val
-	if err := tx.Append(a.canonicalTbl, a.encTs(tsId), forkId); err != nil {
+	a := r.a
+	if err := tx.Append(a.canonicalTbl, a.encTs(uint64(tsId)), forkId); err != nil {
 		return err
 	}
 
-	key := a.combK(tsId, forkId)
+	key := a.combK(uint64(tsId), forkId)
 	return tx.Put(a.valsTbl, key, value)
 }
 
-func (a *MarkedAppendable) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
+func (r *MarkedAppendableRwTx) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
 	// from 1 to baseKeyTo (exclusive)
 
 	// probably fromKey value needs to be in configuration...starts from 1 because we want to keep genesis block
 	// but this might start from 0 as well.
+	a := r.a
 	fromKey := uint64(1)
 	fromKeyPrefix := a.encTs(fromKey)
 	toKeyPrefix := a.encTs(uint64(baseKeyTo))
@@ -105,7 +145,8 @@ func (a *MarkedAppendable) Prune(ctx context.Context, baseKeyTo Num, limit uint6
 	return nil
 }
 
-func (a *MarkedAppendable) Unwind(ctx context.Context, baseKeyFrom Num, rwTx kv.RwTx) error {
+func (r *MarkedAppendableRwTx) Unwind(ctx context.Context, baseKeyFrom Num, rwTx kv.RwTx) error {
+	a := r.a
 	fromKey := a.encTs(uint64(baseKeyFrom))
 	if err := DeleteRangeFromTbl(a.canonicalTbl, fromKey, nil, MaxUint64, rwTx); err != nil {
 		return err
@@ -116,27 +157,4 @@ func (a *MarkedAppendable) Unwind(ctx context.Context, baseKeyFrom Num, rwTx kv.
 	}
 
 	return nil
-}
-
-// TODO: slots are encoded 4 bytes in canonicalTbl (CanonicalBlockRoots);
-// but 8 bytes in prefix of key in valsTbl (BeaconBlocks) -- I think we can be consistent here
-// i.e. use a.ts8Bytes instead of a.forkIdBytes....but this needs some kind of migration
-// of existing BeaconBlocks table.
-const tsLength = 8
-
-func (a *MarkedAppendable) combK(ts uint64, forkId []byte) []byte {
-	k := make([]byte, tsLength+a.forkIdBytes)
-	binary.BigEndian.PutUint64(k, ts)
-	copy(k[tsLength:], forkId)
-	return k
-}
-
-// rotx
-type MarkedAppendableRoTx struct {
-	*ProtoAppendableRoTx
-	m *MarkedAppendable
-}
-
-type MarkedAppendableRwTx struct {
-	*MarkedAppendableRoTx
 }
