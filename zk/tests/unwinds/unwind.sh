@@ -117,6 +117,7 @@ different_files=(
     "SyncStage.txt"
     "BadHeaderNumber.txt"
     "CallToIndex.txt"
+    "bad_tx_hashes_lookup.txt"
 )
 
 is_in_array() {
@@ -176,7 +177,7 @@ for file in "$dataPath/phase2-dump1"/*; do
         echo "Phase 2 No difference found in $filename"
     else
         # file where it should be different
-        if [ "$filename" = "BadHeaderNumber.txt" ]; then  
+        if [ "$filename" = "BadHeaderNumber.txt" ] || [ "$filename" = "bad_tx_hashes_lookup.txt" ]; then
             echo "Phase 2 - Expected differences in $filename"
         else
             echo "Phase 2 - Error unexpected differences in $filename"

@@ -622,3 +622,60 @@ func TestDeleteForkId(t *testing.T) {
 		})
 	}
 }
+
+func TestTruncateBadTxs(t *testing.T) {
+	testCases := map[string]struct {
+		truncate uint64
+		txsToAdd uint64
+	}{
+		"truncate 5": {
+			truncate: 5,
+			txsToAdd: 10,
+		},
+		"truncate 10": {
+			truncate: 10,
+			txsToAdd: 10,
+		},
+		"truncate 5 with 100 tx's": {
+			truncate: 5,
+			txsToAdd: 100,
+		},
+		"truncate 5 with 500 tx's": {
+			truncate: 5,
+			txsToAdd: 500,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			tx, cleanup := GetDbTx()
+			defer cleanup()
+			db := NewHermezDb(tx)
+
+			// add naughty tx's to the db, simulate staged sync
+			for i := uint64(0); i < tc.txsToAdd; i++ {
+				require.NoError(t, db.WriteBadTxHashCounter(common.HexToHash(fmt.Sprintf("0x%x", i)), 0))
+				require.NoError(t, db.TruncateBadTxHashCounterBelow(tc.truncate))
+			}
+
+			// check that the db only has the last 5 tx's
+			c1, err := db.tx.Cursor(BAD_TX_HASHES_LOOKUP)
+			require.NoError(t, err)
+			defer c1.Close()
+
+			lookupCount, err := c1.Count()
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.truncate, lookupCount)
+
+			c2, err := db.tx.Cursor(BAD_TX_HASHES)
+			require.NoError(t, err)
+			defer c2.Close()
+
+			count, err := c2.Count()
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.truncate, count)
+		})
+	}
+}

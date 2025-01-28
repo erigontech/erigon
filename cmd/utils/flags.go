@@ -855,7 +855,7 @@ var (
 	}
 	BadTxPurge = cli.BoolFlag{
 		Name:  "zkevm.bad-tx-purge",
-		Usage: "Purge the bad transactions form the database on startup. Default false.",
+		Usage: "Purge the bad transactions from the database on startup. Default false.",
 		Value: false,
 	}
 	SyncLimitVerifiedEnabled = cli.BoolFlag{
