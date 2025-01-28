@@ -440,8 +440,9 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 					"err", resp.Error.Message)
 			}
 		}
-		h.logger.Info("[rpc] served", "method", msg.Method, "params", string(msg.Params))
-
+		if !strings.Contains(msg.Method, "engine") {
+			h.logger.Info("[rpc] served", "method", msg.Method, "params", string(msg.Params))
+		}
 		if h.traceRequests {
 			h.logger.Info("Served", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 		}
