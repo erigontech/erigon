@@ -20,3 +20,4 @@ assertoor_params:
   run_block_proposal_check: true
   tests:
     - { file: "https://raw.githubusercontent.com/ethpandaops/assertoor/refs/heads/electra-support/playbooks/pectra-dev/kurtosis/all.yaml"}
+    
