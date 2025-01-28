@@ -278,10 +278,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
 
-	if err = zkStages.UpdateZkSyncMetrics(ctx, chainKv); err != nil {
-		return nil, err
-	}
-
 	createClientVersionMetric()
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {

@@ -47,11 +47,6 @@ func SpawnSequencerL1BlockSyncStage(
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting L1 block sync stage", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Finished L1 block sync stage", logPrefix))
-	defer func() {
-		if err := UpdateZkSyncMetrics(ctx, cfg.db); err != nil {
-			log.Warn(fmt.Sprintf("[%s] Failed to update metric for stage %s: %v", logPrefix, s.ID, err))
-		}
-	}()
 
 	if !cfg.zkCfg.IsL1Recovery() {
 		log.Info(fmt.Sprintf("[%s] Skipping L1 block sync stage", logPrefix))

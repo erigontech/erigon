@@ -520,6 +520,16 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, firstCyc
 		return wrappedError
 	}
 
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err = stages.UpdateMetrics(tx); err != nil {
+		log.Error("[%s] Error while updating metrics", "err", s.LogPrefix(), err)
+	}
+
 	took := time.Since(start)
 	logPrefix := s.LogPrefix()
 	if took > 60*time.Second {

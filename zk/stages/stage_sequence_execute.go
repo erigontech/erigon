@@ -89,11 +89,6 @@ func sequencingBatchStep(
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting sequencing stage", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Finished sequencing stage", logPrefix))
-	defer func() {
-		if err := UpdateZkSyncMetrics(ctx, cfg.db); err != nil {
-			log.Warn(fmt.Sprintf("[%s] Failed to update metric for stage %s: %v", logPrefix, s.ID, err))
-		}
-	}()
 
 	// at this point of time the datastream could not be ahead of the executor
 	if err := validateIfDatastreamIsAheadOfExecution(s, ctx, cfg); err != nil {
