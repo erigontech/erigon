@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
@@ -37,6 +38,10 @@ type EriDb struct {
 	kvTx kv.RwTx
 	tx   SmtDbTx
 	*EriRoDb
+	accountCollector   *etl.Collector
+	keySourceCollector *etl.Collector
+	hashKeyCollector   *etl.Collector
+	smtCollector       *etl.Collector
 }
 
 type EriRoDb struct {
@@ -73,11 +78,105 @@ func CreateEriDbBuckets(tx kv.RwTx) error {
 }
 
 func NewEriDb(tx kv.RwTx) *EriDb {
+	logger := log.New()
+
+	// make etls for holding account data and key sources
+	accountCollector := etl.NewCollector("", "./account_collector", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	accountCollector.LogLvl(log.LvlTrace)
+
+	keySourceCollector := etl.NewCollector("", "./key_source_collector", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	keySourceCollector.LogLvl(log.LvlTrace)
+
+	hashKeyCollector := etl.NewCollector("", "./hash_key_collector", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	hashKeyCollector.LogLvl(log.LvlTrace)
+
+	smtCollector := etl.NewCollector("", "./smt_collector", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	smtCollector.LogLvl(log.LvlTrace)
+
 	return &EriDb{
-		tx:      tx,
-		kvTx:    tx,
-		EriRoDb: NewRoEriDb(tx),
+		tx:                 tx,
+		kvTx:               tx,
+		accountCollector:   accountCollector,
+		keySourceCollector: keySourceCollector,
+		hashKeyCollector:   hashKeyCollector,
+		smtCollector:       smtCollector,
+		EriRoDb:            NewRoEriDb(tx),
 	}
+}
+
+func (m *EriDb) CloseAccountCollectors() {
+	m.accountCollector.Close()
+	m.keySourceCollector.Close()
+}
+
+func (m *EriDb) CloseSmtCollectors() {
+	m.hashKeyCollector.Close()
+	m.smtCollector.Close()
+}
+
+func (m *EriDb) LoadAccountCollectors() error {
+	err := m.accountCollector.Load(m.kvTx, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		m.tx.Put(TableAccountValues, k, v)
+		return nil
+	}, etl.TransformArgs{})
+	if err != nil {
+		return err
+	}
+
+	err = m.keySourceCollector.Load(m.kvTx, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		m.tx.Put(TableMetadata, k, v)
+		return nil
+	}, etl.TransformArgs{})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *EriDb) LoadSmtCollectors() error {
+	err := m.hashKeyCollector.Load(m.kvTx, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		m.tx.Put(TableHashKey, k, v)
+		return nil
+	}, etl.TransformArgs{})
+	if err != nil {
+		return err
+	}
+
+	err = m.smtCollector.Load(m.kvTx, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		m.tx.Put(TableSmt, k, v)
+		return nil
+	}, etl.TransformArgs{})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *EriDb) CollectAccountValue(key utils.NodeKey, value utils.NodeValue8) {
+	k := key.ToHex()
+	v := value.ToHex()
+
+	m.accountCollector.Collect([]byte(k), []byte(v))
+}
+
+func (m *EriDb) CollectKeySource(key utils.NodeKey, value []byte) {
+	keyConc := utils.ArrayToScalar(key[:])
+	m.keySourceCollector.Collect(keyConc.Bytes(), value)
+}
+
+func (m *EriDb) CollectHashKey(key utils.NodeKey, value utils.NodeKey) {
+	keyConc := utils.ArrayToScalar(key[:])
+	valConc := utils.ArrayToScalar(value[:])
+	m.hashKeyCollector.Collect(keyConc.Bytes(), valConc.Bytes())
+}
+
+func (m *EriDb) CollectSmt(key utils.NodeKey, value utils.NodeValue12) {
+	k := key.ToHex()
+	v := value.ToHex()
+
+	m.smtCollector.Collect([]byte(k), []byte(v))
 }
 
 func NewRoEriDb(tx kv.Getter) *EriRoDb {
@@ -88,9 +187,6 @@ func NewRoEriDb(tx kv.Getter) *EriRoDb {
 
 func (m *EriDb) OpenBatch(quitCh <-chan struct{}) {
 	batch := membatch.NewHashBatch(m.kvTx, quitCh, "./tempdb", log.New())
-	defer func() {
-		batch.Close()
-	}()
 	m.tx = batch
 	m.kvTxRo = batch
 }
@@ -158,8 +254,7 @@ func (m *EriDb) SetDepth(depth uint8) error {
 }
 
 func (m *EriRoDb) Get(key utils.NodeKey) (utils.NodeValue12, error) {
-	keyConc := utils.ArrayToScalar(key[:])
-	k := utils.ConvertBigIntToHex(keyConc)
+	k := key.ToHex()
 
 	data, err := m.kvTxRo.GetOne(TableSmt, []byte(k))
 	if err != nil {
@@ -177,14 +272,8 @@ func (m *EriRoDb) Get(key utils.NodeKey) (utils.NodeValue12, error) {
 }
 
 func (m *EriDb) Insert(key utils.NodeKey, value utils.NodeValue12) error {
-	keyConc := utils.ArrayToScalar(key[:])
-	k := utils.ConvertBigIntToHex(keyConc)
-
-	vals := make([]*big.Int, 12)
-	copy(vals, value[:])
-
-	vConc := utils.ArrayToScalarBig(vals)
-	v := utils.ConvertBigIntToHex(vConc)
+	k := key.ToHex()
+	v := value.ToHex()
 
 	return m.tx.Put(TableSmt, []byte(k), []byte(v))
 }
@@ -194,14 +283,12 @@ func (m *EriDb) Delete(key string) error {
 }
 
 func (m *EriDb) DeleteByNodeKey(key utils.NodeKey) error {
-	keyConc := utils.ArrayToScalar(key[:])
-	k := utils.ConvertBigIntToHex(keyConc)
+	k := key.ToHex()
 	return m.tx.Delete(TableSmt, []byte(k))
 }
 
 func (m *EriRoDb) GetAccountValue(key utils.NodeKey) (utils.NodeValue8, error) {
-	keyConc := utils.ArrayToScalar(key[:])
-	k := utils.ConvertBigIntToHex(keyConc)
+	k := key.ToHex()
 
 	data, err := m.kvTxRo.GetOne(TableAccountValues, []byte(k))
 	if err != nil {
@@ -219,14 +306,8 @@ func (m *EriRoDb) GetAccountValue(key utils.NodeKey) (utils.NodeValue8, error) {
 }
 
 func (m *EriDb) InsertAccountValue(key utils.NodeKey, value utils.NodeValue8) error {
-	keyConc := utils.ArrayToScalar(key[:])
-	k := utils.ConvertBigIntToHex(keyConc)
-
-	vals := make([]*big.Int, 8)
-	copy(vals, value[:]) // Replace the loop with the copy function
-
-	vConc := utils.ArrayToScalarBig(vals)
-	v := utils.ConvertBigIntToHex(vConc)
+	k := key.ToHex()
+	v := value.ToHex()
 
 	return m.tx.Put(TableAccountValues, []byte(k), []byte(v))
 }

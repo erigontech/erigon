@@ -128,7 +128,9 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 	eridb := db2.NewEriDb(tx)
 	smt := smt.NewSMT(eridb, false)
 
-	if cfg.zk.SmtRegenerateInMemory {
+	useBatch := shouldIncrement || cfg.zk.SmtRegenerateInMemory
+
+	if useBatch {
 		log.Info(fmt.Sprintf("[%s] SMT using mapmutation", logPrefix))
 		eridb.OpenBatch(quit)
 	} else {
@@ -139,6 +141,7 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 		if shouldIncrementBecauseOfAFlag {
 			log.Debug(fmt.Sprintf("[%s] IncrementTreeAlways true - incrementing tree", logPrefix), "previousRootHeight", s.BlockNumber, "calculatingRootHeight", to)
 		}
+
 		if root, err = zkIncrementIntermediateHashes(ctx, logPrefix, s, tx, eridb, smt, s.BlockNumber, to); err != nil {
 			return trie.EmptyRoot, err
 		}
@@ -162,7 +165,7 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 		expectedRootHash := syncHeadHeader.Root
 		headerHash := syncHeadHeader.Hash()
 		if root != expectedRootHash {
-			if cfg.zk.SmtRegenerateInMemory {
+			if useBatch {
 				eridb.RollbackBatch()
 			}
 			panic(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
@@ -171,7 +174,7 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 		log.Info(fmt.Sprintf("[%s] State root matches", logPrefix))
 	}
 
-	if cfg.zk.SmtRegenerateInMemory {
+	if useBatch {
 		if err := eridb.CommitBatch(); err != nil {
 			return trie.EmptyRoot, err
 		}
@@ -261,6 +264,8 @@ func regenerateIntermediateHashes(ctx context.Context, logPrefix string, db kv.R
 		return trie.EmptyRoot, err
 	}
 
+	defer eridb.CloseAccountCollectors()
+
 	progressChan, stopProgressPrinter := zk.ProgressPrinterWithoutValues(fmt.Sprintf("[%s] SMT regenerate progress", logPrefix), total*2)
 
 	progCt := uint64(0)
@@ -316,12 +321,16 @@ func regenerateIntermediateHashes(ctx context.Context, logPrefix string, db kv.R
 	dataCollectTime := time.Since(dataCollectStartTime)
 	log.Info(fmt.Sprintf("[%s] Collecting account data finished in %v", logPrefix, dataCollectTime))
 
+	if err := eridb.LoadAccountCollectors(); err != nil {
+		return trie.EmptyRoot, err
+	}
+
 	// generate tree
 	if _, err := smtIn.GenerateFromKVBulk(ctx, logPrefix, keys); err != nil {
 		return trie.EmptyRoot, err
 	}
 
-	err2 := db.ClearBucket("HermezSmtAccountValues")
+	err2 := db.ClearBucket(kv.TableAccountValues)
 	if err2 != nil {
 		log.Warn(fmt.Sprint("regenerate SaveStageProgress to zero error: ", err2))
 	}
@@ -340,6 +349,8 @@ func regenerateIntermediateHashes(ctx context.Context, logPrefix string, db kv.R
 func zkIncrementIntermediateHashes(ctx context.Context, logPrefix string, s *stagedsync.StageState, db kv.RwTx, eridb *db2.EriDb, dbSmt *smt.SMT, from, to uint64) (common.Hash, error) {
 	log.Info(fmt.Sprintf("[%s] Increment trie hashes started", logPrefix), "previousRootHeight", s.BlockNumber, "calculatingRootHeight", to)
 	defer log.Info(fmt.Sprintf("[%s] Increment ended", logPrefix))
+
+	now := time.Now()
 
 	ac, err := db.CursorDupSort(kv.AccountChangeSet)
 	if err != nil {
@@ -431,7 +442,7 @@ func zkIncrementIntermediateHashes(ctx context.Context, logPrefix string, s *sta
 		return trie.EmptyRoot, err
 	}
 
-	log.Info(fmt.Sprintf("[%s] Regeneration trie hashes finished. Commiting batch", logPrefix))
+	log.Info(fmt.Sprintf("[%s] Regeneration trie hashes finished. Commiting batch", logPrefix), "taken", time.Since(now))
 
 	lr := dbSmt.LastRoot()
 
@@ -504,18 +515,18 @@ func insertContractBytecodeToKV(db smt.DB, keys []utils.NodeKey, ethAddr string,
 	}
 	if !valueContractCode.IsZero() {
 		keys = append(keys, keyContractCode)
-		db.InsertAccountValue(keyContractCode, *valueContractCode)
+		db.CollectAccountValue(keyContractCode, *valueContractCode)
 
 		ks := utils.EncodeKeySource(utils.SC_CODE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
-		db.InsertKeySource(keyContractCode, ks)
+		db.CollectKeySource(keyContractCode, ks)
 	}
 
 	if !valueContractLength.IsZero() {
 		keys = append(keys, keyContractLength)
-		db.InsertAccountValue(keyContractLength, *valueContractLength)
+		db.CollectAccountValue(keyContractLength, *valueContractLength)
 
 		ks := utils.EncodeKeySource(utils.SC_LENGTH, utils.ConvertHexToAddress(ethAddr), common.Hash{})
-		db.InsertKeySource(keyContractLength, ks)
+		db.CollectKeySource(keyContractLength, ks)
 	}
 
 	return keys, nil
@@ -547,12 +558,12 @@ func insertContractStorageToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, 
 		}
 		if !parsedValue.IsZero() {
 			keys = append(keys, keyStoragePosition)
-			db.InsertAccountValue(keyStoragePosition, *parsedValue)
+			db.CollectAccountValue(keyStoragePosition, *parsedValue)
 
 			sp, _ := utils.StrValToBigInt(k)
 
 			ks := utils.EncodeKeySource(utils.SC_STORAGE, utils.ConvertHexToAddress(ethAddr), common.BigToHash(sp))
-			db.InsertKeySource(keyStoragePosition, ks)
+			db.CollectKeySource(keyStoragePosition, ks)
 		}
 	}
 
@@ -577,17 +588,17 @@ func insertAccountStateToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, bal
 
 	if !valueBalance.IsZero() {
 		keys = append(keys, keyBalance)
-		db.InsertAccountValue(keyBalance, *valueBalance)
+		db.CollectAccountValue(keyBalance, *valueBalance)
 
 		ks := utils.EncodeKeySource(utils.KEY_BALANCE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
-		db.InsertKeySource(keyBalance, ks)
+		db.CollectKeySource(keyBalance, ks)
 	}
 	if !valueNonce.IsZero() {
 		keys = append(keys, keyNonce)
-		db.InsertAccountValue(keyNonce, *valueNonce)
+		db.CollectAccountValue(keyNonce, *valueNonce)
 
 		ks := utils.EncodeKeySource(utils.KEY_NONCE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
-		db.InsertKeySource(keyNonce, ks)
+		db.CollectKeySource(keyNonce, ks)
 	}
 	return keys, nil
 }

@@ -284,3 +284,32 @@ func (m *MemDb) GetDb() map[string][]string {
 
 	return m.Db
 }
+
+/*
+As there are no collectors in the memdb we can just fall back to the regular insert
+calls to add them to the maps
+*/
+func (m *MemDb) CollectAccountValue(key utils.NodeKey, value utils.NodeValue8) {
+	m.InsertAccountValue(key, value)
+}
+
+func (m *MemDb) CollectKeySource(key utils.NodeKey, value []byte) {
+	m.InsertKeySource(key, value)
+}
+
+func (m *MemDb) CollectSmt(key utils.NodeKey, value utils.NodeValue12) {
+	m.Insert(key, value)
+}
+
+func (m *MemDb) CollectHashKey(key utils.NodeKey, value utils.NodeKey) {
+	m.InsertHashKey(key, value)
+}
+
+func (m *MemDb) CloseSmtCollectors() {
+	// no-op
+}
+
+func (m *MemDb) LoadSmtCollectors() error {
+	// no-op
+	return nil
+}

@@ -57,6 +57,8 @@ func (s *SMT) GenerateFromKVBulk(ctx context.Context, logPrefix string, nodeKeys
 		deletesWorker.DoWork()
 	}()
 
+	defer s.Db.CloseSmtCollectors()
+
 	var buildSmtLoopErr error
 	var rootNode *SmtNode
 	tempTreeBuildStart := time.Now()
@@ -111,6 +113,10 @@ func (s *SMT) GenerateFromKVBulk(ctx context.Context, logPrefix string, nodeKeys
 
 	finalRoot, err := rootNode.deleteTree(pathToDeleteFrom, s, &leafValueMap)
 	if err != nil {
+		return [4]uint64{}, err
+	}
+
+	if err := s.Db.LoadSmtCollectors(); err != nil {
 		return [4]uint64{}, err
 	}
 

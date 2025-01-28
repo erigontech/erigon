@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -8,11 +10,10 @@ import (
 	"strconv"
 	"strings"
 
-	"sort"
-
 	poseidon "github.com/gateway-fm/vectorized-poseidon-gold/src/vectorizedposeidongold"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -78,6 +79,15 @@ func (nk *NodeKey) AsUint64Pointer() *[4]uint64 {
 	return (*[4]uint64)(nk)
 }
 
+func (nk *NodeKey) ToHex() string {
+	buf := make([]byte, 32) // 4 uint64s * 8 bytes each = 32 bytes
+	binary.BigEndian.PutUint64(buf[0:8], nk[0])
+	binary.BigEndian.PutUint64(buf[8:16], nk[1])
+	binary.BigEndian.PutUint64(buf[16:24], nk[2])
+	binary.BigEndian.PutUint64(buf[24:32], nk[3])
+	return hex.EncodeToString(buf)
+}
+
 func (nv *NodeValue8) IsZero() bool {
 	if nv == nil {
 		return true
@@ -140,8 +150,8 @@ func (nv *NodeValue8) ToUintArrayByPointer() *[8]uint64 {
 	return &result
 }
 
-func (nv *NodeValue12) ToBigInt() *big.Int {
-	return ArrayToScalarBig(nv[:])
+func (nv *NodeValue8) ToHex() string {
+	return BigIntArrayToHex(nv[:])
 }
 
 func (nv *NodeValue12) StripCapacity() [8]uint64 {
@@ -183,6 +193,10 @@ func (nv *NodeValue12) IsUniqueSibling() (int, error) {
 		return fnd, nil
 	}
 	return -1, nil
+}
+
+func (nv *NodeValue12) ToHex() string {
+	return BigIntArrayToHex(nv[:])
 }
 
 func NodeKeyFromBigIntArray(arr []*big.Int) NodeKey {
@@ -311,15 +325,6 @@ func ScalarToArray(scalar *big.Int) []uint64 {
 	r3 = new(big.Int).And(r3, mask)
 
 	return []uint64{r0.Uint64(), r1.Uint64(), r2.Uint64(), r3.Uint64()}
-}
-
-func ArrayToScalarBig(array []*big.Int) *big.Int {
-	scalar := new(big.Int)
-	for i := len(array) - 1; i >= 0; i-- {
-		scalar.Lsh(scalar, 64)
-		scalar.Add(scalar, array[i])
-	}
-	return scalar
 }
 
 func ScalarToNodeKey(s *big.Int) NodeKey {
@@ -766,25 +771,26 @@ func binaryStringToUint64(binary string) (uint64, error) {
 }
 
 func SortNodeKeysBitwiseAsc(keys []NodeKey) {
-	sort.Slice(keys, func(i, j int) bool {
-		aTmp := keys[i]
-		bTmp := keys[j]
-
+	slices.SortFunc(keys, func(i, j NodeKey) int {
 		for l := 0; l < 64; l++ {
 			for n := 0; n < 4; n++ {
-				aBit := aTmp[n] & 1
-				bBit := bTmp[n] & 1
+				aBit := i[n] & 1
+				bBit := j[n] & 1
 
-				aTmp[n] >>= 1 // Right shift the current part
-				bTmp[n] >>= 1 // Right shift the current part
+				i[n] >>= 1 // Right shift the current part
+				j[n] >>= 1 // Right shift the current part
 
 				if aBit != bBit {
-					return aBit < bBit
+					if aBit < bBit {
+						return -1
+					} else if aBit > bBit {
+						return 1
+					}
 				}
 			}
 		}
 
-		return true
+		return 0
 	})
 }
 
@@ -813,4 +819,21 @@ func DecodeKeySource(keySource []byte) (int, common.Address, common.Hash, error)
 		storagePosition = common.BytesToHash(keySource[length.Addr+1 : length.Addr+length.Hash+1])
 	}
 	return t, accountAddr, storagePosition, nil
+}
+
+func BigIntArrayToBytes(array []*big.Int) []byte {
+	// Each uint64 needs 8 bytes, so total bytes needed is len(array) * 8
+	buf := make([]byte, len(array)*8)
+
+	// Convert each big.Int to uint64 and write to buffer
+	for i := 0; i < len(array); i++ {
+		// Write to buffer in reverse order to match original ArrayToScalarBig behavior
+		pos := (len(array) - 1 - i) * 8
+		binary.BigEndian.PutUint64(buf[pos:pos+8], array[i].Uint64())
+	}
+	return buf
+}
+
+func BigIntArrayToHex(array []*big.Int) string {
+	return hex.EncodeToString(BigIntArrayToBytes(array))
 }

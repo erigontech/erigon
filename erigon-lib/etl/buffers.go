@@ -212,7 +212,6 @@ func (b *appendSortableBuffer) Put(k, v []byte) {
 		b.size += len(k)
 	}
 	b.size += len(v)
-	fmt.Printf("put: %d, %x, %x . %x\n", b.size, k, stored, v)
 	b.entries[string(k)] = append(stored, v...)
 }
 
@@ -256,7 +255,6 @@ func (b *appendSortableBuffer) Write(w io.Writer) error {
 	var numBuf [binary.MaxVarintLen64]byte
 	entries := b.sortedBuf
 	for _, entry := range entries {
-		fmt.Printf("write: %x, %x\n", entry.key, entry.value)
 		lk := int64(len(entry.key))
 		if entry.key == nil {
 			lk = -1

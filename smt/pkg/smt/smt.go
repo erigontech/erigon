@@ -19,10 +19,14 @@ import (
 
 type DB interface {
 	Insert(key utils.NodeKey, value utils.NodeValue12) error
+	CollectSmt(key utils.NodeKey, value utils.NodeValue12)
 	InsertAccountValue(key utils.NodeKey, value utils.NodeValue8) error
+	CollectAccountValue(key utils.NodeKey, value utils.NodeValue8)
 	InsertKeySource(key utils.NodeKey, value []byte) error
+	CollectKeySource(key utils.NodeKey, value []byte)
 	DeleteKeySource(key utils.NodeKey) error
 	InsertHashKey(key utils.NodeKey, value utils.NodeKey) error
+	CollectHashKey(key utils.NodeKey, value utils.NodeKey)
 	AddCode(code []byte) error
 	DeleteHashKey(key utils.NodeKey) error
 	Delete(string) error
@@ -32,6 +36,8 @@ type DB interface {
 	CommitBatch() error
 	OpenBatch(quitCh <-chan struct{})
 	RollbackBatch()
+	CloseSmtCollectors()
+	LoadSmtCollectors() error
 	RoDB
 }
 

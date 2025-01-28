@@ -192,26 +192,6 @@ func TestArrayToScalar(t *testing.T) {
 	}
 }
 
-func TestArrayToScalarBig(t *testing.T) {
-	array := []*big.Int{
-		new(big.Int),
-		new(big.Int),
-		new(big.Int),
-	}
-
-	array[0].SetString("1122334455667788", 16)
-	array[1].SetString("99aabbccddeeff00", 16)
-	array[2].SetString("1122334455667788", 16)
-
-	expected, _ := new(big.Int).SetString("112233445566778899aabbccddeeff001122334455667788", 16)
-
-	result := ArrayToScalarBig(array)
-
-	if !reflect.DeepEqual(result, expected) {
-		t.Errorf("ArrayToScalarBig(%v) = %v, want %v", array, result, expected)
-	}
-}
-
 func TestRemoveKeyBits(t *testing.T) {
 	testCases := map[string]struct {
 		k      NodeKey

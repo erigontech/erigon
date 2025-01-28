@@ -8,6 +8,8 @@ import (
 type DB interface {
 	InsertHashKey(key NodeKey, value NodeKey) error
 	Insert(key NodeKey, value NodeValue12) error
+	CollectSmt(key NodeKey, value NodeValue12)
+	CollectHashKey(key NodeKey, value NodeKey)
 }
 
 type JobResult interface {
@@ -36,14 +38,10 @@ func (r *CalcAndPrepareJobResult) GetError() error {
 
 func (r *CalcAndPrepareJobResult) Save() error {
 	for key, value := range r.LeafsKvMap {
-		if err := r.db.InsertHashKey(key, value); err != nil {
-			return err
-		}
+		r.db.CollectHashKey(key, value)
 	}
 	for key, value := range r.KvMap {
-		if err := r.db.Insert(key, value); err != nil {
-			return err
-		}
+		r.db.CollectSmt(key, value)
 	}
 	return nil
 }
