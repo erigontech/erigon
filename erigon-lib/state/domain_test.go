@@ -1031,6 +1031,7 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.hist.iiCfg.salt = &salt
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.aggregationStep = aggStep
+	cfg.hist.iiCfg.name = kv.InvertedIdx("dummy")
 
 	d, err := NewDomain(cfg, log.New())
 	if err != nil {
