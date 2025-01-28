@@ -111,8 +111,8 @@ func (s *SyncCommittee) Static() bool {
 
 func (s *SyncCommittee) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Committee          []libcommon.Bytes48 `json:"committee"`
-		AggregatePublicKey libcommon.Bytes48   `json:"aggregate_public_key"`
+		Committee          []libcommon.Bytes48 `json:"pubkeys"`
+		AggregatePublicKey libcommon.Bytes48   `json:"aggregate_pubkey"`
 	}{
 		Committee:          s.GetCommittee(),
 		AggregatePublicKey: s.AggregatePublicKey(),
@@ -122,8 +122,8 @@ func (s *SyncCommittee) MarshalJSON() ([]byte, error) {
 func (s *SyncCommittee) UnmarshalJSON(input []byte) error {
 	var err error
 	var tmp struct {
-		Committee          []libcommon.Bytes48 `json:"committee"`
-		AggregatePublicKey libcommon.Bytes48   `json:"aggregate_public_key"`
+		Committee          []libcommon.Bytes48 `json:"pubkeys"`
+		AggregatePublicKey libcommon.Bytes48   `json:"aggregate_pubkey"`
 	}
 	if err = json.Unmarshal(input, &tmp); err != nil {
 		return err

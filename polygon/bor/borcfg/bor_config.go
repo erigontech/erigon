@@ -156,12 +156,16 @@ func (c *BorConfig) IsNapoli(num uint64) bool {
 	return isForked(c.NapoliBlock, num)
 }
 
+func (c *BorConfig) GetNapoliBlock() *big.Int {
+	return c.NapoliBlock
+}
+
 func (c *BorConfig) IsAhmedabad(number uint64) bool {
 	return isForked(c.AhmedabadBlock, number)
 }
 
-func (c *BorConfig) GetNapoliBlock() *big.Int {
-	return c.NapoliBlock
+func (c *BorConfig) GetAhmedabadBlock() *big.Int {
+	return c.AhmedabadBlock
 }
 
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {

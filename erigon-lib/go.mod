@@ -8,7 +8,7 @@ replace (
 )
 
 require (
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20250121111444-6cc4c0c1fb89
 	github.com/erigontech/interfaces v0.0.0-20241120074553-214b5fd396ed
 	github.com/erigontech/mdbx-go v0.38.4
 	github.com/erigontech/secp256k1 v1.1.0
@@ -49,14 +49,14 @@ require (
 	github.com/tidwall/btree v1.6.0
 	github.com/ugorji/go/codec v1.2.12
 	go.uber.org/mock v0.5.0
-	golang.org/x/crypto v0.31.0
+	golang.org/x/crypto v0.32.0
 	golang.org/x/exp v0.0.0-20241009180824-f66d83c29e7c
 	golang.org/x/sync v0.10.0
-	golang.org/x/sys v0.28.0
-	golang.org/x/time v0.8.0
+	golang.org/x/sys v0.29.0
+	golang.org/x/time v0.9.0
 	google.golang.org/grpc v1.65.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.4.0
-	google.golang.org/protobuf v1.34.2
+	google.golang.org/protobuf v1.36.3
 )
 
 require (

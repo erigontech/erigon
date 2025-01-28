@@ -156,7 +156,10 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 		return err
 	}
 
-	sn, borSn, agg, _, _, _ := allSnapshots(ctx, db, logger1)
+	sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger1)
+	if err != nil {
+		return err
+	}
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
@@ -389,7 +392,10 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *chain2.Config) {
 func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
 	chainConfig := fromdb.ChainConfig(db)
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	sn, borSn, agg, _, _, _ := allSnapshots(ctx, db, logger)
+	sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
+	if err != nil {
+		return err
+	}
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
