@@ -26,7 +26,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/erigontech/erigon/txnprovider/shutter"
-	shutterproto "github.com/erigontech/erigon/txnprovider/shutter/proto"
+	shutterproto "github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 )
 
 const (

@@ -16,7 +16,7 @@ PROTOC_OS = linux
 endif
 
 PROTOC_INCLUDE = build/include/google
-PROTO_DIR = $(CURDIR)/proto
+PROTO_DIR = $(CURDIR)/internal/proto
 
 $(GOBINREL):
 	mkdir -p "$(GOBIN)"
