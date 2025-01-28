@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	jsoniter "github.com/json-iterator/go"
 
@@ -43,6 +44,8 @@ type PrivateDebugAPI interface {
 	AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
 	GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error)
 	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error)
+	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutility.Bytes, error)
+	GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error)
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
@@ -403,4 +406,82 @@ func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash r
 		return nil, fmt.Errorf("block not found")
 	}
 	return rlp.EncodeToBytes(block)
+}
+
+// GetRawReceipts retrieves the binary-encoded receipts of a single block.
+func (api *PrivateDebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutility.Bytes, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+	receipts, err := api.getReceipts(ctx, tx, block, nil)
+	if err != nil {
+		return nil, fmt.Errorf("getReceipts error: %w", err)
+	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if chainConfig.Bor != nil {
+		return nil, nil
+	}
+
+	result := make([]hexutility.Bytes, len(receipts))
+	for i, receipt := range receipts {
+		b, err := rlp.EncodeToBytes(receipt)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = b
+	}
+	return result, nil
+}
+
+func (api *PrivateDebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blocks, err := rawdb.GetLatestBadBlocks(tx)
+	if err != nil || len(blocks) == 0 {
+		return nil, err
+	}
+
+	results := make([]map[string]interface{}, 0, len(blocks))
+	for _, block := range blocks {
+		var blockRlp string
+		if rlpBytes, err := rlp.EncodeToBytes(block); err != nil {
+			blockRlp = err.Error() // hack
+		} else {
+			blockRlp = fmt.Sprintf("%#x", rlpBytes)
+		}
+
+		blockJson, err := ethapi.RPCMarshalBlock(block, true, true, nil)
+		if err != nil {
+			log.Error("Failed to marshal block", "err", err)
+			blockJson = map[string]interface{}{}
+		}
+		results = append(results, map[string]interface{}{
+			"hash":  block.Hash(),
+			"block": blockRlp,
+			"rlp":   blockJson,
+		})
+	}
+
+	return results, nil
 }
