@@ -65,7 +65,7 @@ type TemporalTx interface {
 type TemporalRwTx interface {
 	kv.RwTx
 	TemporalTx
-	AggRwTx(baseAppendable AppEnum) *AggregatorRwTx // gets aggtx for entity-set represented by baseAppendable
+	// AggRwTx(baseAppendable AppEnum) *AggregatorRwTx // gets aggtx for entity-set represented by baseAppendable
 }
 
 // use Marked(enum) or Relational(enum) to get the right ro/rw tx.
@@ -75,13 +75,6 @@ type AggregatorRoTx struct{}
 
 func (a *AggregatorRoTx) Marked(app AppEnum) *MarkedAppendableRoTx         { return nil }
 func (a *AggregatorRoTx) Relational(app AppEnum) *RelationalAppendableRoTx { return nil }
-
-type AggregatorRwTx struct {
-	*AggregatorRoTx
-}
-
-func (a *AggregatorRwTx) Marked(app AppEnum) *MarkedAppendableRwTx         { return nil }
-func (a *AggregatorRwTx) Relational(app AppEnum) *RelationalAppendableRwTx { return nil }
 
 type Aggregator struct{}
 
@@ -115,7 +108,7 @@ func WriteRawBody(tx TemporalRwTx, hash common.Hash, number uint64, body *types.
 }
 
 func WriteBodyForStorage(tx TemporalRwTx, hash common.Hash, number uint64, body *types.BodyForStorage) error {
-	aggTx := tx.AggRwTx(Headers) // or temporalTx.AggTx(baseAppendableEnum); gives aggtx for entityset
+	aggTx := tx.AggRoTx(Headers) // or temporalTx.AggTx(baseAppendableEnum); gives aggtx for entityset
 
 	b := bytes.Buffer{}
 	if err := body.EncodeRLP(&b); err != nil {
@@ -129,7 +122,7 @@ func WriteBodyForStorage(tx TemporalRwTx, hash common.Hash, number uint64, body 
 }
 
 func WriteRawTransactions(tx TemporalRwTx, txs [][]byte, baseTxnID uint64) error {
-	aggTx := tx.AggRwTx(Headers) // or temporalTx.AggTx(baseAppendableEnum); gives aggtx for entityset
+	aggTx := tx.AggRoTx(Headers) // or temporalTx.AggTx(baseAppendableEnum); gives aggtx for entityset
 	stx := baseTxnID
 	txq := aggTx.Relational(Transactions)
 
@@ -191,3 +184,10 @@ func IwannaBuildFiles(ctx context.Context, tx TemporalRwTx) error {
 
 // 	// more methods on level of aggtx
 // }
+
+// type AggregatorRwTx struct {
+// 	*AggregatorRoTx
+// }
+
+// func (a *AggregatorRwTx) Marked(app AppEnum) *MarkedAppendableRwTx         { return nil }
+// func (a *AggregatorRwTx) Relational(app AppEnum) *RelationalAppendableRwTx { return nil }

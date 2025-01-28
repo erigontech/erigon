@@ -161,17 +161,17 @@ func (r *MarkedAppendableRoTx) GetNc(id Id, hash []byte, tx kv.Tx) (VVType, erro
 	return tx.GetOne(a.valsTbl, key)
 }
 
-type MarkedAppendableRwTx struct {
-	*MarkedAppendableRoTx
-}
+// type MarkedAppendableRwTx struct {
+// 	*MarkedAppendableRoTx
+// }
 
-func (m *MarkedAppendable) BeginFilesRw() *MarkedAppendableRwTx {
-	return &MarkedAppendableRwTx{
-		MarkedAppendableRoTx: m.BeginFilesRo(),
-	}
-}
+// func (m *MarkedAppendable) BeginFilesRw() *MarkedAppendableRwTx {
+// 	return &MarkedAppendableRwTx{
+// 		MarkedAppendableRoTx: m.BeginFilesRo(),
+// 	}
+// }
 
-func (r *MarkedAppendableRwTx) Put(num Num, forkId []byte, value VVType, tx kv.RwTx) error {
+func (r *MarkedAppendableRoTx) Put(num Num, forkId []byte, value VVType, tx kv.RwTx) error {
 	// can then val
 	a := r.a
 	if err := tx.Append(a.canonicalTbl, a.encTs(uint64(num)), forkId); err != nil {
@@ -182,7 +182,7 @@ func (r *MarkedAppendableRwTx) Put(num Num, forkId []byte, value VVType, tx kv.R
 	return tx.Put(a.valsTbl, key, value)
 }
 
-func (r *MarkedAppendableRwTx) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
+func (r *MarkedAppendableRoTx) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
 	// from 1 to baseKeyTo (exclusive)
 
 	// probably fromKey value needs to be in configuration...starts from 1 because we want to keep genesis block
@@ -202,7 +202,7 @@ func (r *MarkedAppendableRwTx) Prune(ctx context.Context, baseKeyTo Num, limit u
 	return nil
 }
 
-func (r *MarkedAppendableRwTx) Unwind(ctx context.Context, baseKeyFrom Num, rwTx kv.RwTx) error {
+func (r *MarkedAppendableRoTx) Unwind(ctx context.Context, baseKeyFrom Num, rwTx kv.RwTx) error {
 	a := r.a
 	fromKey := a.encTs(uint64(baseKeyFrom))
 	if err := DeleteRangeFromTbl(a.canonicalTbl, fromKey, nil, MaxUint64, rwTx); err != nil {
