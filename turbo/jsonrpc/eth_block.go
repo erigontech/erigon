@@ -6,14 +6,11 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
-
-	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -103,7 +100,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	blockNumber := stateBlockNumber + 1
 
-	timestamp := parent.Time + clparams.MainnetBeaconConfig.SecondsPerSlot
+	timestamp := parent.Time + chainConfig.SecondsPerSlot()
 
 	coinbase := parent.Coinbase
 	header := &types.Header{

@@ -56,7 +56,6 @@ type blockFees struct {
 	blobBaseFee, nextBlobBaseFee *big.Int
 	gasUsedRatio                 float64
 	blobGasUsedRatio             float64
-	secondsPerSlot               uint64
 	err                          error
 }
 
@@ -98,7 +97,8 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 			bf.err = err
 			return
 		}
-		nextBlobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, misc.CalcExcessBlobGas(chainconfig, bf.header, bf.header.Time+bf.secondsPerSlot), bf.header.Time+bf.secondsPerSlot)
+		nextBlockTime := bf.header.Time + chainconfig.SecondsPerSlot()
+		nextBlobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, misc.CalcExcessBlobGas(chainconfig, bf.header, nextBlockTime), nextBlockTime)
 		if err != nil {
 			bf.err = err
 			return
@@ -119,6 +119,10 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 	if len(percentiles) == 0 {
 		// rewards were not requested, return null
 		return
+	}
+
+	if blobGasUsed := bf.header.BlobGasUsed; blobGasUsed != nil && chainconfig.MaxBlobGasPerBlock != nil {
+		bf.blobGasUsedRatio = float64(*blobGasUsed) / float64(*chainconfig.MaxBlobGasPerBlock)
 	}
 	if bf.block == nil || (bf.receipts == nil && len(bf.block.Transactions()) != 0) {
 		log.Error("Block or receipts are missing while reward percentiles are requested")
@@ -163,26 +167,23 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 // also returned if requested and available.
 // Note: an error is only returned if retrieving the head header has failed. If there are no
 // retrievable blocks in the specified range then zero block count is returned with no error.
-func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.BlockNumber, blocks, maxHistory int) (*types.Block, []*types.Receipt, uint64, int, uint64, error) {
+func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.BlockNumber, blocks, maxHistory int) (*types.Block, []*types.Receipt, uint64, int, error) {
 	var (
 		headBlock       rpc.BlockNumber
 		pendingBlock    *types.Block
 		pendingReceipts types.Receipts
-		secondsPerSlot  uint64 // Time diff from parent block as an approx
-		lastBlockTime   uint64
 	)
 	// query either pending block or head header and set headBlock
 	if lastBlock == rpc.PendingBlockNumber {
 		if pendingBlock, pendingReceipts = oracle.backend.PendingBlockAndReceipts(); pendingBlock != nil {
 			lastBlock = rpc.BlockNumber(pendingBlock.NumberU64())
 			headBlock = lastBlock - 1
-			lastBlockTime = pendingBlock.Time()
 		} else {
 			// pending block not supported by backend, process until latest block
 			lastBlock = rpc.LatestBlockNumber
 			blocks--
 			if blocks == 0 {
-				return nil, nil, 0, 0, 0, nil
+				return nil, nil, 0, 0, nil
 			}
 		}
 	}
@@ -190,24 +191,14 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 		// if pending block is not fetched then we retrieve the head header to get the head block number
 		if latestHeader, err := oracle.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber); err == nil {
 			headBlock = rpc.BlockNumber(latestHeader.Number.Uint64())
-			lastBlockTime = latestHeader.Time
 		} else {
-			return nil, nil, 0, 0, 0, err
+			return nil, nil, 0, 0, err
 		}
 	}
 	if lastBlock == rpc.LatestBlockNumber {
 		lastBlock = headBlock
 	} else if pendingBlock == nil && lastBlock > headBlock {
-		return nil, nil, 0, 0, 0, fmt.Errorf("%w: requested %d, head %d", ErrRequestBeyondHead, lastBlock, headBlock)
-	}
-	if lastBlock > 0 {
-		parentHeader, err := oracle.backend.HeaderByNumber(ctx, lastBlock-1)
-		if err != nil {
-			return nil, nil, 0, 0, 0, err
-		}
-		if parentHeader != nil {
-			secondsPerSlot = parentHeader.Time - lastBlockTime
-		}
+		return nil, nil, 0, 0, fmt.Errorf("%w: requested %d, head %d", ErrRequestBeyondHead, lastBlock, headBlock)
 	}
 	if maxHistory != 0 {
 		// limit retrieval to the given number of latest blocks
@@ -216,7 +207,7 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 			if int64(blocks) > tooOldCount {
 				blocks -= int(tooOldCount)
 			} else {
-				return nil, nil, 0, 0, 0, nil
+				return nil, nil, 0, 0, nil
 			}
 		}
 	}
@@ -224,7 +215,7 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 	if rpc.BlockNumber(blocks) > lastBlock+1 {
 		blocks = int(lastBlock + 1)
 	}
-	return pendingBlock, pendingReceipts, uint64(lastBlock), blocks, secondsPerSlot, nil
+	return pendingBlock, pendingReceipts, uint64(lastBlock), blocks, nil
 }
 
 // FeeHistory returns data relevant for fee estimation based on the specified range of blocks.
@@ -241,9 +232,9 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 //
 // Note: baseFee includes the next block after the newest of the returned range, because this
 // value can be derived from the newest block.
-func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*big.Int, []float64, error) {
+func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*big.Int, []float64, []*big.Int, []float64, error) {
 	if blocks < 1 {
-		return libcommon.Big0, nil, nil, nil, nil // returning with no data and no error means there are no retrievable blocks
+		return libcommon.Big0, nil, nil, nil, nil, nil, nil // returning with no data and no error means there are no retrievable blocks
 	}
 	if blocks > maxFeeHistory {
 		log.Warn("Sanitizing fee history length", "requested", blocks, "truncated", maxFeeHistory)
@@ -251,10 +242,10 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	}
 	for i, p := range rewardPercentiles {
 		if p < 0 || p > 100 {
-			return libcommon.Big0, nil, nil, nil, fmt.Errorf("%w: %f", ErrInvalidPercentile, p)
+			return libcommon.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: %f", ErrInvalidPercentile, p)
 		}
 		if i > 0 && p < rewardPercentiles[i-1] {
-			return libcommon.Big0, nil, nil, nil, fmt.Errorf("%w: #%d:%f > #%d:%f", ErrInvalidPercentile, i-1, rewardPercentiles[i-1], i, p)
+			return libcommon.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: #%d:%f > #%d:%f", ErrInvalidPercentile, i-1, rewardPercentiles[i-1], i, p)
 		}
 	}
 	// Only process blocks if reward percentiles were requested
@@ -267,9 +258,9 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		pendingReceipts []*types.Receipt
 		err             error
 	)
-	pendingBlock, pendingReceipts, lastBlock, blocks, secondsPerSlot, err := oracle.resolveBlockRange(ctx, unresolvedLastBlock, blocks, maxHistory)
+	pendingBlock, pendingReceipts, lastBlock, blocks, err := oracle.resolveBlockRange(ctx, unresolvedLastBlock, blocks, maxHistory)
 	if err != nil || blocks == 0 {
-		return libcommon.Big0, nil, nil, nil, err
+		return libcommon.Big0, nil, nil, nil, nil, nil, err
 	}
 	oldestBlock := lastBlock + 1 - uint64(blocks)
 
@@ -277,14 +268,16 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		next = oldestBlock
 	)
 	var (
-		reward       = make([][]*big.Int, blocks)
-		baseFee      = make([]*big.Int, blocks+1)
-		gasUsedRatio = make([]float64, blocks)
-		firstMissing = blocks
+		reward           = make([][]*big.Int, blocks)
+		baseFee          = make([]*big.Int, blocks+1)
+		gasUsedRatio     = make([]float64, blocks)
+		blobGasUsedRatio = make([]float64, blocks)
+		blobBaseFee      = make([]*big.Int, blocks+1)
+		firstMissing     = blocks
 	)
 	for ; blocks > 0; blocks-- {
 		if err = libcommon.Stopped(ctx.Done()); err != nil {
-			return libcommon.Big0, nil, nil, nil, err
+			return libcommon.Big0, nil, nil, nil, nil, nil, err
 		}
 		// Retrieve the next block number to fetch with this goroutine
 		blockNumber := atomic.AddUint64(&next, 1) - 1
@@ -292,7 +285,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			continue
 		}
 
-		fees := &blockFees{blockNumber: blockNumber, secondsPerSlot: secondsPerSlot}
+		fees := &blockFees{blockNumber: blockNumber}
 		if pendingBlock != nil && blockNumber >= pendingBlock.NumberU64() {
 			fees.block, fees.receipts = pendingBlock, pendingReceipts
 		} else {
@@ -313,11 +306,12 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		}
 
 		if fees.err != nil {
-			return libcommon.Big0, nil, nil, nil, fees.err
+			return libcommon.Big0, nil, nil, nil, nil, nil, fees.err
 		}
 		i := int(fees.blockNumber - oldestBlock)
 		if fees.header != nil {
 			reward[i], baseFee[i], baseFee[i+1], gasUsedRatio[i] = fees.reward, fees.baseFee, fees.nextBaseFee, fees.gasUsedRatio
+			blobGasUsedRatio[i], blobBaseFee[i], blobBaseFee[i+1] = fees.blobGasUsedRatio, fees.blobBaseFee, fees.nextBlobBaseFee
 		} else {
 			// getting no block and no error means we are requesting into the future (might happen because of a reorg)
 			if i < firstMissing {
@@ -326,7 +320,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		}
 	}
 	if firstMissing == 0 {
-		return libcommon.Big0, nil, nil, nil, nil
+		return libcommon.Big0, nil, nil, nil, nil, nil, nil
 	}
 	if len(rewardPercentiles) != 0 {
 		reward = reward[:firstMissing]
@@ -334,5 +328,5 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		reward = nil
 	}
 	baseFee, gasUsedRatio = baseFee[:firstMissing+1], gasUsedRatio[:firstMissing]
-	return new(big.Int).SetUint64(oldestBlock), reward, baseFee, gasUsedRatio, nil
+	return new(big.Int).SetUint64(oldestBlock), reward, baseFee, gasUsedRatio, blobBaseFee, blobGasUsedRatio, nil
 }
