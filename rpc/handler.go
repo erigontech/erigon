@@ -401,9 +401,9 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 	switch {
 	case msg.isNotification():
 		h.handleCall(ctx, msg, stream)
-		//if h.traceRequests {
-		h.logger.Info("[rpc] served", "method", msg.Method, "params", string(msg.Params))
-		//}
+		if h.traceRequests {
+			h.logger.Info("[rpc] served", "method", msg.Method, "params", string(msg.Params))
+		}
 		return nil
 	case msg.isCall():
 		var doSlowLog bool
@@ -440,6 +440,8 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 					"err", resp.Error.Message)
 			}
 		}
+		h.logger.Info("[rpc] served", "method", msg.Method, "params", string(msg.Params), "resp", resp.String())
+
 		if h.traceRequests {
 			h.logger.Info("Served", "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 		}
