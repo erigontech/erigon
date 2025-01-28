@@ -31,7 +31,6 @@ type IndexKeyFactory interface {
 
 type AccessorIndexBuilder interface {
 	Build(ctx context.Context, baseNumFrom, baseNumTo Num, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error)
-	SetAccessorArgs(*AccessorArgs)
 	AllowsOrdinalLookupByNum() bool
 }
 
