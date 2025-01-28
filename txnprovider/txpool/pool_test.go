@@ -931,8 +931,8 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			defer tx.Rollback()
 			asrt.NoError(err)
 			sd, err := state.NewSharedDomains(tx, logger)
-			defer sd.Close()
 			asrt.NoError(err)
+			defer sd.Close()
 			cache := kvcache.NewDummy()
 			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
 			asrt.NoError(err)
@@ -1053,8 +1053,8 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	defer tx.Rollback()
 	assert.NoError(t, err)
 	sd, err := state.NewSharedDomains(tx, logger)
-	defer sd.Close()
 	assert.NoError(t, err)
+	defer sd.Close()
 
 	sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 	sndrBytes := accounts3.SerialiseV3(&sndr)
