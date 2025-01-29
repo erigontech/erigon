@@ -213,6 +213,8 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	}
 
 	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, targetGasLimit)
+
+	// Optimism forces the gas limit from the config
 	if !cfg.chainConfig.IsOptimism() {
 		if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 			logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
