@@ -70,7 +70,6 @@ func (e *EthereumExecutionModule) evictOldBuilders() {
 }
 
 func (e *EthereumExecutionModule) isThereABlockInDBAlreadyBuilt(ctx context.Context, tx kv.Tx, parentHash libcommon.Hash, forceTransactions [][]byte, noTxPool bool, gasLimit *uint64) (bool, error) {
-	fmt.Println("isThereABlockInDBAlreadyBuilt", parentHash, forceTransactions, noTxPool, gasLimit)
 	// This should only be called for Optimism
 	if !e.config.IsOptimism() || !noTxPool || gasLimit == nil {
 		return false, nil
@@ -80,7 +79,6 @@ func (e *EthereumExecutionModule) isThereABlockInDBAlreadyBuilt(ctx context.Cont
 	if err != nil {
 		return false, err
 	}
-	fmt.Println("isThereABlockInDBAlreadyBuilt", parentHeader == nil)
 	if parentHeader == nil {
 		return false, nil
 	}
@@ -89,10 +87,10 @@ func (e *EthereumExecutionModule) isThereABlockInDBAlreadyBuilt(ctx context.Cont
 		return false, err
 	}
 	expectedTransactionsRoot := types.DeriveSha(types.BinaryTransactions(forceTransactions))
-	fmt.Println("isThereABlockInDBAlreadyBuilt", candidateHeader.TxHash == expectedTransactionsRoot, candidateHeader.GasLimit == *gasLimit, candidateHeader.ParentHash == parentHash)
 	if candidateHeader == nil {
 		return false, nil
 	}
+	fmt.Println("isThereABlockInDBAlreadyBuilt", candidateHeader.TxHash == expectedTransactionsRoot, candidateHeader.GasLimit == *gasLimit, candidateHeader.ParentHash == parentHash)
 	return candidateHeader.TxHash == expectedTransactionsRoot && candidateHeader.GasLimit == *gasLimit && candidateHeader.ParentHash == parentHash, nil
 }
 
