@@ -21,11 +21,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"io/fs"
 	"math/big"
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -274,6 +276,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
+
+	createClientVersionMetric()
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
 		if err = stages.UpdateMetrics(tx); err != nil {
@@ -2214,4 +2218,12 @@ func l1ContractAddressCheck(ctx context.Context, cfg *ethconfig.Zk, l1BlockSynce
 	log.Warn("🚨 zkevm.address-sequencer configuration parameter is deprecated and it will be removed in upcoming releases")
 
 	return true, nil
+}
+
+func createClientVersionMetric() {
+	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{name="cdk-erigon"}`))
+	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{version="%s"}`, utils.GetVersion()))
+	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{os="%s"}`, runtime.GOOS))
+	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{arch="%s"}`, runtime.GOARCH))
+	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{go_version="%s"}`, runtime.Version()))
 }

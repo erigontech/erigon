@@ -520,6 +520,10 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, firstCyc
 		return wrappedError
 	}
 
+	if err = s.UpdateMetrics(txc.Tx, db); err != nil {
+		return err
+	}
+
 	took := time.Since(start)
 	logPrefix := s.LogPrefix()
 	if took > 60*time.Second {
@@ -639,4 +643,24 @@ func (s *Sync) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 			s.stages[i].Forward = f
 		}
 	}
+}
+
+func (s *Sync) UpdateMetrics(tx kv.Tx, db kv.RoDB) error {
+	var err error
+	useExternalTx := tx != nil
+	if useExternalTx {
+		if err = stages.UpdateMetrics(tx); err != nil {
+			log.Error("[%s] Error while updating metrics", "err", s.LogPrefix(), err)
+		}
+	} else {
+		if err = db.View(context.Background(), func(tx kv.Tx) error {
+			if err = stages.UpdateMetrics(tx); err != nil {
+				log.Error("[%s] Error while updating metrics", "err", s.LogPrefix(), err)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
