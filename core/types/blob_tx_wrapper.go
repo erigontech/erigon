@@ -223,13 +223,13 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	versionedHashes = make([]libcommon.Hash, len(blobs))
 
 	kzgCtx := libkzg.Ctx()
-	for i, blob := range blobs {
-		commitment, err := kzgCtx.BlobToKZGCommitment(gokzg4844.Blob(blob), 1 /*numGoRoutines*/)
+	for i := 0; i < len(blobs); i++ {
+		commitment, err := kzgCtx.BlobToKZGCommitment((*gokzg4844.Blob)(&blobs[i]), 1 /*numGoRoutines*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %v", err)
 		}
 
-		proof, err := kzgCtx.ComputeBlobKZGProof(gokzg4844.Blob(blob), commitment, 1 /*numGoRoutnes*/)
+		proof, err := kzgCtx.ComputeBlobKZGProof((*gokzg4844.Blob)(&blobs[i]), commitment, 1 /*numGoRoutnes*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not compute proof for blob: %v", err)
 		}
