@@ -1148,7 +1148,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 			txIndex := txTask.Version().TxIndex
 
 			var prevReceipt *types.Receipt
-			if txIndex > 0 {
+			if txIndex > 0 && tx > 0 {
 				prevReceipt = blockStatus.results[tx-1].Receipt
 			}
 

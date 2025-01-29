@@ -305,6 +305,7 @@ func testExecutorComb(t *testing.T, totalTxs []int, numReads []int, numWrites []
 	totalExecDuration := time.Duration(0)
 	totalSerialDuration := time.Duration(0)
 
+	fmt.Println(t.Name())
 	for _, numTx := range totalTxs {
 		for _, numRead := range numReads {
 			for _, numWrite := range numWrites {
@@ -323,7 +324,7 @@ func testExecutorComb(t *testing.T, totalTxs []int, numReads []int, numWrites []
 						performance = redCross
 					}
 
-					fmt.Printf("exec duration %v, serial duration %v, time reduced %v %.2f%%, %v \n", execDuration, expectedSerialDuration, expectedSerialDuration-execDuration, float64(expectedSerialDuration-execDuration)/float64(expectedSerialDuration)*100, performance)
+					fmt.Printf("exec duration %v, serial duration %v, improved %v %.2fx, %v \n", execDuration, expectedSerialDuration, expectedSerialDuration-execDuration, float64(expectedSerialDuration)/float64(execDuration), performance)
 
 					totalExecDuration += execDuration
 					totalSerialDuration += expectedSerialDuration
@@ -333,7 +334,7 @@ func testExecutorComb(t *testing.T, totalTxs []int, numReads []int, numWrites []
 	}
 
 	fmt.Println("Improved: ", improved, "Total: ", total, "success rate: ", float64(improved)/float64(total)*100)
-	fmt.Printf("Total exec duration: %v, total serial duration: %v, time reduced: %v, time reduced percent: %.2f%%\n", totalExecDuration, totalSerialDuration, totalSerialDuration-totalExecDuration, float64(totalSerialDuration-totalExecDuration)/float64(totalSerialDuration)*100)
+	fmt.Printf("Total exec duration: %v, total serial duration: %v, time reduced: %v, improved: %.2fx\n", totalExecDuration, totalSerialDuration, totalSerialDuration-totalExecDuration, float64(totalSerialDuration)/float64(totalExecDuration))
 }
 
 // nolint: gocognit
@@ -377,8 +378,8 @@ func testExecutorCombWithMetadata(t *testing.T, totalTxs []int, numReads []int, 
 						improvedMetadata++
 					}
 
-					fmt.Printf("WITHOUT METADATA: exec duration %v, serial duration             %v, time reduced %v %.2f%%, %v \n", execDuration, expectedSerialDuration, expectedSerialDuration-execDuration, float64(expectedSerialDuration-execDuration)/float64(expectedSerialDuration)*100, performance)
-					fmt.Printf("WITH METADATA:    exec duration %v, exec duration with metadata %v, time reduced %v %.2f%%\n", execDuration, execDurationMetadata, execDuration-execDurationMetadata, float64(execDuration-execDurationMetadata)/float64(execDuration)*100)
+					fmt.Printf("WITHOUT METADATA: exec duration %v, serial duration             %v, improved %v %.2fx, %v \n", execDuration, expectedSerialDuration, expectedSerialDuration-execDuration, float64(expectedSerialDuration)/float64(execDuration), performance)
+					fmt.Printf("WITH METADATA:    exec duration %v, exec duration with metadata %v, time reduced %v %.2fx\n", execDuration, execDurationMetadata, execDuration-execDurationMetadata, float64(expectedSerialDuration)/float64(execDurationMetadata))
 
 					totalExecDuration += execDuration
 					totalExecDurationMetadata += execDurationMetadata
@@ -391,9 +392,9 @@ func testExecutorCombWithMetadata(t *testing.T, totalTxs []int, numReads []int, 
 	fmt.Println("\nImproved: ", improved, "Total: ", total, "success rate: ", float64(improved)/float64(total)*100)
 	fmt.Println("Metadata Better: ", improvedMetadata, "out of: ", total, "success rate: ", float64(improvedMetadata)/float64(total)*100)
 	fmt.Println("Rockets (Time of: metadata < serial < without metadata): ", rocket)
-	fmt.Printf("\nWithout metadata <> serial:        Total exec duration:          %v, total serial duration       : %v, time reduced: %v, time reduced percent: %.2f%%\n", totalExecDuration, totalSerialDuration, totalSerialDuration-totalExecDuration, float64(totalSerialDuration-totalExecDuration)/float64(totalSerialDuration)*100)
-	fmt.Printf("With metadata    <> serial:        Total exec duration metadata: %v, total serial duration       : %v, time reduced: %v, time reduced percent: %.2f%%\n", totalExecDurationMetadata, totalSerialDuration, totalSerialDuration-totalExecDurationMetadata, float64(totalSerialDuration-totalExecDurationMetadata)/float64(totalSerialDuration)*100)
-	fmt.Printf("Without metadata <> with metadata: Total exec duration:          %v, total exec duration metadata: %v, time reduced: %v, time reduced percent: %.2f%%\n", totalExecDuration, totalExecDurationMetadata, totalExecDuration-totalExecDurationMetadata, float64(totalExecDuration-totalExecDurationMetadata)/float64(totalExecDuration)*100)
+	fmt.Printf("\nWithout metadata <> serial:        Total exec duration:          %v, total serial duration       : %v, time reduced: %v, improved: %.2fx\n", totalExecDuration, totalSerialDuration, totalSerialDuration-totalExecDuration, float64(totalSerialDuration)/float64(totalExecDuration))
+	fmt.Printf("With metadata    <> serial:        Total exec duration metadata: %v, total serial duration       : %v, time reduced: %v, improved: %.2fx\n", totalExecDurationMetadata, totalSerialDuration, totalSerialDuration-totalExecDurationMetadata, float64(totalSerialDuration)/float64(totalExecDurationMetadata))
+	fmt.Printf("Without metadata <> with metadata: Total exec duration:          %v, total exec duration metadata: %v, time reduced: %v, improved: %.2fx\n", totalExecDuration, totalExecDurationMetadata, totalExecDuration-totalExecDurationMetadata, float64(totalExecDuration)/float64(totalExecDurationMetadata))
 }
 
 func composeValidations(checks []propertyCheck) propertyCheck {
