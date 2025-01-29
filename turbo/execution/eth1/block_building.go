@@ -90,7 +90,7 @@ func (e *EthereumExecutionModule) isThereABlockInDBAlreadyBuilt(ctx context.Cont
 	if candidateHeader == nil {
 		return false, nil
 	}
-	fmt.Println("isThereABlockInDBAlreadyBuilt", candidateHeader.TxHash == expectedTransactionsRoot, candidateHeader.GasLimit == *gasLimit, candidateHeader.ParentHash == parentHash)
+	fmt.Println("isThereABlockInDBAlreadyBuilt", candidateHeader.TxHash, expectedTransactionsRoot, candidateHeader.GasLimit == *gasLimit, candidateHeader.ParentHash == parentHash)
 	return candidateHeader.TxHash == expectedTransactionsRoot && candidateHeader.GasLimit == *gasLimit && candidateHeader.ParentHash == parentHash, nil
 }
 
