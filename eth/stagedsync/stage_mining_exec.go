@@ -130,6 +130,9 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			// forceTxs is sent by Optimism consensus client, and all force txs must be included in the payload.
 			// Therefore, interrupts to block building must not be handled while force txs are being processed.
 			// So do not pass cfg.interrupt
+			current.Txns = current.Txns[:0]
+			current.Receipts = current.Receipts[:0]
+
 			logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, forceTxs, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
 			if err != nil {
 				return err
@@ -211,10 +214,12 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 	var err error
 	var block *types.Block
+	fmt.Println("b len(current.Txns): ", len(current.Txns), "len(current.Receipts): ", len(current.Receipts))
 	block, current.Txns, current.Receipts, current.Requests, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txns, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, chainReader, true, logger)
 	if err != nil {
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
+	fmt.Println("a len(current.Txns): ", len(current.Txns), "len(current.Receipts): ", len(current.Receipts))
 
 	// Simulate the block execution to get the final state root
 	if err = rawdb.WriteHeader(txc.Tx, block.Header()); err != nil {
@@ -259,11 +264,11 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	}
 	current.Header.Root = libcommon.BytesToHash(rh)
 
-	if cfg.chainConfig.IsOptimism() {
-		logger.Debug("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txns.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
-	} else {
-		logger.Info("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txns.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
-	}
+	// if cfg.chainConfig.IsOptimism() {
+	// 	logger.Debug("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txns.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
+	// } else {
+	logger.Info("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txns.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId, "forcedTxs", len(current.ForceTxs))
+	//}
 
 	return nil
 }

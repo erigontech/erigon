@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/kv"
 
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
@@ -67,31 +66,6 @@ func (e *EthereumExecutionModule) evictOldBuilders() {
 	for i := 0; i <= len(e.builders)-engine_helpers.MaxBuilders; i++ {
 		delete(e.builders, ids[i])
 	}
-}
-
-func (e *EthereumExecutionModule) isThereABlockInDBAlreadyBuilt(ctx context.Context, tx kv.Tx, parentHash libcommon.Hash, forceTransactions [][]byte, noTxPool bool, gasLimit *uint64) (bool, error) {
-	// This should only be called for Optimism
-	if !e.config.IsOptimism() || !noTxPool || gasLimit == nil {
-		return false, nil
-	}
-
-	parentHeader, err := e.blockReader.HeaderByHash(ctx, tx, parentHash)
-	if err != nil {
-		return false, err
-	}
-	if parentHeader == nil {
-		return false, nil
-	}
-	candidateHeader, err := e.blockReader.HeaderByNumber(ctx, tx, parentHeader.Number.Uint64()+1)
-	if err != nil {
-		return false, err
-	}
-	expectedTransactionsRoot := types.DeriveSha(types.BinaryTransactions(forceTransactions))
-	if candidateHeader == nil {
-		return false, nil
-	}
-	fmt.Println("isThereABlockInDBAlreadyBuilt", candidateHeader.TxHash, expectedTransactionsRoot, candidateHeader.GasLimit == *gasLimit, candidateHeader.ParentHash == parentHash, candidateHeader.Hash(), candidateHeader.Number.Uint64())
-	return candidateHeader.TxHash == expectedTransactionsRoot && candidateHeader.GasLimit == *gasLimit && candidateHeader.ParentHash == parentHash, nil
 }
 
 // Missing: NewPayload, AssembleBlock
@@ -143,28 +117,6 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	e.nextPayloadId++
 	param.PayloadId = e.nextPayloadId
 	e.lastParameters = &param
-
-	var isThereAMatchingBlockInDB bool
-	// if err := e.db.View(ctx, func(tx kv.Tx) (err error) {
-	// 	isThereAMatchingBlockInDB, err = e.isThereABlockInDBAlreadyBuilt(ctx, tx, param.ParentHash, req.Transactions, req.NoTxPool, req.GasLimit)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	if isThereAMatchingBlockInDB {
-	// 		e.logger.Info("[ForkChoiceUpdated] Block already built in the past", "payload", e.nextPayloadId)
-	// 	}
-
-	// 	return nil
-	// }); err != nil {
-	// 	return nil, err
-	// }
-
-	if isThereAMatchingBlockInDB {
-		return &execution.AssembleBlockResponse{
-			Id:   e.nextPayloadId,
-			Busy: false,
-		}, nil
-	}
 
 	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param)
 	if e.config.IsOptimism() {
