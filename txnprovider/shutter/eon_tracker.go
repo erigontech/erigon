@@ -141,6 +141,10 @@ func (et *KsmEonTracker) Eon(index EonIndex) (Eon, error) {
 }
 
 func (et *KsmEonTracker) readEon(blockNum uint64) (Eon, error) {
+	//
+	// TODO add debug logging for how long this func takes with and without cache being used
+	//
+
 	callOpts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNum)}
 	eonIndex, err := et.ksmContract.GetKeyperSetIndexByBlock(callOpts, blockNum)
 	if err != nil {
