@@ -258,6 +258,10 @@ type Config struct {
 	SilkwormRpcLogDumpResponse   bool
 	SilkwormRpcNumWorkers        uint32
 	SilkwormRpcJsonCompatibility bool
+
+	// PoS Single Slot finality
+	PosSingleSlotFinality        bool
+	PosSingleSlotFinalityBlockAt uint64
 }
 
 type Sync struct {

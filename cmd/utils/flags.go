@@ -1113,6 +1113,14 @@ var (
 		Name:  "shutter.p2p.listen.port",
 		Usage: "Use to override the default p2p listen port (defaults to 23102)",
 	}
+	PosSingleSlotFinalityFlag = cli.BoolFlag{
+		Name:  "pos.ssf",
+		Usage: "Enabling PoS Single Slot Finality",
+	}
+	PosSingleSlotFinalityBlockAtFlag = cli.Int64Flag{
+		Name:  "pos.ssf.block",
+		Usage: "Enabling PoS Single Slot Finality since block",
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag, &DiagSpeedTestFlag}
@@ -1821,6 +1829,11 @@ func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.SilkwormRpcJsonCompatibility = ctx.Bool(SilkwormRpcJsonCompatibilityFlag.Name)
 }
 
+func setPosFinality(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.PosSingleSlotFinality = ctx.Bool(PosSingleSlotFinalityFlag.Name)
+	cfg.PosSingleSlotFinalityBlockAt = ctx.Uint64(PosSingleSlotFinalityBlockAtFlag.Name)
+}
+
 // CheckExclusive verifies that only a single instance of the provided flags was
 // set by the user. Each flag might optionally be followed by a string type to
 // specialize it further.
@@ -1929,6 +1942,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg, nodeConfig, logger)
+	setPosFinality(ctx, cfg)
 	setSilkworm(ctx, cfg)
 	if err := setBeaconAPI(ctx, cfg); err != nil {
 		log.Error("Failed to set beacon API", "err", err)
