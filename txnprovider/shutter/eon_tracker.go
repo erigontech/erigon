@@ -22,20 +22,25 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sync/atomic"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
-type EonPool struct {
+type EonTracker struct {
+	logger               log.Logger
 	config               Config
+	blockListener        BlockListener
 	contractBackend      bind.ContractBackend
 	ksmContract          *contracts.KeyperSetManager
 	keyBroadcastContract *contracts.KeyBroadcastContract
+	currentEon           atomic.Pointer[Eon]
 }
 
-func NewEonPool(config Config, contractBackend bind.ContractBackend) EonPool {
+func NewEonTracker(config Config, blockListener BlockListener, contractBackend bind.ContractBackend) *EonTracker {
 	ksmContractAddr := libcommon.HexToAddress(config.KeyperSetManagerContractAddress)
 	ksmContract, err := contracts.NewKeyperSetManager(ksmContractAddr, contractBackend)
 	if err != nil {
@@ -48,40 +53,64 @@ func NewEonPool(config Config, contractBackend bind.ContractBackend) EonPool {
 		panic(fmt.Errorf("failed to create KeyBroadcastContract: %w", err))
 	}
 
-	return EonPool{
+	return &EonTracker{
 		config:               config,
+		blockListener:        blockListener,
 		contractBackend:      contractBackend,
 		ksmContract:          ksmContract,
 		keyBroadcastContract: keyBroadcastContract,
 	}
 }
 
-func (ep EonPool) Run(ctx context.Context) error {
-	//
-	// TODO listen to new events for new eons and pool them
-	//      pool is like a lru cache - keeps them pooled based on activation block
-	//      may need a tree implementation that allows Seek semantic
-	//
-	return nil
+func (et *EonTracker) Run(ctx context.Context) error {
+	et.logger.Info("running eon tracker")
+
+	blockEventC := make(chan BlockEvent)
+	unregisterBlockEventObserver := et.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
+		select {
+		case <-ctx.Done(): // no-op
+		case blockEventC <- blockEvent:
+		}
+	})
+
+	defer unregisterBlockEventObserver()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case blockEvent := <-blockEventC:
+			eon, err := et.readEon(blockEvent.BlockNum)
+			if err != nil {
+				return err
+			}
+
+			et.currentEon.Store(&eon)
+		}
+	}
 }
 
-func (ep EonPool) Eon(blockNum uint64) (Eon, error) {
-	//
-	// TODO - check if we have it in the pool first, if not then fallback (fallback should make sure to wait until blockNum has been observed)
-	//
+func (et *EonTracker) CurrentEon() (Eon, bool) {
+	eon := et.currentEon.Load()
+	if eon == nil {
+		return Eon{}, false
+	}
 
+	return *eon, true
+}
+
+func (et *EonTracker) readEon(blockNum uint64) (Eon, error) {
 	callOpts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNum)}
-	eonIndex, err := ep.ksmContract.GetKeyperSetIndexByBlock(callOpts, blockNum)
+	eonIndex, err := et.ksmContract.GetKeyperSetIndexByBlock(callOpts, blockNum)
 	if err != nil {
 		return Eon{}, fmt.Errorf("failed to get KeyperSetIndexByBlock: %w", err)
 	}
 
-	keyperSetAddress, err := ep.ksmContract.GetKeyperSetAddress(&bind.CallOpts{}, eonIndex)
+	keyperSetAddress, err := et.ksmContract.GetKeyperSetAddress(&bind.CallOpts{}, eonIndex)
 	if err != nil {
 		return Eon{}, fmt.Errorf("failed to get KeyperSetAddress: %w", err)
 	}
 
-	keyperSet, err := contracts.NewKeyperSet(keyperSetAddress, ep.contractBackend)
+	keyperSet, err := contracts.NewKeyperSet(keyperSetAddress, et.contractBackend)
 	if err != nil {
 		return Eon{}, fmt.Errorf("failed to create KeyperSet: %w", err)
 	}
@@ -96,24 +125,42 @@ func (ep EonPool) Eon(blockNum uint64) (Eon, error) {
 		return Eon{}, fmt.Errorf("failed to get KeyperSet members: %w", err)
 	}
 
-	key, err := ep.keyBroadcastContract.GetEonKey(callOpts, eonIndex)
+	key, err := et.keyBroadcastContract.GetEonKey(callOpts, eonIndex)
 	if err != nil {
 		return Eon{}, fmt.Errorf("failed to get EonKey: %w", err)
 	}
 
+	activationBlock, err := et.ksmContract.GetKeyperSetActivationBlock(callOpts, eonIndex)
+	if err != nil {
+		return Eon{}, fmt.Errorf("failed to get KeyperSet activation block: %w", err)
+	}
+	if activationBlock < blockNum {
+		return Eon{}, fmt.Errorf("unexpected invalid activation block: %d < %d", activationBlock, blockNum)
+	}
+
+	finalized, err := keyperSet.IsFinalized(callOpts)
+	if err != nil {
+		return Eon{}, fmt.Errorf("failed to get KeyperSet finalized: %w", err)
+	}
+	if !finalized {
+		return Eon{}, fmt.Errorf("unexpected KeyperSet is not finalized: eon=%d, address=%s", eonIndex, keyperSetAddress)
+	}
+
 	eon := Eon{
-		Index:     eonIndex,
-		Key:       key,
-		Threshold: threshold,
-		Members:   members,
+		Index:           eonIndex,
+		ActivationBlock: activationBlock,
+		Key:             key,
+		Threshold:       threshold,
+		Members:         members,
 	}
 
 	return eon, nil
 }
 
 type Eon struct {
-	Index     uint64
-	Key       []byte
-	Threshold uint64
-	Members   []libcommon.Address
+	Index           uint64
+	ActivationBlock uint64
+	Key             []byte
+	Threshold       uint64
+	Members         []libcommon.Address
 }

@@ -38,11 +38,12 @@ type Pool struct {
 	logger                  log.Logger
 	config                  Config
 	secondaryTxnProvider    txnprovider.TxnProvider
+	blockListener           BlockListener
 	decryptionKeysListener  DecryptionKeysListener
 	decryptionKeysProcessor DecryptionKeysProcessor
 	encryptedTxnsPool       EncryptedTxnsPool
 	decryptedTxnsPool       DecryptedTxnsPool
-	eonPool                 EonPool
+	eonTracker              *EonTracker
 	slotCalculator          SlotCalculator
 }
 
@@ -51,20 +52,23 @@ func NewPool(
 	config Config,
 	secondaryTxnProvider txnprovider.TxnProvider,
 	contractBackend bind.ContractBackend,
+	stateChangesClient stateChangesClient,
 ) *Pool {
 	logger = logger.New("component", "shutter")
 	decryptionKeysListener := NewDecryptionKeysListener(logger, config)
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
-	encryptedTxnsPool := NewEncryptedTxnsPool(config, contractBackend)
-	eonPool := NewEonPool(config, contractBackend)
+	encryptedTxnsPool := NewEncryptedTxnsPool(logger, config, contractBackend)
+	blockListener := NewBlockListener(logger, stateChangesClient)
+	eonTracker := NewEonTracker(config, blockListener, contractBackend)
 	return &Pool{
 		logger:                  logger,
 		config:                  config,
 		secondaryTxnProvider:    secondaryTxnProvider,
+		blockListener:           blockListener,
 		decryptionKeysListener:  decryptionKeysListener,
 		decryptionKeysProcessor: decryptionKeysProcessor,
 		encryptedTxnsPool:       encryptedTxnsPool,
-		eonPool:                 eonPool,
+		eonTracker:              eonTracker,
 		slotCalculator:          NewSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot),
 	}
 }
@@ -75,13 +79,14 @@ func (p Pool) Run(ctx context.Context) error {
 	unregisterDkpObserver := p.decryptionKeysListener.RegisterObserver(func(msg *proto.DecryptionKeys) {
 		p.decryptionKeysProcessor.Enqueue(msg)
 	})
-	defer unregisterDkpObserver()
 
+	defer unregisterDkpObserver()
 	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return p.blockListener.Run(ctx) })
 	eg.Go(func() error { return p.decryptionKeysListener.Run(ctx) })
 	eg.Go(func() error { return p.decryptionKeysProcessor.Run(ctx) })
 	eg.Go(func() error { return p.encryptedTxnsPool.Run(ctx) })
-	eg.Go(func() error { return p.eonPool.Run(ctx) })
+	eg.Go(func() error { return p.eonTracker.Run(ctx) })
 	return eg.Wait()
 }
 

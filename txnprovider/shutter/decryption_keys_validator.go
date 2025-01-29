@@ -33,19 +33,29 @@ var (
 	ErrInstanceIdMismatch     = errors.New("instance id mismatch")
 	ErrMissingGnosisExtraData = errors.New("missing gnosis extra data")
 	ErrSlotTooLarge           = errors.New("slot too large")
+	ErrSlotInThePast          = errors.New("slot in the past")
+	ErrSlotInTheFuture        = errors.New("slot in the future")
 	ErrTxPointerTooLarge      = errors.New("tx pointer too large")
 	ErrEonTooLarge            = errors.New("eon too large")
+	ErrEonUnavailable         = errors.New("eon unavailable")
+	ErrEonInThePast           = errors.New("eon in the past")
+	ErrEonInTheFuture         = errors.New("eon in the future")
 	ErrEmptyKeys              = errors.New("empty keys")
 	ErrTooManyKeys            = errors.New("too many keys")
+	ErrIgnoreMsg              = errors.New("ignoring msg")
 )
 
 type DecryptionKeysValidator struct {
-	config Config
+	config         Config
+	slotCalculator SlotCalculator
+	eonTracker     *EonTracker
 }
 
-func NewDecryptionKeysValidator(config Config) DecryptionKeysValidator {
+func NewDecryptionKeysValidator(config Config, slotCalculator SlotCalculator, eonTracker *EonTracker) DecryptionKeysValidator {
 	return DecryptionKeysValidator{
-		config: config,
+		config:         config,
+		slotCalculator: slotCalculator,
+		eonTracker:     eonTracker,
 	}
 }
 
@@ -59,8 +69,19 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 		return ErrMissingGnosisExtraData
 	}
 
-	if gnosisExtraData.Slot > math.MaxInt64 {
-		return fmt.Errorf("%w: %d", ErrSlotTooLarge, gnosisExtraData.Slot)
+	msgSlot := gnosisExtraData.Slot
+	if msgSlot > math.MaxInt64 {
+		return fmt.Errorf("%w: %d", ErrSlotTooLarge, msgSlot)
+	}
+
+	currentSlot := v.slotCalculator.CalcCurrentSlot()
+	if msgSlot < currentSlot {
+		return fmt.Errorf("%w: msgSlot=%d, currentSlot=%d", ErrSlotInThePast, msgSlot, currentSlot)
+	}
+
+	if msgSlot > currentSlot+1 {
+		// msgSlot can be either for current slot or for the next one depending on timing, but not further ahead than that
+		return fmt.Errorf("%w: msgSlot=%d, currentSlot=%d", ErrSlotInTheFuture, msgSlot, currentSlot)
 	}
 
 	if gnosisExtraData.TxPointer > math.MaxInt32 {
@@ -69,6 +90,21 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 
 	if msg.Eon > math.MaxInt64 {
 		return fmt.Errorf("%w: %d", ErrEonTooLarge, msg.Eon)
+	}
+
+	currentEon, ok := v.eonTracker.CurrentEon()
+	if !ok {
+		// we're still syncing and are behind - ignore msg, without penalizing peer
+		return fmt.Errorf("%w: %w", ErrIgnoreMsg, ErrEonUnavailable)
+	}
+
+	if msg.Eon < currentEon.Index {
+		return fmt.Errorf("%w: msg.Eon=%d, currentEon=%d", ErrEonInThePast, msg.Eon, currentEon.Index)
+	}
+
+	if msg.Eon > currentEon.Index {
+		// we may be behind - ignore msg, without penalizing peer
+		return fmt.Errorf("%w: %w: msg.Eon=%d, currentEon=%d", ErrIgnoreMsg, ErrEonInTheFuture, msg.Eon, currentEon.Index)
 	}
 
 	if len(msg.Keys) == 0 {
@@ -81,15 +117,20 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 
 	//
 	// TODO when we add the shcrypto library and smart contract state accessors:
-	//      - add validation for signers and signatures based on keyper set and eon infos
+	//      - add validation for signers and signatures based on keyper set and currentEon infos
 	//      - add DecryptionKeys.Validate() equivalent which checks the Key unmarshalling into shcrypto.EpochSecretKey
 	//      - add validation forVerifyEpochSecretKey: check if we should be doing this validation
 	//
 	return nil
 }
 
-func NewDecryptionKeysP2pValidatorEx(logger log.Logger, config Config) pubsub.ValidatorEx {
-	dkv := NewDecryptionKeysValidator(config)
+func NewDecryptionKeysP2pValidatorEx(
+	logger log.Logger,
+	config Config,
+	slotCalculator SlotCalculator,
+	eonTracker *EonTracker,
+) pubsub.ValidatorEx {
+	dkv := NewDecryptionKeysValidator(config, slotCalculator, eonTracker)
 	return func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		if topic := msg.GetTopic(); topic != DecryptionKeysTopic {
 			logger.Debug("rejecting decryption keys msg due to topic mismatch", "topic", topic, "peer", id)
@@ -104,7 +145,12 @@ func NewDecryptionKeysP2pValidatorEx(logger log.Logger, config Config) pubsub.Va
 
 		err = dkv.Validate(decryptionKeys)
 		if err != nil {
-			logger.Debug("rejecting decryption keys msg due to data validation error", "err", err, "peer", id)
+			if errors.Is(err, ErrIgnoreMsg) {
+				logger.Debug("ignoring decryption keys msg due to", "err", err, "peer", id)
+				return pubsub.ValidationIgnore
+			}
+
+			logger.Debug("rejecting decryption keys msg due to", "err", err, "peer", id)
 			return pubsub.ValidationReject
 		}
 

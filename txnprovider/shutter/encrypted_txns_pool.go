@@ -26,17 +26,19 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
 type EncryptedTxnsPool struct {
+	logger            log.Logger
 	config            Config
 	sequencerContract *contracts.Sequencer
 	submissions       *lru.Cache[TxnIndex, EncryptedTxnSubmission]
 }
 
-func NewEncryptedTxnsPool(config Config, contractBackend bind.ContractBackend) EncryptedTxnsPool {
+func NewEncryptedTxnsPool(logger log.Logger, config Config, contractBackend bind.ContractBackend) EncryptedTxnsPool {
 	sequencerContractAddress := libcommon.HexToAddress(config.SequencerContractAddress)
 	sequencerContract, err := contracts.NewSequencer(sequencerContractAddress, contractBackend)
 	if err != nil {
@@ -49,15 +51,18 @@ func NewEncryptedTxnsPool(config Config, contractBackend bind.ContractBackend) E
 	}
 
 	return EncryptedTxnsPool{
+		logger:            logger,
 		config:            config,
 		sequencerContract: sequencerContract,
 		submissions:       submissions,
 	}
 }
 
-func (utp EncryptedTxnsPool) Run(ctx context.Context) error {
+func (etp EncryptedTxnsPool) Run(ctx context.Context) error {
+	etp.logger.Info("running encrypted txns pool")
+
 	submissionEventC := make(chan *contracts.SequencerTransactionSubmitted)
-	submissionEventSub, err := utp.sequencerContract.WatchTransactionSubmitted(&bind.WatchOpts{}, submissionEventC)
+	submissionEventSub, err := etp.sequencerContract.WatchTransactionSubmitted(&bind.WatchOpts{}, submissionEventC)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to sequencer TransactionSubmitted event: %w", err)
 	}
@@ -77,7 +82,7 @@ func (utp EncryptedTxnsPool) Run(ctx context.Context) error {
 				GasLimit:             event.GasLimit,
 			}
 
-			utp.submissions.Add(encryptedTxnSubmission.TxnIndex, encryptedTxnSubmission)
+			etp.submissions.Add(encryptedTxnSubmission.TxnIndex, encryptedTxnSubmission)
 		}
 	}
 }
