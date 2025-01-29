@@ -144,6 +144,7 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 
 			executionAt = expectedExecutionAt
 			parent = exectedParent
+
 		} else {
 			return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockBuilderParameters.ParentHash)
 		}
