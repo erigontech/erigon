@@ -1747,9 +1747,11 @@ func (zkapi *ZkEvmAPIImpl) GetProof(ctx context.Context, address common.Address,
 		StorageProof:    make([]accounts.SMTStorageProofResult, 0),
 	}
 
-	addressArrayBig := smtUtils.ScalarToArrayBig(smtUtils.ConvertHexToBigInt(address.String()))
 	for _, k := range storageKeys {
-		storageKey := smtUtils.KeyContractStorage(addressArrayBig, k.String())
+		storageKey, err := smtUtils.KeyContractStorage(address.String(), k.String())
+		if err != nil {
+			return nil, fmt.Errorf("key contract storage failed: %w", err)
+		}
 		storageProofs := smt.FilterProofs(proofs, storageKey)
 
 		valueBytes, err := smt.VerifyAndGetVal(stateRootNode, storageProofs, storageKey)

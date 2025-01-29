@@ -135,14 +135,15 @@ func (s *SMT) GetAccountCodeHash(address libcommon.Address) (libcommon.Hash, err
 // getValue returns the value of a key from SMT by traversing the SMT
 func (s *SMT) getValue(key int, address libcommon.Address, storageKey *libcommon.Hash) ([]byte, error) {
 	var kn utils.NodeKey
+	var err error
 
 	if storageKey == nil {
 		kn = utils.Key(address.String(), key)
 	} else {
-		a := utils.ConvertHexToBigInt(address.String())
-		add := utils.ScalarToArrayBig(a)
-
-		kn = utils.KeyContractStorage(add, storageKey.String())
+		kn, err = utils.KeyContractStorage(address.String(), storageKey.String())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return s.getValueInBytes(kn)

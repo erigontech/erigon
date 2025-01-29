@@ -927,10 +927,10 @@ func (tds *TrieDbState) ResolveSMTRetainList(inclusion map[libcommon.Address][]l
 	}
 
 	getSMTPath := func(ethAddr string, key string) ([]int, error) {
-		a := utils.ConvertHexToBigInt(ethAddr)
-		addr := utils.ScalarToArrayBig(a)
-
-		storageKey := utils.KeyContractStorage(addr, key)
+		storageKey, err := utils.KeyContractStorage(ethAddr, key)
+		if err != nil {
+			return nil, err
+		}
 
 		return storageKey.GetPath(), nil
 	}

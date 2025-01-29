@@ -162,6 +162,31 @@ func TestScalarToArrayBig(t *testing.T) {
 	}
 }
 
+func TestScalarToArrayUint64(t *testing.T) {
+	scalar := big.NewInt(0x1234567890ABCDEF)
+
+	expected := [8]uint64{
+		0x90ABCDEF,
+		0x12345678,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+	}
+
+	result, err := ScalarToArrayUint64(scalar)
+
+	if err != nil {
+		t.Errorf("ScalarToArray = %v; want %v", result, expected)
+	}
+
+	if !reflect.DeepEqual(result, expected) {
+		t.Errorf("ScalarToArray = %v; want %v", result, expected)
+	}
+}
+
 func BenchmarkScalarToArrayBig(b *testing.B) {
 	scalar := big.NewInt(0x1234567890ABCDEF)
 	for i := 0; i < b.N; i++ {
@@ -768,6 +793,84 @@ func TestNodeKeyFromPath(t *testing.T) {
 
 		if result != input {
 			t.Errorf("parse doesn't match, expected: %v, got: %v", input, result)
+		}
+	}
+}
+
+func Test_Key(t *testing.T) {
+	tests := []struct {
+		input  string
+		output NodeKey
+	}{
+		{
+			input: "0xe859276098f208D003ca6904C6cC26629Ee364Ce",
+			output: NodeKey{
+				9755015262748197613,
+				11140630475045976694,
+				14930209430661078379,
+				6319951756608990063,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		result := Key(test.input, 1)
+		if result != test.output {
+			t.Errorf("expected %v but got %v", test.output, result)
+		}
+	}
+}
+
+func TestKeyContractStorage(t *testing.T) {
+	tests := []struct {
+		input  string
+		output NodeKey
+	}{
+		{
+			input: "0xe859276098f208D003ca6904C6cC26629Ee364Ce",
+			output: NodeKey{
+				9485388526025222793,
+				2844922146222416636,
+				12800508867551015356,
+				9480521524011931274,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		result, err := KeyContractStorage(test.input, "0x1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != test.output {
+			t.Errorf("expected %v but got %v", test.output, result)
+		}
+	}
+}
+
+func TestKeyBig(t *testing.T) {
+	tests := []struct {
+		input  *big.Int
+		output NodeKey
+	}{
+		{
+			input: big.NewInt(1092034958475866),
+			output: NodeKey{
+				11593000745318970063,
+				7942385326937081179,
+				13970824778267919554,
+				7405798476109204467,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		result, err := KeyBig(test.input, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if *result != test.output {
+			t.Errorf("expected %v but got %v", test.output, result)
 		}
 	}
 }
