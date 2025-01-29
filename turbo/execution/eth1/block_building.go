@@ -89,7 +89,7 @@ func (e *EthereumExecutionModule) isThereABlockInDBAlreadyBuilt(ctx context.Cont
 		return false, err
 	}
 	expectedTransactionsRoot := types.DeriveSha(types.BinaryTransactions(forceTransactions))
-	fmt.Println("isThereABlockInDBAlreadyBuilt", candidateHeader == nil)
+	fmt.Println("isThereABlockInDBAlreadyBuilt", candidateHeader.TxHash == expectedTransactionsRoot, candidateHeader.GasLimit == *gasLimit, candidateHeader.ParentHash == parentHash)
 	if candidateHeader == nil {
 		return false, nil
 	}
