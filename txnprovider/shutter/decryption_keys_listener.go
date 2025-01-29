@@ -43,16 +43,20 @@ const (
 )
 
 type DecryptionKeysListener struct {
-	logger    log.Logger
-	config    Config
-	observers *event.Observers[*proto.DecryptionKeys]
+	logger         log.Logger
+	config         Config
+	observers      *event.Observers[*proto.DecryptionKeys]
+	slotCalculator SlotCalculator
+	eonTracker     EonTracker
 }
 
-func NewDecryptionKeysListener(logger log.Logger, config Config) DecryptionKeysListener {
+func NewDecryptionKeysListener(logger log.Logger, config Config, sc SlotCalculator, et EonTracker) DecryptionKeysListener {
 	return DecryptionKeysListener{
-		logger:    logger,
-		config:    config,
-		observers: event.NewObservers[*proto.DecryptionKeys](),
+		logger:         logger,
+		config:         config,
+		observers:      event.NewObservers[*proto.DecryptionKeys](),
+		slotCalculator: sc,
+		eonTracker:     et,
 	}
 }
 
@@ -209,7 +213,7 @@ func (dkl DecryptionKeysListener) connectBootstrapNodes(ctx context.Context, hos
 }
 
 func (dkl DecryptionKeysListener) listenLoop(ctx context.Context, pubSub *pubsub.PubSub) error {
-	topicValidator := NewDecryptionKeysP2pValidatorEx(dkl.logger, dkl.config)
+	topicValidator := NewDecryptionKeysP2pValidatorEx(dkl.logger, dkl.config, dkl.slotCalculator, dkl.eonTracker)
 	err := pubSub.RegisterTopicValidator(DecryptionKeysTopic, topicValidator)
 	if err != nil {
 		return err

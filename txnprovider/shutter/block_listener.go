@@ -24,6 +24,11 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
+type BlockEvent struct {
+	BlockNum uint64
+	Unwind   bool
+}
+
 type BlockListener struct {
 	logger             log.Logger
 	stateChangesClient stateChangesClient
@@ -67,9 +72,4 @@ func (bl BlockListener) Run(ctx context.Context) error {
 	}
 
 	return err
-}
-
-type BlockEvent struct {
-	BlockNum uint64
-	Unwind   bool
 }

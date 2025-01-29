@@ -43,7 +43,7 @@ type Pool struct {
 	decryptionKeysProcessor DecryptionKeysProcessor
 	encryptedTxnsPool       EncryptedTxnsPool
 	decryptedTxnsPool       DecryptedTxnsPool
-	eonTracker              *EonTracker
+	eonTracker              EonTracker
 	slotCalculator          SlotCalculator
 }
 
@@ -55,11 +55,12 @@ func NewPool(
 	stateChangesClient stateChangesClient,
 ) *Pool {
 	logger = logger.New("component", "shutter")
-	decryptionKeysListener := NewDecryptionKeysListener(logger, config)
+	slotCalculator := NewBeaconChainSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot)
+	blockListener := NewBlockListener(logger, stateChangesClient)
+	eonTracker := NewKsmEonTracker(config, blockListener, contractBackend)
+	decryptionKeysListener := NewDecryptionKeysListener(logger, config, slotCalculator, eonTracker)
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
 	encryptedTxnsPool := NewEncryptedTxnsPool(logger, config, contractBackend)
-	blockListener := NewBlockListener(logger, stateChangesClient)
-	eonTracker := NewEonTracker(config, blockListener, contractBackend)
 	return &Pool{
 		logger:                  logger,
 		config:                  config,
@@ -69,7 +70,7 @@ func NewPool(
 		decryptionKeysProcessor: decryptionKeysProcessor,
 		encryptedTxnsPool:       encryptedTxnsPool,
 		eonTracker:              eonTracker,
-		slotCalculator:          NewSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot),
+		slotCalculator:          slotCalculator,
 	}
 }
 

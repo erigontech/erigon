@@ -39,7 +39,7 @@ var (
 	ErrSlotInTheFuture        = errors.New("slot in the future")
 	ErrTxPointerTooLarge      = errors.New("tx pointer too large")
 	ErrEonTooLarge            = errors.New("eon too large")
-	ErrEonUnavailable         = errors.New("eon unavailable")
+	ErrCurrentEonUnavailable  = errors.New("current eon unavailable")
 	ErrEonInThePast           = errors.New("eon in the past")
 	ErrEonInTheFuture         = errors.New("eon in the future")
 	ErrEmptyKeys              = errors.New("empty keys")
@@ -50,14 +50,14 @@ var (
 type DecryptionKeysValidator struct {
 	config         Config
 	slotCalculator SlotCalculator
-	eonTracker     *EonTracker
+	eonTracker     EonTracker
 }
 
-func NewDecryptionKeysValidator(config Config, slotCalculator SlotCalculator, eonTracker *EonTracker) DecryptionKeysValidator {
+func NewDecryptionKeysValidator(config Config, sc SlotCalculator, et EonTracker) DecryptionKeysValidator {
 	return DecryptionKeysValidator{
 		config:         config,
-		slotCalculator: slotCalculator,
-		eonTracker:     eonTracker,
+		slotCalculator: sc,
+		eonTracker:     et,
 	}
 }
 
@@ -97,7 +97,7 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 	currentEon, ok := v.eonTracker.CurrentEon()
 	if !ok {
 		// we're still syncing and are behind - ignore msg, without penalizing peer
-		return fmt.Errorf("%w: %w", ErrIgnoreMsg, ErrEonUnavailable)
+		return fmt.Errorf("%w: %w", ErrIgnoreMsg, ErrCurrentEonUnavailable)
 	}
 
 	if msg.Eon < currentEon.Index {
@@ -126,13 +126,8 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 	return nil
 }
 
-func NewDecryptionKeysP2pValidatorEx(
-	logger log.Logger,
-	config Config,
-	slotCalculator SlotCalculator,
-	eonTracker *EonTracker,
-) pubsub.ValidatorEx {
-	dkv := NewDecryptionKeysValidator(config, slotCalculator, eonTracker)
+func NewDecryptionKeysP2pValidatorEx(logger log.Logger, config Config, sc SlotCalculator, et EonTracker) pubsub.ValidatorEx {
+	dkv := NewDecryptionKeysValidator(config, sc, et)
 	return func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		if topic := msg.GetTopic(); topic != DecryptionKeysTopic {
 			logger.Debug("rejecting decryption keys msg due to topic mismatch", "topic", topic, "peer", id)

@@ -30,7 +30,20 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
-type EonTracker struct {
+type EonTracker interface {
+	CurrentEon() (Eon, bool)
+	Run(ctx context.Context) error
+}
+
+type Eon struct {
+	Index           uint64
+	ActivationBlock uint64
+	Key             []byte
+	Threshold       uint64
+	Members         []libcommon.Address
+}
+
+type KsmEonTracker struct {
 	logger               log.Logger
 	config               Config
 	blockListener        BlockListener
@@ -40,7 +53,7 @@ type EonTracker struct {
 	currentEon           atomic.Pointer[Eon]
 }
 
-func NewEonTracker(config Config, blockListener BlockListener, contractBackend bind.ContractBackend) *EonTracker {
+func NewKsmEonTracker(config Config, blockListener BlockListener, contractBackend bind.ContractBackend) *KsmEonTracker {
 	ksmContractAddr := libcommon.HexToAddress(config.KeyperSetManagerContractAddress)
 	ksmContract, err := contracts.NewKeyperSetManager(ksmContractAddr, contractBackend)
 	if err != nil {
@@ -53,7 +66,7 @@ func NewEonTracker(config Config, blockListener BlockListener, contractBackend b
 		panic(fmt.Errorf("failed to create KeyBroadcastContract: %w", err))
 	}
 
-	return &EonTracker{
+	return &KsmEonTracker{
 		config:               config,
 		blockListener:        blockListener,
 		contractBackend:      contractBackend,
@@ -62,7 +75,7 @@ func NewEonTracker(config Config, blockListener BlockListener, contractBackend b
 	}
 }
 
-func (et *EonTracker) Run(ctx context.Context) error {
+func (et *KsmEonTracker) Run(ctx context.Context) error {
 	et.logger.Info("running eon tracker")
 
 	blockEventC := make(chan BlockEvent)
@@ -89,7 +102,7 @@ func (et *EonTracker) Run(ctx context.Context) error {
 	}
 }
 
-func (et *EonTracker) CurrentEon() (Eon, bool) {
+func (et *KsmEonTracker) CurrentEon() (Eon, bool) {
 	eon := et.currentEon.Load()
 	if eon == nil {
 		return Eon{}, false
@@ -98,7 +111,7 @@ func (et *EonTracker) CurrentEon() (Eon, bool) {
 	return *eon, true
 }
 
-func (et *EonTracker) readEon(blockNum uint64) (Eon, error) {
+func (et *KsmEonTracker) readEon(blockNum uint64) (Eon, error) {
 	callOpts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNum)}
 	eonIndex, err := et.ksmContract.GetKeyperSetIndexByBlock(callOpts, blockNum)
 	if err != nil {
@@ -155,12 +168,4 @@ func (et *EonTracker) readEon(blockNum uint64) (Eon, error) {
 	}
 
 	return eon, nil
-}
-
-type Eon struct {
-	Index           uint64
-	ActivationBlock uint64
-	Key             []byte
-	Threshold       uint64
-	Members         []libcommon.Address
 }
