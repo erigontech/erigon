@@ -169,7 +169,7 @@ func (a *RelationalAppendableRoTx) Put(id Id, value VVType, tx kv.RwTx) error {
 
 func (a *RelationalAppendableRoTx) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
 	fromKey := a.a.encTs(uint64(1)) // config driven
-	toKey := a.a.encTs(uint64(baseKeyTo))
+	toKey := a.a.encTs(uint64(baseKeyTo) - 1)
 	return DeleteRangeFromTbl(a.a.valsTbl, fromKey, toKey, limit, rwTx)
 }
 

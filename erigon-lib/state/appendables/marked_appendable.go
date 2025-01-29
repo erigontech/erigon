@@ -190,7 +190,7 @@ func (r *MarkedAppendableRoTx) Prune(ctx context.Context, baseKeyTo Num, limit u
 	a := r.a
 	fromKey := uint64(1)
 	fromKeyPrefix := a.encTs(fromKey)
-	toKeyPrefix := a.encTs(uint64(baseKeyTo))
+	toKeyPrefix := a.encTs(uint64(baseKeyTo) - 1)
 	if err := DeleteRangeFromTbl(a.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, rwTx); err != nil {
 		return err
 	}
