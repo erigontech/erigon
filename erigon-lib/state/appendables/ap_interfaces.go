@@ -30,12 +30,13 @@ type Freezer interface {
 }
 
 type Appendable interface {
+	// might have more methods...
 	SetFreezer(Freezer)
 	SetIndexBuilders(...AccessorIndexBuilder)
 	DirtySegmentsMaxNum() Num
 	VisibleSegmentsMaxNum() Num
 	RecalcVisibleFiles(baseNumTo Num)
-	// don't put BeginFilesRo here, since it returns PointAppendableRo, RangedAppendableRo etc. (each has different query patterns)
+	// don't put BeginFilesRo here, since it returns different kinds of Ro etc. (each has different query patterns)
 	// so anyway aggregator has to recover concrete type, and then it can
 	// call BeginFilesRo on that
 }
