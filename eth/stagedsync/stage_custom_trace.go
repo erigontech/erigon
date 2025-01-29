@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -227,6 +228,31 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 		},
 	}, ctx, tx, cfg, logger); err != nil {
 		return err
+	}
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
+	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+	if err != nil {
+		return err
+	}
+	if toBlock > 0 {
+		toBlock-- // [fromBlock,toBlock)
+	}
+	toTxNum, err := txNumsReader.Max(tx, toBlock)
+	if err != nil {
+		return err
+	}
+	prevCumGasUsed := -1
+	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
+		cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
+		if err != nil {
+			return err
+		}
+		if int(cumGasUsed) == prevCumGasUsed {
+			_, blockNum, _ := txNumsReader.FindBlockNum(tx, txNum)
+			panic("bad receipt at txnum" + strconv.Itoa(int(txNum)) + " block: " + strconv.Itoa(int(blockNum)))
+		}
+		prevCumGasUsed = int(cumGasUsed)
 	}
 
 	return nil
