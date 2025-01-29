@@ -49,7 +49,8 @@ func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
 	//
 	// TODO - the dkp can actually clean the encrypted and decrypted pools (so we wont have to use LRU)
 	//      - uses block listener - when a new block comes in - calculate its slots using its timestamp (need changes to StateChange) - remove all decrypted txns for slots <= slot
-	//      - remember previous txn pointer from the previous decryption keys msg - when the new one comes if the txn pointer has moved forward then drop all
+	//      - remember previous txn pointer from the previous decryption keys msg - when the new one comes if the txn pointer has moved forward then drop all <= old tx pointer
+	//        (this also raises the question - is it possible for the validator to reject old TxPointers)
 	//
 
 	for {
