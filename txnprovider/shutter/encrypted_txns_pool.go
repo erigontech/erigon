@@ -31,6 +31,18 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
+type TxnIndex uint64
+
+// EncryptedTxnSubmission mimics contracts.SequencerTransactionSubmitted but without the "Raw" attribute to save memory.
+type EncryptedTxnSubmission struct {
+	Eon                  uint64
+	TxnIndex             TxnIndex
+	IdentityPrefix       [32]byte
+	Sender               libcommon.Address
+	EncryptedTransaction []byte
+	GasLimit             *big.Int
+}
+
 type EncryptedTxnsPool struct {
 	logger            log.Logger
 	config            Config
@@ -85,16 +97,4 @@ func (etp EncryptedTxnsPool) Run(ctx context.Context) error {
 			etp.submissions.Add(encryptedTxnSubmission.TxnIndex, encryptedTxnSubmission)
 		}
 	}
-}
-
-type TxnIndex uint64
-
-// EncryptedTxnSubmission mimics contracts.SequencerTransactionSubmitted but without the "Raw" attribute to save memory.
-type EncryptedTxnSubmission struct {
-	Eon                  uint64
-	TxnIndex             TxnIndex
-	IdentityPrefix       [32]byte
-	Sender               libcommon.Address
-	EncryptedTransaction []byte
-	GasLimit             *big.Int
 }
