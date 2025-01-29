@@ -24,8 +24,12 @@ import (
 )
 
 type DecryptionKeysProcessor struct {
-	logger log.Logger
-	queue  chan *proto.DecryptionKeys
+	logger            log.Logger
+	config            Config
+	eonTracker        EonTracker
+	encryptedTxnsPool EncryptedTxnsPool
+	decryptedTxnsPool DecryptedTxnsPool
+	queue             chan *proto.DecryptionKeys
 }
 
 func NewDecryptionKeysProcessor(logger log.Logger) DecryptionKeysProcessor {
@@ -42,21 +46,58 @@ func (dkp DecryptionKeysProcessor) Enqueue(msg *proto.DecryptionKeys) {
 func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
 	dkp.logger.Info("running decryption keys processor")
 
+	//
+	// TODO - the dkp can actually clean the encrypted and decrypted pools (so we wont have to use LRU)
+	//      - uses block listener - when a new block comes in - calculate its slots using its timestamp (need changes to StateChange) - remove all decrypted txns for slots <= slot
+	//      - remember previous txn pointer from the previous decryption keys msg - when the new one comes if the txn pointer has moved forward then drop all
+	//
+
 	for {
 		select {
-		case msg := <-dkp.queue:
-			dkp.logger.Debug(
-				"processing decryption keys message",
-				"instanceId", msg.InstanceId,
-				"eon", msg.Eon,
-				"slot", msg.GetGnosis().Slot,
-				"txPointer", msg.GetGnosis().TxPointer,
-			)
-		//
-		// TODO process msg
-		//
 		case <-ctx.Done():
 			return ctx.Err()
+		case msg := <-dkp.queue:
+			err := dkp.process(msg)
+			if err != nil {
+				dkp.logger.Error(
+					"failed to process decryption keys message - skipping",
+					"eon", msg.Eon,
+					"slot", msg.GetGnosis().Slot,
+					"err", err,
+				)
+				continue
+			}
 		}
 	}
+}
+
+func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
+	dkp.logger.Debug(
+		"processing decryption keys message",
+		"instanceId", msg.InstanceId,
+		"eon", msg.Eon,
+		"slot", msg.GetGnosis().Slot,
+		"txPointer", msg.GetGnosis().TxPointer,
+	)
+
+	from := TxnIndex(msg.GetGnosis().TxPointer)
+	to := from + TxnIndex(len(msg.Keys))
+	encryptedTxns, err := dkp.encryptedTxnsPool.Txns(from, to, dkp.config.EncryptedGasLimit)
+	if err != nil {
+		return err
+	}
+
+	for _, encryptedTxn := range encryptedTxns {
+		_, err := dkp.eonTracker.Eon(encryptedTxn.EonIndex)
+		if err != nil {
+			return err
+		}
+
+		//
+		// TODO - decrypt txns using shcrypto
+		//      - add them to the encrypted pool for the given msg.Slot
+		//
+	}
+
+	return nil
 }

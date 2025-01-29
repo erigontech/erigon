@@ -40,7 +40,8 @@ type Config struct {
 	MaxNumKeysPerMessage             uint64
 	MaxPooledEncryptedTxns           uint64
 	MaxDecryptionKeysDelay           time.Duration
-	DecryptionGasLimit               uint64
+	EncryptedGasLimit                uint64
+	MaxRecentEons                    int
 }
 
 type P2pConfig struct {
@@ -92,7 +93,8 @@ var (
 		MaxNumKeysPerMessage:             defaultMaxNumKeysPerMessage,
 		MaxPooledEncryptedTxns:           defaultMaxPooledEncryptedTxns,
 		MaxDecryptionKeysDelay:           defaultMaxDecryptionKeysDelay,
-		DecryptionGasLimit:               defaultDecryptionGasLimit,
+		EncryptedGasLimit:                defaultEncryptedGasLimit,
+		MaxRecentEons:                    defaultMaxRecentEons,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -114,7 +116,8 @@ var (
 		MaxNumKeysPerMessage:             defaultMaxNumKeysPerMessage,
 		MaxPooledEncryptedTxns:           defaultMaxPooledEncryptedTxns,
 		MaxDecryptionKeysDelay:           defaultMaxDecryptionKeysDelay,
-		DecryptionGasLimit:               defaultDecryptionGasLimit,
+		EncryptedGasLimit:                defaultEncryptedGasLimit,
+		MaxRecentEons:                    defaultMaxRecentEons,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -130,5 +133,6 @@ const (
 	defaultMaxNumKeysPerMessage   = 500
 	defaultMaxPooledEncryptedTxns = 10_000
 	defaultMaxDecryptionKeysDelay = 1_666 * time.Millisecond
-	defaultDecryptionGasLimit     = 10_000_000
+	defaultEncryptedGasLimit      = 10_000_000
+	defaultMaxRecentEons          = 5
 )

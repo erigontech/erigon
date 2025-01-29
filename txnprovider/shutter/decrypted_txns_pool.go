@@ -33,7 +33,7 @@ func (p DecryptedTxnsPool) WaitForSlot(ctx context.Context, slot uint64) error {
 	return nil
 }
 
-func (p DecryptedTxnsPool) DecryptedTxns(slot uint64, gasTarget uint64) (DecryptedTxns, error) {
+func (p DecryptedTxnsPool) DecryptedTxns(slot uint64) (DecryptedTxns, error) {
 	return DecryptedTxns{}, nil
 }
 

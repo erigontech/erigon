@@ -213,7 +213,7 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 			wantValidationResult: pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{
 				"rejecting decryption keys msg due to",
-				"eon in the past: msg.Eon=1, currentEon=2",
+				"eon in the past: msgEonIndex=1, currentEonIndex=2",
 			},
 		},
 		{
@@ -228,7 +228,7 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 			wantValidationResult: pubsub.ValidationIgnore,
 			wantValidationLogMsgs: []string{
 				"ignoring decryption keys msg due to",
-				"eon in the future: msg.Eon=3, currentEon=2",
+				"eon in the future: msgEonIndex=3, currentEonIndex=2",
 			},
 		},
 		{

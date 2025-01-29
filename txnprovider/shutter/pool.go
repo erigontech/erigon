@@ -115,7 +115,7 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 	err = p.decryptedTxnsPool.WaitForSlot(ctx, slot)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			p.logger.Info(
+			p.logger.Warn(
 				"decryption keys wait timeout, falling back to secondary txn provider",
 				"slot", slot,
 				"age", slotAge,
@@ -131,16 +131,16 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 }
 
 func (p Pool) provide(ctx context.Context, slot uint64, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
-	provideOpts := txnprovider.ApplyProvideOptions(opts...)
-	totalGasTarget := provideOpts.GasTarget
-	decryptionGasTarget := min(totalGasTarget, p.config.DecryptionGasLimit)
-	decryptedTxns, err := p.decryptedTxnsPool.DecryptedTxns(slot, decryptionGasTarget)
+	decryptedTxns, err := p.decryptedTxnsPool.DecryptedTxns(slot)
 	if err != nil {
 		return nil, err
 	}
 
 	decryptedTxnsGas := decryptedTxns.TotalGas
+	provideOpts := txnprovider.ApplyProvideOptions(opts...)
+	totalGasTarget := provideOpts.GasTarget
 	if decryptedTxnsGas > totalGasTarget {
+		// note this should never happen because EncryptedGasLimit must always be <= gasLimit for a block
 		return nil, fmt.Errorf("decrypted txns gas gt target: %d > %d", decryptedTxnsGas, totalGasTarget)
 	}
 

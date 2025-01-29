@@ -35,17 +35,17 @@ type TxnIndex uint64
 
 // EncryptedTxnSubmission mimics contracts.SequencerTransactionSubmitted but without the "Raw" attribute to save memory.
 type EncryptedTxnSubmission struct {
-	Eon                  uint64
+	EonIndex             EonIndex
 	TxnIndex             TxnIndex
 	IdentityPrefix       [32]byte
 	Sender               libcommon.Address
 	EncryptedTransaction []byte
 	GasLimit             *big.Int
+	BlockNum             uint64
 }
 
 type EncryptedTxnsPool struct {
 	logger            log.Logger
-	config            Config
 	sequencerContract *contracts.Sequencer
 	submissions       *lru.Cache[TxnIndex, EncryptedTxnSubmission]
 }
@@ -57,6 +57,9 @@ func NewEncryptedTxnsPool(logger log.Logger, config Config, contractBackend bind
 		panic(fmt.Errorf("failed to create shutter sequencer contract: %w", err))
 	}
 
+	//
+	// TODO golang-lru has expirable TTL LRU - could potentially use that
+	//
 	submissions, err := lru.New[TxnIndex, EncryptedTxnSubmission](int(config.MaxPooledEncryptedTxns))
 	if err != nil {
 		panic(fmt.Errorf("failed to create shutter submissions LRU cache: %w", err))
@@ -64,7 +67,6 @@ func NewEncryptedTxnsPool(logger log.Logger, config Config, contractBackend bind
 
 	return EncryptedTxnsPool{
 		logger:            logger,
-		config:            config,
 		sequencerContract: sequencerContract,
 		submissions:       submissions,
 	}
@@ -86,15 +88,39 @@ func (etp EncryptedTxnsPool) Run(ctx context.Context) error {
 			return ctx.Err()
 		case event := <-submissionEventC:
 			encryptedTxnSubmission := EncryptedTxnSubmission{
-				Eon:                  event.Eon,
+				EonIndex:             EonIndex(event.Eon),
 				TxnIndex:             TxnIndex(event.TxIndex),
 				IdentityPrefix:       event.IdentityPrefix,
 				Sender:               event.Sender,
 				EncryptedTransaction: event.EncryptedTransaction,
 				GasLimit:             event.GasLimit,
+				BlockNum:             event.Raw.BlockNumber,
 			}
 
 			etp.submissions.Add(encryptedTxnSubmission.TxnIndex, encryptedTxnSubmission)
 		}
 	}
+}
+
+func (etp EncryptedTxnsPool) Txns(from, to TxnIndex, gasLimit uint64) ([]EncryptedTxnSubmission, error) {
+	var txns []EncryptedTxnSubmission
+	var accumulatedGasLimit uint64
+	for i := from; i < to; i++ {
+		submission, ok := etp.submissions.Peek(i) // use peek not to change "recently used metric"
+		if !ok {
+
+			//
+			// TODO handle gaps
+			//
+		}
+
+		accumulatedGasLimit += submission.GasLimit.Uint64()
+		if accumulatedGasLimit > gasLimit {
+			break
+		}
+
+		txns = append(txns, submission)
+	}
+
+	return txns, nil
 }

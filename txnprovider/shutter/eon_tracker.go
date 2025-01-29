@@ -24,6 +24,8 @@ import (
 	"math/big"
 	"sync/atomic"
 
+	lru "github.com/hashicorp/golang-lru/v2"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi/bind"
@@ -31,12 +33,15 @@ import (
 )
 
 type EonTracker interface {
-	CurrentEon() (Eon, bool)
 	Run(ctx context.Context) error
+	CurrentEon() (Eon, bool)
+	Eon(EonIndex) (Eon, error)
 }
 
+type EonIndex uint64
+
 type Eon struct {
-	Index           uint64
+	Index           EonIndex
 	ActivationBlock uint64
 	Key             []byte
 	Threshold       uint64
@@ -51,6 +56,7 @@ type KsmEonTracker struct {
 	ksmContract          *contracts.KeyperSetManager
 	keyBroadcastContract *contracts.KeyBroadcastContract
 	currentEon           atomic.Pointer[Eon]
+	recentEons           *lru.Cache[EonIndex, Eon]
 }
 
 func NewKsmEonTracker(config Config, blockListener BlockListener, contractBackend bind.ContractBackend) *KsmEonTracker {
@@ -66,12 +72,18 @@ func NewKsmEonTracker(config Config, blockListener BlockListener, contractBacken
 		panic(fmt.Errorf("failed to create KeyBroadcastContract: %w", err))
 	}
 
+	recentEons, err := lru.New[EonIndex, Eon](config.MaxRecentEons)
+	if err != nil {
+		panic(fmt.Errorf("failed to create recentEons LRU cache: %w", err))
+	}
+
 	return &KsmEonTracker{
 		config:               config,
 		blockListener:        blockListener,
 		contractBackend:      contractBackend,
 		ksmContract:          ksmContract,
 		keyBroadcastContract: keyBroadcastContract,
+		recentEons:           recentEons,
 	}
 }
 
@@ -111,11 +123,31 @@ func (et *KsmEonTracker) CurrentEon() (Eon, bool) {
 	return *eon, true
 }
 
+func (et *KsmEonTracker) Eon(index EonIndex) (Eon, error) {
+	currentEon, ok := et.CurrentEon()
+	if !ok {
+		return Eon{}, fmt.Errorf("requested eon by index before current eon is set: %d", index)
+	}
+	if index > currentEon.Index {
+		return Eon{}, fmt.Errorf("requested eon by index which is gt current eon: %d > %d", index, currentEon.Index)
+	}
+
+	eon, ok := et.recentEons.Get(index)
+	if !ok {
+		return Eon{}, fmt.Errorf("requested eon by index which is not in recentEons: %d", index)
+	}
+
+	return eon, nil
+}
+
 func (et *KsmEonTracker) readEon(blockNum uint64) (Eon, error) {
 	callOpts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNum)}
 	eonIndex, err := et.ksmContract.GetKeyperSetIndexByBlock(callOpts, blockNum)
 	if err != nil {
 		return Eon{}, fmt.Errorf("failed to get KeyperSetIndexByBlock: %w", err)
+	}
+	if eon, ok := et.recentEons.Get(EonIndex(eonIndex)); ok {
+		return eon, nil
 	}
 
 	keyperSetAddress, err := et.ksmContract.GetKeyperSetAddress(&bind.CallOpts{}, eonIndex)
@@ -160,7 +192,7 @@ func (et *KsmEonTracker) readEon(blockNum uint64) (Eon, error) {
 	}
 
 	eon := Eon{
-		Index:           eonIndex,
+		Index:           EonIndex(eonIndex),
 		ActivationBlock: activationBlock,
 		Key:             key,
 		Threshold:       threshold,

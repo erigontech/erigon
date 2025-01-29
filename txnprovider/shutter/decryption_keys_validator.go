@@ -100,13 +100,14 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 		return fmt.Errorf("%w: %w", ErrIgnoreMsg, ErrCurrentEonUnavailable)
 	}
 
-	if msg.Eon < currentEon.Index {
-		return fmt.Errorf("%w: msg.Eon=%d, currentEon=%d", ErrEonInThePast, msg.Eon, currentEon.Index)
+	msgEonIndex := EonIndex(msg.Eon)
+	if msgEonIndex < currentEon.Index {
+		return fmt.Errorf("%w: msgEonIndex=%d, currentEonIndex=%d", ErrEonInThePast, msgEonIndex, currentEon.Index)
 	}
 
-	if msg.Eon > currentEon.Index {
+	if msgEonIndex > currentEon.Index {
 		// we may be behind - ignore msg, without penalizing peer
-		return fmt.Errorf("%w: %w: msg.Eon=%d, currentEon=%d", ErrIgnoreMsg, ErrEonInTheFuture, msg.Eon, currentEon.Index)
+		return fmt.Errorf("%w: %w: msgEonIndex=%d, currentEonIndex=%d", ErrIgnoreMsg, ErrEonInTheFuture, msgEonIndex, currentEon.Index)
 	}
 
 	if len(msg.Keys) == 0 {
