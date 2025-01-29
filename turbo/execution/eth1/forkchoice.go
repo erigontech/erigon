@@ -273,6 +273,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		if canonicalHash == blockHash {
 			// if block hash is part of the canonical chain treat it as no-op.
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
+
+			if e.config.IsOptimism() {
+				// unwind
+				fmt.Println("X+", fcuHeader.Number.Uint64())
+			}
+			// e.executionPipeline.UnwindTo(fcuHeader.Number.Uint64(), stagedsync.ForkChoice, tx)
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 			if err != nil {
 				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
@@ -291,7 +297,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				Status:          execution.ExecutionStatus_Success,
 			}, false)
 			return
-
 		}
 
 		currentParentHash := fcuHeader.ParentHash

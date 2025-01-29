@@ -145,19 +145,19 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	e.lastParameters = &param
 
 	var isThereAMatchingBlockInDB bool
-	if err := e.db.View(ctx, func(tx kv.Tx) (err error) {
-		isThereAMatchingBlockInDB, err = e.isThereABlockInDBAlreadyBuilt(ctx, tx, param.ParentHash, req.Transactions, req.NoTxPool, req.GasLimit)
-		if err != nil {
-			return err
-		}
-		if isThereAMatchingBlockInDB {
-			e.logger.Info("[ForkChoiceUpdated] Block already built in the past", "payload", e.nextPayloadId)
-		}
+	// if err := e.db.View(ctx, func(tx kv.Tx) (err error) {
+	// 	isThereAMatchingBlockInDB, err = e.isThereABlockInDBAlreadyBuilt(ctx, tx, param.ParentHash, req.Transactions, req.NoTxPool, req.GasLimit)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	if isThereAMatchingBlockInDB {
+	// 		e.logger.Info("[ForkChoiceUpdated] Block already built in the past", "payload", e.nextPayloadId)
+	// 	}
 
-		return nil
-	}); err != nil {
-		return nil, err
-	}
+	// 	return nil
+	// }); err != nil {
+	// 	return nil, err
+	// }
 
 	if isThereAMatchingBlockInDB {
 		return &execution.AssembleBlockResponse{
