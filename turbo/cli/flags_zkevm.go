@@ -67,6 +67,9 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	verifyAddressFlag := func(name, value string) string {
+		if strings.Count(value, ":") == 0 {
+			return value
+		}
 		_, _, err := net.SplitHostPort(value)
 		if err != nil {
 			panic(fmt.Sprintf("invalid address for flag %s: %s", name, value))
