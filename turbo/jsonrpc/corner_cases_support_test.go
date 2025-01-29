@@ -36,7 +36,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	require := require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewEthAPI(newBaseApiForTest(m),
-		m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
+		m.DB, nil, nil, nil, 5000000, 1, 100_000, false, 100_000, 128, log.New())
 	ctx := context.Background()
 
 	a, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)
