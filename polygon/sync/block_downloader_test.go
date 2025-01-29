@@ -236,7 +236,6 @@ func (hdt blockDownloaderTest) defaultFetchBodiesMock() fetchBodiesMock {
 						0,
 						uint256.NewInt(666),
 						uint256.NewInt(777),
-						uint256.NewInt(888),
 						nil,
 					),
 				},
