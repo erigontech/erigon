@@ -1077,7 +1077,7 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	// Verify pubkey exists
 	vindex, exist := s.ValidatorIndexByPubkey(reqPubkey)
 	if !exist {
-		log.Warn("ProcessWithdrawalRequest: validator index not found for pubkey %v", common.Bytes2Hex(reqPubkey[:]))
+		log.Warn("ProcessWithdrawalRequest: validator index not found", "pubkey", common.Bytes2Hex(reqPubkey[:]))
 		return nil
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(vindex))
