@@ -136,8 +136,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			}
 			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
 		}
-
-		if len(preparedTxns) > 0 {
+		if !cfg.noTxPool && len(preparedTxns) == 0 {
 			logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
 			if err != nil {
 				return err
