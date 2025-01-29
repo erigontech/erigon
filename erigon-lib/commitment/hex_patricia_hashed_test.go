@@ -518,7 +518,7 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 	rnd.Read(first.hash[:])
 
 	second := new(cell)
-	err := second.Decode(first.Encode())
+	err := second.DecodeRoot(first.EncodeRoot())
 	require.NoError(t, err)
 
 	cellMustEqual(t, first, second)

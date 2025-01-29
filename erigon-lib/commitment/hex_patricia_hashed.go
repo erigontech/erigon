@@ -1606,7 +1606,8 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
-			if err = hph.ctx.PutBranch(common.Copy(updateKey), common.Copy(del), nil, 0); err != nil {
+			// if err = hph.ctx.PutBranch(common.Copy(updateKey), common.Copy(del), nil, 0); err != nil {
+			if err = hph.ctx.PutBranch(updateKey, del, nil, 0); err != nil {
 				return fmt.Errorf("failed to collect leaf node update: %w", err)
 			}
 		}
@@ -2279,12 +2280,13 @@ func (s *state) Decode(buf []byte) error {
 	return nil
 }
 
-func (cell *cell) Encode() []byte {
+// Encodes root cell only. Does not match with encoding inside branches
+func (cell *cell) EncodeRoot() []byte {
 	var pos = 1
 	size := pos + 5 + cell.hashLen + cell.accountAddrLen + cell.storageAddrLen + cell.hashedExtLen + cell.extLen // max size
 	buf := make([]byte, size)
 
-	var flags uint8
+	var flags cellFlag
 	if cell.hashLen != 0 {
 		flags |= cellFlagHash
 		buf[pos] = byte(cell.hashLen)
@@ -2323,12 +2325,16 @@ func (cell *cell) Encode() []byte {
 	if cell.Deleted() {
 		flags |= cellFlagDelete
 	}
-	buf[0] = flags
+	buf[0] = byte(flags)
 	return buf
 }
 
+type cellFlag uint8
+
+func (f cellFlag) Has(flag cellFlag) bool { return f&flag != 0 }
+
 const (
-	cellFlagHash = uint8(1 << iota)
+	cellFlagHash = cellFlag(1 << iota)
 	cellFlagAccount
 	cellFlagStorage
 	cellFlagDownHash
@@ -2336,47 +2342,48 @@ const (
 	cellFlagDelete
 )
 
-func (cell *cell) Decode(buf []byte) error {
+// Use for root encoding only, has twisted encoding for hash and extension with branchEncoding/encodeInto
+func (cell *cell) DecodeRoot(buf []byte) error {
 	if len(buf) < 1 {
 		return errors.New("invalid buffer size to contain cell (at least 1 byte expected)")
 	}
 	cell.reset()
 
 	var pos int
-	flags := buf[pos]
+	flags := cellFlag(buf[pos])
 	pos++
 
-	if flags&cellFlagHash != 0 {
+	if flags.Has(cellFlagHash) {
 		cell.hashLen = int(buf[pos])
 		pos++
 		copy(cell.hash[:], buf[pos:pos+cell.hashLen])
 		pos += cell.hashLen
 	}
-	if flags&cellFlagAccount != 0 {
+	if flags.Has(cellFlagAccount) {
 		cell.accountAddrLen = int(buf[pos])
 		pos++
 		copy(cell.accountAddr[:], buf[pos:pos+cell.accountAddrLen])
 		pos += cell.accountAddrLen
 	}
-	if flags&cellFlagStorage != 0 {
+	if flags.Has(cellFlagStorage) {
 		cell.storageAddrLen = int(buf[pos])
 		pos++
 		copy(cell.storageAddr[:], buf[pos:pos+cell.storageAddrLen])
 		pos += cell.storageAddrLen
 	}
-	if flags&cellFlagDownHash != 0 {
+	if flags.Has(cellFlagDownHash) {
 		cell.hashedExtLen = int(buf[pos])
 		pos++
 		copy(cell.hashedExtension[:], buf[pos:pos+cell.hashedExtLen])
 		pos += cell.hashedExtLen
 	}
-	if flags&cellFlagExtension != 0 {
+	if flags.Has(cellFlagExtension) {
 		cell.extLen = int(buf[pos])
 		pos++
 		copy(cell.extension[:], buf[pos:pos+cell.extLen])
 		pos += cell.extLen //nolint
 	}
-	if flags&cellFlagDelete != 0 {
+	if flags.Has(cellFlagDelete) {
 		log.Warn("deleted cell should not be encoded", "cell", cell.String())
 		cell.Update.Flags = DeleteUpdate
 	}
@@ -2394,7 +2401,7 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 		panic("currentKeyLen > 0")
 	}
 
-	s.Root = hph.root.Encode()
+	s.Root = hph.root.EncodeRoot()
 	copy(s.Depths[:], hph.depths[:])
 	copy(s.BranchBefore[:], hph.branchBefore[:])
 	copy(s.TouchMap[:], hph.touchMap[:])
@@ -2403,7 +2410,7 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 	return s.Encode(buf)
 }
 
-// buf expected to be encoded hph state. Decode state and set up hph to that state.
+// buf expected to be encoded hph state. DecodeRoot state and set up hph to that state.
 func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	hph.Reset()
 
@@ -2432,7 +2439,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		return err
 	}
 
-	if err := hph.root.Decode(s.Root); err != nil {
+	if err := hph.root.DecodeRoot(s.Root); err != nil {
 		return err
 	}
 	hph.rootChecked = s.RootChecked
@@ -2483,7 +2490,7 @@ func HexTrieExtractStateRoot(enc []byte) ([]byte, error) {
 		return nil, err
 	}
 	root := new(cell)
-	if err := root.Decode(s.Root); err != nil {
+	if err := root.DecodeRoot(s.Root); err != nil {
 		return nil, err
 	}
 	return root.hash[:], nil
@@ -2531,7 +2538,7 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	fmt.Fprintf(sb, " rootNode: %x [touched=%t, present=%t, checked=%t]\n", s.Root, s.RootTouched, s.RootPresent, s.RootChecked)
 
 	root := new(cell)
-	if err := root.Decode(s.Root); err != nil {
+	if err := root.DecodeRoot(s.Root); err != nil {
 		return "", err
 	}
 

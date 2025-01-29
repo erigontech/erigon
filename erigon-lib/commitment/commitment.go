@@ -141,7 +141,10 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 	}
 }
 
+// cellFields is a bitmask of fields presented in the cell for encoding
 type cellFields uint8
+
+func (c cellFields) Has(field cellFields) bool { return c&field != 0 }
 
 const (
 	fieldExtension   cellFields = 1
@@ -153,19 +156,19 @@ const (
 
 func (p cellFields) String() string {
 	var sb strings.Builder
-	if p&fieldExtension != 0 {
+	if p.Has(fieldExtension) {
 		sb.WriteString("DownHash")
 	}
-	if p&fieldAccountAddr != 0 {
+	if p.Has(fieldAccountAddr) {
 		sb.WriteString("+AccountPlain")
 	}
-	if p&fieldStorageAddr != 0 {
+	if p.Has(fieldStorageAddr) {
 		sb.WriteString("+StoragePlain")
 	}
-	if p&fieldHash != 0 {
+	if p.Has(fieldHash) {
 		sb.WriteString("+Hash")
 	}
-	if p&fieldStateHash != 0 {
+	if p.Has(fieldStateHash) {
 		sb.WriteString("+LeafHash")
 	}
 	return sb.String()
@@ -215,27 +218,27 @@ func (cell *cell) EncodeInto(be *BranchEncoder) error {
 	if err := be.buf.WriteByte(byte(fields)); err != nil {
 		return err
 	}
-	if fields&fieldExtension != 0 {
+	if fields.Has(fieldExtension) {
 		if err := be.putUvarAndVal(uint64(cell.extLen), cell.extension[:cell.extLen]); err != nil {
 			return err
 		}
 	}
-	if fields&fieldAccountAddr != 0 {
+	if fields.Has(fieldAccountAddr) {
 		if err := be.putUvarAndVal(uint64(cell.accountAddrLen), cell.accountAddr[:cell.accountAddrLen]); err != nil {
 			return err
 		}
 	}
-	if fields&fieldStorageAddr != 0 {
+	if fields.Has(fieldStorageAddr) {
 		if err := be.putUvarAndVal(uint64(cell.storageAddrLen), cell.storageAddr[:cell.storageAddrLen]); err != nil {
 			return err
 		}
 	}
-	if fields&fieldHash != 0 {
+	if fields.Has(fieldHash) {
 		if err := be.putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
 			return err
 		}
 	}
-	if fields&fieldStateHash != 0 {
+	if fields.Has(fieldStateHash) {
 		if err := be.putUvarAndVal(uint64(cell.stateHashLen), cell.stateHash[:cell.stateHashLen]); err != nil {
 			return err
 		}
@@ -361,7 +364,7 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		fields := cellFields(branchData[pos])
 		newData = append(newData, byte(fields))
 		pos++
-		if fields&fieldExtension != 0 {
+		if fields.Has(fieldExtension) {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for hashedKey len")
@@ -378,7 +381,7 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				pos += int(l)
 			}
 		}
-		if fields&fieldAccountAddr != 0 {
+		if fields.Has(fieldAccountAddr) {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for accountAddr len")
@@ -411,7 +414,7 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				newData = append(newData, newKey...)
 			}
 		}
-		if fields&fieldStorageAddr != 0 {
+		if fields.Has(fieldStorageAddr) {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for storageAddr len")
@@ -444,7 +447,7 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				newData = append(newData, newKey...)
 			}
 		}
-		if fields&fieldHash != 0 {
+		if fields.Has(fieldHash) {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for hash len")
@@ -461,7 +464,7 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				pos += int(l)
 			}
 		}
-		if fields&fieldStateHash != 0 {
+		if fields.Has(fieldStateHash) {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for acLeaf hash len")
@@ -801,7 +804,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			if c == nil {
 				continue
 			}
-			enc := uint64(len(c.Encode()))
+			enc := uint64(len(c.EncodeRoot()))
 			stat.MinCellSize = min(stat.MinCellSize, enc)
 			stat.MaxCellSize = max(stat.MaxCellSize, enc)
 			switch {
