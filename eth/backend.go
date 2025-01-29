@@ -268,7 +268,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	fmt.Println(config.NetworkID)
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
 	backend := &Ethereum{
 		sentryCtx:                 ctx,
