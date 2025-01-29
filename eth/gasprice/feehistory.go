@@ -121,9 +121,6 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 		return
 	}
 
-	if blobGasUsed := bf.header.BlobGasUsed; blobGasUsed != nil && chainconfig.MaxBlobGasPerBlock != nil {
-		bf.blobGasUsedRatio = float64(*blobGasUsed) / float64(*chainconfig.MaxBlobGasPerBlock)
-	}
 	if bf.block == nil || (bf.receipts == nil && len(bf.block.Transactions()) != 0) {
 		log.Error("Block or receipts are missing while reward percentiles are requested")
 		return
