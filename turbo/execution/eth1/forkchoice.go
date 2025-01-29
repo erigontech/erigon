@@ -298,10 +298,16 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 					sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 					return
 				}
+
+				if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()+1); err != nil {
+					sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+					return
+				}
 				if err := tx.Commit(); err != nil {
 					sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 					return
 				}
+
 				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 					LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
 					Status:          execution.ExecutionStatus_Success,
