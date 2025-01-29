@@ -127,7 +127,7 @@ func (a *RelationalAppendableRoTx) Get(num Num, tx kv.Tx) (VVType, error) {
 	}
 
 	// then db
-	id, err := ap.relation.BaseNum2Id(num, tx)
+	id, err := ap.relation.Num2Id(num, tx)
 	if err != nil {
 		return nil, err
 	}
