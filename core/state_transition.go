@@ -459,29 +459,6 @@ func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlock
 
 	ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
 
-	effectiveTip := st.gasPrice
-	if rules.IsLondon {
-		if st.gasFeeCap.Gt(st.evm.Context.BaseFee) {
-			effectiveTip = math.Min256(st.tip, new(uint256.Int).Sub(st.gasFeeCap, st.evm.Context.BaseFee))
-		} else {
-			effectiveTip = u256.Num0
-		}
-	}
-	amount := new(uint256.Int).SetUint64(st.gasUsed())
-	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-	st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee)
-	if !msg.IsFree() && rules.IsLondon {
-		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
-		if burntContractAddress != nil {
-			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
-			st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
-			if rules.IsAura && rules.IsPrague {
-				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
-				st.state.AddBalance(*burntContractAddress, st.evm.BlobFee, tracing.BalanceChangeUnspecified)
-			}
-		}
-	}
-
 	result := &evmtypes.ExecutionResult{
 		UsedGas:             st.gasUsed(),
 		Err:                 vmerr,
@@ -489,7 +466,6 @@ func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlock
 		ReturnData:          ret,
 		SenderInitBalance:   senderInitBalance,
 		CoinbaseInitBalance: coinbaseInitBalance,
-		FeeTipped:           amount,
 	}
 
 	if st.evm.Context.PostApplyMessage != nil {

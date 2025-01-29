@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
@@ -20,40 +18,6 @@ import (
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
-
-func chargeGas(
-	header *types.Header,
-	tx *types.AccountAbstractionTransaction,
-	gasPool *core.GasPool,
-	ibs *state.IntraBlockState,
-) error {
-	baseFee := uint256.MustFromBig(header.BaseFee)
-	effectiveGasPrice := new(uint256.Int).Add(baseFee, tx.GetEffectiveGasTip(baseFee))
-
-	totalGasLimit := fixedgas.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.Gas + tx.PostOpGasLimit
-	preCharge := new(uint256.Int).SetUint64(totalGasLimit)
-	preCharge = preCharge.Mul(preCharge, effectiveGasPrice)
-
-	chargeFrom := tx.GasPayer()
-	balance, err := ibs.GetBalance(*chargeFrom)
-	if err != nil {
-		return err
-	}
-
-	if balance.Cmp(preCharge) < 0 {
-		return fmt.Errorf("%w: RIP-7560 address %v have %v want %v", core.ErrInsufficientFunds, chargeFrom.Hex(), balance, preCharge)
-	}
-
-	if err := ibs.SubBalance(*chargeFrom, preCharge, 0); err != nil {
-		return err
-	}
-
-	if err := gasPool.SubGas(totalGasLimit); err != nil {
-		return newValidationPhaseError(err, nil, "block gas limit", false)
-	}
-
-	return nil
-}
 
 func ValidateAATransaction(
 	tx *types.AccountAbstractionTransaction,
@@ -241,6 +205,8 @@ func ExecuteAATransaction(
 	validationGasUsed uint64,
 	gasPool *core.GasPool,
 	evm *vm.EVM,
+	header *types.Header,
+	ibs *state.IntraBlockState,
 ) (executionStatus uint64, executionReturnData []byte, postOpReturnData []byte, err error) {
 	executionStatus = types.ExecutionStatusSuccess
 
@@ -256,13 +222,15 @@ func ExecuteAATransaction(
 	}
 	executionReturnData = applyRes.ReturnData
 
+	execRefund := capRefund(tx.Gas-applyRes.UsedGas, applyRes.UsedGas) // TODO: can be moved into statetransition
+	validationRefund := capRefund(tx.ValidationGasLimit-validationGasUsed, validationGasUsed)
+
 	executionGasPenalty := (tx.Gas - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
 	gasUsed := validationGasUsed + applyRes.UsedGas + executionGasPenalty
-	gasRefund := capRefund(applyRes.UsedGas+validationGasUsed, gasUsed) // TODO: check correctness, i think this should be moved into statetransition
-	finalGasUsed := gasUsed - gasRefund
+	gasRefund := capRefund(execRefund+validationRefund, gasUsed)
 
 	// Paymaster post-op frame
-	msg, err = tx.PaymasterPostOp(paymasterContext, finalGasUsed, !applyRes.Failed())
+	msg, err = tx.PaymasterPostOp(paymasterContext, gasUsed, !applyRes.Failed())
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -278,11 +246,23 @@ func ExecuteAATransaction(
 			executionStatus = types.ExecutionStatusPostOpFailure
 		}
 
-		// TODO: cap refund, unused gas penalty
+		validationGasPenalty := (tx.PostOpGasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
+		gasRefund += capRefund(tx.PostOpGasLimit-applyRes.UsedGas, applyRes.UsedGas)
+		gasUsed += applyRes.UsedGas + validationGasPenalty
 
 		return 0, nil, nil, errors.New("paymaster post-op failed")
 	}
 	postOpReturnData = applyRes.ReturnData
+
+	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
+		return 0, nil, nil, err
+	}
+
+	if err = payCoinbase(header, tx, ibs, gasUsed-gasRefund, evm.Context.Coinbase); err != nil {
+		return 0, nil, nil, err
+	}
+
+	gasPool.AddGas(fixedgas.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.Gas + tx.PostOpGasLimit - gasUsed)
 
 	return executionStatus, executionReturnData, postOpReturnData, nil
 }
