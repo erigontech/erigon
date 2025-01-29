@@ -404,9 +404,9 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 type WriteStatus byte
 
 const (
-	NonStatTy WriteStatus = iota
-	CanonStatTy
-	SideStatTy
+	NonStatTx WriteStatus = iota
+	CanonStatTx
+	SideStatTx
 )
 
 // // WriteBlockAndSetHeadWithTime also counts processTime, which will cause intermittent TrieDirty cache writes

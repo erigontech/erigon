@@ -19,6 +19,7 @@ package gethclient
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -286,7 +287,7 @@ func (a OverrideAccount) MarshalJSON() ([]byte, error) {
 		StateDiff: a.StateDiff,
 	}
 	if a.Code != nil {
-		output.Code = hexutil.Encode(a.Code)
+		output.Code = hex.EncodeToString(a.Code)
 	}
 	if a.State != nil {
 		output.State = a.State

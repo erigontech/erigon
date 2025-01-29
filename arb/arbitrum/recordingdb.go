@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"sync"
+
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	state2 "github.com/erigontech/erigon-lib/state"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -30,14 +32,34 @@ var (
 )
 
 type RecordingKV struct {
-	//inner         *triedb.Database
-	diskDb        kv.RwDB
+	diskDb        kv.Tx
+	state         state.StateReader
+	bucket        string
 	readDbEntries map[common.Hash][]byte
 	enableBypass  bool
 }
 
-func newRecordingKV() *RecordingKV {
-	return &RecordingKV{nil, make(map[common.Hash][]byte), false}
+func (db *RecordingKV) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
+	enc, err := db.state.ReadAccountCode(address, incarnation)
+	if err != nil {
+		return nil, err
+	}
+	hash := crypto.Keccak256Hash(enc)
+	db.readDbEntries[hash] = enc
+	// if crypto.Keccak256Hash(enc) != hash {
+	// 	return nil, fmt.Errorf("recording KV attempted to access non-hash key %v", hash)
+	// }
+	//else if len(key) == len(rawdb.CodePrefix)+32 && bytes.HasPrefix(key, rawdb.CodePrefix) {
+	// copy(hash[:], key[len(rawdb.CodePrefix):])
+	return enc, nil
+}
+
+func NewRecordingKV(s state.StateReader) *RecordingKV {
+	return &RecordingKV{state: s, readDbEntries: make(map[common.Hash][]byte), enableBypass: false}
+}
+
+func newRecordingKV(tx kv.Tx, bucket string) *RecordingKV {
+	return &RecordingKV{diskDb: tx, bucket: bucket, readDbEntries: make(map[common.Hash][]byte), enableBypass: false}
 }
 
 //func newRecordingKV(inner *triedb.Database, diskDb ethdb.KeyValueStore) *RecordingKV {
@@ -54,11 +76,12 @@ func (db *RecordingKV) Get(key []byte) ([]byte, error) {
 	var err error
 	if len(key) == 32 {
 		copy(hash[:], key)
-		res, err = db.inner.Node(hash)
+		res, err = db.diskDb.GetOne(db.bucket, key)
+		// res, err = db.inner.Node(hash)
 	} else if len(key) == len(rawdb.CodePrefix)+32 && bytes.HasPrefix(key, rawdb.CodePrefix) {
 		// Retrieving code
 		copy(hash[:], key[len(rawdb.CodePrefix):])
-		res, err = db.diskDb.Get(key)
+		res, err = db.diskDb.GetOne(db.bucket, key)
 	} else {
 		err = fmt.Errorf("recording KV attempted to access non-hash key %v", hex.EncodeToString(key))
 	}
@@ -84,25 +107,25 @@ func (db *RecordingKV) Delete(key []byte) error {
 }
 
 func (db *RecordingKV) NewBatch() ethdb.Batch {
-	if db.enableBypass {
-		return db.diskDb.NewBatch()
-	}
+	// if db.enableBypass {
+	// 	return db.diskDb.NewBatch()
+	// }
 	log.Error("recording KV: attempted to create batch when bypass not enabled")
 	return nil
 }
 
 func (db *RecordingKV) NewBatchWithSize(size int) ethdb.Batch {
-	if db.enableBypass {
-		return db.diskDb.NewBatchWithSize(size)
-	}
+	// if db.enableBypass {
+	// 	return db.diskDb.NewBatchWithSize(size)
+	// }
 	log.Error("recording KV: attempted to create batch when bypass not enabled")
 	return nil
 }
 
 func (db *RecordingKV) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
-	if db.enableBypass {
-		return db.diskDb.NewIterator(prefix, start)
-	}
+	// if db.enableBypass {
+	// 	return db.diskDb.NewIterator(prefix, start)
+	// }
 	log.Error("recording KV: attempted to create iterator when bypass not enabled")
 	return nil
 }
@@ -170,7 +193,7 @@ type RecordingDatabaseConfig struct {
 type RecordingDatabase struct {
 	config     *RecordingDatabaseConfig
 	sd         *state2.SharedDomains
-	db         state.Database
+	db         *state.IntraBlockState
 	bc         core.BlockChain
 	mutex      sync.Mutex // protects StateFor and Dereference
 	references int64
@@ -198,6 +221,8 @@ func (r *RecordingDatabase) StateFor(header *types.Header) (*state.IntraBlockSta
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
+	// rawdbv3.TxNums.Max(r., blockNum uint64)
+
 	rd := state.NewReaderV3(r.sd)
 	sdb := state.New(rd)
 	//sdb, err := state.NewDeterministic(header.Root, r.db)
@@ -214,9 +239,12 @@ func (r *RecordingDatabase) Dereference(header *types.Header) {
 }
 
 func (r *RecordingDatabase) WriteStateToDatabase(header *types.Header) error {
-	if header != nil {
-		return r.db.TrieDB().Commit(header.Root, true)
+	if _, err := r.sd.ComputeCommitment(context.Background(), true, header.Number.Uint64(), ""); err != nil {
+		return err
 	}
+	// if header != nil {
+	// 	return r.db.TrieDB().Commit(header.Root, true)
+	// }
 	return nil
 }
 
@@ -224,7 +252,12 @@ func (r *RecordingDatabase) WriteStateToDatabase(header *types.Header) error {
 func (r *RecordingDatabase) referenceRootLockHeld(root common.Hash) {
 	r.references++
 	recordingDbReferences.SetUint64(uint64(r.references))
-	r.db.TrieDB().Reference(root, common.Hash{})
+
+	// TODO looks like we dont need that at all
+	// Reference adds a new reference from a parent node to a child node. This function
+	// is used to add reference between internal trie node and external node(e.g. storage
+	// trie root), all internal trie nodes are referenced together by database itself.
+	// r.db.TrieDB().Reference(root, common.Hash{})
 }
 
 func (r *RecordingDatabase) dereferenceRoot(root common.Hash) {
@@ -232,7 +265,11 @@ func (r *RecordingDatabase) dereferenceRoot(root common.Hash) {
 	defer r.mutex.Unlock()
 	r.references--
 	recordingDbReferences.SetUint64(uint64(r.references))
-	r.db.TrieDB().Dereference(root)
+
+	// todo we do not need at all
+	// Dereference removes an existing reference from a root node. It's only
+	// supported by hash-based database and will return an error for others.
+	// r.db.TrieDB().Dereference(root)
 }
 
 func (r *RecordingDatabase) addStateVerify(statedb *state.IntraBlockState, expected common.Hash, blockNumber uint64) (*state.IntraBlockState, error) {
@@ -247,15 +284,15 @@ func (r *RecordingDatabase) addStateVerify(statedb *state.IntraBlockState, expec
 	}
 	r.referenceRootLockHeld(result)
 
-	_, size, _ := r.db.TrieDB().Size()
-	limit := common.StorageSize(r.config.TrieDirtyCache) * 1024 * 1024
-	recordingDbSize.SetUint64(uint64(size))
-	if size > limit {
-		log.Info("Recording DB: flushing to disk", "size", size, "limit", limit)
-		r.db.TrieDB().Cap(limit - ethdb.IdealBatchSize)
-		_, size, _ = r.db.TrieDB().Size()
-		recordingDbSize.SetUint64(uint64(size))
-	}
+	// _, size, _ := r.db.TrieDB().Size()
+	// limit := common.StorageSize(r.config.TrieDirtyCache) * 1024 * 1024
+	// recordingDbSize.SetUint64(uint64(size))
+	// if size > limit {
+	// 	log.Info("Recording DB: flushing to disk", "size", size, "limit", limit)
+	// 	r.db.TrieDB().Cap(limit - ethdb.IdealBatchSize)
+	// 	_, size, _ = r.db.TrieDB().Size()
+	// 	recordingDbSize.SetUint64(uint64(size))
+	// }
 	return statedb, nil
 	//return state.New(result, statedb.Database(), nil)
 }
@@ -268,17 +305,19 @@ func (r *RecordingDatabase) PrepareRecording(ctx context.Context, lastBlockHeade
 	finalDereference := lastBlockHeader // dereference in case of error
 	defer func() { r.Dereference(finalDereference) }()
 	//recordingKeyValue := newRecordingKV(r.db.TrieDB(), r.db.DiskDB())
-	recordingKeyValue := newRecordingKV()
+	recordingKeyValue := NewRecordingKV(state.NewReaderV3(r.sd))
+	// state.WrapDatabaseWithWasm(wasm kv.RwDB, 0, targets []state.WasmTarget)
 
-	recordingStateDatabase := state.NewDatabase(rawdb.WrapDatabaseWithWasm(rawdb.NewDatabase(recordingKeyValue), r.db.WasmStore(), 0, r.db.WasmTargets()))
-	var prevRoot common.Hash
-	if lastBlockHeader != nil {
-		prevRoot = lastBlockHeader.Root
-	}
-	recordingStateDb, err := state.NewDeterministic(prevRoot, recordingStateDatabase)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create recordingStateDb: %w", err)
-	}
+	// recordingStateDatabase := state.NewDatabase(rawdb.WrapDatabaseWithWasm(rawdb.NewDatabase(recordingKeyValue), r.db.WasmStore(), 0, r.db.WasmTargets()))
+	// var prevRoot common.Hash
+	// if lastBlockHeader != nil {
+	// 	prevRoot = lastBlockHeader.Root
+	// }
+	// recordingStateDb, err := state.New(prevRoot, recordingStateDatabase)
+	// if err != nil {
+	// 	return nil, nil, nil, fmt.Errorf("failed to create recordingStateDb: %w", err)
+	// }
+	recordingStateDb := state.New(recordingKeyValue.state)
 	recordingStateDb.StartRecording()
 	var recordingChainContext *RecordingChainContext
 	if lastBlockHeader != nil {

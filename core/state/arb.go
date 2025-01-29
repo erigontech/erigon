@@ -2,6 +2,7 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"runtime"
@@ -202,6 +203,8 @@ type IntraBlockStateArbitrum interface {
 	HasSelfDestructed(addr common.Address) bool
 
 	RecordProgram(targets []WasmTarget, moduleHash common.Hash)
+
+	GetStorageRoot(address common.Address) common.Hash
 
 	ActivatedAsm(target WasmTarget, moduleHash common.Hash) (asm []byte, err error)
 	WasmStore() kv.RwDB
@@ -459,4 +462,53 @@ func (s *IntraBlockState) GetStorageRoot(addr common.Address) common.Hash {
 		return stateObject.data.Root
 	}
 	return common.Hash{}
+}
+
+type activatedAsmCacheKey struct {
+	moduleHash common.Hash
+	target     WasmTarget
+}
+
+type WasmDB struct {
+	kv.RwDB
+
+	activatedAsmCache *lru.SizeConstrainedCache[activatedAsmCacheKey, []byte]
+	cacheTag          uint32
+	targets           []WasmTarget
+}
+
+func (w *WasmDB) ActivatedAsm(target WasmTarget, moduleHash common.Hash) ([]byte, error) {
+	cacheKey := activatedAsmCacheKey{moduleHash, target}
+	if asm, _ := w.activatedAsmCache.Get(cacheKey); len(asm) > 0 {
+		return asm, nil
+	}
+	var asm []byte
+	err := w.View(context.Background(), func(tx kv.Tx) error {
+		asm = ReadActivatedAsm(tx, target, moduleHash)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(asm) > 0 {
+		w.activatedAsmCache.Add(cacheKey, asm)
+		return asm, nil
+	}
+	return nil, errors.New("not found")
+}
+
+func (w *WasmDB) WasmStore() kv.RwDB {
+	return w
+}
+
+func (w *WasmDB) WasmCacheTag() uint32 {
+	return w.cacheTag
+}
+
+func (w *WasmDB) WasmTargets() []WasmTarget {
+	return w.targets
+}
+
+func WrapDatabaseWithWasm(wasm kv.RwDB, cacheTag uint32, targets []WasmTarget) kv.RwDB {
+	return &WasmDB{RwDB: wasm, cacheTag: cacheTag, targets: targets, activatedAsmCache: lru.NewSizeConstrainedCache[activatedAsmCacheKey, []byte](1000)}
 }

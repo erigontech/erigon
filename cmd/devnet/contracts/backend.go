@@ -43,6 +43,9 @@ type contractBackend struct {
 func (cb contractBackend) CodeAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) ([]byte, error) {
 	return cb.node.GetCode(contract, rpc.AsBlockReference(blockNumber))
 }
+func (cb contractBackend) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
+	panic("implement me")
+}
 
 func (cb contractBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
 	var gasPrice *hexutil.Big

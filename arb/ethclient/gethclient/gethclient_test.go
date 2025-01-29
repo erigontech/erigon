@@ -25,7 +25,9 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/arb/ethclient"
 	"github.com/erigontech/erigon/consensus/ethash"
@@ -37,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/app"
 	"github.com/holiman/uint256"
 )
 
@@ -87,7 +88,7 @@ func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 	return n, blocks
 }
 
-func generateTestChain() (*types.Genesis, []*types.Block) {
+func generateTestChain(db kv.RwDB) (*types.Genesis, []*types.Block) {
 	genesis := &types.Genesis{
 		Config: params.AllEthashProtocolChanges,
 		Alloc: types.GenesisAlloc{
@@ -102,9 +103,13 @@ func generateTestChain() (*types.Genesis, []*types.Block) {
 		g.OffsetTime(5)
 		g.SetExtra([]byte("test"))
 	}
-	_, blocks, _ := core.GenerateChainWithGenesis(genesis, ethash.NewFaker(), 1, generate)
-	blocks = append([]*types.Block{genesis.ToBlock()}, blocks...)
-	return genesis, blocks
+
+	block, _, _ := core.GenesisToBlock(core.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	pack, _ := core.GenerateChain(genesis.Config, block, ethash.NewFaker(), db, 1, generate)
+	// m := mock.MockWithGenesis(t, genesis, key, false)
+	// _, blocks, _ := core.GenerateChainWithGenesis(genesis, ethash.NewFaker(), 1, generate)
+	// blocks = append([]*types.Block{block}, blocks...)
+	return genesis, pack.Blocks
 }
 
 func TestGethClient(t *testing.T) {
@@ -378,11 +383,13 @@ func testSubscribePendingTransactions(t *testing.T, client *rpc.Client) {
 	// Create transaction
 	tx := types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), 22000, uint256.NewInt(1), nil)
 	signer := types.LatestSignerForChainID(chainID)
-	signature, err := crypto.Sign(signer.Hash(tx).Bytes(), testKey)
+
+	shash := tx.SigningHash(signer.ChainID().ToBig()).Bytes()
+	signature, err := crypto.Sign(shash, testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	signedTx, err := tx.WithSignature(signer, signature)
+	signedTx, err := tx.WithSignature(*signer, signature)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,16 +417,16 @@ func testSubscribeFullPendingTransactions(t *testing.T, client *rpc.Client) {
 		t.Fatal(err)
 	}
 	// Create transaction
-	tx := types.NewTransaction(1, common.Address{1}, uint256.NewInt(1), 22000, uint256.NewInt(1), nil)
+	var tx types.Transaction
+	tx = types.NewTransaction(1, common.Address{1}, uint256.NewInt(1), 22000, uint256.NewInt(1), nil)
 	signer := types.LatestSignerForChainID(chainID)
-	signature, err := crypto.Sign(signer.Hash(tx).Bytes(), testKey)
+
+	shash := tx.SigningHash(signer.ChainID().ToBig()).Bytes()
+	signature, err := crypto.Sign(shash, testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	signedTx, err := tx.WithSignature(signer, signature)
-	if err != nil {
-		t.Fatal(err)
-	}
+	signedTx, err := tx.WithSignature(*signer, signature)
 	// Send transaction
 	err = ethcl.SendTransaction(context.Background(), signedTx)
 	if err != nil {

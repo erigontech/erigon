@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
@@ -56,7 +57,8 @@ var RenderRPCError func(data []byte) error
 
 type NodeInterfaceBackendAPI interface {
 	ChainConfig() *chain.Config
-	CurrentBlock() *types.Header
+	// CurrentHeader() *types.Header
+	CurrentBlock() *types.Block
 	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
 	HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
 	GetLogs(ctx context.Context, blockHash common.Hash, number uint64) ([][]*types.Log, error)
@@ -88,6 +90,9 @@ type BlockChain interface {
 
 	// WriteBlockAndSetHeadWithTime also counts processTime, which will cause intermittent TrieDirty cache writes
 	WriteBlockAndSetHeadWithTime(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.IntraBlockState, emitHeadEvent bool, processTime time.Duration) (status WriteStatus, err error)
+
+	// StateCache returns the caching database underpinning the blockchain instance.
+	StateCache() kv.RwDB
 }
 
 // // State returns a new mutable state based on the current HEAD block.

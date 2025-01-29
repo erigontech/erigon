@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -46,6 +45,7 @@ type APIBackend struct {
 	b           *eth.Ethereum
 	blockReader services.FullBlockReader
 
+	arbConfig     *Config
 	dbForAPICalls kv.TemporalRwDB
 
 	fallbackClient types.FallbackClient
@@ -106,6 +106,8 @@ func createRegisterAPIBackend(backend *eth.Ethereum, filterConfig filters.Config
 	}
 	// discard stylus-tag on any call made from api database
 	dbForAPICalls := backend.ChainDB()
+	_ = dbForAPICalls
+	_ = fallbackClient
 	wasmStore, tag := backend.ChainDB().WasmDataBase()
 	if tag != 0 || len(backend.ChainDB().WasmTargets()) > 1 {
 		dbForAPICalls = rawdb.WrapDatabaseWithWasm(backend.ChainDB(), wasmStore, 0, []state.WasmTarget{state.LocalTarget()})
@@ -115,7 +117,7 @@ func createRegisterAPIBackend(backend *eth.Ethereum, filterConfig filters.Config
 	// 	dbForAPICalls:  dbForAPICalls,
 	// 	fallbackClient: fallbackClient,
 	// }
-	// filterSystem := filters.NewFilterSystem(backend.apiBackend, filterConfig)
+	filterSystem := filters.NewFilterSystem(backend.apiBackend, filterConfig)
 	// backend.stack.RegisterAPIs(backend.apiBackend.GetAPIs(filterSystem))
 	return filterSystem, nil
 }
@@ -164,7 +166,7 @@ func (a *APIBackend) GetAPIs(filterSystem *filters.FilterSystem) []rpc.API {
 	return apis
 }
 
-func (a *APIBackend) BlockChain() *eth1_chain_reader.ChainReaderWriterEth1 {
+func (a *APIBackend) BlockChain() core.BlockChain /**eth1_chain_reader.ChainReaderWriterEth1 */ {
 	return a.b.BlockChain()
 }
 
@@ -218,7 +220,7 @@ func (a *APIBackend) FeeHistory(
 	nitroGenesis := rpc.BlockNumber(a.ChainConfig().ArbitrumChainParams.GenesisBlockNum)
 	newestBlock, latestBlock := a.BlockChain().ClipToPostNitroGenesis(newestBlock)
 
-	maxFeeHistory := a.b.config.FeeHistoryMaxBlockCount
+	maxFeeHistory := a.arbConfig.FeeHistoryMaxBlockCount
 	if blocks > maxFeeHistory {
 		log.Warn("Sanitizing fee history length", "requested", blocks, "truncated", maxFeeHistory)
 		blocks = maxFeeHistory
@@ -336,19 +338,19 @@ func (a *APIBackend) ExtRPCEnabled() bool {
 }
 
 func (a *APIBackend) RPCGasCap() uint64 {
-	return a.b.config.RPCGasCap
+	return a.arbConfig.RPCGasCap
 }
 
 func (a *APIBackend) RPCTxFeeCap() float64 {
-	return a.b.config.RPCTxFeeCap
+	return a.arbConfig.RPCTxFeeCap
 }
 
 func (a *APIBackend) RPCEVMTimeout() time.Duration {
-	return a.b.config.RPCEVMTimeout
+	return a.arbConfig.RPCEVMTimeout
 }
 
 func (a *APIBackend) UnprotectedAllowed() bool {
-	return a.b.config.TxAllowUnprotected
+	return a.arbConfig.TxAllowUnprotected
 }
 
 // Blockchain API
@@ -366,7 +368,11 @@ func (a *APIBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*types
 
 func (a *APIBackend) blockNumberToUint(ctx context.Context, number rpc.BlockNumber) (uint64, error) {
 	if number == rpc.LatestBlockNumber || number == rpc.PendingBlockNumber {
-		return a.BlockChain().CurrentBlock().Number.Uint64(), nil
+		b := a.CurrentBlock()
+		if b == nil {
+			return 0, errors.New("cant get current block")
+		}
+		return b.Number().Uint64(), nil
 	}
 	if number == rpc.SafeBlockNumber {
 		if a.sync == nil {
@@ -388,13 +394,18 @@ func (a *APIBackend) blockNumberToUint(ctx context.Context, number rpc.BlockNumb
 
 func (a *APIBackend) headerByNumberImpl(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
 	if number == rpc.LatestBlockNumber || number == rpc.PendingBlockNumber {
-		return a.BlockChain().CurrentBlock(), nil
+		return a.CurrentHeader(), nil
 	}
 	numUint, err := a.blockNumberToUint(ctx, number)
 	if err != nil {
 		return nil, err
 	}
-	return a.BlockChain().GetHeaderByNumber(numUint), nil
+	var header *types.Header
+	err = a.ChainDb().View(ctx, func(tx kv.Tx) error {
+		header, err = a.BlockChain().HeaderByNumber(ctx, tx, numUint)
+		return err
+	})
+	return header, nil
 }
 
 func (a *APIBackend) headerByNumberOrHashImpl(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, error) {
@@ -404,7 +415,7 @@ func (a *APIBackend) headerByNumberOrHashImpl(ctx context.Context, blockNrOrHash
 	}
 	hash, ishash := blockNrOrHash.Hash()
 	if ishash {
-		return a.BlockChain().GetHeaderByHash(hash), nil
+		return a.BlockChain().GetHeaderByHash(ctx, hash), nil
 	}
 	return nil, errors.New("invalid arguments; neither block nor hash specified")
 }
@@ -414,18 +425,32 @@ func (a *APIBackend) HeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc
 }
 
 func (a *APIBackend) CurrentHeader() *types.Header {
-	//return a.blockReader.CurrentBlock()
-	return a.BlockChain().CurrentHeader()
+	block := a.CurrentBlock()
+	if block == nil {
+		return nil
+	}
+	return block.Header()
 }
 
-func (a *APIBackend) CurrentBlock() *types.Header {
-	return a.BlockChain().CurrentBlock()
+func (a *APIBackend) CurrentBlock() *types.Block {
+	//return a.blockReader.CurrentBlock()
+	var block *types.Block
+	var err error
+	a.ChainDb().View(context.Background(), func(tx kv.Tx) error {
+		block, err = a.BlockChain().CurrentBlock(tx)
+		return err
+	})
+	if err != nil {
+		return nil
+	}
+	return block
 }
 
 func (a *APIBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	if number == rpc.LatestBlockNumber || number == rpc.PendingBlockNumber {
-		currentHeader := a.BlockChain().CurrentBlock()
-		currentBlock := a.BlockChain().GetBlock(currentHeader.Hash(), currentHeader.Number.Uint64())
+		currentBlock := a.CurrentBlock()
+		// currentHeader := currentBlock.Header() //a.CurrentHeader()
+		// currentBlock := a.BlockChain().BlockBy(currentHeader.Hash(), currentHeader.Number.Uint64())
 		if currentBlock == nil {
 			return nil, errors.New("can't find block for current header")
 		}
@@ -435,7 +460,12 @@ func (a *APIBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) 
 	if err != nil {
 		return nil, err
 	}
-	return a.BlockChain().GetBlockByNumber(numUint), nil
+	var block *types.Block
+	err = a.ChainDb().View(ctx, func(tx kv.Tx) error {
+		block, err = a.BlockChain().BlockByNumber(ctx, tx, numUint)
+		return err
+	})
+	return block, err
 }
 
 func (a *APIBackend) BlockByHash(ctx context.Context, hash common.Hash) (*types.Block, error) {
@@ -464,6 +494,9 @@ func StateAndHeaderFromHeader(ctx context.Context, chainDb kv.TemporalRwDB, bc c
 	if !bc.Config().IsArbitrumNitro(header.Number) {
 		return nil, header, types.ErrUseFallback
 	}
+	// chainDb.ViewTemporal(ctx ,func(tx kv.TemporalTx) error{
+	// 	tx.
+	// })
 	stateFor := func(db *state2.SharedDomains) func(header *types.Header) (*state.IntraBlockState, StateReleaseFunc, error) {
 		return func(header *types.Header) (*state.IntraBlockState, StateReleaseFunc, error) {
 			//if header.Root != (common.Hash{}) {
@@ -515,11 +548,23 @@ func StateAndHeaderFromHeader(ctx context.Context, chainDb kv.TemporalRwDB, bc c
 		return lastState, header, nil
 	}
 	defer lastStateRelease()
-	targetBlock := bc.GetBlockByNumber(header.Number.Uint64())
+	l2tx, err := chainDb.BeginRw(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer l2tx.Rollback()
+
+	targetBlock, err := bc.BlockByNumber(ctx, l2tx, header.Number.Uint64())
+	if err != nil {
+		return nil, nil, err
+	}
 	if targetBlock == nil {
 		return nil, nil, errors.New("target block not found")
 	}
-	lastBlock := bc.GetBlockByNumber(lastHeader.Number.Uint64())
+	lastBlock, err := bc.BlockByNumber(ctx, l2tx, lastHeader.Number.Uint64())
+	if err != nil {
+		return nil, nil, err
+	}
 	if lastBlock == nil {
 		return nil, nil, errors.New("last block not found")
 	}
@@ -541,18 +586,31 @@ func StateAndHeaderFromHeader(ctx context.Context, chainDb kv.TemporalRwDB, bc c
 
 func (a *APIBackend) StateAndHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*state.IntraBlockState, *types.Header, error) {
 	header, err := a.HeaderByNumber(ctx, number)
-	return StateAndHeaderFromHeader(ctx, a.ChainDb(), a.b.arb.BlockChain(), a.b.config.MaxRecreateStateDepth, header, err)
+	return StateAndHeaderFromHeader(ctx, a.ChainDb(), a.BlockChain(), a.arbConfig.MaxRecreateStateDepth, header, err)
 }
 
 func (a *APIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*state.IntraBlockState, *types.Header, error) {
 	header, err := a.HeaderByNumberOrHash(ctx, blockNrOrHash)
 	hash, ishash := blockNrOrHash.Hash()
 	bc := a.BlockChain()
+	ltx, err := a.ChainDb().BeginRo(context.Background())
+	if err != nil {
+		return nil, nil, err
+	}
+	defer ltx.Rollback()
+
+	canoncialHash, ok, err := bc.CanonicalHash(ctx, ltx, header.Number.Uint64())
+	if err != nil {
+		return nil, nil, err
+	}
+	if !ok {
+		return nil, nil, errors.New("canonical hash not found")
+	}
 	// check if we are not trying to get recent state that is not yet triedb referenced or committed in Blockchain.writeBlockWithState
-	if ishash && header != nil && header.Number.Cmp(bc.CurrentBlock().Number) > 0 && bc.GetCanonicalHash(header.Number.Uint64()) != hash {
+	if ishash && header != nil && header.Number.Cmp(a.CurrentBlock().Number()) > 0 && canoncialHash != hash {
 		return nil, nil, errors.New("requested block ahead of current block and the hash is not currently canonical")
 	}
-	return StateAndHeaderFromHeader(ctx, a.ChainDb(), a.b.arb.BlockChain(), a.b.config.MaxRecreateStateDepth, header, err)
+	return StateAndHeaderFromHeader(ctx, a.ChainDb(), a.b.arb.BlockChain(), a.arbConfig.MaxRecreateStateDepth, header, err)
 }
 
 func (a *APIBackend) StateAtBlock(ctx context.Context, block *types.Block, reexec uint64, base *state.IntraBlockState, checkLive bool, preferDisk bool) (statedb *state.IntraBlockState, release tracers.StateReleaseFunc, err error) {
@@ -618,6 +676,7 @@ func (a *APIBackend) SendConditionalTx(ctx context.Context, signedTx types.Trans
 }
 
 func (a *APIBackend) GetTransaction(ctx context.Context, txHash common.Hash) (bool, types.Transaction, common.Hash, uint64, uint64, error) {
+	// br, bw := a.b.BlockIO()
 	tx, blockHash, blockNumber, index := rawdb.ReadTransaction(a.b.chainDb, txHash)
 	return tx != nil, tx, blockHash, blockNumber, index, nil
 }
@@ -637,7 +696,11 @@ func (a *APIBackend) GetPoolNonce(ctx context.Context, addr common.Address) (uin
 	if err != nil {
 		return 0, err
 	}
-	return stateDB.GetNonce(addr), nil
+	nonce, err := stateDB.GetNonce(addr)
+	if err != nil {
+		return 0, err
+	}
+	return nonce, nil
 }
 
 func (a *APIBackend) Stats() (pending int, queued int) {

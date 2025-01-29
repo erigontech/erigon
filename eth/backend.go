@@ -1121,6 +1121,10 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	return nil
 }
 
+func (s *Ethereum) Engine() consensus.Engine {
+	return s.engine
+}
+
 func (s *Ethereum) APIs() []rpc.API {
 	return s.apiList
 }
@@ -1792,4 +1796,18 @@ func polygonSyncSentry(sentries []protosentry.SentryClient) protosentry.SentryCl
 
 // func (s *Ethereum) BlockChain() eth1_chain_reader.ChainReaderWriterEth1 {
 // 	return s.ExecutionModule().blo
+// }
+
+// func NewArbEthereum(
+// 	blockchain *core.BlockChain,
+// 	chainDb kv.RwDB,
+// ) *Ethereum {
+// 	return &Ethereum{
+// 		blockchain: blockchain,
+// 		chainDb:    chainDb,
+// 	}
+// }
+
+// func (eth *Ethereum) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (*core.Message, vm.BlockContext, *state.StateDB, tracers.StateReleaseFunc, error) {
+// 	return eth.stateAtTransaction(ctx, block, txIndex, reexec)
 // }

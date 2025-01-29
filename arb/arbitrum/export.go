@@ -7,6 +7,7 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 type TransactionArgs = ethapi.SendTxArgs
@@ -19,7 +20,7 @@ type TransactionArgs = ethapi.SendTxArgs
 
 func EstimateGas(
 	ctx context.Context,
-	b ethapi.Backend,
+	b rpchelper.ApiBackend,
 	args TransactionArgs,
 	blockNrOrHash rpc.BlockNumberOrHash,
 	overrides *ethapi.StateOverrides,
