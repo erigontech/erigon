@@ -59,6 +59,10 @@ func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint2
 		return effectiveFee
 	}
 }
+func (tx *DynamicFeeTransaction) GetEffectiveGasPrice(baseFee *uint256.Int) *uint256.Int {
+	priorityFeePerGas := tx.GetEffectiveGasTip(baseFee)
+	return new(uint256.Int).Add(baseFee, priorityFeePerGas)
+}
 
 func (tx *DynamicFeeTransaction) Unwrap() Transaction {
 	return tx
