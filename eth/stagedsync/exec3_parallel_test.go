@@ -456,6 +456,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	t.Helper()
 
 	logger := log.Root()
+	logger.SetHandler(log.DiscardHandler())
 
 	rawDb := memdb.NewStateDB("")
 	defer rawDb.Close()
@@ -535,19 +536,23 @@ func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.T
 		return nil, nil
 	}
 
-	_, err = pe.execute(context.Background(), tasks, profile)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	_, err = pe.execute(ctx, tasks, profile)
 
 	if err != nil {
 		return
 	}
 
-	defer pe.wait(context.Background())
+	defer pe.wait(ctx)
 
-	blockResult := pe.processEvents(context.Background(), true)
+	blockResult := pe.processEvents(ctx, true)
 
 	if check != nil {
 		err = check(pe)
 	}
+
+	cancel()
 
 	return blockResult, err
 }

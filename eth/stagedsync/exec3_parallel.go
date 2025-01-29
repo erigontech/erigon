@@ -507,11 +507,11 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 
 	defer func() {
 		if rec := recover(); rec != nil {
-			pe.logger.Warn("[dbg] apply loop panic", "rec", rec)
-		} else if err != nil {
-			pe.logger.Warn("[dbg] apply loop error", "err", err)
+			pe.logger.Warn(pe.execStage.LogPrefix()+" apply loop panic", "rec", rec, "stack", dbg.Stack())
+		} else if err != nil && !errors.Is(err, context.Canceled) {
+			pe.logger.Warn(pe.execStage.LogPrefix()+" apply loop error", "err", err)
 		} else {
-			pe.logger.Warn("[dbg] apply loop exit")
+			pe.logger.Debug(pe.execStage.LogPrefix() + " apply loop exit")
 		}
 	}()
 
@@ -654,10 +654,12 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 
 func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) (err error) {
 	defer func() {
-		if err != nil {
-			fmt.Println("rwLoop done:", err)
+		if rec := recover(); rec != nil {
+			pe.logger.Warn(pe.execStage.LogPrefix()+"rw loop panic", "rec", rec, "stack", dbg.Stack())
+		} else if err != nil && !errors.Is(err, context.Canceled) {
+			pe.logger.Warn(pe.execStage.LogPrefix()+" rw loop exit", "err", err)
 		} else {
-			fmt.Println("rwLoop done")
+			pe.logger.Debug(pe.execStage.LogPrefix() + " rw loop loop exit")
 		}
 	}()
 
