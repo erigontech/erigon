@@ -432,6 +432,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 		chainId.Set(txn.GetChainID())
 		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		result.YParity = (*hexutil.Big)(v.ToBig())
+		result.V = (*hexutil.Big)(v.ToBig())
 		acl := txn.GetAccessList()
 		result.Accesses = &acl
 
