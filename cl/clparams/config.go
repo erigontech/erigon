@@ -358,6 +358,12 @@ func (b ConfigByte) MarshalJSON() ([]byte, error) {
 	return []byte(fmt.Sprintf("\"0x%x\"", b)), nil
 }
 
+type RequestTypePrefix byte
+
+func (b RequestTypePrefix) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf("\"0x%02x\"", b)), nil
+}
+
 type ConfigForkVersion uint32
 
 func (v ConfigForkVersion) MarshalJSON() ([]byte, error) {
@@ -579,12 +585,12 @@ type BeaconChainConfig struct {
 	PendingConsolidationsLimit            uint64 `yaml:"PENDING_CONSOLIDATIONS_LIMIT" spec:"true" json:"PENDING_CONSOLIDATIONS_LIMIT,string"`                             // PendingConsolidationsLimit defines the maximum number of pending consolidations.
 	MaxBlobsPerBlockElectra               uint64 `yaml:"MAX_BLOBS_PER_BLOCK_ELECTRA" spec:"true" json:"MAX_BLOBS_PER_BLOCK_ELECTRA,string"`                               // MaxBlobsPerBlockElectra defines the maximum number of blobs per block for Electra.
 	// Constants for the Electra fork.
-	UnsetDepositRequestsStartIndex uint64     `yaml:"UNSET_DEPOSIT_REQUESTS_START_INDEX" spec:"true" json:"UNSET_DEPOSIT_REQUESTS_START_INDEX,string"` // UnsetDepositRequestsStartIndex defines the start index for unset deposit requests.
-	FullExitRequestAmount          uint64     `yaml:"FULL_EXIT_REQUEST_AMOUNT" spec:"true" json:"FULL_EXIT_REQUEST_AMOUNT,string"`                     // FullExitRequestAmount defines the amount for a full exit request.
-	CompoundingWithdrawalPrefix    ConfigByte `yaml:"COMPOUNDING_WITHDRAWAL_PREFIX" spec:"true" json:"COMPOUNDING_WITHDRAWAL_PREFIX"`                  // CompoundingWithdrawalPrefix is the prefix for compounding withdrawals.
-	DepositRequestType             ConfigByte `yaml:"DEPOSIT_REQUEST_TYPE" spec:"true" json:"DEPOSIT_REQUEST_TYPE"`                                    // DepositRequestType is the type for deposit requests.
-	WithdrawalRequestType          ConfigByte `yaml:"WITHDRAWAL_REQUEST_TYPE" spec:"true" json:"WITHDRAWAL_REQUEST_TYPE"`                              // WithdrawalRequestType is the type for withdrawal requests.
-	ConsolidationRequestType       ConfigByte `yaml:"CONSOLIDATION_REQUEST_TYPE" spec:"true" json:"CONSOLIDATION_REQUEST_TYPE"`                        // ConsolidationRequestType is the type for consolidation requests.
+	UnsetDepositRequestsStartIndex uint64            `yaml:"UNSET_DEPOSIT_REQUESTS_START_INDEX" spec:"true" json:"UNSET_DEPOSIT_REQUESTS_START_INDEX,string"` // UnsetDepositRequestsStartIndex defines the start index for unset deposit requests.
+	FullExitRequestAmount          uint64            `yaml:"FULL_EXIT_REQUEST_AMOUNT" spec:"true" json:"FULL_EXIT_REQUEST_AMOUNT,string"`                     // FullExitRequestAmount defines the amount for a full exit request.
+	CompoundingWithdrawalPrefix    RequestTypePrefix `yaml:"COMPOUNDING_WITHDRAWAL_PREFIX" spec:"true" json:"COMPOUNDING_WITHDRAWAL_PREFIX"`                  // CompoundingWithdrawalPrefix is the prefix for compounding withdrawals.
+	DepositRequestType             RequestTypePrefix `yaml:"DEPOSIT_REQUEST_TYPE" spec:"true" json:"DEPOSIT_REQUEST_TYPE"`                                    // DepositRequestType is the type for deposit requests.
+	WithdrawalRequestType          RequestTypePrefix `yaml:"WITHDRAWAL_REQUEST_TYPE" spec:"true" json:"WITHDRAWAL_REQUEST_TYPE"`                              // WithdrawalRequestType is the type for withdrawal requests.
+	ConsolidationRequestType       RequestTypePrefix `yaml:"CONSOLIDATION_REQUEST_TYPE" spec:"true" json:"CONSOLIDATION_REQUEST_TYPE"`                        // ConsolidationRequestType is the type for consolidation requests.
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
