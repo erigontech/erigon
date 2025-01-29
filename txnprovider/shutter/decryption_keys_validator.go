@@ -106,6 +106,12 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 	}
 
 	if msgEonIndex > currentEon.Index {
+		//
+		// TODO: maybe we can add a wait time here (same as max decryption keys wait time)
+		//       combined with a check if it is in the activationQueue (if more than 1 block away)
+		//       the 2 above can be done in the eon tracker
+		//
+
 		// we may be behind - ignore msg, without penalizing peer
 		return fmt.Errorf("%w: %w: msgEonIndex=%d, currentEonIndex=%d", ErrIgnoreMsg, ErrEonInTheFuture, msgEonIndex, currentEon.Index)
 	}
