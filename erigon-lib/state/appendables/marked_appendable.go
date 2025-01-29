@@ -91,8 +91,8 @@ func NewMarkedAppendable(enum ApEnum, canonicalTbl, valsTbl string, opts ...MAOp
 	return m, nil
 }
 
-func (a *MarkedAppendable) encTs(ts uint64) []byte {
-	return Encode64ToBytes(ts, a.ts8Bytes)
+func (a *MarkedAppendable) encTs(ts Num) []byte {
+	return Encode64ToBytes(uint64(ts), a.ts8Bytes)
 }
 
 // TODO: slots are encoded 4 bytes in canonicalTbl (CanonicalBlockRoots);
@@ -101,9 +101,9 @@ func (a *MarkedAppendable) encTs(ts uint64) []byte {
 // of existing BeaconBlocks table.
 const tsLength = 8
 
-func (a *MarkedAppendable) combK(ts uint64, hash []byte) []byte {
+func (a *MarkedAppendable) combK(ts Num, hash []byte) []byte {
 	k := make([]byte, tsLength+a.hashBytes)
-	binary.BigEndian.PutUint64(k, ts)
+	binary.BigEndian.PutUint64(k, uint64(ts))
 	copy(k[tsLength:], hash)
 	return k
 }
@@ -144,20 +144,19 @@ func (r *MarkedAppendableRoTx) Get(num Num, tx kv.Tx) (VVType, error) {
 	}
 
 	// then db
-	iNum := uint64(num)
-	canHash, err := tx.GetOne(a.canonicalTbl, a.encTs(iNum))
+	canHash, err := tx.GetOne(a.canonicalTbl, a.encTs(num))
 	if err != nil {
 		return nil, err
 	}
 	// if canHash == nil....
 
-	key := a.combK(iNum, canHash)
+	key := a.combK(num, canHash)
 	return tx.GetOne(a.valsTbl, key)
 }
 
-func (r *MarkedAppendableRoTx) GetNc(id Id, hash []byte, tx kv.Tx) (VVType, error) {
+func (r *MarkedAppendableRoTx) GetNc(num Num, hash []byte, tx kv.Tx) (VVType, error) {
 	a := r.a
-	key := a.combK(uint64(id), hash)
+	key := a.combK(num, hash)
 	return tx.GetOne(a.valsTbl, key)
 }
 
@@ -174,11 +173,11 @@ func (r *MarkedAppendableRoTx) GetNc(id Id, hash []byte, tx kv.Tx) (VVType, erro
 func (r *MarkedAppendableRoTx) Put(num Num, hash []byte, value VVType, tx kv.RwTx) error {
 	// can then val
 	a := r.a
-	if err := tx.Append(a.canonicalTbl, a.encTs(uint64(num)), hash); err != nil {
+	if err := tx.Append(a.canonicalTbl, a.encTs(num), hash); err != nil {
 		return err
 	}
 
-	key := a.combK(uint64(num), hash)
+	key := a.combK(num, hash)
 	return tx.Put(a.valsTbl, key, value)
 }
 
@@ -188,9 +187,9 @@ func (r *MarkedAppendableRoTx) Prune(ctx context.Context, baseKeyTo Num, limit u
 	// probably fromKey value needs to be in configuration...starts from 1 because we want to keep genesis block
 	// but this might start from 0 as well.
 	a := r.a
-	fromKey := uint64(1)
+	fromKey := Num(1)
 	fromKeyPrefix := a.encTs(fromKey)
-	toKeyPrefix := a.encTs(uint64(baseKeyTo) - 1)
+	toKeyPrefix := a.encTs(baseKeyTo - 1)
 	if err := DeleteRangeFromTbl(a.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, rwTx); err != nil {
 		return err
 	}
@@ -204,7 +203,7 @@ func (r *MarkedAppendableRoTx) Prune(ctx context.Context, baseKeyTo Num, limit u
 
 func (r *MarkedAppendableRoTx) Unwind(ctx context.Context, baseKeyFrom Num, rwTx kv.RwTx) error {
 	a := r.a
-	fromKey := a.encTs(uint64(baseKeyFrom))
+	fromKey := a.encTs(baseKeyFrom)
 	if err := DeleteRangeFromTbl(a.canonicalTbl, fromKey, nil, MaxUint64, rwTx); err != nil {
 		return err
 	}
