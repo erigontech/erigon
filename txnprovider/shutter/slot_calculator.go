@@ -59,5 +59,6 @@ func (sc BeaconChainSlotCalculator) CalcCurrentSlot() uint64 {
 	if err != nil {
 		panic(err)
 	}
+
 	return slot
 }
