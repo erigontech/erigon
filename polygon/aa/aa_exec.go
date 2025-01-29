@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -17,6 +20,40 @@ import (
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
+
+func chargeGas(
+	header *types.Header,
+	tx *types.AccountAbstractionTransaction,
+	gasPool *core.GasPool,
+	ibs *state.IntraBlockState,
+) error {
+	baseFee := uint256.MustFromBig(header.BaseFee)
+	effectiveGasPrice := new(uint256.Int).Add(baseFee, tx.GetEffectiveGasTip(baseFee))
+
+	totalGasLimit := fixedgas.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.Gas + tx.PostOpGasLimit
+	preCharge := new(uint256.Int).SetUint64(totalGasLimit)
+	preCharge = preCharge.Mul(preCharge, effectiveGasPrice)
+
+	chargeFrom := tx.GasPayer()
+	balance, err := ibs.GetBalance(*chargeFrom)
+	if err != nil {
+		return err
+	}
+
+	if balance.Cmp(preCharge) < 0 {
+		return fmt.Errorf("%w: RIP-7560 address %v have %v want %v", core.ErrInsufficientFunds, chargeFrom.Hex(), balance, preCharge)
+	}
+
+	if err := ibs.SubBalance(*chargeFrom, preCharge, 0); err != nil {
+		return err
+	}
+
+	if err := gasPool.SubGas(totalGasLimit); err != nil {
+		return newValidationPhaseError(err, nil, "block gas limit", false)
+	}
+
+	return nil
+}
 
 func ValidateAATransaction(
 	tx *types.AccountAbstractionTransaction,
@@ -47,10 +84,9 @@ func ValidateAATransaction(
 
 	validationGasUsed = 0
 
-	//baseFee := uint256.MustFromBig(header.BaseFee)
-
-	//effectiveGasPrice := new(uint256.Int).Add(baseFee, tx.GetEffectiveGasTip(baseFee))
-	//gasLimit, preCharge, err := BuyGasRip7560Transaction(tx, statedb, effectiveGasPrice, gasPool)
+	if err = chargeGas(header, tx, gasPool, ibs); err != nil {
+		return nil, 0, err
+	}
 
 	// TODO: configure tracer
 
@@ -106,7 +142,7 @@ func ValidateAATransaction(
 			return errors.New("invalid call to EntryPoint contract from a wrong account address")
 		}
 
-		validityTimeRange, err := DecodeAcceptAccount(epc.Input)
+		validityTimeRange, err := types.DecodeAcceptAccount(epc.Input)
 		if err != nil {
 			return err
 		}
@@ -144,7 +180,7 @@ func ValidateAATransaction(
 			if bytes.Compare(epc.From[:], tx.Paymaster[:]) != 0 {
 				return errors.New("invalid call to EntryPoint contract from a wrong paymaster address")
 			}
-			paymasterValidity, err := DecodeAcceptPaymaster(epc.Input) // TODO: find better name
+			paymasterValidity, err := types.DecodeAcceptPaymaster(epc.Input) // TODO: find better name
 			if err != nil {
 				return err
 			}
@@ -291,7 +327,7 @@ func injectRIP7560AccountDeployedEvent(
 	blockNum uint64,
 	ibs *state.IntraBlockState,
 ) error {
-	topics, data, err := EncodeRIP7560AccountDeployedEvent(txn.Paymaster, txn.Deployer, txn.SenderAddress)
+	topics, data, err := types.EncodeRIP7560AccountDeployedEvent(txn.Paymaster, txn.Deployer, txn.SenderAddress)
 	if err != nil {
 		return err
 	}
@@ -308,7 +344,7 @@ func injectRIP7560TransactionRevertReasonEvent(
 	blockNum uint64,
 	ibs *state.IntraBlockState,
 ) error {
-	topics, data, err := EncodeRIP7560TransactionRevertReasonEvent(revertData, txn.Nonce, txn.NonceKey, txn.SenderAddress)
+	topics, data, err := types.EncodeRIP7560TransactionRevertReasonEvent(revertData, txn.Nonce, txn.NonceKey, txn.SenderAddress)
 	if err != nil {
 		return err
 	}
@@ -325,7 +361,7 @@ func injectRIP7560TransactionPostOpRevertReasonEvent(
 	blockNum uint64,
 	ibs *state.IntraBlockState,
 ) error {
-	topics, data, err := EncodeRIP7560TransactionPostOpRevertReasonEvent(revertData, txn.Nonce, txn.NonceKey, txn.Paymaster, txn.SenderAddress)
+	topics, data, err := types.EncodeRIP7560TransactionPostOpRevertReasonEvent(revertData, txn.Nonce, txn.NonceKey, txn.Paymaster, txn.SenderAddress)
 	if err != nil {
 		return err
 	}
@@ -342,7 +378,7 @@ func injectRIP7560TransactionEvent(
 	blockNum uint64,
 	ibs *state.IntraBlockState,
 ) error {
-	topics, data, err := EncodeRIP7560TransactionEvent(executionStatus, txn.Nonce, txn.NonceKey, txn.Paymaster, txn.Deployer, txn.SenderAddress)
+	topics, data, err := types.EncodeRIP7560TransactionEvent(executionStatus, txn.Nonce, txn.NonceKey, txn.Paymaster, txn.Deployer, txn.SenderAddress)
 	if err != nil {
 		return err
 	}

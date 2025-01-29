@@ -16,7 +16,6 @@ import (
 	emath "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/polygon/aa"
 )
 
 const (
@@ -689,7 +688,7 @@ func (tx *AccountAbstractionTransaction) ExecutionFrame() *Message {
 }
 
 func (tx *AccountAbstractionTransaction) PaymasterPostOp(paymasterContext []byte, gasUsed uint64, executionSuccess bool) (*Message, error) {
-	postOpData, err := aa.EncodePostOpFrame(paymasterContext, big.NewInt(int64(gasUsed)), executionSuccess)
+	postOpData, err := EncodePostOpFrame(paymasterContext, big.NewInt(int64(gasUsed)), executionSuccess)
 	if err != nil {
 		return nil, errors.New("unable to encode postPaymasterTransaction")
 	}
@@ -714,7 +713,7 @@ func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Mess
 		return nil, err
 	}
 
-	validatePaymasterData, err := aa.EncodeTxnForFrame("validatePaymasterTransaction", signingHash, txAbiEncoding)
+	validatePaymasterData, err := EncodeTxnForFrame("validatePaymasterTransaction", signingHash, txAbiEncoding)
 	if err != nil {
 		return nil, err
 	}
@@ -733,7 +732,7 @@ func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deplo
 		return nil, err
 	}
 
-	validateTransactionData, err := aa.EncodeTxnForFrame("validateTransaction", signingHash, txAbiEncoding)
+	validateTransactionData, err := EncodeTxnForFrame("validateTransaction", signingHash, txAbiEncoding)
 	if err != nil {
 		return nil, err
 	}
@@ -747,6 +746,14 @@ func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deplo
 		gasLimit: accountGasLimit,
 		data:     validateTransactionData,
 	}, nil
+}
+
+func (tx *AccountAbstractionTransaction) GasPayer() *common.Address {
+	if tx.Paymaster != nil && tx.Paymaster.Cmp(common.Address{}) != 0 {
+		return tx.Paymaster
+	}
+
+	return tx.SenderAddress
 }
 
 func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {

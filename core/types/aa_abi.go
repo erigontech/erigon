@@ -1,7 +1,9 @@
-package aa
+package types
 
 import (
+	_ "embed"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 
@@ -11,26 +13,47 @@ import (
 	"github.com/erigontech/erigon/accounts/abi"
 )
 
-//go:generate abigen -abi aa.abi -pkg aa -out ./gen_aa.go
+//go:embed aa.abi
+var AccountAbstractionABIJSON string
+
+const AccountAbstractionABIVersion = 0
+
+var AccountAbstractionABI, _ = abi.JSON(strings.NewReader(AccountAbstractionABIJSON))
 
 /// DECODING
 
 const PaymasterMaxContextSize = 65536
+
+func decodeMethodParamsToInterface(output interface{}, methodName string, input []byte) error {
+	m, err := AccountAbstractionABI.MethodById(input)
+	if err != nil {
+		return fmt.Errorf("unable to decode %s: %w", methodName, err)
+	}
+	if methodName != m.Name {
+		return fmt.Errorf("unable to decode %s: got wrong method %s", methodName, m.Name)
+	}
+	params, err := m.Inputs.Unpack(input[4:])
+	if err != nil {
+		return fmt.Errorf("unable to decode %s: %w", methodName, err)
+	}
+	err = m.Inputs.Copy(output, params)
+	if err != nil {
+		return fmt.Errorf("unable to decode %s: %v", methodName, err)
+	}
+	return nil
+}
 
 type AcceptAccountData struct {
 	ValidAfter, ValidUntil uint64
 }
 
 func DecodeAcceptAccount(input []byte) (*AcceptAccountData, error) {
-	p, err := ParseAaSigFailAccountParams(input)
+	acceptAccountData := &AcceptAccountData{}
+	err := decodeMethodParamsToInterface(acceptAccountData, "acceptAccount", input)
 	if err != nil {
 		return nil, err
 	}
-
-	return &AcceptAccountData{
-		ValidAfter: p.Param_validAfter.Uint64(),
-		ValidUntil: p.Param_validUntil.Uint64(),
-	}, nil
+	return acceptAccountData, nil
 }
 
 type AcceptPaymasterData struct {
@@ -39,27 +62,18 @@ type AcceptPaymasterData struct {
 }
 
 func DecodeAcceptPaymaster(input []byte) (*AcceptPaymasterData, error) {
-	p, err := ParseAaAcceptPaymasterParams(input)
+	acceptPaymasterData := &AcceptPaymasterData{}
+	err := decodeMethodParamsToInterface(acceptPaymasterData, "acceptPaymaster", input)
 	if err != nil {
 		return nil, err
 	}
-
-	if len(p.Param_context) > PaymasterMaxContextSize {
+	if len(acceptPaymasterData.Context) > PaymasterMaxContextSize {
 		return nil, errors.New("paymaster return data: context too large")
 	}
-	return &AcceptPaymasterData{
-		ValidAfter: p.Param_validAfter.Uint64(),
-		ValidUntil: p.Param_validUntil.Uint64(),
-		Context:    p.Param_context,
-	}, err
+	return acceptPaymasterData, err
 }
 
 /// ENCODING
-
-const AccountAbstractionABIJSON = `[{"type":"function","name":"validateTransaction","inputs":[{"name":"version","type":"uint256"},{"name":"txHash","type":"bytes32"},{"name":"transaction","type":"bytes"}]},{"type":"function","name":"validatePaymasterTransaction","inputs":[{"name":"version","type":"uint256"},{"name":"txHash","type":"bytes32"},{"name":"transaction","type":"bytes"}]},{"type":"function","name":"postPaymasterTransaction","inputs":[{"name":"success","type":"bool"},{"name":"actualGasCost","type":"uint256"},{"name":"context","type":"bytes"}]},{"type":"function","name":"acceptAccount","inputs":[{"name":"validAfter","type":"uint256"},{"name":"validUntil","type":"uint256"}]},{"type":"function","name":"acceptPaymaster","inputs":[{"name":"validAfter","type":"uint256"},{"name":"validUntil","type":"uint256"},{"name":"context","type":"bytes"}]},{"type":"function","name":"sigFailAccount","inputs":[{"name":"validAfter","type":"uint256"},{"name":"validUntil","type":"uint256"}]},{"type":"function","name":"sigFailPaymaster","inputs":[{"name":"validAfter","type":"uint256"},{"name":"validUntil","type":"uint256"},{"name":"context","type":"bytes"}]},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"sender","type":"address"},{"indexed":true,"internalType":"address","name":"paymaster","type":"address"},{"indexed":false,"internalType":"uint256","name":"nonceKey","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"nonceSequence","type":"uint256"},{"indexed":false,"internalType":"bool","name":"executionStatus","type":"uint256"}],"name":"RIP7560TransactionEvent","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"sender","type":"address"},{"indexed":false,"internalType":"uint256","name":"nonceKey","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"nonceSequence","type":"uint256"},{"indexed":false,"internalType":"bytes","name":"revertReason","type":"bytes"}],"name":"RIP7560TransactionRevertReason","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"sender","type":"address"},{"indexed":true,"internalType":"address","name":"paymaster","type":"address"},{"indexed":false,"internalType":"uint256","name":"nonceKey","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"nonceSequence","type":"uint256"},{"indexed":false,"internalType":"bytes","name":"revertReason","type":"bytes"}],"name":"RIP7560TransactionPostOpRevertReason","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"sender","type":"address"},{"indexed":true,"internalType":"address","name":"paymaster","type":"address"},{"indexed":true,"internalType":"address","name":"deployer","type":"address"}],"name":"RIP7560AccountDeployed","type":"event"}]`
-const AccountAbstractionABIVersion = 0
-
-var AccountAbstractionABI, _ = abi.JSON(strings.NewReader(AccountAbstractionABIJSON))
 
 func EncodeRIP7560TransactionEvent(
 	executionStatus, nonce uint64,
