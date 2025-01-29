@@ -274,11 +274,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			// if block hash is part of the canonical chain treat it as no-op.
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 
-			if e.config.IsOptimism() {
-				// unwind
-				fmt.Println("X+", fcuHeader.Number.Uint64())
-			}
-			// e.executionPipeline.UnwindTo(fcuHeader.Number.Uint64(), stagedsync.ForkChoice, tx)
+			//
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 			if err != nil {
 				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
@@ -290,6 +286,26 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 					Status:          execution.ExecutionStatus_InvalidForkchoice,
 				}, false)
 				return
+			}
+
+			// In the case of optimism unwind
+			if e.config.IsOptimism() {
+				if err := e.executionPipeline.UnwindTo(fcuHeader.Number.Uint64(), stagedsync.ForkChoice, tx); err != nil {
+					sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+					return
+				}
+				if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
+					sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+					return
+				}
+				if err := tx.Commit(); err != nil {
+					sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+					return
+				}
+				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+					LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
+					Status:          execution.ExecutionStatus_Success,
+				}, false)
 			}
 
 			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
