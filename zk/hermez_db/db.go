@@ -54,6 +54,7 @@ const ERIGON_VERSIONS = "erigon_versions"                               // erigo
 const BATCH_ENDS = "batch_ends"                                         // batch number -> true
 const WITNESS_CACHE = "witness_cache"                                   // block number -> witness for 1 block
 const BAD_TX_HASHES = "bad_tx_hashes"                                   // tx hash -> integer counter
+const BAD_TX_HASHES_LOOKUP = "bad_tx_hashes_lookup"                     // timestamp -> tx hash
 
 var HermezDbTables = []string{
 	L1VERIFICATIONS,
@@ -91,6 +92,7 @@ var HermezDbTables = []string{
 	ERIGON_VERSIONS,
 	BATCH_ENDS,
 	BAD_TX_HASHES,
+	BAD_TX_HASHES_LOOKUP,
 	WITNESS_CACHE,
 }
 
@@ -1892,8 +1894,53 @@ func (db *HermezDbReader) getForkIntervals(forkIdFilter *uint64) ([]types.ForkIn
 	return forkIntervals, nil
 }
 
+func (db *HermezDb) PurgeBadTxHashes() error {
+	if err := db.tx.ClearBucket(BAD_TX_HASHES); err != nil {
+		return err
+	}
+	if err := db.tx.ClearBucket(BAD_TX_HASHES_LOOKUP); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *HermezDb) TruncateBadTxHashCounterBelow(below uint64) error {
+	c, err := db.tx.Cursor(BAD_TX_HASHES_LOOKUP)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	var counter uint64 = 0
+	for k, v, err := c.Last(); k != nil; k, v, err = c.Prev() {
+		if err != nil {
+			return err
+		}
+		counter++
+		if counter <= below {
+			continue
+		}
+
+		if err = db.tx.Delete(BAD_TX_HASHES, v); err != nil {
+			return err
+		}
+
+		if err = db.tx.Delete(BAD_TX_HASHES_LOOKUP, k); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (db *HermezDb) WriteBadTxHashCounter(txHash common.Hash, counter uint64) error {
-	return db.tx.Put(BAD_TX_HASHES, txHash.Bytes(), Uint64ToBytes(counter))
+	if err := db.tx.Put(BAD_TX_HASHES, txHash.Bytes(), Uint64ToBytes(counter)); err != nil {
+		return err
+	}
+	if err := db.tx.Put(BAD_TX_HASHES_LOOKUP, TimeToBytes(time.Now()), txHash.Bytes()); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (db *HermezDbReader) GetBadTxHashCounter(txHash common.Hash) (uint64, error) {

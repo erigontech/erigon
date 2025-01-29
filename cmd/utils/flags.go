@@ -848,6 +848,16 @@ var (
 		Usage: "The maximum number of times a transaction that consumes too many counters to fit into a batch will be attempted before it is rejected outright by eth_sendRawTransaction",
 		Value: 2,
 	}
+	BadTxStoreValue = cli.Uint64Flag{
+		Name:  "zkevm.bad-tx-store-value",
+		Usage: "The maximum number of bad transactions to store in the database. Default 200.",
+		Value: 200,
+	}
+	BadTxPurge = cli.BoolFlag{
+		Name:  "zkevm.bad-tx-purge",
+		Usage: "Purge the bad transactions from the database on startup. Default false.",
+		Value: false,
+	}
 	SyncLimitVerifiedEnabled = cli.BoolFlag{
 		Name:  "zkevm.sync-limit-verified-enabled",
 		Usage: "Enable sync to verified batch height.",

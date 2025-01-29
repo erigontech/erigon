@@ -309,4 +309,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.RejectLowGasPriceTransactions,
 	&utils.RejectLowGasPriceTolerance,
 	&utils.BadTxAllowance,
+	&utils.BadTxStoreValue,
+	&utils.BadTxPurge,
 }

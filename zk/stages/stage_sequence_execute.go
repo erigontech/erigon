@@ -554,6 +554,9 @@ func sequencingBatchStep(
 							if err != nil {
 								return err
 							}
+							if err = sdb.hermezDb.TruncateBadTxHashCounterBelow(cfg.zk.BadTxStoreValue); err != nil {
+								return err
+							}
 							log.Info(fmt.Sprintf("[%s] single transaction %s cannot fit into batch - overflow", logPrefix, txHash), "context", ocs, "times_seen", counter)
 						} else {
 							batchState.newOverflowTransaction()

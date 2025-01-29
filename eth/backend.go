@@ -154,6 +154,7 @@ type Config = ethconfig.Config
 type PreStartTasks struct {
 	WarmUpDataStream  bool
 	PurgeWitnessCache bool
+	PurgeBadTxs       bool
 }
 
 // Ethereum implements the Ethereum full node service.
@@ -1015,6 +1016,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		backend.preStartTasks.PurgeWitnessCache = config.WitnessCachePurge
+		backend.preStartTasks.PurgeBadTxs = config.BadTxPurge
 
 		// entering ZK territory!
 		cfg := backend.config
@@ -1456,6 +1458,22 @@ func (s *Ethereum) PreStart() error {
 		hermezDb := hermez_db.NewHermezDb(tx)
 		if err := hermezDb.PurgeWitnessCaches(); err != nil {
 			return fmt.Errorf("failed to purge witness caches: %w", err)
+		}
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("tx.Commit: %w", err)
+		}
+	}
+
+	if s.preStartTasks.PurgeBadTxs {
+		log.Warn("[PreStart] purge bad transactions cache enabled, purging...", "zkevm.bad-tx-purge", s.config.BadTxPurge)
+		tx, err := s.chainDB.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		hermezDb := hermez_db.NewHermezDb(tx)
+		if err = hermezDb.PurgeBadTxHashes(); err != nil {
+			return fmt.Errorf("failed to purge bad transactions: %w", err)
 		}
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("tx.Commit: %w", err)
