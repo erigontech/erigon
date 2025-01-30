@@ -598,8 +598,8 @@ func (s *SMT) fetchNodeDataFromDb(nodeHash *utils.NodeKey, parentNode *smtBatchN
 		return nil, err
 	}
 
-	nodeLeftHashOrRemainingKey := utils.NodeKeyFromBigIntArray(dbNodeValue[0:4])
-	nodeRightHashOrValueHash := utils.NodeKeyFromBigIntArray(dbNodeValue[4:8])
+	nodeLeftHashOrRemainingKey := utils.NodeKeyFromUint64Array(dbNodeValue[0:4])
+	nodeRightHashOrValueHash := utils.NodeKeyFromUint64Array(dbNodeValue[4:8])
 	return &smtBatchNode{
 		parentNode:                 parentNode,
 		nodeLeftHashOrRemainingKey: &nodeLeftHashOrRemainingKey,

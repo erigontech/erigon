@@ -3,7 +3,6 @@ package smt_test
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
@@ -43,14 +42,14 @@ func TestBatchDelete(t *testing.T) {
 	values := make([]utils.NodeValue8, 0)
 	for _, vT := range valuesTemp {
 		values = append(values, utils.NodeValue8{
-			big.NewInt(0).SetUint64(vT[0]),
-			big.NewInt(0).SetUint64(vT[1]),
-			big.NewInt(0).SetUint64(vT[2]),
-			big.NewInt(0).SetUint64(vT[3]),
-			big.NewInt(0).SetUint64(vT[4]),
-			big.NewInt(0).SetUint64(vT[5]),
-			big.NewInt(0).SetUint64(vT[6]),
-			big.NewInt(0).SetUint64(vT[7]),
+			vT[0],
+			vT[1],
+			vT[2],
+			vT[3],
+			vT[4],
+			vT[5],
+			vT[6],
+			vT[7],
 		})
 	}
 

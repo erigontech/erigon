@@ -22,13 +22,13 @@ func dumpTree(smt *SMT, nodeKey utils.NodeKey, level int, path []int, printDepth
 
 	nodeValue, _ := smt.Db.Get(nodeKey)
 	if !nodeValue.IsFinalNode() {
-		nodeKeyRight := utils.NodeKeyFromBigIntArray(nodeValue[4:8])
+		nodeKeyRight := utils.NodeKeyFromUint64Array(nodeValue[4:8])
 		dumpTree(smt, nodeKeyRight, level+1, append(path, 1), printDepth)
 	}
 
 	if nodeValue.IsFinalNode() {
-		rKey := utils.NodeKeyFromBigIntArray(nodeValue[0:4])
-		leafValueHash := utils.NodeKeyFromBigIntArray(nodeValue[4:8])
+		rKey := utils.NodeKeyFromUint64Array(nodeValue[0:4])
+		leafValueHash := utils.NodeKeyFromUint64Array(nodeValue[4:8])
 		totalKey := utils.JoinKey(path, rKey)
 		leafPath := totalKey.GetPath()
 		fmt.Printf("|")
@@ -51,12 +51,12 @@ func dumpTree(smt *SMT, nodeKey utils.NodeKey, level int, path []int, printDepth
 		for i := level * 2; i < printDepth; i++ {
 			fmt.Printf("-")
 		}
-		fmt.Printf(" # hashLeft(%s) <-> hashRight(%s)", utils.ConvertBigIntToHex(utils.ArrayBigToScalar(nodeValue[0:4])), utils.ConvertBigIntToHex(utils.ArrayBigToScalar(nodeValue[4:8])))
+		fmt.Printf(" # hashLeft(%s) <-> hashRight(%s)", utils.ConvertBigIntToHex(utils.ArrayToScalar(nodeValue[0:4])), utils.ConvertBigIntToHex(utils.ArrayToScalar(nodeValue[4:8])))
 		fmt.Println()
 	}
 
 	if !nodeValue.IsFinalNode() {
-		nodeKeyLeft := utils.NodeKeyFromBigIntArray(nodeValue[0:4])
+		nodeKeyLeft := utils.NodeKeyFromUint64Array(nodeValue[0:4])
 		dumpTree(smt, nodeKeyLeft, level+1, append(path, 0), printDepth)
 	}
 }

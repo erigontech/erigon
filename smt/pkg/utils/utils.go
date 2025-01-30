@@ -39,8 +39,8 @@ var (
 	PoseidonAllZeroesHash [4]uint64
 )
 
-type NodeValue8 [8]*big.Int
-type NodeValue12 [12]*big.Int
+type NodeValue8 [8]uint64
+type NodeValue12 [12]uint64
 type NodeKey [4]uint64
 
 type NodeType int
@@ -106,7 +106,7 @@ func (nv *NodeValue8) IsZero() bool {
 	}
 
 	for i := 0; i < 8; i++ {
-		if nv[i] == nil || nv[i].Uint64() != 0 {
+		if nv[i] != 0 {
 			return false
 		}
 	}
@@ -122,9 +122,7 @@ func (nv *NodeValue8) SetHalfValue(values [4]uint64, part int) error {
 
 	partI := part * 4
 	for i, v := range values {
-		nlh := big.Int{}
-		nlh.SetUint64(v)
-		nv[i+partI] = &nlh
+		nv[i+partI] = v
 	}
 
 	return nil
@@ -135,10 +133,7 @@ func (nv *NodeValue8) ToUintArray() [8]uint64 {
 
 	if nv != nil {
 		for i := 0; i < 8; i++ {
-			if nv[i] != nil {
-				result[i] = nv[i].Uint64()
-			}
-			// if nv[i] is nil, result[i] will remain as its zero value (0)
+			result[i] = nv[i]
 		}
 	}
 	// if nv is nil, result will be an array of 8 zeros
@@ -151,10 +146,7 @@ func (nv *NodeValue8) ToUintArrayByPointer() *[8]uint64 {
 
 	if nv != nil {
 		for i := 0; i < 8; i++ {
-			if nv[i] != nil {
-				result[i] = nv[i].Uint64()
-			}
-			// if nv[i] is nil, result[i] will remain as its zero value (0)
+			result[i] = nv[i]
 		}
 	}
 	// if nv is nil, result will be an array of 8 zeros
@@ -163,21 +155,26 @@ func (nv *NodeValue8) ToUintArrayByPointer() *[8]uint64 {
 }
 
 func (nv *NodeValue8) ToHex() string {
-	return BigIntArrayToHex(nv[:])
+	bytes := make([]byte, 64)
+	for i := 0; i < 8; i++ {
+		// Write in reverse order: start from the end and work backwards
+		binary.BigEndian.PutUint64(bytes[(7-i)*8:], nv[i])
+	}
+	return hex.EncodeToString(bytes)
 }
 
 func (nv *NodeValue12) StripCapacity() [8]uint64 {
-	return [8]uint64{nv[0].Uint64(), nv[1].Uint64(), nv[2].Uint64(), nv[3].Uint64(), nv[4].Uint64(), nv[5].Uint64(), nv[6].Uint64(), nv[7].Uint64()}
+	return [8]uint64{nv[0], nv[1], nv[2], nv[3], nv[4], nv[5], nv[6], nv[7]}
 }
 
 func (nv *NodeValue12) Get0to4() *NodeKey {
 	// slice it 0-4
-	return &NodeKey{nv[0].Uint64(), nv[1].Uint64(), nv[2].Uint64(), nv[3].Uint64()}
+	return &NodeKey{nv[0], nv[1], nv[2], nv[3]}
 }
 
 func (nv *NodeValue12) Get4to8() *NodeKey {
 	// slice it 4-8
-	return &NodeKey{nv[4].Uint64(), nv[5].Uint64(), nv[6].Uint64(), nv[7].Uint64()}
+	return &NodeKey{nv[4], nv[5], nv[6], nv[7]}
 }
 
 func (nv *NodeValue12) GetNodeValue8() *NodeValue8 {
@@ -186,7 +183,7 @@ func (nv *NodeValue12) GetNodeValue8() *NodeValue8 {
 
 func (nv *NodeValue12) Get0to8() [8]uint64 {
 	// slice it from 0-8
-	return [8]uint64{nv[0].Uint64(), nv[1].Uint64(), nv[2].Uint64(), nv[3].Uint64(), nv[4].Uint64(), nv[5].Uint64(), nv[6].Uint64(), nv[7].Uint64()}
+	return [8]uint64{nv[0], nv[1], nv[2], nv[3], nv[4], nv[5], nv[6], nv[7]}
 }
 
 func (nv *NodeValue12) IsUniqueSibling() (int, error) {
@@ -195,7 +192,7 @@ func (nv *NodeValue12) IsUniqueSibling() (int, error) {
 	a := nv[:]
 
 	for i := 0; i < len(a); i += 4 {
-		k := NodeKeyFromBigIntArray(a[i : i+4])
+		k := NodeKeyFromUint64Array(a[i : i+4])
 		if !k.IsZero() {
 			count++
 			fnd = i / 4
@@ -208,7 +205,12 @@ func (nv *NodeValue12) IsUniqueSibling() (int, error) {
 }
 
 func (nv *NodeValue12) ToHex() string {
-	return BigIntArrayToHex(nv[:])
+	bytes := make([]byte, 96)
+	for i := 0; i < 12; i++ {
+		// Write in reverse order: start from the end and work backwards
+		binary.BigEndian.PutUint64(bytes[(11-i)*8:], nv[i])
+	}
+	return hex.EncodeToString(bytes)
 }
 
 func NodeKeyFromBigIntArray(arr []*big.Int) NodeKey {
@@ -223,6 +225,10 @@ func NodeKeyFromBigIntArray(arr []*big.Int) NodeKey {
 	return nk
 }
 
+func NodeKeyFromUint64Array(arr []uint64) NodeKey {
+	return NodeKey{arr[0], arr[1], arr[2], arr[3]}
+}
+
 func IsArrayUint64Empty(arr []uint64) bool {
 	for _, v := range arr {
 		if v > 0 {
@@ -234,8 +240,16 @@ func IsArrayUint64Empty(arr []uint64) bool {
 }
 
 func Value8FromBigIntArray(arr []*big.Int) NodeValue8 {
-	nv := [8]*big.Int{}
-	copy(nv[:], arr)
+	nv := [8]uint64{}
+	for i, v := range arr {
+		nv[i] = v.Uint64()
+	}
+	return nv
+}
+
+func Value8FromUint64Array(arr []uint64) NodeValue8 {
+	nv := [8]uint64{}
+	copy(nv[:], arr[:8])
 	return nv
 }
 
@@ -244,7 +258,9 @@ func NodeValue12FromBigIntArray(arr []*big.Int) (*NodeValue12, error) {
 		return &NodeValue12{}, fmt.Errorf("invalid array length")
 	}
 	nv := NodeValue12{}
-	copy(nv[:], arr)
+	for i, v := range arr {
+		nv[i] = v.Uint64()
+	}
 	return &nv, nil
 }
 
@@ -263,22 +279,24 @@ func NodeValue8FromBigIntArray(arr []*big.Int) (*NodeValue8, error) {
 		return &NodeValue8{}, fmt.Errorf("invalid array length")
 	}
 	nv := NodeValue8{}
-	copy(nv[:], arr)
+	for i, v := range arr {
+		nv[i] = v.Uint64()
+	}
 	return &nv, nil
 }
 
 func BigIntArrayFromNodeValue8(nv *NodeValue8) []*big.Int {
 	arr := make([]*big.Int, 8)
-
-	copy(arr, nv[:])
-
+	for i, v := range nv {
+		arr[i] = big.NewInt(int64(v))
+	}
 	return arr
 }
 
 func (nv *NodeValue12) IsZero() bool {
 	zero := false
 	for _, v := range nv {
-		if v.Cmp(big.NewInt(0)) == 0 {
+		if v == 0 {
 			zero = true
 		} else {
 			zero = false
@@ -289,10 +307,10 @@ func (nv *NodeValue12) IsZero() bool {
 }
 
 func (nv *NodeValue12) IsFinalNode() bool {
-	if nv[8] == nil {
+	if nv[8] == 0 {
 		return false
 	}
-	return nv[8].Cmp(big.NewInt(1)) == 0
+	return nv[8] == 1
 }
 
 // 7 times more efficient than sprintf
@@ -300,10 +318,26 @@ func ConvertBigIntToHex(n *big.Int) string {
 	return "0x" + n.Text(16)
 }
 
+func ConvertUint64ToHex(n uint64) string {
+	return "0x" + strconv.FormatUint(n, 16)
+}
+
+func ConvertArrayToHex(arr []uint64) string {
+	hexVal := hex.EncodeToString(ArrayToBytes(arr))
+	// big int .Text function trims leading zeros from the hex string
+	hexVal = strings.TrimPrefix(hexVal, "0")
+	return "0x" + hexVal
+}
+
 func ConvertHexToBigInt(hex string) *big.Int {
 	hex = strings.TrimPrefix(hex, "0x")
 	n, _ := new(big.Int).SetString(hex, 16)
 	return n
+}
+
+func ConvertHexToUint64(hex string) (uint64, error) {
+	hex = strings.TrimPrefix(hex, "0x")
+	return strconv.ParseUint(hex, 16, 64)
 }
 
 // ConvertHexToUint64s converts a hex string into an array of uint64s - designed to offer the same functionality
@@ -348,6 +382,34 @@ func ArrayToScalar(array []uint64) *big.Int {
 		scalar.Add(scalar, new(big.Int).SetUint64(array[i]))
 	}
 	return scalar
+}
+
+// ArrayToBytes converts an array of uint64s to a byte array, matching the behavior of big.Int.Bytes()
+// and avoids the allocation headache of big.Int
+func ArrayToBytes(array []uint64) []byte {
+	// Each uint64 needs 8 bytes
+	buf := make([]byte, len(array)*8)
+
+	// Convert each uint64 to bytes in the same order as ArrayToScalar
+	for i := 0; i < len(array); i++ {
+		pos := (len(array) - 1 - i) * 8
+		binary.BigEndian.PutUint64(buf[pos:pos+8], array[i])
+	}
+
+	// Trim leading zeros to match big.Int.Bytes() behavior
+	for i := 0; i < len(buf); i++ {
+		if buf[i] != 0 {
+			return buf[i:]
+		}
+	}
+
+	// If all bytes are zero, return a single zero byte
+	// to match big.Int.Bytes() behavior
+	if len(buf) > 0 {
+		return []byte{0}
+	}
+
+	return buf
 }
 
 func ScalarToArray(scalar *big.Int) []uint64 {
@@ -413,26 +475,26 @@ func ScalarToRoot(s *big.Int) NodeKey {
 }
 
 func ScalarToNodeValue(scalarIn *big.Int) NodeValue12 {
-	out := [12]*big.Int{}
+	out := [12]uint64{}
 	mask := new(big.Int).SetBytes([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
 	scalar := new(big.Int).Set(scalarIn)
 
 	for i := 0; i < 12; i++ {
 		value := new(big.Int).And(scalar, mask)
-		out[i] = value
+		out[i] = value.Uint64()
 		scalar.Rsh(scalar, 64)
 	}
 	return out
 }
 
 func ScalarToNodeValue8(scalarIn *big.Int) NodeValue8 {
-	out := [8]*big.Int{}
+	out := [8]uint64{}
 	mask := new(big.Int).SetBytes([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
 	scalar := new(big.Int).Set(scalarIn)
 
 	for i := 0; i < 8; i++ {
 		value := new(big.Int).And(scalar, mask)
-		out[i] = value
+		out[i] = value.Uint64()
 		scalar.Rsh(scalar, 64)
 	}
 	return out
@@ -494,10 +556,10 @@ func ConcatArrays4ByPointers(a, b *[4]uint64) *[8]uint64 {
 func ConcatArrays8AndCapacityByPointers(in *[8]uint64, capacity *[4]uint64) *NodeValue12 {
 	v := NodeValue12{}
 	for i, val := range in {
-		v[i] = new(big.Int).SetUint64(val)
+		v[i] = val
 	}
 	for i, val := range capacity {
-		v[i+8] = new(big.Int).SetUint64(val)
+		v[i+8] = val
 	}
 
 	return &v

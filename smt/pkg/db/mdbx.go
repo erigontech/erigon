@@ -162,14 +162,14 @@ func (m *EriDb) CollectAccountValue(key utils.NodeKey, value utils.NodeValue8) {
 }
 
 func (m *EriDb) CollectKeySource(key utils.NodeKey, value []byte) {
-	keyConc := utils.ArrayToScalar(key[:])
-	m.keySourceCollector.Collect(keyConc.Bytes(), value)
+	keyBytes := utils.ArrayToBytes(key[:])
+	m.keySourceCollector.Collect(keyBytes, value)
 }
 
 func (m *EriDb) CollectHashKey(key utils.NodeKey, value utils.NodeKey) {
-	keyConc := utils.ArrayToScalar(key[:])
-	valConc := utils.ArrayToScalar(value[:])
-	m.hashKeyCollector.Collect(keyConc.Bytes(), valConc.Bytes())
+	keyBytes := utils.ArrayToBytes(key[:])
+	valBytes := utils.ArrayToBytes(value[:])
+	m.hashKeyCollector.Collect(keyBytes, valBytes)
 }
 
 func (m *EriDb) CollectSmt(key utils.NodeKey, value utils.NodeValue12) {
@@ -313,21 +313,21 @@ func (m *EriDb) InsertAccountValue(key utils.NodeKey, value utils.NodeValue8) er
 }
 
 func (m *EriDb) InsertKeySource(key utils.NodeKey, value []byte) error {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyBytes := utils.ArrayToBytes(key[:])
 
-	return m.tx.Put(TableMetadata, keyConc.Bytes(), value)
+	return m.tx.Put(TableMetadata, keyBytes, value)
 }
 
 func (m *EriDb) DeleteKeySource(key utils.NodeKey) error {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyBytes := utils.ArrayToBytes(key[:])
 
-	return m.tx.Delete(TableMetadata, keyConc.Bytes())
+	return m.tx.Delete(TableMetadata, keyBytes)
 }
 
 func (m *EriRoDb) GetKeySource(key utils.NodeKey) ([]byte, error) {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyBytes := utils.ArrayToBytes(key[:])
 
-	data, err := m.kvTxRo.GetOne(TableMetadata, keyConc.Bytes())
+	data, err := m.kvTxRo.GetOne(TableMetadata, keyBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -340,28 +340,27 @@ func (m *EriRoDb) GetKeySource(key utils.NodeKey) ([]byte, error) {
 }
 
 func (m *EriDb) InsertHashKey(key utils.NodeKey, value utils.NodeKey) error {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyBytes := utils.ArrayToBytes(key[:])
+	valBytes := utils.ArrayToBytes(value[:])
 
-	valConc := utils.ArrayToScalar(value[:])
-
-	return m.tx.Put(TableHashKey, keyConc.Bytes(), valConc.Bytes())
+	return m.tx.Put(TableHashKey, keyBytes, valBytes)
 }
 
 func (m *EriDb) DeleteHashKey(key utils.NodeKey) error {
-	keyConc := utils.ArrayToScalar(key[:])
-	return m.tx.Delete(TableHashKey, keyConc.Bytes())
+	keyBytes := utils.ArrayToBytes(key[:])
+	return m.tx.Delete(TableHashKey, keyBytes)
 }
 
 func (m *EriRoDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyBytes := utils.ArrayToBytes(key[:])
 
-	data, err := m.kvTxRo.GetOne(TableHashKey, keyConc.Bytes())
+	data, err := m.kvTxRo.GetOne(TableHashKey, keyBytes)
 	if err != nil {
 		return utils.NodeKey{}, err
 	}
 
 	if data == nil {
-		return utils.NodeKey{}, fmt.Errorf("hash key %x not found", keyConc.Bytes())
+		return utils.NodeKey{}, fmt.Errorf("hash key %x not found", keyBytes)
 	}
 
 	nv := big.NewInt(0).SetBytes(data)
@@ -422,7 +421,7 @@ func (m *EriRoDb) GetDb() map[string][]string {
 
 		allFirst8PaddedWithZeros := true
 		for i := 0; i < 8; i++ {
-			if !strings.HasPrefix(fmt.Sprintf("%016s", val[i].Text(16)), "00000000") {
+			if !strings.HasPrefix(fmt.Sprintf("%016x", val[i]), "00000000") {
 				allFirst8PaddedWithZeros = false
 				break
 			}
@@ -435,7 +434,7 @@ func (m *EriRoDb) GetDb() map[string][]string {
 		outputArr := make([]string, truncationLength)
 		for i := 0; i < truncationLength; i++ {
 			if i < len(val) {
-				outputArr[i] = fmt.Sprintf("%016s", val[i].Text(16))
+				outputArr[i] = fmt.Sprintf("%016x", val[i])
 			} else {
 				outputArr[i] = "0000000000000000"
 			}

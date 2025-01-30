@@ -30,7 +30,7 @@ func (s *SMT) GetNodeAtPath(path []int) (nodeV *utils.NodeValue12, err error) {
 		}
 
 		if sl.IsFinalNode() {
-			foundRKey := utils.NodeKeyFromBigIntArray(sl[0:4])
+			foundRKey := utils.NodeKeyFromUint64Array(sl[0:4])
 			if level < pathLen-1 ||
 				foundRKey.GetPath()[0] != pathByte {
 				return nil, nil
@@ -38,7 +38,7 @@ func (s *SMT) GetNodeAtPath(path []int) (nodeV *utils.NodeValue12, err error) {
 
 			break
 		} else {
-			oldRoot = utils.NodeKeyFromBigIntArray(sl[pathByte*4 : pathByte*4+4])
+			oldRoot = utils.NodeKeyFromUint64Array(sl[pathByte*4 : pathByte*4+4])
 			if oldRoot.IsZero() {
 				return nil, nil
 			}

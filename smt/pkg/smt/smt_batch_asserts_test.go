@@ -50,7 +50,7 @@ func assertSmtTreeDbStructure(t *testing.T, s *smt.SMT, nodeHash utils.NodeKey, 
 	usedNodeHashesMap[nodeHashHex] = &nodeHash
 
 	if dbNodeValue.IsFinalNode() {
-		nodeValueHash := utils.NodeKeyFromBigIntArray(dbNodeValue[4:8])
+		nodeValueHash := utils.NodeKeyFromUint64Array(dbNodeValue[4:8])
 		dbNodeValue, err = s.Db.Get(nodeValueHash)
 		assert.NilError(t, err)
 
@@ -59,8 +59,8 @@ func assertSmtTreeDbStructure(t *testing.T, s *smt.SMT, nodeHash utils.NodeKey, 
 		return
 	}
 
-	assertSmtTreeDbStructure(t, s, utils.NodeKeyFromBigIntArray(dbNodeValue[0:4]), usedNodeHashesMap)
-	assertSmtTreeDbStructure(t, s, utils.NodeKeyFromBigIntArray(dbNodeValue[4:8]), usedNodeHashesMap)
+	assertSmtTreeDbStructure(t, s, utils.NodeKeyFromUint64Array(dbNodeValue[0:4]), usedNodeHashesMap)
+	assertSmtTreeDbStructure(t, s, utils.NodeKeyFromUint64Array(dbNodeValue[4:8]), usedNodeHashesMap)
 }
 
 func assertHashToKeyDbStrcture(t *testing.T, smtBatch *smt.SMT, nodeHash utils.NodeKey, testMetadata bool) int {
@@ -83,15 +83,14 @@ func assertHashToKeyDbStrcture(t *testing.T, smtBatch *smt.SMT, nodeHash utils.N
 		assert.Equal(t, found, true)
 
 		if testMetadata {
-			keyConc = utils.ArrayToScalar(nodeKey[:])
-
-			_, found = memDb.DbKeySource[keyConc.String()]
+			k := utils.ConvertArrayToHex(nodeKey[:])
+			_, found = memDb.DbKeySource[k]
 			assert.Equal(t, found, true)
 		}
 		return 1
 	}
 
-	return assertHashToKeyDbStrcture(t, smtBatch, utils.NodeKeyFromBigIntArray(dbNodeValue[0:4]), testMetadata) + assertHashToKeyDbStrcture(t, smtBatch, utils.NodeKeyFromBigIntArray(dbNodeValue[4:8]), testMetadata)
+	return assertHashToKeyDbStrcture(t, smtBatch, utils.NodeKeyFromUint64Array(dbNodeValue[0:4]), testMetadata) + assertHashToKeyDbStrcture(t, smtBatch, utils.NodeKeyFromUint64Array(dbNodeValue[4:8]), testMetadata)
 }
 
 func assertTraverse(t *testing.T, s *smt.SMT) {
@@ -106,7 +105,7 @@ func assertTraverse(t *testing.T, s *smt.SMT) {
 				return false, err
 			}
 
-			if v[0] == nil {
+			if v[0] == 0 {
 				return false, fmt.Errorf("value is missing in the db")
 			}
 

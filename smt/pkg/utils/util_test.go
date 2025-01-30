@@ -1,12 +1,15 @@
 package utils
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+
+	"gotest.tools/v3/assert"
 )
 
 const forkId7BlockGasLimit = 18446744073709551615
@@ -320,36 +323,36 @@ func TestNodeValueIsZero(t *testing.T) {
 		{
 			name: "Zero Key",
 			value: NodeValue12{
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
 			},
 			want: true,
 		},
 		{
 			name: "Non-Zero Key",
 			value: NodeValue12{
-				big.NewInt(1),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
-				big.NewInt(0),
+				1,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
 			},
 			want: false,
 		},
@@ -394,11 +397,11 @@ func TestNodeValue8SetHalfValue(t *testing.T) {
 				a.SetHalfValue(v, tt.part)
 			}
 
-			if tt.part == 0 && a[0].Uint64() != v[0] {
+			if tt.part == 0 && a[0] != v[0] {
 				t.Errorf("first part not set to 1")
-			} else if tt.part == 1 && a[4].Uint64() != v[0] {
+			} else if tt.part == 1 && a[4] != v[0] {
 				t.Errorf("second part not set to 1")
-			} else if tt.part == 2 && a[0].Uint64() != v[0] && a[4].Uint64() != v[0] {
+			} else if tt.part == 2 && a[0] != v[0] && a[4] != v[0] {
 				t.Errorf("first and second part not set to 1")
 			}
 		})
@@ -413,17 +416,12 @@ func TestIsFinalNode(t *testing.T) {
 	}{
 		{
 			name:  "Final Node",
-			value: NodeValue12{big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(1), big.NewInt(0), big.NewInt(0), big.NewInt(0)},
+			value: NodeValue12{0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0},
 			want:  true,
 		},
 		{
 			name:  "Not a Final Node",
-			value: NodeValue12{big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0)},
-			want:  false,
-		},
-		{
-			name:  "Nil value at 9th element",
-			value: NodeValue12{big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, big.NewInt(0), big.NewInt(0), big.NewInt(0)},
+			value: NodeValue12{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 			want:  false,
 		},
 	}
@@ -493,12 +491,8 @@ func TestNodeValueFromBigIntArray(t *testing.T) {
 				big.NewInt(11),
 				big.NewInt(12),
 			},
-			expected: &NodeValue12{
-				big.NewInt(1), big.NewInt(2), big.NewInt(3), big.NewInt(4),
-				big.NewInt(5), big.NewInt(6), big.NewInt(7), big.NewInt(8),
-				big.NewInt(9), big.NewInt(10), big.NewInt(11), big.NewInt(12),
-			},
-			err: nil,
+			expected: &NodeValue12{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+			err:      nil,
 		},
 		{
 			input: []*big.Int{
@@ -620,26 +614,26 @@ func TestScalarToNodeKey(t *testing.T) {
 
 func TestScalarToNodeValue(t *testing.T) {
 	// Define the array of original values
-	originalValues := [12]*big.Int{
-		big.NewInt(1),
-		big.NewInt(2),
-		big.NewInt(3),
-		big.NewInt(4),
-		big.NewInt(5),
-		big.NewInt(6),
-		big.NewInt(7),
-		big.NewInt(8),
-		big.NewInt(9),
-		big.NewInt(10),
-		big.NewInt(11),
-		big.NewInt(12),
+	originalValues := [12]uint64{
+		1,
+		2,
+		3,
+		4,
+		5,
+		6,
+		7,
+		8,
+		9,
+		10,
+		11,
+		12,
 	}
 
 	// Create a big scalar that is the concatenation of the 12 original values
 	scalar := new(big.Int)
 	for i := 11; i >= 0; i-- {
 		scalar.Lsh(scalar, 64)
-		scalar.Or(scalar, originalValues[i])
+		scalar.Or(scalar, big.NewInt(int64(originalValues[i])))
 	}
 
 	// Call the function to test
@@ -647,8 +641,8 @@ func TestScalarToNodeValue(t *testing.T) {
 
 	// Check that each element of the result matches the corresponding original value
 	for i := range originalValues {
-		if result[i].Cmp(originalValues[i]) != 0 {
-			t.Errorf("Element %d: expected %s, got %s", i, originalValues[i], result[i])
+		if result[i] != originalValues[i] {
+			t.Errorf("Element %d: expected %v, got %v", i, originalValues[i], result[i])
 		}
 	}
 }
@@ -678,8 +672,8 @@ func TestScalarToNodeValue8(t *testing.T) {
 
 	// Check that each element of the result matches the corresponding original value
 	for i := range originalValues {
-		if result[i].Cmp(originalValues[i]) != 0 {
-			t.Errorf("Element %d: expected %s, got %s", i, originalValues[i], result[i])
+		if result[i] != originalValues[i].Uint64() {
+			t.Errorf("Element %d: expected %s, got %v", i, originalValues[i], result[i])
 		}
 	}
 }
@@ -691,20 +685,20 @@ func TestValue8FromBigIntArray(t *testing.T) {
 	}{
 		{
 			input:  []*big.Int{big.NewInt(1), big.NewInt(2), big.NewInt(3)},
-			output: NodeValue8{big.NewInt(1), big.NewInt(2), big.NewInt(3), nil, nil, nil, nil, nil},
+			output: NodeValue8{1, 2, 3, 0, 0, 0, 0, 0},
 		},
 		{
 			input:  []*big.Int{big.NewInt(1), big.NewInt(2), big.NewInt(3), big.NewInt(4), big.NewInt(5), big.NewInt(6), big.NewInt(7), big.NewInt(8)},
-			output: NodeValue8{big.NewInt(1), big.NewInt(2), big.NewInt(3), big.NewInt(4), big.NewInt(5), big.NewInt(6), big.NewInt(7), big.NewInt(8)},
+			output: NodeValue8{1, 2, 3, 4, 5, 6, 7, 8},
 		},
 	}
 
 	for _, test := range tests {
 		result := Value8FromBigIntArray(test.input)
 		for i := range result {
-			if result[i] != nil && test.output[i] != nil && result[i].Cmp(test.output[i]) != 0 {
+			if result[i] != 0 && test.output[i] != 0 && result[i] != test.output[i] {
 				t.Errorf("For input %v, expected %v but got %v", test.input, test.output, result)
-			} else if (result[i] == nil && test.output[i] != nil) || (result[i] != nil && test.output[i] == nil) {
+			} else if (result[i] == 0 && test.output[i] != 0) || (result[i] != 0 && test.output[i] == 0) {
 				t.Errorf("For input %v, expected %v but got %v", test.input, test.output, result)
 			}
 		}
@@ -871,6 +865,154 @@ func TestKeyBig(t *testing.T) {
 		}
 		if *result != test.output {
 			t.Errorf("expected %v but got %v", test.output, result)
+		}
+	}
+}
+
+func Test_Node8ValueIsZero(t *testing.T) {
+	tests := []struct {
+		input  NodeValue8
+		output bool
+	}{
+		{
+			input:  NodeValue8{0, 0, 0, 0, 0, 0, 0, 0},
+			output: true,
+		},
+		{
+			input:  NodeValue8{0, 0, 0, 0, 0, 0, 0, 1},
+			output: false,
+		},
+	}
+
+	for _, test := range tests {
+		result := test.input.IsZero()
+		if result != test.output {
+			t.Errorf("expected %v but got %v", test.output, result)
+		}
+	}
+}
+
+func Test_Node8ValueToHex(t *testing.T) {
+	tests := []struct {
+		input  NodeValue8
+		output string
+	}{
+		{
+			input:  NodeValue8{0, 0, 0, 0, 0, 0, 0, 0},
+			output: "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+		},
+		{
+			input:  NodeValue8{1, 2, 3, 4, 5, 6, 7, 8},
+			output: "00000000000000080000000000000007000000000000000600000000000000050000000000000004000000000000000300000000000000020000000000000001",
+		},
+	}
+
+	for _, test := range tests {
+		result := test.input.ToHex()
+		if result != test.output {
+			t.Errorf("expected %v but got %v", test.output, result)
+		}
+	}
+}
+
+func Test_ScalarToNodeValue8(t *testing.T) {
+	input := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+	expected := NodeValue8{18446744073709551615, 18446744073709551615, 18446744073709551615, 18446744073709551615, 0, 0, 0, 0}
+
+	result := ScalarToNodeValue8(input)
+
+	// Compare each value individually using Cmp
+	for i := 0; i < 8; i++ {
+		assert.Equal(t, expected[i], result[i])
+	}
+}
+
+func Test_CompareBigAndUint64ToHex(t *testing.T) {
+	tests := []struct {
+		input  uint64
+		output string
+	}{
+		{input: 1, output: "0x1"},
+		{input: 1234567890, output: "0x499602d2"},
+		{input: 1234567890123456, output: "0x462d53c8abac0"},
+	}
+
+	for _, test := range tests {
+		bigResult := ConvertBigIntToHex(big.NewInt(int64(test.input)))
+		uintResult := ConvertUint64ToHex(test.input)
+		if bigResult != uintResult {
+			t.Errorf("big doesn't match uint for %v, big: %v uint: %v", test.input, bigResult, uintResult)
+		}
+
+		if bigResult != test.output {
+			t.Errorf("big doesn't match hex for %v, expected %v but got %v", test.input, test.output, bigResult)
+		}
+	}
+}
+
+func Test_NodeValue12ToHex(t *testing.T) {
+	tests := []struct {
+		input  NodeValue12
+		output string
+	}{
+		{input: NodeValue12{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+			output: "000000000000000c000000000000000b000000000000000a000000000000000900000000000000080000000000000007000000000000000600000000000000050000000000000004000000000000000300000000000000020000000000000001"},
+	}
+
+	for _, test := range tests {
+		result := test.input.ToHex()
+		if result != test.output {
+			t.Errorf("expected %v but got %v", test.output, result)
+		}
+	}
+}
+
+func Test_ArrayToScalar_Bytes(t *testing.T) {
+	tests := []struct {
+		input  []uint64
+		output []byte
+	}{
+		{input: []uint64{1, 2, 3, 4}, output: []byte{4, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1}},
+	}
+
+	for _, test := range tests {
+		result := ArrayToScalar(test.input)
+		bigResult := result.Bytes()
+
+		bytesResult := ArrayToBytes(test.input)
+
+		if !bytes.Equal(bigResult, test.output) {
+			t.Errorf("expected %v but got %v", test.output, bigResult)
+		}
+
+		if !bytes.Equal(bytesResult, test.output) {
+			t.Errorf("expected %v but got %v", test.output, bytesResult)
+		}
+	}
+}
+
+func Test_ArrayToScalar_Hex(t *testing.T) {
+	tests := []struct {
+		input  []uint64
+		output string
+	}{
+		{input: []uint64{1, 2, 3, 4}, output: "0x4000000000000000300000000000000020000000000000001"},
+		{input: []uint64{1, 2, 3, 4, 5, 6, 7, 8}, output: "0x80000000000000007000000000000000600000000000000050000000000000004000000000000000300000000000000020000000000000001"},
+		{input: []uint64{1, 2, 3, 4, 5, 6, 7, 87654321}, output: "0x5397fb10000000000000007000000000000000600000000000000050000000000000004000000000000000300000000000000020000000000000001"},
+	}
+
+	for _, test := range tests {
+		result := ArrayToScalar(test.input)
+		bigHex := ConvertBigIntToHex(result)
+
+		uintHex := ConvertArrayToHex(test.input)
+
+		if bigHex != test.output {
+			t.Errorf("big hex expected %v but got %v", test.output, bigHex)
+		}
+
+		if uintHex != test.output {
+			t.Errorf("uint hex expected %v but got %v", test.output, uintHex)
 		}
 	}
 }
