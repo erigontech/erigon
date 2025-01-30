@@ -126,7 +126,7 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address,
 		return "", errors.New("unable to decode storage key: hex string invalid")
 	}
 	if len(indexBytes) > 32 {
-		return "", fmt.Errorf("unable to decode storage key: hex string too long, want at most 32 bytes")
+		return "", errors.New("unable to decode storage key: hex string too long, want at most 32 bytes")
 	}
 
 	tx, err1 := api.db.BeginTemporalRo(ctx)
