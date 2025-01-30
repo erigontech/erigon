@@ -23,7 +23,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 		return common.Hash{}, err
 	}
 
-	if txn.Type() == types.BlobTxType || txn.Type() == types.DynamicFeeTxType {
+	if txn.Type() == types.BlobTxType || txn.Type() == types.DynamicFeeTxType || txn.Type() == types.SetCodeTxType {
 		baseFeeBig, err := api.BaseFee(ctx)
 		if err != nil {
 			return common.Hash{}, err
