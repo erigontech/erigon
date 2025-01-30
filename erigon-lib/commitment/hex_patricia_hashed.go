@@ -382,7 +382,7 @@ func (cell *cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen 
 
 func (cell *cell) fillFromFields(data []byte, pos int, fieldBits cellFields) (int, error) {
 	fields := []struct {
-		flag      cellFields
+		field     cellFields
 		lenField  *int
 		dataField []byte
 		extraFunc func(int)
@@ -399,8 +399,9 @@ func (cell *cell) fillFromFields(data []byte, pos int, fieldBits cellFields) (in
 		{fieldStateHash, &cell.stateHashLen, cell.stateHash[:], nil},
 	}
 
+	cell.reset()
 	for _, f := range fields {
-		if fieldBits&f.flag != 0 {
+		if fieldBits.Has(f.field) {
 			l, n, err := readUvarint(data[pos:])
 			if err != nil {
 				return 0, err
@@ -408,7 +409,7 @@ func (cell *cell) fillFromFields(data []byte, pos int, fieldBits cellFields) (in
 			pos += n
 
 			if len(data) < pos+int(l) {
-				return 0, fmt.Errorf("buffer too small for %v", f.flag)
+				return 0, fmt.Errorf("buffer too small for %v", f.field)
 			}
 
 			*f.lenField = int(l)
@@ -419,16 +420,7 @@ func (cell *cell) fillFromFields(data []byte, pos int, fieldBits cellFields) (in
 			if f.extraFunc != nil {
 				f.extraFunc(int(l))
 			}
-		} else {
-			*f.lenField = 0
-			if f.flag == fieldExtension {
-				cell.extLen = 0
-			}
 		}
-	}
-
-	if fieldBits&fieldAccountAddr != 0 {
-		copy(cell.CodeHash[:], EmptyCodeHash)
 	}
 	return pos, nil
 }
