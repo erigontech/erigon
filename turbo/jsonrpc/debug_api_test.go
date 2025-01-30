@@ -615,9 +615,10 @@ func TestGetRawTransaction(t *testing.T) {
 	var testedOnce = false
 	for i := uint64(0); i < number; i++ {
 		tx, err := m.DB.BeginRo(ctx)
-		block, err := api._blockReader.BlockByNumber(ctx, tx, i)
-		tx.Rollback()
 		require.NoError(err)
+		block, err := api._blockReader.BlockByNumber(ctx, tx, i)
+		require.NoError(err)
+		tx.Rollback()
 		txns := block.Transactions()
 
 		for _, txn := range txns {
