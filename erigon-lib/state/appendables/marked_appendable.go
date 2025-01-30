@@ -110,14 +110,14 @@ func (a *MarkedAppendable) combK(ts Num, hash []byte) []byte {
 
 // rotx
 type MarkedAppendableTx struct {
-	*ProtoAppendableRoTx
+	*ProtoAppendableTx
 	a *MarkedAppendable
 }
 
 func (m *MarkedAppendable) BeginFilesRo() *MarkedAppendableTx {
 	return &MarkedAppendableTx{
-		ProtoAppendableRoTx: m.ProtoAppendable.BeginFilesRo(),
-		a:                   m,
+		ProtoAppendableTx: m.ProtoAppendable.BeginFilesRo(),
+		a:                 m,
 	}
 }
 

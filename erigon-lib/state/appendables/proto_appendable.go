@@ -264,13 +264,13 @@ func calcVisibleFiles(files *btree.BTreeG[*DirtySegment], toNum Num) VisibleSegm
 
 // proto_appendable_rotx
 
-type ProtoAppendableRoTx struct {
+type ProtoAppendableTx struct {
 	enum  ApEnum
 	files VisibleSegments
 	a     *ProtoAppendable
 }
 
-func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableRoTx {
+func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableTx {
 	a.visibleLock.Lock()
 	defer a.visibleLock.RUnlock()
 	for i := 0; i < len(a._visible); i++ {
@@ -279,14 +279,14 @@ func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableRoTx {
 		}
 	}
 
-	return &ProtoAppendableRoTx{
+	return &ProtoAppendableTx{
 		enum:  a.enum,
 		files: a._visible,
 		a:     a,
 	}
 }
 
-func (a *ProtoAppendableRoTx) Close() {
+func (a *ProtoAppendableTx) Close() {
 	if a.files == nil {
 		return
 	}
@@ -304,7 +304,7 @@ func (a *ProtoAppendableRoTx) Close() {
 	}
 }
 
-func (a *ProtoAppendableRoTx) Garbage(merged *DirtySegment) (outs []*DirtySegment) {
+func (a *ProtoAppendableTx) Garbage(merged *DirtySegment) (outs []*DirtySegment) {
 	if merged == nil {
 		return
 	}

@@ -95,14 +95,14 @@ func (a *RelationalAppendable) encTs(ts uint64) []byte {
 }
 
 type RelationalAppendableTx struct {
-	*ProtoAppendableRoTx
+	*ProtoAppendableTx
 	a *RelationalAppendable
 }
 
 func (a *RelationalAppendable) BeginFilesRo() *RelationalAppendableTx {
 	return &RelationalAppendableTx{
-		ProtoAppendableRoTx: a.ProtoAppendable.BeginFilesRo(),
-		a:                   a,
+		ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
+		a:                 a,
 	}
 }
 
@@ -149,7 +149,7 @@ func (a *RelationalAppendableTx) Close() {
 		return
 	}
 
-	a.ProtoAppendableRoTx.Close()
+	a.ProtoAppendableTx.Close()
 }
 
 // RelationalAppendableRwTx
