@@ -532,6 +532,8 @@ func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
 // All failed tasks have higher priority than new one.
 // No limit on amount of txs added by this method.
 func (q *QueueWithRetry) ReTry(t Task) {
+	fmt.Println("retry", t.Version())
+	defer fmt.Println("done retry")
 	q.retiresLock.Lock()
 	heap.Push(&q.retires, t)
 	q.retiresLock.Unlock()
