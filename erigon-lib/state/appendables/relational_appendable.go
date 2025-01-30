@@ -94,19 +94,19 @@ func (a *RelationalAppendable) encTs(ts uint64) []byte {
 	return Encode64ToBytes(ts, true)
 }
 
-type RelationalAppendableRoTx struct {
+type RelationalAppendableTx struct {
 	*ProtoAppendableRoTx
 	a *RelationalAppendable
 }
 
-func (a *RelationalAppendable) BeginFilesRo() *RelationalAppendableRoTx {
-	return &RelationalAppendableRoTx{
+func (a *RelationalAppendable) BeginFilesRo() *RelationalAppendableTx {
+	return &RelationalAppendableTx{
 		ProtoAppendableRoTx: a.ProtoAppendable.BeginFilesRo(),
 		a:                   a,
 	}
 }
 
-func (a *RelationalAppendableRoTx) Get(num Num, tx kv.Tx) (VVType, error) {
+func (a *RelationalAppendableTx) Get(num Num, tx kv.Tx) (VVType, error) {
 	ap := a.a
 	lastNum := ap.VisibleSegmentsMaxNum()
 	if num <= lastNum {
@@ -136,15 +136,15 @@ func (a *RelationalAppendableRoTx) Get(num Num, tx kv.Tx) (VVType, error) {
 }
 
 // only db
-func (a *RelationalAppendableRoTx) GetNc(id Id, tx kv.Tx) (VVType, error) {
+func (a *RelationalAppendableTx) GetNc(id Id, tx kv.Tx) (VVType, error) {
 	return tx.GetOne(a.a.valsTbl, a.a.encTs(uint64(id)))
 }
 
-func (a *RelationalAppendableRoTx) NewWriter() *RelationalAppendableWriter {
+func (a *RelationalAppendableTx) NewWriter() *RelationalAppendableWriter {
 	return &RelationalAppendableWriter{}
 }
 
-func (a *RelationalAppendableRoTx) Close() {
+func (a *RelationalAppendableTx) Close() {
 	if a.files == nil {
 		return
 	}
@@ -164,11 +164,11 @@ func (a *RelationalAppendableRoTx) Close() {
 // 	}
 // }
 
-func (a *RelationalAppendableRoTx) Put(id Id, value VVType, tx kv.RwTx) error {
+func (a *RelationalAppendableTx) Put(id Id, value VVType, tx kv.RwTx) error {
 	return tx.Append(a.a.valsTbl, a.a.encTs(uint64(id)), value)
 }
 
-func (a *RelationalAppendableRoTx) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
+func (a *RelationalAppendableTx) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
 	fromId, err := a.a.relation.BaseNum2Id(1 /*config driven*/, rwTx) // or maybe just from start or nil
 	if err != nil {
 		return err
@@ -184,7 +184,7 @@ func (a *RelationalAppendableRoTx) Prune(ctx context.Context, baseKeyTo Num, lim
 	return DeleteRangeFromTbl(a.a.valsTbl, entityFrom, entityTo, limit, rwTx)
 }
 
-func (a *RelationalAppendableRoTx) Unwind(ctx context.Context, baseKeyFrom Num, limit uint64, rwTx kv.RwTx) error {
+func (a *RelationalAppendableTx) Unwind(ctx context.Context, baseKeyFrom Num, limit uint64, rwTx kv.RwTx) error {
 	if a.a.noUnwind {
 		return nil
 	}

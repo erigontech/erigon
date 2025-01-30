@@ -109,19 +109,19 @@ func (a *MarkedAppendable) combK(ts Num, hash []byte) []byte {
 }
 
 // rotx
-type MarkedAppendableRoTx struct {
+type MarkedAppendableTx struct {
 	*ProtoAppendableRoTx
 	a *MarkedAppendable
 }
 
-func (m *MarkedAppendable) BeginFilesRo() *MarkedAppendableRoTx {
-	return &MarkedAppendableRoTx{
+func (m *MarkedAppendable) BeginFilesRo() *MarkedAppendableTx {
+	return &MarkedAppendableTx{
 		ProtoAppendableRoTx: m.ProtoAppendable.BeginFilesRo(),
 		a:                   m,
 	}
 }
 
-func (r *MarkedAppendableRoTx) Get(num Num, tx kv.Tx) (VVType, error) {
+func (r *MarkedAppendableTx) Get(num Num, tx kv.Tx) (VVType, error) {
 	// first look into snapshots..
 	a := r.a
 	lastNum := a.VisibleSegmentsMaxNum()
@@ -154,7 +154,7 @@ func (r *MarkedAppendableRoTx) Get(num Num, tx kv.Tx) (VVType, error) {
 	return tx.GetOne(a.valsTbl, key)
 }
 
-func (r *MarkedAppendableRoTx) GetNc(num Num, hash []byte, tx kv.Tx) (VVType, error) {
+func (r *MarkedAppendableTx) GetNc(num Num, hash []byte, tx kv.Tx) (VVType, error) {
 	a := r.a
 	key := a.combK(num, hash)
 	return tx.GetOne(a.valsTbl, key)
@@ -170,7 +170,7 @@ func (r *MarkedAppendableRoTx) GetNc(num Num, hash []byte, tx kv.Tx) (VVType, er
 // 	}
 // }
 
-func (r *MarkedAppendableRoTx) Put(num Num, hash []byte, value VVType, tx kv.RwTx) error {
+func (r *MarkedAppendableTx) Put(num Num, hash []byte, value VVType, tx kv.RwTx) error {
 	// can then val
 	a := r.a
 	if err := tx.Append(a.canonicalTbl, a.encTs(num), hash); err != nil {
@@ -181,7 +181,7 @@ func (r *MarkedAppendableRoTx) Put(num Num, hash []byte, value VVType, tx kv.RwT
 	return tx.Put(a.valsTbl, key, value)
 }
 
-func (r *MarkedAppendableRoTx) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
+func (r *MarkedAppendableTx) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
 	// from 1 to baseKeyTo (exclusive)
 
 	// probably fromKey value needs to be in configuration...starts from 1 because we want to keep genesis block
@@ -201,7 +201,7 @@ func (r *MarkedAppendableRoTx) Prune(ctx context.Context, baseKeyTo Num, limit u
 	return nil
 }
 
-func (r *MarkedAppendableRoTx) Unwind(ctx context.Context, baseKeyFrom Num, rwTx kv.RwTx) error {
+func (r *MarkedAppendableTx) Unwind(ctx context.Context, baseKeyFrom Num, rwTx kv.RwTx) error {
 	a := r.a
 	fromKey := a.encTs(baseKeyFrom)
 	if err := DeleteRangeFromTbl(a.canonicalTbl, fromKey, nil, MaxUint64, rwTx); err != nil {

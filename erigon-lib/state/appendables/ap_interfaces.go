@@ -74,8 +74,8 @@ type TemporalRwTx interface {
 // else code should panic.
 type AggregatorRoTx struct{}
 
-func (a *AggregatorRoTx) Marked(app AppEnum) *MarkedAppendableRoTx         { return nil }
-func (a *AggregatorRoTx) Relational(app AppEnum) *RelationalAppendableRoTx { return nil }
+func (a *AggregatorRoTx) Marked(app AppEnum) *MarkedAppendableTx         { return nil }
+func (a *AggregatorRoTx) Relational(app AppEnum) *RelationalAppendableTx { return nil }
 
 type Aggregator struct{}
 
