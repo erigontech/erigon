@@ -47,7 +47,7 @@ func SubmitConditionalTransaction(ctx context.Context, b *APIBackend, tx *types.
 		return common.Hash{}, err
 	}
 	// Print a log with full tx details for manual investigations and interventions
-	signer := types.MakeSigner(b.ChainConfig(), b.CurrentBlock().Number.Uint64(), b.CurrentBlock().Time)
+	signer := types.MakeSigner(b.ChainConfig(), b.CurrentBlock().Number().Uint64(), b.CurrentBlock().Time())
 	from, err := tx.Sender(*signer)
 	if err != nil {
 		return common.Hash{}, err

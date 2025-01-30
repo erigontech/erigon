@@ -159,6 +159,7 @@ const (
 	CaplinDB        = "caplin"
 	TemporaryDB     = "temporary"
 	ArbitrumDB      = "arbitrum"
+	ArbClassicDB    = "arb-classic"
 )
 
 type GetPut interface {

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/chain"
 	state2 "github.com/erigontech/erigon-lib/state"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -157,28 +157,33 @@ func (db *RecordingKV) EnableBypass() {
 }
 
 type RecordingChainContext struct {
-	bc                     consensus.ChainHeaderReader
+	// er                     consensus.Engine
+	consensus.ChainHeaderReader
 	minBlockNumberAccessed uint64
 	initialBlockNumber     uint64
 }
 
+func (r *RecordingChainContext) Config() *chain.Config {
+	return r.bc.Config()
+}
+
 func newRecordingChainContext(inner consensus.ChainHeaderReader, blocknumber uint64) *RecordingChainContext {
 	return &RecordingChainContext{
-		bc:                     inner,
+		ChainHeaderReader:      inner,
 		minBlockNumberAccessed: blocknumber,
 		initialBlockNumber:     blocknumber,
 	}
 }
 
 func (r *RecordingChainContext) Engine() consensus.Engine {
-	return r.bc.Engine()
+	return r.ChainHeaderReader
 }
 
 func (r *RecordingChainContext) GetHeader(hash common.Hash, num uint64) *types.Header {
 	if num < r.minBlockNumberAccessed {
 		r.minBlockNumberAccessed = num
 	}
-	return r.bc.GetHeader(hash, num)
+	return r.ChainHeaderReader.GetHeader(hash, num)
 }
 
 func (r *RecordingChainContext) GetMinBlockNumberAccessed() uint64 {
@@ -193,22 +198,36 @@ type RecordingDatabaseConfig struct {
 type RecordingDatabase struct {
 	config     *RecordingDatabaseConfig
 	sd         *state2.SharedDomains
+	tx         kv.TemporalRwTx
 	db         *state.IntraBlockState
 	bc         core.BlockChain
 	mutex      sync.Mutex // protects StateFor and Dereference
 	references int64
 }
 
-func NewRecordingDatabase(config *RecordingDatabaseConfig, sd *state2.SharedDomains, ethdb kv.TemporalRwDB, blockchain core.BlockChain) *RecordingDatabase {
+func NewRecordingDatabase(config *RecordingDatabaseConfig, ethdb kv.TemporalRwDB, blockchain core.BlockChain) *RecordingDatabase {
 	//hashConfig := *hashdb.Defaults
 	//hashConfig.CleanCacheSize = config.TrieCleanCache
 	//trieConfig := triedb.Config{
 	//	Preimages: false,
 	//	HashDB:    &hashConfig,
 	//}
+	//
+	tx, err := ethdb.BeginTemporalRw(context.Background())
+	if err != nil {
+		log.Error("Failed to create temporal tx", "err", err)
+		return nil
+	}
+
+	sd, err := state2.NewSharedDomains(tx, log.New())
+	if err != nil {
+		log.Error("Failed to open shaerd domains", "err", err)
+		return nil
+	}
 	return &RecordingDatabase{
 		config: config,
 		sd:     sd,
+		tx:     tx,
 		//db:     state.NewDatabaseWithConfig(ethdb, &trieConfig),
 		db: state.New(state.NewReaderV3(sd)),
 		bc: blockchain,
@@ -275,14 +294,16 @@ func (r *RecordingDatabase) dereferenceRoot(root common.Hash) {
 func (r *RecordingDatabase) addStateVerify(statedb *state.IntraBlockState, expected common.Hash, blockNumber uint64) (*state.IntraBlockState, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	result, err := statedb.Commit(blockNumber, true)
+
+	result, err := r.sd.ComputeCommitment(context.Background(), true, blockNumber, "")
+	// result, err := statedb.Commit(blockNumber, true)
 	if err != nil {
 		return nil, err
 	}
-	if result != expected {
+	if !bytes.Equal(result, expected[:]) {
 		return nil, fmt.Errorf("bad root hash expected: %v got: %v", expected, result)
 	}
-	r.referenceRootLockHeld(result)
+	r.referenceRootLockHeld(common.Hash(result))
 
 	// _, size, _ := r.db.TrieDB().Size()
 	// limit := common.StorageSize(r.config.TrieDirtyCache) * 1024 * 1024
@@ -338,7 +359,10 @@ func (r *RecordingDatabase) PreimagesFromRecording(chainContextIf consensus.Chai
 	}
 
 	for i := recordingChainContext.GetMinBlockNumberAccessed(); i <= recordingChainContext.initialBlockNumber; i++ {
-		header := r.bc.GetHeaderByNumber(i)
+		header, err := r.bc.HeaderByNumber(context.Background(), r.tx, i)
+		if err != nil {
+			return nil, fmt.Errorf("Error reading header %d: %v\n", i, err)
+		}
 		hash := header.Hash()
 		bytes, err := rlp.EncodeToBytes(header)
 		if err != nil {

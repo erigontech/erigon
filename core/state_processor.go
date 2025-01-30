@@ -210,7 +210,7 @@ func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
 func ApplyArbTransaction(config *chain.Config, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader,
-	author *libcommon.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter,
+	author *libcommon.Address, gp *GasPool, ibs state.IntraBlockStateArbitrum, stateWriter state.StateWriter,
 	header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64, cfg vm.Config,
 ) (*types.Receipt, *evmtypes.ExecutionResult, error) {
 	// Create a new context to be used in the EVM environment
@@ -221,6 +221,8 @@ func ApplyArbTransaction(config *chain.Config, blockHashFunc func(n uint64) libc
 
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
+
+	// ibss := ibs.(*state.IntraBlockState)
 
 	return applyArbTransaction(config, engine, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, vmenv, cfg)
 }

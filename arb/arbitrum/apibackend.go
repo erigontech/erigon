@@ -484,7 +484,7 @@ func (a *APIBackend) BlockByNumberOrHash(ctx context.Context, blockNrOrHash rpc.
 	return nil, errors.New("invalid arguments; neither block nor hash specified")
 }
 
-func StateAndHeaderFromHeader(ctx context.Context, chainDb kv.TemporalRwDB, bc core.BlockChain, maxRecreateStateDepth int64, header *types.Header, err error) (*state.IntraBlockState, *types.Header, error) {
+func StateAndHeaderFromHeader(ctx context.Context, chainDb kv.TemporalRwDB, bc core.BlockChain, maxRecreateStateDepth int64, header *types.Header, err error) (state.IntraBlockStateArbitrum, *types.Header, error) {
 	if err != nil {
 		return nil, header, err
 	}

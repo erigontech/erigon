@@ -53,6 +53,7 @@ type CallArgs struct {
 	Input                *hexutility.Bytes  `json:"input"`
 	AccessList           *types.AccessList  `json:"accessList"`
 	ChainID              *hexutil.Big       `json:"chainId,omitempty"`
+	SkipL1Charging       *bool              `json:"skipL1Charging"` // Arbitrum
 }
 
 // from retrieves the transaction sender address.
@@ -777,7 +778,112 @@ type SendTxArgs struct {
 	// For non-legacy transactions
 	AccessList *types.AccessList `json:"accessList,omitempty"`
 	ChainID    *hexutil.Big      `json:"chainId,omitempty"`
+
+	SkipL1Charging *bool `json:"skipL1Charging"` // Arbitrum
 }
+
+// func (args *SendTxArgs) ToMessage(globalGasCap uint64, header *types.Header, state *state.StateDB, runMode core.MessageRunMode) (*core.Message, error) {
+// 	baseFee := header.BaseFee
+// 	// Reject invalid combinations of pre- and post-1559 fee styles
+// 	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
+// 		return nil, errors.New("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
+// 	}
+// 	// Set sender address or use zero address if none specified.
+// 	addr := args.from()
+
+// 	// Set default gas & gas price if none were set
+// 	gas := globalGasCap
+// 	if gas == 0 {
+// 		gas = uint64(math.MaxUint64 / 2)
+// 	}
+// 	if args.Gas != nil {
+// 		gas = uint64(*args.Gas)
+// 	}
+// 	if globalGasCap != 0 && globalGasCap < gas {
+// 		log.Warn("Caller gas above allowance, capping", "requested", gas, "cap", globalGasCap)
+// 		gas = globalGasCap
+// 	}
+// 	var (
+// 		gasPrice   *big.Int
+// 		gasFeeCap  *big.Int
+// 		gasTipCap  *big.Int
+// 		blobFeeCap *big.Int
+// 	)
+// 	if baseFee == nil {
+// 		// If there's no basefee, then it must be a non-1559 execution
+// 		gasPrice = new(big.Int)
+// 		if args.GasPrice != nil {
+// 			gasPrice = args.GasPrice.ToInt()
+// 		}
+// 		gasFeeCap, gasTipCap = gasPrice, gasPrice
+// 	} else {
+// 		// A basefee is provided, necessitating 1559-type execution
+// 		if args.GasPrice != nil {
+// 			// User specified the legacy gas field, convert to 1559 gas typing
+// 			gasPrice = args.GasPrice.ToInt()
+// 			gasFeeCap, gasTipCap = gasPrice, gasPrice
+// 		} else {
+// 			// User specified 1559 gas fields (or none), use those
+// 			gasFeeCap = new(big.Int)
+// 			if args.MaxFeePerGas != nil {
+// 				gasFeeCap = args.MaxFeePerGas.ToInt()
+// 			}
+// 			gasTipCap = new(big.Int)
+// 			if args.MaxPriorityFeePerGas != nil {
+// 				gasTipCap = args.MaxPriorityFeePerGas.ToInt()
+// 			}
+// 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
+// 			gasPrice = new(big.Int)
+// 			if gasFeeCap.BitLen() > 0 || gasTipCap.BitLen() > 0 {
+// 				gasPrice = math.BigMin(new(big.Int).Add(gasTipCap, baseFee), gasFeeCap)
+// 			}
+// 		}
+// 	}
+// 	if args.BlobFeeCap != nil {
+// 		blobFeeCap = args.BlobFeeCap.ToInt()
+// 	} else if args.BlobHashes != nil {
+// 		blobFeeCap = new(big.Int)
+// 	}
+// 	value := new(big.Int)
+// 	if args.Value != nil {
+// 		value = args.Value.ToInt()
+// 	}
+// 	data := args.data()
+// 	var accessList types.AccessList
+// 	if args.AccessList != nil {
+// 		accessList = *args.AccessList
+// 	}
+
+// 	skipL1Charging := false
+// 	if args.SkipL1Charging != nil {
+// 		skipL1Charging = *args.SkipL1Charging
+// 	}
+
+// 	msg := &core.Message{
+// 		From:              addr,
+// 		To:                args.To,
+// 		Value:             value,
+// 		GasLimit:          gas,
+// 		GasPrice:          gasPrice,
+// 		GasFeeCap:         gasFeeCap,
+// 		GasTipCap:         gasTipCap,
+// 		Data:              data,
+// 		AccessList:        accessList,
+// 		BlobGasFeeCap:     blobFeeCap,
+// 		BlobHashes:        args.BlobHashes,
+// 		SkipAccountChecks: true,
+// 		TxRunMode:         runMode,
+// 		SkipL1Charging:    skipL1Charging,
+// 	}
+// 	// Arbitrum: raise the gas cap to ignore L1 costs so that it's compute-only
+// 	if state != nil {
+// 		// ToMessage recurses once to allow ArbOS to intercept the result for all callers
+// 		// ArbOS uses this to modify globalGasCap so that the cap will ignore this tx's specific L1 data costs
+// 		core.InterceptRPCGasCap(&globalGasCap, msg, header, state)
+// 		return args.ToMessage(globalGasCap, header, nil, runMode) // we pass a nil to avoid another recursion
+// 	}
+// 	return msg, nil
+// }
 
 // setDefaults fills in default values for unspecified txn fields.
 // func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {

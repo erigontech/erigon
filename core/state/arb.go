@@ -205,6 +205,8 @@ type IntraBlockStateArbitrum interface {
 	RecordProgram(targets []WasmTarget, moduleHash common.Hash)
 
 	GetStorageRoot(address common.Address) common.Hash
+	GetUnexpectedBalanceDelta() *uint256.Int
+	SetTxContext(ti int)
 
 	ActivatedAsm(target WasmTarget, moduleHash common.Hash) (asm []byte, err error)
 	WasmStore() kv.RwDB
