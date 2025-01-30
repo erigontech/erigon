@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
+	types2 "github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/rpc"
@@ -65,6 +67,7 @@ type PrivateDebugAPI interface {
 	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error)
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutility.Bytes, error)
 	GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error)
+	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutility.Bytes, error)
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
@@ -358,6 +361,7 @@ type AccountResult struct {
 	CodeHash common.Hash      `json:"codeHash"`
 }
 
+// GetRawHeader implements debug_getRawHeader - returns a an RLP-encoded header, given a block number or hash
 func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -378,6 +382,7 @@ func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash 
 	return rlp.EncodeToBytes(header)
 }
 
+// Implements debug_getRawBlock - Returns an RLP-encoded block
 func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -398,7 +403,7 @@ func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash r
 	return rlp.EncodeToBytes(block)
 }
 
-// GetRawReceipts retrieves the binary-encoded receipts of a single block.
+// GetRawReceipts implements debug_getRawReceipts - retrieves and returns an array of EIP-2718 binary-encoded receipts of a single block
 func (api *PrivateDebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutility.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -450,6 +455,7 @@ func (api *PrivateDebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHas
 	return result, nil
 }
 
+// GetBadBlocks implements debug_getBadBlocks - Returns an array of recent bad blocks that the client has seen on the network
 func (api *PrivateDebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -484,4 +490,43 @@ func (api *PrivateDebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]
 	}
 
 	return results, nil
+}
+
+// GetRawTransaction implements debug_getRawTransaction - Returns an array of EIP-2718 binary-encoded transactions
+func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, hash common.Hash) (hexutility.Bytes, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+	var txn types2.Transaction
+	for _, transaction := range block.Transactions() {
+		if transaction.Hash() == hash {
+			txn = transaction
+			break
+		}
+	}
+
+	if txn != nil {
+		var buf bytes.Buffer
+		err = txn.MarshalBinary(&buf)
+		return buf.Bytes(), err
+	}
+
+	return nil, nil
 }
