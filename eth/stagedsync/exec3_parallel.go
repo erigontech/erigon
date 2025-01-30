@@ -1145,7 +1145,6 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 			}
 
 			txResult := blockStatus.results[tx]
-			fmt.Println("finalize", tx)
 			_, err = txResult.finalize(prevReceipt, pe.cfg.engine, blockStatus.versionMap, stateReader, stateWriter)
 
 			if err != nil {
@@ -1208,11 +1207,12 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 		return blockStatus.result, nil
 	}
 
-	fmt.Println("scheulle", blockStatus.execTasks.minPending(), maxValidated+1)
+	fmt.Println("schedule", blockStatus.execTasks.minPending(), maxValidated+1)
 	// Send the next immediate pending transaction to be executed
 	if blockStatus.execTasks.minPending() != -1 && blockStatus.execTasks.minPending() == maxValidated+1 {
 		nextTx := blockStatus.execTasks.takeNextPending()
 		if nextTx != -1 {
+			fmt.Println("exec", nextTx)
 			blockStatus.cntExec++
 
 			blockStatus.skipCheck[nextTx] = true
@@ -1244,6 +1244,8 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 	// Send speculative tasks
 	for nextTx := blockStatus.execTasks.minPending(); nextTx != -1; nextTx = blockStatus.execTasks.minPending() {
 		incarnation := blockStatus.txIncarnations[nextTx]
+
+		fmt.Println("exec", nextTx, incarnation)
 
 		if incarnation > 0 {
 			break
