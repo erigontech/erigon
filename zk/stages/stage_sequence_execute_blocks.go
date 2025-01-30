@@ -3,7 +3,6 @@ package stages
 import (
 	"fmt"
 
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
@@ -302,7 +301,7 @@ func addSenders(
 	txHash2SenderCache map[common.Hash]common.Address,
 ) error {
 	signer := types.MakeSigner(cfg.chainConfig, newNum.Uint64(), 0)
-	cryptoContext := secp256k1.ContextForThread(1)
+	cryptoContext := secp256k1.ContextForThread(0)
 	senders := make([]common.Address, 0, len(finalTransactions))
 	var from common.Address
 	for _, transaction := range finalTransactions {
