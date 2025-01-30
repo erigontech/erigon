@@ -23,7 +23,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 		return common.Hash{}, err
 	}
 
-	if txn.Type() == types.BlobTxType || txn.Type() == types.DynamicFeeTxType {
+	if txn.Type() == types.BlobTxType || txn.Type() == types.DynamicFeeTxType || txn.Type() == types.SetCodeTxType {
 		baseFeeBig, err := api.BaseFee(ctx)
 		if err != nil {
 			return common.Hash{}, err
@@ -31,7 +31,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 
 		// If the transaction fee cap is already specified, ensure the
 		// effective gas fee is less than fee cap.
-		if err := checkEIP1559TxFee(txn.GetFeeCap(), baseFeeBig); err != nil {
+		if err := checkDynamicTxFee(txn.GetFeeCap(), baseFeeBig); err != nil {
 			return common.Hash{}, err
 		}
 	} else {
@@ -105,7 +105,7 @@ func checkTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
 
 // checkEIP1559TxFee is an internal function used to check whether the fee of
 // the given transaction is bigger than the base fee.
-func checkEIP1559TxFee(feeCap *uint256.Int, baseFeeBig *hexutil.Big) error {
+func checkDynamicTxFee(feeCap *uint256.Int, baseFeeBig *hexutil.Big) error {
 	baseFee := uint256.NewInt(0)
 	overflow := baseFee.SetFromBig(baseFeeBig.ToInt())
 	if overflow {
