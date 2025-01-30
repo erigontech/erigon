@@ -150,9 +150,9 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			if err != nil {
 				return err
 			}
-			_, blockNum, _ := txNumsReader.FindBlockNum(tx, txNum)
-			if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum != prevBN {
-				println(cumGasUsed, txNum, blockNum, prevCumGasUsed)
+			blockNum := badFoundBlockNum(ttx, prevBN-1, txNumsReader, txNum)
+			//println(cumGasUsed, txNum, blockNum, prevCumGasUsed)
+			if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
 				panic("bad receipt at txnum: " + strconv.Itoa(int(txNum)) + " block: " + strconv.Itoa(int(blockNum)))
 			}
 			prevCumGasUsed = int(cumGasUsed)
@@ -195,6 +195,16 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	return nil
 }
 
+func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsReader, curTxNum uint64) uint64 {
+	txNumMax, _ := txNumsReader.Max(tx, fromBlock)
+	i := uint64(0)
+	for txNumMax < curTxNum {
+		i++
+		txNumMax, _ = txNumsReader.Max(tx, fromBlock+i)
+	}
+	return fromBlock + i
+}
+
 func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
@@ -230,12 +240,8 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
-			if !txTask.Final {
-				var receipt *types.Receipt
-				if txTask.TxIndex >= 0 && !txTask.Final {
-					receipt = txTask.BlockReceipts[txTask.TxIndex]
-				}
-				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
+			if txTask.TxIndex >= 0 && !txTask.Final {
+				if err := rawtemporaldb.AppendReceipt(doms, txTask.BlockReceipts[txTask.TxIndex], cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
 			}
