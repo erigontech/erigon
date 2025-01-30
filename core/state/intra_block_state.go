@@ -1007,7 +1007,11 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 		return sdb.validRevisions[i].id >= revid
 	})
 	if idx == len(sdb.validRevisions) || sdb.validRevisions[idx].id != revid {
-		panic(fmt.Errorf("revision id %v cannot be reverted", revid))
+		var id int
+		if idx < len(sdb.validRevisions) {
+			id = sdb.validRevisions[idx].id
+		}
+		panic(fmt.Errorf("revision id %v cannot be reverted (idx=%v,len=%v,id=%v)", revid, idx, len(sdb.validRevisions), id))
 	}
 	snapshot := sdb.validRevisions[idx].journalIndex
 
