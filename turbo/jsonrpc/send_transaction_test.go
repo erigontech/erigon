@@ -228,7 +228,7 @@ func TestSendRawTransactionDynamicFee(t *testing.T) {
 	// --- Test Case 1: Transaction with valid gas fee cap ---
 	{
 		// Gas fee cap: 2x BaseFee + Tip
-		gasFeeCap := uint256.NewInt(uint64(2*baseFeeValue) + gasTip.Uint64())
+		gasFeeCap := uint256.NewInt((2 * baseFeeValue) + gasTip.Uint64())
 
 		// Create and sign a transaction
 		txn, err := types.SignTx(
@@ -261,7 +261,7 @@ func TestSendRawTransactionDynamicFee(t *testing.T) {
 	// --- Test Case 2: Transaction with gas fee cap lower than base fee ---
 	{
 		// Gas fee cap: BaseFee - Tip (too low to be accepted)
-		gasFeeCap := uint256.NewInt(uint64(baseFeeValue - gasTip.Uint64()))
+		gasFeeCap := uint256.NewInt(baseFeeValue - gasTip.Uint64())
 
 		// Create and sign a transaction
 		txn, err := types.SignTx(

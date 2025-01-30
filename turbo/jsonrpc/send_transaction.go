@@ -113,7 +113,7 @@ func checkDynamicTxFee(gasCap *uint256.Int, baseFeeBig *hexutil.Big) error {
 	}
 
 	if gasCap.Lt(baseFee) {
-		return fmt.Errorf("fee cap is lower than the base fee")
+		return errors.New("fee cap is lower than the base fee")
 	}
 
 	return nil
