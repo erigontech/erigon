@@ -545,9 +545,9 @@ func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
 		typ      byte
 		requests ssz.EncodableSSZ
 	}{
-		{b.beaconCfg.DepositRequestType, r.Deposits},
-		{b.beaconCfg.WithdrawalRequestType, r.Withdrawals},
-		{b.beaconCfg.ConsolidationRequestType, r.Consolidations},
+		{byte(b.beaconCfg.DepositRequestType), r.Deposits},
+		{byte(b.beaconCfg.WithdrawalRequestType), r.Withdrawals},
+		{byte(b.beaconCfg.ConsolidationRequestType), r.Consolidations},
 	} {
 		ssz, err := r.requests.EncodeSSZ([]byte{})
 		if err != nil {

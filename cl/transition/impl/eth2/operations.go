@@ -1267,7 +1267,7 @@ func switchToCompoundingValidator(s abstract.BeaconState, vindex uint64) error {
 	wc := validator.WithdrawalCredentials()
 	newWc := common.Hash{}
 	copy(newWc[:], wc[:])
-	newWc[0] = s.BeaconConfig().CompoundingWithdrawalPrefix
+	newWc[0] = byte(s.BeaconConfig().CompoundingWithdrawalPrefix)
 	validator.SetWithdrawalCredentials(newWc)
 	s.SetValidatorAtIndex(int(vindex), validator) // update the state
 	return state.QueueExcessActiveBalance(s, vindex, &validator)
