@@ -191,44 +191,103 @@ func pricedTransaction(nonce uint64, gaslimit uint64, gasprice *uint256.Int, key
 }
 
 func TestSendRawTransactionDynamicFee(t *testing.T) {
-	mockSentry, require := mock.MockWithAllProtocolChanges(t), require.New(t)
+	// Initialize a mock Ethereum node (Sentry) with protocol changes enabled
+	mockSentry := mock.MockWithAllProtocolChanges(t)
+	require := require.New(t)
 	logger := log.New()
 
+	// Set up a single block step for the mock chain
 	oneBlockStep(mockSentry, require, t)
 
+	// Create a test gRPC connection and initialize TxPool & API
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := txpool.NewTxpoolClient(conn)
-	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000 /*1e18*/, 1*params.GWei, 100_000, false, 100_000, 128, logger)
+	api := jsonrpc.NewEthAPI(
+		newBaseApiForTest(mockSentry),
+		mockSentry.DB,
+		nil,
+		txPool,
+		nil,
+		5_000_000, // Gas limit
+		1*params.GWei,
+		100_000,
+		false,
+		100_000,
+		128,
+		logger,
+	)
 
+	// Get the current base fee
 	baseFee, err := api.BaseFee(ctx)
 	require.NoError(err)
+	baseFeeValue := baseFee.Uint64()
 
-	// Create a transaction with a gas price that is lower than the fee cap
-	bf := baseFee.Uint64()
-	tip := uint64(5 * params.Wei)
-	cap := uint64(tip + (bf * 2))
-	gasTip := uint256.NewInt(tip)
-	gasFeeCap := uint256.NewInt(cap)
+	// Define gas tip (priority fee)
+	gasTip := uint256.NewInt(5 * params.Wei)
 
-	txn, err := types.SignTx(types.NewEIP1559Transaction(uint256.Int{1337}, 0, common.Address{1}, uint256.NewInt(uint64(1234)), params.TxGas, uint256.NewInt(2000_000), gasTip, gasFeeCap, nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
-	require.NoError(err)
+	// --- Test Case 1: Transaction with valid gas fee cap ---
+	{
+		// Gas fee cap: 2x BaseFee + Tip
+		gasFeeCap := uint256.NewInt(uint64(2*baseFeeValue) + gasTip.Uint64())
 
-	buf := bytes.NewBuffer(nil)
-	err = txn.MarshalBinary(buf)
-	require.NoError(err)
+		// Create and sign a transaction
+		txn, err := types.SignTx(
+			types.NewEIP1559Transaction(
+				uint256.Int{1337}, // Nonce
+				0,                 // Gas price (not used in EIP-1559)
+				common.Address{1}, // Recipient
+				uint256.NewInt(1234),
+				params.TxGas,
+				uint256.NewInt(2_000_000),
+				gasTip,
+				gasFeeCap,
+				nil,
+			),
+			*types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID),
+			mockSentry.Key,
+		)
+		require.NoError(err)
 
-	_, err = api.SendRawTransaction(ctx, buf.Bytes())
-	require.NoError(err)
+		// Serialize the transaction
+		buf := bytes.NewBuffer(nil)
+		err = txn.MarshalBinary(buf)
+		require.NoError(err)
 
-	// Create a transaction with a gas price that is higher than the fee cap
-	gasFeeCap = uint256.NewInt(bf - tip)
-	txn1, err := types.SignTx(types.NewEIP1559Transaction(uint256.Int{1337}, 1, common.Address{1}, uint256.NewInt(uint64(1234)), params.TxGas, uint256.NewInt(2000_000), gasTip, gasFeeCap, nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
-	require.NoError(err)
+		// Send the transaction
+		_, err = api.SendRawTransaction(ctx, buf.Bytes())
+		require.NoError(err, "Transaction with sufficient gas fee cap should be accepted")
+	}
 
-	buf = bytes.NewBuffer(nil)
-	err = txn1.MarshalBinary(buf)
-	require.NoError(err)
+	// --- Test Case 2: Transaction with gas fee cap lower than base fee ---
+	{
+		// Gas fee cap: BaseFee - Tip (too low to be accepted)
+		gasFeeCap := uint256.NewInt(uint64(baseFeeValue - gasTip.Uint64()))
 
-	_, err = api.SendRawTransaction(ctx, buf.Bytes())
-	require.Error(err)
+		// Create and sign a transaction
+		txn, err := types.SignTx(
+			types.NewEIP1559Transaction(
+				uint256.Int{1337}, // Nonce
+				1,                 // Gas price (not used in EIP-1559)
+				common.Address{1}, // Recipient
+				uint256.NewInt(1234),
+				params.TxGas,
+				uint256.NewInt(2_000_000),
+				gasTip,
+				gasFeeCap,
+				nil,
+			),
+			*types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID),
+			mockSentry.Key,
+		)
+		require.NoError(err)
+
+		// Serialize the transaction
+		buf := bytes.NewBuffer(nil)
+		err = txn.MarshalBinary(buf)
+		require.NoError(err)
+
+		// Send the transaction (should fail)
+		_, err = api.SendRawTransaction(ctx, buf.Bytes())
+		require.Error(err, "Transaction with gas fee cap lower than base fee should be rejected")
+	}
 }

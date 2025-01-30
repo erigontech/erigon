@@ -94,7 +94,6 @@ func checkTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
 		return nil
 	}
 
-	//gasCap = gasCap / params.Ether // Convert from wei
 	feeEth := new(big.Float).Quo(new(big.Float).SetInt(new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gas))), new(big.Float).SetInt(big.NewInt(params.Wei)))
 	feeFloat, _ := feeEth.Float64()
 	if feeFloat > gasCap {
