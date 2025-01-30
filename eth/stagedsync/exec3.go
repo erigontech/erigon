@@ -488,7 +488,12 @@ Loop:
 			// TODO: panic here and see that overall process deadlock
 			return fmt.Errorf("nil block %d", blockNum)
 		}
-		metrics2.UpdateBlockConsumerPreExecutionDelay(b.Time(), blockNum, logger)
+
+		if execStage.SyncMode() == stages.ModeApplyingBlocks ||
+			execStage.SyncMode() == stages.ModeForkValidation {
+			metrics2.UpdateBlockConsumerPreExecutionDelay(b.Time(), blockNum, logger)
+		}
+
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
@@ -643,7 +648,8 @@ Loop:
 
 		// MA commitTx
 		if !parallel {
-			if !inMemExec && !isMining {
+			if execStage.SyncMode() == stages.ModeApplyingBlocks ||
+				execStage.SyncMode() == stages.ModeForkValidation {
 				metrics2.UpdateBlockConsumerPostExecutionDelay(b.Time(), blockNum, logger)
 			}
 
