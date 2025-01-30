@@ -169,16 +169,30 @@ func (a *RelationalAppendableRoTx) Put(id Id, value VVType, tx kv.RwTx) error {
 }
 
 func (a *RelationalAppendableRoTx) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
-	fromKey := a.a.encTs(uint64(1)) // config driven
-	toKey := a.a.encTs(uint64(baseKeyTo) - 1)
-	return DeleteRangeFromTbl(a.a.valsTbl, fromKey, toKey, limit, rwTx)
+	fromId, err := a.a.relation.BaseNum2Id(1 /*config driven*/, rwTx) // or maybe just from start or nil
+	if err != nil {
+		return err
+	}
+
+	toId, err := a.a.relation.BaseNum2Id(baseKeyTo, rwTx)
+	if err != nil {
+		return err
+	}
+
+	entityFrom := a.a.encTs(uint64(fromId))
+	entityTo := a.a.encTs(uint64(toId) - 1)
+	return DeleteRangeFromTbl(a.a.valsTbl, entityFrom, entityTo, limit, rwTx)
 }
 
 func (a *RelationalAppendableRoTx) Unwind(ctx context.Context, baseKeyFrom Num, limit uint64, rwTx kv.RwTx) error {
 	if a.a.noUnwind {
 		return nil
 	}
-	fromKey := a.a.encTs(uint64(baseKeyFrom))
+	fromId, err := a.a.relation.BaseNum2Id(baseKeyFrom, rwTx)
+	if err != nil {
+		return err
+	}
+	fromKey := a.a.encTs(uint64(fromId))
 	return DeleteRangeFromTbl(a.a.valsTbl, fromKey, nil, MaxUint64, rwTx)
 }
 
