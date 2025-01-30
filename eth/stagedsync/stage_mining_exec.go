@@ -470,7 +470,7 @@ func addTransactionsToMiningBlock(
 	header := current.Header
 	txnIdx := ibs.TxnIndex() + 1
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
-	if header.BlobGasUsed != nil {
+	if header.BlobGasUsed != nil && !forceTxs {
 		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
 	}
 	signer := types.MakeSigner(&chainConfig, header.Number.Uint64(), header.Time)
@@ -526,7 +526,7 @@ LOOP:
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
 		// If we don't have enough gas for any further transactions then we're done
-		if gasPool.Gas() < params.TxGas {
+		if gasPool.Gas() < params.TxGas && !forceTxs {
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
 			done = true
 			break
