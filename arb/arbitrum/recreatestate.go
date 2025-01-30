@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -61,8 +62,9 @@ func FindLastAvailableState(ctx context.Context, bc core.BlockChain, stateFor St
 		if currentHeader.Number.Uint64() <= genesis {
 			return nil, lastHeader, nil, errors.Wrap(err, fmt.Sprintf("moved beyond genesis looking for state %d, genesis %d", targetHeader.Number.Uint64(), genesis))
 		}
-		currentHeader = bc.GetHeader(currentHeader.ParentHash, currentHeader.Number.Uint64()-1)
-		if currentHeader == nil {
+		var tx kv.Tx // TODO
+		currentHeader, err = bc.Header(ctx, tx, currentHeader.ParentHash, currentHeader.Number.Uint64()-1)
+		if currentHeader == nil || err != nil {
 			return nil, lastHeader, nil, fmt.Errorf("chain doesn't contain parent of block %d hash %v", lastHeader.Number, lastHeader.Hash())
 		}
 	}
@@ -70,8 +72,9 @@ func FindLastAvailableState(ctx context.Context, bc core.BlockChain, stateFor St
 }
 
 func AdvanceStateByBlock(ctx context.Context, bc core.BlockChain, state *state.IntraBlockState, targetHeader *types.Header, blockToRecreate uint64, prevBlockHash common.Hash, logFunc StateBuildingLogFunction) (*state.IntraBlockState, *types.Block, error) {
-	block := bc.GetBlockByNumber(blockToRecreate)
-	if block == nil {
+	var tx kv.Tx // TODO
+	block, err := bc.BlockByNumber(ctx, tx, blockToRecreate)
+	if block == nil || err != nil {
 		return nil, nil, fmt.Errorf("block not found while recreating: %d", blockToRecreate)
 	}
 	if block.ParentHash() != prevBlockHash {
@@ -80,7 +83,7 @@ func AdvanceStateByBlock(ctx context.Context, bc core.BlockChain, state *state.I
 	if logFunc != nil {
 		logFunc(targetHeader, block.Header(), true)
 	}
-	_, _, _, err := bc.Processor().Process(block, state, vm.Config{})
+	_, _, _, err = bc.Processor().Process(block, state, vm.Config{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed recreating state for block %d : %w", blockToRecreate, err)
 	}

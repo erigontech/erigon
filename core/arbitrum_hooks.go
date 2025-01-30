@@ -93,7 +93,23 @@ type BlockChain interface {
 
 	// StateCache returns the caching database underpinning the blockchain instance.
 	StateCache() kv.RwDB
+
+	// Processor returns the current processor.
+	Processor() Processor
 }
+
+// Processor is an interface for processing blocks using a given initial state.
+type Processor interface {
+	// Process processes the state changes according to the Ethereum rules by running
+	// the transaction messages using the statedb and applying any rewards to both
+	// the processor (coinbase) and any included uncles.
+	Process(block *types.Block, statedb *state.IntraBlockState, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error)
+}
+
+// Processor returns the current processor.
+// func (bc *BlockChain) Processor() Processor {
+// 	return bc.processor
+// }
 
 // // State returns a new mutable state based on the current HEAD block.
 // func (bc *BlockChain) State() (*state.StateDB, error) {
