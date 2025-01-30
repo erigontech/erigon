@@ -545,10 +545,8 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 			}
 
 			if blockResult.complete {
-				if blockResult.BlockNum == 16841967 {
-					//fmt.Println("Block Complete", blockResult.BlockNum)
-					//panic(blockResult.BlockNum)
-				}
+				fmt.Println("Block Complete", blockResult.BlockNum)
+				//panic(blockResult.BlockNum)
 
 				if blockStatus, ok := pe.blockStatus[blockResult.BlockNum]; ok {
 					if blockResult.complete {
@@ -1178,7 +1176,10 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 	}
 
 	if blockStatus.validateTasks.countComplete() == len(blockStatus.tasks) && blockStatus.execTasks.countComplete() == len(blockStatus.tasks) {
-		pe.logger.Debug("exec summary", "block", blockNum, "tasks", len(blockStatus.tasks), "execs", blockStatus.cntExec, "speculative", blockStatus.cntSpecExec, "success", blockStatus.cntSuccess, "aborts", blockStatus.cntAbort, "validations", blockStatus.cntTotalValidations, "failures", blockStatus.cntValidationFail, "#tasks/#execs", fmt.Sprintf("%.2f%%", float64(len(blockStatus.tasks))/float64(blockStatus.cntExec)*100))
+		pe.logger.Debug("exec summary", "block", blockNum, "tasks", len(blockStatus.tasks), "execs", blockStatus.cntExec,
+			"speculative", blockStatus.cntSpecExec, "success", blockStatus.cntSuccess, "aborts", blockStatus.cntAbort, "validations", blockStatus.cntTotalValidations, "failures", blockStatus.cntValidationFail,
+			"retry%", fmt.Sprintf("%.2f%%", float64(blockStatus.cntAbort+blockStatus.cntValidationFail)/float64(blockStatus.cntExec)*100),
+			"#execs/#tasks", fmt.Sprintf("%.2f%%", float64(blockStatus.cntExec)/float64(len(blockStatus.tasks))*100))
 
 		pe.execCount.Add(int64(blockStatus.cntExec))
 		pe.abortCount.Add(int64(blockStatus.cntAbort))
