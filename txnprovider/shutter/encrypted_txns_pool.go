@@ -97,6 +97,10 @@ func (etp EncryptedTxnsPool) Run(ctx context.Context) error {
 				BlockNum:             event.Raw.BlockNumber,
 			}
 
+			//
+			// TODO handle reorgs
+			//
+
 			etp.submissions.Add(encryptedTxnSubmission.TxnIndex, encryptedTxnSubmission)
 		}
 	}
