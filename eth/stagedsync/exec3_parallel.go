@@ -617,13 +617,7 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 					blockStatus.cntExec++
 					execTask := blockStatus.tasks[nextTx]
 
-					//fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
-					if blockResult.BlockNum+1 == 16862608 {
-						//vm.Trace = true
-						//fmt.Println(blockResult.BlockNum+1, len(blockStatus.tasks))
-					} else {
-						vm.Trace = false
-					}
+					fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
 
 					pe.in.Add(ctx,
 						&taskVersion{
@@ -1130,8 +1124,8 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 	maxValidated := blockStatus.validateTasks.maxAllComplete()
 	maxFinalized := blockStatus.cntFinalized - 1
 
+	fmt.Println(maxValidated, maxFinalized)
 	if maxValidated > maxFinalized {
-
 		stateWriter := state.NewStateWriterBufferedV3(pe.rs, pe.accumulator)
 		stateReader := state.NewBufferedReader(pe.rs, state.NewReaderParallelV3(pe.rs.Domains(), applyTx))
 

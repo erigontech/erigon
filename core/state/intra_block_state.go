@@ -1017,7 +1017,6 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 	snapshot := sdb.validRevisions[idx].journalIndex
 
 	// Replay the journal to undo changes and remove invalidated snapshots
-	fmt.Println("revert", idx, sdb.validRevisions[idx].journalIndex, sdb.journal.length())
 	sdb.journal.revert(sdb, snapshot)
 	sdb.validRevisions = sdb.validRevisions[:idx]
 
