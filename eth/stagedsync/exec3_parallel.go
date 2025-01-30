@@ -1124,7 +1124,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 	maxValidated := blockStatus.validateTasks.maxAllComplete()
 	maxFinalized := blockStatus.cntFinalized - 1
 
-	fmt.Println(maxValidated, maxFinalized)
+	fmt.Println(len(blockStatus.tasks), blockStatus.execTasks.maxAllComplete(), maxValidated, maxFinalized)
 	if maxValidated > maxFinalized {
 		stateWriter := state.NewStateWriterBufferedV3(pe.rs, pe.accumulator)
 		stateReader := state.NewBufferedReader(pe.rs, state.NewReaderParallelV3(pe.rs.Domains(), applyTx))
@@ -1170,7 +1170,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 	}
 
 	if blockStatus.validateTasks.countComplete() == len(blockStatus.tasks) && blockStatus.execTasks.countComplete() == len(blockStatus.tasks) {
-		pe.logger.Debug("exec summary", "block", blockNum, "tasks", len(blockStatus.tasks), "execs", blockStatus.cntExec,
+		/*pe.logger.Debug*/ fmt.Println("exec summary", "block", blockNum, "tasks", len(blockStatus.tasks), "execs", blockStatus.cntExec,
 			"speculative", blockStatus.cntSpecExec, "success", blockStatus.cntSuccess, "aborts", blockStatus.cntAbort, "validations", blockStatus.cntTotalValidations, "failures", blockStatus.cntValidationFail,
 			"retries", fmt.Sprintf("%.2f%%", float64(blockStatus.cntAbort+blockStatus.cntValidationFail)/float64(blockStatus.cntExec)*100),
 			"execs", fmt.Sprintf("%.2f%%", float64(blockStatus.cntExec)/float64(len(blockStatus.tasks))*100))
