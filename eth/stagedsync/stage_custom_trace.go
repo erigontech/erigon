@@ -130,6 +130,35 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
+
+		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
+		fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+		if err != nil {
+			return err
+		}
+		if toBlock > 0 {
+			toBlock-- // [fromBlock,toBlock)
+		}
+		toTxNum, err := txNumsReader.Max(tx, toBlock)
+		if err != nil {
+			return err
+		}
+		prevCumGasUsed := -1
+		prevBN := uint64(0)
+		for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
+			cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(ttx, txNum)
+			if err != nil {
+				return err
+			}
+			_, blockNum, _ := txNumsReader.FindBlockNum(tx, txNum)
+			if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum != prevBN {
+				println(cumGasUsed, txNum, blockNum, prevCumGasUsed)
+				panic("bad receipt at txnum: " + strconv.Itoa(int(txNum)) + " block: " + strconv.Itoa(int(blockNum)))
+			}
+			prevCumGasUsed = int(cumGasUsed)
+			prevBN = blockNum
+		}
+
 		lastTxNum = doms.TxNum()
 		if err := tx.Commit(); err != nil {
 			return err
@@ -206,7 +235,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				if txTask.TxIndex >= 0 && !txTask.Final {
 					receipt = txTask.BlockReceipts[txTask.TxIndex]
 				}
-				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
+				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
 			}
@@ -228,31 +257,6 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 		},
 	}, ctx, tx, cfg, logger); err != nil {
 		return err
-	}
-
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
-	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
-	if err != nil {
-		return err
-	}
-	if toBlock > 0 {
-		toBlock-- // [fromBlock,toBlock)
-	}
-	toTxNum, err := txNumsReader.Max(tx, toBlock)
-	if err != nil {
-		return err
-	}
-	prevCumGasUsed := -1
-	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
-		cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
-		if err != nil {
-			return err
-		}
-		if int(cumGasUsed) == prevCumGasUsed {
-			_, blockNum, _ := txNumsReader.FindBlockNum(tx, txNum)
-			panic("bad receipt at txnum" + strconv.Itoa(int(txNum)) + " block: " + strconv.Itoa(int(blockNum)))
-		}
-		prevCumGasUsed = int(cumGasUsed)
 	}
 
 	return nil

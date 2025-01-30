@@ -71,12 +71,16 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	return
 }
 
-func AppendReceipt(ttx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed uint64) error {
+func AppendReceipt(ttx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed uint64, txNum uint64) error {
 	var cumGasUsedInBlock uint64
 	var firstLogIndexWithinBlock uint32
 	if receipt != nil {
 		cumGasUsedInBlock = receipt.CumulativeGasUsed
 		firstLogIndexWithinBlock = receipt.FirstLogIndexWithinBlock
+	}
+
+	if txNum > 92000 && txNum < 92300 {
+		println("append receipt", cumGasUsedInBlock, txNum)
 	}
 
 	{
