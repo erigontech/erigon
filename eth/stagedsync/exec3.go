@@ -647,6 +647,8 @@ Loop:
 			offsetFromBlockBeginning = 0
 		}
 
+		metrics2.LogSyncMode(execStage.SyncMode(), logger)
+
 		// MA commitTx
 		if !parallel {
 			if execStage.SyncMode() == stages.ModeApplyingBlocks ||

@@ -17,6 +17,7 @@
 package metrics
 
 import (
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -88,5 +89,11 @@ func UpdateBlockProducerProductionDelay(parentBlockTime uint64, producedBlockNum
 
 	if DelayLoggingEnabled {
 		log.Info("[producer-delay] Production", "blockNumber", producedBlockNum, "delay", time.Since(t))
+	}
+}
+
+func LogSyncMode(stages_mode stages.Mode, log log.Logger) {
+	if DelayLoggingEnabled {
+		log.Info("[producer-delay] SyncMode", "mode", stages_mode)
 	}
 }
