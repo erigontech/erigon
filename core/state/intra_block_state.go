@@ -196,6 +196,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.balanceInc = map[libcommon.Address]*BalanceIncrease{}
 	sdb.journal.Reset()
 	sdb.nextRevisionId = 0
+	sdb.validRevisions = sdb.validRevisions[:0]
 	sdb.refund = 0
 	sdb.txIndex = 0
 	sdb.logSize = 0
