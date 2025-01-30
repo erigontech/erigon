@@ -206,11 +206,11 @@ func TestSendRawTransactionDynamicFee(t *testing.T) {
 	// Create a transaction with a gas price that is lower than the fee cap
 	bf := baseFee.Uint64()
 	tip := uint64(5 * params.Wei)
-	cap := uint64(tip + bf)
+	cap := uint64(tip + (bf * 2))
 	gasTip := uint256.NewInt(tip)
 	gasFeeCap := uint256.NewInt(cap)
 
-	txn, err := types.SignTx(types.NewEIP1559Transaction(uint256.Int{1337}, 0, common.Address{1}, uint256.NewInt(uint64(1234)), params.TxGas, gasTip, gasFeeCap, nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
+	txn, err := types.SignTx(types.NewEIP1559Transaction(uint256.Int{1337}, 0, common.Address{1}, uint256.NewInt(uint64(1234)), params.TxGas, uint256.NewInt(2000_000), gasTip, gasFeeCap, nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
 	require.NoError(err)
 
 	buf := bytes.NewBuffer(nil)
@@ -222,7 +222,7 @@ func TestSendRawTransactionDynamicFee(t *testing.T) {
 
 	// Create a transaction with a gas price that is higher than the fee cap
 	gasFeeCap = uint256.NewInt(bf - tip)
-	txn1, err := types.SignTx(types.NewEIP1559Transaction(uint256.Int{1337}, 1, common.Address{1}, uint256.NewInt(uint64(1234)), params.TxGas, gasTip, gasFeeCap, nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
+	txn1, err := types.SignTx(types.NewEIP1559Transaction(uint256.Int{1337}, 1, common.Address{1}, uint256.NewInt(uint64(1234)), params.TxGas, uint256.NewInt(2000_000), gasTip, gasFeeCap, nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
 	require.NoError(err)
 
 	buf = bytes.NewBuffer(nil)

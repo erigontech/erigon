@@ -23,7 +23,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 		return common.Hash{}, err
 	}
 
-	if txn.Type() == types.BlobTxType || txn.Type() == types.DynamicFeeTxType || txn.Type() == types.SetCodeTxType {
+	if txn.Type() == types.BlobTxType || txn.Type() == types.DynamicFeeTxType {
 		baseFeeBig, err := api.BaseFee(ctx)
 		if err != nil {
 			return common.Hash{}, err
@@ -94,7 +94,8 @@ func checkTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
 		return nil
 	}
 
-	feeEth := new(big.Float).Quo(new(big.Float).SetInt(new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gas))), new(big.Float).SetInt(big.NewInt(params.Ether)))
+	//gasCap = gasCap / params.Ether // Convert from wei
+	feeEth := new(big.Float).Quo(new(big.Float).SetInt(new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gas))), new(big.Float).SetInt(big.NewInt(params.Wei)))
 	feeFloat, _ := feeEth.Float64()
 	if feeFloat > gasCap {
 		return fmt.Errorf("tx fee (%.2f ether) exceeds the configured cap (%.2f ether)", feeFloat, gasCap)
@@ -103,16 +104,16 @@ func checkTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
 	return nil
 }
 
-// checkEIP1559TxFee is an internal function used to check whether the fee of
-// the given transaction is bigger than the base fee.
-func checkDynamicTxFee(feeCap *uint256.Int, baseFeeBig *hexutil.Big) error {
+// checkTxFee is an internal function used to check whether the fee of
+// the given transaction is _reasonable_(under the cap).
+func checkDynamicTxFee(gasCap *uint256.Int, baseFeeBig *hexutil.Big) error {
 	baseFee := uint256.NewInt(0)
 	overflow := baseFee.SetFromBig(baseFeeBig.ToInt())
 	if overflow {
 		return errors.New("opts.Value higher than 2^256-1")
 	}
 
-	if feeCap.Lt(baseFee) {
+	if gasCap.Lt(baseFee) {
 		return fmt.Errorf("fee cap is lower than the base fee")
 	}
 
