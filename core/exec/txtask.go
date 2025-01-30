@@ -566,6 +566,7 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 	for {
 		select {
 		case inTask, ok := <-q.newTasks:
+			fmt.Println("popWait", inTask)
 			if !ok {
 				q.retiresLock.Lock()
 				if q.retires.Len() > 0 {
