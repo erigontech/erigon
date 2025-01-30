@@ -195,6 +195,20 @@ func (t *testExecTask) Dependencies() []int {
 	return t.dependencies
 }
 
+func logger(discardLogging bool) log.Logger {
+	var handler log.Handler
+
+	if discardLogging {
+		handler = log.DiscardHandler()
+	} else {
+		handler = log.LvlFilterHandler(log.LvlDebug, log.StreamHandler(os.Stderr, log.TerminalFormat()))
+	}
+
+	log.Root().SetHandler(handler)
+
+	return log.Root()
+}
+
 func randTimeGenerator(min time.Duration, max time.Duration) func(txIdx int, opIdx int) time.Duration {
 	return func(txIdx int, opIdx int) time.Duration {
 		return time.Duration(rand.Int63n(int64(max-min))) + min
@@ -295,9 +309,8 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 	return exec, serialDuration
 }
 
-func testExecutorComb(t *testing.T, totalTxs []int, numReads []int, numWrites []int, numNonIO []int, taskRunner TaskRunner) {
+func testExecutorComb(t *testing.T, totalTxs []int, numReads []int, numWrites []int, numNonIO []int, taskRunner TaskRunner, logger log.Logger) {
 	t.Helper()
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 
 	improved := 0
 	total := 0
@@ -305,12 +318,12 @@ func testExecutorComb(t *testing.T, totalTxs []int, numReads []int, numWrites []
 	totalExecDuration := time.Duration(0)
 	totalSerialDuration := time.Duration(0)
 
-	fmt.Println(t.Name())
+	fmt.Println("\n" + t.Name())
 	for _, numTx := range totalTxs {
 		for _, numRead := range numReads {
 			for _, numWrite := range numWrites {
 				for _, numNonIO := range numNonIO {
-					log.Info("Executing block", "numTx", numTx, "numRead", numRead, "numWrite", numWrite, "numNonIO", numNonIO)
+					logger.Info("Executing block", "numTx", numTx, "numRead", numRead, "numWrite", numWrite, "numNonIO", numNonIO)
 					execDuration, expectedSerialDuration := taskRunner(numTx, numRead, numWrite, numNonIO)
 
 					if execDuration < expectedSerialDuration {
@@ -333,14 +346,13 @@ func testExecutorComb(t *testing.T, totalTxs []int, numReads []int, numWrites []
 		}
 	}
 
-	fmt.Println("Improved: ", improved, "Total: ", total, "success rate: ", float64(improved)/float64(total)*100)
+	fmt.Printf("Improved: %v Total: %v success rate: %.2f%%\n", improved, total, float64(improved)/float64(total)*100)
 	fmt.Printf("Total exec duration: %v, total serial duration: %v, time reduced: %v, improved: %.2fx\n", totalExecDuration, totalSerialDuration, totalSerialDuration-totalExecDuration, float64(totalSerialDuration)/float64(totalExecDuration))
 }
 
 // nolint: gocognit
-func testExecutorCombWithMetadata(t *testing.T, totalTxs []int, numReads []int, numWrites []int, numNonIOs []int, taskRunner TaskRunnerWithMetadata) {
+func testExecutorCombWithMetadata(t *testing.T, totalTxs []int, numReads []int, numWrites []int, numNonIOs []int, taskRunner TaskRunnerWithMetadata, logger log.Logger) {
 	t.Helper()
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 
 	improved := 0
 	improvedMetadata := 0
@@ -350,12 +362,12 @@ func testExecutorCombWithMetadata(t *testing.T, totalTxs []int, numReads []int, 
 	totalExecDuration := time.Duration(0)
 	totalExecDurationMetadata := time.Duration(0)
 	totalSerialDuration := time.Duration(0)
-
+	fmt.Println("\n" + t.Name())
 	for _, numTx := range totalTxs {
 		for _, numRead := range numReads {
 			for _, numWrite := range numWrites {
 				for _, numNonIO := range numNonIOs {
-					log.Info("Executing block", "numTx", numTx, "numRead", numRead, "numWrite", numWrite, "numNonIO", numNonIO)
+					logger.Info("Executing block", "numTx", numTx, "numRead", numRead, "numWrite", numWrite, "numNonIO", numNonIO)
 					execDuration, execDurationMetadata, expectedSerialDuration := taskRunner(numTx, numRead, numWrite, numNonIO)
 
 					if execDuration < expectedSerialDuration {
@@ -453,16 +465,13 @@ func checkNoDroppedTx(pe *parallelExecutor) error {
 }
 
 // nolint: unparam
-func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, metadata bool) time.Duration {
+func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger) time.Duration {
 	t.Helper()
-
-	logger := log.Root()
-	logger.SetHandler(log.DiscardHandler())
 
 	rawDb := memdb.NewStateDB("")
 	defer rawDb.Close()
 
-	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, rawDb, log.New())
+	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, rawDb, logger)
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -608,9 +617,13 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 	return res.AllDeps
 }
 
+var discardLogging = true
+
 func TestLessConflicts(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	rand.Seed(0)
+
+	logger := logger(discardLogging)
 
 	totalTxs := []int{10, 50, 100, 200, 300}
 	numReads := []int{20, 100, 200}
@@ -626,15 +639,17 @@ func TestLessConflicts(t *testing.T) {
 		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
-		return runParallel(t, tasks, checks, false), serialDuration
+		return runParallel(t, tasks, checks, false, logger), serialDuration
 	}
 
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner)
+	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
 func TestLessConflictsWithMetadata(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	rand.Seed(0)
+
+	logger := logger(discardLogging)
 
 	totalTxs := []int{300}
 	numReads := []int{100, 200}
@@ -650,7 +665,7 @@ func TestLessConflictsWithMetadata(t *testing.T) {
 		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
-		parallelDuration := runParallel(t, tasks, checks, false)
+		parallelDuration := runParallel(t, tasks, checks, false, logger)
 
 		allDeps := runParallelGetMetadata(t, tasks, checks)
 
@@ -672,15 +687,17 @@ func TestLessConflictsWithMetadata(t *testing.T) {
 			newTasks = append(newTasks, temp)
 		}
 
-		return parallelDuration, runParallel(t, newTasks, checks, true), serialDuration
+		return parallelDuration, runParallel(t, newTasks, checks, true, logger), serialDuration
 	}
 
-	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIOs, taskRunner)
+	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIOs, taskRunner, logger)
 }
 
 func TestZeroTx(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	rand.Seed(0)
+
+	logger := logger(discardLogging)
 
 	totalTxs := []int{0}
 	numReads := []int{20}
@@ -693,15 +710,17 @@ func TestZeroTx(t *testing.T) {
 		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(1))) }
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
-		return runParallel(t, tasks, checks, false), serialDuration
+		return runParallel(t, tasks, checks, false, logger), serialDuration
 	}
 
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner)
+	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
 func TestAlternatingTx(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	rand.Seed(0)
+
+	logger := logger(discardLogging)
 
 	totalTxs := []int{200}
 	numReads := []int{20}
@@ -714,15 +733,17 @@ func TestAlternatingTx(t *testing.T) {
 		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(i % 2))) }
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
-		return runParallel(t, tasks, checks, false), serialDuration
+		return runParallel(t, tasks, checks, false, logger), serialDuration
 	}
 
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner)
+	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
 func TestAlternatingTxWithMetadata(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	rand.Seed(0)
+
+	logger := logger(discardLogging)
 
 	totalTxs := []int{200}
 	numReads := []int{20}
@@ -735,7 +756,7 @@ func TestAlternatingTxWithMetadata(t *testing.T) {
 		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(i % 2))) }
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
-		parallelDuration := runParallel(t, tasks, checks, false)
+		parallelDuration := runParallel(t, tasks, checks, false, logger)
 
 		allDeps := runParallelGetMetadata(t, tasks, checks)
 
@@ -757,15 +778,17 @@ func TestAlternatingTxWithMetadata(t *testing.T) {
 			newTasks = append(newTasks, temp)
 		}
 
-		return parallelDuration, runParallel(t, newTasks, checks, true), serialDuration
+		return parallelDuration, runParallel(t, newTasks, checks, true, logger), serialDuration
 	}
 
-	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner)
+	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
 func TestMoreConflicts(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	rand.Seed(0)
+
+	logger := logger(discardLogging)
 
 	totalTxs := []int{10, 50, 100, 200, 300}
 	numReads := []int{20, 100, 200}
@@ -781,15 +804,17 @@ func TestMoreConflicts(t *testing.T) {
 		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
-		return runParallel(t, tasks, checks, false), serialDuration
+		return runParallel(t, tasks, checks, false, logger), serialDuration
 	}
 
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner)
+	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
 func TestMoreConflictsWithMetadata(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	rand.Seed(0)
+
+	logger := logger(discardLogging)
 
 	totalTxs := []int{300}
 	numReads := []int{100, 200}
@@ -805,7 +830,7 @@ func TestMoreConflictsWithMetadata(t *testing.T) {
 		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
-		parallelDuration := runParallel(t, tasks, checks, false)
+		parallelDuration := runParallel(t, tasks, checks, false, logger)
 
 		allDeps := runParallelGetMetadata(t, tasks, checks)
 
@@ -827,15 +852,17 @@ func TestMoreConflictsWithMetadata(t *testing.T) {
 			newTasks = append(newTasks, temp)
 		}
 
-		return parallelDuration, runParallel(t, newTasks, checks, true), serialDuration
+		return parallelDuration, runParallel(t, newTasks, checks, true, logger), serialDuration
 	}
 
-	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner)
+	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
 func TestRandomTx(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	rand.Seed(0)
+
+	logger := logger(discardLogging)
 
 	totalTxs := []int{10, 50, 100, 200, 300}
 	numReads := []int{20, 100, 200}
@@ -849,15 +876,17 @@ func TestRandomTx(t *testing.T) {
 		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(rand.Intn(10)))) }
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
-		return runParallel(t, tasks, checks, false), serialDuration
+		return runParallel(t, tasks, checks, false, logger), serialDuration
 	}
 
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner)
+	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
 func TestRandomTxWithMetadata(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	rand.Seed(0)
+
+	logger := logger(discardLogging)
 
 	totalTxs := []int{300}
 	numReads := []int{100, 200}
@@ -871,7 +900,7 @@ func TestRandomTxWithMetadata(t *testing.T) {
 		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(rand.Intn(10)))) }
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 
-		parallelDuration := runParallel(t, tasks, checks, false)
+		parallelDuration := runParallel(t, tasks, checks, false, logger)
 
 		allDeps := runParallelGetMetadata(t, tasks, checks)
 
@@ -893,15 +922,17 @@ func TestRandomTxWithMetadata(t *testing.T) {
 			newTasks = append(newTasks, temp)
 		}
 
-		return parallelDuration, runParallel(t, newTasks, checks, true), serialDuration
+		return parallelDuration, runParallel(t, newTasks, checks, true, logger), serialDuration
 	}
 
-	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner)
+	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
 func TestTxWithLongTailRead(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	rand.Seed(0)
+
+	logger := logger(discardLogging)
 
 	totalTxs := []int{10, 50, 100, 200, 300}
 	numReads := []int{20, 100, 200}
@@ -920,15 +951,17 @@ func TestTxWithLongTailRead(t *testing.T) {
 
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, longTailReadTimer, writeTime, nonIOTime)
 
-		return runParallel(t, tasks, checks, false), serialDuration
+		return runParallel(t, tasks, checks, false, logger), serialDuration
 	}
 
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner)
+	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
 func TestTxWithLongTailReadWithMetadata(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	rand.Seed(0)
+
+	logger := logger(discardLogging)
 
 	totalTxs := []int{300}
 	numReads := []int{100, 200}
@@ -947,7 +980,7 @@ func TestTxWithLongTailReadWithMetadata(t *testing.T) {
 
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, longTailReadTimer, writeTime, nonIOTime)
 
-		parallelDuration := runParallel(t, tasks, checks, false)
+		parallelDuration := runParallel(t, tasks, checks, false, logger)
 
 		allDeps := runParallelGetMetadata(t, tasks, checks)
 
@@ -969,15 +1002,17 @@ func TestTxWithLongTailReadWithMetadata(t *testing.T) {
 			newTasks = append(newTasks, temp)
 		}
 
-		return parallelDuration, runParallel(t, newTasks, checks, true), serialDuration
+		return parallelDuration, runParallel(t, newTasks, checks, true, logger), serialDuration
 	}
 
-	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner)
+	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
 func TestDexScenario(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	rand.Seed(0)
+
+	logger := logger(discardLogging)
 
 	totalTxs := []int{10, 50, 100, 200, 300}
 	numReads := []int{20, 100, 200}
@@ -1012,15 +1047,17 @@ func TestDexScenario(t *testing.T) {
 		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(i))) }
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, dexPathGenerator, readTime, writeTime, nonIOTime)
 
-		return runParallel(t, tasks, checks, false), serialDuration
+		return runParallel(t, tasks, checks, false, logger), serialDuration
 	}
 
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner)
+	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
 func TestDexScenarioWithMetadata(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 	rand.Seed(0)
+
+	logger := logger(discardLogging)
 
 	totalTxs := []int{300}
 	numReads := []int{100, 200}
@@ -1055,7 +1092,7 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(i))) }
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, dexPathGenerator, readTime, writeTime, nonIOTime)
 
-		parallelDuration := runParallel(t, tasks, checks, false)
+		parallelDuration := runParallel(t, tasks, checks, false, logger)
 
 		allDeps := runParallelGetMetadata(t, tasks, checks)
 
@@ -1077,8 +1114,8 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 			newTasks = append(newTasks, temp)
 		}
 
-		return parallelDuration, runParallel(t, newTasks, checks, true), serialDuration
+		return parallelDuration, runParallel(t, newTasks, checks, true, logger), serialDuration
 	}
 
-	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner)
+	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
