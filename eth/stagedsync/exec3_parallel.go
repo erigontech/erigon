@@ -995,7 +995,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 	blockNum := res.Version().BlockNum
 	tx := task.index
 
-	fmt.Println("res", tx)
+	fmt.Println("res", tx, res.Err)
 	blockStatus, ok := pe.blockStatus[blockNum]
 
 	if !ok {
