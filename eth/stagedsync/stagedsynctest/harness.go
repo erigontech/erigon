@@ -474,6 +474,7 @@ func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.
 					new(uint256.Int),
 					21000,
 					new(uint256.Int),
+					new(uint256.Int),
 					uint256.NewInt(937500001),
 					nil,
 				),

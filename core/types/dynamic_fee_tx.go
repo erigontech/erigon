@@ -49,6 +49,7 @@ func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint2
 	}
 	gasFeeCap := tx.GetFeeCap()
 	// return 0 because effectiveFee cant be < 0
+	// transaction max fee is below base fee
 	if gasFeeCap.Lt(baseFee) {
 		return uint256.NewInt(0)
 	}
@@ -58,10 +59,6 @@ func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint2
 	} else {
 		return effectiveFee
 	}
-}
-func (tx *DynamicFeeTransaction) GetEffectiveGasPrice(baseFee *uint256.Int) *uint256.Int {
-	priorityFeePerGas := tx.GetEffectiveGasTip(baseFee)
-	return new(uint256.Int).Add(baseFee, priorityFeePerGas)
 }
 
 func (tx *DynamicFeeTransaction) Unwrap() Transaction {
@@ -434,7 +431,7 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error
 }
 
 // NewEIP1559Transaction creates an unsigned eip1559 transaction.
-func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
+func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
 	return &DynamicFeeTransaction{
 		CommonTx: CommonTx{
 			Nonce: nonce,

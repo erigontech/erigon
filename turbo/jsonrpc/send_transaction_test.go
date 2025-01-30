@@ -189,3 +189,46 @@ func pricedTransaction(nonce uint64, gaslimit uint64, gasprice *uint256.Int, key
 	tx, _ := types.SignTx(types.NewTransaction(nonce, common.Address{}, uint256.NewInt(100), gaslimit, gasprice, nil), *types.LatestSignerForChainID(big.NewInt(1337)), key)
 	return tx
 }
+
+func TestSendRawTransactionDynamicFee(t *testing.T) {
+	mockSentry, require := mock.MockWithAllProtocolChanges(t), require.New(t)
+	logger := log.New()
+
+	oneBlockStep(mockSentry, require, t)
+
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
+	txPool := txpool.NewTxpoolClient(conn)
+	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000 /*1e18*/, 1*params.GWei, 100_000, false, 100_000, 128, logger)
+
+	baseFee, err := api.BaseFee(ctx)
+	require.NoError(err)
+
+	// Create a transaction with a gas price that is lower than the fee cap
+	bf := baseFee.Uint64()
+	tip := uint64(5 * params.Wei)
+	cap := uint64(tip + bf)
+	gasTip := uint256.NewInt(tip)
+	gasFeeCap := uint256.NewInt(cap)
+
+	txn, err := types.SignTx(types.NewEIP1559Transaction(uint256.Int{1337}, 0, common.Address{1}, uint256.NewInt(uint64(1234)), params.TxGas, gasTip, gasFeeCap, nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
+	require.NoError(err)
+
+	buf := bytes.NewBuffer(nil)
+	err = txn.MarshalBinary(buf)
+	require.NoError(err)
+
+	_, err = api.SendRawTransaction(ctx, buf.Bytes())
+	require.NoError(err)
+
+	// Create a transaction with a gas price that is higher than the fee cap
+	gasFeeCap = uint256.NewInt(bf - tip)
+	txn1, err := types.SignTx(types.NewEIP1559Transaction(uint256.Int{1337}, 1, common.Address{1}, uint256.NewInt(uint64(1234)), params.TxGas, gasTip, gasFeeCap, nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
+	require.NoError(err)
+
+	buf = bytes.NewBuffer(nil)
+	err = txn1.MarshalBinary(buf)
+	require.NoError(err)
+
+	_, err = api.SendRawTransaction(ctx, buf.Bytes())
+	require.Error(err)
+}

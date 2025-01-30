@@ -303,6 +303,7 @@ func (txw *BlobTxWrapper) GetTip() *uint256.Int     { return txw.Tx.GetTip() }
 func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	return txw.Tx.GetEffectiveGasTip(baseFee)
 }
+
 func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int { return txw.Tx.GetFeeCap() }
 
 func (txw *BlobTxWrapper) GetBlobHashes() []libcommon.Hash { return txw.Tx.GetBlobHashes() }

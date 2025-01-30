@@ -36,7 +36,7 @@ func TestEIP1559Signing(t *testing.T) {
 
 	chainId := uint256.NewInt(18)
 	signer := LatestSignerForChainID(chainId.ToBig())
-	txn, err := SignTx(NewEIP1559Transaction(*chainId, 0, addr, new(uint256.Int), 0, new(uint256.Int), new(uint256.Int), nil), *signer, key)
+	txn, err := SignTx(NewEIP1559Transaction(*chainId, 0, addr, new(uint256.Int), 0, new(uint256.Int), new(uint256.Int), new(uint256.Int), nil), *signer, key)
 	if err != nil {
 		t.Fatal(err)
 	}
