@@ -79,10 +79,6 @@ func AppendReceipt(ttx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed
 		firstLogIndexWithinBlock = receipt.FirstLogIndexWithinBlock
 	}
 
-	if txNum < 92300 {
-		println("append receipt", cumGasUsedInBlock, txNum, receipt.BlockNumber.Uint64())
-	}
-
 	{
 		var buf [binary.MaxVarintLen64]byte
 		i := binary.PutUvarint(buf[:], cumGasUsedInBlock)
