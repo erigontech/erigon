@@ -1004,50 +1004,54 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 
 	blockStatus.results[tx] = &execResult{res}
 
-	if abortErr, ok := res.Err.(exec.ErrExecAbortError); ok && abortErr.OriginError != nil && blockStatus.skipCheck[tx] {
-		// If the transaction failed when we know it should not fail, this means the transaction itself is
-		// bad (e.g. wrong nonce), and we should exit the execution immediately
-		return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w", blockNum, res.Version().TxIndex, task.TxHash(), abortErr.OriginError)
-	}
-
-	if execErr, ok := res.Err.(exec.ErrExecAbortError); ok {
-		if res.Version().Incarnation > len(blockStatus.tasks) {
-			return nil, fmt.Errorf("could not apply tx %d [%v]: %w: too many incarnations: %d", tx, task.TxHash(), execErr.OriginError, res.Version().Incarnation)
-		}
-
-		addedDependencies := false
-
-		if execErr.Dependency >= 0 {
-			l := len(blockStatus.estimateDeps[tx])
-			for l > 0 && blockStatus.estimateDeps[tx][l-1] > execErr.Dependency {
-				blockStatus.execTasks.removeDependency(blockStatus.estimateDeps[tx][l-1])
-				blockStatus.estimateDeps[tx] = blockStatus.estimateDeps[tx][:l-1]
-				l--
+	if res.Err != nil {
+		if execErr, ok := res.Err.(exec.ErrExecAbortError); ok {
+			if execErr.OriginError != nil && blockStatus.skipCheck[tx] {
+				// If the transaction failed when we know it should not fail, this means the transaction itself is
+				// bad (e.g. wrong nonce), and we should exit the execution immediately
+				return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w", blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError)
 			}
 
-			addedDependencies = blockStatus.execTasks.addDependencies(execErr.Dependency, tx)
+			if res.Version().Incarnation > len(blockStatus.tasks) {
+				return nil, fmt.Errorf("could not apply tx %d [%v]: %w: too many incarnations: %d", tx, task.TxHash(), execErr.OriginError, res.Version().Incarnation)
+			}
+
+			addedDependencies := false
+
+			if execErr.Dependency >= 0 {
+				l := len(blockStatus.estimateDeps[tx])
+				for l > 0 && blockStatus.estimateDeps[tx][l-1] > execErr.Dependency {
+					blockStatus.execTasks.removeDependency(blockStatus.estimateDeps[tx][l-1])
+					blockStatus.estimateDeps[tx] = blockStatus.estimateDeps[tx][:l-1]
+					l--
+				}
+
+				addedDependencies = blockStatus.execTasks.addDependencies(execErr.Dependency, tx)
+			} else {
+				estimate := 0
+
+				if len(blockStatus.estimateDeps[tx]) > 0 {
+					estimate = blockStatus.estimateDeps[tx][len(blockStatus.estimateDeps[tx])-1]
+				}
+				addedDependencies = blockStatus.execTasks.addDependencies(estimate, tx)
+				newEstimate := estimate + (estimate+tx)/2
+				if newEstimate >= tx {
+					newEstimate = tx - 1
+				}
+				blockStatus.estimateDeps[tx] = append(blockStatus.estimateDeps[tx], newEstimate)
+			}
+
+			blockStatus.execTasks.clearInProgress(tx)
+
+			if !addedDependencies {
+				blockStatus.execTasks.pushPending(tx)
+			}
+			blockStatus.txIncarnations[tx]++
+			blockStatus.diagExecAbort[tx]++
+			blockStatus.cntAbort++
 		} else {
-			estimate := 0
-
-			if len(blockStatus.estimateDeps[tx]) > 0 {
-				estimate = blockStatus.estimateDeps[tx][len(blockStatus.estimateDeps[tx])-1]
-			}
-			addedDependencies = blockStatus.execTasks.addDependencies(estimate, tx)
-			newEstimate := estimate + (estimate+tx)/2
-			if newEstimate >= tx {
-				newEstimate = tx - 1
-			}
-			blockStatus.estimateDeps[tx] = append(blockStatus.estimateDeps[tx], newEstimate)
+			return nil, fmt.Errorf("unexptected exec error: %w", err)
 		}
-
-		blockStatus.execTasks.clearInProgress(tx)
-
-		if !addedDependencies {
-			blockStatus.execTasks.pushPending(tx)
-		}
-		blockStatus.txIncarnations[tx]++
-		blockStatus.diagExecAbort[tx]++
-		blockStatus.cntAbort++
 	} else {
 		txIndex := res.Version().TxIndex
 
@@ -1119,6 +1123,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 
 			blockStatus.preValidated[tx] = false
 			blockStatus.txIncarnations[tx]++
+			fmt.Println("invalid", tx)
 		}
 	}
 
@@ -1273,6 +1278,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 	if maxValidated >= 0 {
 		lastTxTask := blockStatus.tasks[maxValidated].Task
 		lastTxNum = lastTxTask.Version().TxNum
+		fmt.Println("last", maxValidated)
 	}
 
 	txTask := blockStatus.tasks[0].Task
