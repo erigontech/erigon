@@ -1178,8 +1178,8 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 	if blockStatus.validateTasks.countComplete() == len(blockStatus.tasks) && blockStatus.execTasks.countComplete() == len(blockStatus.tasks) {
 		pe.logger.Debug("exec summary", "block", blockNum, "tasks", len(blockStatus.tasks), "execs", blockStatus.cntExec,
 			"speculative", blockStatus.cntSpecExec, "success", blockStatus.cntSuccess, "aborts", blockStatus.cntAbort, "validations", blockStatus.cntTotalValidations, "failures", blockStatus.cntValidationFail,
-			"retry%", fmt.Sprintf("%.2f%%", float64(blockStatus.cntAbort+blockStatus.cntValidationFail)/float64(blockStatus.cntExec)*100),
-			"#execs/#tasks", fmt.Sprintf("%.2f%%", float64(blockStatus.cntExec)/float64(len(blockStatus.tasks))*100))
+			"retries", fmt.Sprintf("%.2f%%", float64(blockStatus.cntAbort+blockStatus.cntValidationFail)/float64(blockStatus.cntExec)*100),
+			"execs", fmt.Sprintf("%.2f%%", float64(blockStatus.cntExec)/float64(len(blockStatus.tasks))*100))
 
 		pe.execCount.Add(int64(blockStatus.cntExec))
 		pe.abortCount.Add(int64(blockStatus.cntAbort))
