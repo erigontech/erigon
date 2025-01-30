@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 )
 
+// concrete impls in relations.go
 type RelationI interface {
 	BaseNum2Id(fromBaseNum Num, tx kv.Tx) (Id, error)
 	Num2Id(num Num, tx kv.Tx) (Id, error)
