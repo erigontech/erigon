@@ -69,6 +69,10 @@ func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
 					"slot", msg.GetGnosis().Slot,
 					"err", err,
 				)
+
+				//
+				// TODO - metrics for this?
+				//
 				continue
 			}
 		}
