@@ -133,14 +133,14 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			current.Txns = current.Txns[:0]
 			current.Receipts = current.Receipts[:0]
 
-			logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, forceTxs, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+			logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, forceTxs, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, true, logger)
 			if err != nil {
 				return err
 			}
 			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
 		}
 		if !cfg.noTxPool && len(preparedTxns) == 0 {
-			logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+			logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, false, logger)
 			if err != nil {
 				return err
 			}
@@ -174,7 +174,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 				}
 
 				if len(txns) > 0 {
-					logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+					logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, false, logger)
 					if err != nil {
 						return err
 					}
@@ -464,6 +464,7 @@ func addTransactionsToMiningBlock(
 	ibs *state.IntraBlockState,
 	interrupt *int32,
 	payloadId uint64,
+	forceTxs bool,
 	logger log.Logger,
 ) (types.Logs, bool, error) {
 	header := current.Header
@@ -506,7 +507,7 @@ func addTransactionsToMiningBlock(
 LOOP:
 	for _, txn := range txns {
 		// see if we need to stop now
-		if stopped != nil {
+		if stopped != nil && !forceTxs {
 			select {
 			case <-stopped.C:
 				done = true
@@ -519,7 +520,7 @@ LOOP:
 			return nil, true, err
 		}
 
-		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 && stopped == nil {
+		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 && stopped == nil && !forceTxs {
 			logger.Debug("Transaction adding was requested to stop", "payload", payloadId)
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)
@@ -540,7 +541,7 @@ LOOP:
 
 		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
-		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) {
+		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) && !forceTxs {
 			logger.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
 			continue
 		}
