@@ -200,9 +200,9 @@ test-hive:
 
 # Define the run_suite function
 define run_suite
-    echo -e "\n\n============================================================"; \
+    printf "\n\n============================================================"; \
     echo "Running test: $1-$2"; \
-    echo -e "\n"; \
+    printf "\n"; \
     ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --client erigon $3 2>&1 | tee output.log; \
     if [ $$? -gt 0 ]; then \
         echo "Exitcode gt 0"; \
@@ -215,28 +215,28 @@ define run_suite
     fi; \
     tests=$$(echo "$$status_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p'); \
     failed=$$(echo "$$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p'); \
-    echo -e "\n"; \
+    printf "\n"; \
     echo "-----------   Results for $1-$2    -----------"; \
     echo "Tests: $$tests, Failed: $$failed"; \
-    echo -e "\n\n============================================================"
+    printf "\n\n============================================================"
 endef
 
 hive-local:
 	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
-	rm -rf "hive-test-$(SHORT_COMMIT)" && mkdir "hive-local-$(SHORT_COMMIT)"
+	rm -rf "hive-local-$(SHORT_COMMIT)" && mkdir "hive-local-$(SHORT_COMMIT)"
 	cd "hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 
 	cd "hive-local-$(SHORT_COMMIT)/hive" && \
 	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
 	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "hive-local-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
-	cd "hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs
+	cd "hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
 	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,exchange-capabilities)
 	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,withdrawals)
 	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,cancun)
 	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,api)
 	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc,compat)
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
 eest-hive:
 	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
