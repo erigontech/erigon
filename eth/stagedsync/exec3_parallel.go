@@ -995,6 +995,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 	blockNum := res.Version().BlockNum
 	tx := task.index
 
+	fmt.Println("res", tx)
 	blockStatus, ok := pe.blockStatus[blockNum]
 
 	if !ok {
@@ -1212,7 +1213,6 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 	if blockStatus.execTasks.minPending() != -1 && blockStatus.execTasks.minPending() == maxValidated+1 {
 		nextTx := blockStatus.execTasks.takeNextPending()
 		if nextTx != -1 {
-			fmt.Println("exec", nextTx)
 			blockStatus.cntExec++
 
 			blockStatus.skipCheck[nextTx] = true
@@ -1220,6 +1220,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 			execTask := blockStatus.tasks[nextTx]
 
 			if incarnation := blockStatus.txIncarnations[nextTx]; incarnation == 0 {
+				fmt.Println("exec", nextTx, incarnation)
 				pe.in.Add(ctx, &taskVersion{
 					execTask:   execTask,
 					version:    execTask.Version(),
@@ -1228,6 +1229,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 					stats:      blockStatus.stats,
 					statsMutex: &blockStatus.Mutex})
 			} else {
+				fmt.Println("re exec", nextTx, incarnation)
 				version := execTask.Version()
 				version.Incarnation = incarnation
 				pe.in.ReTry(&taskVersion{
@@ -1245,7 +1247,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 	for nextTx := blockStatus.execTasks.minPending(); nextTx != -1; nextTx = blockStatus.execTasks.minPending() {
 		incarnation := blockStatus.txIncarnations[nextTx]
 
-		fmt.Println("exec", nextTx, incarnation)
+		fmt.Println("exec sp", nextTx, incarnation)
 
 		if incarnation > 0 {
 			break
