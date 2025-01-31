@@ -10,7 +10,6 @@ import (
 	"github.com/erigontech/erigon/core/bloombits"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
 
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/rpc"
@@ -74,10 +73,10 @@ func NewBackend(stack *node.Node, config *Config, chainDb kv.TemporalRwDB, publi
 }
 
 // func (b *Backend) AccountManager() *accounts.Manager { return b.stack.AccountManager() }
-func (b *Backend) APIBackend() *APIBackend                             { return b.apiBackend }
-func (b *Backend) APIs() []rpc.API                                     { return nil /*b.apiBackend.GetAPIs(b.filterSystem) */ }
-func (b *Backend) ArbInterface() ArbInterface                          { return b.arb }
-func (b *Backend) BlockChain() eth1_chain_reader.ChainReaderWriterEth1 { return b.arb.BlockChain() }
+func (b *Backend) APIBackend() *APIBackend     { return b.apiBackend }
+func (b *Backend) APIs() []rpc.API             { return nil /*b.apiBackend.GetAPIs(b.filterSystem) */ }
+func (b *Backend) ArbInterface() ArbInterface  { return b.arb }
+func (b *Backend) BlockChain() core.BlockChain { return b.arb.BlockChain() }
 
 // func (b *Backend) BloomIndexer() *core.ChainIndexer                    { return b.bloomIndexer }
 func (b *Backend) ChainDb() kv.TemporalRwDB { return b.chainDb }
