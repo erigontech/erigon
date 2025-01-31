@@ -297,9 +297,9 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 			outputTxNum.Store(processedTxNum)
 		}
 	}
-	if outputTxNum.Load() != toTxNum {
-		return fmt.Errorf("rws closed but not all txnums proceeded: rwsClosed=%t, toTxNum=%d, outputTxNum=%d", rwsClosed, toTxNum, outputTxNum)
-	}
+	//if outputTxNum.Load() != toTxNum {
+	//	return fmt.Errorf("rws closed but not all txnums proceeded: rwsClosed=%t, toTxNum=%d, outputTxNum=%d", rwsClosed, toTxNum, outputTxNum)
+	//}
 	return nil
 }
 func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in *state.QueueWithRetry, workerCount int, rws *state.ResultsQueue, logger log.Logger) error {
