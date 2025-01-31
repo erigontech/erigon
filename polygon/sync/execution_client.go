@@ -91,7 +91,7 @@ func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Bloc
 		case executionproto.ExecutionStatus_Busy:
 			return ErrExecutionClientBusy // gets retried
 		default:
-			return backoff.Permanent(fmt.Errorf("executionClient.InsertBlocks failure status: %s", status.String()))
+			return fmt.Errorf("executionClient.InsertBlocks failure status: %s", status.String())
 		}
 	})
 }
@@ -125,8 +125,7 @@ func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Heade
 		case executionproto.ExecutionStatus_Busy:
 			return ErrExecutionClientBusy // gets retried
 		default:
-			return fmt.Errorf(
-				"%w: status=%d, validationErr='%s'", ErrForkChoiceUpdateFailure, r.Status, r.ValidationError)
+			return fmt.Errorf("%w: status=%d, validationErr='%s'", ErrForkChoiceUpdateFailure, r.Status, r.ValidationError)
 		}
 	})
 
