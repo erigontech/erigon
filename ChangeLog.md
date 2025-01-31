@@ -9,6 +9,9 @@ ChangeLog
 ### Improvements:
 
 - `eth_estimateGas`: StateOverrides and HistoricalBlocks support
+- fixes sporadic crashes on Polygon with new default flow (Astrid)
+  - `nonsequential block in bridge processing` - should be fixed
+  - `pos sync failed: fork choice update failure: status=5, validationErr=''` - should be fixed
 
 ### TODO
 
