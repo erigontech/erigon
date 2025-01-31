@@ -131,7 +131,8 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		}
 
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
-		fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+		//fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+		fromTxNum := uint64(0)
 		if err != nil {
 			return err
 		}
@@ -143,7 +144,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			return err
 		}
 		prevCumGasUsed := -1
-		prevBN := uint64(0)
+		prevBN := uint64(1)
 		for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
 			cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(ttx, txNum)
 			if err != nil {
