@@ -248,7 +248,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
-			//if txTask.TxNum < 50 {
+			//if txTask.TxNum f< 50 {
 			//fmt.Printf("[dbg.exec] rec: %d, %d, %t\n", txTask.BlockNum, txTask.TxNum, txTask.Final)
 			//}
 
