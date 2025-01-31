@@ -147,13 +147,13 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			return err
 		}
 		prevCumGasUsed := -1
-		prevBN := uint64(1)
+		prevBN := uint64(0)
 		for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
 			cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(ttx, txNum)
 			if err != nil {
 				return err
 			}
-			blockNum := badFoundBlockNum(ttx, prevBN-1, txNumsReader, txNum)
+			blockNum := badFoundBlockNum(ttx, prevBN, txNumsReader, txNum)
 			//println(cumGasUsed, txNum, blockNum, prevCumGasUsed)
 			if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
 				err := fmt.Errorf("bad receipt at txnum: %d, block: %d, cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, cumGasUsed, prevCumGasUsed)
