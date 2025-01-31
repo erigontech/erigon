@@ -295,7 +295,6 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 			outputTxNum.Store(processedTxNum)
 		}
 	}
-	log.Warn("[dbg] reduceDone", "outputTxNum", outputTxNum.Load(), "toTxNum", toTxNum)
 	if outputTxNum.Load() != toTxNum {
 		return fmt.Errorf("not all txnums proceeded: toTxNum=%d, outputTxNum=%d", toTxNum, outputTxNum.Load())
 	}
