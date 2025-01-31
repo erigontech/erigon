@@ -1,7 +1,13 @@
 ChangeLog
 ---------
 
-## v3.0.0-beta1 (in development)
+## v3.0.0-beta2 (in development)
+
+### Breaking changes
+- Reverts Optimize gas by default in eth_createAccessList #8337  
+
+
+## v3.0.0-beta1
 
 ### Breaking changes
 
