@@ -1,7 +1,23 @@
 ChangeLog
 ---------
 
-## v3.0.0-beta1 (in development)
+## v3.0.0-beta2 (in development)
+
+### Breaking changes
+
+- eth_estimateGas: support historical blocks and state overrides
+
+### TODO
+
+- milestone: https://github.com/erigontech/erigon/milestone/5
+- Known problem:
+  - external CL support
+  - `erigon_getLatestLogs` not implemented
+
+### Acknowledgements:
+
+
+## v3.0.0-beta1 
 
 ### Breaking changes
 
@@ -10,13 +26,6 @@ ChangeLog
     - This may however fail, as there are a number of potential edge cases.  If this happens the process will likely stop with a failure message.
     - In this situation you will need to do a clean sync, in which case the complete snapshot set will be downloaded and astrid will sync.
     - If you want to prevent this and retain the old behaviour start erigon with --polygon.sync=false
-
-### TODO
-
-- milestone: https://github.com/erigontech/erigon/milestone/5
-- Known problem:
-    - external CL support
-    - `erigon_getLatestLogs` not implemented
 
 ### Acknowledgements:
 
