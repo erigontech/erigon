@@ -428,11 +428,6 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 		txn = &t.Tx
 	}
 
-	v, r, s := txn.RawSignatureValues()
-	result.V = (*hexutil.Big)(v.ToBig())
-	result.R = (*hexutil.Big)(r.ToBig())
-	result.S = (*hexutil.Big)(s.ToBig())
-
 	if t, ok := txn.(*types.OptimismDepositTx); ok {
 		if t.Mint != nil {
 			result.Mint = (*hexutil.Big)(t.Mint.ToBig())
@@ -470,6 +465,10 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 		return result
 	}
 
+	v, r, s := txn.RawSignatureValues()
+	result.V = (*hexutil.Big)(v.ToBig())
+	result.R = (*hexutil.Big)(r.ToBig())
+	result.S = (*hexutil.Big)(s.ToBig())
 	if txn.Type() == types.LegacyTxType {
 		// avoid overflow by not calling DeriveChainId. chain id not included when v = 0 (this can happen in optimism)
 		if !v.IsZero() {
