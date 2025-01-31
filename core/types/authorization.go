@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/holiman/uint256"
 
@@ -38,8 +39,12 @@ func (ath *Authorization) copy() *Authorization {
 }
 
 func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommon.Address, error) {
-	authLen := (1 + rlp.Uint256LenExcludingHead(&ath.ChainID))
-	authLen += (1 + length.Addr)
+	if ath.Nonce == math.MaxUint64 {
+		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
+	}
+
+	authLen := 1 + rlp.Uint256LenExcludingHead(&ath.ChainID)
+	authLen += 1 + length.Addr
 	authLen += rlp2.U64Len(ath.Nonce)
 
 	if err := EncodeStructSizePrefix(authLen, data, b); err != nil {
@@ -59,26 +64,27 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 		return nil, err
 	}
 
+	return RecoverSignerFromRLP(data.Bytes(), ath.YParity, ath.R, ath.S)
+}
+
+func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*libcommon.Address, error) {
 	hashData := []byte{params.SetCodeMagicPrefix}
-	hashData = append(hashData, data.Bytes()...)
+	hashData = append(hashData, rlp...)
 	hash := crypto.Keccak256Hash(hashData)
 
 	var sig [65]byte
-	r := ath.R.Bytes()
-	s := ath.S.Bytes()
-	copy(sig[32-len(r):32], r)
-	copy(sig[64-len(s):64], s)
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	copy(sig[32-len(r):32], rBytes)
+	copy(sig[64-len(s):64], sBytes)
 
-	if ath.Nonce == 1<<64-1 {
-		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
-	}
-	if ath.YParity == 0 || ath.YParity == 1 {
-		sig[64] = ath.YParity
+	if yParity == 0 || yParity == 1 {
+		sig[64] = yParity
 	} else {
-		return nil, fmt.Errorf("invalid y parity value: %d", ath.YParity)
+		return nil, fmt.Errorf("invalid y parity value: %d", yParity)
 	}
 
-	if !libcrypto.TransactionSignatureIsValid(sig[64], &ath.R, &ath.S, false /* allowPreEip2s */) {
+	if !libcrypto.TransactionSignatureIsValid(sig[64], &r, &s, false /* allowPreEip2s */) {
 		return nil, errors.New("invalid signature")
 	}
 

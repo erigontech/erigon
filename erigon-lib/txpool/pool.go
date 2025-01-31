@@ -35,12 +35,14 @@ import (
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/log/v3"
+	types3 "github.com/erigontech/erigon/core/types"
 	"github.com/go-stack/stack"
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -235,6 +237,7 @@ type TxPool struct {
 	blobSchedule            *chain.BlobSchedule
 	feeCalculator           FeeCalculator
 	logger                  log.Logger
+	auths                   map[common.Address]*metaTx // All accounts with a pooled authorization
 }
 
 type FeeCalculator interface {
@@ -293,6 +296,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		// builderNotifyNewTxns:    builderNotifyNewTxns,
 		// newSlotsStreams:         newSlotsStreams,
 		logger: logger,
+		auths:  map[common.Address]*metaTx{},
 	}
 
 	if shanghaiTime != nil {
@@ -488,6 +492,22 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	if err = p.removeMined(p.all, minedTxs.Txs); err != nil {
 		return err
+	}
+
+	// remove auths from pool map
+	for _, mt := range minedTxs.Txs {
+		if mt.Type == types2.SetCodeTxType {
+			numAuths := len(mt.AuthRaw)
+			for i := range numAuths {
+				signature := mt.Authorizations[i]
+				signer, err := types3.RecoverSignerFromRLP(mt.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+				if err != nil {
+					continue
+				}
+
+				delete(p.auths, *signer)
+			}
+		}
 	}
 
 	var announcements types.Announcements
@@ -1450,6 +1470,30 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoo
 		return txpoolcfg.FeeTooLow
 	}
 
+	// Check if we have txn with same authorization in the pool
+	if mt.Tx.Type == types2.SetCodeTxType {
+		numAuths := len(mt.Tx.AuthRaw)
+		foundDuplicate := false
+		for i := range numAuths {
+			signature := mt.Tx.Authorizations[i]
+			signer, err := types3.RecoverSignerFromRLP(mt.Tx.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+			if err != nil {
+				continue
+			}
+
+			if _, ok := p.auths[*signer]; ok {
+				foundDuplicate = true
+				break
+			}
+
+			p.auths[*signer] = mt
+		}
+
+		if foundDuplicate {
+			return txpoolcfg.ErrAuthorityReserved
+		}
+	}
+
 	hashStr := string(mt.Tx.IDHash[:])
 	p.byHash[hashStr] = mt
 
@@ -1485,6 +1529,18 @@ func (p *TxPool) discardLocked(mt *metaTx, reason txpoolcfg.DiscardReason) {
 	if mt.Tx.Type == types.BlobTxType {
 		t := p.totalBlobsInPool.Load()
 		p.totalBlobsInPool.Store(t - uint64(len(mt.Tx.BlobHashes)))
+	}
+	if mt.Tx.Type == types2.SetCodeTxType {
+		numAuths := len(mt.Tx.AuthRaw)
+		for i := range numAuths {
+			signature := mt.Tx.Authorizations[i]
+			signer, err := types3.RecoverSignerFromRLP(mt.Tx.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+			if err != nil {
+				continue
+			}
+
+			delete(p.auths, *signer)
+		}
 	}
 }
 
