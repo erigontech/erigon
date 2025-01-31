@@ -59,7 +59,7 @@ func NextKey(key []byte) ([]byte, error) {
 
 // LoadCommitHandler is a callback called each time a new batch is being
 // loaded from files into a DB
-// * `key`: last commited key to the database (use etl.NextKey helper to use in LoadStartKey)
+// * `key`: last committed key to the database (use etl.NextKey helper to use in LoadStartKey)
 // * `isDone`: true, if everything is processed
 type LoadCommitHandler func(db kv.Putter, key []byte, isDone bool) error
 type AdditionalLogArguments func(k, v []byte) (additionalLogArguments []interface{})
