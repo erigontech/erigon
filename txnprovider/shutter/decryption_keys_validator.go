@@ -66,12 +66,36 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 		return fmt.Errorf("%w: %d", ErrInstanceIdMismatch, msg.InstanceId)
 	}
 
+	if err := v.validateExtraData(msg); err != nil {
+		return err
+	}
+
+	if err := v.validateEonIndex(msg); err != nil {
+		return err
+	}
+
+	return v.validateKeys(msg)
+}
+
+func (v DecryptionKeysValidator) validateExtraData(msg *proto.DecryptionKeys) error {
 	gnosisExtraData := msg.GetGnosis()
 	if gnosisExtraData == nil {
 		return ErrMissingGnosisExtraData
 	}
 
-	msgSlot := gnosisExtraData.Slot
+	if err := v.validateSlot(msg); err != nil {
+		return err
+	}
+
+	if gnosisExtraData.TxPointer > math.MaxInt32 {
+		return fmt.Errorf("%w: %d", ErrTxPointerTooLarge, gnosisExtraData.TxPointer)
+	}
+
+	return nil
+}
+
+func (v DecryptionKeysValidator) validateSlot(msg *proto.DecryptionKeys) error {
+	msgSlot := msg.GetGnosis().Slot
 	if msgSlot > math.MaxInt64 {
 		return fmt.Errorf("%w: %d", ErrSlotTooLarge, msgSlot)
 	}
@@ -86,37 +110,10 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 		return fmt.Errorf("%w: msgSlot=%d, currentSlot=%d", ErrSlotInTheFuture, msgSlot, currentSlot)
 	}
 
-	if gnosisExtraData.TxPointer > math.MaxInt32 {
-		return fmt.Errorf("%w: %d", ErrTxPointerTooLarge, gnosisExtraData.TxPointer)
-	}
+	return nil
+}
 
-	if msg.Eon > math.MaxInt64 {
-		return fmt.Errorf("%w: %d", ErrEonTooLarge, msg.Eon)
-	}
-
-	currentEon, ok := v.eonTracker.CurrentEon()
-	if !ok {
-		// we're still syncing and are behind - ignore msg, without penalizing peer
-		return fmt.Errorf("%w: %w", ErrIgnoreMsg, ErrCurrentEonUnavailable)
-	}
-
-	msgEonIndex := EonIndex(msg.Eon)
-	if msgEonIndex < currentEon.Index {
-		return fmt.Errorf("%w: msgEonIndex=%d, currentEonIndex=%d", ErrEonInThePast, msgEonIndex, currentEon.Index)
-	}
-
-	if msgEonIndex > currentEon.Index {
-		//
-		// TODO: maybe we can add a wait time here (same as max decryption keys wait time)
-		//       only if it is in the activationQueue and not more than 1 block away
-		//       the 2 above can be done in the eon tracker with a activationBlock, ok := et.EonInActivateQueue(eon)
-		//       this is so that we only wait in legit cases and prevent a DDoS vector if a malicious peer spams us
-		//
-
-		// we may be behind - ignore msg, without penalizing peer
-		return fmt.Errorf("%w: %w: msgEonIndex=%d, currentEonIndex=%d", ErrIgnoreMsg, ErrEonInTheFuture, msgEonIndex, currentEon.Index)
-	}
-
+func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys) error {
 	if len(msg.Keys) == 0 {
 		return ErrEmptyKeys
 	}
@@ -131,6 +128,32 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 	//      - add DecryptionKeys.Validate() equivalent which checks the Key unmarshalling into shcrypto.EpochSecretKey
 	//      - add validation forVerifyEpochSecretKey: check if we should be doing this validation
 	//
+
+	return nil
+}
+
+func (v DecryptionKeysValidator) validateEonIndex(msg *proto.DecryptionKeys) error {
+	if msg.Eon > math.MaxInt64 {
+		return fmt.Errorf("%w: %d", ErrEonTooLarge, msg.Eon)
+	}
+
+	msgEonIndex := EonIndex(msg.Eon)
+	currentEon, ok := v.eonTracker.CurrentEon()
+	if !ok {
+		// we're still syncing and are behind - ignore msg, without penalizing peer
+		return fmt.Errorf("%w: %w", ErrIgnoreMsg, ErrCurrentEonUnavailable)
+	}
+
+	_, inRecent := v.eonTracker.RecentEon(msgEonIndex)
+	if msgEonIndex < currentEon.Index && !inRecent {
+		return fmt.Errorf("%w: msgEonIndex=%d, currentEonIndex=%d", ErrEonInThePast, msgEonIndex, currentEon.Index)
+	}
+
+	if msgEonIndex > currentEon.Index && !inRecent {
+		// we may be lagging behind - ignore msg, without penalizing peer
+		return fmt.Errorf("%w: %w: msgEonIndex=%d, currentEonIndex=%d", ErrIgnoreMsg, ErrEonInTheFuture, msgEonIndex, currentEon.Index)
+	}
+
 	return nil
 }
 

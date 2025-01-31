@@ -57,9 +57,6 @@ func NewEncryptedTxnsPool(logger log.Logger, config Config, contractBackend bind
 		panic(fmt.Errorf("failed to create shutter sequencer contract: %w", err))
 	}
 
-	//
-	// TODO golang-lru has expirable TTL LRU - could potentially use that
-	//
 	submissions, err := lru.New[TxnIndex, EncryptedTxnSubmission](int(config.MaxPooledEncryptedTxns))
 	if err != nil {
 		panic(fmt.Errorf("failed to create shutter submissions LRU cache: %w", err))
@@ -86,6 +83,8 @@ func (etp EncryptedTxnsPool) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case err := <-submissionEventSub.Err():
+			return err
 		case event := <-submissionEventC:
 			encryptedTxnSubmission := EncryptedTxnSubmission{
 				EonIndex:             EonIndex(event.Eon),
@@ -97,11 +96,11 @@ func (etp EncryptedTxnsPool) Run(ctx context.Context) error {
 				BlockNum:             event.Raw.BlockNumber,
 			}
 
-			//
-			// TODO handle reorgs
-			//
-
-			etp.submissions.Add(encryptedTxnSubmission.TxnIndex, encryptedTxnSubmission)
+			if event.Raw.Removed {
+				etp.submissions.Remove(encryptedTxnSubmission.TxnIndex)
+			} else {
+				etp.submissions.Add(encryptedTxnSubmission.TxnIndex, encryptedTxnSubmission)
+			}
 		}
 	}
 }

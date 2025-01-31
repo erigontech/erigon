@@ -20,6 +20,7 @@ import (
 type MockSlotCalculator struct {
 	ctrl     *gomock.Controller
 	recorder *MockSlotCalculatorMockRecorder
+	isgomock struct{}
 }
 
 // MockSlotCalculatorMockRecorder is the mock recorder for MockSlotCalculator.
@@ -78,18 +79,18 @@ func (c *MockSlotCalculatorCalcCurrentSlotCall) DoAndReturn(f func() uint64) *Mo
 }
 
 // CalcSlot mocks base method.
-func (m *MockSlotCalculator) CalcSlot(arg0 uint64) (uint64, error) {
+func (m *MockSlotCalculator) CalcSlot(timestamp uint64) (uint64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CalcSlot", arg0)
+	ret := m.ctrl.Call(m, "CalcSlot", timestamp)
 	ret0, _ := ret[0].(uint64)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // CalcSlot indicates an expected call of CalcSlot.
-func (mr *MockSlotCalculatorMockRecorder) CalcSlot(arg0 any) *MockSlotCalculatorCalcSlotCall {
+func (mr *MockSlotCalculatorMockRecorder) CalcSlot(timestamp any) *MockSlotCalculatorCalcSlotCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CalcSlot", reflect.TypeOf((*MockSlotCalculator)(nil).CalcSlot), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CalcSlot", reflect.TypeOf((*MockSlotCalculator)(nil).CalcSlot), timestamp)
 	return &MockSlotCalculatorCalcSlotCall{Call: call}
 }
 
@@ -117,17 +118,17 @@ func (c *MockSlotCalculatorCalcSlotCall) DoAndReturn(f func(uint64) (uint64, err
 }
 
 // CalcSlotAge mocks base method.
-func (m *MockSlotCalculator) CalcSlotAge(arg0 uint64) time.Duration {
+func (m *MockSlotCalculator) CalcSlotAge(slot uint64) time.Duration {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CalcSlotAge", arg0)
+	ret := m.ctrl.Call(m, "CalcSlotAge", slot)
 	ret0, _ := ret[0].(time.Duration)
 	return ret0
 }
 
 // CalcSlotAge indicates an expected call of CalcSlotAge.
-func (mr *MockSlotCalculatorMockRecorder) CalcSlotAge(arg0 any) *MockSlotCalculatorCalcSlotAgeCall {
+func (mr *MockSlotCalculatorMockRecorder) CalcSlotAge(slot any) *MockSlotCalculatorCalcSlotAgeCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CalcSlotAge", reflect.TypeOf((*MockSlotCalculator)(nil).CalcSlotAge), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CalcSlotAge", reflect.TypeOf((*MockSlotCalculator)(nil).CalcSlotAge), slot)
 	return &MockSlotCalculatorCalcSlotAgeCall{Call: call}
 }
 

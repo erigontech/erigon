@@ -18,6 +18,7 @@ package shutter
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
@@ -96,9 +97,9 @@ func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 	}
 
 	for _, encryptedTxn := range encryptedTxns {
-		_, err := dkp.eonTracker.Eon(encryptedTxn.EonIndex)
-		if err != nil {
-			return err
+		_, ok := dkp.eonTracker.RecentEon(encryptedTxn.EonIndex)
+		if !ok {
+			return fmt.Errorf("eon not seen recently: %d", encryptedTxn.EonIndex)
 		}
 
 		//

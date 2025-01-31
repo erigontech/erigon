@@ -21,6 +21,7 @@ import (
 type MockEonTracker struct {
 	ctrl     *gomock.Controller
 	recorder *MockEonTrackerMockRecorder
+	isgomock struct{}
 }
 
 // MockEonTrackerMockRecorder is the mock recorder for MockEonTracker.
@@ -79,57 +80,57 @@ func (c *MockEonTrackerCurrentEonCall) DoAndReturn(f func() (shutter.Eon, bool))
 	return c
 }
 
-// Eon mocks base method.
-func (m *MockEonTracker) Eon(arg0 shutter.EonIndex) (shutter.Eon, error) {
+// RecentEon mocks base method.
+func (m *MockEonTracker) RecentEon(index shutter.EonIndex) (shutter.Eon, bool) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Eon", arg0)
+	ret := m.ctrl.Call(m, "RecentEon", index)
 	ret0, _ := ret[0].(shutter.Eon)
-	ret1, _ := ret[1].(error)
+	ret1, _ := ret[1].(bool)
 	return ret0, ret1
 }
 
-// Eon indicates an expected call of Eon.
-func (mr *MockEonTrackerMockRecorder) Eon(arg0 any) *MockEonTrackerEonCall {
+// RecentEon indicates an expected call of RecentEon.
+func (mr *MockEonTrackerMockRecorder) RecentEon(index any) *MockEonTrackerRecentEonCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Eon", reflect.TypeOf((*MockEonTracker)(nil).Eon), arg0)
-	return &MockEonTrackerEonCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecentEon", reflect.TypeOf((*MockEonTracker)(nil).RecentEon), index)
+	return &MockEonTrackerRecentEonCall{Call: call}
 }
 
-// MockEonTrackerEonCall wrap *gomock.Call
-type MockEonTrackerEonCall struct {
+// MockEonTrackerRecentEonCall wrap *gomock.Call
+type MockEonTrackerRecentEonCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockEonTrackerEonCall) Return(arg0 shutter.Eon, arg1 error) *MockEonTrackerEonCall {
+func (c *MockEonTrackerRecentEonCall) Return(arg0 shutter.Eon, arg1 bool) *MockEonTrackerRecentEonCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockEonTrackerEonCall) Do(f func(shutter.EonIndex) (shutter.Eon, error)) *MockEonTrackerEonCall {
+func (c *MockEonTrackerRecentEonCall) Do(f func(shutter.EonIndex) (shutter.Eon, bool)) *MockEonTrackerRecentEonCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockEonTrackerEonCall) DoAndReturn(f func(shutter.EonIndex) (shutter.Eon, error)) *MockEonTrackerEonCall {
+func (c *MockEonTrackerRecentEonCall) DoAndReturn(f func(shutter.EonIndex) (shutter.Eon, bool)) *MockEonTrackerRecentEonCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // Run mocks base method.
-func (m *MockEonTracker) Run(arg0 context.Context) error {
+func (m *MockEonTracker) Run(ctx context.Context) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Run", arg0)
+	ret := m.ctrl.Call(m, "Run", ctx)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Run indicates an expected call of Run.
-func (mr *MockEonTrackerMockRecorder) Run(arg0 any) *MockEonTrackerRunCall {
+func (mr *MockEonTrackerMockRecorder) Run(ctx any) *MockEonTrackerRunCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Run", reflect.TypeOf((*MockEonTracker)(nil).Run), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Run", reflect.TypeOf((*MockEonTracker)(nil).Run), ctx)
 	return &MockEonTrackerRunCall{Call: call}
 }
 

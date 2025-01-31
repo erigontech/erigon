@@ -134,5 +134,5 @@ const (
 	defaultMaxPooledEncryptedTxns = 10_000
 	defaultMaxDecryptionKeysDelay = 1_666 * time.Millisecond
 	defaultEncryptedGasLimit      = 10_000_000
-	defaultMaxRecentEons          = 5
+	defaultMaxRecentEons          = 100
 )
