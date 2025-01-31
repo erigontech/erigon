@@ -45,7 +45,8 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 		toBlock-- // [fromBlock,toBlock)
 	}
 
-	toTxNum := tx.(kv.TemporalTx).(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
+	ac := tx.(kv.TemporalTx).(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
+	toTxNum := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
 	//toTxNum, err := txNumsReader.Max(tx, toBlock)
 	//if err != nil {
 	//	return err
@@ -53,6 +54,14 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	prevCumGasUsed := -1
 	prevBN := uint64(1)
 	log.Info("[integrity] ReceiptsNoDuplicates starting", "fromTxNum", fromTxNum, "toTxNum", toTxNum)
+
+	{
+		receiptProgress := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
+		accProgress := ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
+		if accProgress != receiptProgress {
+			log.Warn("[dbg] seems Receipt domain is behind Acc Domain", "toBlock", toBlock, "accProgress", accProgress, "receiptProgress", receiptProgress)
+		}
+	}
 
 	var cumGasUsed uint64
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
