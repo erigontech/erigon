@@ -215,6 +215,7 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx
 	if err != nil {
 		return false, err
 	}
+	log.Warn("[dbg] AssertReceipts", "toBlock", toBlock, "fromTxNum", fromTxNum, "toTxNum", toTxNum)
 	prevCumGasUsed := -1
 	prevBN := uint64(1)
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
