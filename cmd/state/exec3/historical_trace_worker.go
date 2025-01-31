@@ -282,6 +282,7 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 	defer tx.Rollback()
 
 	for outputTxNum.Load() <= toTxNum {
+		log.Warn("[dbg]  iter", "outputTxNum", outputTxNum.Load(), "toTxNum", toTxNum)
 		err = rws.DrainNonBlocking(ctx)
 		if err != nil {
 			return err
