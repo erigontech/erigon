@@ -569,7 +569,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.ReceiptsNoDups:
-			if err := integrity.ReceiptsNoDuplicates(ctx, chainDB, blockReader, failFast); err != nil {
+			if err := integrity.ReceiptsNoDuplicates(ctx, chainDB.(kv.TemporalRoDB), blockReader, failFast); err != nil {
 				return err
 			}
 
