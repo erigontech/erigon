@@ -128,7 +128,7 @@ func WriteRawTransactions(tx TemporalRwTx, txs [][]byte, baseTxnID uint64) error
 	txq := aggTx.Relational(Transactions)
 
 	for _, txn := range txs {
-		txq.Put(Id(stx), VVType(txn), tx)
+		txq.Append(Id(stx), VVType(txn), tx)
 		stx++
 	}
 	return nil

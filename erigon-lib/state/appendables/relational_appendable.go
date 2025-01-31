@@ -164,7 +164,7 @@ func (a *RelationalAppendableTx) Close() {
 // 	}
 // }
 
-func (a *RelationalAppendableTx) Put(id Id, value VVType, tx kv.RwTx) error {
+func (a *RelationalAppendableTx) Append(id Id, value VVType, tx kv.RwTx) error {
 	return tx.Append(a.a.valsTbl, a.a.encTs(uint64(id)), value)
 }
 
