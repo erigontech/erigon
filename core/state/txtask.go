@@ -385,9 +385,11 @@ func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (closed b
 	for {
 		select {
 		case <-ctx.Done():
+			log.Warn("[dbg] closed1", "q.closed", q.closed)
 			return q.closed, ctx.Err()
 		case txTask, ok := <-q.resultCh:
 			if !ok {
+				log.Warn("[dbg] closed2", "q.closed", q.closed)
 				return q.closed, nil
 			}
 			if txTask == nil {
