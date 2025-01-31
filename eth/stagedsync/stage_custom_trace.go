@@ -114,7 +114,8 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		receiptProgress := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
 		accProgress := ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
 		if accProgress != receiptProgress {
-			log.Warn("[dbg] seems Receipt domain is behind Acc Domain", "accProgress", accProgress, "receiptProgress", receiptProgress)
+			err := fmt.Errorf("[integrity] ReceiptDomain=%d is behind AccountDomain=%d", accProgress, receiptProgress)
+			return err
 		}
 		return nil
 	}); err != nil {
