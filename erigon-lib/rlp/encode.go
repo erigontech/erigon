@@ -637,10 +637,7 @@ func EncodeUint256(i *uint256.Int, w io.Writer, buffer []byte) error {
 	if _, err := w.Write(buffer[:1]); err != nil {
 		return err
 	}
-	binary.BigEndian.PutUint64(buffer[0:8], i[3])
-	binary.BigEndian.PutUint64(buffer[8:16], i[2])
-	binary.BigEndian.PutUint64(buffer[16:24], i[1])
-	binary.BigEndian.PutUint64(buffer[24:32], i[0])
+	i.PutUint256(buffer)
 	_, err := w.Write(buffer[32-nBytes : 32])
 	return err
 }
