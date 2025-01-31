@@ -116,3 +116,41 @@ func (c *MockAggregationPoolGetAggregatationByRootCall) DoAndReturn(f func(commo
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// GetAggregatationByRootAndCommittee mocks base method.
+func (m *MockAggregationPool) GetAggregatationByRootAndCommittee(root common.Hash, committeeIndex uint64) *solid.Attestation {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAggregatationByRootAndCommittee", root, committeeIndex)
+	ret0, _ := ret[0].(*solid.Attestation)
+	return ret0
+}
+
+// GetAggregatationByRootAndCommittee indicates an expected call of GetAggregatationByRootAndCommittee.
+func (mr *MockAggregationPoolMockRecorder) GetAggregatationByRootAndCommittee(root, committeeIndex any) *MockAggregationPoolGetAggregatationByRootAndCommitteeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAggregatationByRootAndCommittee", reflect.TypeOf((*MockAggregationPool)(nil).GetAggregatationByRootAndCommittee), root, committeeIndex)
+	return &MockAggregationPoolGetAggregatationByRootAndCommitteeCall{Call: call}
+}
+
+// MockAggregationPoolGetAggregatationByRootAndCommitteeCall wrap *gomock.Call
+type MockAggregationPoolGetAggregatationByRootAndCommitteeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockAggregationPoolGetAggregatationByRootAndCommitteeCall) Return(arg0 *solid.Attestation) *MockAggregationPoolGetAggregatationByRootAndCommitteeCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockAggregationPoolGetAggregatationByRootAndCommitteeCall) Do(f func(common.Hash, uint64) *solid.Attestation) *MockAggregationPoolGetAggregatationByRootAndCommitteeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockAggregationPoolGetAggregatationByRootAndCommitteeCall) DoAndReturn(f func(common.Hash, uint64) *solid.Attestation) *MockAggregationPoolGetAggregatationByRootAndCommitteeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}

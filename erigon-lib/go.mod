@@ -4,6 +4,7 @@ go 1.22.0
 
 replace (
 	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.3-alpha-1
+	github.com/crate-crypto/go-kzg-4844 => github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 )
 
@@ -25,7 +26,7 @@ require (
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc
-	github.com/crate-crypto/go-kzg-4844 v0.7.0
+	github.com/crate-crypto/go-kzg-4844 v1.1.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/elastic/go-freelru v0.13.0
@@ -33,6 +34,7 @@ require (
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.12.1
 	github.com/google/btree v1.1.3
+	github.com/gorilla/websocket v1.5.3
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/go-retryablehttp v0.7.7
 	github.com/holiman/bloomfilter/v2 v2.0.3
@@ -100,7 +102,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/consensys/bavard v0.1.13 // indirect
-	github.com/consensys/gnark-crypto v0.12.1 // indirect
+	github.com/consensys/gnark-crypto v0.13.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docker/go-units v0.5.0 // indirect
@@ -113,7 +115,6 @@ require (
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/godbus/dbus/v5 v5.0.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/huandu/xstrings v1.4.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/mattn/go-colorable v0.1.13
@@ -144,7 +145,6 @@ require (
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/rogpeppe/go-internal v1.12.0 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
