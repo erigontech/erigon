@@ -214,12 +214,10 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 	var err error
 	var block *types.Block
-	fmt.Println("b len(current.Txns): ", len(current.Txns), "len(current.Receipts): ", len(current.Receipts))
 	block, current.Txns, current.Receipts, current.Requests, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txns, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, chainReader, true, logger)
 	if err != nil {
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
-	fmt.Println("a len(current.Txns): ", len(current.Txns), "len(current.Receipts): ", len(current.Receipts))
 
 	// Simulate the block execution to get the final state root
 	if err = rawdb.WriteHeader(txc.Tx, block.Header()); err != nil {
