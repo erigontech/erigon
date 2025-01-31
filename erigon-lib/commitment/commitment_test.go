@@ -68,7 +68,7 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	t.Parallel()
 	row, bm := generateCellRow(t, 16)
 
-	be := NewBranchEncoder(1024, t.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
 		return row[i], nil
 	})
@@ -139,27 +139,14 @@ func TestBranchData_MergeHexBranches3(t *testing.T) {
 	//_, _ = tm, am
 }
 
+// used as a tool for occasional decode of arbitrary BranchData
 func TestDecodeBranchWithLeafHashes(t *testing.T) {
-	// enc := "00061614a8f8d73af90eee32dc9729ce8d5bb762f30d21a434a8f8d73af90eee32dc9729ce8d5bb762f30d21a49f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033203c7e2acaef5400189202e1a6a3b0b3d9add71fb52ad24ae35be6b6c85ca78bb51214ba7a3b7b095d3370c022ca655c790f0c0ead66f52025c143802ceb44bbe35e883927edb5933fc33416d4cc354dd88c7bcf1aad66a1"
-	// unfoldBranchDataFromString(t, enc)
+	t.Helper()
 
-	row, bm := generateCellRow(t, 16)
-
-	for i := 0; i < len(row); i++ {
-		if row[i].accountAddrLen > 0 {
-			rand.Read(row[i].stateHash[:])
-			row[i].stateHashLen = 32
-		}
-	}
-
-	be := NewBranchEncoder(1024, t.TempDir())
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
-		return row[i], nil
-	})
-	require.NoError(t, err)
-
-	fmt.Printf("%s\n", enc.String())
-
+	enc := "ffffffff0820c897b4bd17e28055ef895b93b3c9d860f500d5f71cc4d88da43174f21855e7360820de5fad02cc43b2adc2d69d3bcf075c46f94f2e93c99e705e5e38e78b0deecfce08201913bafd6fa83683fc070e3bce0aca7276801fac48b671e85eba2c518afb5b090820e49b6b70a891c92d92018ebea62b10de7e64c91d19b3dd53ab566c2960d02b35082001043b43a93d87d986ff699fc6dcbfc24bb1e4bb5de01e1a873a31376ec2f362082094854c60e0b479a4fe32338da59c19f9fa678c98ac279310de541c406f78f7d208200a47e9bedcd30cb8445b11a701dc895ff6935a3b4d03818cd34bccd91da77cab0820da84ca186cd0ef061b53e2f8dde6f63ce926ef53dd238f6421f7e9a518d3b1ee0820b33cc57f00e8dbf97acf4f8d53f450cd305f126caa3aaec39f1a2c26ac53e87d0820240ec57bdbed7448939cf084698c33037c0f7333bdd6ef8a5b9cb16e2ad4e26f08205c3b6e60f80a65ca3feeec5e5c79aa7861cd37de95af2a9909c39ee5c276d5660820e76fd92681b17a61d625b429c54e4d94b90a0e377795e0f08fe006b66e918bb808204049fddbeb5275fae0e3e0a4d91fbe85f903326727bf99a023c67a8a136ec01d0820be379602300baaa9ff56feb0ad049ed5236dfbe8d1bb0d16209209b9910d58520820c4d66181775ac0addfaaf11e24accd8a12e9cd59d994d64476b4f8057e0081e208202b09e493d0eb47fbc7d2c9acf8c5c7b47a771ec20ea263e44513aa699a254350"
+	enc1 := "0520ffff0820c897b4bd17e28055ef895b93b3c9d860f500d5f71cc4d88da43174f21855e7360820de5fad02cc43b2adc2d69d3bcf075c46f94f2e93c99e705e5e38e78b0deecfce08201913bafd6fa83683fc070e3bce0aca7276801fac48b671e85eba2c518afb5b090820e49b6b70a891c92d92018ebea62b10de7e64c91d19b3dd53ab566c2960d02b35082001043b43a93d87d986ff699fc6dcbfc24bb1e4bb5de01e1a873a31376ec2f362082094854c60e0b479a4fe32338da59c19f9fa678c98ac279310de541c406f78f7d208200a47e9bedcd30cb8445b11a701dc895ff6935a3b4d03818cd34bccd91da77cab0820da84ca186cd0ef061b53e2f8dde6f63ce926ef53dd238f6421f7e9a518d3b1ee0820b33cc57f00e8dbf97acf4f8d53f450cd305f126caa3aaec39f1a2c26ac53e87d0820240ec57bdbed7448939cf084698c33037c0f7333bdd6ef8a5b9cb16e2ad4e26f08205c3b6e60f80a65ca3feeec5e5c79aa7861cd37de95af2a9909c39ee5c276d5660820e76fd92681b17a61d625b429c54e4d94b90a0e377795e0f08fe006b66e918bb808204049fddbeb5275fae0e3e0a4d91fbe85f903326727bf99a023c67a8a136ec01d0820be379602300baaa9ff56feb0ad049ed5236dfbe8d1bb0d16209209b9910d58520820c4d66181775ac0addfaaf11e24accd8a12e9cd59d994d64476b4f8057e0081e208202b09e493d0eb47fbc7d2c9acf8c5c7b47a771ec20ea263e44513aa699a254350"
+	unfoldBranchDataFromString(t, enc)
+	unfoldBranchDataFromString(t, enc1)
 }
 
 // helper to decode row of cells from string
@@ -213,7 +200,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 		return row[nibble], nil
 	}
 
-	be := NewBranchEncoder(1024, t.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
 	require.NoError(t, err)
 
@@ -262,7 +249,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 		return row[nibble], nil
 	}
 
-	be := NewBranchEncoder(1024, t.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
 	require.NoError(t, err)
 
