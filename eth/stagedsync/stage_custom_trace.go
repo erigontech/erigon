@@ -254,6 +254,13 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
 	fromTxNum, _ := txNumsReader.Min(tx, fromBlock)
 	prevTxNumLog := fromTxNum
+	toTxNum, err := txNumsReader.Max(tx, toBlock)
+	if err != nil {
+		return err
+	}
+	if toTxNum > 0 {
+		toTxNum--
+	}
 
 	var m runtime.MemStats
 	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
@@ -294,7 +301,11 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				//}
 
 				if doms.TxNum() < fromTxNum {
-					err := fmt.Errorf("assert: modify too old txnum. doms.TxNum()=%d, rangeStartedFromTxNum=%d", fromTxNum, doms.TxNum(), fromTxNum)
+					err := fmt.Errorf("assert: modify TxNum out of allowed range. doms.TxNum()=%d, rangeStartTxNum=%d", doms.TxNum(), fromTxNum)
+					panic(err.Error())
+				}
+				if doms.TxNum() > toTxNum {
+					err := fmt.Errorf("assert:  modify TxNum out of allowed range. doms.TxNum()=%d, rangeEndTxNum=%d", doms.TxNum(), toTxNum)
 					panic(err.Error())
 				}
 				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
