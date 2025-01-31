@@ -371,7 +371,7 @@ type Status struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	ForkDigest     uint32           `protobuf:"varint,1,opt,name=fork_digest,json=forkDigest,proto3" json:"fork_digest,omitempty"` // 4 bytes can be repressented in uint32.
+	ForkDigest     uint32           `protobuf:"varint,1,opt,name=fork_digest,json=forkDigest,proto3" json:"fork_digest,omitempty"` // 4 bytes can be represented in uint32.
 	FinalizedRoot  *typesproto.H256 `protobuf:"bytes,2,opt,name=finalized_root,json=finalizedRoot,proto3" json:"finalized_root,omitempty"`
 	FinalizedEpoch uint64           `protobuf:"varint,3,opt,name=finalized_epoch,json=finalizedEpoch,proto3" json:"finalized_epoch,omitempty"`
 	HeadRoot       *typesproto.H256 `protobuf:"bytes,4,opt,name=head_root,json=headRoot,proto3" json:"head_root,omitempty"`
