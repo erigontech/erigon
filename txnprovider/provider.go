@@ -43,6 +43,12 @@ func WithParentBlockNum(blockNum uint64) ProvideOption {
 	}
 }
 
+func WithBlockTimestamp(blockTimestamp uint64) ProvideOption {
+	return func(opt *ProvideOptions) {
+		opt.BlockTimestamp = blockTimestamp
+	}
+}
+
 func WithAmount(amount int) ProvideOption {
 	return func(opt *ProvideOptions) {
 		opt.Amount = amount
@@ -69,6 +75,7 @@ func WithTxnIdsFilter(txnIdsFilter mapset.Set[[32]byte]) ProvideOption {
 
 type ProvideOptions struct {
 	ParentBlockNum uint64
+	BlockTimestamp uint64
 	Amount         int
 	GasTarget      uint64
 	BlobGasTarget  uint64

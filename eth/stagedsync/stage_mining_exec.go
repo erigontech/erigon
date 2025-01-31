@@ -272,6 +272,7 @@ func getNextTransactions(
 	provideOpts := []txnprovider.ProvideOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
+		txnprovider.WithBlockTimestamp(header.Time),
 		txnprovider.WithGasTarget(remainingGas),
 		txnprovider.WithBlobGasTarget(remainingBlobGas),
 		txnprovider.WithTxnIdsFilter(alreadyYielded),

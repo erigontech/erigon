@@ -18,14 +18,19 @@ package shutter
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 )
 
 type DecryptionKeysProcessor struct {
-	logger log.Logger
-	queue  chan *proto.DecryptionKeys
+	logger            log.Logger
+	config            Config
+	eonTracker        EonTracker
+	encryptedTxnsPool EncryptedTxnsPool
+	decryptedTxnsPool DecryptedTxnsPool
+	queue             chan *proto.DecryptionKeys
 }
 
 func NewDecryptionKeysProcessor(logger log.Logger) DecryptionKeysProcessor {
@@ -42,21 +47,66 @@ func (dkp DecryptionKeysProcessor) Enqueue(msg *proto.DecryptionKeys) {
 func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
 	dkp.logger.Info("running decryption keys processor")
 
+	//
+	// TODO - the dkp can actually clean the encrypted and decrypted pools (so we wont have to use LRU)
+	//      - uses block listener - when a new block comes in - calculate its slots using its timestamp (need changes to StateChange) - remove all decrypted txns for slots <= slot
+	//      - remember previous txn pointer from the previous decryption keys msg - when the new one comes if the txn pointer has moved forward then drop all <= old tx pointer
+	//        (this also raises the question - is it possible for the validator to reject old TxPointers:
+	//          - i believe that once we verify key share identities that means we've received 100% reliable msgs from keypers
+	//          - in that case, the validator can also keep track of "last validated keys txpointer" and reject those with txpointer < prev one
+	//         )
+	//
+
 	for {
 		select {
-		case msg := <-dkp.queue:
-			dkp.logger.Debug(
-				"processing decryption keys message",
-				"instanceId", msg.InstanceId,
-				"eon", msg.Eon,
-				"slot", msg.GetGnosis().Slot,
-				"txPointer", msg.GetGnosis().TxPointer,
-			)
-		//
-		// TODO process msg
-		//
 		case <-ctx.Done():
 			return ctx.Err()
+		case msg := <-dkp.queue:
+			err := dkp.process(msg)
+			if err != nil {
+				dkp.logger.Error(
+					"failed to process decryption keys message - skipping",
+					"eon", msg.Eon,
+					"slot", msg.GetGnosis().Slot,
+					"err", err,
+				)
+
+				//
+				// TODO - metrics for this?
+				//
+				continue
+			}
 		}
 	}
+}
+
+func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
+	dkp.logger.Debug(
+		"processing decryption keys message",
+		"instanceId", msg.InstanceId,
+		"eon", msg.Eon,
+		"slot", msg.GetGnosis().Slot,
+		"txPointer", msg.GetGnosis().TxPointer,
+	)
+
+	from := TxnIndex(msg.GetGnosis().TxPointer)
+	to := from + TxnIndex(len(msg.Keys))
+	encryptedTxns, err := dkp.encryptedTxnsPool.Txns(from, to, dkp.config.EncryptedGasLimit)
+	if err != nil {
+		return err
+	}
+
+	for _, encryptedTxn := range encryptedTxns {
+		_, ok := dkp.eonTracker.RecentEon(encryptedTxn.EonIndex)
+		if !ok {
+			return fmt.Errorf("eon not seen recently: %d", encryptedTxn.EonIndex)
+		}
+
+		//
+		// TODO - decrypt txns using shcrypto
+		//      - add them to the encrypted pool for the given msg.Slot
+		//
+	}
+
+	return nil
 }
