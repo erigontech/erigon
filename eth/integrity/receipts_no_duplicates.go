@@ -28,7 +28,7 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	}
 	defer tx.Rollback()
 
-	fromBlock := uint64(0)
+	fromBlock := uint64(1)
 	stageExecProgress, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err
