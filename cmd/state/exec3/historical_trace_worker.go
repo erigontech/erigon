@@ -115,14 +115,16 @@ func NewHistoricalTraceWorker(
 }
 
 func (rw *HistoricalTraceWorker) Run() (err error) {
+	var i int
 	defer func() { // convert panic to err - because it's background workers
-		log.Warn("[dbg] HistoricalTraceWorker.Run done")
+		log.Warn("[dbg] HistoricalTraceWorker.Run done", "i", i)
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("HistoricalTraceWorker panic: %s, %s", rec, dbg.Stack())
 		}
 	}()
 	defer rw.evm.JumpDestCache.LogStats()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
+		i++
 		rw.RunTxTask(txTask)
 		if err := rw.out.Add(rw.ctx, txTask); err != nil {
 			return err
