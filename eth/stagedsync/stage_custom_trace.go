@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"runtime"
-	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -153,7 +152,8 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			blockNum := badFoundBlockNum(ttx, prevBN-1, txNumsReader, txNum)
 			//println(cumGasUsed, txNum, blockNum, prevCumGasUsed)
 			if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
-				panic("bad receipt at txnum: " + strconv.Itoa(int(txNum)) + " block: " + strconv.Itoa(int(blockNum)))
+				err := fmt.Errorf("bad receipt at txnum: %d, block: %d, cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, cumGasUsed, prevCumGasUsed)
+				panic(err)
 			}
 			prevCumGasUsed = int(cumGasUsed)
 			prevBN = blockNum
