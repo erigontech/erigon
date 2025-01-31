@@ -128,19 +128,12 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 	eridb := db2.NewEriDb(tx)
 	smt := smt.NewSMT(eridb, false)
 
-	useBatch := shouldIncrement || cfg.zk.SmtRegenerateInMemory
-
-	if useBatch {
-		log.Info(fmt.Sprintf("[%s] SMT using mapmutation", logPrefix))
-		eridb.OpenBatch(quit)
-	} else {
-		log.Info(fmt.Sprintf("[%s] SMT not using mapmutation", logPrefix))
-	}
-
 	if shouldIncrement {
 		if shouldIncrementBecauseOfAFlag {
 			log.Debug(fmt.Sprintf("[%s] IncrementTreeAlways true - incrementing tree", logPrefix), "previousRootHeight", s.BlockNumber, "calculatingRootHeight", to)
 		}
+
+		eridb.OpenBatch(quit)
 
 		if root, err = zkIncrementIntermediateHashes(ctx, logPrefix, s, tx, eridb, smt, s.BlockNumber, to); err != nil {
 			return trie.EmptyRoot, err
@@ -165,7 +158,7 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 		expectedRootHash := syncHeadHeader.Root
 		headerHash := syncHeadHeader.Hash()
 		if root != expectedRootHash {
-			if useBatch {
+			if shouldIncrement {
 				eridb.RollbackBatch()
 			}
 			panic(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
@@ -174,7 +167,7 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 		log.Info(fmt.Sprintf("[%s] State root matches", logPrefix))
 	}
 
-	if useBatch {
+	if shouldIncrement {
 		if err := eridb.CommitBatch(); err != nil {
 			return trie.EmptyRoot, err
 		}
@@ -346,7 +339,7 @@ func regenerateIntermediateHashes(ctx context.Context, logPrefix string, db kv.R
 	return common.BigToHash(root), nil
 }
 
-func zkIncrementIntermediateHashes(ctx context.Context, logPrefix string, s *stagedsync.StageState, db kv.RwTx, eridb *db2.EriDb, dbSmt *smt.SMT, from, to uint64) (common.Hash, error) {
+func zkIncrementIntermediateHashes(ctx context.Context, logPrefix string, s *stagedsync.StageState, db kv.RwTx, eridb *db2.EriDb, dbSmt *smt.SMT, from, to uint64) (hash common.Hash, err error) {
 	log.Info(fmt.Sprintf("[%s] Increment trie hashes started", logPrefix), "previousRootHeight", s.BlockNumber, "calculatingRootHeight", to)
 	defer log.Info(fmt.Sprintf("[%s] Increment ended", logPrefix))
 
@@ -446,7 +439,7 @@ func zkIncrementIntermediateHashes(ctx context.Context, logPrefix string, s *sta
 
 	lr := dbSmt.LastRoot()
 
-	hash := common.BigToHash(lr)
+	hash = common.BigToHash(lr)
 
 	// do not put this outside, because sequencer uses this function to calculate root for each block
 	hermezDb := hermez_db.NewHermezDb(db)
