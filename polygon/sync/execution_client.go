@@ -78,7 +78,7 @@ func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Bloc
 		Blocks: eth1utils.ConvertBlocksToRPC(blocks),
 	}
 
-	return e.retryBusy("insertBlocks", func() error {
+	return e.retryBusy(ctx, "insertBlocks", func() error {
 		response, err := e.client.InsertBlocks(ctx, request)
 		if err != nil {
 			return err
@@ -107,7 +107,7 @@ func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Heade
 	}
 
 	var latestValidHash common.Hash
-	err := e.retryBusy("updateForkChoice", func() error {
+	err := e.retryBusy(ctx, "updateForkChoice", func() error {
 		r, err := e.client.UpdateForkChoice(ctx, &request)
 		if err != nil {
 			return err
@@ -174,7 +174,7 @@ func (e *executionClient) GetTd(ctx context.Context, blockNum uint64, blockHash 
 	return eth1utils.ConvertBigIntFromRpc(response.GetTd()), nil
 }
 
-func (e *executionClient) retryBusy(label string, f func() error) error {
+func (e *executionClient) retryBusy(ctx context.Context, label string, f func() error) error {
 	backOff := 50 * time.Millisecond
 	logEvery := 5 * time.Second
 	logEveryXAttempt := int64(logEvery / backOff)
@@ -196,5 +196,5 @@ func (e *executionClient) retryBusy(label string, f func() error) error {
 		return backoff.Permanent(err)
 	}
 
-	return backoff.Retry(operation, backoff.NewConstantBackOff(backOff))
+	return backoff.Retry(operation, backoff.WithContext(backoff.NewConstantBackOff(backOff), ctx))
 }
