@@ -297,7 +297,10 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 			outputTxNum.Store(processedTxNum)
 		}
 	}
-	println("rws closed", rwsClosed, "toTxNum", toTxNum, "outputTxNum", outputTxNum.Load())
+	if outputTxNum.Load() != toTxNum {
+		println("rws closed", rwsClosed, "toTxNum", toTxNum, "outputTxNum", outputTxNum.Load())
+		return fmt.Errorf("rws closed but not all txnums proceeded")
+	}
 	return nil
 }
 func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in *state.QueueWithRetry, workerCount int, rws *state.ResultsQueue, logger log.Logger) error {
