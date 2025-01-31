@@ -327,7 +327,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 	defer rwsIt.Close()
 
 	outputTxNum = outputTxNumIn
-	for rwsIt.HasNext(outputTxNum) {
+	for rwsIt.HasNext(outputTxNum + 1) {
 		txTask := rwsIt.PopNext()
 		outputTxNum = txTask.TxNum
 		stopedAtBlockEnd = txTask.Final
