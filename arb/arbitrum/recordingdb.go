@@ -156,15 +156,24 @@ func (db *RecordingKV) EnableBypass() {
 	db.enableBypass = true
 }
 
-type RecordingChainContext struct {
-	// er                     consensus.Engine
-	consensus.ChainHeaderReader
-	minBlockNumberAccessed uint64
-	initialBlockNumber     uint64
-}
+// // ChainContextBackend provides methods required to implement ChainContext.
+// type ChainContextBackend interface {
+// 	Engine() consensus.Engine
+// 	HeaderByNumber(context.Context, rpc.BlockNumber) (*types.Header, error)
+// }
 
-func (r *RecordingChainContext) Config() *chain.Config {
-	return r.bc.Config()
+// // ChainContext is an implementation of core.ChainContext. It's main use-case
+// // is instantiating a vm.BlockContext without having access to the BlockChain object.
+// type ChainContext struct {
+// 	b   ChainContextBackend
+// 	ctx context.Context
+// }
+
+type RecordingChainContext struct {
+	// ChainHeaderReader                     consensus.Engine
+	consensus.ChainHeaderReader // stagedsync.ChainReader
+	minBlockNumberAccessed      uint64
+	initialBlockNumber          uint64
 }
 
 func newRecordingChainContext(inner consensus.ChainHeaderReader, blocknumber uint64) *RecordingChainContext {
@@ -175,9 +184,12 @@ func newRecordingChainContext(inner consensus.ChainHeaderReader, blocknumber uin
 	}
 }
 
-func (r *RecordingChainContext) Engine() consensus.Engine {
-	return r.ChainHeaderReader
-}
+// func (r *RecordingChainContext) Engine() consensus.Engine {
+// 	return r.ChainHeaderReader
+// }
+// func (r *RecordingChainContext) Config() *chain.Config {
+// 	return r.bc.Config()
+// }
 
 func (r *RecordingChainContext) GetHeader(hash common.Hash, num uint64) *types.Header {
 	if num < r.minBlockNumberAccessed {
@@ -291,7 +303,7 @@ func (r *RecordingDatabase) dereferenceRoot(root common.Hash) {
 	// r.db.TrieDB().Dereference(root)
 }
 
-func (r *RecordingDatabase) addStateVerify(statedb *state.IntraBlockState, expected common.Hash, blockNumber uint64) (*state.IntraBlockState, error) {
+func (r *RecordingDatabase) addStateVerify(statedb state.IntraBlockStateArbitrum, expected common.Hash, blockNumber uint64) (state.IntraBlockStateArbitrum, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -318,7 +330,7 @@ func (r *RecordingDatabase) addStateVerify(statedb *state.IntraBlockState, expec
 	//return state.New(result, statedb.Database(), nil)
 }
 
-func (r *RecordingDatabase) PrepareRecording(ctx context.Context, lastBlockHeader *types.Header, logFunc StateBuildingLogFunction) (*state.IntraBlockState, consensus.ChainHeaderReader, *RecordingKV, error) {
+func (r *RecordingDatabase) PrepareRecording(ctx context.Context, lastBlockHeader *types.Header, logFunc StateBuildingLogFunction) (state.IntraBlockStateArbitrum, consensus.ChainHeaderReader, *RecordingKV, error) {
 	_, err := r.GetOrRecreateState(ctx, lastBlockHeader, logFunc)
 	if err != nil {
 		return nil, nil, nil, err
@@ -338,14 +350,14 @@ func (r *RecordingDatabase) PrepareRecording(ctx context.Context, lastBlockHeade
 	// if err != nil {
 	// 	return nil, nil, nil, fmt.Errorf("failed to create recordingStateDb: %w", err)
 	// }
-	recordingStateDb := state.New(recordingKeyValue.state)
+	recordingStateDb := state.NewArbitrum(state.New(recordingKeyValue.state))
 	recordingStateDb.StartRecording()
 	var recordingChainContext *RecordingChainContext
 	if lastBlockHeader != nil {
 		if !lastBlockHeader.Number.IsUint64() {
 			return nil, nil, nil, errors.New("block number not uint64")
 		}
-		recordingChainContext = newRecordingChainContext(r.bc, lastBlockHeader.Number.Uint64())
+		recordingChainContext = newRecordingChainContext(r.bc.ChainReader(), lastBlockHeader.Number.Uint64())
 	}
 	finalDereference = nil
 	return recordingStateDb, recordingChainContext, recordingKeyValue, nil
@@ -373,11 +385,11 @@ func (r *RecordingDatabase) PreimagesFromRecording(chainContextIf consensus.Chai
 	return entries, nil
 }
 
-func (r *RecordingDatabase) GetOrRecreateState(ctx context.Context, header *types.Header, logFunc StateBuildingLogFunction) (*state.IntraBlockState, error) {
-	stateFor := func(header *types.Header) (*state.IntraBlockState, StateReleaseFunc, error) {
-		state, err := r.StateFor(header)
+func (r *RecordingDatabase) GetOrRecreateState(ctx context.Context, header *types.Header, logFunc StateBuildingLogFunction) (state.IntraBlockStateArbitrum, error) {
+	stateFor := func(header *types.Header) (state.IntraBlockStateArbitrum, StateReleaseFunc, error) {
+		s, err := r.StateFor(header)
 		// we don't use the release functor pattern here yet
-		return state, NoopStateRelease, err
+		return state.NewArbitrum(s), NoopStateRelease, err
 	}
 	state, currentHeader, _, err := FindLastAvailableState(ctx, r.bc, stateFor, header, logFunc, -1)
 	if err != nil {
@@ -423,4 +435,8 @@ func (r *RecordingDatabase) GetOrRecreateState(ctx context.Context, header *type
 
 func (r *RecordingDatabase) ReferenceCount() int64 {
 	return r.references
+}
+
+func (r *RecordingDatabase) Config() *chain.Config {
+	return r.bc.Config()
 }

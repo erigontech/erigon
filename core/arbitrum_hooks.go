@@ -18,15 +18,19 @@ package core
 
 import (
 	"context"
+	"math/big"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/arb/arbitrum_types"
+	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -47,7 +51,7 @@ var InterceptRPCMessage = func(
 }
 
 // Gets ArbOS's maximum intended gas per second
-var GetArbOSSpeedLimitPerSecond func(statedb *state.IntraBlockState) (uint64, error)
+var GetArbOSSpeedLimitPerSecond func(statedb state.IntraBlockStateArbitrum) (uint64, error)
 
 // Allows ArbOS to update the gas cap so that it ignores the message's specific L1 poster costs.
 var InterceptRPCGasCap = func(gascap *uint64, msg *types.Message, header *types.Header, statedb *state.IntraBlockState) {}
@@ -68,6 +72,7 @@ type NodeInterfaceBackendAPI interface {
 // Arbitrum widely uses BlockChain structure so better to wrap interface here
 type BlockChain interface {
 	services.FullBlockReader
+	ChainReader() consensus.ChainHeaderReader // may be useful more than embedding of FullBlockReader itself
 
 	// Config retrieves the chain's fork configuration.
 	Config() *chain.Config
@@ -89,11 +94,22 @@ type BlockChain interface {
 	ReorgToOldBlock(newHead *types.Block) error
 
 	// WriteBlockAndSetHeadWithTime also counts processTime, which will cause intermittent TrieDirty cache writes
-	WriteBlockAndSetHeadWithTime(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.IntraBlockState, emitHeadEvent bool, processTime time.Duration) (status WriteStatus, err error)
+	WriteBlockAndSetHeadWithTime(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state state.IntraBlockStateArbitrum, emitHeadEvent bool, processTime time.Duration) (status WriteStatus, err error)
 
+	GetReceiptsByHash(hash common.Hash) types.Receipts
 	// StateCache returns the caching database underpinning the blockchain instance.
 	StateCache() kv.RwDB
 
+	ResetWithGenesisBlock(gb *types.Block)
+	SubscribeNewTxsEvent(ch chan<- NewTxsEvent) event.Subscription
+	EnqueueL2Message(ctx context.Context, tx types.Transaction, options *arbitrum_types.ConditionalOptions) error
+
+	// GetVMConfig returns the block chain VM config.
+	GetVMConfig() *vm.Config
+
+	Engine() consensus.Engine
+
+	GetTd(common.Hash, uint64) *big.Int
 	// Processor returns the current processor.
 	Processor() Processor
 }
@@ -103,8 +119,20 @@ type Processor interface {
 	// Process processes the state changes according to the Ethereum rules by running
 	// the transaction messages using the statedb and applying any rewards to both
 	// the processor (coinbase) and any included uncles.
-	Process(block *types.Block, statedb *state.IntraBlockState, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error)
+	Process(block *types.Block, statedb state.IntraBlockStateArbitrum, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error)
 }
+
+// func (b *Backend) ResetWithGenesisBlock(gb *types.Block) {
+// 	b.arb.BlockChain().ResetWithGenesisBlock(gb)
+// }
+
+// func (b *Backend) EnqueueL2Message(ctx context.Context, tx *types.Transaction, options *arbitrum_types.ConditionalOptions) error {
+// 	return b.arb.PublishTransaction(ctx, tx, options)
+// }
+
+// func (b *Backend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
+// 	return b.scope.Track(b.txFeed.Subscribe(ch))
+// }
 
 // Processor returns the current processor.
 // func (bc *BlockChain) Processor() Processor {

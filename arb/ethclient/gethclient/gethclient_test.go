@@ -88,7 +88,7 @@ func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 	return n, blocks
 }
 
-func generateTestChain(db kv.RwDB) (*types.Genesis, []*types.Block) {
+func generateTestChain(t testing.TB, db kv.RwDB) (*types.Genesis, []*types.Block) {
 	genesis := &types.Genesis{
 		Config: params.AllEthashProtocolChanges,
 		Alloc: types.GenesisAlloc{

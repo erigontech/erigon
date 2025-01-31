@@ -219,6 +219,10 @@ type Ethereum struct {
 	bgComponentsEg      errgroup.Group
 }
 
+func (e *Ethereum) BlockChain() core.BlockChain {
+	panic("implment blockchain return")
+}
+
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
 	idx := strings.LastIndexByte(addr, ':')
 	if idx < 0 {
@@ -1807,6 +1811,21 @@ func polygonSyncSentry(sentries []protosentry.SentryClient) protosentry.SentryCl
 // 		chainDb:    chainDb,
 // 	}
 // }
+
+// func (eth *Ethereum) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (*core.Message, vm.BlockContext, *state.StateDB, tracers.StateReleaseFunc, error) {
+// 	return eth.stateAtTransaction(ctx, block, txIndex, reexec)
+// }
+
+// TODO
+func NewArbEthereum(
+	blockchain core.BlockChain,
+	chainDb kv.RwDB,
+) *Ethereum {
+	return &Ethereum{
+		// blockchain: blockchain,
+		// chainDb:    chainDb,
+	}
+}
 
 // func (eth *Ethereum) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (*core.Message, vm.BlockContext, *state.StateDB, tracers.StateReleaseFunc, error) {
 // 	return eth.stateAtTransaction(ctx, block, txIndex, reexec)

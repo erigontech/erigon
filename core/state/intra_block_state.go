@@ -105,6 +105,10 @@ type IntraBlockState struct {
 	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 }
 
+func NewArbitrum(ibs *IntraBlockState) IntraBlockStateArbitrum {
+	return nil // TODO
+}
+
 // Create a new state from a given trie
 func New(stateReader StateReader) *IntraBlockState {
 	return &IntraBlockState{

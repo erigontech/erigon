@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/lru"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/holiman/uint256"
@@ -192,6 +194,11 @@ type IntraBlockStateArbitrum interface {
 	RecordCacheWasm(wasm CacheWasm)
 	RecordEvictWasm(wasm EvictWasm)
 	GetRecentWasms() RecentWasms
+	UserWasms() UserWasms
+	ActivatedAsm(target WasmTarget, moduleHash common.Hash) (asm []byte, err error)
+	WasmStore() kv.RwDB
+	WasmCacheTag() uint32
+	WasmTargets() []WasmTarget
 
 	// Arbitrum: track stylus's memory footprint
 	GetStylusPages() (uint16, uint16)
@@ -202,16 +209,24 @@ type IntraBlockStateArbitrum interface {
 
 	HasSelfDestructed(addr common.Address) bool
 
+	StartRecording()
 	RecordProgram(targets []WasmTarget, moduleHash common.Hash)
 
 	GetStorageRoot(address common.Address) common.Hash
 	GetUnexpectedBalanceDelta() *uint256.Int
-	SetTxContext(ti int)
 
-	ActivatedAsm(target WasmTarget, moduleHash common.Hash) (asm []byte, err error)
-	WasmStore() kv.RwDB
-	WasmCacheTag() uint32
-	WasmTargets() []WasmTarget
+	// SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription
+	SetArbFinalizer(f func(*ArbitrumExtraData))
+
+	SetTxContext(ti int)
+	IntermediateRoot(_ bool) common.Hash
+	GetReceiptsByHash(hash common.Hash) types.Receipts
+	SetBalance(addr common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error
+	Commit(bn uint64, _ bool) (common.Hash, error)
+	FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error
+	GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs
+	// TxIndex returns the current transaction index set by Prepare.
+	TxnIndex() int
 }
 
 func (s *IntraBlockState) ActivateWasm(moduleHash common.Hash, asmMap map[WasmTarget][]byte) {

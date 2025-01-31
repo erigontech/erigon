@@ -250,7 +250,7 @@ func rlpHash(x interface{}) (h libcommon.Hash) {
 	return h
 }
 
-func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool) (result []byte, err error) {
+func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool) (result []byte, err error) {
 	msg := types.NewMessage(
 		state.SystemAddress,
 		&contract,

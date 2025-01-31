@@ -133,7 +133,7 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) libcomm
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
+func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs state.IntraBlockStateArbitrum,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64,
 	evm *vm.EVM, cfg vm.Config) (*types.Receipt, *evmtypes.ExecutionResult, error) {
 	rules := evm.ChainRules()

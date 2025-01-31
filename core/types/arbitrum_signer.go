@@ -25,7 +25,9 @@ var NodeInterfaceAddress = common.HexToAddress("0xc8")
 var NodeInterfaceDebugAddress = common.HexToAddress("0xc9")
 var ArbDebugAddress = common.HexToAddress("0xff")
 
-type ArbitrumSigner struct{ Signer }
+type ArbitrumSigner struct {
+	Signer
+}
 
 func NewArbitrumSigner(signer Signer) ArbitrumSigner {
 	return ArbitrumSigner{Signer: signer}
@@ -54,7 +56,7 @@ func (s ArbitrumSigner) Sender(tx Transaction) (common.Address, error) {
 		// fakeTx := NewTx(&legacyData.LegacyTx)
 		// return s.Signer.Sender(fakeTx)
 	default:
-		return tx.Sender(s.Signer)
+		return s.Signer.Sender(tx)
 	}
 }
 

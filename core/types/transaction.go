@@ -384,9 +384,10 @@ type Message struct {
 	// Arbitrum
 	// L1 charging is disabled when SkipL1Charging is true.
 	// This field might be set to true for operations like RPC eth_call.
-	SkipL1Charging bool
-	TxRunMode      MessageRunMode // deprecated (shoudl be)
-	Tx             Transaction
+	SkipAccountChecks bool
+	SkipL1Charging    bool
+	TxRunMode         MessageRunMode // deprecated (shoudl be)
+	Tx                Transaction
 }
 
 type MessageRunMode uint8

@@ -226,6 +226,8 @@ func WriteOrTestGenblock(chainDb kv.TemporalRwTx, initData statetransfer.InitDat
 	EmptyHash := common.Hash{}
 	prevHash := EmptyHash
 	prevDifficulty := big.NewInt(0)
+	_ = prevDifficulty
+
 	blockNumber, err := initData.GetNextBlockNumber()
 	if err != nil {
 		return err
@@ -260,7 +262,8 @@ func WriteOrTestGenblock(chainDb kv.TemporalRwTx, initData statetransfer.InitDat
 
 	if storedGenHash == EmptyHash {
 		// chainDb did not have genesis block. Initialize it.
-		core.WriteHeadBlock(chainDb, genBlock, prevDifficulty)
+		rawdb.WriteHeadBlockHash(chainDb, genBlock.Hash())
+		// core.WriteHeadBlock(chainDb, genBlock, prevDifficulty)
 		log.Info("wrote genesis block", "number", blockNumber, "hash", blockHash)
 	} else if storedGenHash != blockHash {
 		return fmt.Errorf("database contains data inconsistent with initialization: database has genesis hash %v but we built genesis hash %v", storedGenHash, blockHash)
@@ -315,7 +318,7 @@ func WriteOrTestChainConfig(tx kv.TemporalRwTx, config *chain.Config) error {
 	return nil
 }
 
-func GetBlockChain(chainDb kv.TemporalRwDB, cacheConfig *CachingConfig, chainConfig *chain.Config, txLookupLimit uint64) (core.BlockChain, error) {
+func GetBlockChain(chainDb kv.TemporalRwTx, cacheConfig *CachingConfig, chainConfig *chain.Config, txLookupLimit uint64) (core.BlockChain, error) {
 	engine := arbos.Engine{
 		IsSequencer: true,
 	}
