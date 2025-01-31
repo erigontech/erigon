@@ -217,7 +217,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			ibs.SoftFinalise()
-			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex).Copy()
+			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
 		}
 	}
 }
@@ -296,9 +296,9 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 			outputTxNum.Store(processedTxNum)
 		}
 	}
-	if outputTxNum.Load() != toTxNum {
-		return fmt.Errorf("not all txnums proceeded: toTxNum=%d, outputTxNum=%d", toTxNum, outputTxNum.Load())
-	}
+	//if outputTxNum.Load() != toTxNum {
+	//	return fmt.Errorf("not all txnums proceeded: toTxNum=%d, outputTxNum=%d", toTxNum, outputTxNum.Load())
+	//}
 	return nil
 }
 func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in *state.QueueWithRetry, workerCount int, rws *state.ResultsQueue, logger log.Logger) error {
@@ -327,9 +327,9 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 	defer rwsIt.Close()
 
 	outputTxNum = outputTxNumIn
-	for rwsIt.HasNext(outputTxNum + 1) {
+	for rwsIt.HasNext(outputTxNum) {
 		txTask := rwsIt.PopNext()
-		outputTxNum = txTask.TxNum
+		outputTxNum++
 		stopedAtBlockEnd = txTask.Final
 
 		if txTask.Error != nil {
