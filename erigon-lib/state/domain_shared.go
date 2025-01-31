@@ -134,7 +134,7 @@ type SharedDomains struct {
 	storage *btree2.Map[string, dataWithPrevStep]
 
 	domainWriters [kv.DomainLen]*domainBufferedWriter
-	iiWriters     map[kv.InvertedIdx]*invertedIndexBufferedWriter
+	iiWriters     []*invertedIndexBufferedWriter
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
@@ -150,12 +150,12 @@ type HasAgg interface {
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	// fmt.Println("NewSharedDomains")
 	sd := &SharedDomains{
-		logger:    logger,
-		storage:   btree2.NewMap[string, dataWithPrevStep](128),
-		iiWriters: map[kv.InvertedIdx]*invertedIndexBufferedWriter{},
+		logger:  logger,
+		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
 	}
 	sd.SetTx(tx)
+	sd.iiWriters = make([]*invertedIndexBufferedWriter, len(sd.aggTx.iis))
 
 	sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
 
@@ -711,8 +711,10 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
-	if writer, ok := sd.iiWriters[table]; ok {
-		return writer.Add(key)
+	for _, writer := range sd.iiWriters {
+		if writer.name == table {
+			return writer.Add(key)
+		}
 	}
 	panic(fmt.Errorf("unknown index %s", table))
 }
@@ -858,7 +860,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 			case FILE_CURSOR:
-				indexList := sd.aggTx.d[kv.StorageDomain].d.IndexList
+				indexList := sd.aggTx.d[kv.StorageDomain].d.AccessorList
 				if indexList&AccessorBTree != 0 {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
