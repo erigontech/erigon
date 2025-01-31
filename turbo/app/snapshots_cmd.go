@@ -529,7 +529,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen().(kv.TemporalRoDB)
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -569,7 +569,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.ReceiptsNoDups:
-			if err := integrity.ReceiptsNoDuplicates(ctx, chainDB.(kv.TemporalRoDB), blockReader, failFast); err != nil {
+			if err := integrity.ReceiptsNoDuplicates(ctx, chainDB, blockReader, failFast); err != nil {
 				return err
 			}
 
