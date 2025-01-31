@@ -389,7 +389,7 @@ func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (closed b
 			return q.closed, ctx.Err()
 		case txTask, ok := <-q.resultCh:
 			if !ok {
-				log.Warn("[dbg] closed2")
+				log.Warn("[dbg] closed2", "q.closed", q.closed)
 				return q.closed, nil
 			}
 			if txTask == nil {
@@ -400,7 +400,7 @@ func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (closed b
 				return q.closed, nil
 			}
 		default: // we are inside mutex section, can't block here
-			log.Warn("[dbg] closed3")
+			log.Warn("[dbg] closed3", "q.closed", q.closed)
 			return q.closed, nil
 		}
 	}
