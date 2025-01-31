@@ -853,12 +853,10 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 	}
 }
 
-func toBlobs(_blobs [][]byte) []gokzg4844.Blob {
-	blobs := make([]gokzg4844.Blob, len(_blobs))
+func toBlobs(_blobs [][]byte) []gokzg4844.BlobRef {
+	blobs := make([]gokzg4844.BlobRef, len(_blobs))
 	for i, _blob := range _blobs {
-		var b gokzg4844.Blob
-		copy(b[:], _blob)
-		blobs[i] = b
+		blobs[i] = _blob
 	}
 	return blobs
 }
