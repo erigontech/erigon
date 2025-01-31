@@ -124,7 +124,7 @@ func (m *MarkedAppendable) BeginFilesRo() *MarkedAppendableTx {
 func (r *MarkedAppendableTx) Get(num Num, tx kv.Tx) (VVType, error) {
 	// first look into snapshots..
 	a := r.a
-	lastNum := a.VisibleSegmentsMaxNum()
+	lastNum := Num(a.VisibleSegmentsMaxNum()) // num == baseNum
 	if num <= lastNum {
 		if a.baseNumSameAsNum {
 			// can do binary search or loop over visible segments and find which segment contains num
@@ -181,7 +181,7 @@ func (r *MarkedAppendableTx) Put(num Num, hash []byte, value VVType, tx kv.RwTx)
 	return tx.Put(a.valsTbl, key, value)
 }
 
-func (r *MarkedAppendableTx) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
+func (r *MarkedAppendableTx) Prune(ctx context.Context, to BaseNum, limit uint64, rwTx kv.RwTx) error {
 	// from 1 to baseKeyTo (exclusive)
 
 	// probably fromKey value needs to be in configuration...starts from 1 because we want to keep genesis block
@@ -189,7 +189,7 @@ func (r *MarkedAppendableTx) Prune(ctx context.Context, baseKeyTo Num, limit uin
 	a := r.a
 	fromKey := Num(1)
 	fromKeyPrefix := a.encTs(fromKey)
-	toKeyPrefix := a.encTs(baseKeyTo - 1)
+	toKeyPrefix := a.encTs(Num(to - 1))
 	if err := DeleteRangeFromTbl(a.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, rwTx); err != nil {
 		return err
 	}
@@ -201,9 +201,9 @@ func (r *MarkedAppendableTx) Prune(ctx context.Context, baseKeyTo Num, limit uin
 	return nil
 }
 
-func (r *MarkedAppendableTx) Unwind(ctx context.Context, baseKeyFrom Num, rwTx kv.RwTx) error {
+func (r *MarkedAppendableTx) Unwind(ctx context.Context, from BaseNum, rwTx kv.RwTx) error {
 	a := r.a
-	fromKey := a.encTs(baseKeyFrom)
+	fromKey := a.encTs(Num(from))
 	if err := DeleteRangeFromTbl(a.canonicalTbl, fromKey, nil, MaxUint64, rwTx); err != nil {
 		return err
 	}

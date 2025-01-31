@@ -57,25 +57,31 @@ func (a *ProtoAppendable) BaseKeySameAsNum() {
 	a.baseNumSameAsNum = true
 }
 
-func (a *ProtoAppendable) VisibleSegmentsMaxNum() Num {
+func (a *ProtoAppendable) VisibleSegmentsMaxNum() BaseNum {
 	// if snapshots store the last num
 	latest := a._visible[len(a._visible)-1]
-	return Num(latest.Src().GetLastNum())
+	return BaseNum(latest.Src().GetLastNum())
 }
 
-func (a *ProtoAppendable) DirtySegmentsMaxNum() Num {
+func (a *ProtoAppendable) DirtySegmentsMaxNum() BaseNum {
 	// if snapshots store the last num
 	latest, ok := a.dirtyFiles.Max()
 	if !ok {
 		return 0
 	}
-	return Num(latest.GetLastNum())
+	return BaseNum(latest.GetLastNum())
+}
+
+func (a *ProtoAppendable) VisibleSegment(num Num) *VisibleSegment {
+	// returns visible segment which contains entity num
+	// this needs the snapshot to store the first num.
+	return nil
 }
 
 func (a *ProtoAppendable) BuildFiles(ctx context.Context, baseNumFrom, baseNumTo Num, db kv.RoDB, ps *background.ProgressSet) error {
 	stepFrom, stepTo := uint64(baseNumFrom)/a.stepSize, uint64(baseNumTo)/a.stepSize
 	for step := stepFrom; step <= stepTo; step++ {
-		from, to := Num(step*a.stepSize), Num((step+1)*a.stepSize)
+		from, to := BaseNum(step*a.stepSize), BaseNum((step+1)*a.stepSize)
 
 		// can it freeze? just follow base appendable
 		if !a.standalone && to > a.baseAppendable.DirtySegmentsMaxNum() {
@@ -144,8 +150,8 @@ func (a *ProtoAppendable) BuildMissedIndexes(ctx context.Context, g *errgroup.Gr
 	// caller must "refresh" like OpenFolder to refresh the dirty files
 }
 
-func (a *ProtoAppendable) RecalcVisibleFiles(baseNumTo Num) {
-	a._visible = calcVisibleFiles(a.dirtyFiles, baseNumTo)
+func (a *ProtoAppendable) RecalcVisibleFiles(to BaseNum) {
+	a._visible = calcVisibleFiles(a.dirtyFiles, to)
 }
 
 func (a *ProtoAppendable) Close() {
@@ -227,9 +233,9 @@ func (a *ProtoAppendable) IsBaseAppendable() bool {
 
 ///
 
-func calcVisibleFiles(files *btree.BTreeG[*DirtySegment], toNum Num) VisibleSegments {
+func calcVisibleFiles(files *btree.BTreeG[*DirtySegment], to BaseNum) VisibleSegments {
 	newVisibleFiles := make([]VisibleSegment, 0, files.Len())
-	iToNum := uint64(toNum)
+	iToNum := uint64(to)
 	files.Walk(func(items []*DirtySegment) bool {
 		for _, item := range items {
 			if item.To() > iToNum {

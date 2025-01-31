@@ -13,7 +13,7 @@ import (
 
 // concrete impls in relations.go
 type RelationI interface {
-	BaseNum2Id(fromBaseNum Num, tx kv.Tx) (Id, error)
+	BaseNum2Id(from BaseNum, tx kv.Tx) (Id, error)
 	Num2Id(num Num, tx kv.Tx) (Id, error)
 }
 
@@ -168,13 +168,13 @@ func (a *RelationalAppendableTx) Append(id Id, value VVType, tx kv.RwTx) error {
 	return tx.Append(a.a.valsTbl, a.a.encTs(uint64(id)), value)
 }
 
-func (a *RelationalAppendableTx) Prune(ctx context.Context, baseKeyTo Num, limit uint64, rwTx kv.RwTx) error {
+func (a *RelationalAppendableTx) Prune(ctx context.Context, to BaseNum, limit uint64, rwTx kv.RwTx) error {
 	fromId, err := a.a.relation.BaseNum2Id(1 /*config driven*/, rwTx) // or maybe just from start or nil
 	if err != nil {
 		return err
 	}
 
-	toId, err := a.a.relation.BaseNum2Id(baseKeyTo, rwTx)
+	toId, err := a.a.relation.BaseNum2Id(to, rwTx)
 	if err != nil {
 		return err
 	}
@@ -184,11 +184,11 @@ func (a *RelationalAppendableTx) Prune(ctx context.Context, baseKeyTo Num, limit
 	return DeleteRangeFromTbl(a.a.valsTbl, entityFrom, entityTo, limit, rwTx)
 }
 
-func (a *RelationalAppendableTx) Unwind(ctx context.Context, baseKeyFrom Num, limit uint64, rwTx kv.RwTx) error {
+func (a *RelationalAppendableTx) Unwind(ctx context.Context, from BaseNum, limit uint64, rwTx kv.RwTx) error {
 	if a.a.noUnwind {
 		return nil
 	}
-	fromId, err := a.a.relation.BaseNum2Id(baseKeyFrom, rwTx)
+	fromId, err := a.a.relation.BaseNum2Id(from, rwTx)
 	if err != nil {
 		return err
 	}
@@ -212,13 +212,13 @@ type ValueKeyFetcherFromRelation struct {
 	relation RelationI
 }
 
-func (f *ValueKeyFetcherFromRelation) GetKeys(baseNumFrom, baseNumTo Num, tx kv.Tx) stream.Uno[VKType] {
-	from, _ := f.relation.BaseNum2Id(baseNumFrom, tx)
-	to, _ := f.relation.BaseNum2Id(baseNumTo, tx)
+func (f *ValueKeyFetcherFromRelation) GetKeys(from, to BaseNum, tx kv.Tx) stream.Uno[VKType] {
+	idFrom, _ := f.relation.BaseNum2Id(from, tx)
+	idTo, _ := f.relation.BaseNum2Id(to, tx)
 
 	// can do better here for sparsed valsTbl like borcheckpoints, many:1; rather than
 	// iterating over all the keys, might be more efficient to iterate over db.NExt()
-	return NewSequentialStream(uint64(from), uint64(to))
+	return NewSequentialStream(uint64(idFrom), uint64(idTo))
 }
 
 ///

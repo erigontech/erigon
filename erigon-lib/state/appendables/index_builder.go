@@ -30,7 +30,7 @@ type IndexKeyFactory interface {
 }
 
 type AccessorIndexBuilder interface {
-	Build(ctx context.Context, baseNumFrom, baseNumTo Num, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error)
+	Build(ctx context.Context, from, to BaseNum, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error)
 	AllowsOrdinalLookupByNum() bool
 }
 
@@ -81,9 +81,9 @@ func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 	s.args = args
 }
 
-func (s *SimpleAccessorBuilder) GetInputDataQuery(baseNumFrom, baseNumTo Num) *DecompressorIndexInputDataQuery {
+func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to BaseNum) *DecompressorIndexInputDataQuery {
 	// just segname?
-	sgname := AppeSegName(s.enum, 1, uint64(baseNumFrom), uint64(baseNumTo))
+	sgname := AppeSegName(s.enum, 1, uint64(from), uint64(to))
 	decomp, _ := seg.NewDecompressor(sgname)
 	return &DecompressorIndexInputDataQuery{decomp: decomp}
 }
@@ -96,9 +96,9 @@ func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 	return s.args.enums
 }
 
-func (s *SimpleAccessorBuilder) Build(ctx context.Context, baseNumFrom, baseNumTo Num, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
-	iidq := s.GetInputDataQuery(baseNumFrom, baseNumTo)
-	idxFile := AppeIdxName(s.enum, snaptype.Version(1), uint64(baseNumFrom), uint64(baseNumTo), s.indexPos)
+func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to BaseNum, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
+	iidq := s.GetInputDataQuery(from, to)
+	idxFile := AppeIdxName(s.enum, snaptype.Version(1), uint64(from), uint64(to), s.indexPos)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:           int(iidq.GetCount()),
 		Enums:              true,

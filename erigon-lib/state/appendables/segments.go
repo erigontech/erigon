@@ -41,7 +41,18 @@ type VisibleSegment struct {
 	src *DirtySegment
 }
 
-type VisibleSegments []VisibleSegment
+type VisibleSegments []*VisibleSegment
+
+func (v VisibleSegments) GetSegment(num Num) *VisibleSegment {
+	//use GetFirstNum
+	for _, v := range v {
+		if num >= v.src.GetFirstNum() && num < v.src.GetLastNum() {
+			return v
+		}
+	}
+
+	return nil
+}
 
 func (v *VisibleSegment) Get(num Num) ([]byte, error) {
 	idxSlot := v.src.indexes[0]
@@ -69,14 +80,14 @@ func (v *VisibleSegment) Src() *DirtySegment {
 	return v.src
 }
 
-func (v *VisibleSegment) GetFirstNum() uint64 {
+func (v *DirtySegment) GetFirstNum() Num {
 	// TODO: store first num in snapshot...
 	// https://github.com/erigontech/erigon/issues/13342 talks about storing first num
 	// in snapshots, but lastNum can be easily gotten from count and firstNum.
 	return 0
 }
 
-func (v *DirtySegment) GetLastNum() uint64 {
+func (v *DirtySegment) GetLastNum() Num {
 	// TODO: store first num in snapshot...
 	// https://github.com/erigontech/erigon/issues/13342 talks about storing first num
 	// in snapshots, but lastNum can be easily gotten from count and firstNum.

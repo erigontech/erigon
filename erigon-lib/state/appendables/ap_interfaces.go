@@ -17,6 +17,7 @@ type VKType []byte
 type VVType []byte
 type Num uint64
 type Id uint64
+type BaseNum uint64
 
 type Collector func(values []byte) error
 
@@ -25,7 +26,7 @@ type Freezer interface {
 	// baseNumFrom/To represent num which the snapshot should range
 	// this doesn't check if the snapshot can be created or not. It's the responsibilty of the caller
 	// to ensure this.
-	Freeze(ctx context.Context, baseNumFrom, baseNumTo Num, tx kv.Tx) error
+	Freeze(ctx context.Context, from, to BaseNum, tx kv.Tx) error
 	SetCollector(coll Collector)
 }
 
@@ -33,9 +34,9 @@ type Appendable interface {
 	// might have more methods...
 	SetFreezer(Freezer)
 	SetIndexBuilders(...AccessorIndexBuilder)
-	DirtySegmentsMaxNum() Num
-	VisibleSegmentsMaxNum() Num
-	RecalcVisibleFiles(baseNumTo Num)
+	DirtySegmentsMaxNum() BaseNum
+	VisibleSegmentsMaxNum() BaseNum
+	RecalcVisibleFiles(to BaseNum)
 	// don't put BeginFilesRo here, since it returns different kinds of Ro etc. (each has different query patterns)
 	// so anyway aggregator has to recover concrete type, and then it can
 	// call BeginFilesRo on that
@@ -57,16 +58,21 @@ const (
 	Transactions AppEnum = "transactions"
 )
 
-// ro
+// Marked(enum) gives MarkedAppendableTx -- use it to put/append/read etc.
+// for write ops like put, temporalrwtx must be used.
+// temporaldb holds multiple aggregators, and appendables are under those.
+// so tx.Marked(enum) search and find the right MarkedAppendableTx.
+// same thing applicable for RelationalAppendableTx
 type TemporalTx interface {
 	kv.TemporalTx
-	AggRoTx(baseAppendable AppEnum) *AggregatorRoTx
+	Marked(app AppEnum) *MarkedAppendableTx         // read/write queries for marked appendable (write query only when TemporalRwTx is used)
+	Relational(app AppEnum) *RelationalAppendableTx // read/write queries for relational appendable (write query only when TemporalRwTx is used)
+	AggRoTx(baseAppendable AppEnum) *AggregatorRoTx // aggregate queries like prune/unwind
 }
 
 type TemporalRwTx interface {
 	kv.RwTx
 	TemporalTx
-	// AggRwTx(baseAppendable AppEnum) *AggregatorRwTx // gets aggtx for entity-set represented by baseAppendable
 }
 
 // use Marked(enum) or Relational(enum) to get the right ro/rw tx.
@@ -79,7 +85,7 @@ func (a *AggregatorRoTx) Relational(app AppEnum) *RelationalAppendableTx { retur
 
 type Aggregator struct{}
 
-func (a *Aggregator) ViewSingleFile(ap AppEnum, baseNum Num) (segment *VisibleSegment, ok bool, close func()) {
+func (a *Aggregator) ViewSingleFile(ap AppEnum, num BaseNum) (segment *VisibleSegment, ok bool, close func()) {
 	// TODO
 	// similar to RoSnapshots#ViewSingleFile etc.
 	return nil, false, nil
@@ -109,36 +115,24 @@ func WriteRawBody(tx TemporalRwTx, hash common.Hash, number uint64, body *types.
 }
 
 func WriteBodyForStorage(tx TemporalRwTx, hash common.Hash, number uint64, body *types.BodyForStorage) error {
-	aggTx := tx.AggRoTx(Headers) // or temporalTx.AggTx(baseAppendableEnum); gives aggtx for entityset
-
 	b := bytes.Buffer{}
 	if err := body.EncodeRLP(&b); err != nil {
 		panic(err)
 	}
 
-	markedQueries := aggTx.Marked(Bodies)
-
+	markedTx := tx.Marked(Bodies)
 	// write bodies
-	return markedQueries.Put(Num(number), hash.Bytes(), b.Bytes(), tx)
+	return markedTx.Put(Num(number), hash.Bytes(), b.Bytes(), tx)
 }
 
 func WriteRawTransactions(tx TemporalRwTx, txs [][]byte, baseTxnID uint64) error {
-	aggTx := tx.AggRoTx(Headers) // or temporalTx.AggTx(baseAppendableEnum); gives aggtx for entityset
+	txq := tx.Relational(Transactions)
 	stx := baseTxnID
-	txq := aggTx.Relational(Transactions)
 
 	for _, txn := range txs {
 		txq.Append(Id(stx), VVType(txn), tx)
 		stx++
 	}
-	return nil
-}
-
-func IwannaBuildFiles(ctx context.Context, tx TemporalRwTx) error {
-	// get the aggregator from temporaldb (no use of temporalrwtx)
-	// appenadable.freezer.SetCollector()
-	// then call appenadable.freezer.Freeze(ctx, baseNumFrom, baseNumTo, tx)
-	// integrate dirty files
 	return nil
 }
 
