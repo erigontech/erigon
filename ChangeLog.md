@@ -5,7 +5,7 @@ ChangeLog
 
 ### Breaking changes
 
-- eth_estimateGas: support historical blocks and state overrides
+- `eth_estimateGas`: StateOverrides and HistoricalBlocks support
 
 ### TODO
 
