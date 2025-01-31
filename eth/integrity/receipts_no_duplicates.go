@@ -46,11 +46,11 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	}
 
 	ac := tx.(kv.TemporalTx).(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
-	toTxNum := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
-	//toTxNum, err := txNumsReader.Max(tx, toBlock)
-	//if err != nil {
-	//	return err
-	//}
+	//toTxNum := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
+	toTxNum, err := txNumsReader.Max(tx, toBlock)
+	if err != nil {
+		return err
+	}
 	prevCumGasUsed := -1
 	prevBN := uint64(1)
 	log.Info("[integrity] ReceiptsNoDuplicates starting", "fromTxNum", fromTxNum, "toTxNum", toTxNum)
