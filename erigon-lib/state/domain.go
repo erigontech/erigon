@@ -1531,9 +1531,18 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		}
 		return v, v != nil, nil
 	}
-	v, _, _, err = dt.GetLatest(key, roTx)
+
+	var ok bool
+	v, _, ok, err = dt.GetLatest(key, roTx)
 	if err != nil {
 		return nil, false, err
+	}
+	if traceGetAsOf == dt.d.filenameBase {
+		if ok {
+			fmt.Printf("DomainGetAsOf(%s, %x, %d) -> found in latest state\n", dt.d.filenameBase, key, txNum)
+		} else {
+			fmt.Printf("DomainGetAsOf(%s, %x, %d) -> not found in latest state\n", dt.d.filenameBase, key, txNum)
+		}
 	}
 	return v, v != nil, nil
 }
