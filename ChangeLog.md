@@ -4,6 +4,9 @@ ChangeLog
 ## v3.0.0-beta2 (in development)
 
 ### Breaking changes
+- Reverts Optimize gas by default in eth_createAccessList #8337  
+
+### Improvements:
 
 - `eth_estimateGas`: StateOverrides and HistoricalBlocks support
 
