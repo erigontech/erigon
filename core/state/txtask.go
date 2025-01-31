@@ -385,11 +385,9 @@ func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (closed b
 	for {
 		select {
 		case <-ctx.Done():
-			log.Warn("[dbg] closed1", "q.closed", q.closed)
 			return q.closed, ctx.Err()
 		case txTask, ok := <-q.resultCh:
 			if !ok {
-				log.Warn("[dbg] closed2", "q.closed", q.closed)
 				return q.closed, nil
 			}
 			if txTask == nil {
@@ -397,11 +395,10 @@ func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (closed b
 			}
 			heap.Push(q.results, txTask)
 			if q.results.Len() > q.limit {
-				return q.closed, nil
+				return false, nil
 			}
 		default: // we are inside mutex section, can't block here
-			log.Warn("[dbg] closed3", "q.closed", q.closed)
-			return q.closed, nil
+			return false, nil
 		}
 	}
 }
