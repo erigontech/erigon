@@ -146,7 +146,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 
 		var failedAssert bool
 		{ //assert
-			if failedAssert, err = AssertReceipts(ctx, cfg, ttx, toBlock); err != nil {
+			if failedAssert, err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
 				return err
 			}
 		}
@@ -191,25 +191,26 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	return nil
 }
 
-func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, toBlock uint64) (failed bool, err error) {
+func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (failed bool, err error) {
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
-	fromTxNum := uint64(2)
-	//fromTxNum, err := txNumsReader.Min(tx, fromBlock)
-	//if err != nil {
-	//	return err
-	//}
+	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+	if err != nil {
+		return false, err
+	}
+	if fromTxNum < 2 {
+		fromTxNum = 2 //i don't remember why need this
+	}
+
 	if toBlock > 0 {
 		toBlock-- // [fromBlock,toBlock)
 	}
-	//toTxNum := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
 	toTxNum, err := txNumsReader.Max(tx, toBlock)
 	if err != nil {
 		return false, err
 	}
-	log.Warn("[dbg] AssertReceipts", "toBlock", toBlock, "toTxNum", toTxNum)
 	prevCumGasUsed := -1
 	prevBN := uint64(1)
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
