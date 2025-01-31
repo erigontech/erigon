@@ -143,16 +143,6 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			toBlock-- // [fromBlock,toBlock)
 		}
 		toTxNum := tx.(kv.TemporalTx).(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
-		{
-			accProgress := tx.(kv.TemporalTx).(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
-			//_toTxNum, err := txNumsReader.Max(tx, toBlock)
-			//if err != nil {
-			//	return err
-			//}
-			if accProgress != toTxNum {
-				log.Warn("[dbg] seems Receipt domain is behind Acc Domain", "toBlock", toBlock, "accProgress", accProgress, "receiptProgress", toTxNum)
-			}
-		}
 		prevCumGasUsed := -1
 		prevBN := uint64(1)
 		for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
@@ -186,6 +176,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	}); err != nil {
 		return err
 	}
+
 	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	var fromStep, toStep uint64
 	if lastTxNum/agg.StepSize() > 0 {
@@ -194,6 +185,14 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 		fromStep = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles()
+
+		{
+			receiptProgress := tx.(kv.TemporalTx).(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
+			accProgress := tx.(kv.TemporalTx).(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
+			if accProgress != receiptProgress {
+				log.Warn("[dbg] seems Receipt domain is behind Acc Domain", "toBlock", toBlock, "accProgress", accProgress, "receiptProgress", receiptProgress)
+			}
+		}
 		return nil
 	}); err != nil {
 		return err
