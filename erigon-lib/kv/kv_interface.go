@@ -531,7 +531,7 @@ type TemporalRwDB interface {
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
 }
 
-// ---- non-importnt utilites
+// ---- non-important utilites
 
 type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum
 
