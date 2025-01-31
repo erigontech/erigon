@@ -48,7 +48,7 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 		return err
 	}
 	prevCumGasUsed := -1
-	prevBN := uint64(1)
+	prevBN := uint64(0)
 	log.Info("[integrity] ReceiptsNoDuplicates starting", "fromTxNum", fromTxNum, "toTxNum", toTxNum)
 
 	var cumGasUsed uint64
@@ -57,7 +57,7 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 		if err != nil {
 			return err
 		}
-		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
+		blockNum := badFoundBlockNum(tx, prevBN, txNumsReader, txNum)
 		//println(cumGasUsed, txNum, blockNum, prevCumGasUsed)
 		if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
 			if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
