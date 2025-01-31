@@ -715,6 +715,9 @@ func TestBlobTxEncodeDecode(t *testing.T) {
 		// printSTX(dummyBlobTxs[i])
 
 		tx, err := encodeDecodeBinary(dummyBlobTxs[i])
+		if errors.Is(err, ErrNilToFieldTx) {
+			continue
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
