@@ -1618,12 +1618,15 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				hph.touchMap[row-1] |= uint16(1) << nibble
 			}
 		}
-		bitmap := hph.touchMap[row] & hph.afterMap[row]
-		if !hph.branchBefore[row] {
-			// There was no branch node before, so we need to touch even the singular child that existed
+		if !hph.branchBefore[row] { // There was no branch node before, so we need to touch even the singular child that existed
 			hph.touchMap[row] |= hph.afterMap[row]
-			bitmap |= hph.afterMap[row]
 		}
+		bitmap := hph.touchMap[row] & hph.afterMap[row]
+		// if !hph.branchBefore[row] {
+		// 	// There was no branch node before, so we need to touch even the singular child that existed
+		// 	hph.touchMap[row] |= hph.afterMap[row]
+		// 	bitmap |= hph.afterMap[row]
+		// }
 
 		var branchRoot []byte
 		branchRoot, branchUpdate, err = hph.foldRow(bitmap, row, depth, nibblesLeftAfterUpdate)
