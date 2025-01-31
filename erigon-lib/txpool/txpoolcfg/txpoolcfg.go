@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	emath "github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/types"
 )
 
 // BorDefaultTxPoolPriceLimit defines the minimum gas price limit for bor to enforce txs acceptance into the pool.
@@ -188,7 +187,7 @@ func (r DiscardReason) String() string {
 
 // CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.
 // TODO: move input data to a struct
-func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028, isShanghai, isPrague bool) (gas uint64, floorGas7623 uint64, d DiscardReason) {
+func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessListLen, storageKeysLen uint64, isContractCreation, isHomestead, isEIP2028, isShanghai, isPrague bool) (gas uint64, floorGas7623 uint64, d DiscardReason) {
 	// Set the starting gas for the raw transaction
 	if isContractCreation && isHomestead {
 		gas = fixedgas.TxGasContractCreation
@@ -251,8 +250,8 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessL
 			}
 		}
 	}
-	if accessList != nil {
-		product, overflow := emath.SafeMul(uint64(len(accessList)), fixedgas.TxAccessListAddressGas)
+	if accessListLen > 0 {
+		product, overflow := emath.SafeMul(accessListLen, fixedgas.TxAccessListAddressGas)
 		if overflow {
 			return 0, 0, GasUintOverflow
 		}
@@ -261,7 +260,7 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessL
 			return 0, 0, GasUintOverflow
 		}
 
-		product, overflow = emath.SafeMul(uint64(accessList.StorageKeys()), fixedgas.TxAccessListStorageKeyGas)
+		product, overflow = emath.SafeMul(storageKeysLen, fixedgas.TxAccessListStorageKeyGas)
 		if overflow {
 			return 0, 0, GasUintOverflow
 		}
