@@ -172,7 +172,9 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 	}
 	defer tx.Rollback()
 
+	fmt.Println("JG NewSharedDomains syncBySmallSteps")
 	sd, err := stateLib.NewSharedDomains(tx, logger1)
+	defer fmt.Println("sync small step closing", sd.ObjectInfo())
 	if err != nil {
 		return err
 	}

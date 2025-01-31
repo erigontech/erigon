@@ -102,7 +102,8 @@ type MockSentry struct {
 	Ctx                  context.Context
 	Log                  log.Logger
 	tb                   testing.TB
-	cancel               context.CancelFunc
+	Cancel               context.CancelFunc
+	EthConfig            *ethconfig.Config
 	DB                   kv.TemporalRwDB
 	Dirs                 datadir.Dirs
 	Engine               consensus.Engine
@@ -123,6 +124,7 @@ type MockSentry struct {
 	ReceiveWg            sync.WaitGroup
 	Address              libcommon.Address
 	Eth1ExecutionService *eth1.EthereumExecutionModule
+	RemoteKvServer       *remotedbserver.KvServer
 
 	Notifications *shards.Notifications
 
@@ -284,14 +286,14 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 
 	logger := log.Root()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+	logger.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StdoutHandler))
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	db, agg := temporaltest.NewTestDB(tb, dirs)
 
-	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
 	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
+	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, allSnapshots, allBorSnapshots, agg, logger)
 
 	bridgeStore := bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots, gspec.Config.Bor)
 	heimdallStore := heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
@@ -299,7 +301,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 
 	mock := &MockSentry{
-		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
+		Ctx: ctx, Cancel: ctxCancel, DB: db, agg: agg,
+		EthConfig:      &cfg,
 		tb:             tb,
 		Log:            logger,
 		Dirs:           dirs,
@@ -307,12 +310,13 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		gspec:          gspec,
 		ChainConfig:    gspec.Config,
 		Key:            key,
-		Notifications:  shards.NewNotifications(erigonGrpcServeer),
+		Notifications:  shards.NewNotifications(erigonGrpcServer),
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
 		BlockReader:    br,
 		ReceiptsReader: receipts.NewGenerator(br, engine),
 		HistoryV3:      true,
+		RemoteKvServer: erigonGrpcServer,
 	}
 
 	if tb != nil {

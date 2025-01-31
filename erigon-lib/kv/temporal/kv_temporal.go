@@ -18,6 +18,7 @@ package temporal
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -116,6 +117,7 @@ func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	return db.BeginTemporalRw(ctx)
 }
 func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
+	fmt.Println("kv_temporal DB.Update")
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
@@ -141,6 +143,7 @@ func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return db.BeginTemporalRwNosync(ctx) //nolint:gocritic
 }
 func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
+	fmt.Println("kv_temporal DB.UpdateNosync")
 	tx, err := db.BeginTemporalRwNosync(ctx)
 	if err != nil {
 		return err
