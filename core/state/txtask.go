@@ -486,7 +486,7 @@ func (q *ResultsQueue) Close() {
 	if q.closed {
 		return
 	}
-	log.Warn("[dbg] closing", "stack", dbg.Stack())
+	log.Warn("[dbg] ResultsQueue.Close", "stack", dbg.Stack())
 	q.closed = true
 	close(q.resultCh)
 	q.ticker.Stop()
