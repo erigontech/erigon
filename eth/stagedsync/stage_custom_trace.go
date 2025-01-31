@@ -210,7 +210,11 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx
 	if toBlock > 0 {
 		toBlock-- // [fromBlock,toBlock)
 	}
-	toTxNum := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
+	//toTxNum := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
+	toTxNum, err := txNumsReader.Min(tx, toBlock)
+	if err != nil {
+		return err
+	}
 	prevCumGasUsed := -1
 	prevBN := uint64(1)
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
