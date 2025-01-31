@@ -223,7 +223,6 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 	defer logEvery.Stop()
 
 	var cumulativeBlobGasUsedInBlock uint64
-	//var cumulativeGasUsedTotal = uint256.NewInt(0)
 
 	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
 	/// maybe need startTxNum/endTxNum
@@ -239,9 +238,6 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			if txTask.Tx != nil {
 				cumulativeBlobGasUsedInBlock += txTask.Tx.GetBlobGas()
 			}
-			//if txTask.Final {
-			//	cumulativeGasUsedTotal.AddUint64(cumulativeGasUsedTotal, cumulativeGasUsedInBlock)
-			//}
 
 			if txTask.Final { // TODO: move asserts to 1 level higher
 				if txTask.Header.BlobGasUsed != nil && *txTask.Header.BlobGasUsed != cumulativeBlobGasUsedInBlock {
