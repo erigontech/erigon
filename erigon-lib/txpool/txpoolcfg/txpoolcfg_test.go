@@ -19,13 +19,14 @@ package txpoolcfg
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon-lib/common/fixedgas"
 )
 
 func TestZeroDataIntrinsicGas(t *testing.T) {
 	assert := assert.New(t)
-	gas, floorGas7623, discardReason := CalcIntrinsicGas(0, 0, 0, nil, false, true, true, true, true)
+	gas, floorGas7623, discardReason := CalcIntrinsicGas(0, 0, 0, 0, 0, false, true, true, true, true)
 	assert.Equal(discardReason, Success)
 	assert.Equal(gas, fixedgas.TxGas)
 	assert.Equal(floorGas7623, fixedgas.TxGas)
