@@ -85,7 +85,7 @@ func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.S
 	opts := []grpc.ServerOption{
 		//grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
 		grpc.MaxConcurrentStreams(rateLimit), // to force clients reduce concurrency level
-		// Don't drop the connection, settings accordign to this comment on GitHub
+		// Don't drop the connection, settings according to this comment on GitHub
 		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime:             10 * time.Second,
