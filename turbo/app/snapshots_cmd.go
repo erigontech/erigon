@@ -529,7 +529,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen().(kv.TemporalRoDB)
+	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen().(kv.TemporalRwDB)
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
