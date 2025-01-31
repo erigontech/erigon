@@ -150,6 +150,12 @@ type TxPool struct {
 	newSlotsStreams         *NewSlotsStreams
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
+
+	ethBackend remote.ETHBACKENDClient
+}
+
+type ValidateAA interface {
+	ValidateAA() (bool, error)
 }
 
 type FeeCalculator interface {
