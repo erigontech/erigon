@@ -380,15 +380,6 @@ func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if codeSize == types.DelegateDesignationCodeSize {
-		_, ok, err := interpreter.evm.IntraBlockState().GetDelegatedDesignation(addr)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-		}
-		if ok {
-			codeSize = 2 // first two bytes only: EIP-7702
-		}
-	}
 	slot.SetUint64(uint64(codeSize))
 	return nil, nil
 }
@@ -429,9 +420,6 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	code, err := interpreter.evm.IntraBlockState().GetCode(addr)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-	}
-	if _, ok := types.ParseDelegation(code); ok {
-		code = append([]byte{}, (params.DelegatedDesignationPrefix[0:2])...)
 	}
 
 	codeCopy := getDataBig(code, &codeOffset, len64)
@@ -488,17 +476,9 @@ func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 		slot.Clear()
 	} else {
 		var codeHash libcommon.Hash
-		_, ok, err := interpreter.evm.IntraBlockState().GetDelegatedDesignation(address)
+		codeHash, err = interpreter.evm.IntraBlockState().GetCodeHash(address)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-		}
-		if ok {
-			codeHash = params.DelegatedCodeHash
-		} else {
-			codeHash, err = interpreter.evm.IntraBlockState().GetCodeHash(address)
-			if err != nil {
-				return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-			}
 		}
 		slot.SetBytes(codeHash.Bytes())
 	}
