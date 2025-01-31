@@ -282,9 +282,8 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 	}
 	defer tx.Rollback()
 
-	var rwsClosed bool
-	for outputTxNum.Load() <= toTxNum && !rwsClosed {
-		rwsClosed, err = rws.DrainNonBlocking(ctx)
+	for outputTxNum.Load() <= toTxNum {
+		err = rws.DrainNonBlocking(ctx)
 		if err != nil {
 			return err
 		}
@@ -297,7 +296,7 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 			outputTxNum.Store(processedTxNum)
 		}
 	}
-	log.Warn("[dbg] reduceDone", "rwsClosed", rwsClosed, "outputTxNum", outputTxNum.Load(), "toTxNum", toTxNum)
+	log.Warn("[dbg] reduceDone", "outputTxNum", outputTxNum.Load(), "toTxNum", toTxNum)
 	//if outputTxNum.Load() != toTxNum {
 	//	return fmt.Errorf("rws closed but not all txnums proceeded: rwsClosed=%t, toTxNum=%d, outputTxNum=%d", rwsClosed, toTxNum, outputTxNum)
 	//}
