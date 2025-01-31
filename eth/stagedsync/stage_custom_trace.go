@@ -139,18 +139,12 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			return err
 		}
 
-		var failedAssert bool
-		{ //assert
-			if failedAssert, err = AssertReceipts(ctx, cfg, ttx, fromBlock); err != nil {
-				return err
-			}
-		}
-
 		doms.SetTx(tx)
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
 
+		var failedAssert bool
 		{ //assert
 			if failedAssert, err = AssertReceipts(ctx, cfg, ttx, toBlock); err != nil {
 				return err
