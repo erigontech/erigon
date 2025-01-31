@@ -85,8 +85,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		}
 
 		txNum = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles() * stepSize
-		log.Info("SpawnCustomTrace", "recpStep", ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles(), "accDomain", ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles())
-		log.Info("SpawnCustomTrace", "files", ac.DbgDomain(kv.ReceiptDomain).Name(), "recp", fmt.Sprintf("%+v", ac.DbgDomain(kv.ReceiptDomain)), "files", ac.DbgDomain(kv.ReceiptDomain).Files())
+		log.Info("[dbg] SpawnCustomTrace", "accountsDomainProgress", ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx), "receiptDomainProgress", ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx), "receiptDomainFiles", ac.DbgDomain(kv.ReceiptDomain).Files())
 		ok, startBlock, err = txNumsReader.FindBlockNum(tx, txNum)
 		if err != nil {
 			return fmt.Errorf("getting last executed block: %w", err)
