@@ -391,6 +391,7 @@ func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (err erro
 				return nil
 			}
 			if txTask == nil {
+				log.Warn("[dbg] nil1")
 				continue
 			}
 			heap.Push(q.results, txTask)
