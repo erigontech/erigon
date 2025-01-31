@@ -184,12 +184,10 @@ func (sd *SharedDomains) ObjectInfo() string {
 func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
 	sd.currentChangesAccumulator = acc
 	for idx := range sd.domainWriters {
-		if sd.domainWriters[idx] != nil {
-			if sd.currentChangesAccumulator == nil {
-				sd.domainWriters[idx].diff = nil
-			} else {
-				sd.domainWriters[idx].diff = &sd.currentChangesAccumulator.Diffs[idx]
-			}
+		if sd.currentChangesAccumulator == nil {
+			sd.domainWriters[idx].diff = nil
+		} else {
+			sd.domainWriters[idx].diff = &sd.currentChangesAccumulator.Diffs[idx]
 		}
 	}
 }
