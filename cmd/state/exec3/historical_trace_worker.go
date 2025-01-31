@@ -174,6 +174,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		if txTask.BlockNum == 0 {
 			break
 		}
+		log.Warn("[dbg] dbg2.1, final tx", "block", txTask.BlockNum)
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
