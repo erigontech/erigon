@@ -108,6 +108,18 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		}
 	}
 
+	log.Info("SpawnCustomTrace finish")
+	if err := cfg.db.View(ctx, func(tx kv.Tx) error {
+		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		receiptProgress := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
+		accProgress := ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
+		if accProgress != receiptProgress {
+			log.Warn("[dbg] seems Receipt domain is behind Acc Domain", "accProgress", accProgress, "receiptProgress", receiptProgress)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -184,14 +196,6 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 		fromStep = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles()
-
-		{
-			receiptProgress := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
-			accProgress := ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
-			if accProgress != receiptProgress {
-				log.Warn("[dbg] seems Receipt domain is behind Acc Domain", "toBlock", toBlock, "accProgress", accProgress, "receiptProgress", receiptProgress)
-			}
-		}
 		return nil
 	}); err != nil {
 		return err
