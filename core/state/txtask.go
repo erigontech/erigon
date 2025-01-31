@@ -337,7 +337,7 @@ func (q *QueueWithRetry) Close() {
 	if q.closed {
 		return
 	}
-	log.Warn("[dbg] QueueWithRetry.Close")
+	log.Warn("[dbg] QueueWithRetry.Close", "stack", dbg.Stack())
 	q.closed = true
 	close(q.newTasks)
 }
