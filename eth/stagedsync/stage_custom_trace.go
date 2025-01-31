@@ -289,7 +289,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 
 			if !txTask.Final {
 				var receipt *types.Receipt
-				if txTask.TxIndex >= 0 && !txTask.Final {
+				if txTask.TxIndex >= 0 {
 					receipt = txTask.BlockReceipts[txTask.TxIndex]
 				}
 				//if txTask.TxNum < 50 {
