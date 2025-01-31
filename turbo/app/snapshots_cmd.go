@@ -568,6 +568,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.NoGapsInBorEvents(ctx, chainDB, blockReader, 0, 0, failFast); err != nil {
 				return err
 			}
+		case integrity.ReceiptsNoDups:
+			if err := integrity.ReceiptsNoDuplicates(ctx, chainDB, blockReader, failFast); err != nil {
+				return err
+			}
 
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
