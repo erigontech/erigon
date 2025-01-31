@@ -211,7 +211,7 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx
 		toBlock-- // [fromBlock,toBlock)
 	}
 	//toTxNum := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
-	toTxNum, err := txNumsReader.Min(tx, toBlock)
+	toTxNum, err := txNumsReader.Max(tx, toBlock)
 	if err != nil {
 		return false, err
 	}
