@@ -116,6 +116,7 @@ func NewHistoricalTraceWorker(
 
 func (rw *HistoricalTraceWorker) Run() (err error) {
 	defer func() { // convert panic to err - because it's background workers
+		log.Warn("[dbg] HistoricalTraceWorker.Run done")
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("HistoricalTraceWorker panic: %s, %s", rec, dbg.Stack())
 		}
