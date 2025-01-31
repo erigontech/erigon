@@ -11,6 +11,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	cmath "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -618,4 +619,34 @@ func copyAddressPtr(a *common.Address) *common.Address {
 	}
 	cpy := *a
 	return &cpy
+}
+
+// // TransactionToMessage converts a transaction into a Message.
+func TransactionToMessage(tx Transaction, s ArbitrumSigner, baseFee *big.Int, runmode MessageRunMode) (msg *Message, err error) {
+	// tx.AsMessage(s types.Signer, baseFee *big.Int, rules *chain.Rules)
+	msg = &Message{
+		TxRunMode: runmode,
+		Tx:        tx,
+
+		nonce:    tx.GetNonce(),
+		gasLimit: tx.GetGas(),
+		gasPrice: *tx.GetPrice(),
+		feeCap:   *tx.GetFeeCap(),
+		tip:      *tx.GetTip(),
+		to:       tx.GetTo(),
+		// value:             tx.GetValue(),
+		amount:            *tx.GetValue(), // TODO amount is value?
+		data:              tx.GetData(),
+		accessList:        tx.GetAccessList(),
+		SkipAccountChecks: false, // tx.SkipAccountChecks(), // TODO Arbitrum upstream this was init'd to false
+		blobHashes:        tx.GetBlobHashes(),
+		// maxFeePerBlobGas:  tx.GetBlobGasFeeCap(),
+		// BlobGasFeeCap:     tx.GetBlobGasFeeCap(), // TODO
+	}
+	// If baseFee provided, set gasPrice to effectiveGasPrice.
+	if baseFee != nil {
+		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
+	}
+	msg.from, err = s.Sender(tx)
+	return msg, err
 }
