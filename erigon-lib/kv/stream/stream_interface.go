@@ -22,7 +22,7 @@ import "errors"
 //  - cancelable
 //  - return errors
 //  - batch-friendly
-//  - server-side-streaming-friendly: no cliend-side granular managemnent. all required data described by construtor (query) then only iterate over results.
+//  - server-side-streaming-friendly: no cliend-side granular managemnent. all required data described by constructor (query) then only iterate over results.
 //  - more high-level than kv.Cursor
 //
 //	for s.HasNext() {
