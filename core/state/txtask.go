@@ -477,6 +477,8 @@ Loop:
 }
 
 func (q *ResultsQueue) Close() {
+	q.m.Lock()
+	defer q.m.Unlock()
 	if q.closed {
 		return
 	}
