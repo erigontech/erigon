@@ -70,7 +70,7 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 		case <-ctx.Done():
 			return
 		case <-logEvery.C:
-			log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%d/%d", blockNum, toBlock))
+			log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%dk/%dk", blockNum/1_000, toBlock/1_000))
 		default:
 		}
 	}
