@@ -2,14 +2,12 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/kv"
 )
 
@@ -20,36 +18,37 @@ type DirectAccessDomains struct {
 }
 
 func NewDirectAccessDomains(tx kv.RwTx, logger log.Logger) (*DirectAccessDomains, error) {
-	fmt.Println("NewDirectAccessDomains")
-	sd := &SharedDomains{
-		logger: logger,
-		// storage: btree2.NewMap[string, dataWithPrevStep](128),
+	// fmt.Println("NewDirectAccessDomains")
+
+	sub, _ := NewSharedDomains(tx, logger)
+
+	sd := &DirectAccessDomains{
+		SharedDomains: *sub,
+		rwTx:          tx,
 		//trace:   true,
 	}
-	sd.SetTx(tx)
 
-	sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
+	sd.sdCtx.sharedDomains = &sd.SharedDomains
+	// sd.SetTx(tx)
 
-	for id, ii := range sd.aggTx.iis {
-		sd.iiWriters[id] = ii.NewWriter()
-	}
+	// sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
 
-	for id, d := range sd.aggTx.d {
-		if kv.Domain(id) == kv.CommitmentDomain {
-			sd.domainWriters[id] = d.NewWriter()
-		}
-	}
+	// for id, ii := range sd.aggTx.iis {
+	// 	sd.iiWriters[id] = ii.NewWriter()
+	// }
 
-	sd.SetTxNum(0)
-	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
+	// for id, d := range sd.aggTx.d {
+	// 	sd.domains[id] = map[string]dataWithPrevStep{}
+	// 	sd.domainWriters[id] = d.NewWriter()
+	// }
 
-	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
-		return nil, err
-	}
-	return &DirectAccessDomains{
-		SharedDomains: *sd,
-		rwTx:          tx,
-	}, nil
+	// sd.SetTxNum(0)
+	// sd.sdCtx = NewSharedDomainsCommitmentContext(sub, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
+
+	// if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
+	// 	return nil, err
+	// }
+	return sd, nil
 }
 
 // TODO JG: large values tables
@@ -62,20 +61,20 @@ func (sd *DirectAccessDomains) ObjectInfo() string {
 // TemporalDomain satisfaction
 func (sd *DirectAccessDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
-		fmt.Println("JG GetLatest", domain.String(), "LatestCommitment")
+		fmt.Println("JG GetLatest", "LatestCommitment")
 		return sd.SharedDomains.LatestCommitment(k)
 	}
 
 	v, step, _, err = sd.aggTx.GetLatest(domain, k, sd.roTx)
 	if err != nil {
-		fmt.Println("JG DAD.GetLatest", domain.String(), err)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
-	fmt.Println("JG GetLatest", sd.ObjectInfo(), domain.String(), hexutility.Encode(k), hexutility.Encode(v), step)
+	fmt.Println("JG GetLatest", domain.String(), hexutility.Encode(k), hexutility.Encode(v), step)
 	return v, step, nil
 }
 
 func (sd *DirectAccessDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
+	fmt.Println("JG DomainPut", domain.String(), hexutility.Encode(k1), hexutility.Encode(k2), hexutility.Encode(val), prevStep)
 	if val == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
@@ -86,6 +85,8 @@ func (sd *DirectAccessDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, p
 			return err
 		}
 	}
+
+	// sd.sdCtx.TouchKey()
 
 	switch domain {
 	default:
@@ -111,7 +112,7 @@ func (sd *DirectAccessDomains) updateHistory(k1 []byte, k2 []byte, val []byte, d
 	k := append(k1, k2...)
 	v := append(txNumBytes[:], val...)
 
-	err := sd.rwTx.AppendDup(sd.aggTx.d[domain].d.hist.valuesTable, k, v)
+	err := sd.rwTx.AppendDup(sd.aggTx.d[domain].ht.h.valuesTable, k, v)
 	if err != nil {
 		return err
 	}
@@ -134,8 +135,10 @@ func (sd *DirectAccessDomains) updateValue(k1 []byte, k2 []byte, val []byte, dom
 	} else {
 		k = append(k1, k2...)
 		v = append(histStepPrefix[:], val...)
-
 	}
+
+	sd.sdCtx.TouchKey(domain, string(k), v)
+
 	valuesCursor, err := sd.rwTx.RwCursorDupSort(sd.aggTx.d[domain].d.valuesTable)
 	if err != nil {
 		return err
@@ -194,22 +197,5 @@ func (sd *DirectAccessDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVa
 }
 
 func (sd *DirectAccessDomains) Close() {
-	fmt.Println("JG", sd.ObjectInfo(), "Close")
-	sd.SetBlockNum(0)
-	if sd.aggTx != nil {
-		sd.SetTxNum(0)
-
-		//sd.walLock.Lock()
-		//defer sd.walLock.Unlock()
-		for _, d := range sd.domainWriters {
-			d.close()
-		}
-		for _, iiWriter := range sd.iiWriters {
-			iiWriter.close()
-		}
-	}
-
-	if sd.sdCtx != nil {
-		sd.sdCtx.Close()
-	}
+	sd.SharedDomains.Close()
 }
