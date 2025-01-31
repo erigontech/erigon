@@ -28,12 +28,13 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type txNumsIterFactory func(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error)
 
-func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, iterFactory txNumsIterFactory, addr common.Address, fromTxNum int, pageSize uint16) ([]*RPCTransaction, []map[string]interface{}, bool, error) {
+func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, iterFactory txNumsIterFactory, addr common.Address, fromTxNum int, pageSize uint16) ([]*ethapi.RPCTransaction, []map[string]interface{}, bool, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, nil, false, err
@@ -45,7 +46,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 	}
 
 	var block *types.Block
-	txs := make([]*RPCTransaction, 0, pageSize)
+	txs := make([]*ethapi.RPCTransaction, 0, pageSize)
 	receipts := make([]map[string]interface{}, 0, pageSize)
 	resultCount := uint16(0)
 
@@ -68,7 +69,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 
 		// Avoid reading the same block multiple times; multiple matches in the same block
 		// may be common.
-		mustReadBlock = mustReadBlock || blockNumChanged
+		mustReadBlock = mustReadBlock || blockNumChanged || chainConfig.IsOptimism()
 
 		// it is necessary to track dirty/lazy-must-read block headers
 		// because we skip system txs like rewards (which are not "real" txs
@@ -93,13 +94,14 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			log.Warn("[rpc] txn not found", "blockNum", blockNum, "txIndex", txIndex)
 			continue
 		}
-		rpcTx := NewRPCTransaction(txn, block.Hash(), blockNum, uint64(txIndex), block.BaseFee())
-		txs = append(txs, rpcTx)
 
 		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block.HeaderNoCopy(), txn, txIndex, txNum+1)
 		if err != nil {
 			return nil, nil, false, err
 		}
+
+		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), blockNum, uint64(txIndex), block.BaseFee(), receipt)
+		txs = append(txs, rpcTx)
 
 		mReceipt := ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true)
 		mReceipt["timestamp"] = block.Time()

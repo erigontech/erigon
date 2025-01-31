@@ -1,22 +1,36 @@
 ChangeLog
 ---------
 
-## v3.0.0-beta1 (in development)
+## v3.0.0-beta2 (in development)
+
+### Breaking changes
+- Reverts Optimize gas by default in eth_createAccessList #8337  
+
+### Improvements:
+
+- `eth_estimateGas`: StateOverrides and HistoricalBlocks support
+
+### TODO
+
+- milestone: https://github.com/erigontech/erigon/milestone/28
+- Known problem:
+    - external CL support
+    - `erigon_getLatestLogs` not implemented
+
+### Acknowledgements:
+
+## v3.0.0-beta1
 
 ### Breaking changes
 
 - Bor chains: enable our internal Consensus Layer by default (name: Astrid)
-    - The process should auto upgrade - in which case you may find that it starts creating new snapshots for checkpoints and milestones.
-    - This may however fail, as there are a number of potential edge cases.  If this happens the process will likely stop with a failure message.
-    - In this situation you will need to do a clean sync, in which case the complete snapshot set will be downloaded and astrid will sync.
+    - The process should auto upgrade - in which case you may find that it starts creating new snapshots for checkpoints
+      and milestones.
+    - This may however fail, as there are a number of potential edge cases. If this happens the process will likely stop
+      with a failure message.
+    - In this situation you will need to do a clean sync, in which case the complete snapshot set will be downloaded and
+      astrid will sync.
     - If you want to prevent this and retain the old behaviour start erigon with --polygon.sync=false
-
-### TODO
-
-- milestone: https://github.com/erigontech/erigon/milestone/5
-- Known problem:
-    - external CL support
-    - `erigon_getLatestLogs` not implemented
 
 ### Acknowledgements:
 
@@ -24,13 +38,14 @@ ChangeLog
 
 ### Improvements:
 
-- Faster eth_getTransactionReceipt with "txn-granularity cache" in https://github.com/erigontech/erigon/pull/13134 and "executing only 1 txn"  https://github.com/erigontech/erigon/pull/12424
+- Faster eth_getTransactionReceipt with "txn-granularity cache" in https://github.com/erigontech/erigon/pull/13134 and "
+  executing only 1 txn"  https://github.com/erigontech/erigon/pull/12424
 - Return PrunedError when trying to read unavailable historical data in https://github.com/erigontech/erigon/pull/13014
 
 ### Fixes:
 
-- Fix trace_block returning "insufficient funds" (Issues #12525 and similar) with standalone rpcdaemon in https://github.com/erigontech/erigon/pull/13129
-
+- Fix trace_block returning "insufficient funds" (Issues #12525 and similar) with standalone rpcdaemon
+  in https://github.com/erigontech/erigon/pull/13129
 
 ### Acknowledgements:
 

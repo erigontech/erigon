@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/txnprovider/shutter/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 )
 
 const (

@@ -31,6 +31,8 @@ import (
 	"github.com/erigontech/erigon/opstack"
 )
 
+var ErrNilToFieldTx = errors.New("Tx: field 'To' can not be 'nil'")
+
 type BlobTx struct {
 	DynamicFeeTransaction
 	MaxFeePerBlobGas    *uint256.Int
@@ -267,6 +269,9 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 }
 
 func (stx *BlobTx) EncodeRLP(w io.Writer) error {
+	if stx.To == nil {
+		return ErrNilToFieldTx
+	}
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
@@ -288,6 +293,9 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 }
 
 func (stx *BlobTx) MarshalBinary(w io.Writer) error {
+	if stx.To == nil {
+		return ErrNilToFieldTx
+	}
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
