@@ -138,46 +138,53 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		if err := customTraceBatch(ctx, cfg, ttx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
 			return err
 		}
+
 		doms.SetTx(tx)
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
 
-		logEvery := time.NewTicker(10 * time.Second)
-		defer logEvery.Stop()
+		{ //assert
+			if err := AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
+				return err
+			}
 
-		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
-		//fromTxNum, err := txNumsReader.Min(tx, fromBlock)
-		fromTxNum := uint64(2)
-		if err != nil {
-			return err
-		}
-		if toBlock > 0 {
-			toBlock-- // [fromBlock,toBlock)
-		}
-		toTxNum := tx.(kv.TemporalTx).(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
-		prevCumGasUsed := -1
-		prevBN := uint64(1)
-		for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
-			cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(ttx, txNum)
+			logEvery := time.NewTicker(10 * time.Second)
+			defer logEvery.Stop()
+
+			txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
+			//fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+			fromTxNum := uint64(2)
 			if err != nil {
 				return err
 			}
-			blockNum := badFoundBlockNum(ttx, prevBN-1, txNumsReader, txNum)
-			//fmt.Printf("[dbg.integrity] cumGasUsed=%d, txNum=%d, blockNum=%d, prevCumGasUsed=%d\n", cumGasUsed, txNum, blockNum, prevCumGasUsed)
-			if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
-				err := fmt.Errorf("bad receipt at txnum: %d, block: %d, cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, cumGasUsed, prevCumGasUsed)
-				panic(err)
+			if toBlock > 0 {
+				toBlock-- // [fromBlock,toBlock)
 			}
-			prevCumGasUsed = int(cumGasUsed)
-			prevBN = blockNum
+			toTxNum := tx.(kv.TemporalTx).(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
+			prevCumGasUsed := -1
+			prevBN := uint64(1)
+			for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
+				cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(ttx, txNum)
+				if err != nil {
+					return err
+				}
+				blockNum := badFoundBlockNum(ttx, prevBN-1, txNumsReader, txNum)
+				//fmt.Printf("[dbg.integrity] cumGasUsed=%d, txNum=%d, blockNum=%d, prevCumGasUsed=%d\n", cumGasUsed, txNum, blockNum, prevCumGasUsed)
+				if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
+					err := fmt.Errorf("bad receipt at txnum: %d, block: %d, cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, cumGasUsed, prevCumGasUsed)
+					panic(err)
+				}
+				prevCumGasUsed = int(cumGasUsed)
+				prevBN = blockNum
 
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%dk/%dk", txNum/1_000, toTxNum/1_000))
-			default:
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%dk/%dk", txNum/1_000, toTxNum/1_000))
+				default:
+				}
 			}
 		}
 
@@ -214,6 +221,47 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		return nil
 	}); err != nil {
 		return err
+	}
+	return nil
+}
+
+func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) error {
+	logEvery := time.NewTicker(10 * time.Second)
+	defer logEvery.Stop()
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
+	fromTxNum := uint64(2)
+	//fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+	//if err != nil {
+	//	return err
+	//}
+	if toBlock > 0 {
+		toBlock-- // [fromBlock,toBlock)
+	}
+	toTxNum := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
+	prevCumGasUsed := -1
+	prevBN := uint64(1)
+	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
+		cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
+		if err != nil {
+			return err
+		}
+		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
+		//fmt.Printf("[dbg.integrity] cumGasUsed=%d, txNum=%d, blockNum=%d, prevCumGasUsed=%d\n", cumGasUsed, txNum, blockNum, prevCumGasUsed)
+		if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
+			err := fmt.Errorf("bad receipt at txnum: %d, block: %d, cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, cumGasUsed, prevCumGasUsed)
+			panic(err)
+		}
+		prevCumGasUsed = int(cumGasUsed)
+		prevBN = blockNum
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%dk/%dk", txNum/1_000, toTxNum/1_000))
+		default:
+		}
 	}
 	return nil
 }
