@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/crypto"
 )
 
@@ -139,7 +140,7 @@ func TestV3_PBKDF2_1(t *testing.T) {
 var testsSubmodule = filepath.Join("..", "..", "tests", "testdata", "KeyStoreTests")
 
 func skipIfSubmoduleMissing(t *testing.T) {
-	if !common.FileExist(testsSubmodule) {
+	if ok, _ := dir.FileExist(testsSubmodule); !ok {
 		t.Skipf("can't find JSON tests from submodule at %s", testsSubmodule)
 	}
 }
