@@ -38,11 +38,11 @@ func UnwindZkSMT(ctx context.Context, logPrefix string, from, to uint64, tx kv.R
 		eridb.OpenBatch(quit)
 	}
 
-	changesGetter := NewChangesGetter(tx)
-	if err := changesGetter.openChangesGetter(from); err != nil {
+	cg := NewChangesGetter(tx)
+	if err := cg.openChangesGetter(from); err != nil {
 		return trie.EmptyRoot, fmt.Errorf("OpenChangesGetter: %w", err)
 	}
-	defer changesGetter.closeChangesGetter()
+	defer cg.closeChangesGetter()
 
 	total := uint64(math.Abs(float64(from) - float64(to) + 1))
 	progressChan, stopPrinter := zk.ProgressPrinter(fmt.Sprintf("[%s] Progress unwinding", logPrefix), total, quiet)
@@ -58,7 +58,7 @@ func UnwindZkSMT(ctx context.Context, logPrefix string, from, to uint64, tx kv.R
 		default:
 		}
 
-		if err := changesGetter.getChangesForBlock(i); err != nil {
+		if err := cg.getChangesForBlock(i); err != nil {
 			return trie.EmptyRoot, fmt.Errorf("getChangesForBlock: %w", err)
 		}
 
@@ -67,7 +67,7 @@ func UnwindZkSMT(ctx context.Context, logPrefix string, from, to uint64, tx kv.R
 
 	stopPrinter()
 
-	if _, _, err := dbSmt.SetStorage(ctx, logPrefix, changesGetter.accChanges, changesGetter.codeChanges, changesGetter.storageChanges); err != nil {
+	if _, _, err := dbSmt.SetStorage(ctx, logPrefix, cg.accChanges, cg.codeChanges, cg.storageChanges); err != nil {
 		return trie.EmptyRoot, err
 	}
 

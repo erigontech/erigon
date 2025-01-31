@@ -61,13 +61,14 @@ func (s *SMT) GenerateFromKVBulk(ctx context.Context, logPrefix string, nodeKeys
 
 	var buildSmtLoopErr error
 	var rootNode *SmtNode
+	var maxDepth int
 	tempTreeBuildStart := time.Now()
 	leafValueMap := sync.Map{}
 	accountValuesReadChan := make(chan *utils.NodeValue8, 1024)
 	go func() {
 		defer wg.Done()
 		defer deletesWorker.Stop()
-		rootNode, buildSmtLoopErr = runBuildSmtLoop(s, logPrefix, nodeKeys, &leafValueMap, deletesWorker, accountValuesReadChan)
+		rootNode, maxDepth, buildSmtLoopErr = runBuildSmtLoop(s, logPrefix, nodeKeys, &leafValueMap, deletesWorker, accountValuesReadChan)
 	}()
 
 	// startBuildSmtLoopDbCompanionLoop is blocking operation. It continue only when the last result is saved
@@ -124,10 +125,14 @@ func (s *SMT) GenerateFromKVBulk(ctx context.Context, logPrefix string, nodeKeys
 		return [4]uint64{}, err
 	}
 
+	if err := s.updateDepth(maxDepth); err != nil {
+		return [4]uint64{}, err
+	}
+
 	return finalRoot, nil
 }
 
-func runBuildSmtLoop(s *SMT, logPrefix string, nodeKeys []utils.NodeKey, leafValueMap *sync.Map, deletesWorker *utils.Worker, accountValuesReadChan <-chan *utils.NodeValue8) (*SmtNode, error) {
+func runBuildSmtLoop(s *SMT, logPrefix string, nodeKeys []utils.NodeKey, leafValueMap *sync.Map, deletesWorker *utils.Worker, accountValuesReadChan <-chan *utils.NodeValue8) (*SmtNode, int, error) {
 	totalKeysCount := len(nodeKeys)
 	insertedKeysCount := uint64(0)
 	maxReachedLevel := 0
@@ -148,7 +153,7 @@ func runBuildSmtLoop(s *SMT, logPrefix string, nodeKeys []utils.NodeKey, leafVal
 		keys := k.GetPath()
 		vPointer := <-accountValuesReadChan
 		if vPointer == nil {
-			return nil, fmt.Errorf("the actual error is returned by main DB thread")
+			return nil, 0, fmt.Errorf("the actual error is returned by main DB thread")
 		}
 		v := *vPointer
 		leafValueMap.Store(k, &v)
@@ -202,7 +207,7 @@ func runBuildSmtLoop(s *SMT, logPrefix string, nodeKeys []utils.NodeKey, leafVal
 			//sanity check - new leaf should be on the right side
 			//otherwise something went wrong
 			if leaf0.rKey[level2] != 0 || keys[level2+level] != 1 {
-				return nil, fmt.Errorf(
+				return nil, 0, fmt.Errorf(
 					"leaf insert error. new leaf should be on the right of the old, oldLeaf: %v, newLeaf: %v",
 					append(keys[:level+1], leaf0.rKey[level2:]...),
 					keys,
@@ -264,7 +269,7 @@ func runBuildSmtLoop(s *SMT, logPrefix string, nodeKeys []utils.NodeKey, leafVal
 			// this is case for 1 leaf inserted to the left of the root node
 			if len(siblings) == 0 && keys[0] == 0 {
 				if upperNode.node0 != nil {
-					return nil, fmt.Errorf("tried to override left node")
+					return nil, 0, fmt.Errorf("tried to override left node")
 				}
 				upperNode.node0 = newNode
 			} else {
@@ -273,7 +278,7 @@ func runBuildSmtLoop(s *SMT, logPrefix string, nodeKeys []utils.NodeKey, leafVal
 				//the new leaf should be on the right side
 				//otherwise something went wrong
 				if upperNode.node1 != nil || keys[level] != 1 {
-					return nil, fmt.Errorf(
+					return nil, 0, fmt.Errorf(
 						"leaf insert error. new should be on the right of the found node, foundNode: %v, newLeafKey: %v",
 						upperNode.node1,
 						keys,
@@ -318,9 +323,7 @@ func runBuildSmtLoop(s *SMT, logPrefix string, nodeKeys []utils.NodeKey, leafVal
 		progressChan <- uint64(totalKeysCount) + insertedKeysCount
 	}
 
-	s.updateDepth(maxReachedLevel)
-
-	return &rootNode, nil
+	return &rootNode, maxReachedLevel, nil
 }
 
 func startBuildSmtLoopDbCompanionLoop(s *SMT, nodeKeys []utils.NodeKey, jobResultsChannel chan utils.JobResult, accountValuesReadChan chan *utils.NodeValue8) error {

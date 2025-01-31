@@ -32,6 +32,9 @@ const TableAccountValues = "HermezSmtAccountValues"
 const TableMetadata = "HermezSmtMetadata"
 const TableHashKey = "HermezSmtHashKey"
 
+const MetaLastRoot = "lastRoot"
+const MetaDepth = "depth"
+
 var HermezSmtTables = []string{TableSmt, TableStats, TableAccountValues, TableMetadata, TableHashKey}
 
 type EriDb struct {
@@ -219,7 +222,7 @@ func (m *EriDb) RollbackBatch() {
 }
 
 func (m *EriRoDb) GetLastRoot() (*big.Int, error) {
-	data, err := m.kvTxRo.GetOne(TableStats, []byte("lastRoot"))
+	data, err := m.kvTxRo.GetOne(TableStats, []byte(MetaLastRoot))
 	if err != nil {
 		return big.NewInt(0), err
 	}
@@ -233,11 +236,11 @@ func (m *EriRoDb) GetLastRoot() (*big.Int, error) {
 
 func (m *EriDb) SetLastRoot(r *big.Int) error {
 	v := utils.ConvertBigIntToHex(r)
-	return m.tx.Put(TableStats, []byte("lastRoot"), []byte(v))
+	return m.tx.Put(TableStats, []byte(MetaLastRoot), []byte(v))
 }
 
 func (m *EriRoDb) GetDepth() (uint8, error) {
-	data, err := m.kvTxRo.GetOne(TableStats, []byte("depth"))
+	data, err := m.kvTxRo.GetOne(TableStats, []byte(MetaDepth))
 	if err != nil {
 		return 0, err
 	}
@@ -250,7 +253,7 @@ func (m *EriRoDb) GetDepth() (uint8, error) {
 }
 
 func (m *EriDb) SetDepth(depth uint8) error {
-	return m.tx.Put(TableStats, []byte("lastRoot"), []byte{depth})
+	return m.tx.Put(TableStats, []byte(MetaDepth), []byte{depth})
 }
 
 func (m *EriRoDb) Get(key utils.NodeKey) (utils.NodeValue12, error) {
