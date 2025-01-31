@@ -217,7 +217,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			ibs.SoftFinalise()
-			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
+			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex).Copy()
 		}
 	}
 }
@@ -333,9 +333,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 			return outputTxNum, false, txTask.Error
 		}
 
-		if txTask.TxIndex >= 0 && !txTask.Final {
-			txTask.CreateReceipt(tx)
-		}
+		txTask.CreateReceipt(tx)
 		if err := consumer.Reduce(txTask, tx); err != nil {
 			return outputTxNum, false, err
 		}
