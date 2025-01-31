@@ -59,7 +59,8 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 		receiptProgress := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
 		accProgress := ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
 		if accProgress != receiptProgress {
-			log.Warn("[dbg] ReceiptDomain is behind AccountDomain", "accProgress", accProgress, "receiptProgress", receiptProgress)
+			err := fmt.Errorf("[integrity] ReceiptDomain=%d is behind AccountDomain=%d", accProgress, receiptProgress)
+			log.Warn(err.Error())
 		}
 	}
 
