@@ -135,7 +135,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
 		//fromTxNum, err := txNumsReader.Min(tx, fromBlock)
-		fromTxNum := uint64(0)
+		fromTxNum := uint64(1)
 		if err != nil {
 			return err
 		}
