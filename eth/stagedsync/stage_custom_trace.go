@@ -140,7 +140,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		}
 
 		{ //assert
-			if err := AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
+			if err := AssertReceipts(ctx, cfg, ttx, fromBlock); err != nil {
 				return err
 			}
 		}
@@ -151,7 +151,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		}
 
 		{ //assert
-			if err := AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
+			if err := AssertReceipts(ctx, cfg, ttx, toBlock); err != nil {
 				return err
 			}
 		}
@@ -193,7 +193,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	return nil
 }
 
-func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) error {
+func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, toBlock uint64) error {
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
