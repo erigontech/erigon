@@ -143,10 +143,15 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			toBlock-- // [fromBlock,toBlock)
 		}
 		toTxNum := tx.(kv.TemporalTx).(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
-		//toTxNum, err := txNumsReader.Max(tx, toBlock)
-		//if err != nil {
-		//	return err
-		//}
+		{
+			_toTxNum, err := txNumsReader.Max(tx, toBlock)
+			if err != nil {
+				return err
+			}
+			if _toTxNum != toTxNum {
+				log.Warn("[dbg] toBlock", "toBlock", toBlock, "expectToTxNum", _toTxNum, "actualToTxNum", toTxNum)
+			}
+		}
 		prevCumGasUsed := -1
 		prevBN := uint64(1)
 		for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
