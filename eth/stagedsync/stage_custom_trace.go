@@ -251,9 +251,10 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 
 	var cumulativeBlobGasUsedInBlock uint64
 
-	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
-	/// maybe need startTxNum/endTxNum
-	var prevTxNumLog = fromBlock
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
+	fromTxNum, _ := txNumsReader.Min(tx, fromBlock)
+	prevTxNumLog := fromTxNum
+
 	var m runtime.MemStats
 	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
 		NewTracer: func() exec3.GenericTracer { return nil },
@@ -291,6 +292,11 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				//		fmt.Printf("[dbg.exec] append: %d, %d, 0\n", txTask.BlockNum, txTask.TxNum)
 				//	}
 				//}
+
+				if doms.TxNum() < fromTxNum {
+					err := fmt.Errorf("assert: modify too old txnum. doms.TxNum()=%d, rangeStartedFromTxNum=%d", fromTxNum, doms.TxNum(), fromTxNum)
+					panic(err.Error())
+				}
 				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
