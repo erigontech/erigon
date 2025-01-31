@@ -925,3 +925,59 @@ var ArbitrumSupportedChainConfigs = []*Config{
 	ArbitrumDevTestDASChainConfig(),
 	ArbitrumAnytrustGoerliTestnetChainConfig(),
 }
+
+// IsEIP158 returns whether num is either equal to the EIP158 fork block or greater.
+func (c *Config) IsEIP158(num *big.Int) bool {
+	return isBlockForked(c.EIP158Block, num)
+}
+
+// DefaultCacheConfigWithScheme returns a deep copied default cache config with
+// a provided trie node scheme.
+func DefaultCacheConfigWithScheme(scheme string) *CacheConfig {
+	config := *defaultCacheConfig
+	config.StateScheme = scheme
+	return &config
+}
+
+// defaultCacheConfig are the default caching values if none are specified by the
+// user (also used during testing).
+var defaultCacheConfig = &CacheConfig{
+	// Arbitrum Config Options
+	TriesInMemory:                      128,
+	TrieRetention:                      30 * time.Minute,
+	MaxNumberOfBlocksToSkipStateSaving: 0,
+	MaxAmountOfGasToSkipStateSaving:    0,
+
+	TrieCleanLimit: 256,
+	TrieDirtyLimit: 256,
+	TrieTimeLimit:  5 * time.Minute,
+	SnapshotLimit:  256,
+	SnapshotWait:   true,
+	// StateScheme:    rawdb.HashScheme,
+}
+
+// CacheConfig contains the configuration values for the trie database
+// and state snapshot these are resident in a blockchain.
+type CacheConfig struct {
+	TrieCleanLimit      int           // Memory allowance (MB) to use for caching trie nodes in memory
+	TrieCleanNoPrefetch bool          // Whether to disable heuristic state prefetching for followup blocks
+	TrieDirtyLimit      int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
+	TrieDirtyDisabled   bool          // Whether to disable trie write caching and GC altogether (archive node)
+	TrieTimeLimit       time.Duration // Time limit after which to flush the current in-memory trie to disk
+	SnapshotLimit       int           // Memory allowance (MB) to use for caching snapshot entries in memory
+	Preimages           bool          // Whether to store preimage of trie key to the disk
+	StateHistory        uint64        // Number of blocks from head whose state histories are reserved.
+	StateScheme         string        // Scheme used to store ethereum states and merkle tree nodes on top
+
+	SnapshotRestoreMaxGas uint64 // Rollback up to this much gas to restore snapshot (otherwise snapshot recalculated from nothing)
+
+	// Arbitrum: configure GC window
+	TriesInMemory uint64        // Height difference before which a trie may not be garbage-collected
+	TrieRetention time.Duration // Time limit before which a trie may not be garbage-collected
+
+	MaxNumberOfBlocksToSkipStateSaving uint32
+	MaxAmountOfGasToSkipStateSaving    uint64
+
+	SnapshotNoBuild bool // Whether the background generation is allowed
+	SnapshotWait    bool // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
+}
