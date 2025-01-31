@@ -8,6 +8,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
@@ -43,10 +44,12 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	if toBlock > 0 {
 		toBlock-- // [fromBlock,toBlock)
 	}
-	toTxNum, err := txNumsReader.Max(tx, toBlock)
-	if err != nil {
-		return err
-	}
+
+	toTxNum := tx.(kv.TemporalTx).(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
+	//toTxNum, err := txNumsReader.Max(tx, toBlock)
+	//if err != nil {
+	//	return err
+	//}
 	prevCumGasUsed := -1
 	prevBN := uint64(1)
 	log.Info("[integrity] ReceiptsNoDuplicates starting", "fromTxNum", fromTxNum, "toTxNum", toTxNum)
