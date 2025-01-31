@@ -46,13 +46,8 @@ func NewNetAPIImpl(eth rpchelper.ApiBackend) *NetAPIImpl {
 }
 
 // Listening implements net_listening. Returns true if client is actively listening for network connections.
+// If we can get peers info, it means the network interface is up and listening
 func (api *NetAPIImpl) Listening(ctx context.Context) (bool, error) {
-	if api.ethBackend == nil {
-		// We're running in --datadir mode or otherwise cannot get the backend
-		return false, fmt.Errorf(NotAvailableChainData, "net_listening")
-	}
-
-	// If we can get peers info, it means the network interface is up and listening
 	_, err := api.ethBackend.Peers(ctx)
 	if err != nil {
 		return false, nil
