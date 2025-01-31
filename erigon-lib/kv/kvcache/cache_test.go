@@ -192,7 +192,7 @@ func TestAPI(t *testing.T) {
 			go func(out chan []byte) {
 				require.NoError(db.View(context.Background(), func(tx kv.Tx) error {
 					if expectTxnID != tx.ViewID() {
-						panic(fmt.Sprintf("epxected: %d, got: %d", expectTxnID, tx.ViewID()))
+						panic(fmt.Sprintf("expected: %d, got: %d", expectTxnID, tx.ViewID()))
 					}
 					wg.Done()
 					cacheView, err := c.View(context.Background(), tx)
