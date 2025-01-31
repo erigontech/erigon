@@ -329,6 +329,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
+	outputTxNum = outputTxNumIn
 	for rwsIt.HasNext(outputTxNum) {
 		txTask := rwsIt.PopNext()
 		outputTxNum = txTask.TxNum
