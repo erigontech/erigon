@@ -326,6 +326,9 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 	outputTxNum = outputTxNumIn
 	for rwsIt.HasNext(outputTxNum) {
 		txTask := rwsIt.PopNext()
+		if txTask.Final {
+			log.Warn("[dbg] dbg3, final tx", "block", txTask.BlockNum)
+		}
 		outputTxNum++
 		stopedAtBlockEnd = txTask.Final
 
@@ -461,6 +464,9 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				if err != nil {
 					return err
 				}
+			}
+			if txTask.Final {
+				log.Warn("[dbg] dbg2, final tx", "block", txTask.BlockNum)
 			}
 			in.Add(ctx, txTask)
 			inputTxNum++
