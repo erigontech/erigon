@@ -166,7 +166,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
-				log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%dk/%dk", blockNum/1_000, toBlock/1_000))
+				log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%dk/%dk", txNum/1_000, toTxNum/1_000))
 			default:
 			}
 		}
