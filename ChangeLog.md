@@ -9,7 +9,7 @@ ChangeLog
 
 ### TODO
 
-- milestone: https://github.com/erigontech/erigon/milestone/5
+- milestone: https://github.com/erigontech/erigon/milestone/28
 - Known problem:
     - external CL support
     - `erigon_getLatestLogs` not implemented
