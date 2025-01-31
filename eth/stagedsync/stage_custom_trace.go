@@ -157,9 +157,6 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			//fmt.Printf("[dbg.integrity] cumGasUsed=%d, txNum=%d, blockNum=%d, prevCumGasUsed=%d\n", cumGasUsed, txNum, blockNum, prevCumGasUsed)
 			if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
 				err := fmt.Errorf("bad receipt at txnum: %d, block: %d, cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, cumGasUsed, prevCumGasUsed)
-				_min, _ := txNumsReader.Min(tx, blockNum)
-				_max, _ := txNumsReader.Max(tx, blockNum)
-				err = fmt.Errorf("%w, blockMinTxnum=%d, blockMaxTxNum=%d", err, _min, _max)
 				panic(err)
 			}
 			prevCumGasUsed = int(cumGasUsed)
