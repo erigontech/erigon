@@ -54,7 +54,7 @@ func NewService(
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(logger, maxPeers, sentryClient, statusDataProvider.GetStatusData)
-	execution := newExecutionClient(executionClient)
+	execution := newExecutionClient(logger, executionClient)
 
 	signaturesCache, err := lru.NewARC[common.Hash, common.Address](InMemorySignatures)
 	if err != nil {
