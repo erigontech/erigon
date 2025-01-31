@@ -1884,6 +1884,13 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
+var (
+	timeTotalCum    time.Duration
+	timeSpentFold   time.Duration
+	timeSpentUnf    time.Duration
+	perfCountersCum map[string]time.Duration
+)
+
 // Generate the block witness. This works by loading each key from the list of updates (they are not really updates since we won't modify the trie,
 // but currently need to be defined like that for the fold/unfold algorithm) into the grid and traversing the grid to convert it into `trie.Trie`.
 // All the individual tries are combined to create the final witness trie.
@@ -2027,15 +2034,21 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
+			start := time.Now()
 			if err := hph.fold(); err != nil {
 				return fmt.Errorf("fold: %w", err)
 			}
+			t := time.Since(start)
+			timeSpentFold += t
 		}
 		// Now unfold until we step on an empty cell
 		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
+			start := time.Now()
 			if err := hph.unfold(hashedKey, unfolding); err != nil {
 				return fmt.Errorf("unfold: %w", err)
 			}
+			t := time.Since(start)
+			timeSpentUnf += t
 		}
 
 		if stateUpdate == nil {
@@ -2074,6 +2087,37 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		if err := hph.fold(); err != nil {
 			return nil, fmt.Errorf("final fold: %w", err)
 		}
+	}
+	total := time.Since(start)
+	timeTotalCum += total
+	perfCounters := hph.ctx.PerfCounters()
+	if perfCountersCum == nil {
+		perfCountersCum = map[string]time.Duration{}
+	}
+	for k, v := range perfCounters {
+		perfCountersCum[k+"_cum"] += v
+	}
+	perfCountersCum["fold_cum"] += timeSpentFold
+	perfCountersCum["unfold_cum"] += timeSpentUnf
+	fmt.Println(
+		"total", total, "total_cum", timeTotalCum,
+		"\nfold", timeSpentFold,
+		"unfold", timeSpentUnf,
+		"\n", perfCounters,
+		"\n", perfCountersCum)
+	timeSpentFold, timeSpentUnf = 0, 0
+	hph.ctx.ResetPerfCounters()
+	cum_keys := make([]string, 0, len(perfCountersCum))
+	for k := range perfCountersCum {
+		cum_keys = append(cum_keys, k)
+	}
+	sort.Strings(cum_keys)
+	perfCountersPercents := map[string]float64{}
+	for k, v := range perfCountersCum {
+		perfCountersPercents[k] = 100.0 * float64(v) / float64(timeTotalCum)
+	}
+	for _, k := range cum_keys {
+		fmt.Printf("%6.2f%% %s\n", perfCountersPercents[k], k)
 	}
 
 	rootHash, err = hph.RootHash()
@@ -2442,7 +2486,6 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		if hph.ctx == nil {
 			panic("nil ctx")
 		}
-
 		update, err := hph.ctx.Account(hph.root.accountAddr[:hph.root.accountAddrLen])
 		if err != nil {
 			return err
