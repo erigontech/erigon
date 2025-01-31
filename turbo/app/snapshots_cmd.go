@@ -529,7 +529,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen().(kv.TemporalRwDB)
+	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -542,6 +542,12 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 	defer clean()
 
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
 	blockReader, _ := blockRetire.IO()
 	for _, chk := range integrity.AllChecks {
 		if requestedCheck != "" && requestedCheck != chk {
@@ -553,23 +559,23 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.Blocks:
-			if err := integrity.SnapBlocksRead(ctx, chainDB, blockReader, 0, 0, failFast); err != nil {
+			if err := integrity.SnapBlocksRead(ctx, db, blockReader, 0, 0, failFast); err != nil {
 				return err
 			}
 		case integrity.InvertedIndex:
-			if err := integrity.E3EfFiles(ctx, chainDB, agg, failFast, fromStep); err != nil {
+			if err := integrity.E3EfFiles(ctx, db, agg, failFast, fromStep); err != nil {
 				return err
 			}
 		case integrity.HistoryNoSystemTxs:
-			if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, blockReader, agg); err != nil {
+			if err := integrity.E3HistoryNoSystemTxs(ctx, db, blockReader, agg); err != nil {
 				return err
 			}
 		case integrity.NoBorEventGaps:
-			if err := integrity.NoGapsInBorEvents(ctx, chainDB, blockReader, 0, 0, failFast); err != nil {
+			if err := integrity.NoGapsInBorEvents(ctx, db, blockReader, 0, 0, failFast); err != nil {
 				return err
 			}
 		case integrity.ReceiptsNoDups:
-			if err := integrity.ReceiptsNoDuplicates(ctx, chainDB, blockReader, failFast); err != nil {
+			if err := integrity.ReceiptsNoDuplicates(ctx, db, blockReader, failFast); err != nil {
 				return err
 			}
 

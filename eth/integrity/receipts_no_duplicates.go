@@ -50,6 +50,7 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	}
 	prevCumGasUsed := -1
 	prevBN := uint64(0)
+
 	var cumGasUsed uint64
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
 		cumGasUsed, _, _, err = rawtemporaldb.ReceiptAsOf(tx, txNum)
