@@ -32,11 +32,11 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-
-	"github.com/erigontech/erigon-lib/log/v3"
+	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -124,6 +124,8 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		WithTableCfg(bucketsConfig).
 		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
+		Flags(func(f uint) uint { return f ^ mdbx1.Durable | mdbx1.SafeNoSync }).
+		SyncPeriod(2 * time.Second).
 		DirtySpace(uint64(64 * datasize.MB)).
 		Open(ctx)
 	if err != nil {

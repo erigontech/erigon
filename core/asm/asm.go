@@ -68,7 +68,7 @@ func (it *instructionIterator) Next() bool {
 	}
 
 	it.op = vm.OpCode(it.code[it.pc])
-	if it.op.IsPush() {
+	if it.op.IsPushWithImmediateArgs() {
 		a := uint64(it.op) - uint64(vm.PUSH1) + 1
 		u := it.pc + 1 + a
 		if uint64(len(it.code)) <= it.pc || uint64(len(it.code)) < u {

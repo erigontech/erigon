@@ -86,10 +86,12 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 	}
 
 	// [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
-	if msg.Index >= b.beaconCfg.MaxBlobsPerBlock {
+	blockVersion := b.beaconCfg.GetCurrentStateVersion(msg.SignedBlockHeader.Header.Slot / b.beaconCfg.SlotsPerEpoch)
+	maxBlobsPerBlock := b.beaconCfg.MaxBlobsPerBlockByVersion(blockVersion)
+	if msg.Index >= maxBlobsPerBlock {
 		return errors.New("blob index out of range")
 	}
-	sidecarSubnetIndex := msg.Index % b.beaconCfg.MaxBlobsPerBlock
+	sidecarSubnetIndex := msg.Index % maxBlobsPerBlock
 	if sidecarSubnetIndex != *subnetId {
 		return ErrBlobIndexOutOfRange
 	}

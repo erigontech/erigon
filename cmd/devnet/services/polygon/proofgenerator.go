@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
 var ErrTokenIndexOutOfRange = errors.New("index is grater than the number of tokens in transaction")
@@ -122,7 +122,7 @@ func (pg *ProofGenerator) getChainBlockInfo(ctx context.Context, burnTxHash libc
 	var wg sync.WaitGroup
 
 	var lastChild *big.Int
-	var burnTransaction *jsonrpc.RPCTransaction
+	var burnTransaction *ethapi.RPCTransaction
 	var err [2]error
 
 	// err group

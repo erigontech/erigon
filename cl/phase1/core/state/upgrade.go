@@ -155,8 +155,7 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 	// Update the state root cache
 	b.SetVersion(clparams.ElectraVersion)
 
-	//earliestExitEpoch := ComputeActivationExitEpoch(b.BeaconConfig(), epoch)
-	earliestExitEpoch := epoch // for Mekong testnet
+	earliestExitEpoch := ComputeActivationExitEpoch(b.BeaconConfig(), epoch)
 	b.ValidatorSet().Range(func(i int, v solid.Validator, _ int) bool {
 		if v.ExitEpoch() != b.BeaconConfig().FarFutureEpoch {
 			if v.ExitEpoch() > earliestExitEpoch {

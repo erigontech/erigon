@@ -31,6 +31,7 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/trie"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/sha3"
 
@@ -98,7 +99,7 @@ type SharedDomains struct {
 	storage *btree2.Map[string, dataWithPrevStep]
 
 	domainWriters [kv.DomainLen]*domainBufferedWriter
-	iiWriters     map[kv.InvertedIdx]*invertedIndexBufferedWriter
+	iiWriters     []*invertedIndexBufferedWriter
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
@@ -114,12 +115,12 @@ type HasAgg interface {
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
 	sd := &SharedDomains{
-		logger:    logger,
-		storage:   btree2.NewMap[string, dataWithPrevStep](128),
-		iiWriters: map[kv.InvertedIdx]*invertedIndexBufferedWriter{},
+		logger:  logger,
+		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
 	}
 	sd.SetTx(tx)
+	sd.iiWriters = make([]*invertedIndexBufferedWriter, len(sd.aggTx.iis))
 
 	sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
 
@@ -160,6 +161,10 @@ func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blo
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
 	sd.pastChangesAccumulator[toStringZeroCopy(key)] = acc
+}
+
+func (sd *SharedDomains) GetCommitmentContext() *SharedDomainsCommitmentContext {
+	return sd.sdCtx
 }
 
 func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]DomainEntryDiff, bool, error) {
@@ -662,8 +667,10 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
-	if writer, ok := sd.iiWriters[table]; ok {
-		return writer.Add(key)
+	for _, writer := range sd.iiWriters {
+		if writer.name == table {
+			return writer.Add(key)
+		}
 	}
 	panic(fmt.Errorf("unknown index %s", table))
 }
@@ -810,7 +817,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 			case FILE_CURSOR:
-				indexList := sd.aggTx.d[kv.StorageDomain].d.IndexList
+				indexList := sd.aggTx.d[kv.StorageDomain].d.AccessorList
 				if indexList&AccessorBTree != 0 {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
@@ -1308,6 +1315,15 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	default:
 		panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
+}
+
+func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expectedRoot []byte, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
+	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	if ok {
+		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, nil, expectedRoot, logPrefix)
+	}
+
+	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 }
 
 // Evaluates commitment for processed state.

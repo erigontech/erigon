@@ -67,7 +67,8 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 		return err
 	}
 
-	return ethutils.ValidateBlobs(block.BlobGasUsed, cfg.MaxBlobGasPerBlock, cfg.MaxBlobsPerBlock, expectedBlobHashes, &transactions)
+	maxBlobsPerBlock := cfg.MaxBlobsPerBlockByVersion(block.Version())
+	return ethutils.ValidateBlobs(block.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
 }
 
 func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint64) {

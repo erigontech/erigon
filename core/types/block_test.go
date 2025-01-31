@@ -595,12 +595,16 @@ func TestCopyTxs(t *testing.T) {
 
 	populateBlobTxs()
 	for _, txn := range dummyBlobTxs {
-		txs = append(txs, txn)
+		if txn.To != nil { // BlobTx To field can not be nil
+			txs = append(txs, txn)
+		}
 	}
 
 	populateBlobWrapperTxs()
 	for _, txn := range dummyBlobWrapperTxs {
-		txs = append(txs, txn)
+		if txn.Tx.To != nil {
+			txs = append(txs, txn)
+		}
 	}
 
 	copies := CopyTxs(txs)

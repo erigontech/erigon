@@ -48,7 +48,7 @@ import (
 const API_LEVEL = 8
 
 type TransactionsWithReceipts struct {
-	Txs       []*RPCTransaction        `json:"txs"`
+	Txs       []*ethapi.RPCTransaction `json:"txs"`
 	Receipts  []map[string]interface{} `json:"receipts"`
 	FirstPage bool                     `json:"firstPage"`
 	LastPage  bool                     `json:"lastPage"`

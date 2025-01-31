@@ -17,7 +17,9 @@
 package state
 
 import (
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 )
 
@@ -29,41 +31,52 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 	if err != nil {
 		return err
 	}
-	err = b.copyCachesInto(bs)
+	err = bs.reinitCaches()
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (b *CachingBeaconState) copyCachesInto(bs *CachingBeaconState) error {
-	if b.Version() == clparams.Phase0Version {
+func (bs *CachingBeaconState) reinitCaches() error {
+	if bs.Version() == clparams.Phase0Version {
 		return bs.InitBeaconState()
 	}
 	if bs.publicKeyIndicies == nil {
 		bs.publicKeyIndicies = make(map[[48]byte]uint64)
 	}
+
+	// We regenerate public keys from the copied state to avoid concurrency issues.
 	for k, idx := range bs.publicKeyIndicies {
-		if otherIdx, ok := b.publicKeyIndicies[k]; ok {
-			if idx != otherIdx {
-				delete(bs.publicKeyIndicies, k)
-			}
+		if idx >= uint64(bs.ValidatorSet().Length()) {
+			delete(bs.publicKeyIndicies, k)
 			continue
 		}
-		delete(bs.publicKeyIndicies, k)
+		pk := bs.ValidatorSet().Get(int(idx)).PublicKey()
+		if pk != k {
+			delete(bs.publicKeyIndicies, k)
+		}
 	}
-	for pk, index := range b.publicKeyIndicies {
-		bs.publicKeyIndicies[pk] = index
-	}
-	// Sync caches
-	bs.activeValidatorsCache = copyLRU(bs.activeValidatorsCache, b.activeValidatorsCache)
-	bs.shuffledSetsCache = copyLRU(bs.shuffledSetsCache, b.shuffledSetsCache)
+	bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
+		pk := v.PublicKey()
+		if _, ok := bs.publicKeyIndicies[pk]; ok {
+			return true
+		}
+		bs.publicKeyIndicies[pk] = uint64(idx)
+		return true
+	})
 
-	if b.totalActiveBalanceCache != nil {
-		bs.totalActiveBalanceCache = new(uint64)
-		*bs.totalActiveBalanceCache = *b.totalActiveBalanceCache
-		bs.totalActiveBalanceRootCache = b.totalActiveBalanceRootCache
+	bs.totalActiveBalanceCache = nil
+	bs._refreshActiveBalancesIfNeeded()
+	bs.previousStateRoot = common.Hash{}
+	bs.initCaches()
+	if err := bs._updateProposerIndex(); err != nil {
+		return err
 	}
+	if bs.Version() >= clparams.Phase0Version {
+		return bs._initializeValidatorsPhase0()
+	}
+
 	return nil
 }
 

@@ -23,15 +23,13 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	ethereum "github.com/erigontech/erigon"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
 )
 
 type ETHEstimateGas struct {
@@ -163,8 +161,8 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (lib
 	return result, nil
 }
 
-func (req *requestGenerator) GetTransactionByHash(hash libcommon.Hash) (*jsonrpc.RPCTransaction, error) {
-	var result jsonrpc.RPCTransaction
+func (req *requestGenerator) GetTransactionByHash(hash libcommon.Hash) (*ethapi.RPCTransaction, error) {
+	var result ethapi.RPCTransaction
 
 	if err := req.rpcCall(context.Background(), &result, Methods.ETHGetTransactionByHash, hash); err != nil {
 		return nil, err

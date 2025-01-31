@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
 )
 
 var ErrNotImplemented = errors.New("not implemented")
@@ -52,7 +51,7 @@ func (n NopRequestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) GetTransactionByHash(hash libcommon.Hash) (*jsonrpc.RPCTransaction, error) {
+func (n NopRequestGenerator) GetTransactionByHash(hash libcommon.Hash) (*ethapi.RPCTransaction, error) {
 	return nil, ErrNotImplemented
 }
 

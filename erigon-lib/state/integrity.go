@@ -60,11 +60,8 @@ func (ac *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 		}
 	default:
 		// check the ii
-		if v, ok := ac.iis[name]; ok {
-			err := v.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
-			if err != nil {
-				return err
-			}
+		if v := ac.searchII(name); v != nil {
+			return v.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		}
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}

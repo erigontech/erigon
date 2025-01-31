@@ -55,7 +55,12 @@ var cmdResetState = &cobra.Command{
 		}
 		ctx, _ := common.RootContext()
 		defer db.Close()
-		sn, borSn, agg, _, _, _ := allSnapshots(ctx, db, logger)
+		sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
+		if err != nil {
+			logger.Error("Opening snapshots", "error", err)
+			return
+		}
+
 		defer sn.Close()
 		defer borSn.Close()
 		defer agg.Close()
@@ -138,11 +143,28 @@ func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
-	fmt.Fprintf(w, "blocks: segments=%d, indices=%d\n", snapshots.SegmentsMax(), snapshots.IndicesMax())
-	fmt.Fprintf(w, "blocks.bor: segments=%d, indices=%d\n\n", borSn.SegmentsMax(), borSn.IndicesMax())
+	if snapshots != nil {
+		fmt.Fprintf(w, "blocks: segments=%d, indices=%d\n", snapshots.SegmentsMax(), snapshots.IndicesMax())
+	} else {
+		fmt.Fprintf(w, "blocks: segments=0, indices=0; failed to open snapshots\n")
+	}
+	if borSn != nil {
+		fmt.Fprintf(w, "blocks.bor: segments=%d, indices=%d\n", borSn.SegmentsMax(), borSn.IndicesMax())
+	} else {
+		fmt.Fprintf(w, "blocks.bor: segments=0, indices=0; failed to open bor snapshots\n")
+	}
 
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
-	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d), filesAmount: %d\n\n", rawdbhelpers.IdxStepsCountV3(tx), _lb, _lt, agg.FilesAmount())
+
+	var filesAmount []int
+	var aggIsNotOkMessage string
+	if agg != nil {
+		filesAmount = agg.FilesAmount()
+	} else {
+		aggIsNotOkMessage = "failed to open aggregator snapshots"
+	}
+
+	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d), filesAmount: %d%s\n\n", rawdbhelpers.IdxStepsCountV3(tx), _lb, _lt, filesAmount, aggIsNotOkMessage)
 	ethTxSequence, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err

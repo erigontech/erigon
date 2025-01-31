@@ -22,8 +22,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	shutterproto "github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
-	shutterproto "github.com/erigontech/erigon/txnprovider/shutter/proto"
 )
 
 func TestUnmarshallDecryptionKeys(t *testing.T) {

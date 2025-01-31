@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
 func TransactOpts(ctx context.Context, sender libcommon.Address) (*bind.TransactOpts, error) {
@@ -90,7 +90,7 @@ func DeployWithOps[C any](ctx context.Context, auth *bind.TransactOpts, deploy f
 }
 
 var DeploymentChecker = blocks.BlockHandlerFunc(
-	func(ctx context.Context, node devnet.Node, block *requests.Block, transaction *jsonrpc.RPCTransaction) error {
+	func(ctx context.Context, node devnet.Node, block *requests.Block, transaction *ethapi.RPCTransaction) error {
 		if err := blocks.CompletionChecker(ctx, node, block, transaction); err != nil {
 			return nil
 		}

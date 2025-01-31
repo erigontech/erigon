@@ -18,6 +18,7 @@ package types
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -233,11 +234,17 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	} else {
 		txType = _type
 	}
-	to := tr.RandAddress()
+	var to *libcommon.Address
+	if tr.RandIntInRange(0, 10)%2 == 0 {
+		_to := tr.RandAddress()
+		to = &_to
+	} else {
+		to = nil
+	}
 	commonTx := CommonTx{
 		Nonce: *tr.RandUint64(),
 		Gas:   *tr.RandUint64(),
-		To:    &to,
+		To:    to,
 		Value: uint256.NewInt(*tr.RandUint64()), // wei amount
 		Data:  tr.RandBytes(tr.RandIntInRange(128, 1024)),
 		V:     *tr.RandUint256(),
@@ -515,6 +522,9 @@ func TestTransactionEncodeDecodeRLP(t *testing.T) {
 		enc := tr.RandTransaction(-1)
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
+			if enc.Type() >= BlobTxType && errors.Is(err, ErrNilToFieldTx) {
+				continue
+			}
 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
 		}
 
@@ -581,6 +591,9 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 		enc := tr.RandBody()
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
+			if errors.Is(err, ErrNilToFieldTx) {
+				continue
+			}
 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
 		}
 

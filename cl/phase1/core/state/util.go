@@ -20,6 +20,7 @@ import (
 	"sort"
 
 	"github.com/Giulio2002/bls"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -77,7 +78,7 @@ func HasEth1WithdrawalCredential(validator solid.Validator, conf *clparams.Beaco
 
 func HasCompoundingWithdrawalCredential(validator solid.Validator, conf *clparams.BeaconChainConfig) bool {
 	withdrawalCredentials := validator.WithdrawalCredentials()
-	return withdrawalCredentials[0] == conf.CompoundingWithdrawalPrefix
+	return withdrawalCredentials[0] == byte(conf.CompoundingWithdrawalPrefix)
 }
 
 func HasExecutionWithdrawalCredential(validator solid.Validator, conf *clparams.BeaconChainConfig) bool {

@@ -20,7 +20,7 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/txnprovider/shutter/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 )
 
 type DecryptionKeysProcessor struct {

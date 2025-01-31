@@ -26,6 +26,7 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -353,4 +354,26 @@ func (files visibleFiles) MergedRanges() []MergeRange {
 		res[i] = MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
 	}
 	return res
+}
+
+// fileItemsWithMissingAccessors returns list of files with missing accessors
+// here "accessors" are generated dynamically by `accessorsFor`
+func fileItemsWithMissingAccessors(dirtyFiles *btree2.BTreeG[*filesItem], aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*filesItem) {
+	dirtyFiles.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			fromStep, toStep := item.startTxNum/aggregationStep, item.endTxNum/aggregationStep
+			for _, fName := range accessorsFor(fromStep, toStep) {
+				exists, err := dir.FileExist(fName)
+				if err != nil {
+					panic(err)
+				}
+				if !exists {
+					l = append(l, item)
+					break
+				}
+			}
+		}
+		return true
+	})
+	return
 }

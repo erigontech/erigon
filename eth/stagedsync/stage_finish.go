@@ -19,7 +19,6 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
-	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -132,7 +131,6 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 
 // [from,to)
 func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier ChainEventNotifier, tx kv.Tx, logger log.Logger) error {
-	t := time.Now()
 	if notifier == nil {
 		logger.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
 		return nil
@@ -159,8 +157,7 @@ func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier
 
 	if len(headersRlp) > 0 {
 		notifier.OnNewHeader(headersRlp)
-		headerTiming := time.Since(t)
-		logger.Debug("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "amount", len(headersRlp), "header sending", headerTiming)
+		logger.Debug("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "amount", len(headersRlp))
 	}
 	return nil
 }

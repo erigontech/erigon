@@ -55,7 +55,7 @@ import (
 	"github.com/erigontech/erigon/eth/consensuschain"
 	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/tests"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
 const (
@@ -371,7 +371,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	}
 
 	// Now, read the transaction itself
-	var txJson jsonrpc.RPCTransaction
+	var txJson ethapi.RPCTransaction
 
 	if err := json.Unmarshal(input, &txJson); err != nil {
 		return err
@@ -386,7 +386,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
+func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
 	var overflow bool
 	var chainId *uint256.Int

@@ -34,12 +34,14 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 var stringsBuilderPool = sync.Pool{
@@ -791,4 +793,149 @@ func (a *ApiHandler) GetEthV1ValidatorAggregateAttestation(w http.ResponseWriter
 	}
 
 	return newBeaconResponse(att), nil
+}
+
+func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	attDataRoot := r.URL.Query().Get("attestation_data_root")
+	if attDataRoot == "" {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation_data_root is required"))
+	}
+	slot := r.URL.Query().Get("slot")
+	if slot == "" {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is required"))
+	}
+	slotNum, err := strconv.ParseUint(slot, 10, 64)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.WithMessage(err, "invalid slot"))
+	}
+	committeeIndex := r.URL.Query().Get("committee_index")
+	if committeeIndex == "" {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("committee_index is required"))
+	}
+	committeeIndexNum, err := strconv.ParseUint(committeeIndex, 10, 64)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.WithMessage(err, "invalid committee_index"))
+	}
+
+	attDataRootHash := libcommon.HexToHash(attDataRoot)
+	att := a.aggregatePool.GetAggregatationByRootAndCommittee(attDataRootHash, committeeIndexNum)
+	if att == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))
+	}
+	if slotNum != att.Data.Slot {
+		log.Debug("attestation slot does not match", "attestation_data_root", attDataRoot, "slot_inquire", slot)
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation slot mismatch"))
+	}
+
+	return newBeaconResponse(att), nil
+}
+
+func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	blockId, err := beaconhttp.StateIdFromRequest(r)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	ctx := r.Context()
+	tx, err := a.indiciesDB.BeginRo(ctx)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+	}
+	defer tx.Rollback()
+	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(httpStatus, err)
+	}
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
+
+	var (
+		validators  *solid.ValidatorSet
+		isFinalized bool
+	)
+	if blockId.Head() {
+		// If we are looking at the head, we can just read the validators from the head state
+		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+			validators = s.Validators()
+			return nil
+		}); err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+		}
+		isFinalized = false
+	} else {
+		snRoTx := a.caplinStateSnapshots.View()
+		defer snRoTx.Close()
+		getter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		if err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+		} else if slot == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found"))
+		}
+		if *slot < a.forkchoiceStore.LowestAvailableSlot() {
+			// If the slot is less than the lowest available slot, we need to read the validators from the historical state
+			validators, err = a.stateReader.ReadValidatorsForHistoricalState(tx, getter, *slot)
+			if err != nil {
+				return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+			}
+		} else {
+			validators, err = a.forkchoiceStore.GetValidatorSet(blockRoot)
+			if err != nil {
+				return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+			}
+		}
+		isFinalized = *slot <= a.forkchoiceStore.FinalizedSlot()
+	}
+	if validators == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validators not found"))
+	}
+
+	// compose the response
+	validatorIdentities := solid.NewStaticListSSZ[*validatorIdentityResponse](validators.Length(), (&validatorIdentityResponse{}).EncodingSizeSSZ())
+	validators.Range(func(i int, v solid.Validator, l int) bool {
+		validatorIdentities.Append(&validatorIdentityResponse{
+			Index:           uint64(i),
+			Pubkey:          v.PublicKey(),
+			ActivationEpoch: v.ActivationEpoch(),
+		})
+		return true
+	})
+
+	return newBeaconResponse(validatorIdentities).
+		WithOptimistic(isOptimistic).
+		WithFinalized(isFinalized), nil
+}
+
+type validatorIdentityResponse struct {
+	/* Example:
+	{
+		"index": "1",
+		"pubkey": "0x93247f2209abcacf57b75a51dafae777f9dd38bc7053d1af526f220a7489a6d3a2753e5f3e8b1cfe39b56f43611df74a",
+		"activation_epoch": "1"
+	}
+	*/
+	Index           uint64         `json:"index"`
+	Pubkey          common.Bytes48 `json:"pubkey"`
+	ActivationEpoch uint64         `json:"activation_epoch"`
+}
+
+func (v *validatorIdentityResponse) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, v.Index, v.Pubkey[:], v.ActivationEpoch)
+}
+
+func (v *validatorIdentityResponse) DecodeSSZ(buf []byte, version int) error {
+	// Don't care
+	return errors.New("not implemented")
+}
+
+func (v *validatorIdentityResponse) EncodingSizeSSZ() int {
+	return 48 + 8 + 8
+}
+
+func (v *validatorIdentityResponse) Clone() clonable.Clonable {
+	// Don't care
+	return &validatorIdentityResponse{}
+}
+
+func (v *validatorIdentityResponse) HashSSZ() ([32]byte, error) {
+	// Don't care
+	return [32]byte{}, errors.New("not implemented")
 }

@@ -87,5 +87,5 @@ func (p *PendingDeposit) Static() bool {
 }
 
 func NewPendingDepositList(cfg *clparams.BeaconChainConfig) *ListSSZ[*PendingDeposit] {
-	return NewStaticListSSZ[*PendingDeposit](int(cfg.PendingDepositLimit), SizePendingDeposit)
+	return NewStaticListSSZ[*PendingDeposit](int(cfg.PendingDepositLimits), SizePendingDeposit)
 }
