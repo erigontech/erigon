@@ -156,6 +156,14 @@ github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e h1:Zp
 github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
 github.com/erigontech/interfaces v0.0.0-20241120074553-214b5fd396ed h1:un44S8Tuol4LBIC6R94t93GShM53BYjz7GsNPziDLQ8=
 github.com/erigontech/interfaces v0.0.0-20241120074553-214b5fd396ed/go.mod h1:N7OUkhkcagp9+7yb4ycHsG2VWCOmuJ1ONBecJshxtLE=
+github.com/erigontech/interfaces v0.0.0-20250205080129-88fc5dc52709 h1:R4Wiz1WX6xg7iTjLvsoOj/2fKhuhouitl7mG4SERfYU=
+github.com/erigontech/interfaces v0.0.0-20250205080129-88fc5dc52709/go.mod h1:N7OUkhkcagp9+7yb4ycHsG2VWCOmuJ1ONBecJshxtLE=
+github.com/erigontech/interfaces v0.0.0-20250205080400-91ecdd69e8a5 h1:CkGHAOCLmbOJqkwfH/NkcV6GeqYWanHGU4uzy9QQtCQ=
+github.com/erigontech/interfaces v0.0.0-20250205080400-91ecdd69e8a5/go.mod h1:N7OUkhkcagp9+7yb4ycHsG2VWCOmuJ1ONBecJshxtLE=
+github.com/erigontech/interfaces v0.0.0-20250205081526-be272a0fe128 h1:zpYBDv1+1YmG2eooTW8ooPZ5zLqGmKEYZuNcBSha88Q=
+github.com/erigontech/interfaces v0.0.0-20250205081526-be272a0fe128/go.mod h1:N7OUkhkcagp9+7yb4ycHsG2VWCOmuJ1ONBecJshxtLE=
+github.com/erigontech/interfaces v0.0.0-20250205082956-2b56ae4b4bb4 h1:1Cbe6VvxsLQbVGB17ZOXUajuC6yeouAJGcTOqbT6PJY=
+github.com/erigontech/interfaces v0.0.0-20250205082956-2b56ae4b4bb4/go.mod h1:N7OUkhkcagp9+7yb4ycHsG2VWCOmuJ1ONBecJshxtLE=
 github.com/erigontech/mdbx-go v0.38.4 h1:S9T7mTe9KPcFe4dOoOtVdI6gPzht9y7wMnYfUBgrQLo=
 github.com/erigontech/mdbx-go v0.38.4/go.mod h1:IcOLQDPw3VM/asP6T5JVPPN4FHHgJtY16XfYjzWKVNI=
 github.com/erigontech/secp256k1 v1.1.0 h1:mO3YJMUSoASE15Ya//SoHiisptUhdXExuMUN1M0X9qY=

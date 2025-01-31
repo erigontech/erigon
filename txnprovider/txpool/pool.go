@@ -150,6 +150,12 @@ type TxPool struct {
 	newSlotsStreams         *NewSlotsStreams
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
+
+	ethBackend remote.ETHBACKENDClient
+}
+
+type ValidateAA interface {
+	ValidateAA() (bool, error)
 }
 
 type FeeCalculator interface {
@@ -887,7 +893,6 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
-	// TODO: put 7562 rules here
 	if txn.Type == types.AccountAbstractionTxType {
 		senderCode, err := stateCache.GetCode(txn.SenderAddress[:])
 		if err != nil {
@@ -911,6 +916,15 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 			len(senderCode), len(paymasterCode), len(deployerCode),
 		)
 		if err != nil {
+			return txpoolcfg.InvalidAA
+		}
+
+		aaTxn := types.FromTxnSlot(txn)
+		res, err := p.ethBackend.AAValidation(context.Background(), &remote.AAValidationRequest{Tx: aaTxn.ToProto()}) // enforces ERC-7562 rules
+		if err != nil {
+			return txpoolcfg.InvalidAA
+		}
+		if !res.Valid {
 			return txpoolcfg.InvalidAA
 		}
 	}

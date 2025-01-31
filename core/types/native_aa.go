@@ -14,8 +14,10 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	emath "github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 const (
@@ -836,4 +838,115 @@ type ABIAccountAbstractTxn struct {
 	DeployerData                []byte
 	ExecutionData               []byte
 	AuthorizationData           []byte
+}
+
+func (tx *AccountAbstractionTransaction) ToProto() *typesproto.AccountAbstractionTransaction {
+	if tx == nil {
+		return nil
+	}
+
+	return &typesproto.AccountAbstractionTransaction{
+		Nonce:                       tx.Nonce,
+		ChainId:                     tx.ChainID.Bytes(),
+		Tip:                         tx.Tip.Bytes(),
+		FeeCap:                      tx.FeeCap.Bytes(),
+		Gas:                         tx.Gas,
+		SenderAddress:               tx.SenderAddress.Bytes(),
+		Authorizations:              convertAuthorizations(tx.Authorizations),
+		ExecutionData:               tx.ExecutionData,
+		Paymaster:                   tx.Paymaster.Bytes(),
+		PaymasterData:               tx.PaymasterData,
+		Deployer:                    tx.Deployer.Bytes(),
+		DeployerData:                tx.DeployerData,
+		BuilderFee:                  tx.BuilderFee.Bytes(),
+		ValidationGasLimit:          tx.ValidationGasLimit,
+		PaymasterValidationGasLimit: tx.PaymasterValidationGasLimit,
+		PostOpGasLimit:              tx.PostOpGasLimit,
+		NonceKey:                    tx.NonceKey.Bytes(),
+	}
+}
+
+func convertAuthorizations(auths []Authorization) []*typesproto.Authorization {
+	protoAuths := make([]*typesproto.Authorization, len(auths))
+	for i, auth := range auths {
+		protoAuths[i] = &typesproto.Authorization{
+			ChainId: auth.ChainID,
+			Address: auth.Address.Bytes(),
+			Nonce:   auth.Nonce,
+			YParity: uint32(auth.YParity), // Convert uint8 to uint32 since protobuf lacks uint8
+			R:       auth.R.Bytes(),
+			S:       auth.S.Bytes(),
+		}
+	}
+
+	return protoAuths
+}
+
+func FromProto(tx *typesproto.AccountAbstractionTransaction) *AccountAbstractionTransaction {
+	if tx == nil {
+		return nil
+	}
+
+	senderAddress := common.BytesToAddress(tx.SenderAddress)
+	paymasterAddress := common.BytesToAddress(tx.Paymaster)
+	deployerAddress := common.BytesToAddress(tx.Deployer)
+
+	return &AccountAbstractionTransaction{
+		Nonce:                       tx.Nonce,
+		ChainID:                     uint256.NewInt(0).SetBytes(tx.ChainId),
+		Tip:                         uint256.NewInt(0).SetBytes(tx.Tip),
+		FeeCap:                      uint256.NewInt(0).SetBytes(tx.FeeCap),
+		Gas:                         tx.Gas,
+		SenderAddress:               &senderAddress,
+		Authorizations:              convertProtoAuthorizations(tx.Authorizations),
+		ExecutionData:               tx.ExecutionData,
+		Paymaster:                   &paymasterAddress,
+		PaymasterData:               tx.PaymasterData,
+		Deployer:                    &deployerAddress,
+		DeployerData:                tx.DeployerData,
+		BuilderFee:                  uint256.NewInt(0).SetBytes(tx.BuilderFee),
+		ValidationGasLimit:          tx.ValidationGasLimit,
+		PaymasterValidationGasLimit: tx.PaymasterValidationGasLimit,
+		PostOpGasLimit:              tx.PostOpGasLimit,
+		NonceKey:                    uint256.NewInt(0).SetBytes(tx.NonceKey),
+	}
+}
+
+func convertProtoAuthorizations(auths []*typesproto.Authorization) []Authorization {
+	goAuths := make([]Authorization, len(auths))
+	for i, auth := range auths {
+		r := uint256.NewInt(0).SetBytes(auth.R) // Convert bytes to uint256
+		s := uint256.NewInt(0).SetBytes(auth.S)
+		goAuths[i] = Authorization{
+			ChainID: auth.ChainId,
+			Address: common.BytesToAddress(auth.Address),
+			Nonce:   auth.Nonce,
+			YParity: uint8(auth.YParity),
+			R:       *r,
+			S:       *s,
+		}
+	}
+
+	return goAuths
+}
+
+func FromTxnSlot(txnSlot *txpool.TxnSlot) AccountAbstractionTransaction {
+	return AccountAbstractionTransaction{ // authorization is missing here - need to adjust `ABIAccountAbstractTxn` with "authorizationList" and "authorizationListStatus" (pending chat with EF team about why it is designed this way and if it needs changes)
+		Nonce:                       txnSlot.Nonce,
+		ChainID:                     &txnSlot.ChainID,
+		Tip:                         &txnSlot.Tip,
+		FeeCap:                      &txnSlot.FeeCap,
+		Gas:                         txnSlot.Gas,
+		SenderAddress:               txnSlot.SenderAddress,
+		ExecutionData:               txnSlot.ExecutionData,
+		Paymaster:                   txnSlot.Paymaster,
+		PaymasterData:               txnSlot.PaymasterData,
+		Deployer:                    txnSlot.Deployer,
+		DeployerData:                txnSlot.DeployerData,
+		BuilderFee:                  &txnSlot.BuilderFee,
+		ValidationGasLimit:          txnSlot.ValidationGasLimit,
+		PaymasterValidationGasLimit: txnSlot.PaymasterValidationGasLimit,
+		PostOpGasLimit:              txnSlot.PostOpGasLimit,
+		NonceKey:                    &txnSlot.NonceKey,
+	}
 }
