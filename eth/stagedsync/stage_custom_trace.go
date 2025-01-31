@@ -130,6 +130,9 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			return err
 		}
 
+		logEvery := time.NewTicker(10 * time.Second)
+		defer logEvery.Stop()
+
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
 		//fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 		fromTxNum := uint64(0)
@@ -158,6 +161,14 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			}
 			prevCumGasUsed = int(cumGasUsed)
 			prevBN = blockNum
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%dk/%dk", blockNum/1_000, toBlock/1_000))
+			default:
+			}
 		}
 
 		lastTxNum = doms.TxNum()
