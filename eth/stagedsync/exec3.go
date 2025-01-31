@@ -881,7 +881,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
-	header.Root = common.BytesToHash(rh) //JG
+	header.Root = common.BytesToHash(computedRootHash) //JG
 	if cfg.blockProduction {
 		header.Root = common.BytesToHash(computedRootHash)
 		return true, nil

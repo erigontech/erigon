@@ -137,7 +137,7 @@ func ExecuteTx(s *Silkworm, txn kv.Tx, txTask *state.TxTask) error {
 		txnHandle = txn.CHandle()
 	}
 
-	gasUsed, _, err := s.ExecuteTx(txnHandle, txTask.BlockNum, uint64(txTask.TxIndex))
+	gasUsed, _, err := s.ExecuteTxn(txnHandle, txTask.BlockNum, silkworm_go.Hash(txTask.BlockHash), uint64(txTask.TxIndex), txTask.TxNum)
 
 	txTask.UsedGas = gasUsed
 	// txTask.BlobGasUsed = blobGasUsed

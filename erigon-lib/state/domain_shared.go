@@ -133,8 +133,8 @@ type SharedDomains struct {
 	domains [kv.DomainLen]map[string]dataWithPrevStep
 	storage *btree2.Map[string, dataWithPrevStep]
 
-	domainWriters [kv.DomainLen]*domainBufferedWriter               // not used by reads, only domainWriters[CommitmentDomain] is used by commitment
-	iiWriters     [kv.StandaloneIdxLen]*invertedIndexBufferedWriter // not used by reads
+	domainWriters [kv.DomainLen]*domainBufferedWriter
+	iiWriters     map[kv.InvertedIdx]*invertedIndexBufferedWriter
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
