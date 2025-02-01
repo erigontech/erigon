@@ -146,7 +146,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 
 		var failedAssert bool
 		{ //assert
-			if failedAssert, err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
+			if err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
 				return err
 			}
 		}
@@ -191,14 +191,14 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	return nil
 }
 
-func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (failed bool, err error) {
+func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if fromTxNum < 2 {
 		fromTxNum = 2 //i don't remember why need this
@@ -209,14 +209,14 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx
 	}
 	toTxNum, err := txNumsReader.Max(tx, toBlock)
 	if err != nil {
-		return false, err
+		return err
 	}
 	prevCumGasUsed := -1
 	prevBN := uint64(1)
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
 		cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
 		if err != nil {
-			return false, err
+			return err
 		}
 		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
 		//fmt.Printf("[dbg.integrity] cumGasUsed=%d, txNum=%d, blockNum=%d, prevCumGasUsed=%d\n", cumGasUsed, txNum, blockNum, prevCumGasUsed)
@@ -225,7 +225,7 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx
 			_max, _ := txNumsReader.Max(tx, blockNum)
 			err := fmt.Errorf("bad receipt at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
 			log.Warn(err.Error())
-			return true, err
+			return err
 			//panic(err)
 		}
 		prevCumGasUsed = int(cumGasUsed)
@@ -233,13 +233,13 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx
 
 		select {
 		case <-ctx.Done():
-			return false, ctx.Err()
+			return ctx.Err()
 		case <-logEvery.C:
 			log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%dk/%dk", txNum/1_000, toTxNum/1_000))
 		default:
 		}
 	}
-	return false, nil
+	return nil
 }
 
 func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsReader, curTxNum uint64) uint64 {
@@ -300,7 +300,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				//		fmt.Printf("[dbg.exec] append: %d, %d, 0\n", txTask.BlockNum, txTask.TxNum)
 				//	}
 				//}
-				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
+				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
 					return err
 				}
 			}

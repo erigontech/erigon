@@ -441,12 +441,6 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 }
 
 func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, originalStep uint64) (err error) {
-	if w.ii.name == kv.ReceiptHistoryIdx {
-		if original == nil {
-			fmt.Printf("historyBufferedWriter.AddPrevValue(%x, %d, %d, nil)\n", key1, w.ii.txNum, w.ii.txNumBytes[:])
-		}
-	}
-
 	if w.discard {
 		return nil
 	}

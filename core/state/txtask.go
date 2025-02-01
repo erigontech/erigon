@@ -300,7 +300,6 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task *TxTask, ok bool) {
 				return task, true
 			}
 		case <-ctx.Done():
-			log.Warn("[dbg] popWait1")
 			return nil, false
 		}
 	}
