@@ -370,7 +370,7 @@ func TestBasicKeyValidation(t *testing.T) {
 	for _, b := range badBytes {
 		ct[0] = b
 		_, err := prv.Decrypt(ct, nil, nil)
-		if err != ErrInvalidPublicKey {
+		if !errors.Is(err, ErrInvalidPublicKey) {
 			t.Fatal("ecies: validated an invalid key")
 		}
 	}

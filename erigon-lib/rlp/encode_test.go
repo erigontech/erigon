@@ -402,6 +402,7 @@ var encTests = []encTest{
 }
 
 func runEncTests(t *testing.T, f func(val interface{}) ([]byte, error)) {
+	t.Helper()
 	for i, test := range encTests {
 		output, err := f(test.val)
 		if err != nil && test.error == "" {

@@ -53,7 +53,7 @@ func TestStreamKind(t *testing.T) {
 	for i, test := range tests {
 		// using plainReader to inhibit input limit errors.
 		s := NewStream(newPlainReader(unhex(test.input)), 0)
-		kind, len, err := s.Kind()
+		kind, length, err := s.Kind()
 		if err != nil {
 			t.Errorf("test %d: Kind returned error: %v", i, err)
 			continue
@@ -61,8 +61,8 @@ func TestStreamKind(t *testing.T) {
 		if kind != test.wantKind {
 			t.Errorf("test %d: kind mismatch: got %d, want %d", i, kind, test.wantKind)
 		}
-		if len != test.wantLen {
-			t.Errorf("test %d: len mismatch: got %d, want %d", i, len, test.wantLen)
+		if length != test.wantLen {
+			t.Errorf("test %d: len mismatch: got %d, want %d", i, length, test.wantLen)
 		}
 	}
 }
@@ -231,10 +231,10 @@ testfor:
 func TestStreamList(t *testing.T) {
 	s := NewStream(bytes.NewReader(unhex("C80102030405060708")), 0)
 
-	if len, err := s.List(); err != nil {
+	if length, err := s.List(); err != nil {
 		t.Fatalf("List error: %v", err)
-	} else if len != 8 {
-		t.Fatalf("List returned invalid length, got %d, want 8", len)
+	} else if length != 8 {
+		t.Fatalf("List returned invalid length, got %d, want 8", length)
 	}
 
 	for i := uint64(1); i <= 8; i++ {
@@ -245,7 +245,7 @@ func TestStreamList(t *testing.T) {
 		}
 	}
 
-	if _, err := s.Uint(); err != EOL {
+	if _, err := s.Uint(); !errors.Is(err, EOL) {
 		t.Errorf("Uint error mismatch, got %v, want %v", err, EOL)
 	}
 	if err := s.ListEnd(); err != nil {
@@ -287,16 +287,16 @@ func TestStreamRaw(t *testing.T) {
 func TestDecodeErrors(t *testing.T) {
 	r := bytes.NewReader(nil)
 
-	if err := Decode(r, nil); err != errDecodeIntoNil {
+	if err := Decode(r, nil); !errors.Is(err, errDecodeIntoNil) {
 		t.Errorf("Decode(r, nil) error mismatch, got %q, want %q", err, errDecodeIntoNil)
 	}
 
 	var nilptr *struct{}
-	if err := Decode(r, nilptr); err != errDecodeIntoNil {
+	if err := Decode(r, nilptr); !errors.Is(err, errDecodeIntoNil) {
 		t.Errorf("Decode(r, nilptr) error mismatch, got %q, want %q", err, errDecodeIntoNil)
 	}
 
-	if err := Decode(r, struct{}{}); err != errNoPointer {
+	if err := Decode(r, struct{}{}); !errors.Is(err, errNoPointer) {
 		t.Errorf("Decode(r, struct{}{}) error mismatch, got %q, want %q", err, errNoPointer)
 	}
 
@@ -792,6 +792,7 @@ var decodeTests = []decodeTest{
 func uintp(i uint) *uint { return &i }
 
 func runTests(t *testing.T, decode func([]byte, interface{}) error) {
+	t.Helper()
 	for i, test := range decodeTests {
 		input, err := hex.DecodeString(test.input)
 		if err != nil {
@@ -818,6 +819,7 @@ func runTests(t *testing.T, decode func([]byte, interface{}) error) {
 }
 
 func TestDecodeWithByteReader(t *testing.T) {
+	t.Helper()
 	runTests(t, func(input []byte, into interface{}) error {
 		return Decode(bytes.NewReader(input), into)
 	})
