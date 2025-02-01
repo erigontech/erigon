@@ -1213,7 +1213,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, apply
 		return blockStatus.result, nil
 	}
 
-	fmt.Println("schedule", blockStatus.execTasks.minPending(), maxValidated+1)
+	//fmt.Println("schedule", blockStatus.execTasks.minPending(), maxValidated+1)
 	// Send the next immediate pending transaction to be executed
 	if blockStatus.execTasks.minPending() != -1 && blockStatus.execTasks.minPending() == maxValidated+1 {
 		nextTx := blockStatus.execTasks.takeNextPending()
