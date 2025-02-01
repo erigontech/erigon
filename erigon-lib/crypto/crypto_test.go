@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"encoding/hex"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
@@ -98,11 +99,11 @@ func BenchmarkSha3(b *testing.B) {
 
 func TestUnmarshalPubkey(t *testing.T) {
 	key, err := UnmarshalPubkey(nil)
-	if err != errInvalidPubkey || key != nil {
+	if !errors.Is(err, errInvalidPubkey) || key != nil {
 		t.Fatalf("expected error, got %v, %v", err, key)
 	}
 	key, err = UnmarshalPubkey([]byte{1, 2, 3})
-	if err != errInvalidPubkey || key != nil {
+	if !errors.Is(err, errInvalidPubkey) || key != nil {
 		t.Fatalf("expected error, got %v, %v", err, key)
 	}
 
@@ -276,6 +277,7 @@ func TestSaveECDSA(t *testing.T) {
 }
 
 func checkhash(t *testing.T, name string, f func([]byte) []byte, msg, exp []byte) {
+	t.Helper()
 	sum := f(msg)
 	if !bytes.Equal(exp, sum) {
 		t.Fatalf("hash %s mismatch: want: %x have: %x", name, exp, sum)
@@ -283,6 +285,7 @@ func checkhash(t *testing.T, name string, f func([]byte) []byte, msg, exp []byte
 }
 
 func checkAddr(t *testing.T, addr0, addr1 libcommon.Address) {
+	t.Helper()
 	if addr0 != addr1 {
 		t.Fatalf("address mismatch: want: %x have: %x", addr0, addr1)
 	}
