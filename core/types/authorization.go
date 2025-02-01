@@ -42,7 +42,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
 	}
 
-	authLen := 1 + rlp2.Uint256LenExcludingHead(&ath.ChainID)
+	authLen := 1 + rlp.Uint256LenExcludingHead(&ath.ChainID)
 	authLen += 1 + length.Addr
 	authLen += rlp.U64Len(ath.Nonce)
 
@@ -55,11 +55,11 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 		return nil, err
 	}
 
-	if err := rlp2.EncodeOptionalAddress(&ath.Address, data, b); err != nil {
+	if err := rlp.EncodeOptionalAddress(&ath.Address, data, b); err != nil {
 		return nil, err
 	}
 
-	if err := rlp2.EncodeInt(ath.Nonce, data, b); err != nil {
+	if err := rlp.EncodeInt(ath.Nonce, data, b); err != nil {
 		return nil, err
 	}
 
@@ -101,11 +101,11 @@ func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.In
 }
 
 func authorizationSize(auth Authorization) (authLen int) {
-	authLen = (1 + rlp2.Uint256LenExcludingHead(&auth.ChainID))
+	authLen = 1 + rlp.Uint256LenExcludingHead(&auth.ChainID)
 	authLen += rlp.U64Len(auth.Nonce)
 	authLen += 1 + length.Addr
 
-	authLen += rlp.U64Len(uint64(auth.YParity)) + (1 + rlp2.Uint256LenExcludingHead(&auth.R)) + (1 + rlp2.Uint256LenExcludingHead(&auth.S))
+	authLen += rlp.U64Len(uint64(auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
 
 	return
 }
@@ -119,7 +119,7 @@ func authorizationsSize(authorizations []Authorization) (totalSize int) {
 	return
 }
 
-func decodeAuthorizations(auths *[]Authorization, s *rlp2.Stream) error {
+func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open authorizations: %w", err)
@@ -179,7 +179,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp2.Stream) error {
 		}
 		i++
 	}
-	if !errors.Is(err, rlp2.EOL) {
+	if !errors.Is(err, rlp.EOL) {
 		return fmt.Errorf("open authorizations: %d %w", i, err)
 	}
 	if err = s.ListEnd(); err != nil {
@@ -201,15 +201,15 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 			return err
 		}
 		// 2. encode Address
-		if err := rlp2.EncodeOptionalAddress(&auth.Address, w, b); err != nil {
+		if err := rlp.EncodeOptionalAddress(&auth.Address, w, b); err != nil {
 			return err
 		}
 		// 3. encode Nonce
-		if err := rlp2.EncodeInt(auth.Nonce, w, b); err != nil {
+		if err := rlp.EncodeInt(auth.Nonce, w, b); err != nil {
 			return err
 		}
 		// 4. encode YParity, R, S
-		if err := rlp2.EncodeInt(uint64(auth.YParity), w, b); err != nil {
+		if err := rlp.EncodeInt(uint64(auth.YParity), w, b); err != nil {
 			return err
 		}
 		if err := auth.R.EncodeRLP(w); err != nil {

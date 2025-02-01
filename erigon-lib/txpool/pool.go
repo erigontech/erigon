@@ -35,13 +35,13 @@ import (
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	mapset "github.com/deckarep/golang-set/v2"
-	types3 "github.com/erigontech/erigon/core/types"
 	"github.com/go-stack/stack"
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -500,7 +500,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 			numAuths := len(mt.AuthRaw)
 			for i := range numAuths {
 				signature := mt.Authorizations[i]
-				signer, err := types3.RecoverSignerFromRLP(mt.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+				signer, err := RecoverSignerFromRLP(mt.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
 				if err != nil {
 					continue
 				}
@@ -1476,7 +1476,7 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoo
 		foundDuplicate := false
 		for i := range numAuths {
 			signature := mt.Tx.Authorizations[i]
-			signer, err := types3.RecoverSignerFromRLP(mt.Tx.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+			signer, err := RecoverSignerFromRLP(mt.Tx.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
 			if err != nil {
 				continue
 			}
@@ -1534,7 +1534,7 @@ func (p *TxPool) discardLocked(mt *metaTx, reason txpoolcfg.DiscardReason) {
 		numAuths := len(mt.Tx.AuthRaw)
 		for i := range numAuths {
 			signature := mt.Tx.Authorizations[i]
-			signer, err := types3.RecoverSignerFromRLP(mt.Tx.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+			signer, err := RecoverSignerFromRLP(mt.Tx.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
 			if err != nil {
 				continue
 			}
@@ -3010,4 +3010,39 @@ func (p *WorstQueue) Pop() interface{} {
 	item.currentSubPool = 0 // for safety
 	p.ms = old[0 : n-1]
 	return item
+}
+
+func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {
+	// from authorizations.go
+	hashData := []byte{byte(0x05)}
+	hashData = append(hashData, rlp...)
+	hash := crypto.Keccak256Hash(hashData)
+
+	var sig [65]byte
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	copy(sig[32-len(r):32], rBytes)
+	copy(sig[64-len(s):64], sBytes)
+
+	if yParity == 0 || yParity == 1 {
+		sig[64] = yParity
+	} else {
+		return nil, fmt.Errorf("invalid y parity value: %d", yParity)
+	}
+
+	if !crypto.TransactionSignatureIsValid(sig[64], &r, &s, false /* allowPreEip2s */) {
+		return nil, errors.New("invalid signature")
+	}
+
+	pubkey, err := crypto.Ecrecover(hash.Bytes(), sig[:])
+	if err != nil {
+		return nil, err
+	}
+	if len(pubkey) == 0 || pubkey[0] != 4 {
+		return nil, errors.New("invalid public key")
+	}
+
+	var authority common.Address
+	copy(authority[:], crypto.Keccak256(pubkey[1:])[12:])
+	return &authority, nil
 }
