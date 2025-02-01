@@ -34,9 +34,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common/mclock"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 

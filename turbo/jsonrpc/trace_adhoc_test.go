@@ -15,11 +15,12 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/math"
+	math2 "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
@@ -119,15 +120,15 @@ func TestReplayBlockTransactions(t *testing.T) {
 
 func TestOeTracer(t *testing.T) {
 	type callContext struct {
-		Number              math.HexOrDecimal64   `json:"number"`
-		Hash                libcommon.Hash        `json:"hash"`
-		Difficulty          *math.HexOrDecimal256 `json:"difficulty"`
-		Time                math.HexOrDecimal64   `json:"timestamp"`
-		GasLimit            math.HexOrDecimal64   `json:"gasLimit"`
-		BaseFee             *math.HexOrDecimal256 `json:"baseFeePerGas"`
-		Miner               libcommon.Address     `json:"miner"`
-		TransactionHash     libcommon.Hash        `json:"transactionHash"`
-		TransactionPosition uint64                `json:"transactionPosition"`
+		Number              math.HexOrDecimal64    `json:"number"`
+		Hash                libcommon.Hash         `json:"hash"`
+		Difficulty          *math2.HexOrDecimal256 `json:"difficulty"`
+		Time                math.HexOrDecimal64    `json:"timestamp"`
+		GasLimit            math.HexOrDecimal64    `json:"gasLimit"`
+		BaseFee             *math2.HexOrDecimal256 `json:"baseFeePerGas"`
+		Miner               libcommon.Address      `json:"miner"`
+		TransactionHash     libcommon.Hash         `json:"transactionHash"`
+		TransactionPosition uint64                 `json:"transactionPosition"`
 	}
 
 	type testcase struct {

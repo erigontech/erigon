@@ -25,6 +25,8 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
 	"github.com/holiman/uint256"
 	"github.com/protolambda/ztyp/codec"
 
@@ -34,8 +36,7 @@ import (
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/common/math"
 )
 
 var (
@@ -78,7 +79,7 @@ type Transaction interface {
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
 	EncodingSize() int
 	EncodeRLP(w io.Writer) error
-	DecodeRLP(s *rlp.Stream) error
+	DecodeRLP(s *rlp2.Stream) error
 	MarshalBinary(w io.Writer) error
 	// Sender returns the address derived from the signature (V, R, S) using secp256k1
 	// elliptic curve and an error if it failed deriving or upon an incorrect
@@ -113,19 +114,19 @@ func (t BinaryTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 	w.Write(t[i])
 }
 
-func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
+func DecodeRLPTransaction(s *rlp2.Stream, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
 	kind, _, err := s.Kind()
 	if err != nil {
 		return nil, err
 	}
-	if rlp.List == kind {
+	if rlp2.List == kind {
 		tx := &LegacyTx{}
 		if err = tx.DecodeRLP(s); err != nil {
 			return nil, err
 		}
 		return tx, nil
 	}
-	if rlp.String != kind {
+	if rlp2.String != kind {
 		return nil, fmt.Errorf("not an RLP encoded transaction. If this is a canonical encoded transaction, use UnmarshalTransactionFromBinary instead. Got %v for kind, expected String", kind)
 	}
 	// Decode the EIP-2718 typed TX envelope.
@@ -134,7 +135,7 @@ func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Tran
 		return nil, err
 	}
 	if len(b) == 0 {
-		return nil, rlp.EOL
+		return nil, rlp2.EOL
 	}
 	return UnmarshalTransactionFromBinary(b, blobTxnsAreWrappedWithBlobs)
 }
@@ -150,7 +151,7 @@ func DecodeWrappedTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
+	s := rlp2.NewStream(bytes.NewReader(data), uint64(len(data)))
 	return DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 }
 
@@ -163,7 +164,7 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
+	s := rlp2.NewStream(bytes.NewReader(data), uint64(len(data)))
 	tx, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 	if err != nil {
 		return nil, err
@@ -179,7 +180,7 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	if len(data) <= 1 {
 		return nil, fmt.Errorf("short input: %v", len(data))
 	}
-	s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
+	s := rlp2.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
 	var t Transaction
 	switch data[0] {
 	case AccessListTxType:
@@ -215,7 +216,7 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) (retRlp []byte, err error) {
 	if blobTxRlp[0] != BlobTxType {
 		return blobTxRlp, nil
 	}
-	it, err := rlp.NewListIterator(blobTxRlp[1:])
+	it, err := rlp2.NewListIterator(blobTxRlp[1:])
 	if err != nil {
 		return nil, err
 	}

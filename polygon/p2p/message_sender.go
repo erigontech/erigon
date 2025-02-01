@@ -6,8 +6,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/rlp"
 )
 
 var ErrPeerNotFound = errors.New("peer not found")

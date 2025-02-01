@@ -15,14 +15,14 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/trie"
@@ -235,13 +235,13 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 		return nil, fmt.Errorf("log not found in receipt")
 	}
 
-	parentNodesBytes, err := rlp.EncodeToBytes(receiptProof.parentNodes)
+	parentNodesBytes, err := rlp2.EncodeToBytes(receiptProof.parentNodes)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return rlp.EncodeToBytes(
+	return rlp2.EncodeToBytes(
 		[]interface{}{
 			rootBlockNumber,
 			hexutility.Encode(bytes.Join(blockProofs, []byte{})),
@@ -288,7 +288,7 @@ func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receip
 					return err
 				}
 
-				path, _ := rlp.EncodeToBytes(receipt.TransactionIndex)
+				path, _ := rlp2.EncodeToBytes(receipt.TransactionIndex)
 				rawReceipt := getReceiptBytes(receipt)
 				lock.Lock()
 				defer lock.Unlock()
@@ -303,13 +303,13 @@ func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receip
 		}
 	} else {
 		for _, receipt := range receipts {
-			path, _ := rlp.EncodeToBytes(receipt.TransactionIndex)
+			path, _ := rlp2.EncodeToBytes(receipt.TransactionIndex)
 			rawReceipt := getReceiptBytes(receipt)
 			receiptsTrie.Update(path, rawReceipt)
 		}
 	}
 
-	path, _ := rlp.EncodeToBytes(receipt.TransactionIndex)
+	path, _ := rlp2.EncodeToBytes(receipt.TransactionIndex)
 	result, parents, ok := receiptsTrie.FindPath(path)
 
 	if !ok {
@@ -321,7 +321,7 @@ func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receip
 	if isTypedReceipt(receipt) {
 		nodeValue = result
 	} else {
-		rlp.DecodeBytes(result, nodeValue)
+		rlp2.DecodeBytes(result, nodeValue)
 	}
 
 	return &receiptProof{
@@ -444,7 +444,7 @@ func recursiveZeroHash(n int) libcommon.Hash {
 	}
 
 	subHash := recursiveZeroHash(n - 1)
-	bytes, _ := rlp.EncodeToBytes([]libcommon.Hash{subHash, subHash})
+	bytes, _ := rlp2.EncodeToBytes([]libcommon.Hash{subHash, subHash})
 	return crypto.Keccak256Hash(bytes)
 }
 

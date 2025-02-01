@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
+
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/direct"
@@ -28,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/debug"
 	turboNode "github.com/erigontech/erigon/turbo/node"
 	"github.com/erigontech/erigon/turbo/stages"

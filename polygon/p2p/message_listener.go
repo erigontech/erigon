@@ -6,13 +6,14 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
+
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	sentrymulticlient "github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/rlp"
 )
 
 type DecodedInboundMessage[TPacket any] struct {

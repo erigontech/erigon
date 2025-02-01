@@ -23,10 +23,11 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/rlp"
+
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 

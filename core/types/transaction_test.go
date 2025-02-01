@@ -37,14 +37,14 @@ import (
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/txpool"
 	libtypes "github.com/erigontech/erigon-lib/types"
 	types2 "github.com/erigontech/erigon-lib/types"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/rlp"
 )
 
 // The values in those tests are from the Transaction Tests
@@ -122,7 +122,7 @@ func TestDecodeEmptyTypedTx(t *testing.T) {
 	t.Parallel()
 	input := []byte{0x80}
 	_, err := DecodeTransaction(input)
-	if !errors.Is(err, rlp.EOL) {
+	if !errors.Is(err, rlp2.EOL) {
 		t.Fatal("wrong error:", err)
 	}
 }
@@ -139,7 +139,7 @@ func TestTransactionSigHash(t *testing.T) {
 
 func TestTransactionEncode(t *testing.T) {
 	t.Parallel()
-	txb, err := rlp.EncodeToBytes(rightvrsTx)
+	txb, err := rlp2.EncodeToBytes(rightvrsTx)
 	if err != nil {
 		t.Fatalf("encode error: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestEIP2718TransactionEncode(t *testing.T) {
 	t.Parallel()
 	// RLP representation
 	{
-		have, err := rlp.EncodeToBytes(signedEip2718Tx)
+		have, err := rlp2.EncodeToBytes(signedEip2718Tx)
 		if err != nil {
 			t.Fatalf("encode error: %v", err)
 		}
@@ -797,7 +797,7 @@ func TestShortUnwrap(t *testing.T) {
 		t.Errorf("short rlp decoding failed : %v", err)
 	}
 	wrappedBlobTx := BlobTxWrapper{}
-	err = wrappedBlobTx.DecodeRLP(rlp.NewStream(bytes.NewReader(blobTxRlp[1:]), 0))
+	err = wrappedBlobTx.DecodeRLP(rlp2.NewStream(bytes.NewReader(blobTxRlp[1:]), 0))
 	if err != nil {
 		t.Errorf("long rlp decoding failed: %v", err)
 	}
@@ -819,7 +819,7 @@ func TestShortUnwrapLib(t *testing.T) {
 		t.Errorf("short rlp decoding failed : %v", err)
 	}
 	wrappedBlobTx := BlobTxWrapper{}
-	err = wrappedBlobTx.DecodeRLP(rlp.NewStream(bytes.NewReader(makeBlobTxRlp()[1:]), 0))
+	err = wrappedBlobTx.DecodeRLP(rlp2.NewStream(bytes.NewReader(makeBlobTxRlp()[1:]), 0))
 	if err != nil {
 		t.Errorf("long rlp decoding failed: %v", err)
 	}

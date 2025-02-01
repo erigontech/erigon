@@ -26,19 +26,20 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/sha3"
 
 	// "github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 )
 
 // Tests block header storage and retrieval operations.
@@ -114,7 +115,7 @@ func TestBodyStorage(t *testing.T) {
 
 	// Create a test body to move around the database and make sure it's really new
 	hasher := sha3.NewLegacyKeccak256()
-	_ = rlp.Encode(hasher, body)
+	_ = rlp2.Encode(hasher, body)
 	hash := libcommon.BytesToHash(hasher.Sum(nil))
 	header := &types.Header{Number: libcommon.Big1}
 
@@ -133,7 +134,7 @@ func TestBodyStorage(t *testing.T) {
 		//if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
 		t.Fatalf("Stored body RLP not found")
 	} else {
-		bodyRlp, err := rlp.EncodeToBytes(entry)
+		bodyRlp, err := rlp2.EncodeToBytes(entry)
 		if err != nil {
 			log.Error("ReadBodyRLP failed", "err", err)
 		}
@@ -690,7 +691,7 @@ func TestPreShanghaiBodyNoPanicOnWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyRlp)
 
 	body := new(types.Body)
-	rlp.DecodeBytes(bstring, body)
+	rlp2.DecodeBytes(bstring, body)
 
 	require.Nil(body.Withdrawals)
 	require.Equal(2, len(body.Transactions))
@@ -705,7 +706,7 @@ func TestPreShanghaiBodyForStorageNoPanicOnWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyForStorageRlp)
 
 	body := new(types.BodyForStorage)
-	rlp.DecodeBytes(bstring, body)
+	rlp2.DecodeBytes(bstring, body)
 
 	require.Nil(body.Withdrawals)
 	require.Equal(uint32(2), body.TxAmount)
@@ -720,7 +721,7 @@ func TestShanghaiBodyForStorageHasWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyForStorageRlp)
 
 	body := new(types.BodyForStorage)
-	rlp.DecodeBytes(bstring, body)
+	rlp2.DecodeBytes(bstring, body)
 
 	require.NotNil(body.Withdrawals)
 	require.Equal(2, len(body.Withdrawals))
@@ -736,7 +737,7 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyForStorageRlp)
 
 	body := new(types.BodyForStorage)
-	rlp.DecodeBytes(bstring, body)
+	rlp2.DecodeBytes(bstring, body)
 
 	require.NotNil(body.Withdrawals)
 	require.Equal(0, len(body.Withdrawals))
@@ -814,11 +815,11 @@ func checkReceiptsRLP(have, want types.Receipts) error {
 		return fmt.Errorf("receipts sizes mismatch: have %d, want %d", len(have), len(want))
 	}
 	for i := 0; i < len(want); i++ {
-		rlpHave, err := rlp.EncodeToBytes(have[i])
+		rlpHave, err := rlp2.EncodeToBytes(have[i])
 		if err != nil {
 			return err
 		}
-		rlpWant, err := rlp.EncodeToBytes(want[i])
+		rlpWant, err := rlp2.EncodeToBytes(want[i])
 		if err != nil {
 			return err
 		}

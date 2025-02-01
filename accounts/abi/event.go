@@ -22,7 +22,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
 )
 
 // Event is an event potentially triggered by the EVM's LOG mechanism. The Event

@@ -36,9 +36,9 @@ import (
 	types2 "github.com/erigontech/erigon-lib/types"
 
 	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/ethash"

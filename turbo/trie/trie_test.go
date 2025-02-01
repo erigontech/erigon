@@ -26,13 +26,15 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
+
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/rlp"
 )
 
 func init() {

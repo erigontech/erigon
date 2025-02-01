@@ -32,12 +32,13 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon-lib/rlp"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/crypto/cryptopool"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 )
 
 // SignatureLength indicates the byte length required to carry a signature with recovery id.
@@ -50,8 +51,9 @@ const RecoveryIDOffset = 64
 const DigestLength = 32
 
 var (
-	secp256k1N    = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
-	secp256k1NBig = secp256k1N.ToBig()
+	secp256k1N     = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
+	secp256k1NBig  = secp256k1N.ToBig()
+	secp256k1halfN = new(uint256.Int).Rsh(secp256k1N, 1)
 )
 
 var errInvalidPubkey = errors.New("invalid secp256k1 public key")
@@ -221,10 +223,9 @@ func MarshalPubkey(pubkey *ecdsa.PublicKey) []byte {
 // HexToECDSA parses a secp256k1 private key.
 func HexToECDSA(hexkey string) (*ecdsa.PrivateKey, error) {
 	b, err := hex.DecodeString(hexkey)
-	if byteErr, ok := err.(hex.InvalidByteError); ok {
+	var byteErr hex.InvalidByteError
+	if errors.As(err, &byteErr) {
 		return nil, fmt.Errorf("invalid hex character %q in private key", byte(byteErr))
-	} else if err != nil {
-		return nil, errors.New("invalid hex data for private key")
 	}
 	return ToECDSA(b)
 }
@@ -306,4 +307,18 @@ func zeroBytes(bytes []byte) {
 	for i := range bytes {
 		bytes[i] = 0
 	}
+}
+
+// See Appendix F "Signing Transactions" of the Yellow Paper
+func TransactionSignatureIsValid(v byte, r, s *uint256.Int, allowPreEip2s bool) bool {
+	if r.IsZero() || s.IsZero() {
+		return false
+	}
+
+	// See EIP-2: Homestead Hard-fork Changes
+	if !allowPreEip2s && s.Gt(secp256k1halfN) {
+		return false
+	}
+
+	return r.Lt(secp256k1N) && s.Lt(secp256k1N) && (v == 0 || v == 1)
 }

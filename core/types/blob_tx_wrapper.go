@@ -13,9 +13,8 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	types2 "github.com/erigontech/erigon-lib/types"
-
-	"github.com/erigontech/erigon/rlp"
 )
 
 const (
@@ -65,14 +64,14 @@ func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	}
 
 	for _, cmtmt := range li {
-		if err := rlp.EncodeString(cmtmt[:], w, b); err != nil {
+		if err := rlp2.EncodeString(cmtmt[:], w, b); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (li *BlobKzgs) DecodeRLP(s *rlp.Stream) error {
+func (li *BlobKzgs) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open BlobKzgs (Commitments): %w", err)
@@ -115,14 +114,14 @@ func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 	}
 
 	for _, proof := range li {
-		if err := rlp.EncodeString(proof[:], w, b); err != nil {
+		if err := rlp2.EncodeString(proof[:], w, b); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (li *KZGProofs) DecodeRLP(s *rlp.Stream) error {
+func (li *KZGProofs) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 
 	if err != nil {
@@ -169,7 +168,7 @@ func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	}
 
 	for _, blob := range blobs {
-		if err := rlp.EncodeString(blob[:], w, b); err != nil {
+		if err := rlp2.EncodeString(blob[:], w, b); err != nil {
 			return err
 		}
 	}
@@ -177,7 +176,7 @@ func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	return nil
 }
 
-func (blobs *Blobs) DecodeRLP(s *rlp.Stream) error {
+func (blobs *Blobs) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open Blobs: %w", err)
@@ -330,7 +329,7 @@ func (txw *BlobTxWrapper) IsContractDeploy() bool { return txw.Tx.IsContractDepl
 
 func (txw *BlobTxWrapper) Unwrap() Transaction { return &txw.Tx }
 
-func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
+func (txw *BlobTxWrapper) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err

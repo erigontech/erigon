@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )

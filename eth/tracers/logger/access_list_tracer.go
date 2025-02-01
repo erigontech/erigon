@@ -23,9 +23,9 @@ import (
 	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/crypto"
 )
 
 // accessList is an accumulator for the set of accounts and storage slots an EVM

@@ -27,9 +27,9 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/p2p/rlpx"
-	"github.com/erigontech/erigon/rlp"
 )
 
 const (
@@ -198,7 +198,7 @@ func DisconnectMessagePayloadDecode(reader io.Reader) (DiscReason, error) {
 	}
 
 	var reasonList struct{ Reason DiscReason }
-	err = rlp.DecodeBytes(data, &reasonList)
+	err = rlp2.DecodeBytes(data, &reasonList)
 
 	// en empty list
 	if (err != nil) && strings.Contains(err.Error(), "rlp: too few elements") {
@@ -207,12 +207,12 @@ func DisconnectMessagePayloadDecode(reader io.Reader) (DiscReason, error) {
 
 	// not a list, try to decode as a plain integer
 	if (err != nil) && strings.Contains(err.Error(), "rlp: expected input list") {
-		err = rlp.DecodeBytes(data, &reasonList.Reason)
+		err = rlp2.DecodeBytes(data, &reasonList.Reason)
 	}
 
 	return reasonList.Reason, err
 }
 
 func DisconnectMessagePayloadEncode(writer io.Writer, reason DiscReason) error {
-	return rlp.Encode(writer, []DiscReason{reason})
+	return rlp2.Encode(writer, []DiscReason{reason})
 }

@@ -8,7 +8,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common/math"
+	math2 "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -23,7 +24,7 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 		GasCost       math.HexOrDecimal64         `json:"gasCost"`
 		Memory        hexutility.Bytes            `json:"memory"`
 		MemorySize    int                         `json:"memSize"`
-		Stack         []*math.HexOrDecimal256     `json:"stack"`
+		Stack         []*math2.HexOrDecimal256    `json:"stack"`
 		ReturnData    hexutility.Bytes            `json:"returnData"`
 		Storage       map[common.Hash]common.Hash `json:"-"`
 		Depth         int                         `json:"depth"`
@@ -40,9 +41,9 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 	enc.Memory = s.Memory
 	enc.MemorySize = s.MemorySize
 	if s.Stack != nil {
-		enc.Stack = make([]*math.HexOrDecimal256, len(s.Stack))
+		enc.Stack = make([]*math2.HexOrDecimal256, len(s.Stack))
 		for k, v := range s.Stack {
-			enc.Stack[k] = (*math.HexOrDecimal256)(v)
+			enc.Stack[k] = (*math2.HexOrDecimal256)(v)
 		}
 	}
 	enc.ReturnData = s.ReturnData
@@ -64,7 +65,7 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 		GasCost       *math.HexOrDecimal64        `json:"gasCost"`
 		Memory        *hexutility.Bytes           `json:"memory"`
 		MemorySize    *int                        `json:"memSize"`
-		Stack         []*math.HexOrDecimal256     `json:"stack"`
+		Stack         []*math2.HexOrDecimal256    `json:"stack"`
 		ReturnData    *hexutility.Bytes           `json:"returnData"`
 		Storage       map[common.Hash]common.Hash `json:"-"`
 		Depth         *int                        `json:"depth"`

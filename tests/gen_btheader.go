@@ -8,7 +8,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common/math"
+	math2 "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -21,7 +22,7 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 		Coinbase              common.Address
 		MixHash               common.Hash
 		Nonce                 types.BlockNonce
-		Number                *math.HexOrDecimal256
+		Number                *math2.HexOrDecimal256
 		Hash                  common.Hash
 		ParentHash            common.Hash
 		ReceiptTrie           common.Hash
@@ -29,11 +30,11 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 		TransactionsTrie      common.Hash
 		UncleHash             common.Hash
 		ExtraData             hexutility.Bytes
-		Difficulty            *math.HexOrDecimal256
+		Difficulty            *math2.HexOrDecimal256
 		GasLimit              math.HexOrDecimal64
 		GasUsed               math.HexOrDecimal64
 		Timestamp             math.HexOrDecimal64
-		BaseFeePerGas         *math.HexOrDecimal256
+		BaseFeePerGas         *math2.HexOrDecimal256
 		WithdrawalsRoot       *common.Hash
 		BlobGasUsed           *math.HexOrDecimal64
 		ExcessBlobGas         *math.HexOrDecimal64
@@ -45,7 +46,7 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 	enc.Coinbase = b.Coinbase
 	enc.MixHash = b.MixHash
 	enc.Nonce = b.Nonce
-	enc.Number = (*math.HexOrDecimal256)(b.Number)
+	enc.Number = (*math2.HexOrDecimal256)(b.Number)
 	enc.Hash = b.Hash
 	enc.ParentHash = b.ParentHash
 	enc.ReceiptTrie = b.ReceiptTrie
@@ -53,11 +54,11 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 	enc.TransactionsTrie = b.TransactionsTrie
 	enc.UncleHash = b.UncleHash
 	enc.ExtraData = b.ExtraData
-	enc.Difficulty = (*math.HexOrDecimal256)(b.Difficulty)
+	enc.Difficulty = (*math2.HexOrDecimal256)(b.Difficulty)
 	enc.GasLimit = math.HexOrDecimal64(b.GasLimit)
 	enc.GasUsed = math.HexOrDecimal64(b.GasUsed)
 	enc.Timestamp = math.HexOrDecimal64(b.Timestamp)
-	enc.BaseFeePerGas = (*math.HexOrDecimal256)(b.BaseFeePerGas)
+	enc.BaseFeePerGas = (*math2.HexOrDecimal256)(b.BaseFeePerGas)
 	enc.WithdrawalsRoot = b.WithdrawalsRoot
 	enc.BlobGasUsed = (*math.HexOrDecimal64)(b.BlobGasUsed)
 	enc.ExcessBlobGas = (*math.HexOrDecimal64)(b.ExcessBlobGas)
@@ -73,7 +74,7 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		Coinbase              *common.Address
 		MixHash               *common.Hash
 		Nonce                 *types.BlockNonce
-		Number                *math.HexOrDecimal256
+		Number                *math2.HexOrDecimal256
 		Hash                  *common.Hash
 		ParentHash            *common.Hash
 		ReceiptTrie           *common.Hash
@@ -81,11 +82,11 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		TransactionsTrie      *common.Hash
 		UncleHash             *common.Hash
 		ExtraData             *hexutility.Bytes
-		Difficulty            *math.HexOrDecimal256
+		Difficulty            *math2.HexOrDecimal256
 		GasLimit              *math.HexOrDecimal64
 		GasUsed               *math.HexOrDecimal64
 		Timestamp             *math.HexOrDecimal64
-		BaseFeePerGas         *math.HexOrDecimal256
+		BaseFeePerGas         *math2.HexOrDecimal256
 		WithdrawalsRoot       *common.Hash
 		BlobGasUsed           *math.HexOrDecimal64
 		ExcessBlobGas         *math.HexOrDecimal64

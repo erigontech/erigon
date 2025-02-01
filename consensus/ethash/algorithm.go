@@ -34,10 +34,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/common/debug"
-	"github.com/erigontech/erigon/crypto"
 )
 
 const (

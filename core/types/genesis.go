@@ -27,9 +27,10 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	math2 "github.com/erigontech/erigon-lib/common/math"
 
+	"github.com/erigontech/erigon-lib/common/math"
 	common2 "github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -131,8 +132,8 @@ type genesisSpecMarshaling struct {
 	GasLimit      math.HexOrDecimal64
 	GasUsed       math.HexOrDecimal64
 	Number        math.HexOrDecimal64
-	Difficulty    *math.HexOrDecimal256
-	BaseFee       *math.HexOrDecimal256
+	Difficulty    *math2.HexOrDecimal256
+	BaseFee       *math2.HexOrDecimal256
 	BlobGasUsed   *math.HexOrDecimal64
 	ExcessBlobGas *math.HexOrDecimal64
 	Alloc         map[common2.UnprefixedAddress]GenesisAccount
@@ -141,7 +142,7 @@ type genesisSpecMarshaling struct {
 type genesisAccountMarshaling struct {
 	Constructor hexutility.Bytes
 	Code        hexutility.Bytes
-	Balance     *math.HexOrDecimal256
+	Balance     *math2.HexOrDecimal256
 	Nonce       math.HexOrDecimal64
 	Storage     map[storageJSON]storageJSON
 	PrivateKey  hexutility.Bytes

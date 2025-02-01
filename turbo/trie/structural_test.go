@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 
