@@ -151,6 +151,35 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	defer dbtx.Rollback()
 
+	chainConfig, err := api.chainConfig(ctx, dbtx)
+	if err != nil {
+		return 0, err
+	}
+	engine := api.engine()
+
+	latestCanBlockNumber, latestCanHash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, latestNumOrHash, dbtx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	if err != nil {
+		return 0, err
+	}
+
+	// try and get the block from the lru cache first then try DB before failing
+	block := api.tryBlockFromLru(latestCanHash)
+	if block == nil {
+		block, err = api.blockWithSenders(ctx, dbtx, latestCanHash, latestCanBlockNumber)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if block == nil {
+		return 0, errors.New("could not find latest block in cache or db")
+	}
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, txNumsReader, latestCanBlockNumber, isLatest, 0, api.stateCache, chainConfig.ChainName)
+	if err != nil {
+		return 0, err
+	}
+
 	// Binary search the gas requirement, as it may be higher than the amount used
 	var (
 		lo     = params.TxGas - 1
@@ -206,11 +235,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.Sign() != 0 {
-		cacheView, err := api.stateCache.View(ctx, dbtx)
-		if err != nil {
-			return 0, err
-		}
-		stateReader := rpchelper.CreateLatestCachedStateReader(cacheView, dbtx)
 		state := state.New(stateReader)
 		if state == nil {
 			return 0, errors.New("can't get the current state")
@@ -248,34 +272,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	gasCap = hi
 
-	chainConfig, err := api.chainConfig(ctx, dbtx)
-	if err != nil {
-		return 0, err
-	}
-	engine := api.engine()
-
-	latestCanBlockNumber, latestCanHash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, latestNumOrHash, dbtx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
-	if err != nil {
-		return 0, err
-	}
-
-	// try and get the block from the lru cache first then try DB before failing
-	block := api.tryBlockFromLru(latestCanHash)
-	if block == nil {
-		block, err = api.blockWithSenders(ctx, dbtx, latestCanHash, latestCanBlockNumber)
-		if err != nil {
-			return 0, err
-		}
-	}
-	if block == nil {
-		return 0, errors.New("could not find latest block in cache or db")
-	}
-
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, txNumsReader, latestCanBlockNumber, isLatest, 0, api.stateCache, chainConfig.ChainName)
-	if err != nil {
-		return 0, err
-	}
 	header := block.HeaderNoCopy()
 
 	caller, err := transactions.NewReusableCaller(engine, stateReader, overrides, header, args, api.GasCap, latestNumOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)

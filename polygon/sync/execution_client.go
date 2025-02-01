@@ -187,7 +187,7 @@ func (e *executionClient) retryBusy(ctx context.Context, label string, f func() 
 
 		if errors.Is(err, ErrExecutionClientBusy) {
 			if attempt%logEveryXAttempt == 1 {
-				e.logger.Debug("execution client busy - retrying", "in", backOff, "label", label, "attempt", attempt)
+				e.logger.Debug(syncLogPrefix("execution client busy - retrying"), "in", backOff, "label", label, "attempt", attempt)
 			}
 			attempt++
 			return err
