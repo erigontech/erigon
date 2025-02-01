@@ -274,6 +274,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 	var blockHash common.Hash
 	var header *types.Header
+	_ = blockHash
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 	txNumbers, err := applyFiltersV3(txNumsReader, tx, begin, end, crit)
