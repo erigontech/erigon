@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/state/exec3"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
@@ -325,39 +324,40 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
-		rawLogs := exec.GetRawLogs(txIndex)
+		//_ := exec.GetRawLogs(txIndex)
 
 		// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
-		r, err := rawtemporaldb.ReceiptAsOfWithApply(tx, txNum, rawLogs, txIndex, blockHash, blockNum, txn)
-		if err != nil {
-			return nil, err
-		}
-		var filtered types.Logs
-		if r == nil { // if receipt data is not released yet. fallback to manual field filling. can remove in future.
-			filtered = rawLogs.Filter(addrMap, crit.Topics, 0)
-			for _, log := range filtered {
-				log.BlockNumber = blockNum
-				log.BlockHash = blockHash
-				log.TxHash = txn.Hash()
-			}
-		} else {
-			filtered = r.Logs.Filter(addrMap, crit.Topics, 0)
-		}
+		//r, err := rawtemporaldb.ReceiptAsOfWithApply(tx, txNum, rawLogs, txIndex, blockHash, blockNum, txn)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//_ = r
+		//var filtered types.Logs
+		//if r == nil { // if receipt data is not released yet. fallback to manual field filling. can remove in future.
+		//	filtered = rawLogs.Filter(addrMap, crit.Topics, 0)
+		//	for _, log := range filtered {
+		//		log.BlockNumber = blockNum
+		//		log.BlockHash = blockHash
+		//		log.TxHash = txn.Hash()
+		//	}
+		//} else {
+		//	filtered = r.Logs.Filter(addrMap, crit.Topics, 0)
+		//}
 
-		for _, filteredLog := range filtered {
-			logs = append(logs, &types.ErigonLog{
-				Address:     filteredLog.Address,
-				Topics:      filteredLog.Topics,
-				Data:        filteredLog.Data,
-				BlockNumber: filteredLog.BlockNumber,
-				TxHash:      filteredLog.TxHash,
-				TxIndex:     filteredLog.TxIndex,
-				BlockHash:   filteredLog.BlockHash,
-				Index:       filteredLog.Index,
-				Removed:     filteredLog.Removed,
-				Timestamp:   header.Time,
-			})
-		}
+		//for _, filteredLog := range filtered {
+		//	logs = append(logs, &types.ErigonLog{
+		//		Address:     filteredLog.Address,
+		//		Topics:      filteredLog.Topics,
+		//		Data:        filteredLog.Data,
+		//		BlockNumber: filteredLog.BlockNumber,
+		//		TxHash:      filteredLog.TxHash,
+		//		TxIndex:     filteredLog.TxIndex,
+		//		BlockHash:   filteredLog.BlockHash,
+		//		Index:       filteredLog.Index,
+		//		Removed:     filteredLog.Removed,
+		//		Timestamp:   header.Time,
+		//	})
+		//}
 	}
 
 	return logs, nil
