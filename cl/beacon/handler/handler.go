@@ -376,6 +376,8 @@ func (a *ApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.o.Do(func() {
 		a.init()
 	})
+
+	log.Info("beacon http request", r.URL)
 	a.mux.ServeHTTP(w, r)
 }
 
