@@ -167,12 +167,14 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 	currentHeader := header
 
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
-		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, currentHeader.ParentHash, currentHeader.Number.Uint64()-1)
+		parentBlockHash := currentHeader.ParentHash
+		parentBlockNum := currentHeader.Number.Uint64() - 1
+		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, parentBlockHash, parentBlockNum)
 		if err != nil {
 			return err
 		}
 		if currentHeader == nil {
-			return fmt.Errorf("header %v not found", currentHeader.Hash())
+			return fmt.Errorf("header %d, %x not found", parentBlockNum, parentBlockHash)
 		}
 	}
 	if err := e.hook.BeforeRun(tx, true); err != nil {
