@@ -1021,7 +1021,7 @@ func TestDexScenario(t *testing.T) {
 
 	postValidation := func(pe *parallelExecutor) error {
 		for blockNum, blockStatus := range pe.blockExecutors {
-			if blockStatus.validateTasks.maxAllComplete() == len(blockStatus.tasks) {
+			if blockStatus.validateTasks.maxComplete() == len(blockStatus.tasks) {
 				for i, inputs := range blockStatus.result.TxIO.Inputs() {
 					var err error
 					inputs.Scan(func(input *state.VersionedRead) bool {
@@ -1066,7 +1066,7 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 
 	postValidation := func(pe *parallelExecutor) error {
 		for blockNum, blockStatus := range pe.blockExecutors {
-			if blockStatus.validateTasks.maxAllComplete() == len(blockStatus.tasks) {
+			if blockStatus.validateTasks.maxComplete() == len(blockStatus.tasks) {
 				for i, inputs := range blockStatus.result.TxIO.Inputs() {
 					var err error
 					inputs.Scan(func(input *state.VersionedRead) bool {

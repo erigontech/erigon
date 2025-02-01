@@ -576,7 +576,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 	}
 
 	// do validations ...
-	maxComplete := be.execTasks.maxAllComplete()
+	maxComplete := be.execTasks.maxComplete()
+	fmt.Println("Max Exec", maxComplete)
+	fmt.Println("Exec Complete", be.execTasks.complete)
+
 	toValidate := make(sort.IntSlice, 0, 2)
 
 	for be.validateTasks.minPending() <= maxComplete && be.validateTasks.minPending() >= 0 {
@@ -615,7 +618,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 		}
 	}
 
-	maxValidated := be.validateTasks.maxAllComplete()
+	maxValidated := be.validateTasks.maxComplete()
 	fmt.Println("Max Validated", maxValidated)
 	fmt.Println("Validation Complete", be.validateTasks.complete)
 	fmt.Println("Exec Pending", be.execTasks.pending)
@@ -729,7 +732,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWithRetry) {
-	maxValidated := be.validateTasks.maxAllComplete()
+	maxValidated := be.validateTasks.maxComplete()
 	//fmt.Println("schedule", blockExecutor.execTasks.minPending(), maxValidated+1)
 	// Send the next immediate pending transaction to be executed
 	//if blockExecutor.execTasks.minPending() != -1 && blockExecutor.execTasks.minPending() == maxValidated+1 {

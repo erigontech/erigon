@@ -131,7 +131,7 @@ func hasNoGap(l []int) bool {
 	return l[0]+len(l) == l[len(l)-1]+1
 }
 
-func (m execStatusList) maxAllComplete() int {
+func (m execStatusList) maxComplete() int {
 	if len(m.complete) == 0 || m.complete[0] != 0 {
 		return -1
 	} else if m.complete[len(m.complete)-1] == len(m.complete)-1 {
@@ -284,7 +284,7 @@ func (m *execStatusList) checkComplete(tx int) bool {
 //
 //	'all complete' limit
 func (m *execStatusList) getRevalidationRange(txFrom int) (ret []int) {
-	max := m.maxAllComplete() // haven't learned to trust compilers :)
+	max := m.maxComplete() // haven't learned to trust compilers :)
 	for x := txFrom; x <= max; x++ {
 		if !m.checkInProgress(x) {
 			ret = append(ret, x)
