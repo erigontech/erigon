@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/filters"
-	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
@@ -606,7 +605,7 @@ func (a *APIBackend) StateAndHeaderByNumber(ctx context.Context, number rpc.Bloc
 	return StateAndHeaderFromHeader(ctx, a.ChainDb(), a.BlockChain(), a.arbConfig.MaxRecreateStateDepth, header, err)
 }
 
-func (a *APIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*state.IntraBlockState, *types.Header, error) {
+func (a *APIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (state.IntraBlockStateArbitrum, *types.Header, error) {
 	header, err := a.HeaderByNumberOrHash(ctx, blockNrOrHash)
 	hash, ishash := blockNrOrHash.Hash()
 	bc := a.BlockChain()
@@ -630,21 +629,23 @@ func (a *APIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockNrOr
 	return StateAndHeaderFromHeader(ctx, a.ChainDb(), a.b.BlockChain(), a.arbConfig.MaxRecreateStateDepth, header, err)
 }
 
-func (a *APIBackend) StateAtBlock(ctx context.Context, block *types.Block, reexec uint64, base *state.IntraBlockState, checkLive bool, preferDisk bool) (statedb *state.IntraBlockState, release tracers.StateReleaseFunc, err error) {
-	if !a.BlockChain().Config().IsArbitrumNitro(block.Number()) {
-		return nil, nil, types.ErrUseFallback
-	}
-	// DEV: This assumes that `StateAtBlock` only accesses the blockchain and chainDb fields
-	return eth.NewArbEthereum(a.b.BlockChain(), a.ChainDb()).StateAtBlock(ctx, block, reexec, base, nil, checkLive, preferDisk)
-}
+// Unused
+//func (a *APIBackend) StateAtBlock(ctx context.Context, block *types.Block, reexec uint64, base *state.IntraBlockState, checkLive bool, preferDisk bool) (statedb *state.IntraBlockState, release tracers.StateReleaseFunc, err error) {
+//	if !a.BlockChain().Config().IsArbitrumNitro(block.Number()) {
+//		return nil, nil, types.ErrUseFallback
+//	}
+//	// DEV: This assumes that `StateAtBlock` only accesses the blockchain and chainDb fields
+//	return eth.NewArbEthereum(a.b.BlockChain(), a.ChainDb()).StateAtBlock(ctx, block, reexec, base, nil, checkLive, preferDisk)
+//}
 
-func (a *APIBackend) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (*core.Message, evmtypes.BlockContext, *state.IntraBlockState, tracers.StateReleaseFunc, error) {
-	if !a.BlockChain().Config().IsArbitrumNitro(block.Number()) {
-		return nil, evmtypes.BlockContext{}, nil, nil, types.ErrUseFallback
-	}
-	// DEV: This assumes that `StateAtTransaction` only accesses the blockchain and chainDb fields
-	return eth.NewArbEthereum(a.b.BlockChain(), a.ChainDb()).StateAtTransaction(ctx, block, txIndex, reexec)
-}
+// unused
+//func (a *APIBackend) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (*core.Message, evmtypes.BlockContext, *state.IntraBlockState, tracers.StateReleaseFunc, error) {
+//	if !a.BlockChain().Config().IsArbitrumNitro(block.Number()) {
+//		return nil, evmtypes.BlockContext{}, nil, nil, types.ErrUseFallback
+//	}
+//	// DEV: This assumes that `StateAtTransaction` only accesses the blockchain and chainDb fields
+//	return eth.NewArbEthereum(a.b.BlockChain(), a.ChainDb()).StateAtTransaction(ctx, block, txIndex, reexec)
+//}
 
 func (a *APIBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
 	return a.BlockChain().GetReceiptsByHash(hash), nil
@@ -677,17 +678,17 @@ func (a *APIBackend) GetEVM(ctx context.Context, msg *types.Message, state *stat
 	return vm.NewEVM(context, txContext, state, a.BlockChain().Config(), *vmConfig)
 }
 
-func (a *APIBackend) SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription {
-	return a.BlockChain().SubscribeChainEvent(ch)
-}
+// func (a *APIBackend) SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription {
+// 	return a.BlockChain().SubscribeChainEvent(ch)
+// }
 
-func (a *APIBackend) SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription {
-	return a.BlockChain().SubscribeChainHeadEvent(ch)
-}
+// func (a *APIBackend) SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription {
+// 	return a.BlockChain().SubscribeChainHeadEvent(ch)
+// }
 
-func (a *APIBackend) SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) event.Subscription {
-	return a.BlockChain().SubscribeChainSideEvent(ch)
-}
+// func (a *APIBackend) SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) event.Subscription {
+// 	return a.BlockChain().SubscribeChainSideEvent(ch)
+// }
 
 // Transaction pool API
 func (a *APIBackend) SendTx(ctx context.Context, signedTx types.Transaction) error {
@@ -765,19 +766,19 @@ func (a *APIBackend) ServiceFilter(ctx context.Context, session *bloombits.Match
 	}
 }
 
-func (a *APIBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription {
-	// return a.Arb.SubscribeLogsEvent(ch)
-	return a.BlockChain().SubscribeLogsEvent(ch)
-}
+// func (a *APIBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription {
+// 	// return a.Arb.SubscribeLogsEvent(ch)
+// 	return a.BlockChain().SubscribeLogsEvent(ch)
+// }
 
-func (a *APIBackend) SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription {
-	//Arbitrum doesn't really need pending logs. Logs are published as soon as we know them..
-	return a.SubscribeLogsEvent(ch)
-}
+// func (a *APIBackend) SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription {
+// 	//Arbitrum doesn't really need pending logs. Logs are published as soon as we know them..
+// 	return a.SubscribeLogsEvent(ch)
+// }
 
-func (a *APIBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {
-	return a.BlockChain().SubscribeRemovedLogsEvent(ch)
-}
+// func (a *APIBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {
+// 	return a.BlockChain().SubscribeRemovedLogsEvent(ch)
+// }
 
 func (a *APIBackend) ChainConfig() *chain.Config {
 	return a.BlockChain().Config()

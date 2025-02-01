@@ -26,15 +26,14 @@ type Backend struct {
 	scope  event.SubscriptionScope
 
 	bloomRequests chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests
-	// bloomIndexer  *core.ChainIndexer             // Bloom indexer operating during block imports
 
+	// filterSystem *filters.FilterSystem
+	// bloomIndexer  *core.ChainIndexer             // Bloom indexer operating during block imports
 	//shutdownTracker *shutdowncheck.ShutdownTracker
 
 	chanTxs      chan types.Transaction
 	chanClose    chan struct{} //close coroutine
 	chanNewBlock chan struct{} //create new L2 block unless empty
-
-	// filterSystem *filters.FilterSystem
 }
 
 func NewBackend(stack *node.Node, config *Config, chainDb kv.TemporalRwDB, publisher ArbInterface /*, filterConfig filters.Config*/) (*Backend /**filters.FilterSystem,*/, error) {
