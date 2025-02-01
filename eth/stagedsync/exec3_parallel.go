@@ -482,6 +482,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 	tx := task.index
 
+	fmt.Println("res", res.Version().TxIndex, res.Version().Incarnation)
+
 	be.results[tx] = &execResult{res}
 
 	if res.Err != nil {
@@ -577,10 +579,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 	maxComplete := be.execTasks.maxAllComplete()
 	toValidate := make(sort.IntSlice, 0, 2)
 
-	fmt.Println("ToValidate", toValidate)
 	for be.validateTasks.minPending() <= maxComplete && be.validateTasks.minPending() >= 0 {
 		toValidate = append(toValidate, be.validateTasks.takeNextPending())
 	}
+
+	fmt.Println("To Validate", toValidate)
 
 	for i := 0; i < len(toValidate); i++ {
 		be.cntTotalValidations++
@@ -590,6 +593,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 		if be.skipCheck[tx] ||
 			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap, func(read, written state.Version) bool { return read == written }) {
+			fmt.Println("valid", tx)
 			be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), true)
 			be.validateTasks.markComplete(tx)
 			// note this assumes that tasks are pushed in order as finalization needs to happen in block order
