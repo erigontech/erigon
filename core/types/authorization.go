@@ -5,14 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
-	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/params"
 )
@@ -38,10 +36,6 @@ func (ath *Authorization) copy() *Authorization {
 }
 
 func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommon.Address, error) {
-	if ath.Nonce == math.MaxUint64 {
-		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
-	}
-
 	authLen := 1 + rlp.Uint256LenExcludingHead(&ath.ChainID)
 	authLen += 1 + length.Addr
 	authLen += rlp.U64Len(ath.Nonce)
@@ -63,27 +57,26 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 		return nil, err
 	}
 
-	return RecoverSignerFromRLP(data.Bytes(), ath.YParity, ath.R, ath.S)
-}
-
-func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*libcommon.Address, error) {
 	hashData := []byte{params.SetCodeMagicPrefix}
-	hashData = append(hashData, rlp...)
+	hashData = append(hashData, data.Bytes()...)
 	hash := crypto.Keccak256Hash(hashData)
 
 	var sig [65]byte
-	rBytes := r.Bytes()
-	sBytes := s.Bytes()
-	copy(sig[32-len(r):32], rBytes)
-	copy(sig[64-len(s):64], sBytes)
+	r := ath.R.Bytes()
+	s := ath.S.Bytes()
+	copy(sig[32-len(r):32], r)
+	copy(sig[64-len(s):64], s)
 
-	if yParity == 0 || yParity == 1 {
-		sig[64] = yParity
+	if ath.Nonce == 1<<64-1 {
+		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
+	}
+	if ath.YParity == 0 || ath.YParity == 1 {
+		sig[64] = ath.YParity
 	} else {
-		return nil, fmt.Errorf("invalid y parity value: %d", yParity)
+		return nil, fmt.Errorf("invalid y parity value: %d", ath.YParity)
 	}
 
-	if !libcrypto.TransactionSignatureIsValid(sig[64], &r, &s, false /* allowPreEip2s */) {
+	if !crypto.TransactionSignatureIsValid(sig[64], &ath.R, &ath.S, false /* allowPreEip2s */) {
 		return nil, errors.New("invalid signature")
 	}
 
