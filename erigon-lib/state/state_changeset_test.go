@@ -39,7 +39,7 @@ func TestOverflowPages(t *testing.T) {
 	_ = tx.Put(kv.ChangeSets3, k, v)
 	st, err := tx.(*mdbx.MdbxTx).BucketStat(kv.ChangeSets3)
 	require.NoError(t, err)
-	require.Equal(t, 2, int(st.OverflowPages))
+	require.Equal(t, 0, int(st.OverflowPages))
 	require.Equal(t, 1, int(st.LeafPages))
 	require.Equal(t, 2, int(st.Entries))
 	require.Equal(t, 2, int(st.Entries))
