@@ -167,8 +167,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 	currentHeader := header
 
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
-		parentBlockHash := currentHeader.ParentHash
-		parentBlockNum := currentHeader.Number.Uint64() - 1
+		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
 		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, parentBlockHash, parentBlockNum)
 		if err != nil {
 			return err
