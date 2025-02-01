@@ -154,10 +154,9 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 		return err
 	}
 
-	b := bytes.NewBuffer(f.sszBuffer)
-	b.Reset()
+	var b bytes.Buffer
 
-	if err := bs.EncodeCaches(b); err != nil {
+	if err := bs.EncodeCaches(&b); err != nil {
 		log.Error("failed to encode caches", "err", err)
 		return err
 	}
