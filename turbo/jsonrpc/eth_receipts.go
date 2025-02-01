@@ -310,7 +310,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 			blockHash = header.Hash()
 			exec.ChangeBlock(header)
-			if blockNum%1000 == 0 {
+			if blockNum%100 == 0 {
 				log.Warn("[dbg] getLogsV3 progress", "block", blockNum)
 			}
 		}
