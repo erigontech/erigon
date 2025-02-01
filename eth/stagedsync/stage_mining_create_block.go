@@ -53,6 +53,9 @@ type MiningBlock struct {
 	Withdrawals      []*types.Withdrawal
 	PreparedTxns     types.Transactions
 	Requests         types.FlatRequests
+
+	// Optimism
+	ForceTxs types.Transactions
 }
 
 type MiningState struct {
@@ -108,7 +111,6 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	current := cfg.miner.MiningBlock
 	var txPoolLocals []libcommon.Address //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := cfg.miner.MiningConfig.Etherbase
-
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
 		staleThreshold = 7
@@ -119,13 +121,33 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
-	parent := rawdb.ReadHeaderByNumber(txc.Tx, executionAt)
+	ctx := context.Background()
+	parent, err := cfg.blockReader.HeaderByNumber(ctx, txc.Tx, executionAt)
+	if err != nil {
+		return fmt.Errorf("getting parent block: %w", err)
+	}
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf("empty block %d", executionAt)
 	}
 
 	if cfg.blockBuilderParameters != nil && cfg.blockBuilderParameters.ParentHash != parent.Hash() {
-		return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockBuilderParameters.ParentHash)
+		if cfg.chainConfig.IsOptimism() {
+			// In Optimism, self re-org via engine_forkchoiceUpdatedV1 is allowed
+
+			log.Warn("wrong head block", "current", parent.Hash(), "requested", cfg.blockBuilderParameters.ParentHash, "executionAt", executionAt)
+
+			exectedParent, err := cfg.blockReader.HeaderByHash(ctx, txc.Tx, cfg.blockBuilderParameters.ParentHash)
+			if err != nil {
+				return err
+			}
+			expectedExecutionAt := exectedParent.Number.Uint64()
+
+			executionAt = expectedExecutionAt
+			parent = exectedParent
+
+		} else {
+			return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockBuilderParameters.ParentHash)
+		}
 	}
 
 	if cfg.miner.MiningConfig.Etherbase == (libcommon.Address{}) {
@@ -172,6 +194,11 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 		timestamp = cfg.blockBuilderParameters.Timestamp
 	}
 
+	targetGasLimit := &cfg.miner.MiningConfig.GasLimit
+	if cfg.chainConfig.IsOptimism() {
+		targetGasLimit = cfg.blockBuilderParameters.GasLimit
+	}
+
 	type envT struct {
 		signer    *types.Signer
 		ancestors mapset.Set[libcommon.Hash] // ancestor set (used for checking uncle parent validity)
@@ -185,16 +212,23 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 		uncles:    mapset.NewSet[libcommon.Hash](),
 	}
 
-	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
-	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
-		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
-		header.GasLimit = parent.GasLimit
+	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, targetGasLimit)
+
+	// Optimism forces the gas limit from the config
+	if !cfg.chainConfig.IsOptimism() {
+		if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
+			logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
+			header.GasLimit = parent.GasLimit
+		}
 	}
 
 	header.Coinbase = coinbase
 	header.Extra = cfg.miner.MiningConfig.ExtraData
-
-	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
+	if cfg.chainConfig.IsOptimism() {
+		logger.Debug(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
+	} else {
+		logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
+	}
 	ibs := state.New(state.NewReaderV3(txc.Doms))
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
@@ -217,6 +251,14 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 		current.Header = header
 		current.Uncles = nil
 		current.Withdrawals = cfg.blockBuilderParameters.Withdrawals
+		current.ForceTxs = make(types.Transactions, 0, len(cfg.blockBuilderParameters.Transactions))
+		for _, tx := range cfg.blockBuilderParameters.Transactions {
+			decodedTx, err := types.DecodeTransaction(tx)
+			if err != nil {
+				return err
+			}
+			current.ForceTxs = append(current.ForceTxs, decodedTx)
+		}
 		return nil
 	}
 

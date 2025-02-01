@@ -320,6 +320,36 @@ func (api *BaseAPI) stateSyncEvents(ctx context.Context, tx kv.Tx, blockHash com
 	return stateSyncEvents, nil
 }
 
+func (api *BaseAPI) getReceiptsForOptimismBlockMarshalling(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
+	config, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		return nil, errors.New("missing chain config")
+	}
+
+	if !config.IsOptimism() {
+		return nil, nil
+	}
+	return api.receiptsGenerator.GetReceipts(ctx, config, tx, block)
+}
+
+func (api *BaseAPI) getReceiptForOptimismBlockMarshalling(ctx context.Context, tx kv.TemporalTx, header *types.Header, txn types.Transaction, txIndex int) (*types.Receipt, error) {
+	config, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		return nil, errors.New("missing chain config")
+	}
+
+	if !config.IsOptimism() {
+		return nil, nil
+	}
+	return api.getReceipt(ctx, config, tx, header, txn, txIndex, uint64(txIndex)+1)
+}
+
 // checks the pruning state to see if we would hold information about this
 // block in state history or not.  Some strange issues arise getting account
 // history for blocks that have been pruned away giving nonce too low errors
@@ -419,9 +449,9 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 func newRPCPendingTransaction(txn types.Transaction, current *types.Header, config *chain.Config) *ethapi.RPCTransaction {
 	var baseFee *big.Int
 	if current != nil {
-		baseFee = misc.CalcBaseFee(config, current)
+		baseFee = misc.CalcBaseFee(config, current, current.Time+1)
 	}
-	return ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, baseFee)
+	return ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, baseFee, nil)
 }
 
 // newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.

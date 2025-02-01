@@ -59,6 +59,7 @@ type MiningExecCfg struct {
 	interrupt   *int32
 	payloadId   uint64
 	txnProvider txnprovider.TxnProvider
+	noTxPool    bool
 }
 
 func StageMiningExecCfg(
@@ -73,6 +74,7 @@ func StageMiningExecCfg(
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
 	blockReader services.FullBlockReader,
+	noTxPool bool,
 ) MiningExecCfg {
 	return MiningExecCfg{
 		db:          db,
@@ -86,6 +88,7 @@ func StageMiningExecCfg(
 		interrupt:   interrupt,
 		payloadId:   payloadId,
 		txnProvider: txnProvider,
+		noTxPool:    noTxPool,
 	}
 }
 
@@ -122,14 +125,27 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
+		forceTxs := current.ForceTxs
+		if len(forceTxs) > 0 {
+			// forceTxs is sent by Optimism consensus client, and all force txs must be included in the payload.
+			// Therefore, interrupts to block building must not be handled while force txs are being processed.
+			// So do not pass cfg.interrupt
+			current.Txns = current.Txns[:0]
+			current.Receipts = current.Receipts[:0]
 
-		if len(preparedTxns) > 0 {
-			logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+			logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, forceTxs, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, true, logger)
 			if err != nil {
 				return err
 			}
 			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
-		} else {
+		}
+		if !cfg.noTxPool && len(preparedTxns) == 0 {
+			logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, false, logger)
+			if err != nil {
+				return err
+			}
+			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+		} else if !cfg.noTxPool {
 
 			yielded := mapset.NewSet[[32]byte]()
 			var simStateReader state.StateReader
@@ -158,7 +174,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 				}
 
 				if len(txns) > 0 {
-					logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+					logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, false, logger)
 					if err != nil {
 						return err
 					}
@@ -246,7 +262,11 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	}
 	current.Header.Root = libcommon.BytesToHash(rh)
 
-	logger.Info("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txns.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
+	// if cfg.chainConfig.IsOptimism() {
+	// 	logger.Debug("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txns.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
+	// } else {
+	logger.Info("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txns.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId, "forcedTxs", len(current.ForceTxs))
+	//}
 
 	return nil
 }
@@ -442,12 +462,13 @@ func addTransactionsToMiningBlock(
 	ibs *state.IntraBlockState,
 	interrupt *int32,
 	payloadId uint64,
+	forceTxs bool,
 	logger log.Logger,
 ) (types.Logs, bool, error) {
 	header := current.Header
 	txnIdx := ibs.TxnIndex() + 1
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
-	if header.BlobGasUsed != nil {
+	if header.BlobGasUsed != nil && !forceTxs {
 		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
 	}
 	signer := types.MakeSigner(&chainConfig, header.Number.Uint64(), header.Time)
@@ -484,7 +505,7 @@ func addTransactionsToMiningBlock(
 LOOP:
 	for _, txn := range txns {
 		// see if we need to stop now
-		if stopped != nil {
+		if stopped != nil && !forceTxs {
 			select {
 			case <-stopped.C:
 				done = true
@@ -497,13 +518,13 @@ LOOP:
 			return nil, true, err
 		}
 
-		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 && stopped == nil {
+		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 && stopped == nil && !forceTxs {
 			logger.Debug("Transaction adding was requested to stop", "payload", payloadId)
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
 		// If we don't have enough gas for any further transactions then we're done
-		if gasPool.Gas() < params.TxGas {
+		if gasPool.Gas() < params.TxGas && !forceTxs {
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
 			done = true
 			break
@@ -518,7 +539,7 @@ LOOP:
 
 		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
-		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) {
+		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) && !forceTxs {
 			logger.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
 			continue
 		}

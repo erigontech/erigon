@@ -134,6 +134,11 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 
 		select {
 		case <-fcuTimer.C:
+			if e.config.IsOptimism() {
+				// op-node does not handle SYNCING as asynchronous forkChoiceUpdated.
+				// return an error and make op-node retry
+				return nil, errors.New("forkChoiceUpdated timeout")
+			}
 			e.logger.Debug("treating forkChoiceUpdated as asynchronous as it is taking too long")
 			return &execution.ForkChoiceReceipt{
 				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
@@ -177,7 +182,13 @@ func minUnwindableBlock(tx kv.Tx, number uint64) (uint64, error) {
 }
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) {
-	if !e.semaphore.TryAcquire(1) {
+	if e.isBusy() {
+		if e.config.IsOptimism() {
+			// op-node does not handle SYNCING as asynchronous forkChoiceUpdated.
+			// return an error and make op-node retry
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, errors.New("cannot update forkchoice. execution service is busy"), false)
+			return
+		}
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
@@ -247,7 +258,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 	defer metrics.UpdateBlockConsumerPostExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 
-	limitedBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit-2)
+	limitedBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64() > finishProgressBefore && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit-2)
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 	if limitedBigJump {
 		isSynced = false
@@ -259,10 +270,13 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		return
 	}
+
 	if fcuHeader.Number.Uint64() > 0 {
 		if canonicalHash == blockHash {
 			// if block hash is part of the canonical chain treat it as no-op.
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
+
+			//
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 			if err != nil {
 				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
@@ -275,6 +289,33 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				}, false)
 				return
 			}
+
+			// In the case of optimism unwind
+			if e.config.IsOptimism() {
+				if err := e.executionPipeline.UnwindTo(fcuHeader.Number.Uint64(), stagedsync.ForkChoice, tx); err != nil {
+					sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+					return
+				}
+				if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
+					sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+					return
+				}
+
+				if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()+1); err != nil {
+					sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+					return
+				}
+				if err := tx.Commit(); err != nil {
+					sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+					return
+				}
+
+				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+					LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
+					Status:          execution.ExecutionStatus_Success,
+				}, false)
+			}
+
 			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 				LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
 				Status:          execution.ExecutionStatus_Success,
@@ -291,10 +332,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 		// Find such point, and collect all hashes
 		newCanonicals := make([]*canonicalEntry, 0, 64)
+
 		newCanonicals = append(newCanonicals, &canonicalEntry{
 			hash:   fcuHeader.Hash(),
 			number: fcuHeader.Number.Uint64(),
 		})
+
 		for !isCanonicalHash {
 			newCanonicals = append(newCanonicals, &canonicalEntry{
 				hash:   currentParentHash,

@@ -28,11 +28,13 @@ import (
 	"math/big"
 	"slices"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/opstack"
 )
 
 //(go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go)
@@ -50,6 +52,9 @@ const (
 
 	// ReceiptStatusSuccessful is the status code of a transaction if execution succeeded.
 	ReceiptStatusSuccessful = uint64(1)
+
+	// The version number for post-canyon deposit receipts.
+	CanyonDepositReceiptVersion = uint64(1)
 )
 
 // Receipt represents the results of a transaction.
@@ -76,6 +81,31 @@ type Receipt struct {
 	TransactionIndex uint           `json:"transactionIndex"`
 
 	FirstLogIndexWithinBlock uint32 `json:"-"` // field which used to store in db and re-calc
+
+	// OPTIMISM FIELDS
+
+	// OVM legacy: extend receipts with their L1 price (if a rollup tx)
+	L1GasPrice *big.Int   `json:"l1GasPrice,omitempty"`
+	L1GasUsed  *big.Int   `json:"l1GasUsed,omitempty"`
+	L1Fee      *big.Int   `json:"l1Fee,omitempty"`
+	FeeScalar  *big.Float `json:"l1FeeScalar,omitempty"` // always nil after Ecotone hardfork
+
+	// DepositNonce was introduced in Regolith to store the actual nonce used by deposit transactions
+	// The state transition process ensures this is only set for Regolith deposit transactions.
+	DepositNonce *uint64 `json:"depositNonce,omitempty"`
+	// The position of DepositNonce variable must NOT be changed. If changed, cbor decoding will fail
+	// for the data following previous struct and leading to decoding error(triggering backward imcompatibility).
+
+	// Further fields when added must be appended after the last variable. Watch out for cbor.
+
+	// DepositReceiptVersion was introduced in Canyon to indicate an update to how receipt hashes
+	// should be computed when set. The state transition process ensures this is only set for
+	// post-Canyon deposit transactions.
+	DepositReceiptVersion *uint64 `json:"depositReceiptVersion,omitempty"`
+
+	L1BlobBaseFee       *big.Int `json:"l1BlobBaseFee,omitempty"`       // Always nil prior to the Ecotone hardfork
+	L1BaseFeeScalar     *uint64  `json:"l1BaseFeeScalar,omitempty"`     // Always nil prior to the Ecotone hardfork
+	L1BlobBaseFeeScalar *uint64  `json:"l1BlobBaseFeeScalar,omitempty"` // Always nil prior to the Ecotone hardfork
 }
 
 type receiptMarshaling struct {
@@ -86,6 +116,17 @@ type receiptMarshaling struct {
 	GasUsed           hexutil.Uint64
 	BlockNumber       *hexutil.Big
 	TransactionIndex  hexutil.Uint
+
+	// Optimism
+	L1GasPrice            *hexutil.Big
+	L1BlobBaseFee         *hexutil.Big
+	L1GasUsed             *hexutil.Big
+	L1Fee                 *hexutil.Big
+	FeeScalar             *big.Float
+	L1BaseFeeScalar       *hexutil.Uint64
+	L1BlobBaseFeeScalar   *hexutil.Uint64
+	DepositNonce          *hexutil.Uint64
+	DepositReceiptVersion *hexutil.Uint64
 }
 
 // receiptRLP is the consensus encoding of a receipt.
@@ -96,11 +137,29 @@ type receiptRLP struct {
 	Logs              []*Log
 }
 
+type depositReceiptRlp struct {
+	PostStateOrStatus []byte
+	CumulativeGasUsed uint64
+	Bloom             Bloom
+	Logs              []*Log
+	// DepositNonce was introduced in Regolith to store the actual nonce used by deposit transactions.
+	// Must be nil for any transactions prior to Regolith or that aren't deposit transactions.
+	DepositNonce *uint64 `rlp:"optional"`
+	// Receipt hash post-Regolith but pre-Canyon inadvertently did not include the above
+	// DepositNonce. Post Canyon, receipts will have a non-empty DepositReceiptVersion indicating
+	// which post-Canyon receipt hash function to invoke.
+	DepositReceiptVersion *uint64 `rlp:"optional"`
+}
+
 // storedReceiptRLP is the storage encoding of a receipt.
 type storedReceiptRLP struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	FirstLogIndex     uint32 // Logs have their own incremental Index within block. To allow calc it without re-executing whole block - can store it in Receipt
+	// Receipt hash post-Regolith but pre-Canyon inadvertently did not include the above
+	// DepositNonce. Post Canyon, receipts will have a non-empty DepositReceiptVersion indicating
+	// which post-Canyon receipt hash function to invoke.
+	DepositReceiptVersion *uint64 `rlp:"optional"`
 }
 
 // NewReceipt creates a barebone transaction receipt, copying the init fields.
@@ -125,6 +184,17 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
+	if r.Type == OptimismDepositTxType {
+		buf := new(bytes.Buffer)
+		buf.WriteByte(r.Type)
+		withNonceAndReceiptVersion := &depositReceiptRlp{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs, r.DepositNonce, r.DepositReceiptVersion}
+		fmt.Println(*r.DepositReceiptVersion)
+		if err := rlp.Encode(buf, withNonceAndReceiptVersion); err != nil {
+			return err
+		}
+		return rlp.Encode(w, buf.Bytes())
+	}
+
 	buf := encodeBufferPool.Get().(*bytes.Buffer)
 	defer encodeBufferPool.Put(buf)
 	buf.Reset()
@@ -179,7 +249,7 @@ func (r *Receipt) decodeTyped(b []byte) error {
 		return errShortTypedReceipt
 	}
 	switch b[0] {
-	case DynamicFeeTxType, AccessListTxType, BlobTxType:
+	case DynamicFeeTxType, AccessListTxType, OptimismDepositTxType, BlobTxType:
 		var data receiptRLP
 		err := rlp.DecodeBytes(b[1:], &data)
 		if err != nil {
@@ -260,6 +330,28 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close Logs: %w", err)
 	}
+
+	if r.Type == OptimismDepositTxType {
+		depositNonce, err := s.Uint()
+		if err != nil {
+			if !errors.Is(err, rlp.EOL) {
+				return fmt.Errorf("read DepositNonce: %w", err)
+			}
+			return nil
+		} else {
+			r.DepositNonce = &depositNonce
+		}
+		depositReceiptVersion, err := s.Uint()
+		if err != nil {
+			if !errors.Is(err, rlp.EOL) {
+				return fmt.Errorf("read DepositReceiptVersion: %w", err)
+			}
+			return nil
+		} else {
+			r.DepositReceiptVersion = &depositReceiptVersion
+		}
+	}
+
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close receipt payload: %w", err)
 	}
@@ -292,7 +384,7 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		}
 		r.Type = b[0]
 		switch r.Type {
-		case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType:
+		case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, OptimismDepositTxType:
 			if err := r.decodePayload(s); err != nil {
 				return err
 			}
@@ -338,18 +430,19 @@ func (r *Receipt) Copy() *Receipt {
 		return nil
 	}
 	return &Receipt{
-		Type:              r.Type,
-		PostState:         slices.Clone(r.PostState),
-		Status:            r.Status,
-		CumulativeGasUsed: r.CumulativeGasUsed,
-		Bloom:             BytesToBloom(r.Bloom.Bytes()),
-		Logs:              r.Logs.Copy(),
-		TxHash:            libcommon.BytesToHash(r.TxHash.Bytes()),
-		ContractAddress:   libcommon.BytesToAddress(r.ContractAddress.Bytes()),
-		GasUsed:           r.GasUsed,
-		BlockHash:         libcommon.BytesToHash(r.BlockHash.Bytes()),
-		BlockNumber:       big.NewInt(0).Set(r.BlockNumber),
-		TransactionIndex:  r.TransactionIndex,
+		Type:                  r.Type,
+		PostState:             slices.Clone(r.PostState),
+		Status:                r.Status,
+		CumulativeGasUsed:     r.CumulativeGasUsed,
+		Bloom:                 BytesToBloom(r.Bloom.Bytes()),
+		Logs:                  r.Logs.Copy(),
+		TxHash:                libcommon.BytesToHash(r.TxHash.Bytes()),
+		ContractAddress:       libcommon.BytesToAddress(r.ContractAddress.Bytes()),
+		GasUsed:               r.GasUsed,
+		BlockHash:             libcommon.BytesToHash(r.BlockHash.Bytes()),
+		BlockNumber:           big.NewInt(0).Set(r.BlockNumber),
+		TransactionIndex:      r.TransactionIndex,
+		DepositReceiptVersion: r.DepositReceiptVersion,
 	}
 }
 
@@ -367,9 +460,10 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		firstLogIndex = uint32(r.Logs[0].Index)
 	}
 	return rlp.Encode(w, &storedReceiptRLP{
-		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
-		CumulativeGasUsed: r.CumulativeGasUsed,
-		FirstLogIndex:     firstLogIndex,
+		PostStateOrStatus:     (*Receipt)(r).statusEncoding(),
+		CumulativeGasUsed:     r.CumulativeGasUsed,
+		FirstLogIndex:         firstLogIndex,
+		DepositReceiptVersion: r.DepositReceiptVersion,
 	})
 }
 
@@ -385,7 +479,9 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
 	r.FirstLogIndexWithinBlock = stored.FirstLogIndex
-
+	if stored.DepositReceiptVersion != nil {
+		r.DepositReceiptVersion = stored.DepositReceiptVersion
+	}
 	//r.Logs = make([]*Log, len(stored.Logs))
 	//for i, log := range stored.Logs {
 	//	r.Logs[i] = (*Log)(log)
@@ -443,6 +539,19 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 		if err := rlp.Encode(w, data); err != nil {
 			panic(err)
 		}
+	case OptimismDepositTxType:
+		w.WriteByte(OptimismDepositTxType)
+		if r.DepositReceiptVersion != nil {
+			// post-canyon receipt hash computation update
+			depositData := &depositReceiptRlp{data.PostStateOrStatus, data.CumulativeGasUsed, r.Bloom, r.Logs, r.DepositNonce, r.DepositReceiptVersion}
+			if err := rlp.Encode(w, depositData); err != nil {
+				panic(err)
+			}
+		} else {
+			if err := rlp.Encode(w, data); err != nil {
+				panic(err)
+			}
+		}
 	default:
 		// For unsupported types, write nothing. Since this is for
 		// DeriveSha, the error will be caught matching the derived hash
@@ -452,7 +561,7 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transactions, senders []libcommon.Address) error {
+func (r Receipts) DeriveFields(config *chain.Config, hash libcommon.Hash, number uint64, time uint64, txs Transactions, senders []libcommon.Address) error {
 	logIndex := uint(0) // logIdx is unique within the block and starts from 0
 	if len(txs) != len(r) {
 		return fmt.Errorf("transaction and receipt count mismatch, txn count = %d, receipts count = %d", len(txs), len(r))
@@ -474,10 +583,14 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 
 		// The contract address can be derived from the transaction itself
 		if txs[i].GetTo() == nil {
+			nonce := txs[i].GetNonce()
+			if r[i].DepositNonce != nil {
+				nonce = *r[i].DepositNonce
+			}
 			// If one wants to deploy a contract, one needs to send a transaction that does not have `To` field
 			// and then the address of the contract one is creating this way will depend on the `tx.From`
 			// and the nonce of the creating account (which is `tx.From`).
-			r[i].ContractAddress = crypto.CreateAddress(senders[i], txs[i].GetNonce())
+			r[i].ContractAddress = crypto.CreateAddress(senders[i], nonce)
 		}
 		// The used gas can be calculated based on previous r
 		if i == 0 {
@@ -495,12 +608,41 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 			logIndex++
 		}
 	}
+
+	if config.IsOptimismBedrock(number) && len(txs) >= 2 { // need at least an info tx and a non-info tx
+		gasParams, err := opstack.ExtractL1GasParams(config, time, txs[0].GetData())
+		if err != nil {
+			return err
+		}
+		for i := 0; i < len(r); i++ {
+			if txs[i].Type() == OptimismDepositTxType {
+				continue
+			}
+
+			r[i].L1GasPrice = gasParams.L1BaseFee.ToBig()
+			l1Fee, l1GasUsed := gasParams.CostFunc(txs[i].RollupCostData())
+			r[i].L1Fee = l1Fee.ToBig()
+			r[i].L1GasUsed = l1GasUsed.ToBig()
+			r[i].FeeScalar = gasParams.FeeScalar
+			r[i].L1BlobBaseFee = gasParams.L1BlobBaseFee.ToBig()
+			r[i].L1BaseFeeScalar = u32ptrTou64ptr(gasParams.L1BaseFeeScalar)
+			r[i].L1BlobBaseFeeScalar = u32ptrTou64ptr(gasParams.L1BlobBaseFeeScalar)
+		}
+	}
 	return nil
+}
+
+func u32ptrTou64ptr(a *uint32) *uint64 {
+	if a == nil {
+		return nil
+	}
+	b := uint64(*a)
+	return &b
 }
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevCumulativeGasUsed uint64) error {
+func (r *Receipt) DeriveFieldsV3ForSingleReceipt(config *chain.Config, txnIdx int, blockHash libcommon.Hash, blockNum, time uint64, txn Transaction, prevCumulativeGasUsed uint64) error {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	sender, ok := txn.cachedSender()
@@ -541,6 +683,24 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 		r.Logs[j].Index = uint(logIndex)
 		logIndex++
 	}
+
+	if config.IsOptimismBedrock(blockNum) { // need at least an info tx and a non-info tx
+		gasParams, err := opstack.ExtractL1GasParams(config, time, txn.GetData())
+		if err != nil {
+			return err
+		}
+		if txn.Type() != OptimismDepositTxType {
+			r.L1GasPrice = gasParams.L1BaseFee.ToBig()
+			l1Fee, l1GasUsed := gasParams.CostFunc(txn.RollupCostData())
+			r.L1Fee = l1Fee.ToBig()
+			r.L1GasUsed = l1GasUsed.ToBig()
+			r.FeeScalar = gasParams.FeeScalar
+			r.L1BlobBaseFee = gasParams.L1BlobBaseFee.ToBig()
+			r.L1BaseFeeScalar = u32ptrTou64ptr(gasParams.L1BaseFeeScalar)
+			r.L1BlobBaseFeeScalar = u32ptrTou64ptr(gasParams.L1BlobBaseFeeScalar)
+		}
+	}
+
 	return nil
 }
 
