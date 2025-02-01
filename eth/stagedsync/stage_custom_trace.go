@@ -144,7 +144,6 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			return err
 		}
 
-		var failedAssert bool
 		{ //assert
 			if err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
 				return err
@@ -153,9 +152,6 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 
 		lastTxNum = doms.TxNum()
 		if err := tx.Commit(); err != nil {
-			return err
-		}
-		if failedAssert {
 			return err
 		}
 		return nil
