@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -23,17 +23,21 @@ import (
 	"github.com/multiformats/go-multiaddr"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 type Config struct {
 	P2pConfig
 	Enabled                          bool
 	InstanceId                       uint64
+	BeaconChainGenesisTimestamp      uint64
+	SecondsPerSlot                   uint64
 	SequencerContractAddress         string
 	ValidatorRegistryContractAddress string
 	KeyBroadcastContractAddress      string
 	KeyperSetManagerContractAddress  string
 	MaxNumKeysPerMessage             uint64
+	MaxRecentEons                    int
 }
 
 type P2pConfig struct {
@@ -76,11 +80,14 @@ var (
 	chiadoConfig = Config{
 		Enabled:                          true,
 		InstanceId:                       102_000,
+		BeaconChainGenesisTimestamp:      1665396300,
+		SecondsPerSlot:                   clparams.BeaconConfigs[clparams.ChiadoNetwork].SecondsPerSlot,
 		SequencerContractAddress:         "0x2aD8E2feB0ED5b2EC8e700edB725f120576994ed",
 		ValidatorRegistryContractAddress: "0xa9289A3Dd14FEBe10611119bE81E5d35eAaC3084",
 		KeyBroadcastContractAddress:      "0x9D31865BEffcE842FBd36CDA587aDDA8bef804B7",
 		KeyperSetManagerContractAddress:  "0xC4DE9FAf4ec882b33dA0162CBE628B0D8205D0c0",
 		MaxNumKeysPerMessage:             defaultMaxNumKeysPerMessage,
+		MaxRecentEons:                    defaultMaxRecentEons,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -93,11 +100,14 @@ var (
 	gnosisConfig = Config{
 		Enabled:                          true,
 		InstanceId:                       1_000,
+		BeaconChainGenesisTimestamp:      1638993340,
+		SecondsPerSlot:                   clparams.BeaconConfigs[clparams.GnosisNetwork].SecondsPerSlot,
 		SequencerContractAddress:         "0xc5C4b277277A1A8401E0F039dfC49151bA64DC2E",
 		ValidatorRegistryContractAddress: "0xefCC23E71f6bA9B22C4D28F7588141d44496A6D6",
 		KeyBroadcastContractAddress:      "0x626dB87f9a9aC47070016A50e802dd5974341301",
 		KeyperSetManagerContractAddress:  "0x7C2337f9bFce19d8970661DA50dE8DD7d3D34abb",
 		MaxNumKeysPerMessage:             defaultMaxNumKeysPerMessage,
+		MaxRecentEons:                    defaultMaxRecentEons,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -111,4 +121,5 @@ var (
 const (
 	defaultP2PListenPort        = 23_102
 	defaultMaxNumKeysPerMessage = 500
+	defaultMaxRecentEons        = 100
 )

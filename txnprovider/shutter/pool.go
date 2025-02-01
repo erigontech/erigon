@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -34,6 +34,8 @@ type Pool struct {
 	logger                  log.Logger
 	config                  Config
 	secondaryTxnProvider    txnprovider.TxnProvider
+	blockListener           BlockListener
+	eonTracker              EonTracker
 	decryptionKeysListener  DecryptionKeysListener
 	decryptionKeysProcessor DecryptionKeysProcessor
 }
@@ -43,13 +45,19 @@ func NewPool(
 	config Config,
 	secondaryTxnProvider txnprovider.TxnProvider,
 	contractBackend bind.ContractBackend,
+	stateChangesClient stateChangesClient,
 ) *Pool {
 	logger = logger.New("component", "shutter")
-	decryptionKeysListener := NewDecryptionKeysListener(logger, config)
+	slotCalculator := NewBeaconChainSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot)
+	blockListener := NewBlockListener(logger, stateChangesClient)
+	eonTracker := NewKsmEonTracker(config, blockListener, contractBackend)
+	decryptionKeysListener := NewDecryptionKeysListener(logger, config, slotCalculator, eonTracker)
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
 	return &Pool{
 		logger:                  logger,
 		config:                  config,
+		blockListener:           blockListener,
+		eonTracker:              eonTracker,
 		secondaryTxnProvider:    secondaryTxnProvider,
 		decryptionKeysListener:  decryptionKeysListener,
 		decryptionKeysProcessor: decryptionKeysProcessor,
@@ -65,6 +73,8 @@ func (p Pool) Run(ctx context.Context) error {
 	defer unregisterDkpObserver()
 
 	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return p.blockListener.Run(ctx) })
+	eg.Go(func() error { return p.eonTracker.Run(ctx) })
 	eg.Go(func() error { return p.decryptionKeysListener.Run(ctx) })
 	eg.Go(func() error { return p.decryptionKeysProcessor.Run(ctx) })
 	return eg.Wait()
