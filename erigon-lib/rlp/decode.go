@@ -154,18 +154,18 @@ func (err *decodeError) Error() string {
 }
 
 func wrapStreamError(err error, typ reflect.Type) error {
-	switch err {
-	case ErrCanonInt:
+	switch {
+	case errors.Is(err, ErrCanonInt):
 		return &decodeError{msg: "non-canonical integer (leading zero bytes)", typ: typ}
-	case ErrCanonSize:
+	case errors.Is(err, ErrCanonSize):
 		return &decodeError{msg: "non-canonical size information", typ: typ}
-	case ErrExpectedList:
+	case errors.Is(err, ErrExpectedList):
 		return &decodeError{msg: "expected input list", typ: typ}
-	case ErrExpectedString:
+	case errors.Is(err, ErrExpectedString):
 		return &decodeError{msg: "expected input string or byte", typ: typ}
-	case errUintOverflow:
+	case errors.Is(err, errUintOverflow):
 		return &decodeError{msg: "input string too long", typ: typ}
-	case errNotAtEOL:
+	case errors.Is(err, errNotAtEOL):
 		return &decodeError{msg: "input list has too many elements", typ: typ}
 	}
 	return err
@@ -754,7 +754,7 @@ func (s *Stream) uint(maxbits int) (uint64, error) {
 		}
 		v, err := s.readUint(byte(size))
 		switch {
-		case err == ErrCanonSize:
+		case errors.Is(err, ErrCanonSize):
 			// Adjust error because we're not reading a size right now.
 			return 0, ErrCanonInt
 		case err != nil:

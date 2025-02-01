@@ -305,7 +305,7 @@ func TestDecodeErrors(t *testing.T) {
 		t.Errorf("Decode(r, new(chan bool)) error mismatch, got %q, want %q", err, expectErr)
 	}
 
-	if err := Decode(r, new(uint)); err != io.EOF {
+	if err := Decode(r, new(uint)); errors.Is(err, io.EOF) {
 		t.Errorf("Decode(r, new(int)) error mismatch, got %q, want %q", err, io.EOF)
 	}
 }
@@ -826,6 +826,7 @@ func TestDecodeWithByteReader(t *testing.T) {
 }
 
 func testDecodeWithEncReader(t *testing.T, n int) {
+	t.Helper()
 	s := strings.Repeat("0", n)
 	_, r, _ := EncodeToReader(s)
 	var decoded string
@@ -939,8 +940,8 @@ func (bd *byteDecoder) DecodeRLP(s *Stream) error {
 	return err
 }
 
-func (bd byteDecoder) called() bool {
-	return bd == 255
+func (bd *byteDecoder) called() bool {
+	return *bd == 255
 }
 
 // This test verifies that the byte slice/byte array logic
