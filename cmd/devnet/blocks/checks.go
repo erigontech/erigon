@@ -22,11 +22,11 @@ import (
 
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/cmd/devnet/requests"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
 var CompletionChecker = BlockHandlerFunc(
-	func(ctx context.Context, node devnet.Node, block *requests.Block, transaction *jsonrpc.RPCTransaction) error {
+	func(ctx context.Context, node devnet.Node, block *requests.Block, transaction *ethapi.RPCTransaction) error {
 		traceResults, err := node.TraceTransaction(transaction.Hash)
 
 		if err != nil {

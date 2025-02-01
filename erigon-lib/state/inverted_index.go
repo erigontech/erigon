@@ -82,6 +82,7 @@ type iiCfg struct {
 	aggregationStep uint64 // amount of transactions inside single aggregation step
 	keysTable       string // bucket name for index keys;    txnNum_u64 -> key (k+auto_increment)
 	valuesTable     string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
+	name            kv.InvertedIdx
 
 	withExistence bool                // defines if existence index should be built
 	compression   seg.FileCompression // compression type for inverted index keys and values
@@ -374,6 +375,7 @@ type invertedIndexBufferedWriter struct {
 	txNum           uint64
 	aggregationStep uint64
 	txNumBytes      [8]byte
+	name            kv.InvertedIdx
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -448,6 +450,7 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIn
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
 		indexKeys: etl.NewCollector(iit.ii.filenameBase+".flush.ii.keys", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
 		index:     etl.NewCollector(iit.ii.filenameBase+".flush.ii.vals", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
+		name:      iit.name,
 	}
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
@@ -465,6 +468,7 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		ii:      ii,
 		visible: ii._visible,
 		files:   files,
+		name:    ii.name,
 	}
 }
 func (iit *InvertedIndexRoTx) Close() {
@@ -496,6 +500,7 @@ func (iit *InvertedIndexRoTx) Close() {
 }
 
 type MergeRange struct {
+	name      string // entity name
 	needMerge bool
 	from      uint64
 	to        uint64
@@ -509,7 +514,7 @@ func (mr *MergeRange) String(prefix string, aggStep uint64) string {
 	if prefix != "" {
 		prefix += "="
 	}
-	return fmt.Sprintf("%s%d-%d", prefix, mr.from/aggStep, mr.to/aggStep)
+	return fmt.Sprintf("%s%s%d-%d", prefix, mr.name, mr.from/aggStep, mr.to/aggStep)
 }
 
 func (mr *MergeRange) Equal(other *MergeRange) bool {
@@ -518,6 +523,7 @@ func (mr *MergeRange) Equal(other *MergeRange) bool {
 
 type InvertedIndexRoTx struct {
 	ii      *InvertedIndex
+	name    kv.InvertedIdx
 	files   visibleFiles
 	visible *iiVisible
 	getters []*seg.Reader

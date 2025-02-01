@@ -29,8 +29,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
@@ -62,6 +64,7 @@ type PrivateDebugAPI interface {
 	GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error)
 	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error)
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutility.Bytes, error)
+	GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error)
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
@@ -445,4 +448,40 @@ func (api *PrivateDebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHas
 		result[i] = b
 	}
 	return result, nil
+}
+
+func (api *PrivateDebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blocks, err := rawdb.GetLatestBadBlocks(tx)
+	if err != nil || len(blocks) == 0 {
+		return nil, err
+	}
+
+	results := make([]map[string]interface{}, 0, len(blocks))
+	for _, block := range blocks {
+		var blockRlp string
+		if rlpBytes, err := rlp.EncodeToBytes(block); err != nil {
+			blockRlp = err.Error() // hack
+		} else {
+			blockRlp = fmt.Sprintf("%#x", rlpBytes)
+		}
+
+		blockJson, err := ethapi.RPCMarshalBlock(block, true, true, nil)
+		if err != nil {
+			log.Error("Failed to marshal block", "err", err)
+			blockJson = map[string]interface{}{}
+		}
+		results = append(results, map[string]interface{}{
+			"hash":  block.Hash(),
+			"block": blockRlp,
+			"rlp":   blockJson,
+		})
+	}
+
+	return results, nil
 }
