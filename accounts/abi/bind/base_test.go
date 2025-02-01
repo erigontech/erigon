@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/rlp"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rlp"
 )
 
 type mockCaller struct {

@@ -26,7 +26,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 var (

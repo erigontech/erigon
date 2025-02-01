@@ -30,6 +30,7 @@ import (
 
 	math2 "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/rlp"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -47,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/trie"
 )

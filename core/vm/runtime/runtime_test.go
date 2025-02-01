@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/rlp"
 
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/common"
@@ -37,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/rlp"
 )
 
 func TestDefaults(t *testing.T) {

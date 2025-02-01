@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/rlp"
 )
 
 var (
@@ -133,23 +132,23 @@ func (h *Header) EncodingSize() int {
 
 	encodingSize++
 	if h.Difficulty != nil {
-		encodingSize += rlp.BigIntLenExcludingHead(h.Difficulty)
+		encodingSize += rlp2.BigIntLenExcludingHead(h.Difficulty)
 	}
 	encodingSize++
 	if h.Number != nil {
-		encodingSize += rlp.BigIntLenExcludingHead(h.Number)
+		encodingSize += rlp2.BigIntLenExcludingHead(h.Number)
 	}
 	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.GasLimit)
+	encodingSize += rlp2.IntLenExcludingHead(h.GasLimit)
 	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.GasUsed)
+	encodingSize += rlp2.IntLenExcludingHead(h.GasUsed)
 	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.Time)
+	encodingSize += rlp2.IntLenExcludingHead(h.Time)
 	// size of Extra
 	encodingSize += rlp2.StringLen(h.Extra)
 
 	if len(h.AuRaSeal) != 0 {
-		encodingSize += 1 + rlp.IntLenExcludingHead(h.AuRaStep)
+		encodingSize += 1 + rlp2.IntLenExcludingHead(h.AuRaStep)
 		encodingSize += rlp2.ListPrefixLen(len(h.AuRaSeal)) + len(h.AuRaSeal)
 	} else {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
@@ -157,7 +156,7 @@ func (h *Header) EncodingSize() int {
 
 	if h.BaseFee != nil {
 		encodingSize++
-		encodingSize += rlp.BigIntLenExcludingHead(h.BaseFee)
+		encodingSize += rlp2.BigIntLenExcludingHead(h.BaseFee)
 	}
 
 	if h.WithdrawalsHash != nil {
@@ -166,11 +165,11 @@ func (h *Header) EncodingSize() int {
 
 	if h.BlobGasUsed != nil {
 		encodingSize++
-		encodingSize += rlp.IntLenExcludingHead(*h.BlobGasUsed)
+		encodingSize += rlp2.IntLenExcludingHead(*h.BlobGasUsed)
 	}
 	if h.ExcessBlobGas != nil {
 		encodingSize++
-		encodingSize += rlp.IntLenExcludingHead(*h.ExcessBlobGas)
+		encodingSize += rlp2.IntLenExcludingHead(*h.ExcessBlobGas)
 	}
 
 	if h.ParentBeaconBlockRoot != nil {
@@ -185,7 +184,7 @@ func (h *Header) EncodingSize() int {
 		// Encoding of Verkle Proof
 		encodingSize += rlp2.StringLen(h.VerkleProof)
 		var tmpBuffer bytes.Buffer
-		if err := rlp.Encode(&tmpBuffer, h.VerkleKeyVals); err != nil {
+		if err := rlp2.Encode(&tmpBuffer, h.VerkleKeyVals); err != nil {
 			panic(err)
 		}
 		encodingSize += rlp2.ListPrefixLen(tmpBuffer.Len()) + tmpBuffer.Len()
@@ -250,30 +249,30 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(h.Bloom.Bytes()); err != nil {
 		return err
 	}
-	if err := rlp.EncodeBigInt(h.Difficulty, w, b[:]); err != nil {
+	if err := rlp2.EncodeBigInt(h.Difficulty, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeBigInt(h.Number, w, b[:]); err != nil {
+	if err := rlp2.EncodeBigInt(h.Number, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(h.GasLimit, w, b[:]); err != nil {
+	if err := rlp2.EncodeInt(h.GasLimit, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(h.GasUsed, w, b[:]); err != nil {
+	if err := rlp2.EncodeInt(h.GasUsed, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(h.Time, w, b[:]); err != nil {
+	if err := rlp2.EncodeInt(h.Time, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeString(h.Extra, w, b[:]); err != nil {
+	if err := rlp2.EncodeString(h.Extra, w, b[:]); err != nil {
 		return err
 	}
 
 	if len(h.AuRaSeal) > 0 {
-		if err := rlp.EncodeInt(h.AuRaStep, w, b[:]); err != nil {
+		if err := rlp2.EncodeInt(h.AuRaStep, w, b[:]); err != nil {
 			return err
 		}
-		if err := rlp.EncodeString(h.AuRaSeal, w, b[:]); err != nil {
+		if err := rlp2.EncodeString(h.AuRaSeal, w, b[:]); err != nil {
 			return err
 		}
 	} else {
@@ -294,7 +293,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.BaseFee != nil {
-		if err := rlp.EncodeBigInt(h.BaseFee, w, b[:]); err != nil {
+		if err := rlp2.EncodeBigInt(h.BaseFee, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -310,12 +309,12 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.BlobGasUsed != nil {
-		if err := rlp.EncodeInt(*h.BlobGasUsed, w, b[:]); err != nil {
+		if err := rlp2.EncodeInt(*h.BlobGasUsed, w, b[:]); err != nil {
 			return err
 		}
 	}
 	if h.ExcessBlobGas != nil {
-		if err := rlp.EncodeInt(*h.ExcessBlobGas, w, b[:]); err != nil {
+		if err := rlp2.EncodeInt(*h.ExcessBlobGas, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -341,11 +340,11 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.Verkle {
-		if err := rlp.EncodeString(h.VerkleProof, w, b[:]); err != nil {
+		if err := rlp2.EncodeString(h.VerkleProof, w, b[:]); err != nil {
 			return err
 		}
 
-		if err := rlp.Encode(w, h.VerkleKeyVals); err != nil {
+		if err := rlp2.Encode(w, h.VerkleKeyVals); err != nil {
 			return nil
 		}
 	}
@@ -353,7 +352,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func (h *Header) DecodeRLP(s *rlp.Stream) error {
+func (h *Header) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err
@@ -457,7 +456,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 	// BaseFee
 	if b, err = s.Uint256Bytes(); err != nil {
-		if errors.Is(err, rlp.EOL) {
+		if errors.Is(err, rlp2.EOL) {
 			h.BaseFee = nil
 			if err := s.ListEnd(); err != nil {
 				return fmt.Errorf("close header struct (no BaseFee): %w", err)
@@ -470,7 +469,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 	// WithdrawalsHash
 	if b, err = s.Bytes(); err != nil {
-		if errors.Is(err, rlp.EOL) {
+		if errors.Is(err, rlp2.EOL) {
 			h.WithdrawalsHash = nil
 			if err := s.ListEnd(); err != nil {
 				return fmt.Errorf("close header struct (no WithdrawalsHash): %w", err)
@@ -487,7 +486,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 	var blobGasUsed uint64
 	if blobGasUsed, err = s.Uint(); err != nil {
-		if errors.Is(err, rlp.EOL) {
+		if errors.Is(err, rlp2.EOL) {
 			h.BlobGasUsed = nil
 			if err := s.ListEnd(); err != nil {
 				return fmt.Errorf("close header struct (no BlobGasUsed): %w", err)
@@ -500,7 +499,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 	var excessBlobGas uint64
 	if excessBlobGas, err = s.Uint(); err != nil {
-		if errors.Is(err, rlp.EOL) {
+		if errors.Is(err, rlp2.EOL) {
 			h.ExcessBlobGas = nil
 			if err := s.ListEnd(); err != nil {
 				return fmt.Errorf("close header struct (no ExcessBlobGas): %w", err)
@@ -513,7 +512,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 	// ParentBeaconBlockRoot
 	if b, err = s.Bytes(); err != nil {
-		if errors.Is(err, rlp.EOL) {
+		if errors.Is(err, rlp2.EOL) {
 			h.ParentBeaconBlockRoot = nil
 			if err := s.ListEnd(); err != nil {
 				return fmt.Errorf("close header struct (no ParentBeaconBlockRoot): %w", err)
@@ -530,7 +529,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 	// RequestsHash
 	if b, err = s.Bytes(); err != nil {
-		if errors.Is(err, rlp.EOL) {
+		if errors.Is(err, rlp2.EOL) {
 			h.RequestsHash = nil
 			if err := s.ListEnd(); err != nil {
 				return fmt.Errorf("close header struct (no RequestsHash): %w", err)
@@ -553,7 +552,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		if err != nil {
 			return err
 		}
-		rlp.DecodeBytes(rawKv, h.VerkleKeyVals)
+		rlp2.DecodeBytes(rawKv, h.VerkleKeyVals)
 	}
 
 	if err := s.ListEnd(); err != nil {
@@ -777,7 +776,7 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
+func (rb *RawBody) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err
@@ -793,7 +792,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		}
 		rb.Transactions = append(rb.Transactions, tx)
 	}
-	if !errors.Is(err, rlp.EOL) {
+	if !errors.Is(err, rlp2.EOL) {
 		return err
 	}
 	// end of Transactions
@@ -814,8 +813,8 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen int) {
-	baseTxIdLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxId)
-	txAmountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxAmount))
+	baseTxIdLen := 1 + rlp2.IntLenExcludingHead(bfs.BaseTxId)
+	txAmountLen := 1 + rlp2.IntLenExcludingHead(uint64(bfs.TxAmount))
 
 	payloadSize += baseTxIdLen
 	payloadSize += txAmountLen
@@ -843,12 +842,12 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	}
 
 	// encode BaseTxId
-	if err := rlp.Encode(w, bfs.BaseTxId); err != nil {
+	if err := rlp2.Encode(w, bfs.BaseTxId); err != nil {
 		return err
 	}
 
 	// encode TxAmount
-	if err := rlp.Encode(w, bfs.TxAmount); err != nil {
+	if err := rlp2.Encode(w, bfs.TxAmount); err != nil {
 		return err
 	}
 
@@ -867,7 +866,7 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
+func (bfs *BodyForStorage) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err
@@ -940,7 +939,7 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func (bb *Body) DecodeRLP(s *rlp.Stream) error {
+func (bb *Body) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err
@@ -1102,12 +1101,12 @@ func CopyHeader(h *Header) *Header {
 }
 
 // DecodeRLP decodes the Ethereum
-func (bb *Block) DecodeRLP(s *rlp.Stream) error {
+func (bb *Block) DecodeRLP(s *rlp2.Stream) error {
 	size, err := s.List()
 	if err != nil {
 		return err
 	}
-	bb.size.Store(rlp.ListSize(size))
+	bb.size.Store(rlp2.ListSize(size))
 
 	// decode header
 	var h Header
@@ -1256,7 +1255,7 @@ func (b *Block) RawBody() *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
 	for i, tx := range b.transactions {
 		var err error
-		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		br.Transactions[i], err = rlp2.EncodeToBytes(tx)
 		if err != nil {
 			panic(err)
 		}
@@ -1269,7 +1268,7 @@ func (b *Body) RawBody() *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals}
 	for i, tx := range b.Transactions {
 		var err error
-		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		br.Transactions[i], err = rlp2.EncodeToBytes(tx)
 		if err != nil {
 			panic(err)
 		}
@@ -1284,7 +1283,7 @@ func (b *Block) Size() common.StorageSize {
 		return common.StorageSize(size)
 	}
 	c := writeCounter(0)
-	rlp.Encode(&c, b)
+	rlp2.Encode(&c, b)
 	b.size.Store(uint64(c))
 	return common.StorageSize(c)
 }
@@ -1415,7 +1414,7 @@ func (b *Block) Hash() libcommon.Hash { return b.header.Hash() }
 type Blocks []*Block
 
 func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxId uint64, txAmount uint32, err error) {
-	pos, _, err := rlp2.List(payload, 0)
+	pos, _, err := rlp2.ParseList(payload, 0)
 	if err != nil {
 		return baseTxId, txAmount, err
 	}
@@ -1461,7 +1460,7 @@ func encodeRLPGeneric[T rlpEncodable](arr []T, _len int, w io.Writer, b []byte) 
 	return nil
 }
 
-func decodeTxns(appendList *[]Transaction, s *rlp.Stream) error {
+func decodeTxns(appendList *[]Transaction, s *rlp2.Stream) error {
 	var err error
 	if _, err = s.List(); err != nil {
 		return err
@@ -1474,7 +1473,7 @@ func decodeTxns(appendList *[]Transaction, s *rlp.Stream) error {
 	return checkErrListEnd(s, err)
 }
 
-func decodeUncles(appendList *[]*Header, s *rlp.Stream) error {
+func decodeUncles(appendList *[]*Header, s *rlp2.Stream) error {
 	var err error
 	if _, err = s.List(); err != nil {
 		return err
@@ -1489,10 +1488,10 @@ func decodeUncles(appendList *[]*Header, s *rlp.Stream) error {
 	return checkErrListEnd(s, err)
 }
 
-func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
+func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp2.Stream) error {
 	var err error
 	if _, err = s.List(); err != nil {
-		if errors.Is(err, rlp.EOL) {
+		if errors.Is(err, rlp2.EOL) {
 			*appendList = nil
 			return nil // EOL, check for ListEnd is in calling function
 		}
@@ -1508,8 +1507,8 @@ func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
 	return checkErrListEnd(s, err)
 }
 
-func checkErrListEnd(s *rlp.Stream, err error) error {
-	if !errors.Is(err, rlp.EOL) {
+func checkErrListEnd(s *rlp2.Stream, err error) error {
+	if !errors.Is(err, rlp2.EOL) {
 		return err
 	}
 	if err = s.ListEnd(); err != nil {

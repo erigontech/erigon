@@ -27,6 +27,7 @@ import (
 
 	math2 "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -43,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethutils"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/rlp"
 )
 
 var (

@@ -5,13 +5,15 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -23,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )

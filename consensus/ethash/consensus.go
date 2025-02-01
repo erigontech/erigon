@@ -32,6 +32,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 
 	"github.com/erigontech/erigon/common/u256"
@@ -40,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 )
 
 // Ethash proof-of-work protocol constants.

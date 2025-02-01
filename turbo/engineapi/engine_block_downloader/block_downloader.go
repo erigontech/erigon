@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -21,7 +22,6 @@ import (
 
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/adapter"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/erigontech/erigon/turbo/services"

@@ -15,11 +15,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/rlp"
 )
 
 var ErrTxsBeginEndNoMigration = fmt.Errorf("in this Erigon version DB format was changed: added additional first/last system-txs to blocks. There is no DB migration for this change. Please re-sync or switch to earlier version")
@@ -127,7 +127,7 @@ var TxsBeginEnd = Migration{
 					return nil
 				}
 				bodyForStorage := new(types.BodyForStorage)
-				if err := rlp.DecodeBytes(v, bodyForStorage); err != nil {
+				if err := rlp2.DecodeBytes(v, bodyForStorage); err != nil {
 					return err
 				}
 
@@ -204,7 +204,7 @@ var TxsBeginEnd = Migration{
 				var newSeqValue uint64
 				if len(data) > 0 {
 					bodyForStorage := new(types.BodyForStorage)
-					if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
+					if err := rlp2.DecodeBytes(data, bodyForStorage); err != nil {
 						return fmt.Errorf("rlp.DecodeBytes(bodyForStorage): %w", err)
 					}
 					currentSeq, err := tx.ReadSequence(kv.EthTx)
@@ -233,7 +233,7 @@ func writeTransactionsNewDeprecated(db kv.RwTx, txs []types.Transaction, baseTxI
 		binary.BigEndian.PutUint64(txIdKey, txId)
 
 		buf.Reset()
-		if err := rlp.Encode(buf, tx); err != nil {
+		if err := rlp2.Encode(buf, tx); err != nil {
 			return fmt.Errorf("broken tx rlp: %w", err)
 		}
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
@@ -251,7 +251,7 @@ func readCanonicalBodyWithTransactionsDeprecated(db kv.Getter, hash common2.Hash
 		return nil
 	}
 	bodyForStorage := new(types.BodyForStorage)
-	err := rlp.DecodeBytes(data, bodyForStorage)
+	err := rlp2.DecodeBytes(data, bodyForStorage)
 	if err != nil {
 		log.Error("Invalid block body RLP", "hash", hash, "err", err)
 		return nil
@@ -281,7 +281,7 @@ func MakeBodiesNonCanonicalDeprecated(tx kv.RwTx, from uint64, ctx context.Conte
 		}
 
 		bodyForStorage := new(types.BodyForStorage)
-		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
+		if err := rlp2.DecodeBytes(data, bodyForStorage); err != nil {
 			return err
 		}
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -30,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -178,7 +178,7 @@ func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, h
 	}
 
 	block = &types.Block{}
-	err = rlp.Decode(bytes.NewReader(reply.BlockRlp), block)
+	err = rlp2.Decode(bytes.NewReader(reply.BlockRlp), block)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -227,12 +227,12 @@ func (r *RemoteBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Gett
 	return block.Body(), nil
 }
 
-func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
+func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp2.RawValue, err error) {
 	body, err := r.BodyWithTransactions(ctx, tx, hash, blockHeight)
 	if err != nil {
 		return nil, err
 	}
-	bodyRlp, err = rlp.EncodeToBytes(body)
+	bodyRlp, err = rlp2.EncodeToBytes(body)
 	if err != nil {
 		return nil, err
 	}
@@ -254,15 +254,15 @@ func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHa
 	return reply.BlockNumber, true, nil
 }
 
-func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
+func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp2.RawValue, error) {
 	borTxnHash := bortypes.ComputeBorTxHash(blockHeight, hash)
 	reply, err := r.client.BorEvent(ctx, &remote.BorEventRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxnHash)})
 	if err != nil {
 		return nil, err
 	}
-	result := make([]rlp.RawValue, len(reply.EventRlps))
+	result := make([]rlp2.RawValue, len(reply.EventRlps))
 	for i, r := range reply.EventRlps {
-		result[i] = rlp.RawValue(r)
+		result[i] = rlp2.RawValue(r)
 	}
 	return result, nil
 }
@@ -575,12 +575,12 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 	return body, nil
 }
 
-func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
+func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp2.RawValue, err error) {
 	body, err := r.BodyWithTransactions(ctx, tx, hash, blockHeight)
 	if err != nil {
 		return nil, err
 	}
-	bodyRlp, err = rlp.EncodeToBytes(body)
+	bodyRlp, err = rlp2.EncodeToBytes(body)
 	if err != nil {
 		return nil, err
 	}
@@ -763,7 +763,7 @@ func (r *BlockReader) headerFromSnapshot(blockHeight uint64, sn *Segment, buf []
 		return nil, buf, nil
 	}
 	h := &types.Header{}
-	if err := rlp.DecodeBytes(buf[1:], h); err != nil {
+	if err := rlp2.DecodeBytes(buf[1:], h); err != nil {
 		return nil, buf, err
 	}
 	return h, buf, nil
@@ -803,7 +803,7 @@ func (r *BlockReader) headerFromSnapshotByHash(hash common.Hash, sn *Segment, bu
 	}
 
 	h := &types.Header{}
-	if err := rlp.DecodeBytes(buf[1:], h); err != nil {
+	if err := rlp2.DecodeBytes(buf[1:], h); err != nil {
 		return nil, err
 	}
 	if h.Hash() != hash {
@@ -856,7 +856,7 @@ func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *Segment
 	}
 	b := &types.BodyForStorage{}
 	reader := bytes.NewReader(buf)
-	if err := rlp.Decode(reader, b); err != nil {
+	if err := rlp2.Decode(reader, b); err != nil {
 		return nil, buf, err
 	}
 
@@ -1064,7 +1064,7 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount u
 		var b types.BodyForStorage
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
-			if err := rlp.DecodeBytes(buf, &b); err != nil {
+			if err := rlp2.DecodeBytes(buf, &b); err != nil {
 				return err
 			}
 			if err := f(blockNum, b.BaseTxId, uint64(b.TxAmount)); err != nil {
@@ -1289,7 +1289,7 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 	return 0, nil
 }
 
-func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
+func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp2.RawValue, error) {
 	maxBlockNumInFiles := r.FrozenBorBlocks()
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		if tx == nil {
@@ -1303,7 +1303,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		var k, v []byte
 		var buf [8]byte
 		binary.BigEndian.PutUint64(buf[:], blockHeight)
-		result := []rlp.RawValue{}
+		result := []rlp2.RawValue{}
 		if k, v, err = c.Seek(buf[:]); err != nil {
 			return nil, err
 		}
@@ -1331,7 +1331,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 			if eventId >= endEventId {
 				break
 			}
-			result = append(result, rlp.RawValue(common.Copy(v)))
+			result = append(result, rlp2.RawValue(common.Copy(v)))
 		}
 		if err != nil {
 			return nil, err
@@ -1344,7 +1344,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	defer release()
 
 	var buf []byte
-	result := []rlp.RawValue{}
+	result := []rlp2.RawValue{}
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.from > blockHeight {
@@ -1372,7 +1372,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		gg.Reset(offset)
 		for gg.HasNext() && gg.MatchPrefix(borTxHash[:]) {
 			buf, _ = gg.Next(buf[:0])
-			result = append(result, rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:])))
+			result = append(result, rlp2.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:])))
 		}
 	}
 	return result, nil
@@ -1401,7 +1401,7 @@ func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit in
 		for gg.HasNext() {
 			buf, _ = gg.Next(buf[:0])
 
-			raw := rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:]))
+			raw := rlp2.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:]))
 			event, err := heimdall.UnpackEventRecordWithTime(stateContract, raw)
 			if err != nil {
 				return nil, false, err

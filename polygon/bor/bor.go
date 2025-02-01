@@ -18,6 +18,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"github.com/xsleonard/go-merkle"
@@ -47,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/statefull"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -204,7 +205,7 @@ func encodeSigHeader(w io.Writer, header *types.Header, c *borcfg.BorConfig) {
 		}
 	}
 
-	if err := rlp.Encode(w, enc); err != nil {
+	if err := rlp2.Encode(w, enc); err != nil {
 		panic("can't encode: " + err.Error())
 	}
 }
@@ -894,7 +895,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 				TxDependency:   nil,
 			}
 
-			blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
+			blockExtraDataBytes, err := rlp2.EncodeToBytes(blockExtraData)
 			if err != nil {
 				log.Error("error while encoding block extra data: %v", err)
 				return fmt.Errorf("error while encoding block extra data: %v", err)
@@ -912,7 +913,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 			TxDependency:   nil,
 		}
 
-		blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
+		blockExtraDataBytes, err := rlp2.EncodeToBytes(blockExtraData)
 		if err != nil {
 			log.Error("error while encoding block extra data: %v", err)
 			return fmt.Errorf("error while encoding block extra data: %v", err)
@@ -1611,7 +1612,7 @@ func GetTxDependency(b *types.Block) [][]uint64 {
 
 	var blockExtraData BlockExtraData
 
-	if err := rlp.DecodeBytes(tempExtra[types.ExtraVanityLength:len(tempExtra)-types.ExtraSealLength], &blockExtraData); err != nil {
+	if err := rlp2.DecodeBytes(tempExtra[types.ExtraVanityLength:len(tempExtra)-types.ExtraSealLength], &blockExtraData); err != nil {
 		log.Error("error while decoding block extra data", "err", err)
 		return nil
 	}
@@ -1632,7 +1633,7 @@ func GetValidatorBytes(h *types.Header, config *borcfg.BorConfig) []byte {
 	}
 
 	var blockExtraData BlockExtraData
-	if err := rlp.DecodeBytes(tempExtra[types.ExtraVanityLength:len(tempExtra)-types.ExtraSealLength], &blockExtraData); err != nil {
+	if err := rlp2.DecodeBytes(tempExtra[types.ExtraVanityLength:len(tempExtra)-types.ExtraSealLength], &blockExtraData); err != nil {
 		log.Error("error while decoding block extra data", "err", err)
 		return nil
 	}

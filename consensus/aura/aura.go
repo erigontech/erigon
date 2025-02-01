@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -37,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -171,7 +172,7 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er *NonTra
 	// extract other epoch set if it's not the same as the last.
 	if lastTransition.BlockHash != e.epochTransitionHash {
 		proof := &EpochTransitionProof{}
-		if err := rlp.DecodeBytes(lastTransition.ProofRlp, proof); err != nil {
+		if err := rlp2.DecodeBytes(lastTransition.ProofRlp, proof); err != nil {
 			panic(err)
 		}
 		first := proof.SignalNumber == 0
@@ -805,7 +806,7 @@ func isEpochEnd(chain consensus.ChainHeaderReader, e *NonTransactionalEpochReade
 		for i, j := 0, len(finalityProof)-1; i < j; i, j = i+1, j-1 { // reverse
 			finalityProof[i], finalityProof[j] = finalityProof[j], finalityProof[i]
 		}
-		finalityProofRLP, err := rlp.EncodeToBytes(finalityProof)
+		finalityProofRLP, err := rlp2.EncodeToBytes(finalityProof)
 		if err != nil {
 			return nil, err
 		}
@@ -819,7 +820,7 @@ func isEpochEnd(chain consensus.ChainHeaderReader, e *NonTransactionalEpochReade
 			// block that breaks the invariant that the parent's step < the block's step.
 			self.step.can_propose.store(false, AtomicOrdering::SeqCst);
 		*/
-		return rlp.EncodeToBytes(EpochTransitionProof{SignalNumber: signalNumber.Uint64(), SetProof: pendingTransitionProof, FinalityProof: finalityProofRLP})
+		return rlp2.EncodeToBytes(EpochTransitionProof{SignalNumber: signalNumber.Uint64(), SetProof: pendingTransitionProof, FinalityProof: finalityProofRLP})
 	}
 	return nil, nil
 }
@@ -874,7 +875,7 @@ func (c *AuRa) GenesisEpochData(header *types.Header, caller consensus.SystemCal
 	if err != nil {
 		return nil, err
 	}
-	res, err := rlp.EncodeToBytes(EpochTransitionProof{SignalNumber: 0, SetProof: setProof, FinalityProof: []byte{}})
+	res, err := rlp2.EncodeToBytes(EpochTransitionProof{SignalNumber: 0, SetProof: setProof, FinalityProof: []byte{}})
 	if err != nil {
 		panic(err)
 	}

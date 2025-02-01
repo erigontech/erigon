@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -25,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/p2p/discover/v4wire"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -213,7 +214,7 @@ func (s *server) sendMessageById(ctx context.Context, peerId [64]byte, messageDa
 	switch messageData.Id {
 	case isentry.MessageId_GET_BLOCK_HEADERS_65:
 		packet := &eth.GetBlockHeadersPacket{}
-		if err := rlp.DecodeBytes(messageData.Data, packet); err != nil {
+		if err := rlp2.DecodeBytes(messageData.Data, packet); err != nil {
 			return fmt.Errorf("failed to decode packet: %w", err)
 		}
 
@@ -221,7 +222,7 @@ func (s *server) sendMessageById(ctx context.Context, peerId [64]byte, messageDa
 
 	case isentry.MessageId_GET_BLOCK_HEADERS_66:
 		packet := &eth.GetBlockHeadersPacket66{}
-		if err := rlp.DecodeBytes(messageData.Data, packet); err != nil {
+		if err := rlp2.DecodeBytes(messageData.Data, packet); err != nil {
 			return fmt.Errorf("failed to decode packet: %w", err)
 		}
 
@@ -309,7 +310,7 @@ func (s *server) processGetBlockHeaders(ctx context.Context, peer *p2p.Peer, req
 		if len(r65) > 0 {
 			var data bytes.Buffer
 
-			err := rlp.Encode(&data, headers)
+			err := rlp2.Encode(&data, headers)
 
 			if err != nil {
 				s.logger.Warn("Can't encode headers", "error", err)
@@ -328,7 +329,7 @@ func (s *server) processGetBlockHeaders(ctx context.Context, peer *p2p.Peer, req
 		if len(r66) > 0 {
 			var data bytes.Buffer
 
-			err := rlp.Encode(&data, &eth.BlockHeadersPacket66{
+			err := rlp2.Encode(&data, &eth.BlockHeadersPacket66{
 				RequestId:          requestId,
 				BlockHeadersPacket: headers,
 			})

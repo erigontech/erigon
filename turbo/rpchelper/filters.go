@@ -14,6 +14,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"google.golang.org/grpc"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/concurrent"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -21,12 +23,11 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/remote"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpool"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	txpool2 "github.com/erigontech/erigon-lib/txpool"
-	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/filters"
-	"github.com/erigontech/erigon/rlp"
 )
 
 // Filters holds the state for managing subscriptions to various Ethereum events.

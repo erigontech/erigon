@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/merge"
@@ -36,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/trie"
 )
 

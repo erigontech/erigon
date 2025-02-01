@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 )
 
 const POSPandaBanner = `
@@ -327,7 +327,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 				return err
 			}
 			var header types.Header
-			if err = rlp.DecodeBytes(v, &header); err != nil {
+			if err = rlp2.DecodeBytes(v, &header); err != nil {
 				return err
 			}
 			if header.Number.Uint64() <= hd.highestInDb {
@@ -1248,7 +1248,7 @@ func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, r services.FullBlockR
 		if header == nil {
 			continue
 		}
-		v, err := rlp.EncodeToBytes(header)
+		v, err := rlp2.EncodeToBytes(header)
 		if err != nil {
 			return err
 		}
@@ -1382,7 +1382,7 @@ func DecodeTips(encodings []string) (map[libcommon.Hash]HeaderRecord, error) {
 		}
 
 		var h types.Header
-		if err := rlp.DecodeBytes(res, &h); err != nil {
+		if err := rlp2.DecodeBytes(res, &h); err != nil {
 			return nil, fmt.Errorf("parsing hard coded header on %d: %w", i, err)
 		}
 

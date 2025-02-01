@@ -30,8 +30,9 @@ import (
 	"os"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/rlp"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/erigontech/erigon-lib/rlp"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -307,4 +308,18 @@ func zeroBytes(bytes []byte) {
 	for i := range bytes {
 		bytes[i] = 0
 	}
+}
+
+// See Appendix F "Signing Transactions" of the Yellow Paper
+func TransactionSignatureIsValid(v byte, r, s *uint256.Int, allowPreEip2s bool) bool {
+	if r.IsZero() || s.IsZero() {
+		return false
+	}
+
+	// See EIP-2: Homestead Hard-fork Changes
+	if !allowPreEip2s && s.Gt(secp256k1halfN) {
+		return false
+	}
+
+	return r.Lt(secp256k1N) && s.Lt(secp256k1N) && (v == 0 || v == 1)
 }

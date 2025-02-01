@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 
@@ -26,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -148,7 +148,7 @@ func (h test_heimdall) Close() {}
 type test_genesisContract struct {
 }
 
-func (g test_genesisContract) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
+func (g test_genesisContract) CommitState(event rlp2.RawValue, syscall consensus.SystemCall) error {
 	return nil
 }
 
@@ -463,7 +463,7 @@ func TestSendBlock(t *testing.T) {
 		t.Fatalf("verify blocks failed: %v", err)
 	}
 
-	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
+	b, err := rlp2.EncodeToBytes(&eth.NewBlockPacket{
 		Block: sealedBlocks[0],
 		TD:    big.NewInt(1), // This is ignored anyway
 	})

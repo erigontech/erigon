@@ -8,6 +8,8 @@ import (
 	"syscall"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
+
 	"google.golang.org/grpc"
 
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentry"
@@ -15,7 +17,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 

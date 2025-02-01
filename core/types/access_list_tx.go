@@ -30,8 +30,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	types2 "github.com/erigontech/erigon-lib/types"
-
-	"github.com/erigontech/erigon/rlp"
 )
 
 // AccessListTx is the data of EIP-2930 access list transactions.
@@ -98,17 +96,17 @@ func (tx *AccessListTx) EncodingSize() int {
 func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
 	// size of ChainID
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.ChainID)
+	payloadSize += rlp2.Uint256LenExcludingHead(tx.ChainID)
 	// size of Nonce
 	payloadSize++
-	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
+	nonceLen = rlp2.IntLenExcludingHead(tx.Nonce)
 	payloadSize += nonceLen
 	// size of GasPrice
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.GasPrice)
+	payloadSize += rlp2.Uint256LenExcludingHead(tx.GasPrice)
 	// size of Gas
 	payloadSize++
-	gasLen = rlp.IntLenExcludingHead(tx.Gas)
+	gasLen = rlp2.IntLenExcludingHead(tx.Gas)
 	payloadSize += gasLen
 	// size of To
 	payloadSize++
@@ -117,7 +115,7 @@ func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 	}
 	// size of Value
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
+	payloadSize += rlp2.Uint256LenExcludingHead(tx.Value)
 	// size of Data
 	payloadSize += rlp2.StringLen(tx.Data)
 	// size of AccessList
@@ -125,13 +123,13 @@ func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 	payloadSize += rlp2.ListPrefixLen(accessListLen) + accessListLen
 	// size of V
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
+	payloadSize += rlp2.Uint256LenExcludingHead(&tx.V)
 	// size of R
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.R)
+	payloadSize += rlp2.Uint256LenExcludingHead(&tx.R)
 	// size of S
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
+	payloadSize += rlp2.Uint256LenExcludingHead(&tx.S)
 	return payloadSize, nonceLen, gasLen, accessListLen
 }
 
@@ -157,7 +155,7 @@ func encodeAccessList(al types2.AccessList, w io.Writer, b []byte) error {
 		if err := EncodeStructSizePrefix(tupleLen, w, b); err != nil {
 			return err
 		}
-		if err := rlp.EncodeOptionalAddress(&tuple.Address, w, b); err != nil {
+		if err := rlp2.EncodeOptionalAddress(&tuple.Address, w, b); err != nil {
 			return err
 		}
 		if err := EncodeStructSizePrefix(storageLen, w, b); err != nil {
@@ -220,7 +218,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 		return err
 	}
 	// encode Nonce
-	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+	if err := rlp2.EncodeInt(tx.Nonce, w, b); err != nil {
 		return err
 	}
 	// encode GasPrice
@@ -228,7 +226,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 		return err
 	}
 	// encode Gas
-	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+	if err := rlp2.EncodeInt(tx.Gas, w, b); err != nil {
 		return err
 	}
 	// encode To
@@ -250,7 +248,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 		return err
 	}
 	// encode Data
-	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+	if err := rlp2.EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
 	// prefix
@@ -284,7 +282,7 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
 	var b [33]byte
 	// envelope
-	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+	if err := rlp2.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType
@@ -298,7 +296,7 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func decodeAccessList(al *types2.AccessList, s *rlp.Stream) error {
+func decodeAccessList(al *types2.AccessList, s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open accessList: %w", err)
@@ -326,7 +324,7 @@ func decodeAccessList(al *types2.AccessList, s *rlp.Stream) error {
 			}
 			copy(tuple.StorageKeys[len(tuple.StorageKeys)-1][:], b)
 		}
-		if !errors.Is(err, rlp.EOL) {
+		if !errors.Is(err, rlp2.EOL) {
 			return fmt.Errorf("read StorageKey: %w", err)
 		}
 		// end of StorageKeys list
@@ -339,7 +337,7 @@ func decodeAccessList(al *types2.AccessList, s *rlp.Stream) error {
 		}
 		i++
 	}
-	if !errors.Is(err, rlp.EOL) {
+	if !errors.Is(err, rlp2.EOL) {
 		return fmt.Errorf("open accessTuple: %d %w", i, err)
 	}
 	if err = s.ListEnd(); err != nil {
@@ -348,7 +346,7 @@ func decodeAccessList(al *types2.AccessList, s *rlp.Stream) error {
 	return nil
 }
 
-func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
+func (tx *AccessListTx) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err

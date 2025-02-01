@@ -31,15 +31,14 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	math2 "github.com/erigontech/erigon-lib/common/math"
-	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/blake2b"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto/bn256"
+	"github.com/erigontech/erigon-lib/crypto/secp256r1"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/erigon-lib/crypto"
-	"github.com/erigontech/erigon/erigon-lib/crypto/bn256"
-	"github.com/erigontech/erigon/erigon-lib/crypto/secp256r1"
 	"github.com/erigontech/erigon/params"
 
 	//lint:ignore SA1019 Needed for precompile
@@ -239,7 +238,7 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	v := input[63] - 27
 
 	// tighter sig s values input homestead only apply to txn sigs
-	if !allZero(input[32:63]) || !libcrypto.TransactionSignatureIsValid(v, r, s, true /* allowPreEip2s */) {
+	if !allZero(input[32:63]) || !crypto.TransactionSignatureIsValid(v, r, s, true /* allowPreEip2s */) {
 		return nil, nil
 	}
 	// We must make sure not to modify the 'input', so placing the 'v' along with

@@ -28,13 +28,14 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv/dbutils"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/rawdb/utils"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/ethdb/cbor"
-	"github.com/erigontech/erigon/rlp"
+
+	"github.com/gballet/go-verkle"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/gballet/go-verkle"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
@@ -278,7 +279,7 @@ func WriteForkchoiceFinalized(db kv.Putter, hash common.Hash) {
 }
 
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
-func ReadHeaderRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
+func ReadHeaderRLP(db kv.Getter, hash common.Hash, number uint64) rlp2.RawValue {
 	data, err := db.GetOne(kv.Headers, dbutils.HeaderKey(number, hash))
 	if err != nil {
 		log.Error("ReadHeaderRLP failed", "err", err)
@@ -293,7 +294,7 @@ func ReadHeader(db kv.Getter, hash common.Hash, number uint64) *types.Header {
 		return nil
 	}
 	header := new(types.Header)
-	if err := rlp.Decode(bytes.NewReader(data), header); err != nil {
+	if err := rlp2.Decode(bytes.NewReader(data), header); err != nil {
 		log.Error("Invalid block header RLP", "hash", hash, "err", err)
 		return nil
 	}
@@ -346,7 +347,7 @@ func ReadHeadersByNumber(db kv.Tx, number uint64) ([]*types.Header, error) {
 		}
 
 		header := new(types.Header)
-		if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
+		if err := rlp2.Decode(bytes.NewReader(v), header); err != nil {
 			return nil, fmt.Errorf("invalid block header RLP: hash=%x, err=%w", k[8:], err)
 		}
 		res = append(res, header)
@@ -368,7 +369,7 @@ func WriteHeader(db kv.RwTx, header *types.Header) error {
 	}
 
 	// Write the encoded header
-	data, err := rlp.EncodeToBytes(header)
+	data, err := rlp2.EncodeToBytes(header)
 	if err != nil {
 		return fmt.Errorf("WriteHeader: %w", err)
 	}
@@ -401,15 +402,15 @@ func DeleteHeader(db kv.Deleter, hash common.Hash, number uint64) {
 }
 
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
-func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
+func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp2.RawValue {
 	body, _ := ReadBodyWithTransactions(db, hash, number)
-	bodyRlp, err := rlp.EncodeToBytes(body)
+	bodyRlp, err := rlp2.EncodeToBytes(body)
 	if err != nil {
 		log.Error("ReadBodyRLP failed", "err", err)
 	}
 	return bodyRlp
 }
-func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
+func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp2.RawValue {
 	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
 		log.Error("ReadBodyRLP failed", "err", err)
@@ -423,7 +424,7 @@ func ReadStorageBody(db kv.Getter, hash common.Hash, number uint64) (types.BodyF
 		log.Error("ReadBodyRLP failed", "err", err)
 	}
 	bodyForStorage := new(types.BodyForStorage)
-	if err := rlp.DecodeBytes(bodyRlp, bodyForStorage); err != nil {
+	if err := rlp2.DecodeBytes(bodyRlp, bodyForStorage); err != nil {
 		return types.BodyForStorage{}, err
 	}
 	return *bodyForStorage, nil
@@ -501,7 +502,7 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) err
 		txId++
 
 		buf.Reset()
-		if err := rlp.Encode(buf, tx); err != nil {
+		if err := rlp2.Encode(buf, tx); err != nil {
 			return fmt.Errorf("broken tx rlp: %w", err)
 		}
 
@@ -528,7 +529,7 @@ func WriteRawTransactions(tx kv.RwTx, txs [][]byte, baseTxId uint64) error {
 
 // WriteBodyForStorage stores an RLP encoded block body into the database.
 func WriteBodyForStorage(db kv.Putter, hash common.Hash, number uint64, body *types.BodyForStorage) error {
-	data, err := rlp.EncodeToBytes(body)
+	data, err := rlp2.EncodeToBytes(body)
 	if err != nil {
 		return err
 	}
@@ -618,7 +619,7 @@ func ReadBodyForStorageByKey(db kv.Getter, k []byte) (*types.BodyForStorage, err
 		return nil, nil
 	}
 	bodyForStorage := new(types.BodyForStorage)
-	if err := rlp.DecodeBytes(bodyRlp, bodyForStorage); err != nil {
+	if err := rlp2.DecodeBytes(bodyRlp, bodyForStorage); err != nil {
 		return nil, err
 	}
 
@@ -631,7 +632,7 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 		return nil, 0, 0
 	}
 	bodyForStorage := new(types.BodyForStorage)
-	err := rlp.DecodeBytes(data, bodyForStorage)
+	err := rlp2.DecodeBytes(data, bodyForStorage)
 	if err != nil {
 		log.Error("Invalid block body RLP", "hash", hash, "err", err)
 		return nil, 0, 0
@@ -758,7 +759,7 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 			break
 		}
 		bodyForStorage := types.BodyForStorage{}
-		if err := rlp.DecodeBytes(data, &bodyForStorage); err != nil {
+		if err := rlp2.DecodeBytes(data, &bodyForStorage); err != nil {
 			return err
 		}
 
@@ -781,7 +782,7 @@ func ReadTd(db kv.Getter, hash common.Hash, number uint64) (*big.Int, error) {
 		return nil, nil
 	}
 	td := new(big.Int)
-	if err := rlp.Decode(bytes.NewReader(data), td); err != nil {
+	if err := rlp2.Decode(bytes.NewReader(data), td); err != nil {
 		return nil, fmt.Errorf("invalid block total difficulty RLP: %x, %w", hash, err)
 	}
 	return td, nil
@@ -797,7 +798,7 @@ func ReadTdByHash(db kv.Getter, hash common.Hash) (*big.Int, error) {
 
 // WriteTd stores the total difficulty of a block into the database.
 func WriteTd(db kv.Putter, hash common.Hash, number uint64, td *big.Int) error {
-	data, err := rlp.EncodeToBytes(td)
+	data, err := rlp2.EncodeToBytes(td)
 	if err != nil {
 		return fmt.Errorf("failed to RLP encode block total difficulty: %w", err)
 	}
