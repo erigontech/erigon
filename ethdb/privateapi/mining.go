@@ -7,16 +7,17 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/rlp"
+
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	proto_txpool "github.com/erigontech/erigon-lib/gointerfaces/txpool"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/types"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rlp"
 )
 
 // MiningAPIVersion

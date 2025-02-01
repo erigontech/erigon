@@ -12,8 +12,8 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
 	erigonlibtypes "github.com/erigontech/erigon-lib/gointerfaces/types"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/rlp"
 )
 
 func TestMessageSenderSendGetBlockHeaders(t *testing.T) {

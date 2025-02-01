@@ -11,11 +11,10 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 )
 
 type Authorization struct {
@@ -45,7 +44,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 
 	authLen := 1 + rlp.Uint256LenExcludingHead(&ath.ChainID)
 	authLen += 1 + length.Addr
-	authLen += rlp2.U64Len(ath.Nonce)
+	authLen += rlp.U64Len(ath.Nonce)
 
 	if err := EncodeStructSizePrefix(authLen, data, b); err != nil {
 		return nil, err
@@ -103,10 +102,10 @@ func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.In
 
 func authorizationSize(auth Authorization) (authLen int) {
 	authLen = (1 + rlp.Uint256LenExcludingHead(&auth.ChainID))
-	authLen += rlp2.U64Len(auth.Nonce)
+	authLen += rlp.U64Len(auth.Nonce)
 	authLen += 1 + length.Addr
 
-	authLen += rlp2.U64Len(uint64(auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
+	authLen += rlp.U64Len(uint64(auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
 
 	return
 }
@@ -114,7 +113,7 @@ func authorizationSize(auth Authorization) (authLen int) {
 func authorizationsSize(authorizations []Authorization) (totalSize int) {
 	for _, auth := range authorizations {
 		authLen := authorizationSize(auth)
-		totalSize += rlp2.ListPrefixLen(authLen) + authLen
+		totalSize += rlp.ListPrefixLen(authLen) + authLen
 	}
 
 	return

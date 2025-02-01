@@ -20,13 +20,15 @@ import (
 	"encoding/binary"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	math2 "github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/kv"
+
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -66,14 +68,14 @@ type stEnv struct {
 
 type stEnvMarshaling struct {
 	Coinbase         common.UnprefixedAddress
-	Difficulty       *math.HexOrDecimal256
-	Random           *math.HexOrDecimal256
-	ParentDifficulty *math.HexOrDecimal256
+	Difficulty       *math2.HexOrDecimal256
+	Random           *math2.HexOrDecimal256
+	ParentDifficulty *math2.HexOrDecimal256
 	GasLimit         math.HexOrDecimal64
 	Number           math.HexOrDecimal64
 	Timestamp        math.HexOrDecimal64
 	ParentTimestamp  math.HexOrDecimal64
-	BaseFee          *math.HexOrDecimal256
+	BaseFee          *math2.HexOrDecimal256
 }
 
 func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc) (state.StateReader, *state.PlainStateWriter) {

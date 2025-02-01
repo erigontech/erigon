@@ -9,7 +9,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common/math"
+	math2 "github.com/erigontech/erigon-lib/common/math"
 )
 
 var _ = (*genesisAccountMarshaling)(nil)
@@ -20,7 +21,7 @@ func (g GenesisAccount) MarshalJSON() ([]byte, error) {
 		Constructor hexutility.Bytes            `json:"constructor,omitempty"`
 		Code        hexutility.Bytes            `json:"code,omitempty"`
 		Storage     map[storageJSON]storageJSON `json:"storage,omitempty"`
-		Balance     *math.HexOrDecimal256       `json:"balance" gencodec:"required"`
+		Balance     *math2.HexOrDecimal256      `json:"balance" gencodec:"required"`
 		Nonce       math.HexOrDecimal64         `json:"nonce,omitempty"`
 		PrivateKey  hexutility.Bytes            `json:"secretKey,omitempty"`
 	}
@@ -33,7 +34,7 @@ func (g GenesisAccount) MarshalJSON() ([]byte, error) {
 			enc.Storage[storageJSON(k)] = storageJSON(v)
 		}
 	}
-	enc.Balance = (*math.HexOrDecimal256)(g.Balance)
+	enc.Balance = (*math2.HexOrDecimal256)(g.Balance)
 	enc.Nonce = math.HexOrDecimal64(g.Nonce)
 	enc.PrivateKey = g.PrivateKey
 	return json.Marshal(&enc)
@@ -45,7 +46,7 @@ func (g *GenesisAccount) UnmarshalJSON(input []byte) error {
 		Constructor *hexutility.Bytes           `json:"constructor,omitempty"`
 		Code        *hexutility.Bytes           `json:"code,omitempty"`
 		Storage     map[storageJSON]storageJSON `json:"storage,omitempty"`
-		Balance     *math.HexOrDecimal256       `json:"balance" gencodec:"required"`
+		Balance     *math2.HexOrDecimal256      `json:"balance" gencodec:"required"`
 		Nonce       *math.HexOrDecimal64        `json:"nonce,omitempty"`
 		PrivateKey  *hexutility.Bytes           `json:"secretKey,omitempty"`
 	}

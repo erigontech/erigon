@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -23,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/stages/bodydownload"
@@ -435,7 +436,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		var k, v []byte
 		for k, v, err = headerCursor.Seek(hexutility.EncodeTs(u.UnwindPoint + 1)); err == nil && k != nil; k, v, err = headerCursor.Next() {
 			var h types.Header
-			if err = rlp.DecodeBytes(v, &h); err != nil {
+			if err = rlp2.DecodeBytes(v, &h); err != nil {
 				return err
 			}
 			if cfg.hd.IsBadHeader(h.ParentHash) {
@@ -476,7 +477,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 					continue
 				}
 				var td big.Int
-				if err = rlp.DecodeBytes(v, &td); err != nil {
+				if err = rlp2.DecodeBytes(v, &td); err != nil {
 					return err
 				}
 				if td.Cmp(&maxTd) > 0 {
@@ -616,7 +617,7 @@ func (cr ChainReaderImpl) HasBlock(hash libcommon.Hash, number uint64) bool {
 	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
 	return b != nil
 }
-func (cr ChainReaderImpl) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+func (cr ChainReaderImpl) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp2.RawValue {
 	events, err := cr.blockReader.EventsByBlock(context.Background(), cr.tx, hash, number)
 	if err != nil {
 		cr.logger.Error("BorEventsByBlock failed", "err", err)

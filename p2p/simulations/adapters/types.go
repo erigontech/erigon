@@ -24,8 +24,8 @@ import (
 	"net"
 	"strconv"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"

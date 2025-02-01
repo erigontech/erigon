@@ -27,19 +27,21 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/crypto"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
+	math2 "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/tracers"
 	_ "github.com/erigontech/erigon/eth/tracers/js"
 	_ "github.com/erigontech/erigon/eth/tracers/native"
@@ -49,12 +51,12 @@ import (
 )
 
 type callContext struct {
-	Number     math.HexOrDecimal64   `json:"number"`
-	Difficulty *math.HexOrDecimal256 `json:"difficulty"`
-	Time       math.HexOrDecimal64   `json:"timestamp"`
-	GasLimit   math.HexOrDecimal64   `json:"gasLimit"`
-	BaseFee    *math.HexOrDecimal256 `json:"baseFeePerGas"`
-	Miner      libcommon.Address     `json:"miner"`
+	Number     math.HexOrDecimal64    `json:"number"`
+	Difficulty *math2.HexOrDecimal256 `json:"difficulty"`
+	Time       math.HexOrDecimal64    `json:"timestamp"`
+	GasLimit   math.HexOrDecimal64    `json:"gasLimit"`
+	BaseFee    *math2.HexOrDecimal256 `json:"baseFeePerGas"`
+	Miner      libcommon.Address      `json:"miner"`
 }
 
 // callLog is the result of LOG opCode

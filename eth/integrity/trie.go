@@ -13,9 +13,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/ethdb"
 	"github.com/erigontech/erigon/turbo/trie"
 )

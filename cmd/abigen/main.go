@@ -30,11 +30,11 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/compiler"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 	cli2 "github.com/erigontech/erigon/turbo/cli"
 )

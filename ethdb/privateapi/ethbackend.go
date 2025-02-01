@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
+
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -17,7 +19,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"

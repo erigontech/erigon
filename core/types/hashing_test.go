@@ -6,9 +6,10 @@ import (
 	"testing"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
+
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/trie"
 )
 

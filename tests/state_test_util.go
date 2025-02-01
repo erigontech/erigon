@@ -25,9 +25,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
+
+	math2 "github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/rlp"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -36,15 +39,15 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	types2 "github.com/erigontech/erigon-lib/types"
 
+	"github.com/erigontech/erigon-lib/crypto"
+
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/trie"
 )
@@ -86,9 +89,9 @@ type stPostState struct {
 }
 
 type stTransaction struct {
-	GasPrice             *math.HexOrDecimal256     `json:"gasPrice"`
-	MaxFeePerGas         *math.HexOrDecimal256     `json:"maxFeePerGas"`
-	MaxPriorityFeePerGas *math.HexOrDecimal256     `json:"maxPriorityFeePerGas"`
+	GasPrice             *math2.HexOrDecimal256    `json:"gasPrice"`
+	MaxFeePerGas         *math2.HexOrDecimal256    `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas *math2.HexOrDecimal256    `json:"maxPriorityFeePerGas"`
 	Nonce                math.HexOrDecimal64       `json:"nonce"`
 	GasLimit             []math.HexOrDecimal64     `json:"gasLimit"`
 	PrivateKey           hexutility.Bytes          `json:"secretKey"`
@@ -96,7 +99,7 @@ type stTransaction struct {
 	Data                 []string                  `json:"data"`
 	Value                []string                  `json:"value"`
 	AccessLists          []*types2.AccessList      `json:"accessLists,omitempty"`
-	BlobGasFeeCap        *math.HexOrDecimal256     `json:"maxFeePerBlobGas,omitempty"`
+	BlobGasFeeCap        *math2.HexOrDecimal256    `json:"maxFeePerBlobGas,omitempty"`
 	Authorizations       []types.JsonAuthorization `json:"authorizationList,omitempty"`
 }
 
@@ -114,12 +117,12 @@ type stEnv struct {
 
 type stEnvMarshaling struct {
 	Coinbase   common.UnprefixedAddress
-	Difficulty *math.HexOrDecimal256
-	Random     *math.HexOrDecimal256
+	Difficulty *math2.HexOrDecimal256
+	Random     *math2.HexOrDecimal256
 	GasLimit   math.HexOrDecimal64
 	Number     math.HexOrDecimal64
 	Timestamp  math.HexOrDecimal64
-	BaseFee    *math.HexOrDecimal256
+	BaseFee    *math2.HexOrDecimal256
 }
 
 // GetChainConfig takes a fork definition and returns a chain config.
@@ -414,7 +417,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message
 
 	value := new(uint256.Int)
 	if valueHex != "0x" {
-		va, ok := math.ParseBig256(valueHex)
+		va, ok := math2.ParseBig256(valueHex)
 		if !ok {
 			return nil, fmt.Errorf("invalid txn value %q", valueHex)
 		}
@@ -442,7 +445,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message
 			tx.MaxFeePerGas = gasPrice
 		}
 		if tx.MaxFeePerGas == nil {
-			tx.MaxFeePerGas = math.NewHexOrDecimal256(0)
+			tx.MaxFeePerGas = math2.NewHexOrDecimal256(0)
 		}
 		if tx.MaxPriorityFeePerGas == nil {
 			tx.MaxPriorityFeePerGas = tx.MaxFeePerGas
@@ -451,8 +454,8 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message
 		feeCap = big.Int(*tx.MaxPriorityFeePerGas)
 		tipCap = big.Int(*tx.MaxFeePerGas)
 
-		gp := math.BigMin(new(big.Int).Add(&feeCap, baseFee), &tipCap)
-		gasPrice = math.NewHexOrDecimal256(gp.Int64())
+		gp := math2.BigMin(new(big.Int).Add(&feeCap, baseFee), &tipCap)
+		gasPrice = math2.NewHexOrDecimal256(gp.Int64())
 	}
 	if gasPrice == nil {
 		return nil, fmt.Errorf("no gas price provided")

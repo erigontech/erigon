@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common/math"
 )
 
 // MarshalJSON marshals as JSON.

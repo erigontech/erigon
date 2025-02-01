@@ -7,15 +7,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/btree"
+	lru "github.com/hashicorp/golang-lru/v2"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/google/btree"
-	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type QueueID uint8

@@ -20,10 +20,12 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv/dbutils"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -36,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	hackdb "github.com/erigontech/erigon/cmd/hack/db"
 	"github.com/erigontech/erigon/cmd/hack/flow"
 	"github.com/erigontech/erigon/cmd/hack/tool"
@@ -46,13 +49,11 @@ import (
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/ethdb"
 	"github.com/erigontech/erigon/ethdb/cbor"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
@@ -525,7 +526,7 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := libcommon.BytesToHash(k[8:])
 		var header types.Header
-		if err = rlp.DecodeBytes(v, &header); err != nil {
+		if err = rlp2.DecodeBytes(v, &header); err != nil {
 			return fmt.Errorf("decoding header from %x: %w", v, err)
 		}
 		fmt.Printf("Header %d %x: stateRoot %x, parentHash %x, diff %d\n", blockNumber, blockHash, header.Root, header.ParentHash, header.Difficulty)
@@ -739,7 +740,7 @@ func fixTd(chaindata string) error {
 		if hv == nil {
 			fmt.Printf("Missing TD record for %x, fixing\n", k)
 			var header types.Header
-			if err = rlp.DecodeBytes(v, &header); err != nil {
+			if err = rlp2.DecodeBytes(v, &header); err != nil {
 				return fmt.Errorf("decoding header from %x: %w", v, err)
 			}
 			if header.Number.Uint64() == 0 {
@@ -753,13 +754,13 @@ func fixTd(chaindata string) error {
 				return fmt.Errorf("reading parentTd Rec for %d: %w", header.Number.Uint64(), err)
 			}
 			var parentTd big.Int
-			if err = rlp.DecodeBytes(parentTdRec, &parentTd); err != nil {
+			if err = rlp2.DecodeBytes(parentTdRec, &parentTd); err != nil {
 				return fmt.Errorf("decoding parent Td record for block %d, from %x: %w", header.Number.Uint64(), parentTdRec, err)
 			}
 			var td big.Int
 			td.Add(&parentTd, header.Difficulty)
 			var newHv []byte
-			if newHv, err = rlp.EncodeToBytes(&td); err != nil {
+			if newHv, err = rlp2.EncodeToBytes(&td); err != nil {
 				return fmt.Errorf("encoding td record for block %d: %w", header.Number.Uint64(), err)
 			}
 			if err = tx.Put(kv.HeaderTD, k, newHv); err != nil {
@@ -856,7 +857,7 @@ func fixState(chaindata string) error {
 			return fmt.Errorf("missing header record for %x", headerKey)
 		}
 		var header types.Header
-		if err = rlp.DecodeBytes(hv, &header); err != nil {
+		if err = rlp2.DecodeBytes(hv, &header); err != nil {
 			return fmt.Errorf("decoding header from %x: %w", v, err)
 		}
 		if header.Number.Uint64() > 1 {
@@ -905,7 +906,7 @@ func trimTxs(chaindata string) error {
 			return err
 		}
 		var body types.BodyForStorage
-		if err = rlp.DecodeBytes(v, &body); err != nil {
+		if err = rlp2.DecodeBytes(v, &body); err != nil {
 			return err
 		}
 		// Remove from the map

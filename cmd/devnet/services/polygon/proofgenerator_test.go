@@ -16,9 +16,11 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/cmd/devnet/requests"
@@ -28,12 +30,10 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/services"
@@ -264,7 +264,7 @@ func TestBlockGeneration(t *testing.T) {
 type genesisContract struct {
 }
 
-func (g genesisContract) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
+func (g genesisContract) CommitState(event rlp2.RawValue, syscall consensus.SystemCall) error {
 	return nil
 }
 
@@ -372,7 +372,7 @@ func TestReceiptProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parentNodesBytes, err := rlp.EncodeToBytes(receiptProof.parentNodes)
+	parentNodesBytes, err := rlp2.EncodeToBytes(receiptProof.parentNodes)
 
 	if err != nil {
 		t.Fatal(err)

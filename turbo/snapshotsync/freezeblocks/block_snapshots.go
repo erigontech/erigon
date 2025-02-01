@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 	"golang.org/x/exp/slices"
@@ -46,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/silkworm"
 )
@@ -1573,7 +1574,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, fmt.Errorf("body not found: %d, %x", blockNum, h)
 		}
 		var body types.BodyForStorage
-		if e := rlp.DecodeBytes(dataRLP, &body); e != nil {
+		if e := rlp2.DecodeBytes(dataRLP, &body); e != nil {
 			return false, e
 		}
 		if body.TxAmount == 0 {
@@ -1721,7 +1722,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 			return false, fmt.Errorf("header missed in db: block_num=%d,  hash=%x", blockNum, v)
 		}
 		h := types.Header{}
-		if err := rlp.DecodeBytes(dataRLP, &h); err != nil {
+		if err := rlp2.DecodeBytes(dataRLP, &h); err != nil {
 			return false, err
 		}
 
@@ -1789,7 +1790,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		body.BaseTxId = lastTxNum
 		lastTxNum += uint64(body.TxAmount)
 
-		dataRLP, err := rlp.EncodeToBytes(body)
+		dataRLP, err := rlp2.EncodeToBytes(body)
 		if err != nil {
 			return false, err
 		}
@@ -1833,7 +1834,7 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 				word, _ = g.Next(word[:0])
 				var header types.Header
 				r.Reset(word[1:])
-				if err := rlp.Decode(r, &header); err != nil {
+				if err := rlp2.Decode(r, &header); err != nil {
 					return err
 				}
 				if err := walker(&header); err != nil {
