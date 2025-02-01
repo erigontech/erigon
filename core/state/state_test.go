@@ -29,8 +29,8 @@ import (
 	"github.com/holiman/uint256"
 	checker "gopkg.in/check.v1"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/crypto"
 )
 
 var toAddr = common.BytesToAddress

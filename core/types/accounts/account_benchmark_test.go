@@ -8,7 +8,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
 )
 
 func BenchmarkEncodingLengthForStorage(b *testing.B) {

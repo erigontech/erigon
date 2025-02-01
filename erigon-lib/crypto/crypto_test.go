@@ -28,8 +28,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 var testAddrHex = "970e8128ab834e8eac17ab8e3812f010678cf791"
@@ -296,7 +295,7 @@ func TestPythonIntegration(t *testing.T) {
 	msg0 := Keccak256([]byte("foo"))
 	sig0, _ := Sign(msg0, k0)
 
-	msg1 := common.FromHex("00000000000000000000000000000000")
+	msg1 := hexutility.FromHex("00000000000000000000000000000000")
 	sig1, _ := Sign(msg0, k0)
 
 	t.Logf("msg: %x, privkey: %s sig: %x\n", msg0, kh, sig0)

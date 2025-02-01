@@ -2,16 +2,17 @@ package trie
 
 import (
 	"crypto/ecdsa"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"reflect"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/crypto"
 )
 
 func TestGetAccount(t *testing.T) {

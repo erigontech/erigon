@@ -8,8 +8,9 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
+	math2 "github.com/erigontech/erigon-lib/common/math"
 	common0 "github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 )
 
 var _ = (*stEnvMarshaling)(nil)
@@ -18,21 +19,21 @@ var _ = (*stEnvMarshaling)(nil)
 func (s stEnv) MarshalJSON() ([]byte, error) {
 	type stEnv struct {
 		Coinbase   common0.UnprefixedAddress `json:"currentCoinbase"   gencodec:"required"`
-		Difficulty *math.HexOrDecimal256     `json:"currentDifficulty" gencodec:"required"`
-		Random     *math.HexOrDecimal256     `json:"currentRandom"     gencodec:"optional"`
+		Difficulty *math2.HexOrDecimal256    `json:"currentDifficulty" gencodec:"required"`
+		Random     *math2.HexOrDecimal256    `json:"currentRandom"     gencodec:"optional"`
 		GasLimit   math.HexOrDecimal64       `json:"currentGasLimit"   gencodec:"required"`
 		Number     math.HexOrDecimal64       `json:"currentNumber"     gencodec:"required"`
 		Timestamp  math.HexOrDecimal64       `json:"currentTimestamp"  gencodec:"required"`
-		BaseFee    *math.HexOrDecimal256     `json:"currentBaseFee"    gencodec:"optional"`
+		BaseFee    *math2.HexOrDecimal256    `json:"currentBaseFee"    gencodec:"optional"`
 	}
 	var enc stEnv
 	enc.Coinbase = common0.UnprefixedAddress(s.Coinbase)
-	enc.Difficulty = (*math.HexOrDecimal256)(s.Difficulty)
-	enc.Random = (*math.HexOrDecimal256)(s.Random)
+	enc.Difficulty = (*math2.HexOrDecimal256)(s.Difficulty)
+	enc.Random = (*math2.HexOrDecimal256)(s.Random)
 	enc.GasLimit = math.HexOrDecimal64(s.GasLimit)
 	enc.Number = math.HexOrDecimal64(s.Number)
 	enc.Timestamp = math.HexOrDecimal64(s.Timestamp)
-	enc.BaseFee = (*math.HexOrDecimal256)(s.BaseFee)
+	enc.BaseFee = (*math2.HexOrDecimal256)(s.BaseFee)
 	return json.Marshal(&enc)
 }
 
@@ -40,12 +41,12 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 func (s *stEnv) UnmarshalJSON(input []byte) error {
 	type stEnv struct {
 		Coinbase   *common0.UnprefixedAddress `json:"currentCoinbase"   gencodec:"required"`
-		Difficulty *math.HexOrDecimal256      `json:"currentDifficulty" gencodec:"required"`
-		Random     *math.HexOrDecimal256      `json:"currentRandom"     gencodec:"optional"`
+		Difficulty *math2.HexOrDecimal256     `json:"currentDifficulty" gencodec:"required"`
+		Random     *math2.HexOrDecimal256     `json:"currentRandom"     gencodec:"optional"`
 		GasLimit   *math.HexOrDecimal64       `json:"currentGasLimit"   gencodec:"required"`
 		Number     *math.HexOrDecimal64       `json:"currentNumber"     gencodec:"required"`
 		Timestamp  *math.HexOrDecimal64       `json:"currentTimestamp"  gencodec:"required"`
-		BaseFee    *math.HexOrDecimal256      `json:"currentBaseFee"    gencodec:"optional"`
+		BaseFee    *math2.HexOrDecimal256     `json:"currentBaseFee"    gencodec:"optional"`
 	}
 	var dec stEnv
 	if err := json.Unmarshal(input, &dec); err != nil {

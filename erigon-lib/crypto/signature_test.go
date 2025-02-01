@@ -19,12 +19,13 @@ package crypto
 import (
 	"bytes"
 	"crypto/ecdsa"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"reflect"
 	"testing"
 
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+
+	"github.com/erigontech/erigon-lib/common/math"
 )
 
 var (

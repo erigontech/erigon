@@ -28,10 +28,10 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rlp"
 )

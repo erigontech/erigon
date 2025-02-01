@@ -29,8 +29,8 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/crypto"
 )
 
 var ErrInvalidChainId = errors.New("invalid chain id for signer")

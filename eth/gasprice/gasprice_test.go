@@ -31,10 +31,10 @@ import (
 	"github.com/erigontech/erigon/turbo/stages/mock"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"

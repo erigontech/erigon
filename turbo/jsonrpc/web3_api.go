@@ -5,7 +5,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
 
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 

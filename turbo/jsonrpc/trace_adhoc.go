@@ -8,8 +8,10 @@ import (
 	"math"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
+
+	math2 "github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -17,7 +19,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	types2 "github.com/erigontech/erigon-lib/types"
 
-	math2 "github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"

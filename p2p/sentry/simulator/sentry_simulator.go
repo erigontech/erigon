@@ -11,6 +11,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	isentry "github.com/erigontech/erigon-lib/gointerfaces/sentry"
@@ -18,7 +19,6 @@ import (
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	coretypes "github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p"

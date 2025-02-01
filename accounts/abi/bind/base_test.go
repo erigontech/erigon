@@ -18,19 +18,20 @@ package bind_test
 
 import (
 	"context"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"math/big"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common/hexutil"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 
 	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/rlp"
 )
 

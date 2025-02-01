@@ -41,9 +41,9 @@ import (
 	libtypes "github.com/erigontech/erigon-lib/types"
 	types2 "github.com/erigontech/erigon-lib/types"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/rlp"
 )
 

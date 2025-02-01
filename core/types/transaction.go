@@ -34,7 +34,7 @@ import (
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/rlp"
 )
 

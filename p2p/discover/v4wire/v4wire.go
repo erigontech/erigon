@@ -27,8 +27,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
+
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/rlp"
 )

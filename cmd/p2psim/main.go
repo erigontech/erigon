@@ -50,7 +50,7 @@ import (
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/simulations"

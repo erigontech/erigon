@@ -23,7 +23,7 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/stretchr/testify/assert"

@@ -23,15 +23,17 @@ import (
 	"slices"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"golang.org/x/crypto/sha3"
+
+	math2 "github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/consensus"
 
@@ -65,16 +67,16 @@ type RejectedTx struct {
 type RejectedTxs []*RejectedTx
 
 type EphemeralExecResult struct {
-	StateRoot        libcommon.Hash        `json:"stateRoot"`
-	TxRoot           libcommon.Hash        `json:"txRoot"`
-	ReceiptRoot      libcommon.Hash        `json:"receiptsRoot"`
-	LogsHash         libcommon.Hash        `json:"logsHash"`
-	Bloom            types.Bloom           `json:"logsBloom"        gencodec:"required"`
-	Receipts         types.Receipts        `json:"receipts"`
-	Rejected         RejectedTxs           `json:"rejected,omitempty"`
-	Difficulty       *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
-	GasUsed          math.HexOrDecimal64   `json:"gasUsed"`
-	StateSyncReceipt *types.Receipt        `json:"-"`
+	StateRoot        libcommon.Hash         `json:"stateRoot"`
+	TxRoot           libcommon.Hash         `json:"txRoot"`
+	ReceiptRoot      libcommon.Hash         `json:"receiptsRoot"`
+	LogsHash         libcommon.Hash         `json:"logsHash"`
+	Bloom            types.Bloom            `json:"logsBloom"        gencodec:"required"`
+	Receipts         types.Receipts         `json:"receipts"`
+	Rejected         RejectedTxs            `json:"rejected,omitempty"`
+	Difficulty       *math2.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
+	GasUsed          math.HexOrDecimal64    `json:"gasUsed"`
+	StateSyncReceipt *types.Receipt         `json:"-"`
 }
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
@@ -176,7 +178,7 @@ func ExecuteBlockEphemerally(
 		Bloom:       bloom,
 		LogsHash:    rlpHash(blockLogs),
 		Receipts:    receipts,
-		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty),
+		Difficulty:  (*math2.HexOrDecimal256)(header.Difficulty),
 		GasUsed:     math.HexOrDecimal64(*usedGas),
 		Rejected:    rejectedTxs,
 	}

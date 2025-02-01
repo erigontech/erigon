@@ -29,8 +29,8 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/crypto/ecies"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto/ecies"
 	"github.com/erigontech/erigon/p2p/simulations/pipes"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/stretchr/testify/assert"

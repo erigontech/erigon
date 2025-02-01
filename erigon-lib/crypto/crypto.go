@@ -30,14 +30,14 @@ import (
 	"os"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/rlp"
 	"golang.org/x/crypto/sha3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/crypto/cryptopool"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 )
 
 // SignatureLength indicates the byte length required to carry a signature with recovery id.
@@ -50,8 +50,9 @@ const RecoveryIDOffset = 64
 const DigestLength = 32
 
 var (
-	secp256k1N    = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
-	secp256k1NBig = secp256k1N.ToBig()
+	secp256k1N     = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
+	secp256k1NBig  = secp256k1N.ToBig()
+	secp256k1halfN = new(uint256.Int).Rsh(secp256k1N, 1)
 )
 
 var errInvalidPubkey = errors.New("invalid secp256k1 public key")
