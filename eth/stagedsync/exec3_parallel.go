@@ -482,7 +482,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 	tx := task.index
 
-	fmt.Println("res", res.Version().TxIndex, res.Version().Incarnation)
+	fmt.Println("res", res.Version().TxIndex, res.Version().Incarnation, res.Err)
 
 	be.results[tx] = &execResult{res}
 
@@ -588,6 +588,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 	fmt.Println("To Validate", toValidate)
 
+	cntInvalid := 0
+
 	for i := 0; i < len(toValidate); i++ {
 		be.cntTotalValidations++
 
@@ -596,12 +598,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 		if be.skipCheck[tx] ||
 			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap, func(read, written state.Version) bool { return read == written }) {
-			fmt.Println("valid", tx)
-			be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), true)
-			be.validateTasks.markComplete(tx)
-			// note this assumes that tasks are pushed in order as finalization needs to happen in block order
-			be.finalizeTasks.pushPending(tx)
+			if cntInvalid == 0 {
+				fmt.Println("valid", tx)
+				be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), true)
+				be.validateTasks.markComplete(tx)
+				// note this assumes that tasks are pushed in order as finalization needs to happen in block order
+				be.finalizeTasks.pushPending(tx)
+			}
 		} else {
+			cntInvalid++
+
 			be.cntValidationFail++
 			be.diagExecAbort[tx]++
 			be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), false)
