@@ -72,9 +72,8 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 		}
 	}
 	// Check that no extra elements are in the access list
-	index := s.accessList.addresses[address]
-	if index >= 0 {
-		stateSlots := s.accessList.slots[index]
+	stateSlots := s.accessList.addresses[address]
+	if stateSlots != nil {
 		for s := range stateSlots {
 			if _, slotPresent := slotMap[s]; !slotPresent {
 				t.Fatalf("scope has extra slot %v (address %v)", s, addrString)
@@ -113,9 +112,6 @@ func TestAccessList(t *testing.T) {
 	verifyAddrs(t, state, "aa", "bb")
 	verifySlots(t, state, "bb", "01", "02")
 	if got, exp := len(state.accessList.addresses), 2; got != exp {
-		t.Fatalf("expected empty, got %d", got)
-	}
-	if got, exp := len(state.accessList.slots), 1; got != exp {
 		t.Fatalf("expected empty, got %d", got)
 	}
 
@@ -199,9 +195,6 @@ func TestAccessList(t *testing.T) {
 		t.Fatalf("addr present, expected missing")
 	}
 	if got, exp := len(state.accessList.addresses), 0; got != exp {
-		t.Fatalf("expected empty, got %d", got)
-	}
-	if got, exp := len(state.accessList.slots), 0; got != exp {
 		t.Fatalf("expected empty, got %d", got)
 	}
 }

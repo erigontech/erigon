@@ -425,7 +425,7 @@ func composeValidations(checks []propertyCheck) propertyCheck {
 func checkNoStatusOverlap(pe *parallelExecutor) error {
 	seen := make(map[int]string)
 
-	for blockNum, blockStatus := range pe.blockStatus {
+	for blockNum, blockStatus := range pe.blockExecutors {
 		for _, tx := range blockStatus.execTasks.complete {
 			seen[tx] = "complete"
 		}
@@ -451,7 +451,7 @@ func checkNoStatusOverlap(pe *parallelExecutor) error {
 }
 
 func checkNoDroppedTx(pe *parallelExecutor) error {
-	for blockNum, blockStatus := range pe.blockStatus {
+	for blockNum, blockStatus := range pe.blockExecutors {
 		for i := 0; i < len(blockStatus.tasks); i++ {
 			if !blockStatus.execTasks.checkComplete(i) && !blockStatus.execTasks.checkInProgress(i) && !blockStatus.execTasks.checkPending(i) {
 				if !blockStatus.execTasks.isBlocked(i) {
@@ -1020,7 +1020,7 @@ func TestDexScenario(t *testing.T) {
 	numNonIO := []int{100, 500}
 
 	postValidation := func(pe *parallelExecutor) error {
-		for blockNum, blockStatus := range pe.blockStatus {
+		for blockNum, blockStatus := range pe.blockExecutors {
 			if blockStatus.validateTasks.maxAllComplete() == len(blockStatus.tasks) {
 				for i, inputs := range blockStatus.result.TxIO.Inputs() {
 					var err error
@@ -1065,7 +1065,7 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 	numNonIO := []int{100, 500}
 
 	postValidation := func(pe *parallelExecutor) error {
-		for blockNum, blockStatus := range pe.blockStatus {
+		for blockNum, blockStatus := range pe.blockExecutors {
 			if blockStatus.validateTasks.maxAllComplete() == len(blockStatus.tasks) {
 				for i, inputs := range blockStatus.result.TxIO.Inputs() {
 					var err error

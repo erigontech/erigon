@@ -384,13 +384,13 @@ func (vm *VersionMap) FlushVersionedWrites(writes VersionedWrites, complete bool
 	}
 }
 
-func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap) (valid bool) {
+func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, checkVersion func(readVersion, writeVersion Version) bool) (valid bool) {
 	valid = true
 
 	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
-		readSet.Scan(func(rd *VersionedRead) bool {
-			mvResult := versionMap.Read(rd.Path, txIdx)
-			switch mvResult.Status() {
+		readSet.Scan(func(vr *VersionedRead) bool {
+			readResult := versionMap.Read(vr.Path, txIdx)
+			switch readResult.Status() {
 			case MVReadResultDone:
 				// Having a write record for a path in VersionedMap doesn't necessarily mean there is a conflict,
 				// because VersionedMap is a superset of the actual write set.
@@ -399,21 +399,22 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap) (va
 				// 	continue
 				// }
 
-				valid = rd.Kind == ReadKindMap && rd.Version == Version{
-					TxIndex:     mvResult.depIdx,
-					Incarnation: mvResult.incarnation,
-				}
+				valid = vr.Kind == ReadKindMap &&
+					checkVersion(vr.Version, Version{
+						TxIndex:     readResult.depIdx,
+						Incarnation: readResult.incarnation,
+					})
 			case MVReadResultDependency:
 				valid = false
 			case MVReadResultNone:
-				valid = rd.Kind == ReadKindStorage
+				valid = vr.Kind == ReadKindStorage
 			default:
-				panic(fmt.Errorf("should not happen - undefined vm read status: %ver", mvResult.Status()))
+				panic(fmt.Errorf("should not happen - undefined vm read status: %ver", readResult.Status()))
 			}
 
 			if versionMap.trace {
-				fmt.Println("RD", rd.Path, txIdx, func() string {
-					switch mvResult.Status() {
+				fmt.Println("RD", vr.Path, txIdx, func() string {
+					switch readResult.Status() {
 					case MVReadResultDone:
 						return "done"
 					case MVReadResultDependency:
@@ -423,7 +424,7 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap) (va
 					default:
 						return "unknown"
 					}
-				}(), rd.Version, mvResult.depIdx, valid)
+				}(), vr.Version, readResult.depIdx, valid)
 			}
 
 			return valid

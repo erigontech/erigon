@@ -92,7 +92,7 @@ func ReportDAG(d *state.DAG, stats map[int]ExecutionStat, out func(string)) {
 		time.Duration(serialWeight), fmt.Sprintf("%.1f", float64(weight)*100.0/float64(serialWeight))))
 }
 
-type execStatusManager struct {
+type execStatusList struct {
 	pending    []int
 	inProgress []int
 	complete   []int
@@ -115,7 +115,7 @@ func insertInList(l []int, v int) []int {
 	}
 }
 
-func (m *execStatusManager) takeNextPending() int {
+func (m *execStatusList) takeNextPending() int {
 	if len(m.pending) == 0 {
 		return -1
 	}
@@ -131,7 +131,7 @@ func hasNoGap(l []int) bool {
 	return l[0]+len(l) == l[len(l)-1]+1
 }
 
-func (m execStatusManager) maxAllComplete() int {
+func (m execStatusList) maxAllComplete() int {
 	if len(m.complete) == 0 || m.complete[0] != 0 {
 		return -1
 	} else if m.complete[len(m.complete)-1] == len(m.complete)-1 {
@@ -147,7 +147,7 @@ func (m execStatusManager) maxAllComplete() int {
 	return -1
 }
 
-func (m *execStatusManager) pushPending(tx int) {
+func (m *execStatusList) pushPending(tx int) {
 	m.pending = insertInList(m.pending, tx)
 }
 
@@ -171,12 +171,12 @@ func removeFromList(l []int, v int, expect bool) []int {
 	}
 }
 
-func (m *execStatusManager) markComplete(tx int) {
+func (m *execStatusList) markComplete(tx int) {
 	m.inProgress = removeFromList(m.inProgress, tx, true)
 	m.complete = insertInList(m.complete, tx)
 }
 
-func (m *execStatusManager) minPending() int {
+func (m *execStatusList) minPending() int {
 	if len(m.pending) == 0 {
 		return -1
 	} else {
@@ -184,11 +184,11 @@ func (m *execStatusManager) minPending() int {
 	}
 }
 
-func (m *execStatusManager) countComplete() int {
+func (m *execStatusList) countComplete() int {
 	return len(m.complete)
 }
 
-func (m *execStatusManager) addDependencies(blocker int, dependent int) bool {
+func (m *execStatusList) addDependencies(blocker int, dependent int) bool {
 	if blocker < 0 || blocker >= dependent {
 		return false
 	}
@@ -229,11 +229,11 @@ func (m *execStatusManager) addDependencies(blocker int, dependent int) bool {
 	return true
 }
 
-func (m *execStatusManager) isBlocked(tx int) bool {
+func (m *execStatusList) isBlocked(tx int) bool {
 	return len(m.blocker[tx]) > 0
 }
 
-func (m *execStatusManager) removeDependency(tx int) {
+func (m *execStatusList) removeDependency(tx int) {
 	if deps, ok := m.dependency[tx]; ok && len(deps) > 0 {
 		for k := range deps {
 			delete(m.blocker[k], tx)
@@ -249,11 +249,11 @@ func (m *execStatusManager) removeDependency(tx int) {
 	}
 }
 
-func (m *execStatusManager) clearInProgress(tx int) {
+func (m *execStatusList) clearInProgress(tx int) {
 	m.inProgress = removeFromList(m.inProgress, tx, true)
 }
 
-func (m *execStatusManager) checkInProgress(tx int) bool {
+func (m *execStatusList) checkInProgress(tx int) bool {
 	x := sort.SearchInts(m.inProgress, tx)
 	if x < len(m.inProgress) && m.inProgress[x] == tx {
 		return true
@@ -262,7 +262,7 @@ func (m *execStatusManager) checkInProgress(tx int) bool {
 	return false
 }
 
-func (m *execStatusManager) checkPending(tx int) bool {
+func (m *execStatusList) checkPending(tx int) bool {
 	x := sort.SearchInts(m.pending, tx)
 	if x < len(m.pending) && m.pending[x] == tx {
 		return true
@@ -271,7 +271,7 @@ func (m *execStatusManager) checkPending(tx int) bool {
 	return false
 }
 
-func (m *execStatusManager) checkComplete(tx int) bool {
+func (m *execStatusList) checkComplete(tx int) bool {
 	x := sort.SearchInts(m.complete, tx)
 	if x < len(m.complete) && m.complete[x] == tx {
 		return true
@@ -283,7 +283,7 @@ func (m *execStatusManager) checkComplete(tx int) bool {
 // getRevalidationRange: this range will be all tasks from tx (inclusive) that are not currently in progress up to the
 //
 //	'all complete' limit
-func (m *execStatusManager) getRevalidationRange(txFrom int) (ret []int) {
+func (m *execStatusList) getRevalidationRange(txFrom int) (ret []int) {
 	max := m.maxAllComplete() // haven't learned to trust compilers :)
 	for x := txFrom; x <= max; x++ {
 		if !m.checkInProgress(x) {
@@ -294,7 +294,7 @@ func (m *execStatusManager) getRevalidationRange(txFrom int) (ret []int) {
 	return
 }
 
-func (m *execStatusManager) pushPendingSet(set []int) {
+func (m *execStatusList) pushPendingSet(set []int) {
 	for _, v := range set {
 		if m.checkComplete(v) {
 			m.clearComplete(v)
@@ -304,10 +304,10 @@ func (m *execStatusManager) pushPendingSet(set []int) {
 	}
 }
 
-func (m *execStatusManager) clearComplete(tx int) {
+func (m *execStatusList) clearComplete(tx int) {
 	m.complete = removeFromList(m.complete, tx, false)
 }
 
-func (m *execStatusManager) clearPending(tx int) {
+func (m *execStatusList) clearPending(tx int) {
 	m.pending = removeFromList(m.pending, tx, false)
 }

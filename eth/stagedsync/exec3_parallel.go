@@ -401,8 +401,10 @@ type execRequest struct {
 	profile bool
 }
 
-type blockExecStatus struct {
+type blockExecutor struct {
 	sync.Mutex
+	blockNum uint64
+
 	tasks   []*execTask
 	results []*execResult
 
@@ -412,10 +414,13 @@ type blockExecStatus struct {
 	skipCheck map[int]bool
 
 	// Execution tasks stores the state of each execution task
-	execTasks execStatusManager
+	execTasks execStatusList
 
 	// Validate tasks stores the state of each validation task
-	validateTasks execStatusManager
+	validateTasks execStatusList
+
+	// Finalize tasks stores the state of each finalization task
+	finalizeTasks execStatusList
 
 	// Multi-version map
 	versionMap *state.VersionMap
@@ -452,8 +457,9 @@ type blockExecStatus struct {
 	result *blockResult
 }
 
-func newBlockStatus(profile bool) *blockExecStatus {
-	return &blockExecStatus{
+func newBlockExec(blockNum uint64, profile bool) *blockExecutor {
+	return &blockExecutor{
+		blockNum:     blockNum,
 		begin:        time.Now(),
 		stats:        map[int]ExecutionStat{},
 		skipCheck:    map[int]bool{},
@@ -462,6 +468,304 @@ func newBlockStatus(profile bool) *blockExecStatus {
 		blockIO:      &state.VersionedIO{},
 		versionMap:   state.NewVersionMap(),
 		profile:      profile,
+	}
+}
+
+func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg ExecuteBlockCfg, rs *state.StateV3Buffered,
+	accumulator *shards.Accumulator, in *exec.QueueWithRetry, applyTx kv.Tx, applyResults chan applyResult, logger log.Logger) (result *blockResult, err error) {
+
+	task, ok := res.Task.(*taskVersion)
+
+	if !ok {
+		return nil, fmt.Errorf("unexpected task type: %T", res.Task)
+	}
+
+	tx := task.index
+
+	be.results[tx] = &execResult{res}
+
+	if res.Err != nil {
+		if execErr, ok := res.Err.(exec.ErrExecAbortError); ok {
+			if execErr.OriginError != nil && be.skipCheck[tx] {
+				// If the transaction failed when we know it should not fail, this means the transaction itself is
+				// bad (e.g. wrong nonce), and we should exit the execution immediately
+				return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w", be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError)
+			}
+
+			if res.Version().Incarnation > len(be.tasks) {
+				return nil, fmt.Errorf("could not apply tx %d [%v]: %w: too many incarnations: %d", tx, task.TxHash(), execErr.OriginError, res.Version().Incarnation)
+			}
+
+			addedDependencies := false
+
+			if execErr.Dependency >= 0 {
+				l := len(be.estimateDeps[tx])
+				for l > 0 && be.estimateDeps[tx][l-1] > execErr.Dependency {
+					be.execTasks.removeDependency(be.estimateDeps[tx][l-1])
+					be.estimateDeps[tx] = be.estimateDeps[tx][:l-1]
+					l--
+				}
+
+				addedDependencies = be.execTasks.addDependencies(execErr.Dependency, tx)
+			} else {
+				estimate := 0
+
+				if len(be.estimateDeps[tx]) > 0 {
+					estimate = be.estimateDeps[tx][len(be.estimateDeps[tx])-1]
+				}
+				addedDependencies = be.execTasks.addDependencies(estimate, tx)
+				newEstimate := estimate + (estimate+tx)/2
+				if newEstimate >= tx {
+					newEstimate = tx - 1
+				}
+				be.estimateDeps[tx] = append(be.estimateDeps[tx], newEstimate)
+			}
+
+			be.execTasks.clearInProgress(tx)
+
+			if !addedDependencies {
+				be.execTasks.pushPending(tx)
+			}
+			be.txIncarnations[tx]++
+			be.diagExecAbort[tx]++
+			be.cntAbort++
+		} else {
+			return nil, fmt.Errorf("unexptected exec error: %w", err)
+		}
+	} else {
+		txIndex := res.Version().TxIndex
+
+		be.blockIO.RecordReads(txIndex, res.TxIn)
+
+		if res.Version().Incarnation == 0 {
+			be.blockIO.RecordWrites(txIndex, res.TxOut)
+			be.blockIO.RecordAllWrites(txIndex, res.TxOut)
+		} else {
+			if res.TxOut.HasNewWrite(be.blockIO.AllWriteSet(txIndex)) {
+				be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
+			}
+
+			prevWrite := be.blockIO.AllWriteSet(txIndex)
+
+			// Remove entries that were previously written but are no longer written
+
+			cmpMap := btree.NewBTreeGOptions(func(a, b state.VersionKey) bool { return state.VersionKeyLess(&a, &b) }, btree.Options{NoLocks: true})
+
+			for _, w := range res.TxOut {
+				cmpMap.Set(w.Path)
+			}
+
+			for _, v := range prevWrite {
+				if _, ok := cmpMap.Get(v.Path); !ok {
+					be.versionMap.Delete(v.Path, txIndex, true)
+				}
+			}
+
+			be.blockIO.RecordWrites(txIndex, res.TxOut)
+			be.blockIO.RecordAllWrites(txIndex, res.TxOut)
+		}
+
+		be.validateTasks.pushPending(tx)
+		be.execTasks.markComplete(tx)
+		be.diagExecSuccess[tx]++
+		be.cntSuccess++
+
+		be.execTasks.removeDependency(tx)
+	}
+
+	// do validations ...
+	maxComplete := be.execTasks.maxAllComplete()
+	toValidate := make(sort.IntSlice, 0, 2)
+
+	fmt.Println("ToValidate", toValidate)
+	for be.validateTasks.minPending() <= maxComplete && be.validateTasks.minPending() >= 0 {
+		toValidate = append(toValidate, be.validateTasks.takeNextPending())
+	}
+
+	for i := 0; i < len(toValidate); i++ {
+		be.cntTotalValidations++
+
+		tx := toValidate[i]
+		txVersion := be.tasks[tx].Task.Version()
+
+		if be.skipCheck[tx] ||
+			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap, func(read, written state.Version) bool { return read == written }) {
+			be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), true)
+			be.validateTasks.markComplete(tx)
+			// note this assumes that tasks are pushed in order as finalization needs to happen in block order
+			be.finalizeTasks.pushPending(tx)
+		} else {
+			be.cntValidationFail++
+			be.diagExecAbort[tx]++
+			be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), false)
+			// 'create validation tasks for all transactions > tx ...'
+			be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
+			be.validateTasks.clearInProgress(tx) // clear in progress - pending will be added again once new incarnation executes
+
+			be.execTasks.clearComplete(tx)
+			be.execTasks.pushPending(tx)
+
+			be.preValidated[tx] = false
+			be.txIncarnations[tx]++
+			fmt.Println("invalid", tx)
+		}
+	}
+
+	maxValidated := be.validateTasks.maxAllComplete()
+	fmt.Println("Max Validated", maxValidated)
+	fmt.Println("Exec Pending", be.execTasks.pending)
+	be.scheduleExecution(ctx, in)
+
+	if be.finalizeTasks.minPending() != -1 {
+		stateWriter := state.NewStateWriterBufferedV3(rs, accumulator)
+		stateReader := state.NewBufferedReader(rs, state.NewReaderParallelV3(rs.Domains(), applyTx))
+
+		applyResult := txResult{
+			blockNum:   be.blockNum,
+			traceFroms: map[common.Address]struct{}{},
+			traceTos:   map[common.Address]struct{}{},
+		}
+
+		toFinalize := make(sort.IntSlice, 0, 2)
+
+		for be.finalizeTasks.minPending() <= maxValidated && be.finalizeTasks.minPending() >= 0 {
+			toFinalize = append(toFinalize, be.finalizeTasks.takeNextPending())
+		}
+
+		for i := 0; i < len(toFinalize); i++ {
+			tx := toFinalize[i]
+			txTask := be.tasks[tx].Task
+			txIndex := txTask.Version().TxIndex
+
+			var prevReceipt *types.Receipt
+			if txIndex > 0 && tx > 0 {
+				prevReceipt = be.results[tx-1].Receipt
+			}
+
+			txResult := be.results[tx]
+			_, err = txResult.finalize(prevReceipt, cfg.engine, be.versionMap, stateReader, stateWriter)
+
+			if err != nil {
+				return nil, err
+			}
+
+			applyResult.txNum = txTask.Version().TxNum
+			if txResult.Receipt != nil {
+				applyResult.gasUsed = txResult.Receipt.GasUsed
+			}
+			applyResult.blockTime = txTask.BlockTime()
+			applyResult.logs = append(applyResult.logs, txResult.Logs...)
+			maps.Copy(applyResult.traceFroms, txResult.TraceFroms)
+			maps.Copy(applyResult.traceTos, txResult.TraceTos)
+			be.cntFinalized++
+			be.finalizeTasks.markComplete(tx)
+			be.gasUsed += applyResult.gasUsed
+		}
+
+		if applyResult.txNum > 0 {
+			applyResult.writeSet = stateWriter.WriteSet()
+			applyResults <- &applyResult
+		}
+	}
+
+	if be.finalizeTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
+		/*pe.logger.Debug*/ fmt.Println("exec summary", "block", be.blockNum, "tasks", len(be.tasks), "execs", be.cntExec,
+			"speculative", be.cntSpecExec, "success", be.cntSuccess, "aborts", be.cntAbort, "validations", be.cntTotalValidations, "failures", be.cntValidationFail,
+			"retries", fmt.Sprintf("%.2f%%", float64(be.cntAbort+be.cntValidationFail)/float64(be.cntExec)*100),
+			"execs", fmt.Sprintf("%.2f%%", float64(be.cntExec)/float64(len(be.tasks))*100))
+
+		var allDeps map[int]map[int]bool
+
+		var deps state.DAG
+
+		if be.profile {
+			allDeps = state.GetDep(be.blockIO)
+			deps = state.BuildDAG(be.blockIO, logger)
+		}
+
+		txTask := be.tasks[len(be.tasks)-1].Task
+		be.result = &blockResult{
+			be.blockNum,
+			txTask.BlockTime(),
+			txTask.BlockHash(),
+			txTask.BlockRoot(),
+			nil,
+			be.gasUsed,
+			txTask.Version().TxNum,
+			true,
+			be.blockIO,
+			be.stats,
+			&deps,
+			allDeps}
+		return be.result, nil
+	}
+
+	var lastTxNum uint64
+	if maxValidated >= 0 {
+		lastTxTask := be.tasks[maxValidated].Task
+		lastTxNum = lastTxTask.Version().TxNum
+	}
+
+	txTask := be.tasks[0].Task
+
+	return &blockResult{
+		be.blockNum,
+		txTask.BlockTime(),
+		txTask.BlockHash(),
+		txTask.BlockRoot(),
+		nil,
+		be.gasUsed,
+		lastTxNum,
+		false,
+		be.blockIO,
+		be.stats,
+		nil,
+		nil}, nil
+}
+
+func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWithRetry) {
+	maxValidated := be.validateTasks.maxAllComplete()
+	//fmt.Println("schedule", blockExecutor.execTasks.minPending(), maxValidated+1)
+	// Send the next immediate pending transaction to be executed
+	//if blockExecutor.execTasks.minPending() != -1 && blockExecutor.execTasks.minPending() == maxValidated+1 {
+	for nextTx := be.execTasks.minPending(); nextTx != -1; nextTx = be.execTasks.minPending() {
+		if nextTx != maxValidated+1 && be.txIncarnations[nextTx] > 0 { /*||
+			state.ValidateVersion(nextTx, blockExecutor.blockIO, blockExecutor.versionMap,
+				func(read, written state.Version) bool {
+					return written.Incarnation >= read.Incarnation ||
+						written.TxIndex >= read.Incarnation
+				}) {*/
+			break
+		}
+
+		nextTx := be.execTasks.takeNextPending()
+		be.cntExec++
+
+		be.skipCheck[nextTx] = nextTx == maxValidated+1
+
+		execTask := be.tasks[nextTx]
+
+		if incarnation := be.txIncarnations[nextTx]; incarnation == 0 {
+			fmt.Println("exec", nextTx, incarnation)
+			in.Add(ctx, &taskVersion{
+				execTask:   execTask,
+				version:    execTask.Version(),
+				versionMap: be.versionMap,
+				profile:    be.profile,
+				stats:      be.stats,
+				statsMutex: &be.Mutex})
+		} else {
+			fmt.Println("re exec", nextTx, incarnation)
+			version := execTask.Version()
+			version.Incarnation = incarnation
+			in.ReTry(&taskVersion{
+				execTask:   execTask,
+				version:    version,
+				versionMap: be.versionMap,
+				profile:    be.profile,
+				stats:      be.stats,
+				statsMutex: &be.Mutex})
+		}
 	}
 }
 
@@ -479,9 +783,8 @@ type parallelExecutor struct {
 	pruneEvery   *time.Ticker
 	logEvery     *time.Ticker
 
-	blockStatus map[uint64]*blockExecStatus
-
-	execRequests chan *execRequest
+	blockExecutors map[uint64]*blockExecutor
+	execRequests   chan *execRequest
 }
 
 func (pe *parallelExecutor) LogExecuted() {
@@ -548,85 +851,71 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 				fmt.Println("Block Complete", blockResult.BlockNum)
 				//panic(blockResult.BlockNum)
 
-				if blockStatus, ok := pe.blockStatus[blockResult.BlockNum]; ok {
-					if blockResult.complete {
-						blockReceipts := make([]*types.Receipt, 0, len(blockStatus.results))
-						for _, result := range blockStatus.results {
-							if result.Receipt != nil {
-								blockReceipts = append(blockReceipts, result.Receipt)
-							}
+				if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum]; ok {
+					pe.execCount.Add(int64(blockExecutor.cntExec))
+					pe.abortCount.Add(int64(blockExecutor.cntAbort))
+					pe.invalidCount.Add(int64(blockExecutor.cntValidationFail))
+					pe.readCount.Add(blockExecutor.blockIO.ReadCount())
+					pe.writeCount.Add(blockExecutor.blockIO.WriteCount())
+
+					blockReceipts := make([]*types.Receipt, 0, len(blockExecutor.results))
+					for _, result := range blockExecutor.results {
+						if result.Receipt != nil {
+							blockReceipts = append(blockReceipts, result.Receipt)
+						}
+					}
+
+					result := blockExecutor.results[len(blockExecutor.results)-1]
+
+					ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderParallelV3(pe.rs.Domains(), tx)))
+					ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
+					ibs.SetVersion(result.Version().Incarnation)
+
+					if txTask, ok := result.Task.(*exec.TxTask); ok {
+						syscall := func(contract common.Address, data []byte) ([]byte, error) {
+							return core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false)
 						}
 
-						result := blockStatus.results[len(blockStatus.results)-1]
-
-						ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderParallelV3(pe.rs.Domains(), tx)))
-						ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
-						ibs.SetVersion(result.Version().Incarnation)
-
-						if txTask, ok := result.Task.(*exec.TxTask); ok {
-							syscall := func(contract common.Address, data []byte) ([]byte, error) {
-								return core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false)
-							}
-
-							chainReader := consensuschain.NewReader(pe.cfg.chainConfig, pe.applyTx, pe.cfg.blockReader, pe.logger)
-							if pe.isMining {
-								_, txTask.Txs, blockReceipts, _, err =
-									pe.cfg.engine.FinalizeAndAssemble(
-										pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
-										txTask.Withdrawals, chainReader, syscall, nil, pe.logger)
-							} else {
-								_, _, _, err =
-									pe.cfg.engine.Finalize(
-										pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
-										txTask.Withdrawals, chainReader, syscall, pe.logger)
-							}
-
-							if err != nil {
-								return fmt.Errorf("can't finalize block: %w", err)
-							}
+						chainReader := consensuschain.NewReader(pe.cfg.chainConfig, pe.applyTx, pe.cfg.blockReader, pe.logger)
+						if pe.isMining {
+							_, txTask.Txs, blockReceipts, _, err =
+								pe.cfg.engine.FinalizeAndAssemble(
+									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
+									txTask.Withdrawals, chainReader, syscall, nil, pe.logger)
+						} else {
+							_, _, _, err =
+								pe.cfg.engine.Finalize(
+									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
+									txTask.Withdrawals, chainReader, syscall, pe.logger)
 						}
 
-						stateWriter := state.NewStateWriterBufferedV3(pe.rs, pe.accumulator)
-
-						if err = ibs.MakeWriteSet(pe.cfg.chainConfig.Rules(result.BlockNumber(), result.BlockTime()), stateWriter); err != nil {
-							panic(err)
+						if err != nil {
+							return fmt.Errorf("can't finalize block: %w", err)
 						}
+					}
 
-						applyResults <- &txResult{
-							blockNum:   blockResult.BlockNum,
-							txNum:      blockResult.lastTxNum,
-							blockTime:  blockResult.BlockTime,
-							writeSet:   stateWriter.WriteSet(),
-							logs:       result.Logs,
-							traceFroms: result.TraceFroms,
-							traceTos:   result.TraceTos,
-						}
+					stateWriter := state.NewStateWriterBufferedV3(pe.rs, pe.accumulator)
+
+					if err = ibs.MakeWriteSet(pe.cfg.chainConfig.Rules(result.BlockNumber(), result.BlockTime()), stateWriter); err != nil {
+						panic(err)
+					}
+
+					applyResults <- &txResult{
+						blockNum:   blockResult.BlockNum,
+						txNum:      blockResult.lastTxNum,
+						blockTime:  blockResult.BlockTime,
+						writeSet:   stateWriter.WriteSet(),
+						logs:       result.Logs,
+						traceFroms: result.TraceFroms,
+						traceTos:   result.TraceTos,
 					}
 
 					applyResults <- blockResult
-					delete(pe.blockStatus, blockResult.BlockNum)
+					delete(pe.blockExecutors, blockResult.BlockNum)
 				}
 
-				if blockStatus, ok := pe.blockStatus[blockResult.BlockNum+1]; ok {
-					nextTx := blockStatus.execTasks.takeNextPending()
-
-					if nextTx == -1 {
-						return fmt.Errorf("block exec %d failed: no executable transactions: bad dependency", blockResult.BlockNum+1)
-					}
-
-					blockStatus.cntExec++
-					execTask := blockStatus.tasks[nextTx]
-
-					fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
-
-					pe.in.Add(ctx,
-						&taskVersion{
-							execTask:   execTask,
-							version:    execTask.Version(),
-							versionMap: blockStatus.versionMap,
-							profile:    blockStatus.profile,
-							stats:      blockStatus.stats,
-							statsMutex: &blockStatus.Mutex})
+				if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum+1]; ok {
+					blockExecutor.scheduleExecution(ctx, pe.in)
 				}
 			}
 		}
@@ -634,7 +923,7 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
-			fmt.Println(err)
+			//fmt.Println(err)
 			pe.blockResults <- &blockResult{Err: err}
 		}
 	}
@@ -870,8 +1159,8 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) (err 
 
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
 	prevSenderTx := map[common.Address]int{}
-	var initialTask exec.Task
-	var blockStatus *blockExecStatus
+	var scheduleable *blockExecutor
+	var executor *blockExecutor
 
 	for i, txTask := range execRequest.tasks {
 		t := &execTask{
@@ -882,32 +1171,32 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 		blockNum := t.Version().BlockNum
 
-		if blockStatus == nil {
+		if executor == nil {
 			var ok bool
-			blockStatus, ok = pe.blockStatus[blockNum]
+			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				blockStatus = newBlockStatus(execRequest.profile)
+				executor = newBlockExec(blockNum, execRequest.profile)
 			}
 		}
 
-		blockStatus.tasks = append(blockStatus.tasks, t)
-		blockStatus.results = append(blockStatus.results, nil)
-		blockStatus.txIncarnations = append(blockStatus.txIncarnations, 0)
-		blockStatus.diagExecSuccess = append(blockStatus.diagExecSuccess, 0)
-		blockStatus.diagExecAbort = append(blockStatus.diagExecAbort, 0)
+		executor.tasks = append(executor.tasks, t)
+		executor.results = append(executor.results, nil)
+		executor.txIncarnations = append(executor.txIncarnations, 0)
+		executor.diagExecSuccess = append(executor.diagExecSuccess, 0)
+		executor.diagExecAbort = append(executor.diagExecAbort, 0)
 
-		blockStatus.skipCheck[len(blockStatus.tasks)-1] = false
-		blockStatus.estimateDeps[len(blockStatus.tasks)-1] = []int{}
+		executor.skipCheck[len(executor.tasks)-1] = false
+		executor.estimateDeps[len(executor.tasks)-1] = []int{}
 
-		blockStatus.execTasks.pushPending(i)
-		blockStatus.validateTasks.pushPending(i)
+		executor.execTasks.pushPending(i)
+		executor.validateTasks.pushPending(i)
 
 		if len(t.Dependencies()) > 0 {
 			for _, val := range t.Dependencies() {
-				blockStatus.execTasks.addDependencies(val, i)
+				executor.execTasks.addDependencies(val, i)
 			}
-			blockStatus.execTasks.clearPending(i)
+			executor.execTasks.clearPending(i)
 		} else {
 			sender, err := t.TxSender()
 			if err != nil {
@@ -915,8 +1204,8 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			}
 			if sender != nil {
 				if tx, ok := prevSenderTx[*sender]; ok {
-					blockStatus.execTasks.addDependencies(tx, i)
-					blockStatus.execTasks.clearPending(i)
+					executor.execTasks.addDependencies(tx, i)
+					executor.execTasks.clearPending(i)
 				}
 
 				prevSenderTx[*sender] = i
@@ -924,36 +1213,21 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		}
 
 		if t.IsBlockEnd() {
-			if len(pe.blockStatus) == 0 {
-				pe.blockStatus = map[uint64]*blockExecStatus{
-					blockNum: blockStatus,
+			if len(pe.blockExecutors) == 0 {
+				pe.blockExecutors = map[uint64]*blockExecutor{
+					blockNum: executor,
 				}
-
-				nextTx := blockStatus.execTasks.takeNextPending()
-
-				if nextTx == -1 {
-					return errors.New("no executable transactions: bad dependency")
-				}
-
-				blockStatus.cntExec++
-				execTask := blockStatus.tasks[nextTx]
-				initialTask = &taskVersion{
-					execTask:   execTask,
-					version:    execTask.Version(),
-					versionMap: blockStatus.versionMap,
-					profile:    blockStatus.profile,
-					stats:      blockStatus.stats,
-					statsMutex: &blockStatus.Mutex}
+				scheduleable = executor
 			} else {
-				pe.blockStatus[t.Version().BlockNum] = blockStatus
+				pe.blockExecutors[t.Version().BlockNum] = executor
 			}
 
-			blockStatus = nil
+			executor = nil
 		}
 	}
 
-	if initialTask != nil {
-		pe.in.Add(ctx, initialTask)
+	if scheduleable != nil {
+		scheduleable.scheduleExecution(ctx, pe.in)
 	}
 
 	return nil
@@ -964,17 +1238,23 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tx, a
 
 	for rwsIt.HasNext() && (blockResult == nil || !blockResult.complete) {
 		txResult := rwsIt.PopNext()
-		txTask := txResult.Task.(*taskVersion)
+
 		//fmt.Println("PRQ", txTask.BlockNum, txTask.TxIndex, txTask.TxNum)
 		if pe.cfg.syncCfg.ChaosMonkey {
-			chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.Version().TxIndex, pe.cfg.badBlockHalt, txResult.Err)
+			chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txResult.Version().TxIndex, pe.cfg.badBlockHalt, txResult.Err)
 			if chaosErr != nil {
 				log.Warn("Monkey in consensus")
 				return blockResult, chaosErr
 			}
 		}
 
-		blockResult, err = pe.nextResult(ctx, applyTx, applyResults, txResult)
+		blockExecutor, ok := pe.blockExecutors[txResult.Version().BlockNum]
+
+		if !ok {
+			return nil, fmt.Errorf("unknown block: %d", txResult.Version().BlockNum)
+		}
+
+		blockResult, err = blockExecutor.nextResult(ctx, txResult, pe.cfg, pe.rs, pe.accumulator, pe.in, applyTx, applyResults, pe.logger)
 
 		if err != nil {
 			return blockResult, err
@@ -982,320 +1262,6 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tx, a
 	}
 
 	return blockResult, nil
-}
-
-func (pe *parallelExecutor) nextResult(ctx context.Context, applyTx kv.Tx, applyResults chan applyResult, res *exec.Result) (result *blockResult, err error) {
-
-	task, ok := res.Task.(*taskVersion)
-
-	if !ok {
-		return nil, fmt.Errorf("unexpected task type: %T", res.Task)
-	}
-
-	blockNum := res.Version().BlockNum
-	tx := task.index
-
-	fmt.Println("res", tx, res.Err)
-	blockStatus, ok := pe.blockStatus[blockNum]
-
-	if !ok {
-		return nil, fmt.Errorf("unknown block: %d", blockNum)
-	}
-
-	blockStatus.results[tx] = &execResult{res}
-
-	if res.Err != nil {
-		if execErr, ok := res.Err.(exec.ErrExecAbortError); ok {
-			if execErr.OriginError != nil && blockStatus.skipCheck[tx] {
-				// If the transaction failed when we know it should not fail, this means the transaction itself is
-				// bad (e.g. wrong nonce), and we should exit the execution immediately
-				return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w", blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError)
-			}
-
-			if res.Version().Incarnation > len(blockStatus.tasks) {
-				return nil, fmt.Errorf("could not apply tx %d [%v]: %w: too many incarnations: %d", tx, task.TxHash(), execErr.OriginError, res.Version().Incarnation)
-			}
-
-			addedDependencies := false
-
-			if execErr.Dependency >= 0 {
-				l := len(blockStatus.estimateDeps[tx])
-				for l > 0 && blockStatus.estimateDeps[tx][l-1] > execErr.Dependency {
-					blockStatus.execTasks.removeDependency(blockStatus.estimateDeps[tx][l-1])
-					blockStatus.estimateDeps[tx] = blockStatus.estimateDeps[tx][:l-1]
-					l--
-				}
-
-				addedDependencies = blockStatus.execTasks.addDependencies(execErr.Dependency, tx)
-			} else {
-				estimate := 0
-
-				if len(blockStatus.estimateDeps[tx]) > 0 {
-					estimate = blockStatus.estimateDeps[tx][len(blockStatus.estimateDeps[tx])-1]
-				}
-				addedDependencies = blockStatus.execTasks.addDependencies(estimate, tx)
-				newEstimate := estimate + (estimate+tx)/2
-				if newEstimate >= tx {
-					newEstimate = tx - 1
-				}
-				blockStatus.estimateDeps[tx] = append(blockStatus.estimateDeps[tx], newEstimate)
-			}
-
-			blockStatus.execTasks.clearInProgress(tx)
-
-			if !addedDependencies {
-				blockStatus.execTasks.pushPending(tx)
-			}
-			blockStatus.txIncarnations[tx]++
-			blockStatus.diagExecAbort[tx]++
-			blockStatus.cntAbort++
-		} else {
-			return nil, fmt.Errorf("unexptected exec error: %w", err)
-		}
-	} else {
-		txIndex := res.Version().TxIndex
-
-		blockStatus.blockIO.RecordReads(txIndex, res.TxIn)
-
-		if res.Version().Incarnation == 0 {
-			blockStatus.blockIO.RecordWrites(txIndex, res.TxOut)
-			blockStatus.blockIO.RecordAllWrites(txIndex, res.TxOut)
-		} else {
-			if res.TxOut.HasNewWrite(blockStatus.blockIO.AllWriteSet(txIndex)) {
-				blockStatus.validateTasks.pushPendingSet(blockStatus.execTasks.getRevalidationRange(tx + 1))
-			}
-
-			prevWrite := blockStatus.blockIO.AllWriteSet(txIndex)
-
-			// Remove entries that were previously written but are no longer written
-
-			cmpMap := btree.NewBTreeGOptions(func(a, b state.VersionKey) bool { return state.VersionKeyLess(&a, &b) }, btree.Options{NoLocks: true})
-
-			for _, w := range res.TxOut {
-				cmpMap.Set(w.Path)
-			}
-
-			for _, v := range prevWrite {
-				if _, ok := cmpMap.Get(v.Path); !ok {
-					blockStatus.versionMap.Delete(v.Path, txIndex, true)
-				}
-			}
-
-			blockStatus.blockIO.RecordWrites(txIndex, res.TxOut)
-			blockStatus.blockIO.RecordAllWrites(txIndex, res.TxOut)
-		}
-
-		blockStatus.validateTasks.pushPending(tx)
-		blockStatus.execTasks.markComplete(tx)
-		blockStatus.diagExecSuccess[tx]++
-		blockStatus.cntSuccess++
-
-		blockStatus.execTasks.removeDependency(tx)
-	}
-
-	// do validations ...
-	maxComplete := blockStatus.execTasks.maxAllComplete()
-	toValidate := make(sort.IntSlice, 0, 2)
-
-	for blockStatus.validateTasks.minPending() <= maxComplete && blockStatus.validateTasks.minPending() >= 0 {
-		toValidate = append(toValidate, blockStatus.validateTasks.takeNextPending())
-	}
-
-	for i := 0; i < len(toValidate); i++ {
-		blockStatus.cntTotalValidations++
-
-		tx := toValidate[i]
-		txVersion := blockStatus.tasks[tx].Task.Version()
-
-		if blockStatus.skipCheck[tx] || state.ValidateVersion(txVersion.TxIndex, blockStatus.blockIO, blockStatus.versionMap) {
-			blockStatus.versionMap.FlushVersionedWrites(blockStatus.blockIO.WriteSet(txVersion.TxIndex), true)
-			blockStatus.validateTasks.markComplete(tx)
-		} else {
-			blockStatus.cntValidationFail++
-			blockStatus.diagExecAbort[tx]++
-			blockStatus.versionMap.FlushVersionedWrites(blockStatus.blockIO.WriteSet(txVersion.TxIndex), false)
-			// 'create validation tasks for all transactions > tx ...'
-			blockStatus.validateTasks.pushPendingSet(blockStatus.execTasks.getRevalidationRange(tx + 1))
-			blockStatus.validateTasks.clearInProgress(tx) // clear in progress - pending will be added again once new incarnation executes
-
-			blockStatus.execTasks.clearComplete(tx)
-			blockStatus.execTasks.pushPending(tx)
-
-			blockStatus.preValidated[tx] = false
-			blockStatus.txIncarnations[tx]++
-			fmt.Println("invalid", tx)
-		}
-	}
-
-	maxValidated := blockStatus.validateTasks.maxAllComplete()
-	maxFinalized := blockStatus.cntFinalized - 1
-
-	fmt.Println(len(blockStatus.tasks), blockStatus.execTasks.maxAllComplete(), maxValidated, maxFinalized)
-	if maxValidated > maxFinalized {
-		stateWriter := state.NewStateWriterBufferedV3(pe.rs, pe.accumulator)
-		stateReader := state.NewBufferedReader(pe.rs, state.NewReaderParallelV3(pe.rs.Domains(), applyTx))
-
-		applyResult := txResult{
-			blockNum:   blockNum,
-			traceFroms: map[common.Address]struct{}{},
-			traceTos:   map[common.Address]struct{}{},
-		}
-
-		for tx := maxFinalized + 1; tx <= maxValidated; tx++ {
-			txTask := blockStatus.tasks[tx].Task
-			txIndex := txTask.Version().TxIndex
-
-			var prevReceipt *types.Receipt
-			if txIndex > 0 && tx > 0 {
-				prevReceipt = blockStatus.results[tx-1].Receipt
-			}
-
-			txResult := blockStatus.results[tx]
-			_, err = txResult.finalize(prevReceipt, pe.cfg.engine, blockStatus.versionMap, stateReader, stateWriter)
-
-			if err != nil {
-				return nil, err
-			}
-
-			applyResult.txNum = txTask.Version().TxNum
-			if txResult.Receipt != nil {
-				applyResult.gasUsed = txResult.Receipt.GasUsed
-			}
-			applyResult.blockTime = txTask.BlockTime()
-			applyResult.logs = append(applyResult.logs, txResult.Logs...)
-			maps.Copy(applyResult.traceFroms, txResult.TraceFroms)
-			maps.Copy(applyResult.traceTos, txResult.TraceTos)
-			blockStatus.cntFinalized++
-			blockStatus.gasUsed += applyResult.gasUsed
-		}
-
-		if applyResult.txNum > 0 {
-			applyResult.writeSet = stateWriter.WriteSet()
-			applyResults <- &applyResult
-		}
-	}
-
-	if blockStatus.validateTasks.countComplete() == len(blockStatus.tasks) && blockStatus.execTasks.countComplete() == len(blockStatus.tasks) {
-		/*pe.logger.Debug*/ fmt.Println("exec summary", "block", blockNum, "tasks", len(blockStatus.tasks), "execs", blockStatus.cntExec,
-			"speculative", blockStatus.cntSpecExec, "success", blockStatus.cntSuccess, "aborts", blockStatus.cntAbort, "validations", blockStatus.cntTotalValidations, "failures", blockStatus.cntValidationFail,
-			"retries", fmt.Sprintf("%.2f%%", float64(blockStatus.cntAbort+blockStatus.cntValidationFail)/float64(blockStatus.cntExec)*100),
-			"execs", fmt.Sprintf("%.2f%%", float64(blockStatus.cntExec)/float64(len(blockStatus.tasks))*100))
-
-		pe.execCount.Add(int64(blockStatus.cntExec))
-		pe.abortCount.Add(int64(blockStatus.cntAbort))
-		pe.invalidCount.Add(int64(blockStatus.cntValidationFail))
-		pe.readCount.Add(blockStatus.blockIO.ReadCount())
-		pe.writeCount.Add(blockStatus.blockIO.WriteCount())
-
-		var allDeps map[int]map[int]bool
-
-		var deps state.DAG
-
-		if blockStatus.profile {
-			allDeps = state.GetDep(blockStatus.blockIO)
-			deps = state.BuildDAG(blockStatus.blockIO, pe.logger)
-		}
-
-		txTask := blockStatus.tasks[len(blockStatus.tasks)-1].Task
-		blockStatus.result = &blockResult{
-			blockNum,
-			txTask.BlockTime(),
-			txTask.BlockHash(),
-			txTask.BlockRoot(),
-			nil,
-			blockStatus.gasUsed,
-			txTask.Version().TxNum,
-			true,
-			blockStatus.blockIO,
-			blockStatus.stats,
-			&deps,
-			allDeps}
-		return blockStatus.result, nil
-	}
-
-	//fmt.Println("schedule", blockStatus.execTasks.minPending(), maxValidated+1)
-	// Send the next immediate pending transaction to be executed
-	if blockStatus.execTasks.minPending() != -1 && blockStatus.execTasks.minPending() == maxValidated+1 {
-		nextTx := blockStatus.execTasks.takeNextPending()
-		if nextTx != -1 {
-			blockStatus.cntExec++
-
-			blockStatus.skipCheck[nextTx] = true
-
-			execTask := blockStatus.tasks[nextTx]
-
-			if incarnation := blockStatus.txIncarnations[nextTx]; incarnation == 0 {
-				fmt.Println("exec", nextTx, incarnation)
-				pe.in.Add(ctx, &taskVersion{
-					execTask:   execTask,
-					version:    execTask.Version(),
-					versionMap: blockStatus.versionMap,
-					profile:    blockStatus.profile,
-					stats:      blockStatus.stats,
-					statsMutex: &blockStatus.Mutex})
-			} else {
-				fmt.Println("re exec", nextTx, incarnation)
-				version := execTask.Version()
-				version.Incarnation = incarnation
-				pe.in.ReTry(&taskVersion{
-					execTask:   execTask,
-					version:    version,
-					versionMap: blockStatus.versionMap,
-					profile:    blockStatus.profile,
-					stats:      blockStatus.stats,
-					statsMutex: &blockStatus.Mutex})
-			}
-		}
-	}
-
-	// Send speculative tasks
-	for nextTx := blockStatus.execTasks.minPending(); nextTx != -1; nextTx = blockStatus.execTasks.minPending() {
-		incarnation := blockStatus.txIncarnations[nextTx]
-
-		fmt.Println("exec sp", nextTx, incarnation)
-
-		if incarnation > 0 {
-			break
-		}
-
-		execTask := blockStatus.tasks[nextTx]
-		version := execTask.Version()
-		version.Incarnation = incarnation
-
-		blockStatus.execTasks.takeNextPending()
-		blockStatus.cntExec++
-		blockStatus.cntSpecExec++
-		pe.in.ReTry(&taskVersion{
-			execTask:   execTask,
-			version:    version,
-			versionMap: blockStatus.versionMap,
-			profile:    blockStatus.profile,
-			stats:      blockStatus.stats,
-			statsMutex: &blockStatus.Mutex})
-	}
-
-	var lastTxNum uint64
-	if maxValidated >= 0 {
-		lastTxTask := blockStatus.tasks[maxValidated].Task
-		lastTxNum = lastTxTask.Version().TxNum
-		fmt.Println("last", maxValidated)
-	}
-
-	txTask := blockStatus.tasks[0].Task
-
-	return &blockResult{
-		blockNum,
-		txTask.BlockTime(),
-		txTask.BlockHash(),
-		txTask.BlockRoot(),
-		nil,
-		blockStatus.gasUsed,
-		lastTxNum,
-		false,
-		blockStatus.blockIO,
-		blockStatus.stats,
-		nil,
-		nil}, nil
 }
 
 func (pe *parallelExecutor) run(ctx context.Context) context.CancelFunc {

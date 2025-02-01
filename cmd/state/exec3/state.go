@@ -192,8 +192,6 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 }
 
 func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
-	fmt.Println("Run", txTask.Version())
-	defer fmt.Println("Done", txTask.Version())
 	if txTask.IsHistoric() && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
