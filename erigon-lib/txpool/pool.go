@@ -41,6 +41,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -236,6 +237,7 @@ type TxPool struct {
 	blobSchedule            *chain.BlobSchedule
 	feeCalculator           FeeCalculator
 	logger                  log.Logger
+	auths                   map[common.Address]*metaTx // All accounts with a pooled authorization
 }
 
 type FeeCalculator interface {
@@ -294,6 +296,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		// builderNotifyNewTxns:    builderNotifyNewTxns,
 		// newSlotsStreams:         newSlotsStreams,
 		logger: logger,
+		auths:  map[common.Address]*metaTx{},
 	}
 
 	if shanghaiTime != nil {
@@ -489,6 +492,22 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	if err = p.removeMined(p.all, minedTxs.Txs); err != nil {
 		return err
+	}
+
+	// remove auths from pool map
+	for _, mt := range minedTxs.Txs {
+		if mt.Type == types2.SetCodeTxType {
+			numAuths := len(mt.AuthRaw)
+			for i := range numAuths {
+				signature := mt.Authorizations[i]
+				signer, err := RecoverSignerFromRLP(mt.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+				if err != nil {
+					continue
+				}
+
+				delete(p.auths, *signer)
+			}
+		}
 	}
 
 	var announcements types.Announcements
@@ -1451,6 +1470,30 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoo
 		return txpoolcfg.FeeTooLow
 	}
 
+	// Check if we have txn with same authorization in the pool
+	if mt.Tx.Type == types2.SetCodeTxType {
+		numAuths := len(mt.Tx.AuthRaw)
+		foundDuplicate := false
+		for i := range numAuths {
+			signature := mt.Tx.Authorizations[i]
+			signer, err := RecoverSignerFromRLP(mt.Tx.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+			if err != nil {
+				continue
+			}
+
+			if _, ok := p.auths[*signer]; ok {
+				foundDuplicate = true
+				break
+			}
+
+			p.auths[*signer] = mt
+		}
+
+		if foundDuplicate {
+			return txpoolcfg.ErrAuthorityReserved
+		}
+	}
+
 	hashStr := string(mt.Tx.IDHash[:])
 	p.byHash[hashStr] = mt
 
@@ -1486,6 +1529,18 @@ func (p *TxPool) discardLocked(mt *metaTx, reason txpoolcfg.DiscardReason) {
 	if mt.Tx.Type == types.BlobTxType {
 		t := p.totalBlobsInPool.Load()
 		p.totalBlobsInPool.Store(t - uint64(len(mt.Tx.BlobHashes)))
+	}
+	if mt.Tx.Type == types2.SetCodeTxType {
+		numAuths := len(mt.Tx.AuthRaw)
+		for i := range numAuths {
+			signature := mt.Tx.Authorizations[i]
+			signer, err := RecoverSignerFromRLP(mt.Tx.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+			if err != nil {
+				continue
+			}
+
+			delete(p.auths, *signer)
+		}
 	}
 }
 
@@ -2955,4 +3010,39 @@ func (p *WorstQueue) Pop() interface{} {
 	item.currentSubPool = 0 // for safety
 	p.ms = old[0 : n-1]
 	return item
+}
+
+func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {
+	// from authorizations.go
+	hashData := []byte{byte(0x05)}
+	hashData = append(hashData, rlp...)
+	hash := crypto.Keccak256Hash(hashData)
+
+	var sig [65]byte
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	copy(sig[32-len(r):32], rBytes)
+	copy(sig[64-len(s):64], sBytes)
+
+	if yParity == 0 || yParity == 1 {
+		sig[64] = yParity
+	} else {
+		return nil, fmt.Errorf("invalid y parity value: %d", yParity)
+	}
+
+	if !crypto.TransactionSignatureIsValid(sig[64], &r, &s, false /* allowPreEip2s */) {
+		return nil, errors.New("invalid signature")
+	}
+
+	pubkey, err := crypto.Ecrecover(hash.Bytes(), sig[:])
+	if err != nil {
+		return nil, err
+	}
+	if len(pubkey) == 0 || pubkey[0] != 4 {
+		return nil, errors.New("invalid public key")
+	}
+
+	var authority common.Address
+	copy(authority[:], crypto.Keccak256(pubkey[1:])[12:])
+	return &authority, nil
 }

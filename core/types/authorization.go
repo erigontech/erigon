@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/holiman/uint256"
 
@@ -12,7 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -37,9 +38,13 @@ func (ath *Authorization) copy() *Authorization {
 }
 
 func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommon.Address, error) {
-	authLen := (1 + rlp2.Uint256LenExcludingHead(&ath.ChainID))
-	authLen += (1 + length.Addr)
-	authLen += rlp2.U64Len(ath.Nonce)
+	if ath.Nonce == math.MaxUint64 {
+		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
+	}
+
+	authLen := 1 + rlp.Uint256LenExcludingHead(&ath.ChainID)
+	authLen += 1 + length.Addr
+	authLen += rlp.U64Len(ath.Nonce)
 
 	if err := EncodeStructSizePrefix(authLen, data, b); err != nil {
 		return nil, err
@@ -50,34 +55,35 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 		return nil, err
 	}
 
-	if err := rlp2.EncodeOptionalAddress(&ath.Address, data, b); err != nil {
+	if err := rlp.EncodeOptionalAddress(&ath.Address, data, b); err != nil {
 		return nil, err
 	}
 
-	if err := rlp2.EncodeInt(ath.Nonce, data, b); err != nil {
+	if err := rlp.EncodeInt(ath.Nonce, data, b); err != nil {
 		return nil, err
 	}
 
+	return RecoverSignerFromRLP(data.Bytes(), ath.YParity, ath.R, ath.S)
+}
+
+func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*libcommon.Address, error) {
 	hashData := []byte{params.SetCodeMagicPrefix}
-	hashData = append(hashData, data.Bytes()...)
+	hashData = append(hashData, rlp...)
 	hash := crypto.Keccak256Hash(hashData)
 
 	var sig [65]byte
-	r := ath.R.Bytes()
-	s := ath.S.Bytes()
-	copy(sig[32-len(r):32], r)
-	copy(sig[64-len(s):64], s)
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	copy(sig[32-len(r):32], rBytes)
+	copy(sig[64-len(s):64], sBytes)
 
-	if ath.Nonce == 1<<64-1 {
-		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
-	}
-	if ath.YParity == 0 || ath.YParity == 1 {
-		sig[64] = ath.YParity
+	if yParity == 0 || yParity == 1 {
+		sig[64] = yParity
 	} else {
-		return nil, fmt.Errorf("invalid y parity value: %d", ath.YParity)
+		return nil, fmt.Errorf("invalid y parity value: %d", yParity)
 	}
 
-	if !libcrypto.TransactionSignatureIsValid(sig[64], &ath.R, &ath.S, false /* allowPreEip2s */) {
+	if !libcrypto.TransactionSignatureIsValid(sig[64], &r, &s, false /* allowPreEip2s */) {
 		return nil, errors.New("invalid signature")
 	}
 
@@ -95,11 +101,11 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 }
 
 func authorizationSize(auth Authorization) (authLen int) {
-	authLen = (1 + rlp2.Uint256LenExcludingHead(&auth.ChainID))
-	authLen += rlp2.U64Len(auth.Nonce)
+	authLen = 1 + rlp.Uint256LenExcludingHead(&auth.ChainID)
+	authLen += rlp.U64Len(auth.Nonce)
 	authLen += 1 + length.Addr
 
-	authLen += rlp2.U64Len(uint64(auth.YParity)) + (1 + rlp2.Uint256LenExcludingHead(&auth.R)) + (1 + rlp2.Uint256LenExcludingHead(&auth.S))
+	authLen += rlp.U64Len(uint64(auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
 
 	return
 }
@@ -107,13 +113,13 @@ func authorizationSize(auth Authorization) (authLen int) {
 func authorizationsSize(authorizations []Authorization) (totalSize int) {
 	for _, auth := range authorizations {
 		authLen := authorizationSize(auth)
-		totalSize += rlp2.ListPrefixLen(authLen) + authLen
+		totalSize += rlp.ListPrefixLen(authLen) + authLen
 	}
 
 	return
 }
 
-func decodeAuthorizations(auths *[]Authorization, s *rlp2.Stream) error {
+func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open authorizations: %w", err)
@@ -173,7 +179,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp2.Stream) error {
 		}
 		i++
 	}
-	if !errors.Is(err, rlp2.EOL) {
+	if !errors.Is(err, rlp.EOL) {
 		return fmt.Errorf("open authorizations: %d %w", i, err)
 	}
 	if err = s.ListEnd(); err != nil {
@@ -195,15 +201,15 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 			return err
 		}
 		// 2. encode Address
-		if err := rlp2.EncodeOptionalAddress(&auth.Address, w, b); err != nil {
+		if err := rlp.EncodeOptionalAddress(&auth.Address, w, b); err != nil {
 			return err
 		}
 		// 3. encode Nonce
-		if err := rlp2.EncodeInt(auth.Nonce, w, b); err != nil {
+		if err := rlp.EncodeInt(auth.Nonce, w, b); err != nil {
 			return err
 		}
 		// 4. encode YParity, R, S
-		if err := rlp2.EncodeInt(uint64(auth.YParity), w, b); err != nil {
+		if err := rlp.EncodeInt(uint64(auth.YParity), w, b); err != nil {
 			return err
 		}
 		if err := auth.R.EncodeRLP(w); err != nil {

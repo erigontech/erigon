@@ -111,6 +111,7 @@ type TxSlot struct {
 
 	// EIP-7702: set code tx
 	Authorizations []Signature
+	AuthRaw        [][]byte // rlp encoded chainID+address+nonce, used to recover authorization address in txpool
 }
 
 const (
@@ -511,6 +512,7 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 			}
 			var sig Signature
 			p2 := authPos
+			rawStart := p2
 			p2, err = rlp.U256(payload, p2, &sig.ChainID)
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization chainId: %s", ErrParseTxn, err) //nolint
@@ -528,11 +530,13 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization nonce: %s", ErrParseTxn, err) //nolint
 			}
+			rawEnd := p2
 			p2, _, err = parseSignature(payload, p2, false /* legacy */, nil /* cfgChainId */, &sig)
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization signature: %s", ErrParseTxn, err) //nolint
 			}
 			slot.Authorizations = append(slot.Authorizations, sig)
+			slot.AuthRaw = append(slot.AuthRaw, common.CopyBytes(payload[rawStart:rawEnd]))
 			authPos += authLen
 			if authPos != p2 {
 				return 0, fmt.Errorf("%w: authorization: unexpected list items", ErrParseTxn)
