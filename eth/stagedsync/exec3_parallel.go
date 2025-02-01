@@ -617,6 +617,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 	maxValidated := be.validateTasks.maxAllComplete()
 	fmt.Println("Max Validated", maxValidated)
+	fmt.Println("Validation Complete", be.validateTasks.complete)
 	fmt.Println("Exec Pending", be.execTasks.pending)
 	be.scheduleExecution(ctx, in)
 
