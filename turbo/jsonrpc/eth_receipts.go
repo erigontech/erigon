@@ -310,6 +310,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 			blockHash = header.Hash()
 			exec.ChangeBlock(header)
+			if blockNum%100 == 0 {
+				log.Warn("[dbg] getLogsV3 progress", "block", blockNum)
+			}
 		}
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
