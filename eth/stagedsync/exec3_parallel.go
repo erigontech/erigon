@@ -600,7 +600,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap, func(read, written state.Version) bool { return read == written }) {
 			if cntInvalid == 0 {
 				fmt.Println("valid", tx)
+				be.versionMap.Trace = true
 				be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), true)
+				be.versionMap.Trace = false
 				be.validateTasks.markComplete(tx)
 				// note this assumes that tasks are pushed in order as finalization needs to happen in block order
 				be.finalizeTasks.pushPending(tx)

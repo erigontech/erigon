@@ -149,7 +149,7 @@ func VersionKeyLess(a, b *VersionKey) bool {
 
 type VersionMap struct {
 	s     *btree.BTreeG[vmItem]
-	trace bool
+	Trace bool
 }
 
 type WriteCell struct {
@@ -377,7 +377,7 @@ func (vm *VersionMap) Read(k VersionKey, txIdx int) (res ReadResult) {
 
 func (vm *VersionMap) FlushVersionedWrites(writes VersionedWrites, complete bool) {
 	for _, v := range writes {
-		if vm.trace {
+		if vm.Trace {
 			fmt.Println("WRT", v.Path, v.Version)
 		}
 		vm.Write(v.Path, v.Version, v.Val, complete)
@@ -405,7 +405,7 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, che
 				panic(fmt.Errorf("should not happen - undefined vm read status: %ver", readResult.Status()))
 			}
 
-			if versionMap.trace {
+			if versionMap.Trace {
 				fmt.Println("RD", vr.Path, txIdx, func() string {
 					switch readResult.Status() {
 					case MVReadResultDone:
