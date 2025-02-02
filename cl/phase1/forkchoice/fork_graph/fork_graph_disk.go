@@ -26,7 +26,6 @@ import (
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -206,8 +205,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	if isBlockRootTheCurrentState {
 		newState = f.currentState
 	} else {
-
-		fmt.Println("A", common.Hash(blockRoot))
 		newState, err = f.getState(block.ParentRoot, false, true)
 		if err != nil {
 			return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot: %x", err, block.ParentRoot)
