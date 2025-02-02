@@ -32,9 +32,9 @@ In the file `ethdb/remote/remotedbserver/server.go` there is variable `KvService
 database schema, leading to data migrations.
 In most cases, it is enough to bump minor version. It is best to change both DB schema version and remove KV version together.
 
-## Purify the state domains if a regenration is done
+## Purify the state domains if a regeneration is done
 
-If a regenration is done, the state domains need to be purified. This can be done by running the following command:
+If a regeneration is done, the state domains need to be purified. This can be done by running the following command:
 ````
 make integration
 ./build/bin/integration purify_domains --datadir=<path to datadir> --replace-in-datadir
