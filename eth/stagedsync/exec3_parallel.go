@@ -449,7 +449,7 @@ type blockExecutor struct {
 	// cummulative gas for this block
 	gasUsed uint64
 
-	execSuccess, execAbort []int
+	execFailed, execAborted []int
 
 	// Stores the execution statistics for the last incarnation of each task
 	stats map[int]ExecutionStat
@@ -529,7 +529,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 				be.execTasks.pushPending(tx)
 			}
 			be.txIncarnations[tx]++
-			be.execAbort[tx]++
+			be.execAborted[tx]++
 			be.cntAbort++
 		} else {
 			return nil, fmt.Errorf("unexptected exec error: %w", err)
@@ -569,7 +569,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 		be.validateTasks.pushPending(tx)
 		be.execTasks.markComplete(tx)
-		be.execSuccess[tx]++
 		be.cntSuccess++
 
 		be.execTasks.removeDependency(tx)
@@ -609,7 +608,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			cntInvalid++
 
 			be.cntValidationFail++
-			be.execAbort[tx]++
+			be.execFailed[tx]++
 			be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), false)
 			// 'create validation tasks for all transactions > tx ...'
 			be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
@@ -747,7 +746,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 			be.skipCheck[nextTx] = true
 		} else {
 			if be.txIncarnations[nextTx] > 0 &&
-				(be.execAbort[nextTx] > 0 ||
+				(be.execAborted[nextTx] > 0 ||
 					!be.blockIO.HasReads(nextTx) ||
 					!state.ValidateVersion(nextTx, be.blockIO, be.versionMap,
 						func(read, written state.Version) bool {
@@ -1204,8 +1203,8 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		executor.tasks = append(executor.tasks, t)
 		executor.results = append(executor.results, nil)
 		executor.txIncarnations = append(executor.txIncarnations, 0)
-		executor.execSuccess = append(executor.execSuccess, 0)
-		executor.execAbort = append(executor.execAbort, 0)
+		executor.execFailed = append(executor.execFailed, 0)
+		executor.execAborted = append(executor.execAborted, 0)
 
 		executor.skipCheck[len(executor.tasks)-1] = false
 		executor.estimateDeps[len(executor.tasks)-1] = []int{}
