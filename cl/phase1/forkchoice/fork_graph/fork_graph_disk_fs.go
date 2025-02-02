@@ -88,20 +88,20 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	}
 
 	// decode the cache file
-	cacheFile, err := f.fs.Open(getBeaconStateCacheFilename(blockRoot))
-	if err != nil {
-		return
-	}
-	defer cacheFile.Close()
+	// cacheFile, err := f.fs.Open(getBeaconStateCacheFilename(blockRoot))
+	// if err != nil {
+	// 	return
+	// }
+	// defer cacheFile.Close()
 
-	b := bytes.Buffer{}
-	if _, err := io.Copy(&b, cacheFile); err != nil {
-		return nil, err
-	}
+	// b := bytes.Buffer{}
+	// if _, err := io.Copy(&b, cacheFile); err != nil {
+	// 	return nil, err
+	// }
 
-	if err := bs.DecodeCaches(&b); err != nil {
-		return nil, err
-	}
+	// if err := bs.DecodeCaches(&b); err != nil {
+	// 	return nil, err
+	// }
 
 	return
 }
@@ -154,15 +154,16 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 		return err
 	}
 
+	if err = dumpedFile.Sync(); err != nil {
+		log.Error("failed to sync dumped file", "err", err)
+		return
+	}
+
 	var b bytes.Buffer
 
 	if err := bs.EncodeCaches(&b); err != nil {
 		log.Error("failed to encode caches", "err", err)
 		return err
-	}
-	if err = dumpedFile.Sync(); err != nil {
-		log.Error("failed to sync dumped file", "err", err)
-		return
 	}
 
 	cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
