@@ -509,6 +509,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 				}
 
 				addedDependencies = be.execTasks.addDependencies(execErr.Dependency, tx)
+				be.execFailed[tx]++
 			} else {
 				estimate := 0
 
@@ -521,6 +522,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 					newEstimate = tx - 1
 				}
 				be.estimateDeps[tx] = append(be.estimateDeps[tx], newEstimate)
+				be.execAborted[tx]++
 			}
 
 			be.execTasks.clearInProgress(tx)
@@ -529,7 +531,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 				be.execTasks.pushPending(tx)
 			}
 			be.txIncarnations[tx]++
-			be.execAborted[tx]++
 			be.cntAbort++
 		} else {
 			return nil, fmt.Errorf("unexptected exec error: %w", err)

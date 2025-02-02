@@ -344,6 +344,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 				}
 
 				if pr.Version.Incarnation < vr.Version.Incarnation {
+					fmt.Println("dep discrepency", s.dep, "res", res.DepIdx(), res.incarnation)
 					if res.DepIdx() > s.dep {
 						s.dep = res.DepIdx()
 					}
@@ -365,6 +366,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 		vr.Val = copyV(v)
 
 	case MVReadResultDependency:
+		fmt.Println("dep found", res.DepIdx(), res.incarnation)
 		s.dep = res.DepIdx()
 		panic(ErrDependency)
 
