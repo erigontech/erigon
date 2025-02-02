@@ -171,7 +171,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
 	startStateProcess := time.Now()
-	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation, false)
+	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if err != nil {
 		return err
 	}
