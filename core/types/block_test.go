@@ -595,14 +595,30 @@ func TestCopyTxs(t *testing.T) {
 
 	populateBlobTxs()
 	for _, txn := range dummyBlobTxs {
-		txs = append(txs, txn)
+		if txn.To != nil { // BlobTx To field can not be nil
+			txs = append(txs, txn)
+		}
 	}
 
 	populateBlobWrapperTxs()
 	for _, txn := range dummyBlobWrapperTxs {
-		txs = append(txs, txn)
+		if txn.Tx.To != nil {
+			txs = append(txs, txn)
+		}
 	}
 
 	copies := CopyTxs(txs)
 	assert.Equal(t, txs, copies)
+}
+
+func TestCopyHeader(t *testing.T) {
+	// if this test fails when adding a new attribute to the Header struct
+	// please update the copy function to include logic for the new attribute
+	const runCount = 1000
+	tr := NewTRand()
+	for range make([]byte, runCount) {
+		h1 := tr.RandHeaderReflectAllFields()
+		h2 := CopyHeader(h1)
+		require.Equal(t, h1, h2)
+	}
 }

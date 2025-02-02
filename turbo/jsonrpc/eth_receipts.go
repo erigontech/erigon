@@ -472,17 +472,13 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	if txn == nil && chainConfig.Bor != nil { //TODO: add tx gran here to.
+	if txn == nil && chainConfig.Bor != nil {
 		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
 		if block == nil {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
-		}
-		receipts, err := api.getReceipts(ctx, tx, block)
-		if err != nil {
-			return nil, fmt.Errorf("getReceipts error: %w", err)
 		}
 
 		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
@@ -494,7 +490,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			return nil, errors.New("tx not found")
 		}
 
-		borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
+		borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -519,6 +515,9 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	defer tx.Rollback()
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		if errors.Is(err, rpchelper.BlockNotFoundErr{Hash: blockHash}) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
@@ -549,7 +548,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		}
 
 		if len(events) != 0 {
-			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
+			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
 			if err != nil {
 				return nil, err
 			}

@@ -76,7 +76,7 @@ type peerAndBlocks struct {
 }
 
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
-	count := uint64(16)
+	count := uint64(32)
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
 	reqInterval := time.NewTicker(300 * time.Millisecond)
@@ -94,11 +94,11 @@ Loop:
 				if f.highestSlotProcessed > 2 {
 					reqSlot = f.highestSlotProcessed - 2
 				}
-				// double the request count every 30 seconds. This is inspired by the mekong network, which has many consecutive missing blocks.
+				// double the request count every 10 seconds. This is inspired by the mekong network, which has many consecutive missing blocks.
 				reqCount := count
 				if !f.highestSlotUpdateTime.IsZero() {
-					multiplier := int(time.Since(f.highestSlotUpdateTime).Seconds()) / 30
-					multiplier = min(multiplier, 4)
+					multiplier := int(time.Since(f.highestSlotUpdateTime).Seconds()) / 10
+					multiplier = min(multiplier, 6)
 					reqCount *= uint64(1 << uint(multiplier))
 				}
 				// leave a warning if we are stuck for more than 90 seconds

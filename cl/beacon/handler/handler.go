@@ -302,6 +302,7 @@ func (a *ApiHandler) init() {
 							r.Get("/validator_balances", a.GetEthV1BeaconValidatorsBalances)
 							r.Post("/validator_balances", a.PostEthV1BeaconValidatorsBalances)
 							r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
+							r.Get("/validator_identities", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorIdentities))
 						})
 					})
 				})
@@ -341,8 +342,17 @@ func (a *ApiHandler) init() {
 			}
 			if a.routerCfg.Beacon {
 				r.Route("/beacon", func(r chi.Router) {
-					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
-					r.Post("/blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BeaconBlocks))
+					r.Route("/blocks", func(r chi.Router) {
+						r.Post("/", beaconhttp.HandleEndpointFunc(a.PostEthV2BeaconBlocks))
+						r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
+						r.Get("/{block_id}/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlockAttestations))
+					})
+					r.Route("/pool", func(r chi.Router) {
+						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV2BeaconPoolAttestations))
+						r.Post("/attestations", a.PostEthV1BeaconPoolAttestations)                                         // reuse
+						r.Get("/attester_slashings", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttesterSlashings)) // reuse
+						r.Post("/attester_slashings", a.PostEthV1BeaconPoolAttesterSlashings)                              // resue
+					})
 					if a.routerCfg.Builder {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BlindedBlocks))
 					}
@@ -351,6 +361,8 @@ func (a *ApiHandler) init() {
 			if a.routerCfg.Validator {
 				r.Route("/validator", func(r chi.Router) {
 					r.Get("/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock)) // deprecate
+					r.Get("/aggregate_attestation", beaconhttp.HandleEndpointFunc(a.GetEthV2ValidatorAggregateAttestation))
+					r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof) // reuse
 				})
 			}
 		})
