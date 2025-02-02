@@ -19,6 +19,7 @@ package fork_graph
 import (
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 
@@ -352,7 +353,9 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot libcommon.Hash, in *s
 			return err
 		}
 
+		debug.PrintStack()
 		if prevHeadBlockRoot != blockRoot {
+			// print stack
 			log.Warn("Not Using cached state", "blockRoot", blockRoot, "prevHeadBlockRoot", prevHeadBlockRoot)
 			return nil
 		}
