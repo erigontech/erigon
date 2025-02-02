@@ -738,14 +738,32 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWithRetry) {
+	toExecute := make(sort.IntSlice, 0, 2)
+
+	for be.execTasks.minPending() >= 0 {
+		toExecute = append(toExecute, be.execTasks.takeNextPending())
+	}
+
 	maxValidated := be.validateTasks.maxComplete()
-	for nextTx := be.execTasks.minPending(); nextTx != -1; nextTx = be.execTasks.minPending() {
+	for i := 0; i < len(toExecute); i++ {
+		nextTx := toExecute[i]
+
 		execTask := be.tasks[nextTx]
 
 		if nextTx == maxValidated+1 {
 			be.skipCheck[nextTx] = true
 		} else {
 			txIndex := execTask.Version().TxIndex
+			be.versionMap.Trace = true
+			fmt.Println("Checc re exec", be.blockIO.HasReads(txIndex), state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
+				func(read, written state.Version) bool {
+					fmt.Println("Val Spec", maxValidated, read, written)
+					//return written.Incarnation >= read.Incarnation ||
+					//	written.TxIndex < maxValidated
+					return false
+				}))
+			be.versionMap.Trace = false
+
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 ||
 					!be.blockIO.HasReads(txIndex) ||
@@ -756,12 +774,12 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 							//	written.TxIndex < maxValidated
 							return false
 						})) {
-				return
+				be.execTasks.pushPending(nextTx)
+				continue
 			}
 			be.cntSpecExec++
 		}
 
-		nextTx := be.execTasks.takeNextPending()
 		be.cntExec++
 
 		if incarnation := be.txIncarnations[nextTx]; incarnation == 0 {
