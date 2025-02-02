@@ -600,9 +600,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap, func(read, written state.Version) bool { return read == written }) {
 			if cntInvalid == 0 {
 				fmt.Println("valid", tx)
-				be.versionMap.Trace = true
 				be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), true)
-				be.versionMap.Trace = false
 				be.validateTasks.markComplete(tx)
 				// note this assumes that tasks are pushed in order as finalization needs to happen in block order
 				be.finalizeTasks.pushPending(tx)
@@ -741,17 +739,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWithRetry) {
 	maxValidated := be.validateTasks.maxComplete()
-	//fmt.Println("schedule", blockExecutor.execTasks.minPending(), maxValidated+1)
-	// Send the next immediate pending transaction to be executed
-	//if blockExecutor.execTasks.minPending() != -1 && blockExecutor.execTasks.minPending() == maxValidated+1 {
 	for nextTx := be.execTasks.minPending(); nextTx != -1; nextTx = be.execTasks.minPending() {
+		execTask := be.tasks[nextTx]
+
 		if nextTx == maxValidated+1 {
 			be.skipCheck[nextTx] = true
 		} else {
+			txIndex := execTask.Version().TxIndex
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 ||
-					!be.blockIO.HasReads(nextTx) ||
-					!state.ValidateVersion(nextTx, be.blockIO, be.versionMap,
+					!be.blockIO.HasReads(txIndex) ||
+					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
 						func(read, written state.Version) bool {
 							fmt.Println("Val Spec", maxValidated, read, written)
 							//return written.Incarnation >= read.Incarnation ||
@@ -765,8 +763,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 
 		nextTx := be.execTasks.takeNextPending()
 		be.cntExec++
-
-		execTask := be.tasks[nextTx]
 
 		if incarnation := be.txIncarnations[nextTx]; incarnation == 0 {
 			fmt.Println("exec", nextTx, incarnation)
@@ -1290,7 +1286,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tx, a
 func (pe *parallelExecutor) run(ctx context.Context) context.CancelFunc {
 	pe.blockResults = make(chan *blockResult, 1000)
 	pe.execRequests = make(chan *execRequest, 10_000)
-	pe.in = exec.NewQueueWithRetry(100_000)
+	pe.in = exec.NewQueueWithRetry(10_000)
 
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
 		pe.RWMutex.RLocker(), pe.accumulator, pe.logger, ctx, true, pe.cfg.db, pe.rs, nil, state.NewNoopWriter(), pe.in,
