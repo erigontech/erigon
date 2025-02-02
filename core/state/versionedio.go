@@ -476,6 +476,13 @@ func (io *VersionedIO) ReadCount() (count int64) {
 	return count
 }
 
+func (io *VersionedIO) HasReads(txnIdx int) bool {
+	if len(io.outputsSet) <= txnIdx+1 {
+		return false
+	}
+	return io.outputsSet[txnIdx+1] != nil && io.outputsSet[txnIdx+1].Len() > 0
+}
+
 func (io *VersionedIO) HasWritten(txnIdx int, k VersionKey) bool {
 	if len(io.outputsSet) <= txnIdx+1 {
 		return false
