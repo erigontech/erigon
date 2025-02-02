@@ -344,7 +344,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 				}
 
 				if pr.Version.Incarnation < vr.Version.Incarnation {
-					fmt.Println("dep discrepency", s.dep, "res", res.DepIdx(), res.incarnation)
+					fmt.Println("dep discrepency", s.txIndex, s.dep, pr.Version, "res", res.DepIdx(), res.incarnation)
 					if res.DepIdx() > s.dep {
 						s.dep = res.DepIdx()
 					}
