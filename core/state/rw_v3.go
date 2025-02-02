@@ -258,8 +258,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 				var address common.Address
 				copy(address[:], k)
 
-				newV := make([]byte, acc.EncodingLengthForStorage())
-				acc.EncodeForStorage(newV)
+				newV := accounts.SerialiseV3(&acc)
 				if accumulator != nil {
 					accumulator.ChangeAccount(address, acc.Incarnation, newV)
 				}

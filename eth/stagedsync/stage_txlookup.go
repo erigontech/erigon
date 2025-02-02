@@ -152,11 +152,6 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 			return err
 		}
 
-		if firstTxNumInBlock == 0 {
-			log.Warn(fmt.Sprintf("[%s] transform: empty txnum %d, hash %x", logPrefix, firstTxNumInBlock, v))
-			return nil
-		}
-
 		binary.BigEndian.PutUint64(data[:8], blocknum)
 
 		for i, txn := range body.Transactions {

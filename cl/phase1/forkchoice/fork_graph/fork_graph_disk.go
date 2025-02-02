@@ -395,6 +395,9 @@ func (f *forkGraphDisk) getState(blockRoot libcommon.Hash, alwaysCopy bool, addC
 	// Traverse the blocks from top to bottom.
 	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
 		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], nil, false); err != nil {
+			if addChainSegment {
+				f.currentState = nil // reset the state if it fails here.
+			}
 			return nil, err
 		}
 	}
