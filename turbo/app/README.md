@@ -18,7 +18,7 @@ In order to connect diagnostics run
 
 |                      |                                                                                                                                                                                                            |
 |----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| diagnostics.addr     | Address of the diagnostics system provided by the support team, include unique session PIN. [Instructions how to get proper adderess](https://github.com/erigontech/diagnostics?tab=readme-ov-file#step-4) |
+| diagnostics.addr     | Address of the diagnostics system provided by the support team, include unique session PIN. [Instructions how to get proper address](https://github.com/erigontech/diagnostics?tab=readme-ov-file#step-4) |
 | debug.addrs          | Comma separated list of URLs to the debug endpoints thats are being diagnosed. This endpoints must match values of `diagnostics.endpoint.addr:diagnostics.endpoint.port` by default its `localhost:6060`   |
 | diagnostics.sessions | Comma separated list of session PINs to connect to [Instructions how to obtain PIN](https://github.com/erigontech/diagnostics?tab=readme-ov-file#step-2)                                                   |
 |                      |                                                                                                                                                                                                            |
