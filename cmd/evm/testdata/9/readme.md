@@ -23,13 +23,13 @@ There are two transactions, each invokes the contract above.
 Running it yields: 
 ```
 $ dir=./testdata/9 && ./evm t8n --state.fork=London --input.alloc=$dir/alloc.json --input.txs=$dir/txs.json --input.env=$dir/env.json --trace && cat trace-* | grep SLOAD
-{"pc":2,"op":84,"gas":"0x48c28","gasCost":"0x834","memory":"0x","memSize":0,"stack":["0x0","0x1"],"returnStack":null,"returnD
+{"pc":2,"op":84,"gas":"0x48c28","gasCost":"0x834","memory":"0x","memSize":0,"stack":["0x0","0x1"],"returnStack":null,"returned
 ata":"0x","depth":1,"refund":0,"opName":"SLOAD","error":""}
-{"pc":3,"op":84,"gas":"0x483f4","gasCost":"0x64","memory":"0x","memSize":0,"stack":["0x0","0x0"],"returnStack":null,"returnDa
+{"pc":3,"op":84,"gas":"0x483f4","gasCost":"0x64","memory":"0x","memSize":0,"stack":["0x0","0x0"],"returnStack":null,"returneda
 ta":"0x","depth":1,"refund":0,"opName":"SLOAD","error":""}
-{"pc":2,"op":84,"gas":"0x49cf4","gasCost":"0x834","memory":"0x","memSize":0,"stack":["0x0","0x1"],"returnStack":null,"returnD
+{"pc":2,"op":84,"gas":"0x49cf4","gasCost":"0x834","memory":"0x","memSize":0,"stack":["0x0","0x1"],"returnStack":null,"returned
 ata":"0x","depth":1,"refund":0,"opName":"SLOAD","error":""}
-{"pc":3,"op":84,"gas":"0x494c0","gasCost":"0x834","memory":"0x","memSize":0,"stack":["0x0","0x0"],"returnStack":null,"returnD
+{"pc":3,"op":84,"gas":"0x494c0","gasCost":"0x834","memory":"0x","memSize":0,"stack":["0x0","0x0"],"returnStack":null,"returned
 ata":"0x","depth":1,"refund":0,"opName":"SLOAD","error":""}
 ```
 
