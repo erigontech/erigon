@@ -17,7 +17,6 @@
 package fork_graph
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -87,22 +86,6 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
 	}
 
-	// decode the cache file
-	// cacheFile, err := f.fs.Open(getBeaconStateCacheFilename(blockRoot))
-	// if err != nil {
-	// 	return
-	// }
-	// defer cacheFile.Close()
-
-	// b := bytes.Buffer{}
-	// if _, err := io.Copy(&b, cacheFile); err != nil {
-	// 	return nil, err
-	// }
-
-	// if err := bs.DecodeCaches(&b); err != nil {
-	// 	return nil, err
-	// }
-
 	return
 }
 
@@ -156,29 +139,6 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 
 	if err = dumpedFile.Sync(); err != nil {
 		log.Error("failed to sync dumped file", "err", err)
-		return
-	}
-
-	var b bytes.Buffer
-
-	if err := bs.EncodeCaches(&b); err != nil {
-		log.Error("failed to encode caches", "err", err)
-		return err
-	}
-
-	cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
-	if err != nil {
-		log.Error("failed to open cache file", "err", err)
-		return
-	}
-	defer cacheFile.Close()
-
-	if _, err = cacheFile.Write(b.Bytes()); err != nil {
-		log.Error("failed to write cache file", "err", err)
-		return
-	}
-	if err = cacheFile.Sync(); err != nil {
-		log.Error("failed to sync cache file", "err", err)
 		return
 	}
 
