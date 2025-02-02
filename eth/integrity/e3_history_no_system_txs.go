@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/turbo/services"
@@ -36,14 +35,11 @@ import (
 )
 
 // E3 History - usually don't have anything attributed to 1-st system txs (except genesis)
-func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, blockReader services.FullBlockReader, agg *state.Aggregator) error {
+func E3HistoryNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader) error {
 	count := atomic.Uint64{}
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	db, err := temporal.New(chainDB, agg)
-	if err != nil {
-		return err
-	}
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	g := &errgroup.Group{}
 	for j := 0; j < 256; j++ {
 		j := j

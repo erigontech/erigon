@@ -563,7 +563,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.InvertedIndex:
-			if err := integrity.E3EfFiles(ctx, db, agg, failFast, fromStep); err != nil {
+			if err := integrity.E3EfFiles(ctx, db, failFast, fromStep); err != nil {
 				return err
 			}
 		case integrity.HistoryNoSystemTxs:
