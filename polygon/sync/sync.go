@@ -179,7 +179,13 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 		return err
 	}
 
-	newTip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, rootNum+1, nil)
+	var syncTo *uint64
+
+	if s.config.PolygonPosSingleSlotFinality {
+		syncTo = &s.config.PolygonPosSingleSlotFinalityBlockAt
+	}
+
+	newTip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, rootNum+1, syncTo)
 	if err != nil {
 		return err
 	}
@@ -689,8 +695,8 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
-	if s.config.PosSingleSlotFinality {
-		if result.latestTip.Number.Uint64() >= s.config.PosSingleSlotFinalityBlockAt {
+	if s.config.PolygonPosSingleSlotFinality {
+		if result.latestTip.Number.Uint64() >= s.config.PolygonPosSingleSlotFinalityBlockAt {
 			s.engineAPISwitcher.SetConsuming(true)
 			return nil
 		}
@@ -708,13 +714,13 @@ func (s *Sync) Run(ctx context.Context) error {
 	for {
 		select {
 		case event := <-s.events:
-			if s.config.PosSingleSlotFinality {
+			if s.config.PolygonPosSingleSlotFinality {
 				block, err := s.execution.CurrentHeader(ctx)
 				if err != nil {
 					return err
 				}
 
-				if block.Number.Uint64() >= s.config.PosSingleSlotFinalityBlockAt {
+				if block.Number.Uint64() >= s.config.PolygonPosSingleSlotFinalityBlockAt {
 					s.engineAPISwitcher.SetConsuming(true)
 					return nil
 				}
@@ -861,8 +867,8 @@ func (s *Sync) sync(
 
 	var syncTo *uint64
 
-	if s.config.PosSingleSlotFinality {
-		syncTo = &s.config.PosSingleSlotFinalityBlockAt
+	if s.config.PolygonPosSingleSlotFinality {
+		syncTo = &s.config.PolygonPosSingleSlotFinalityBlockAt
 	}
 
 	for {
@@ -893,8 +899,8 @@ func (s *Sync) sync(
 
 		tip = newTip
 
-		if s.config.PosSingleSlotFinality {
-			if newTip.Number.Uint64() >= s.config.PosSingleSlotFinalityBlockAt {
+		if s.config.PolygonPosSingleSlotFinality {
+			if newTip.Number.Uint64() >= s.config.PolygonPosSingleSlotFinalityBlockAt {
 				break
 			}
 		}

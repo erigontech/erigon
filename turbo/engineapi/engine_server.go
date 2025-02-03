@@ -163,7 +163,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutility.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	if !s.consuming.Load() {
-		return nil, errors.New("execution layer is consuming blocks via p2p. Use --pos.ssf.block flag to specify from which block p2p stops consuming blocks and engine api is allowed to do so")
+		return nil, errors.New("engine payload consumption is not enabled. Use --polygon.pos.ssf.block instead")
 	}
 
 	if s.caplin {

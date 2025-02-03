@@ -292,6 +292,44 @@ func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }
 
+func TestBlockDownloaderDownloadBlocksUsingMilestonesLimitEndBlock(t *testing.T) {
+	test := newBlockDownloaderTest(t)
+	test.waypointReader.EXPECT().
+		MilestonesFromBlock(gomock.Any(), gomock.Any()).
+		Return(test.fakeMilestones(4), nil).
+		Times(1)
+	test.p2pService.EXPECT().
+		ListPeersMayHaveBlockNum(gomock.Any()).
+		Return(test.fakePeers(8)).
+		Times(1)
+	test.p2pService.EXPECT().
+		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchHeadersMock()).
+		Times(1)
+	test.p2pService.EXPECT().
+		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchBodiesMock()).
+		Times(1)
+	var blocks []*types.Block
+	test.store.EXPECT().
+		InsertBlocks(gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
+		Times(1)
+
+	syncTo := uint64(10)
+
+	tip, err := test.blockDownloader.DownloadBlocksUsingMilestones(context.Background(), 1, &syncTo)
+	require.NoError(t, err)
+	require.Len(t, blocks, 10) // 4 milestones x 12 blocks each but we limited it by 10
+	// check blocks are written in order
+	require.Equal(t, uint64(1), blocks[0].Header().Number.Uint64())
+	require.Equal(t, uint64(2), blocks[1].Header().Number.Uint64())
+	require.Equal(t, uint64(3), blocks[2].Header().Number.Uint64())
+	require.Equal(t, uint64(4), blocks[3].Header().Number.Uint64())
+	require.Equal(t, uint64(10), blocks[9].Header().Number.Uint64())
+	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
+}
+
 func TestBlockDownloaderDownloadBlocksUsingMilestonesWhenStartIsBeforeFirstMilestone(t *testing.T) {
 	test := newBlockDownloaderTest(t)
 	// we skip milestone 1, only use 2,3,4 (3 milestones in total) with start=1

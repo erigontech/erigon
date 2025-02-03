@@ -1020,7 +1020,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.InternalCL, // If the chain supports the engine API, then we should not make the server fail.
 		false,
 		config.Miner.EnabledPOS,
-		!config.PosSingleSlotFinality,
+		!config.PolygonPosSingleSlotFinality,
 	)
 	backend.engineBackendRPC = engineBackendRPC
 	// If we choose not to run a consensus layer, run our embedded.
@@ -1164,7 +1164,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		}()
 	}
 
-	if chainConfig.Bor == nil || config.PosSingleSlotFinality {
+	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
 		go s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient)
 	}
 

@@ -260,8 +260,8 @@ type Config struct {
 	SilkwormRpcJsonCompatibility bool
 
 	// PoS Single Slot finality
-	PosSingleSlotFinality        bool
-	PosSingleSlotFinalityBlockAt uint64
+	PolygonPosSingleSlotFinality        bool
+	PolygonPosSingleSlotFinalityBlockAt uint64
 }
 
 type Sync struct {
