@@ -175,8 +175,8 @@ func ReadActiveIndicies(getFn GetValFn, slot uint64) ([]uint64, error) {
 	return base_encoding.ReadRabbits(nil, buf)
 }
 
-func ReadProposersInEpoch(getFn GetValFn, epoch uint64) ([]uint64, error) {
-	key := base_encoding.Encode64ToBytes4(epoch)
+func ReadProposersInEpoch(getFn GetValFn, startEpochSlot uint64) ([]uint64, error) {
+	key := base_encoding.Encode64ToBytes4(startEpochSlot)
 
 	indiciesBytes, err := getFn(kv.Proposers, key)
 	if err != nil {

@@ -136,8 +136,9 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 
 	slot := state.Slot()
 	epoch := slot / i.beaconCfg.SlotsPerEpoch
+
 	// Setup state events handlers
-	if err := i.proposersCollector.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(state)); err != nil {
+	if err := i.proposersCollector.Collect(base_encoding.Encode64ToBytes4(epoch*i.beaconCfg.SlotsPerEpoch), getProposerDutiesValue(state)); err != nil {
 		return err
 	}
 
@@ -266,7 +267,8 @@ func (i *beaconStatesCollector) collectActiveIndices(epoch uint64, activeIndices
 }
 
 func (i *beaconStatesCollector) collectFlattenedProposers(epoch uint64, proposers []byte) error {
-	return i.proposersCollector.Collect(base_encoding.Encode64ToBytes4(epoch), proposers)
+	slot := epoch * i.beaconCfg.SlotsPerEpoch
+	return i.proposersCollector.Collect(base_encoding.Encode64ToBytes4(slot), proposers)
 }
 
 func (i *beaconStatesCollector) collectCurrentSyncCommittee(slot uint64, committee *solid.SyncCommittee) error {

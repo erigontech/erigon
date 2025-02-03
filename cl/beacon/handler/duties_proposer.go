@@ -57,7 +57,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		view := a.caplinStateSnapshots.View()
 		defer view.Close()
 
-		indicies, err := state_accessors.ReadProposersInEpoch(state_accessors.GetValFnTxAndSnapshot(tx, view), epoch)
+		indicies, err := state_accessors.ReadProposersInEpoch(state_accessors.GetValFnTxAndSnapshot(tx, view), epoch+a.beaconChainCfg.SlotsPerEpoch)
 		if err != nil {
 			return nil, err
 		}
