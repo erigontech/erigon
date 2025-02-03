@@ -56,11 +56,11 @@ var handlers = map[string]handle{
 	"*[n]byte":            byteArrayPtrHandle,
 }
 
-func matchTypeToHandle(fieldType types.Type) {
-	if named, ok := fieldType.(*types.Named); ok {
-		process(named)
-	}
-}
+// func matchTypeToHandle(fieldType types.Type) {
+// 	if named, ok := fieldType.(*types.Named); ok {
+// 		process(named)
+// 	}
+// }
 
 // recursive function, constructs string representation of a type. array represented as [n]
 func matchTypeToString(fieldType types.Type, in string) string {

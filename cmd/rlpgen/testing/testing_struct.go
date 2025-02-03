@@ -35,3 +35,5 @@ type TestingStruct struct {
 	m  [10]byte
 	mm *[245]byte
 }
+
+type ArrTestingStruct []TestingStruct

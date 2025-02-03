@@ -80,13 +80,14 @@ func decodeLenMismatch(want int) string {
 // 1. add package to imports if the to-be encoded field is not in the same package
 // e.g do not import "github.com/erigontech/erigon/core/types" if the field is types.BlockNonce
 func addToImports(named *types.Named) (typ string) {
-	if named.Obj().Pkg().Name() != pkgSrc.Name() {
-		_imports[named.Obj().Pkg().Path()] = true
-		typ = named.Obj().Pkg().Name() + "." + named.Obj().Name()
-	} else {
-		typ = named.Obj().Name()
-	}
-	return
+	// if named.Obj().Pkg().Name() != pkgSrc.Name() {
+	// 	_imports[named.Obj().Pkg().Path()] = true
+	// 	typ = named.Obj().Pkg().Name() + "." + named.Obj().Name()
+	// } else {
+	// 	typ = named.Obj().Name()
+	// }
+	// return
+	return ""
 }
 
 func uint64CastTo(kind types.BasicKind) string {
