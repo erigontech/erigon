@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,19 +14,16 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package integrity
+package testhelpers
 
-type Check string
+import "github.com/erigontech/erigon/txnprovider/shutter"
 
-const (
-	Blocks             Check = "Blocks"
-	BlocksTxnID        Check = "BlocksTxnID"
-	InvertedIndex      Check = "InvertedIndex"
-	HistoryNoSystemTxs Check = "HistoryNoSystemTxs"
-	NoBorEventGaps     Check = "NoBorEventGaps"
-	ReceiptsNoDups     Check = "ReceiptsNoDups"
-)
+//go:generate mockgen -typed=true -destination=./slot_calculator_mock.go -package=testhelpers . SlotCalculator
+type SlotCalculator interface {
+	shutter.SlotCalculator
+}
 
-var AllChecks = []Check{
-	Blocks, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, NoBorEventGaps, ReceiptsNoDups,
+//go:generate mockgen -typed=true -destination=./eon_tracker_mock.go -package=testhelpers . EonTracker
+type EonTracker interface {
+	shutter.EonTracker
 }

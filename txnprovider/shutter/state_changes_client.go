@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,19 +14,16 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package integrity
+package shutter
 
-type Check string
+import (
+	"context"
 
-const (
-	Blocks             Check = "Blocks"
-	BlocksTxnID        Check = "BlocksTxnID"
-	InvertedIndex      Check = "InvertedIndex"
-	HistoryNoSystemTxs Check = "HistoryNoSystemTxs"
-	NoBorEventGaps     Check = "NoBorEventGaps"
-	ReceiptsNoDups     Check = "ReceiptsNoDups"
+	"google.golang.org/grpc"
+
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 )
 
-var AllChecks = []Check{
-	Blocks, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, NoBorEventGaps, ReceiptsNoDups,
+type stateChangesClient interface {
+	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
 }
