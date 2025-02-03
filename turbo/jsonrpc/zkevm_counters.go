@@ -405,7 +405,7 @@ func (api *ZkEvmAPIImpl) GetBatchCountersByNumber(ctx context.Context, batchNumR
 	)
 
 	for i, blockNum := range batchBlockNumbers {
-		if l1InfoIndex, err = roHermezDb.GetBlockL1InfoTreeIndex(block.NumberU64()); err != nil {
+		if l1InfoIndex, err = roHermezDb.GetBlockL1InfoTreeIndex(blockNum); err != nil {
 			return nil, err
 		}
 		if _, err := batchCounters.StartNewBlock(l1InfoIndex != 0); err != nil {
