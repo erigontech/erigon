@@ -384,7 +384,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes VersionedWrites, complete bool
 	}
 }
 
-func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, checkVersion func(readVersion, writeVersion Version) bool) (valid bool) {
+func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, checkVersion func(source ReadSource, readVersion, writeVersion Version) bool) (valid bool) {
 	valid = true
 
 	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
@@ -392,15 +392,16 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, che
 			readResult := versionMap.Read(vr.Path, txIdx)
 			switch readResult.Status() {
 			case MVReadResultDone:
-				valid = vr.Kind == ReadKindMap &&
-					checkVersion(vr.Version, Version{
-						TxIndex:     readResult.depIdx,
-						Incarnation: readResult.incarnation,
-					})
+				valid = vr.Source == MapRead &&
+					checkVersion(vr.Source,
+						vr.Version, Version{
+							TxIndex:     readResult.depIdx,
+							Incarnation: readResult.incarnation,
+						})
 			case MVReadResultDependency:
 				valid = false
 			case MVReadResultNone:
-				valid = vr.Kind == ReadKindStorage
+				valid = vr.Source == StorageRead
 			default:
 				panic(fmt.Errorf("should not happen - undefined vm read status: %ver", readResult.Status()))
 			}
@@ -417,7 +418,7 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, che
 					default:
 						return "unknown"
 					}
-				}(), vr.Version, readResult.depIdx, valid)
+				}(), vr.Version, readResult.depIdx, readResult.incarnation, valid)
 			}
 
 			return valid

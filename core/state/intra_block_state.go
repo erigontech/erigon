@@ -1368,7 +1368,7 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 
 		s.versionedReads.Set(&VersionedRead{
 			Path:    k,
-			Kind:    ReadKindStorage,
+			Source:  StorageRead,
 			Version: s.Version(),
 			Val:     *account,
 		})

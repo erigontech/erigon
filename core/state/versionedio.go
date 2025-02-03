@@ -16,14 +16,16 @@ import (
 	"github.com/tidwall/btree"
 )
 
+type ReadSource int
+
 const (
-	ReadKindMap     = 0
-	ReadKindStorage = 1
+	MapRead     = 0
+	StorageRead = 1
 )
 
 type VersionedRead struct {
 	Path    VersionKey
-	Kind    int
+	Source  ReadSource
 	Version Version
 	Val     interface{}
 }
@@ -354,7 +356,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 		}
 
 		var ok bool
-		vr.Kind = ReadKindMap
+		vr.Source = MapRead
 		if v, ok = res.Value().(T); !ok {
 			return defaultV, nil
 		}
@@ -383,7 +385,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 			return defaultV, nil
 		}
 
-		vr.Kind = ReadKindStorage
+		vr.Source = StorageRead
 		so, err := s.getStateObject(k.GetAddress())
 
 		if err != nil {

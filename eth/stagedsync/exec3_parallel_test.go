@@ -141,17 +141,17 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 				}
 			}
 
-			var readKind int
+			var readKind state.ReadSource
 
 			if result.Status() == state.MVReadResultDone {
-				readKind = state.ReadKindMap
+				readKind = state.MapRead
 			} else if result.Status() == state.MVReadResultNone {
-				readKind = state.ReadKindStorage
+				readKind = state.StorageRead
 			}
 
 			sleep(op.duration)
 
-			t.readMap.Set(&state.VersionedRead{Path: k, Kind: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
+			t.readMap.Set(&state.VersionedRead{Path: k, Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
 			t.writeMap.Set(state.VersionedWrite{Path: k, Version: version, Val: op.val})
 		case otherType:

@@ -597,7 +597,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 		txVersion := be.tasks[tx].Task.Version()
 
 		if be.skipCheck[tx] ||
-			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap, func(read, written state.Version) bool { return read == written }) {
+			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap,
+				func(readsource state.ReadSource, readVersion, writtenVersion state.Version) bool {
+					return readsource == state.MapRead && readVersion == writtenVersion
+				}) {
 			if cntInvalid == 0 {
 				fmt.Println("valid", tx)
 				be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), true)
@@ -755,9 +758,9 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 		} else {
 			txIndex := execTask.Version().TxIndex
 			be.versionMap.Trace = true
-			fmt.Println("Checc re exec", be.blockIO.HasReads(txIndex), state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
-				func(read, written state.Version) bool {
-					fmt.Println("Val Spec", maxValidated, read, written)
+			fmt.Println("Check re exec", be.blockIO.HasReads(txIndex), state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
+				func(readsource state.ReadSource, readVersion, writtenVersion state.Version) bool {
+					fmt.Println("Val Spec", maxValidated, readVersion, writtenVersion)
 					//return written.Incarnation >= read.Incarnation ||
 					//	written.TxIndex < maxValidated
 					return false
@@ -768,11 +771,10 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 				(be.execAborted[nextTx] > 0 ||
 					!be.blockIO.HasReads(txIndex) ||
 					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
-						func(read, written state.Version) bool {
-							fmt.Println("Val Spec", maxValidated, read, written)
-							//return written.Incarnation >= read.Incarnation ||
-							//	written.TxIndex < maxValidated
-							return false
+						func(_ state.ReadSource, _, writtenVersion state.Version) bool {
+							fmt.Println("Val Spec", maxValidated, be.txIncarnations[writtenVersion.TxIndex+1], writtenVersion)
+							return writtenVersion.TxIndex < maxValidated &&
+								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
 						})) {
 				be.execTasks.pushPending(nextTx)
 				continue
