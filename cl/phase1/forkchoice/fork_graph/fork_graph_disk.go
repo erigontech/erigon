@@ -359,7 +359,7 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot libcommon.Hash, in *s
 			}
 			ok = true
 			var err2 error
-			log.Warn("Using current cached state", "blockRoot", blockRoot, "prevHeadBlockRoot", prevHeadBlockRoot)
+			log.Warn("Using current cached state", "blockRoot", blockRoot, "headBlockRoot", libcommon.Hash(headBlockRoot))
 
 			if in != nil {
 				err2 = headState.CopyInto(in)
@@ -385,10 +385,10 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot libcommon.Hash, in *s
 		debug.PrintStack()
 		if prevHeadBlockRoot != blockRoot {
 			// print stack
-			log.Warn("Not Using cached state", "blockRoot", blockRoot, "prevHeadBlockRoot", prevHeadBlockRoot)
+			log.Warn("Not Using cached state", "blockRoot", blockRoot, "prevHeadBlockRoot", libcommon.Hash(prevHeadBlockRoot))
 			return nil
 		}
-		log.Warn("Using cached state", "blockRoot", blockRoot, "prevHeadBlockRoot", prevHeadBlockRoot)
+		log.Warn("Using cached state", "blockRoot", blockRoot, "prevHeadBlockRoot", libcommon.Hash(prevHeadBlockRoot))
 		ok = true
 
 		var err2 error
