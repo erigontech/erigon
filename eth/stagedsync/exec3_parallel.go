@@ -757,16 +757,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 			be.skipCheck[nextTx] = true
 		} else {
 			txIndex := execTask.Version().TxIndex
-			be.versionMap.Trace = true
-			fmt.Println("Check re exec", be.blockIO.HasReads(txIndex), state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
-				func(readsource state.ReadSource, readVersion, writtenVersion state.Version) bool {
-					fmt.Println("Val Spec", maxValidated, readVersion, writtenVersion)
-					//return written.Incarnation >= read.Incarnation ||
-					//	written.TxIndex < maxValidated
-					return false
-				}))
-			be.versionMap.Trace = false
-
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 ||
 					!be.blockIO.HasReads(txIndex) ||
