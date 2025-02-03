@@ -109,6 +109,12 @@ type BlockChain interface {
 	SubscribeNewTxsEvent(ch chan<- NewTxsEvent) event.Subscription
 	EnqueueL2Message(ctx context.Context, tx types.Transaction, options *arbitrum_types.ConditionalOptions) error
 
+	// InsertChain attempts to insert the given batch of blocks in to the canonical
+	// chain or, otherwise, create a fork. If an error is returned it will return
+	// the index number of the failing block as well an error describing what went
+	// wrong. After insertion is done, all accumulated events will be fired.
+	InsertChain(chain types.Blocks) (int, error)
+
 	// GetVMConfig returns the block chain VM config.
 	GetVMConfig() *vm.Config
 
