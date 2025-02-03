@@ -277,7 +277,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
 	}
 	if _, ok := f.badBlocks.Load(libcommon.Hash(blockRoot)); ok {
-		fmt.Println("TRACE: Correct BeaconState leaves:")
+		fmt.Println("TRACE: Correct BeaconState leaves:", "slot", block.Slot)
 		newState.PrintLeaves()
 	}
 
