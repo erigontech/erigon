@@ -196,6 +196,19 @@ func (a *RelationalAppendableTx) Unwind(ctx context.Context, from BaseNum, limit
 	return DeleteRangeFromTbl(a.a.valsTbl, fromKey, nil, MaxUint64, rwTx)
 }
 
+// IncrementSequence some entity ids are not generated or provided by consensus (eg. txns)
+// These are generated as db ids. In such case, when we get a new entity, we need to find which
+// entity id is next (to use with the Append operation). This is the purpose of this function.
+// this returns the "base id" from which `amount` is reserved for the collections of txns
+func (a *RelationalAppendableTx) IncrementSequence(amount uint64, tx kv.RwTx) (uint64, error) {
+	baseId, err := tx.IncrementSequence(a.a.valsTbl, amount)
+	if err != nil {
+		return 0, err
+	}
+
+	return baseId, nil
+}
+
 ///// appendable writers
 
 // NewWriter returns a writer for write ops on the appendbale

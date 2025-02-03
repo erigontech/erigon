@@ -124,7 +124,7 @@ func (m *MarkedAppendable) BeginFilesRo() *MarkedAppendableTx {
 func (r *MarkedAppendableTx) Get(num Num, tx kv.Tx) (VVType, error) {
 	// first look into snapshots..
 	a := r.a
-	lastNum := Num(a.VisibleSegmentsMaxNum()) // num == baseNum
+	lastNum := a.VisibleSegmentsMaxNum()
 	if num <= lastNum {
 		if a.baseNumSameAsNum {
 			// can do binary search or loop over visible segments and find which segment contains num

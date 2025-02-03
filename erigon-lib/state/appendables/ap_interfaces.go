@@ -30,12 +30,18 @@ type Freezer interface {
 	SetCollector(coll Collector)
 }
 
+// primary key : num (or canonical entity identifier)
+// secondary key : baseNum (this is a secondary key, which is used as sharding key for the entity snapshots + have some apis be specified in terms of baseNum
+//
+//	like prune/unwind/freeze)
 type Appendable interface {
 	// might have more methods...
 	SetFreezer(Freezer)
 	SetIndexBuilders(...AccessorIndexBuilder)
-	DirtySegmentsMaxNum() BaseNum
-	VisibleSegmentsMaxNum() BaseNum
+	DirtySegmentsMaxNum() Num
+	VisibleSegmentsMaxNum() Num
+	DirtySegmentsMaxBaseNum() BaseNum
+	VisibleSegmentsMaxBaseNum() BaseNum
 	RecalcVisibleFiles(to BaseNum)
 	// don't put BeginFilesRo here, since it returns different kinds of Ro etc. (each has different query patterns)
 	// so anyway aggregator has to recover concrete type, and then it can
@@ -93,7 +99,8 @@ func (a *Aggregator) ViewSingleFile(ap AppEnum, num BaseNum) (segment *VisibleSe
 
 // /
 func WriteRawBody(tx TemporalRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
-	baseTxnID, err := tx.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
+	txq := tx.Relational(Transactions)
+	baseTxnID, err := txq.IncrementSequence(uint64(types.TxCountToTxAmount(len(body.Transactions))), tx)
 	if err != nil {
 		return err
 	}

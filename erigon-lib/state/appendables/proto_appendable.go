@@ -57,19 +57,34 @@ func (a *ProtoAppendable) BaseKeySameAsNum() {
 	a.baseNumSameAsNum = true
 }
 
-func (a *ProtoAppendable) VisibleSegmentsMaxNum() BaseNum {
+func (a *ProtoAppendable) VisibleSegmentsMaxNum() Num {
 	// if snapshots store the last num
 	latest := a._visible[len(a._visible)-1]
-	return BaseNum(latest.Src().GetLastNum())
+	return latest.Src().GetLastNum()
 }
 
-func (a *ProtoAppendable) DirtySegmentsMaxNum() BaseNum {
+func (a *ProtoAppendable) DirtySegmentsMaxNum() Num {
 	// if snapshots store the last num
 	latest, ok := a.dirtyFiles.Max()
 	if !ok {
 		return 0
 	}
-	return BaseNum(latest.GetLastNum())
+	return latest.GetLastNum()
+}
+
+func (a *ProtoAppendable) VisibleSegmentsMaxBaseNum() BaseNum {
+	// if snapshots store the last num
+	latest := a._visible[len(a._visible)-1]
+	return BaseNum(latest.Src().From())
+}
+
+func (a *ProtoAppendable) DirtySegmentsMaxBaseNum() BaseNum {
+	// if snapshots store the last num
+	latest, ok := a.dirtyFiles.Max()
+	if !ok {
+		return 0
+	}
+	return BaseNum(latest.To())
 }
 
 func (a *ProtoAppendable) VisibleSegment(num Num) *VisibleSegment {
