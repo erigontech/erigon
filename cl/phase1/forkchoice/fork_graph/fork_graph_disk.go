@@ -269,11 +269,16 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
 			// Add block to list of invalid blocks
 			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", libcommon.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
+			newState.PrintLeaves()
 			f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
 			f.currentState = nil
 			return nil, InvalidBlock, invalidBlockErr
 		}
 		f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
+	}
+	if _, ok := f.badBlocks.Load(libcommon.Hash(blockRoot)); ok {
+		fmt.Println("TRACE: Correct BeaconState leaves:")
+		newState.PrintLeaves()
 	}
 
 	f.currentState = newState
