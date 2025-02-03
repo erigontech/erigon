@@ -348,6 +348,33 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 }
 
 func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot libcommon.Hash, in *state.CachingBeaconState) (out *state.CachingBeaconState, ok bool, err error) {
+	if f.syncedData.HeadRoot() == blockRoot {
+		err = f.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			headBlockRoot, err := headState.BlockRoot()
+			if err != nil {
+				return err
+			}
+			if headBlockRoot != blockRoot {
+				return nil
+			}
+			ok = true
+			var err2 error
+			log.Warn("Using current cached state", "blockRoot", blockRoot, "prevHeadBlockRoot", prevHeadBlockRoot)
+
+			if in != nil {
+				err2 = headState.CopyInto(in)
+				out = in
+			} else {
+				out, err2 = headState.Copy()
+			}
+			return err2
+		})
+		if errors.Is(err, synced_data.ErrNotSynced) {
+			err = nil
+		}
+		return
+	}
+
 	// check if the state is in the cache
 	err = f.syncedData.ViewPreviousHeadState(func(prevHeadState *state.CachingBeaconState) error {
 		prevHeadBlockRoot, err := prevHeadState.BlockRoot()
