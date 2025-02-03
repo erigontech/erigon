@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"path"
@@ -288,14 +289,30 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	}
 }
 
+var parallel = flag.Int("bench.parallel", 1, "parallelism value") // runs 1 *maxprocs
+var loopv = flag.Int("bench.loopv", 100000, "loop value")
+
 func BenchmarkAggregator_BeginFilesRo(b *testing.B) {
-	//BenchmarkAggregator_BeginFilesRo/begin_files_ro-16  1737404  737.3 ns/op  3216 B/op  21 allocs/op
+	if !flag.Parsed() {
+		flag.Parse()
+	}
+
+	//b.Logf("Running with parallel=%d work=%d", *parallel, *loopv)
+
 	aggStep := uint64(100_00)
 	_, agg := testDbAndAggregatorBench(b, aggStep)
 
-	b.Run("begin_files_ro", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			agg.BeginFilesRo()
+	b.SetParallelism(*parallel) // p * maxprocs
+	b.RunParallel(func(b *testing.PB) {
+		foo := 0
+		for b.Next() {
+			tx := agg.BeginFilesRo()
+			for i := 0; i < *loopv; i++ {
+				foo *= 2
+				foo /= 2
+			}
+			tx.Close()
 		}
+
 	})
 }
