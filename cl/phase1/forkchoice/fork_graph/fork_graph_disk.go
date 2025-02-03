@@ -268,16 +268,11 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
 			// Add block to list of invalid blocks
 			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", libcommon.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
-			newState.PrintLeaves()
 			f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
 			f.currentState = nil
 			return nil, InvalidBlock, invalidBlockErr
 		}
 		f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
-	}
-	if _, ok := f.badBlocks.Load(libcommon.Hash(blockRoot)); ok {
-		fmt.Println("TRACE: Correct BeaconState leaves:", "slot", block.Slot)
-		newState.PrintLeaves()
 	}
 
 	f.currentState = newState
@@ -347,6 +342,9 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 }
 
 func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot libcommon.Hash, in *state.CachingBeaconState) (out *state.CachingBeaconState, ok bool, err error) {
+	if f.syncedData == nil {
+		return
+	}
 	if f.syncedData.HeadRoot() == blockRoot {
 		err = f.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 			headBlockRoot, err := headState.BlockRoot()
@@ -532,7 +530,6 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.headers.Delete(root)
 		f.blockRewards.Delete(root)
 		f.fs.Remove(getBeaconStateFilename(root))
-		f.fs.Remove(getBeaconStateCacheFilename(root))
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return

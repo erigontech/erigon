@@ -34,10 +34,6 @@ func getBeaconStateFilename(blockRoot libcommon.Hash) string {
 	return fmt.Sprintf("%x.snappy_ssz", blockRoot)
 }
 
-func getBeaconStateCacheFilename(blockRoot libcommon.Hash) string {
-	return fmt.Sprintf("%x.cache", blockRoot)
-}
-
 func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *state.CachingBeaconState) (bs *state.CachingBeaconState, err error) {
 	var file afero.File
 	f.stateDumpLock.Lock()
