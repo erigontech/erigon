@@ -701,6 +701,7 @@ func (tx *MdbxTx) CollectMetrics() {
 	}
 
 	kv.TxDirty.SetUint64(txInfo.SpaceDirty)
+	kv.TxRetired.SetUint64(txInfo.SpaceRetired)
 	kv.TxLimit.SetUint64(tx.db.txSize)
 	kv.TxSpill.SetUint64(txInfo.Spill)
 	kv.TxUnspill.SetUint64(txInfo.Unspill)

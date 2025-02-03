@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gballet/go-verkle"
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -77,8 +78,27 @@ func (tr *TRand) RandHash() libcommon.Hash {
 	return libcommon.Hash(tr.RandBytes(32))
 }
 
+func (tr *TRand) RandBoolean() bool {
+	return tr.rnd.Intn(2) == 0
+}
+
 func (tr *TRand) RandBloom() Bloom {
 	return Bloom(tr.RandBytes(BloomByteLength))
+}
+
+func (tr *TRand) RandVerkleKeyValuePairs(count int) []verkle.KeyValuePair {
+	res := make([]verkle.KeyValuePair, count)
+	for i := 0; i < count; i++ {
+		res[i] = tr.RandVerkleKeyValuePair()
+	}
+	return res
+}
+
+func (tr *TRand) RandVerkleKeyValuePair() verkle.KeyValuePair {
+	return verkle.KeyValuePair{
+		Key:   tr.RandBytes(tr.RandIntInRange(1, 32)),
+		Value: tr.RandBytes(tr.RandIntInRange(1, 32)),
+	}
 }
 
 func (tr *TRand) RandWithdrawal() *Withdrawal {
@@ -117,6 +137,60 @@ func (tr *TRand) RandHeader() *Header {
 	}
 }
 
+func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
+	skipSet := make(map[string]struct{}, len(skipFields))
+	for _, field := range skipFields {
+		skipSet[field] = struct{}{}
+	}
+
+	emptyUint64 := uint64(0)
+	h := &Header{}
+	// note unexported fields are skipped in reflection auto-assign as they are not assignable
+	h.mutable = tr.RandBoolean()
+	headerValue := reflect.ValueOf(h)
+	headerElem := headerValue.Elem()
+	numField := headerElem.Type().NumField()
+	for i := 0; i < numField; i++ {
+		field := headerElem.Field(i)
+		if !field.CanSet() {
+			continue
+		}
+
+		if _, skip := skipSet[headerElem.Type().Field(i).Name]; skip {
+			continue
+		}
+
+		switch field.Type() {
+		case reflect.TypeOf(libcommon.Hash{}):
+			field.Set(reflect.ValueOf(tr.RandHash()))
+		case reflect.TypeOf(&libcommon.Hash{}):
+			randHash := tr.RandHash()
+			field.Set(reflect.ValueOf(&randHash))
+		case reflect.TypeOf(libcommon.Address{}):
+			field.Set(reflect.ValueOf(tr.RandAddress()))
+		case reflect.TypeOf(Bloom{}):
+			field.Set(reflect.ValueOf(tr.RandBloom()))
+		case reflect.TypeOf(BlockNonce{}):
+			field.Set(reflect.ValueOf(BlockNonce(tr.RandBytes(8))))
+		case reflect.TypeOf(&big.Int{}):
+			field.Set(reflect.ValueOf(tr.RandBig()))
+		case reflect.TypeOf(uint64(0)):
+			field.Set(reflect.ValueOf(*tr.RandUint64()))
+		case reflect.TypeOf(&emptyUint64):
+			field.Set(reflect.ValueOf(tr.RandUint64()))
+		case reflect.TypeOf([]byte{}):
+			field.Set(reflect.ValueOf(tr.RandBytes(tr.RandIntInRange(128, 1024))))
+		case reflect.TypeOf(false):
+			field.Set(reflect.ValueOf(tr.RandBoolean()))
+		case reflect.TypeOf([]verkle.KeyValuePair{}):
+			field.Set(reflect.ValueOf(tr.RandVerkleKeyValuePairs(tr.RandIntInRange(1, 3))))
+		default:
+			panic(fmt.Sprintf("don't know how to generate rand value for Header field type %v - please add handler", field.Type()))
+		}
+	}
+	return h
+}
+
 func (tr *TRand) RandAccessTuple() AccessTuple {
 	n := tr.RandIntInRange(1, 5)
 	sk := make([]libcommon.Hash, n)
@@ -141,7 +215,7 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 	auths := make([]Authorization, size)
 	for i := 0; i < size; i++ {
 		auths[i] = Authorization{
-			ChainID: *tr.RandUint64(),
+			ChainID: *tr.RandUint256(),
 			Address: tr.RandAddress(),
 			Nonce:   *tr.RandUint64(),
 			YParity: uint8(*tr.RandUint64()),
@@ -543,194 +617,6 @@ func TestWithdrawalEncodeDecodeRLP(t *testing.T) {
 		checkWithdrawals(t, enc, dec)
 	}
 }
-
-func compareTestingStructs(t *testing.T, a, b *TestingStruct) {
-	check(t, "obj.a", a.a, b.a)
-	check(t, "obj.aa", a.aa, b.aa)
-	check(t, "obj.b", a.b, b.b)
-	check(t, "obj.bb", a.bb, b.bb)
-	check(t, "obj.c", a.c, b.c)
-	check(t, "obj.cc", a.cc, b.cc)
-	check(t, "obj.d", a.d, b.d)
-	check(t, "obj.dd", a.dd, b.dd)
-	check(t, "obj.e", a.e, b.e)
-	check(t, "obj.ee", a.ee, b.ee)
-	check(t, "obj.f", a.f, b.f)
-	check(t, "obj.ff", a.ff, b.ff)
-	check(t, "obj.g", a.g, b.g)
-	check(t, "obj.gg", a.gg, b.gg)
-	check(t, "obj.h", a.h, b.h)
-	check(t, "obj.hh", a.hh, b.hh)
-	check(t, "obj.i", a.i, b.i)
-
-	if len(a.ii) != len(b.ii) {
-		t.Errorf("len mismatch: want %v, got %v", len(a.ii), len(b.ii))
-	}
-	for i := 0; i < len(a.ii); i++ {
-		check(t, "obj.ii", *a.ii[i], *b.ii[i])
-	}
-
-	if len(a.j) != len(b.j) {
-		t.Errorf("len mismatch: want %v, got %v", len(a.j), len(b.j))
-	}
-	for i := 0; i < len(a.j); i++ {
-		check(t, "obj.j each", a.j[i], b.j[i])
-	}
-	check(t, "obj.j", a.j, b.j)
-
-	if len(a.jj) != len(b.jj) {
-		t.Errorf("len mismatch: want %v, got %v", len(a.jj), len(b.jj))
-	}
-	for i := 0; i < len(a.jj); i++ {
-		check(t, "obj.j each", a.jj[i], b.jj[i])
-	}
-
-	check(t, "obj.jj", a.jj, b.jj)
-	check(t, "obj.k", a.k, b.k)
-	check(t, "obj.kk", a.kk, b.kk)
-	check(t, "obj.l", a.l, b.l)
-	check(t, "obj.ll", a.ll, b.ll)
-	check(t, "obj.n", a.m, b.m)
-	check(t, "obj.n", a.mm, b.mm)
-}
-
-func randTestingStruct(tr *TRand) *TestingStruct {
-	// _int := tr.RandIntInRange(0, 1<<32)
-	_byteSlice := tr.RandBytes(tr.RandIntInRange(0, 128))
-
-	l := tr.RandIntInRange(0, 8)
-	_byteSliceSlice := make([][]byte, l)
-	for i := 0; i < l; i++ {
-		_byteSliceSlice[i] = tr.RandBytes(tr.RandIntInRange(0, 128))
-	}
-
-	l = tr.RandIntInRange(0, 8)
-	_byteSliceSlicePtr := make([]*[]byte, l)
-	for i := 0; i < l; i++ {
-		arr := tr.RandBytes(tr.RandIntInRange(0, 128))
-		_byteSliceSlicePtr[i] = &arr
-	}
-
-	l = tr.RandIntInRange(0, 8)
-	_nonceSlice := make([]BlockNonce, l)
-	for i := 0; i < l; i++ {
-		_nonceSlice[i] = BlockNonce(tr.RandBytes(8))
-	}
-
-	l = tr.RandIntInRange(0, 8)
-	_nonceSlicePtr := make([]*BlockNonce, l)
-	for i := 0; i < l; i++ {
-		nonce := BlockNonce(tr.RandBytes(8))
-		if i%2 == 0 {
-			_nonceSlicePtr[i] = &nonce
-		} else {
-			_nonceSlicePtr[i] = nil
-		}
-
-	}
-
-	l = tr.RandIntInRange(0, 8)
-	_addrSlice := make([]libcommon.Address, l)
-	for i := 0; i < l; i++ {
-		_addrSlice[i] = tr.RandAddress()
-	}
-
-	l = tr.RandIntInRange(0, 8)
-	_addrSlicePtr := make([]*libcommon.Address, l)
-	for i := 0; i < l; i++ {
-		addr := tr.RandAddress()
-		_addrSlicePtr[i] = &addr
-	}
-
-	l = tr.RandIntInRange(0, 8)
-	_hashSlice := make([]libcommon.Hash, l)
-	for i := 0; i < l; i++ {
-		_hashSlice[i] = tr.RandHash()
-	}
-
-	l = tr.RandIntInRange(0, 8)
-	_hashSlicePtr := make([]*libcommon.Hash, l)
-	for i := 0; i < l; i++ {
-		hash := tr.RandHash()
-		_hashSlicePtr[i] = &hash
-	}
-
-	l = tr.RandIntInRange(0, 8)
-	_bloomSlice := make([]Bloom, l)
-	for i := 0; i < l; i++ {
-		_bloomSlice[i] = tr.RandBloom()
-	}
-
-	l = tr.RandIntInRange(0, 8)
-	_bloomSlicePtr := make([]*Bloom, l)
-	for i := 0; i < l; i++ {
-		bloom := tr.RandBloom()
-		_bloomSlicePtr[i] = &bloom
-	}
-
-	enc := TestingStruct{
-		a:  *tr.RandUint64(),
-		aa: tr.RandUint64(),
-		b:  *tr.RandBig(),
-		bb: tr.RandBig(),
-		c:  *tr.RandUint256(),
-		cc: tr.RandUint256(),
-		d:  BlockNonce(tr.RandBytes(8)),
-		dd: (*BlockNonce)(tr.RandBytes(8)),
-		e:  tr.RandAddress(),
-		ee: (*libcommon.Address)(tr.RandBytes(20)),
-		f:  tr.RandHash(),
-		ff: (*libcommon.Hash)(tr.RandBytes(32)),
-		g:  tr.RandBloom(),
-		gg: (*Bloom)(tr.RandBytes(256)),
-		h:  tr.RandBytes(tr.RandIntInRange(0, 128)),
-		hh: &_byteSlice,
-		i:  _byteSliceSlice,
-		ii: _byteSliceSlicePtr,
-		j:  _nonceSlice,
-		jj: _nonceSlicePtr,
-		k:  _addrSlice,
-		kk: _addrSlicePtr,
-		l:  _hashSlice,
-		ll: _hashSlicePtr,
-		m:  [10]byte(tr.RandBytes(10)),
-		mm: (*[245]byte)(tr.RandBytes(245)),
-	}
-	return &enc
-}
-
-func TestTestingStruct(t *testing.T) {
-	// tr := NewTRand()
-	// var buf bytes.Buffer
-	// for i := 0; i < RUNS; i++ {
-
-	// 	enc := randTestingStruct(tr)
-	// 	buf.Reset()
-
-	// 	if err := enc.EncodeRLP(&buf); err != nil {
-	// 		t.Errorf("error: TestingStruct.EncodeRLP(): %v", err)
-	// 	}
-
-	// 	s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-	// 	dec := &TestingStruct{}
-	// 	if err := dec.DecodeRLP(s); err != nil {
-	// 		t.Errorf("error: TestingStruct.DecodeRLP(): %v", err)
-	// 		panic(err)
-	// 	}
-	// 	compareTestingStructs(t, enc, dec)
-	// }
-}
-
-// func BenchmarkTestingStructRLP(b *testing.B) {
-// 	tr := NewTRand()
-// 	header := randTestingStruct(tr)
-// 	var buf bytes.Buffer
-// 	b.ResetTimer()
-// 	for i := 0; i < b.N; i++ {
-// 		buf.Reset()
-// 		header.EncodeRLP2(&buf)
-// 	}
-// }
 
 /*
 	Benchmarks

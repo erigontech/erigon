@@ -1,8 +1,8 @@
 # Erigon
 
 Documentation: **[docs.erigon.tech](https://docs.erigon.tech)**
-Blog: **[erigon.substack.com](https://erigon.substack.com/)**
-Twitter: [x.com/ErigonEth](https://x.com/ErigonEth)
+Blog: **[erigon.tech/news](https://erigon.tech/news/)**
+X/Twitter: **[x.com/ErigonEth](https://x.com/ErigonEth)**
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
 frontier.
@@ -15,6 +15,7 @@ frontier.
 
 - [Erigon](#erigon)
 - [System Requirements](#system-requirements)
+- [Sync Times](#sync-times)
 - [Usage](#usage)
     - [Getting Started](#getting-started)
     - [Datadir structure](#datadir-structure)
@@ -96,6 +97,18 @@ on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-fil
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
 
 🔬 More details on what type of data stored [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)
+
+Sync Times
+==========
+
+These are the  approximate sync times syncing from scratch to the tip of the chain (results may vary depending on hardware and bandwidth).
+
+
+| Chain      | Archive         | Full           | Minimal        |
+|------------|-----------------|----------------|----------------|
+| Ethereum   | 7 Hours, 55 Minutes | 4 Hours, 23 Minutes | 1 Hour, 41 Minutes |
+| Gnosis     | 2 Hours, 10 Minutes | 1 Hour, 5 Minutes  | 33 Minutes      |
+| Polygon    | 1 Day, 21 Hours    | 21 Hours, 41 Minutes | 11 Hours, 54 Minutes |
 
 Usage
 =====
@@ -708,14 +721,6 @@ Getting in touch
 
 The main discussions are happening on our Discord server. To get an invite, send an email to `bloxster [at] proton.me`
 with your name, occupation, a brief explanation of why you want to join the Discord, and how you heard about Erigon.
-
-### Blog
-
-**[erigon.substack.com](https://erigon.substack.com/)**
-
-### Twitter
-
-[x.com/ErigonEth](https://x.com/ErigonEth)
 
 ### Reporting security issues/concerns
 

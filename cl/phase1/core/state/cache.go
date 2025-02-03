@@ -265,8 +265,6 @@ func (b *CachingBeaconState) initCaches() error {
 }
 
 func (b *CachingBeaconState) InitBeaconState() error {
-	b.totalActiveBalanceCache = nil
-	b._refreshActiveBalancesIfNeeded()
 
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
 	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
@@ -275,6 +273,9 @@ func (b *CachingBeaconState) InitBeaconState() error {
 		return true
 	})
 
+	b.totalActiveBalanceCache = nil
+	b._refreshActiveBalancesIfNeeded()
+	b.previousStateRoot = common.Hash{}
 	b.initCaches()
 	if err := b._updateProposerIndex(); err != nil {
 		return err

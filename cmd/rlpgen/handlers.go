@@ -1,3 +1,19 @@
+// Copyright 2025 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -10,6 +26,7 @@ var decodeBufAdded bool
 var intSizeAdded bool   // for encoding size
 var intEncodeAdded bool // for rlp encoding
 
+// create decoder buffer if not added yet
 func addDecodeBuf(b *bytes.Buffer) {
 	if !decodeBufAdded {
 		fmt.Fprint(b, "    var b []byte\n")
@@ -17,6 +34,7 @@ func addDecodeBuf(b *bytes.Buffer) {
 	}
 }
 
+// add List start check
 func startListDecode(b *bytes.Buffer, fieldName string) {
 	fmt.Fprintf(b, "    _, err = s.List()\n")
 	fmt.Fprintf(b, "    if err != nil {\n")
@@ -24,12 +42,14 @@ func startListDecode(b *bytes.Buffer, fieldName string) {
 	fmt.Fprintf(b, "    }\n")
 }
 
+// add List end check
 func endListDecode(b *bytes.Buffer, fieldName string) {
 	fmt.Fprintf(b, "    if err = s.ListEnd(); err != nil {\n")
 	fmt.Fprintf(b, "        return fmt.Errorf(\"error decoding field %s - fail to close list, err: %%w\", err)\n", fieldName)
 	fmt.Fprintf(b, "    }\n")
 }
 
+// add reusable int for encoding size usage
 func addIntSize(b *bytes.Buffer) {
 	if !intSizeAdded {
 		fmt.Fprint(b, "    gidx := 0\n")
@@ -39,6 +59,7 @@ func addIntSize(b *bytes.Buffer) {
 	}
 }
 
+// add reusable int for encoding usage
 func addIntEncode(b *bytes.Buffer) {
 	if !intEncodeAdded {
 		fmt.Fprint(b, "    gidx := 0\n")
@@ -497,29 +518,6 @@ func byteSliceSliceHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName stri
 	fmt.Fprintf(b3, "    obj.%s = [][]byte{}\n", fieldName)
 	fmt.Fprintf(b3, "    for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {\n")
 	fmt.Fprintf(b3, "        obj.%s = append(obj.%s, b)\n", fieldName, fieldName)
-	fmt.Fprintf(b3, "    }\n")
-
-	endListDecode(b3, fieldName)
-}
-
-func byteSlicePtrSliceHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
-	// size
-	fmt.Fprintf(b1, "    size += rlp.ByteSliceSlicePtrSize(obj.%s)\n", fieldName)
-
-	// encode
-	fmt.Fprintf(b2, "    if err := rlp.EncodeByteSliceSlicePtr(obj.%s, w, b[:]); err != nil {\n", fieldName)
-	fmt.Fprintf(b2, "        return err\n")
-	fmt.Fprintf(b2, "    }\n")
-
-	// decode
-	addDecodeBuf(b3)
-	startListDecode(b3, fieldName)
-
-	fmt.Fprintf(b3, "    obj.%s = []*[]byte{}\n", fieldName)
-	fmt.Fprintf(b3, "    for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {\n")
-	fmt.Fprintf(b3, "        cpy := make([]byte, len(b))\n")
-	fmt.Fprintf(b3, "        copy(cpy, b)\n")
-	fmt.Fprintf(b3, "        obj.%s = append(obj.%s, &cpy)\n", fieldName, fieldName)
 	fmt.Fprintf(b3, "    }\n")
 
 	endListDecode(b3, fieldName)

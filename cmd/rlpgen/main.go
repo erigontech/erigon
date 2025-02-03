@@ -1,3 +1,23 @@
+// Copyright 2025 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+// NOTE: This generator works only on structures, if the type is slice of types (e.g []MyType) it will fail.
+//		 And not all the field types currently supported, see `matcher.go`
+//		 This will be fixed in the future.
+
 package main
 
 import (
@@ -116,7 +136,7 @@ func checkPackageErrors(pkg *packages.Package) error {
 		}
 	}
 	if b.Len() > 0 {
-		return fmt.Errorf(b.String())
+		return errors.New(b.String())
 	}
 	return nil
 }
@@ -231,8 +251,7 @@ func importsToBytes(imports map[string]bool) []byte {
 		result = append(result, []byte("    ")...)
 		result = append(result, '"')
 		result = append(result, []byte(k)...)
-		result = append(result, '"')
-		result = append(result, '\n')
+		result = append(result, '"', '\n')
 	}
 	result = append(result, []byte(")\n\n")...)
 	return result
@@ -321,27 +340,24 @@ func findType(scope *types.Scope, typename string) (*types.Named, error) {
 
 func addEncodeLogic(b1, b2, b3 *bytes.Buffer, g *gen) error {
 
-	// if _struct, ok := g.named.Underlying().(*types.Struct); ok {
-	// 	for i := 0; i < _struct.NumFields(); i++ {
+	if _struct, ok := g.named.Underlying().(*types.Struct); ok {
+		for i := 0; i < _struct.NumFields(); i++ {
 
-	// 		strTyp := matchTypeToString(_struct.Field(i).Type(), "")
-	// 		// fmt.Println("-+-", strTyp)
+			strTyp := matchTypeToString(_struct.Field(i).Type(), "")
+			// fmt.Println("-+-", strTyp)
 
-	// 		matchStrTypeToFunc(strTyp)(b1, b2, b3, _struct.Field(i).Type(), _struct.Field(i).Name())
-	// 	}
-	// } else { // user named types that are not structs, could be:
-	// 	// 1. type aliases
-	// 	//     - type aliases for basic types, e.g type MyInt int
-	// 	//     - type aliases for user named types, e.g type MyHash common.Hash (could be struct as well!)
-	// 	// 2. slice types
-	// 	//     - slice of basice types, e.g type MyInts []int
-	// 	//     - slice of user named types, e.g type ReceiptsForStorage []*ReceiptForStorage
+			matchStrTypeToFunc(strTyp)(b1, b2, b3, _struct.Field(i).Type(), _struct.Field(i).Name())
+		}
+	}
+	// else {
+
+	// 	// TODO(racytech): see handleType
 	// }
 
 	return nil
 }
 
-func handleType(t types.Type, caller types.Type, depth int, ptr bool) error {
+func handleType(t types.Type, caller types.Type, depth int, ptr bool) {
 	switch e := t.(type) {
 	case *types.Pointer:
 		// check if double pointer, fail if depth > 0 and ptr == true
@@ -394,6 +410,4 @@ func handleType(t types.Type, caller types.Type, depth int, ptr bool) error {
 	default:
 		panic("unhandled")
 	}
-
-	return nil
 }
