@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	dirs "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/event"
 	"golang.org/x/exp/slices"
@@ -61,7 +62,7 @@ func TestKeyStore(t *testing.T) {
 	if err := ks.Delete(a, "bar"); err != nil {
 		t.Errorf("Delete error: %v", err)
 	}
-	if common.FileExist(a.URL.Path) {
+	if ex, err := dirs.FileExist(a.URL.Path); !ex || err != nil {
 		t.Errorf("account file %s should be gone after Delete", a.URL)
 	}
 	if ks.HasAddress(a.Address) {

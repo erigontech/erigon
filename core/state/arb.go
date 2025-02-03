@@ -481,6 +481,16 @@ func (s *IntraBlockState) GetStorageRoot(addr common.Address) common.Hash {
 	return common.Hash{}
 }
 
+type WasmIface interface {
+	ActivatedAsm(target WasmTarget, moduleHash common.Hash) ([]byte, error)
+
+	WasmStore() kv.RwDB
+
+	WasmCacheTag() uint32
+
+	WasmTargets() []WasmTarget
+}
+
 type activatedAsmCacheKey struct {
 	moduleHash common.Hash
 	target     WasmTarget
@@ -526,6 +536,6 @@ func (w *WasmDB) WasmTargets() []WasmTarget {
 	return w.targets
 }
 
-func WrapDatabaseWithWasm(wasm kv.RwDB, cacheTag uint32, targets []WasmTarget) kv.RwDB {
+func WrapDatabaseWithWasm(wasm kv.RwDB, cacheTag uint32, targets []WasmTarget) WasmIface {
 	return &WasmDB{RwDB: wasm, cacheTag: cacheTag, targets: targets, activatedAsmCache: lru.NewSizeConstrainedCache[activatedAsmCacheKey, []byte](1000)}
 }

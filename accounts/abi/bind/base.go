@@ -55,9 +55,10 @@ type TransactOpts struct {
 	Nonce  *big.Int          // Nonce to use for the transaction execution (nil = use pending state)
 	Signer SignerFn          // Method to use for signing the transaction (mandatory)
 
-	Value    *big.Int // Funds to transfer along the transaction (nil = 0 = no funds)
-	GasPrice *big.Int // Gas price to use for the transaction execution (nil = gas price oracle)
-	GasLimit uint64   // Gas limit to set for the transaction execution (0 = estimate)
+	Value     *big.Int // Funds to transfer along the transaction (nil = 0 = no funds)
+	GasPrice  *big.Int // Gas price to use for the transaction execution (nil = gas price oracle)
+	GasTipCap *big.Int // Gas priority fee cap to use for the 1559 transaction execution (nil = gas price oracle)
+	GasLimit  uint64   // Gas limit to set for the transaction execution (0 = estimate)
 
 	GasMargin uint64 // Arbitrum: adjusts gas estimate by this many basis points (0 = no adjustment)
 

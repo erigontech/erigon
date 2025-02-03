@@ -20,7 +20,6 @@ import (
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/bloombits"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
@@ -519,13 +518,14 @@ func StateAndHeaderFromHeader(
 			//	// Try referencing the root, if it isn't in dirties cache then Reference will have no effect
 			//	db.TrieDB().Reference(header.Root, common.Hash{})
 			//}
-
 			//statedb, err := state.New(header.Root, db, snapshots)
-			statedb := state.NewArbitrum(state.New(state.NewReaderV3(db)))
-
-			if err != nil {
-				return nil, nil, err
-			}
+			rd := state.NewReaderV3(db)
+			// TODO find txn as last txn in block header.Number
+			// rd.SetTxNum(txNum uint64)
+			statedb := state.NewArbitrum(state.New(rd))
+			// if err != nil {
+			// 	return nil, nil, err
+			// }
 			//if header.Root != (common.Hash{}) {
 			//	headerRoot := header.Root
 			//	return statedb, func() { db.TrieDB().Dereference(headerRoot) }, nil
@@ -533,7 +533,7 @@ func StateAndHeaderFromHeader(
 			return statedb, NoopStateRelease, nil
 		}
 	}
-	liveState, liveStateRelease, err := stateFor(bc.StateCache())(header)
+	liveState, liveStateRelease, err := stateFor(bc.SharedDomains())(header)
 	if err == nil {
 		liveStatesReferencedCounter.Inc()
 		liveState.SetArbFinalizer(func(*state.ArbitrumExtraData) {
@@ -564,7 +564,7 @@ func StateAndHeaderFromHeader(
 		return lastState, header, nil
 	}
 	defer lastStateRelease()
-	l2tx, err := chainDb.BeginRw(ctx)
+	l2tx, err := chainDb.BeginTemporalRw(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -584,17 +584,19 @@ func StateAndHeaderFromHeader(
 	if lastBlock == nil {
 		return nil, nil, errors.New("last block not found")
 	}
-	reexec := uint64(0)
-	checkLive := false
-	preferDisk := false // preferDisk is ignored in this case
-	statedb, release, err := eth.NewArbEthereum(bc, chainDb).StateAtBlock(ctx, targetBlock, reexec, lastState, lastBlock, checkLive, preferDisk)
+	// reexec := uint64(0)
+	// checkLive := false
+	// preferDisk := false // preferDisk is ignored in this case
+
+	statedb := state.NewArbitrum(state.New(state.NewReaderV3(l2tx))) // TODO
+	// statedb, release, err := eth.NewArbEthereum(bc, chainDb).StateAtBlock(ctx, targetBlock, reexec, lastState, lastBlock, checkLive, preferDisk)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to recreate state: %w", err)
 	}
 	// we are setting finalizer instead of returning a StateReleaseFunc to avoid changing ethapi.Backend interface to minimize diff to upstream
 	recreatedStatesReferencedCounter.Inc()
 	statedb.SetArbFinalizer(func(*state.ArbitrumExtraData) {
-		release()
+		// release()
 		recreatedStatesDereferencedCounter.Inc()
 	})
 	return statedb, header, err
@@ -673,7 +675,7 @@ func (a *APIBackend) GetEVM(ctx context.Context, msg *types.Message, state *stat
 		context = *blockCtx
 	} else {
 		author := common.Address{} // TODO ???
-		context = core.NewEVMBlockContext(header, core.GetHashFn(header, nil), a.BlockChain(), &author, a.b.ChainConfig())
+		context = core.NewEVMBlockContext(header, core.GetHashFn(header, nil), a.BlockChain().Engine(), &author, a.b.ChainConfig())
 	}
 	return vm.NewEVM(context, txContext, state, a.BlockChain().Config(), *vmConfig)
 }
@@ -757,7 +759,8 @@ func (a *APIBackend) BloomStatus() (uint64, uint64) {
 }
 
 func (a *APIBackend) GetLogs(ctx context.Context, hash common.Hash, number uint64) ([][]*types.Log, error) {
-	return rawdb.ReadLogs(a.ChainDb(), hash, number), nil
+	return nil, nil
+	// return rawdb.ReadLogs(a.ChainDb(), hash, number), nil // TODO
 }
 
 func (a *APIBackend) ServiceFilter(ctx context.Context, session *bloombits.MatcherSession) {

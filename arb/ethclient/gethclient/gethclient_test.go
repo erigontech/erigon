@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/arb/ethclient"
 	"github.com/erigontech/erigon/consensus/ethash"
@@ -54,7 +55,10 @@ var (
 
 func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 	// Generate test chain.
-	genesis, blocks := generateTestChain()
+	db := memdb.New(t.TempDir(), kv.ArbitrumDB)
+	defer db.Close()
+
+	genesis, blocks := generateTestChain(t, db)
 	// Create node
 	n, err := node.New(context.Background(), &nodecfg.Config{}, log.New())
 	if err != nil {

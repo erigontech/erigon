@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -251,8 +252,10 @@ func WriteOrTestGenblock(chainDb kv.TemporalRwTx, initData statetransfer.InitDat
 		}
 		timestamp = prevHeader.Time
 	}
+	stateDatabase := state.NewReaderV3(chainDb)
+	statedb := state.NewArbitrum(state.New(stateDatabase))
 
-	stateRoot, err := arbosState.InitializeArbosInDatabase(chainDb, initData, chainConfig, initMessage, timestamp, accountsPerSync)
+	stateRoot, err := arbosState.InitializeArbosInDatabase(statedb, initData, chainConfig, initMessage, timestamp, accountsPerSync)
 	if err != nil {
 		return err
 	}
@@ -318,7 +321,7 @@ func WriteOrTestChainConfig(tx kv.TemporalRwTx, config *chain.Config) error {
 	return nil
 }
 
-func GetBlockChain(chainDb kv.TemporalRwTx, cacheConfig *CachingConfig, chainConfig *chain.Config, txLookupLimit uint64) (core.BlockChain, error) {
+func GetBlockChain(chainTx kv.TemporalRwTx, cacheConfig *CachingConfig, chainConfig *chain.Config, txLookupLimit uint64) (core.BlockChain, error) {
 	engine := arbos.Engine{
 		IsSequencer: true,
 	}
@@ -327,7 +330,7 @@ func GetBlockChain(chainDb kv.TemporalRwTx, cacheConfig *CachingConfig, chainCon
 		//	EnablePreimageRecording: false,
 	}
 
-	return core.NewBlockChain(chainDb, cacheConfig, chainConfig, nil, nil, engine, vmConfig, shouldPreserveFalse, &txLookupLimit)
+	return core.NewBlockChain(chainTx, chainConfig, nil, engine, vmConfig, shouldPreserveFalse, &txLookupLimit)
 }
 
 func WriteOrTestBlockChain(
