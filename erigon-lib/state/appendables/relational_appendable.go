@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/core/rawdb"
 )
 
 // concrete impls in relations.go
@@ -207,6 +208,15 @@ func (a *RelationalAppendableTx) IncrementSequence(amount uint64, tx kv.RwTx) (u
 	}
 
 	return baseId, nil
+}
+
+func (a *RelationalAppendableTx) ReadSequence(tx kv.Tx) (uint64, error) {
+	return tx.ReadSequence(a.a.valsTbl)
+}
+
+func (a *RelationalAppendableTx) ResetSequence(tx kv.RwTx, newValue Num) error {
+	// TODO: https://github.com/erigontech/erigon/issues/13675
+	return rawdb.ResetSequence(tx, a.a.valsTbl, uint64(newValue))
 }
 
 ///// appendable writers
