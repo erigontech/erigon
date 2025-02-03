@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build !abigen
+
 package shutter
 
 import (
@@ -26,26 +28,36 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/txnprovider/shutter/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 )
 
 var (
 	ErrInstanceIdMismatch     = errors.New("instance id mismatch")
 	ErrMissingGnosisExtraData = errors.New("missing gnosis extra data")
 	ErrSlotTooLarge           = errors.New("slot too large")
+	ErrSlotInThePast          = errors.New("slot in the past")
+	ErrSlotInTheFuture        = errors.New("slot in the future")
 	ErrTxPointerTooLarge      = errors.New("tx pointer too large")
 	ErrEonTooLarge            = errors.New("eon too large")
+	ErrCurrentEonUnavailable  = errors.New("current eon unavailable")
+	ErrEonInThePast           = errors.New("eon in the past")
+	ErrEonInTheFuture         = errors.New("eon in the future")
 	ErrEmptyKeys              = errors.New("empty keys")
 	ErrTooManyKeys            = errors.New("too many keys")
+	ErrIgnoreMsg              = errors.New("ignoring msg")
 )
 
 type DecryptionKeysValidator struct {
-	config Config
+	config         Config
+	slotCalculator SlotCalculator
+	eonTracker     EonTracker
 }
 
-func NewDecryptionKeysValidator(config Config) DecryptionKeysValidator {
+func NewDecryptionKeysValidator(config Config, sc SlotCalculator, et EonTracker) DecryptionKeysValidator {
 	return DecryptionKeysValidator{
-		config: config,
+		config:         config,
+		slotCalculator: sc,
+		eonTracker:     et,
 	}
 }
 
@@ -54,23 +66,54 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 		return fmt.Errorf("%w: %d", ErrInstanceIdMismatch, msg.InstanceId)
 	}
 
+	if err := v.validateExtraData(msg); err != nil {
+		return err
+	}
+
+	if err := v.validateEonIndex(msg); err != nil {
+		return err
+	}
+
+	return v.validateKeys(msg)
+}
+
+func (v DecryptionKeysValidator) validateExtraData(msg *proto.DecryptionKeys) error {
 	gnosisExtraData := msg.GetGnosis()
 	if gnosisExtraData == nil {
 		return ErrMissingGnosisExtraData
 	}
 
-	if gnosisExtraData.Slot > math.MaxInt64 {
-		return fmt.Errorf("%w: %d", ErrSlotTooLarge, gnosisExtraData.Slot)
+	if err := v.validateSlot(msg); err != nil {
+		return err
 	}
 
 	if gnosisExtraData.TxPointer > math.MaxInt32 {
 		return fmt.Errorf("%w: %d", ErrTxPointerTooLarge, gnosisExtraData.TxPointer)
 	}
 
-	if msg.Eon > math.MaxInt64 {
-		return fmt.Errorf("%w: %d", ErrEonTooLarge, msg.Eon)
+	return nil
+}
+
+func (v DecryptionKeysValidator) validateSlot(msg *proto.DecryptionKeys) error {
+	msgSlot := msg.GetGnosis().Slot
+	if msgSlot > math.MaxInt64 {
+		return fmt.Errorf("%w: %d", ErrSlotTooLarge, msgSlot)
 	}
 
+	currentSlot := v.slotCalculator.CalcCurrentSlot()
+	if msgSlot < currentSlot {
+		return fmt.Errorf("%w: msgSlot=%d, currentSlot=%d", ErrSlotInThePast, msgSlot, currentSlot)
+	}
+
+	if msgSlot > currentSlot+1 {
+		// msgSlot can be either for current slot or for the next one depending on timing, but not further ahead than that
+		return fmt.Errorf("%w: msgSlot=%d, currentSlot=%d", ErrSlotInTheFuture, msgSlot, currentSlot)
+	}
+
+	return nil
+}
+
+func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys) error {
 	if len(msg.Keys) == 0 {
 		return ErrEmptyKeys
 	}
@@ -81,15 +124,41 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 
 	//
 	// TODO when we add the shcrypto library and smart contract state accessors:
-	//      - add validation for signers and signatures based on keyper set and eon infos
+	//      - add validation for signers and signatures based on keyper set and currentEon infos
 	//      - add DecryptionKeys.Validate() equivalent which checks the Key unmarshalling into shcrypto.EpochSecretKey
 	//      - add validation forVerifyEpochSecretKey: check if we should be doing this validation
 	//
+
 	return nil
 }
 
-func NewDecryptionKeysP2pValidatorEx(logger log.Logger, config Config) pubsub.ValidatorEx {
-	dkv := NewDecryptionKeysValidator(config)
+func (v DecryptionKeysValidator) validateEonIndex(msg *proto.DecryptionKeys) error {
+	if msg.Eon > math.MaxInt64 {
+		return fmt.Errorf("%w: %d", ErrEonTooLarge, msg.Eon)
+	}
+
+	msgEonIndex := EonIndex(msg.Eon)
+	currentEon, ok := v.eonTracker.CurrentEon()
+	if !ok {
+		// we're still syncing and are behind - ignore msg, without penalizing peer
+		return fmt.Errorf("%w: %w", ErrIgnoreMsg, ErrCurrentEonUnavailable)
+	}
+
+	_, inRecent := v.eonTracker.RecentEon(msgEonIndex)
+	if msgEonIndex < currentEon.Index && !inRecent {
+		return fmt.Errorf("%w: msgEonIndex=%d, currentEonIndex=%d", ErrEonInThePast, msgEonIndex, currentEon.Index)
+	}
+
+	if msgEonIndex > currentEon.Index && !inRecent {
+		// we may be lagging behind - ignore msg, without penalizing peer
+		return fmt.Errorf("%w: %w: msgEonIndex=%d, currentEonIndex=%d", ErrIgnoreMsg, ErrEonInTheFuture, msgEonIndex, currentEon.Index)
+	}
+
+	return nil
+}
+
+func NewDecryptionKeysP2pValidatorEx(logger log.Logger, config Config, sc SlotCalculator, et EonTracker) pubsub.ValidatorEx {
+	dkv := NewDecryptionKeysValidator(config, sc, et)
 	return func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		if topic := msg.GetTopic(); topic != DecryptionKeysTopic {
 			logger.Debug("rejecting decryption keys msg due to topic mismatch", "topic", topic, "peer", id)
@@ -104,7 +173,12 @@ func NewDecryptionKeysP2pValidatorEx(logger log.Logger, config Config) pubsub.Va
 
 		err = dkv.Validate(decryptionKeys)
 		if err != nil {
-			logger.Debug("rejecting decryption keys msg due to data validation error", "err", err, "peer", id)
+			if errors.Is(err, ErrIgnoreMsg) {
+				logger.Debug("ignoring decryption keys msg due to", "err", err, "peer", id)
+				return pubsub.ValidationIgnore
+			}
+
+			logger.Debug("rejecting decryption keys msg due to", "err", err, "peer", id)
 			return pubsub.ValidationReject
 		}
 

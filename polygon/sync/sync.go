@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -50,7 +51,12 @@ type wiggleCalculator interface {
 	CalculateWiggle(ctx context.Context, header *types.Header) (time.Duration, error)
 }
 
+type EngineAPISwitcher interface {
+	SetConsuming(consuming bool)
+}
+
 func NewSync(
+	config *ethconfig.Config,
 	logger log.Logger,
 	store Store,
 	execution ExecutionClient,
@@ -64,6 +70,7 @@ func NewSync(
 	events <-chan Event,
 	notifications *shards.Notifications,
 	wiggleCalculator wiggleCalculator,
+	engineAPISwitcher EngineAPISwitcher,
 ) *Sync {
 	badBlocksLru, err := simplelru.NewLRU[common.Hash, struct{}](1024, nil)
 	if err != nil {
@@ -71,6 +78,7 @@ func NewSync(
 	}
 
 	return &Sync{
+		config:            config,
 		logger:            logger,
 		store:             store,
 		execution:         execution,
@@ -85,10 +93,12 @@ func NewSync(
 		badBlocks:         badBlocksLru,
 		notifications:     notifications,
 		wiggleCalculator:  wiggleCalculator,
+		engineAPISwitcher: engineAPISwitcher,
 	}
 }
 
 type Sync struct {
+	config            *ethconfig.Config
 	logger            log.Logger
 	store             Store
 	execution         ExecutionClient
@@ -103,6 +113,7 @@ type Sync struct {
 	badBlocks         *simplelru.LRU[common.Hash, struct{}]
 	notifications     *shards.Notifications
 	wiggleCalculator  wiggleCalculator
+	engineAPISwitcher EngineAPISwitcher
 }
 
 func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finalizedHeader *types.Header) error {
@@ -155,11 +166,26 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 		"milestoneRootHash", event.RootHash(),
 	)
 
+	// wait for any possibly unprocessed previous block inserts to finish
+	if err := s.store.Flush(ctx); err != nil {
+		return err
+	}
+
+	if err := s.bridgeSync.Synchronize(ctx, tipNum); err != nil {
+		return err
+	}
+
 	if err := s.bridgeSync.Unwind(ctx, rootNum); err != nil {
 		return err
 	}
 
-	newTip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, rootNum+1)
+	var syncTo *uint64
+
+	if s.config.PolygonPosSingleSlotFinality {
+		syncTo = &s.config.PolygonPosSingleSlotFinalityBlockAt
+	}
+
+	newTip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, rootNum+1, syncTo)
 	if err != nil {
 		return err
 	}
@@ -356,7 +382,8 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
 	if len(newConnectedBlocks) > 1 {
 		s.logger.Info(
-			syncLogPrefix(fmt.Sprintf("inserting %d connected blocks", len(newConnectedBlocks))),
+			syncLogPrefix("inserting multiple connected blocks"),
+			"amount", len(newConnectedBlocks),
 			"start", newConnectedBlocks[0].NumberU64(),
 			"end", newConnectedBlocks[len(newConnectedBlocks)-1].NumberU64(),
 		)
@@ -493,6 +520,15 @@ func (s *Sync) handleBridgeOnForkChange(ctx context.Context, ccb *CanonicalChain
 	lca, ok := ccb.LowestCommonAncestor(newTip.Hash(), oldTip.Hash())
 	if !ok {
 		return errors.New("could not find lowest common ancestor of old and new tip")
+	}
+
+	// wait for any possibly unprocessed previous block inserts to finish
+	if err := s.store.Flush(ctx); err != nil {
+		return err
+	}
+
+	if err := s.bridgeSync.Synchronize(ctx, oldTip.Number.Uint64()); err != nil {
+		return err
 	}
 
 	return s.reorganiseBridge(ctx, ccb, lca)
@@ -659,6 +695,13 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
+	if s.config.PolygonPosSingleSlotFinality {
+		if result.latestTip.Number.Uint64() >= s.config.PolygonPosSingleSlotFinalityBlockAt {
+			s.engineAPISwitcher.SetConsuming(true)
+			return nil
+		}
+	}
+
 	ccBuilder, err := s.initialiseCcb(ctx, result)
 	if err != nil {
 		return err
@@ -671,6 +714,18 @@ func (s *Sync) Run(ctx context.Context) error {
 	for {
 		select {
 		case event := <-s.events:
+			if s.config.PolygonPosSingleSlotFinality {
+				block, err := s.execution.CurrentHeader(ctx)
+				if err != nil {
+					return err
+				}
+
+				if block.Number.Uint64() >= s.config.PolygonPosSingleSlotFinalityBlockAt {
+					s.engineAPISwitcher.SetConsuming(true)
+					return nil
+				}
+			}
+
 			switch event.Type {
 			case EventTypeNewMilestone:
 				if err = s.applyNewMilestoneOnTip(ctx, event.AsNewMilestone(), ccBuilder); err != nil {
@@ -799,7 +854,7 @@ func (s *Sync) syncToTipUsingMilestones(ctx context.Context, tip *types.Header) 
 }
 
 type waypointSyncFunc func(ctx context.Context) (heimdall.Waypoint, error)
-type blockDownloadFunc func(ctx context.Context, startBlockNum uint64) (*types.Header, error)
+type blockDownloadFunc func(ctx context.Context, startBlockNum uint64, endBlockNum *uint64) (*types.Header, error)
 
 func (s *Sync) sync(
 	ctx context.Context,
@@ -810,6 +865,12 @@ func (s *Sync) sync(
 	var waypoint heimdall.Waypoint
 	var err error
 
+	var syncTo *uint64
+
+	if s.config.PolygonPosSingleSlotFinality {
+		syncTo = &s.config.PolygonPosSingleSlotFinalityBlockAt
+	}
+
 	for {
 		waypoint, err = waypointSync(ctx)
 		if err != nil {
@@ -819,7 +880,7 @@ func (s *Sync) sync(
 		// notify about latest waypoint end block so that eth_syncing API doesn't flicker on initial sync
 		s.notifications.NewLastBlockSeen(waypoint.EndBlock().Uint64())
 
-		newTip, err := blockDownload(ctx, tip.Number.Uint64()+1)
+		newTip, err := blockDownload(ctx, tip.Number.Uint64()+1, syncTo)
 		if err != nil {
 			return syncToTipResult{}, err
 		}
@@ -837,6 +898,12 @@ func (s *Sync) sync(
 		}
 
 		tip = newTip
+
+		if s.config.PolygonPosSingleSlotFinality {
+			if newTip.Number.Uint64() >= s.config.PolygonPosSingleSlotFinalityBlockAt {
+				break
+			}
+		}
 	}
 
 	return syncToTipResult{latestTip: tip, latestWaypoint: waypoint}, nil

@@ -223,13 +223,13 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	versionedHashes = make([]libcommon.Hash, len(blobs))
 
 	kzgCtx := libkzg.Ctx()
-	for i, blob := range blobs {
-		commitment, err := kzgCtx.BlobToKZGCommitment(gokzg4844.Blob(blob), 1 /*numGoRoutines*/)
+	for i := 0; i < len(blobs); i++ {
+		commitment, err := kzgCtx.BlobToKZGCommitment(blobs[i][:], 1 /*numGoRoutines*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %v", err)
 		}
 
-		proof, err := kzgCtx.ComputeBlobKZGProof(gokzg4844.Blob(blob), commitment, 1 /*numGoRoutnes*/)
+		proof, err := kzgCtx.ComputeBlobKZGProof(blobs[i][:], commitment, 1 /*numGoRoutnes*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not compute proof for blob: %v", err)
 		}
@@ -241,10 +241,10 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	return commitments, versionedHashes, proofs, nil
 }
 
-func toBlobs(_blobs Blobs) []gokzg4844.Blob {
-	blobs := make([]gokzg4844.Blob, len(_blobs))
+func toBlobs(_blobs Blobs) []gokzg4844.BlobRef {
+	blobs := make([]gokzg4844.BlobRef, len(_blobs))
 	for i, _blob := range _blobs {
-		blobs[i] = gokzg4844.Blob(_blob)
+		blobs[i] = _blob[:]
 	}
 	return blobs
 }
@@ -280,12 +280,6 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	l4 := len(txw.Proofs)
 	if l1 != l2 || l1 != l3 || l1 != l4 {
 		return fmt.Errorf("lengths don't match %v %v %v %v", l1, l2, l3, l4)
-	}
-	// the following check isn't strictly necessary as it would be caught by blob gas processing
-	// (and hence it is not explicitly in the spec for this function), but it doesn't hurt to fail
-	// early in case we are getting spammed with too many blobs or there is a bug somewhere:
-	if uint64(l1) > fixedgas.DefaultMaxBlobsPerBlock {
-		return fmt.Errorf("number of blobs exceeds max: %v", l1)
 	}
 	kzgCtx := libkzg.Ctx()
 	err := kzgCtx.VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.Commitments), toProofs(txw.Proofs))

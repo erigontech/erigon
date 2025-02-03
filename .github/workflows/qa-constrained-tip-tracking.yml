@@ -15,9 +15,11 @@ jobs:
           - chain: mainnet
             backend: Erigon3
             cgroup_name: constrained_res_32G
+            prune_mode: archive_node
           - chain: bor-mainnet
             backend: Polygon
             cgroup_name: constrained_res_64G
+            prune_mode: full_node
     runs-on: [ self-hosted, "${{ matrix.backend }}" ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
@@ -27,6 +29,7 @@ jobs:
       TOTAL_TIME_SECONDS: 28800 # 8 hours
       CHAIN: ${{ matrix.chain }}
       CGROUP_NAME: ${{ matrix.cgroup_name }}
+      PRUNE_MODE: ${{ matrix.prune_mode }}
 
     steps:
     - name: Check out repository
@@ -56,7 +59,7 @@ jobs:
         
         # Run Erigon under memory constraints, wait sync and check ability to maintain sync
         cgexec -g memory:$CGROUP_NAME python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN standard_node statistics
+          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN $PRUNE_MODE statistics
   
         # Capture monitoring script exit status
         test_exit_status=$?

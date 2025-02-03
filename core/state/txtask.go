@@ -375,7 +375,7 @@ func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	}
 	return nil
 }
-func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (closed bool, err error) {
+func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (err error) {
 	q.m.Lock()
 	defer q.m.Unlock()
 	if task != nil {
@@ -385,20 +385,21 @@ func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (closed b
 	for {
 		select {
 		case <-ctx.Done():
-			return q.closed, ctx.Err()
+			return ctx.Err()
 		case txTask, ok := <-q.resultCh:
 			if !ok {
-				return q.closed, nil
+				//log.Warn("[dbg] closed1")
+				return nil
 			}
 			if txTask == nil {
 				continue
 			}
 			heap.Push(q.results, txTask)
 			if q.results.Len() > q.limit {
-				return q.closed, nil
+				return nil
 			}
 		default: // we are inside mutex section, can't block here
-			return q.closed, nil
+			return nil
 		}
 	}
 }
@@ -431,7 +432,7 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 		if !ok {
 			return nil
 		}
-		if _, err := q.drainNoBlock(ctx, txTask); err != nil {
+		if err := q.drainNoBlock(ctx, txTask); err != nil {
 			return err
 		}
 	case <-q.ticker.C:
@@ -448,7 +449,7 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 }
 
 // DrainNonBlocking - does drain batch of results to heap. Immediately stops at `q.limit` or if nothing to drain
-func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) (closed bool, err error) {
+func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) (err error) {
 	return q.drainNoBlock(ctx, nil)
 }
 
@@ -477,6 +478,8 @@ Loop:
 }
 
 func (q *ResultsQueue) Close() {
+	q.m.Lock()
+	defer q.m.Unlock()
 	if q.closed {
 		return
 	}

@@ -4,6 +4,21 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 )
 
+// IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
+// TODO: convert the input to a struct
+func IntrinsicGas(data []byte, accessListLen, storageKeysLen uint64, isContractCreation bool, isHomestead, isEIP2028, isEIP3860, isPrague bool, authorizationsLen uint64) (uint64, uint64, bool) {
+	// Zero and non-zero bytes are priced differently
+	dataLen := uint64(len(data))
+	dataNonZeroLen := uint64(0)
+	for _, byt := range data {
+		if byt != 0 {
+			dataNonZeroLen++
+		}
+	}
+
+	return CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessListLen, storageKeysLen, isContractCreation, isHomestead, isEIP2028, isEIP3860, isPrague)
+}
+
 // CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.
 func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessListLen, storageKeysLen uint64, isContractCreation, isHomestead, isEIP2028, isShanghai, isPrague bool) (gas uint64, floorGas7623 uint64, overflow bool) {
 	// Set the starting gas for the raw transaction

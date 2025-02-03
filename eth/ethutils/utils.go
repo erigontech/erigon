@@ -75,7 +75,8 @@ func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBl
 			}
 		}
 	}
-	if len(actualBlobHashes) > int(maxBlobsPerBlock) || blobGasUsed > maxBlobsGas {
+	if len(actualBlobHashes) > int(maxBlobsPerBlock) { // maybe we shouldn't check by maxBlobsGas?
+		log.Debug("error max blob gas used", "blobGasUsed", blobGasUsed, "maxBlobsGas", maxBlobsGas, "actualBlobHashes", len(actualBlobHashes), "maxBlobsPerBlock", maxBlobsPerBlock)
 		return ErrMaxBlobGasUsed
 	}
 	if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {

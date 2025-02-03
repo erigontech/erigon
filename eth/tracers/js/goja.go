@@ -536,7 +536,7 @@ func (o *opObj) ToString() string {
 }
 
 func (o *opObj) IsPush() bool {
-	return o.op.IsPush()
+	return o.op == vm.PUSH0 || o.op.IsPushWithImmediateArgs()
 }
 
 func (o *opObj) setupObject() *goja.Object {

@@ -82,11 +82,12 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/clique"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/contracts"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
@@ -124,6 +125,7 @@ import (
 	"github.com/erigontech/erigon/turbo/execution/eth1"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -163,10 +165,14 @@ type Ethereum struct {
 
 	eth1ExecutionServer *eth1.EthereumExecutionModule
 
-	ethBackendRPC      *privateapi.EthBackendServer
-	engineBackendRPC   *engineapi.EngineServer
-	miningRPC          txpoolproto.MiningServer
-	stateChangesClient txpool.StateChangesClient
+	ethBackendRPC       *privateapi.EthBackendServer
+	ethRpcClient        rpchelper.ApiBackend
+	engineBackendRPC    *engineapi.EngineServer
+	miningRPC           *privateapi.MiningServer
+	miningRpcClient     txpoolproto.MiningClient
+	stateDiffClient     *direct.StateDiffClientDirect
+	rpcFilters          *rpchelper.Filters
+	rpcDaemonStateCache kvcache.Cache
 
 	miningSealingQuit chan struct{}
 	pendingBlocks     chan *types.Block
@@ -194,6 +200,7 @@ type Ethereum struct {
 
 	txPool                    *txpool.TxPool
 	txPoolGrpcServer          txpoolproto.TxpoolServer
+	txPoolRpcClient           txpoolproto.TxpoolClient
 	shutterPool               *shutter.Pool
 	blockBuilderNotifyNewTxns chan struct{}
 	forkValidator             *engine_helpers.ForkValidator
@@ -643,7 +650,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
-	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
+	backend.stateDiffClient = direct.NewStateDiffClientDirect(kvRPC)
 	var txnProvider txnprovider.TxnProvider
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
@@ -661,7 +668,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.chainDB,
 			kvcache.NewDummy(),
 			sentries,
-			stateDiffClient,
+			backend.stateDiffClient,
 			blockBuilderNotifyNewTxns,
 			logger,
 		)
@@ -671,12 +678,73 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		txnProvider = backend.txPool
 	}
+
+	var ethashApi *ethash.API
+	if casted, ok := backend.engine.(*ethash.Ethash); ok {
+		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
+	}
+
+	backend.miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi, logger)
+	backend.ethBackendRPC = privateapi.NewEthBackendServer(
+		ctx,
+		backend,
+		backend.chainDB,
+		backend.notifications,
+		blockReader,
+		logger,
+		latestBlockBuiltStore,
+	)
+	httpRpcCfg := stack.Config().Http
+	ethRpcClient, txPoolRpcClient, miningRpcClient, rpcDaemonStateCache, rpcFilters := rpcdaemoncli.EmbeddedServices(
+		ctx,
+		backend.chainDB,
+		httpRpcCfg.StateCache,
+		httpRpcCfg.RpcFiltersConfig,
+		blockReader,
+		backend.ethBackendRPC,
+		backend.txPoolGrpcServer,
+		backend.miningRPC,
+		backend.stateDiffClient,
+		logger,
+	)
+	backend.ethRpcClient = ethRpcClient
+	backend.txPoolRpcClient = txPoolRpcClient
+	backend.miningRpcClient = miningRpcClient
+	backend.rpcDaemonStateCache = rpcDaemonStateCache
+	backend.rpcFilters = rpcFilters
+
 	if config.Shutter.Enabled {
 		if config.TxPool.Disable {
 			panic("can't enable shutter pool when devp2p txpool is disabled")
 		}
 
-		backend.shutterPool = shutter.NewPool(logger, config.Shutter, backend.txPool)
+		baseApi := jsonrpc.NewBaseApi(
+			backend.rpcFilters,
+			backend.rpcDaemonStateCache,
+			blockReader,
+			httpRpcCfg.WithDatadir,
+			httpRpcCfg.EvmCallTimeout,
+			backend.engine,
+			httpRpcCfg.Dirs,
+			backend.polygonBridge,
+		)
+		ethApi := jsonrpc.NewEthAPI(
+			baseApi,
+			backend.chainDB,
+			backend.ethRpcClient,
+			backend.txPoolRpcClient,
+			backend.miningRpcClient,
+			httpRpcCfg.Gascap,
+			httpRpcCfg.Feecap,
+			httpRpcCfg.ReturnDataLimit,
+			httpRpcCfg.AllowUnprotectedTxs,
+			httpRpcCfg.MaxGetProofRewindBlockCount,
+			httpRpcCfg.WebsocketSubscribeLogsChannelSize,
+			logger,
+		)
+		contractBackend := contracts.NewDirectBackend(ethApi)
+		secondaryTxnProvider := backend.txPool
+		backend.shutterPool = shutter.NewPool(logger, config.Shutter, secondaryTxnProvider, contractBackend, backend.stateDiffClient)
 		txnProvider = backend.shutterPool
 	}
 
@@ -736,11 +804,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 		logger, stages.ModeBlockProduction)
 
-	var ethashApi *ethash.API
-	if casted, ok := backend.engine.(*ethash.Ethash); ok {
-		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
-	}
-
 	// proof-of-stake mining
 	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error) {
 		miningStatePos := stagedsync.NewMiningState(&config.Miner)
@@ -792,14 +855,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return block, nil
 	}
 
-	// Initialize ethbackend
-	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications, blockReader, logger, latestBlockBuiltStore)
-	// initialize engine backend
-
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, heimdallStore, bridgeStore, backend.chainConfig, config, backend.notifications.Events, segmentsBuildLimiter, logger)
-
-	var miningRPC txpoolproto.MiningServer = privateapi.NewMiningServer(ctx, backend, ethashApi, logger)
-
 	var creds credentials.TransportCredentials
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
@@ -810,9 +866,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		backend.privateAPI, err = privateapi.StartGrpc(
 			kvRPC,
-			ethBackendRPC,
+			backend.ethBackendRPC,
 			backend.txPoolGrpcServer,
-			miningRPC,
+			backend.miningRPC,
 			bridgeRPC,
 			heimdallRPC,
 			stack.Config().PrivateApiAddr,
@@ -846,7 +902,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				//p2p
 				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
 				//rpcdaemon
-				if err := miningRPC.(*privateapi.MiningServer).BroadcastMinedBlock(b); err != nil {
+				if err := backend.miningRPC.BroadcastMinedBlock(b); err != nil {
 					logger.Error("txpool rpc mined block broadcast", "err", err)
 				}
 				logger.Trace("BroadcastMinedBlock successful", "number", b.Number(), "GasUsed", b.GasUsed(), "txn count", b.Transactions().Len())
@@ -858,7 +914,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				})
 
 			case b := <-backend.pendingBlocks:
-				if err := miningRPC.(*privateapi.MiningServer).BroadcastPendingBlock(b); err != nil {
+				if err := backend.miningRPC.BroadcastPendingBlock(b); err != nil {
 					logger.Error("txpool rpc pending block broadcast", "err", err)
 				}
 			case <-backend.sentriesClient.Hd.QuitPoWMining:
@@ -870,7 +926,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if err := backend.StartMining(
 		context.Background(),
 		backend.chainDB,
-		stateDiffClient,
+		backend.stateDiffClient,
 		mining,
 		miner,
 		backend.gasPrice,
@@ -880,8 +936,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		logger); err != nil {
 		return nil, err
 	}
-
-	backend.ethBackendRPC, backend.miningRPC, backend.stateChangesClient = ethBackendRPC, miningRPC, stateDiffClient
 
 	if config.PolygonSyncStage {
 		backend.syncStages = stages2.NewPolygonSyncStages(
@@ -904,6 +958,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			backend.stopNode,
+			&engineAPISwitcher{backend: backend},
 		)
 		backend.syncUnwindOrder = stagedsync.PolygonSyncUnwindOrder
 		backend.syncPruneOrder = stagedsync.PolygonSyncPruneOrder
@@ -964,7 +1019,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.chainDB, chainConfig, tmpdir, config.Sync),
 		config.InternalCL, // If the chain supports the engine API, then we should not make the server fail.
 		false,
-		config.Miner.EnabledPOS)
+		config.Miner.EnabledPOS,
+		!config.PolygonPosSingleSlotFinality,
+	)
 	backend.engineBackendRPC = engineBackendRPC
 	// If we choose not to run a consensus layer, run our embedded.
 	if config.InternalCL && (clparams.EmbeddedSupported(config.NetworkID) || config.CaplinConfig.IsDevnet()) {
@@ -981,6 +1038,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if chainConfig.Bor != nil && config.PolygonSync {
 		backend.polygonSyncService = polygonsync.NewService(
+			config,
 			logger,
 			chainConfig,
 			polygonSyncSentry(sentries),
@@ -991,6 +1049,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			polygonBridge,
 			heimdallService,
 			backend.notifications,
+			backend.engineBackendRPC,
 		)
 
 		// we need to initiate download before the heimdall services start rather than
@@ -1031,7 +1090,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 }
 
 func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {
-	ethBackendRPC, miningRPC, stateDiffClient := s.ethBackendRPC, s.miningRPC, s.stateChangesClient
 	blockReader := s.blockReader
 	ctx := s.sentryCtx
 	chainKv := s.chainDB
@@ -1064,22 +1122,16 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
-	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, httpRpcCfg.RpcFiltersConfig, blockReader, ethBackendRPC,
-		s.txPoolGrpcServer, miningRPC, stateDiffClient, s.logger)
-	if err != nil {
-		return err
-	}
-
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, s.unsubscribeEthstat = s.notifications.Events.AddHeaderSubscription()
-		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, s.engine, config.Ethstats, s.networkID, ctx.Done(), headCh, txPoolRpcClient); err != nil {
+		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, s.engine, config.Ethstats, s.networkID, ctx.Done(), headCh, s.txPoolRpcClient); err != nil {
 			return err
 		}
 	}
 
-	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService)
+	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService)
 
 	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
 		interface_log_settings := silkworm.RpcInterfaceLogSettings{
@@ -1106,14 +1158,14 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		s.silkwormRPCDaemonService = &silkwormRPCDaemonService
 	} else {
 		go func() {
-			if err := cli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger); err != nil {
+			if err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger); err != nil {
 				s.logger.Error("cli.StartRpcServer error", "err", err)
 			}
 		}()
 	}
 
-	if chainConfig.Bor == nil {
-		go s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
+	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
+		go s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient)
 	}
 
 	// Register the backend on the node
@@ -1788,4 +1840,16 @@ func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.C
 
 func polygonSyncSentry(sentries []protosentry.SentryClient) protosentry.SentryClient {
 	return libsentry.NewSentryMultiplexer(sentries)
+}
+
+type engineAPISwitcher struct {
+	backend *Ethereum
+}
+
+func (e *engineAPISwitcher) SetConsuming(consuming bool) {
+	if e.backend.engineBackendRPC == nil {
+		return
+	}
+
+	e.backend.engineBackendRPC.SetConsuming(consuming)
 }
