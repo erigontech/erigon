@@ -48,7 +48,9 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		return nil, err
 	}
 
-	if epoch < a.forkchoiceStore.FinalizedCheckpoint().Epoch {
+	marginEpochs := uint64(2 << 12)
+
+	if epoch+marginEpochs < a.forkchoiceStore.FinalizedCheckpoint().Epoch {
 		tx, err := a.indiciesDB.BeginRo(r.Context())
 		if err != nil {
 			return nil, err
