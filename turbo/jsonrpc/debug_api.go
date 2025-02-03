@@ -508,9 +508,6 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, nil
-	}
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
@@ -525,6 +522,10 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if !ok {
+		return nil, nil
 	}
 
 	txNumMin, err := txNumsReader.Min(tx, blockNum)
