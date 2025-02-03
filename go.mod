@@ -1,8 +1,10 @@
 module github.com/erigontech/erigon
 
-go 1.22.5
+go 1.23.4
 
 replace github.com/erigontech/erigon-lib => ./erigon-lib
+
+replace github.com/erigontech/nitro-erigon => ../
 
 replace (
 	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.3-alpha-1
@@ -33,10 +35,11 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v1.8.0
 	github.com/deckarep/golang-set/v2 v2.6.0
-	github.com/dop251/goja v0.0.0-20230605162241-28ee0ee714f3
+	github.com/dop251/goja v0.0.0-20230806174421-c933cf95e127
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v1.6.2
 	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
+	github.com/erigontech/nitro-erigon v0.0.0-00010101000000-000000000000
 	github.com/fjl/gencodec v0.0.0-20230517082657-f9840df7b83e
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-chi/chi/v5 v5.1.0
@@ -128,8 +131,9 @@ require (
 	github.com/tklauser/numcpus v0.8.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20240528184218-531527333157 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240604185151-ef581f913117 // indirect
+	go.opentelemetry.io/otel/metric v1.24.0 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20240617180043-68d350f18fd4 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240624140628-dc46fd24d27d // indirect
 )
 
 require (
@@ -216,8 +220,8 @@ require (
 	github.com/mikioh/tcpinfo v0.0.0-20190314235526-30a79bb1804b // indirect
 	github.com/mikioh/tcpopt v0.0.0-20190314235656-172688c1accc // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
-	github.com/mitchellh/copystructure v1.0.0 // indirect
-	github.com/mitchellh/reflectwalk v1.0.0 // indirect
+	github.com/mitchellh/copystructure v1.2.0 // indirect
+	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
@@ -276,8 +280,8 @@ require (
 	github.com/supranational/blst v0.3.13 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
-	go.opentelemetry.io/otel v1.8.0 // indirect
-	go.opentelemetry.io/otel/trace v1.8.0 // indirect
+	go.opentelemetry.io/otel v1.24.0 // indirect
+	go.opentelemetry.io/otel/trace v1.24.0 // indirect
 	go.uber.org/dig v1.18.0 // indirect
 	go.uber.org/fx v1.23.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
