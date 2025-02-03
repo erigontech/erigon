@@ -108,7 +108,7 @@ jobs:
                                       --test-sequence "$sequence" \
                                       --repetitions 5 \
                                       --erigon-dir $ERIGON_DATA_DIR \
-                                      --silk-dir ${{runner.workspace}}/dummy \
+                                      --silk-dir ${{runner.workspace}}/erigon \
                                       --test-mode 2 \
                                       --test-report \
                                       --json-report ./reports/mainnet/result.json \
