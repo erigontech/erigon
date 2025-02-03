@@ -392,17 +392,16 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, che
 			readResult := versionMap.Read(vr.Path, txIdx)
 			switch readResult.Status() {
 			case MVReadResultDone:
-				valid = checkVersion(vr.Source,
-					vr.Version, Version{
-						TxIndex:     readResult.depIdx,
-						Incarnation: readResult.incarnation,
-					})
+				valid = checkVersion(vr.Source, vr.Version, Version{
+					TxIndex:     readResult.depIdx,
+					Incarnation: readResult.incarnation,
+				})
 			case MVReadResultDependency:
 				valid = false
 			case MVReadResultNone:
 				valid = vr.Source == StorageRead
 			default:
-				panic(fmt.Errorf("should not happen - undefined vm read status: %ver", readResult.Status()))
+				panic(fmt.Errorf("should not happen - undefined vm read status: %v", readResult.Status()))
 			}
 
 			if versionMap.trace {
