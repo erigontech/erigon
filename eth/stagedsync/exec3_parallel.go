@@ -481,9 +481,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 	}
 
 	tx := task.index
-
-	fmt.Println("res", res.Version().TxIndex+1, res.Version().Incarnation, res.Err)
-
 	be.results[tx] = &execResult{res}
 
 	if res.Err != nil {
@@ -577,16 +574,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 	// do validations ...
 	maxComplete := be.execTasks.maxComplete()
-	fmt.Println("Max Exec", maxComplete)
-	fmt.Println("Exec Complete", be.execTasks.complete)
-
 	toValidate := make(sort.IntSlice, 0, 2)
 
 	for be.validateTasks.minPending() <= maxComplete && be.validateTasks.minPending() >= 0 {
 		toValidate = append(toValidate, be.validateTasks.takeNextPending())
 	}
-
-	fmt.Println("To Validate", toValidate)
 
 	cntInvalid := 0
 
@@ -602,7 +594,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 					return readsource == state.MapRead && readVersion == writtenVersion
 				}) {
 			if cntInvalid == 0 {
-				fmt.Println("valid", tx)
 				be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), true)
 				be.validateTasks.markComplete(tx)
 				// note this assumes that tasks are pushed in order as finalization needs to happen in block order
@@ -623,14 +614,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 			be.preValidated[tx] = false
 			be.txIncarnations[tx]++
-			fmt.Println("invalid", tx)
 		}
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
-	fmt.Println("Max Validated", maxValidated)
-	fmt.Println("Validation Complete", be.validateTasks.complete)
-	fmt.Println("Exec Pending", be.execTasks.pending)
 	be.scheduleExecution(ctx, in)
 
 	if be.finalizeTasks.minPending() != -1 {
@@ -686,7 +673,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 	}
 
 	if be.finalizeTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
-		/*pe.logger.Debug*/ fmt.Println("exec summary", "block", be.blockNum, "tasks", len(be.tasks), "execs", be.cntExec,
+		logger.Debug("exec summary", "block", be.blockNum, "tasks", len(be.tasks), "execs", be.cntExec,
 			"speculative", be.cntSpecExec, "success", be.cntSuccess, "aborts", be.cntAbort, "validations", be.cntTotalValidations, "failures", be.cntValidationFail,
 			"retries", fmt.Sprintf("%.2f%%", float64(be.cntAbort+be.cntValidationFail)/float64(be.cntExec)*100),
 			"execs", fmt.Sprintf("%.2f%%", float64(be.cntExec)/float64(len(be.tasks))*100))
@@ -762,8 +749,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 					!be.blockIO.HasReads(txIndex) ||
 					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
 						func(_ state.ReadSource, _, writtenVersion state.Version) bool {
-							fmt.Println("Val Spec", maxValidated, be.txIncarnations[writtenVersion.TxIndex+1], writtenVersion, writtenVersion.TxIndex < maxValidated &&
-								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1])
 							return writtenVersion.TxIndex < maxValidated &&
 								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
 						})) {
@@ -776,7 +761,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 		be.cntExec++
 
 		if incarnation := be.txIncarnations[nextTx]; incarnation == 0 {
-			fmt.Println("exec", nextTx, incarnation)
 			in.Add(ctx, &taskVersion{
 				execTask:   execTask,
 				version:    execTask.Version(),
@@ -785,7 +769,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 				stats:      be.stats,
 				statsMutex: &be.Mutex})
 		} else {
-			fmt.Println("re exec", nextTx, incarnation)
 			version := execTask.Version()
 			version.Incarnation = incarnation
 			in.ReTry(&taskVersion{
@@ -878,7 +861,7 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 			}
 
 			if blockResult.complete {
-				fmt.Println("Block Complete", blockResult.BlockNum)
+				//fmt.Println("Block Complete", blockResult.BlockNum)
 				//panic(blockResult.BlockNum)
 
 				if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum]; ok {
@@ -1269,7 +1252,6 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tx, a
 	for rwsIt.HasNext() && (blockResult == nil || !blockResult.complete) {
 		txResult := rwsIt.PopNext()
 
-		//fmt.Println("PRQ", txTask.BlockNum, txTask.TxIndex, txTask.TxNum)
 		if pe.cfg.syncCfg.ChaosMonkey {
 			chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txResult.Version().TxIndex, pe.cfg.badBlockHalt, txResult.Err)
 			if chaosErr != nil {
