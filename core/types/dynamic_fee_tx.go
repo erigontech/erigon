@@ -49,6 +49,7 @@ func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint2
 	}
 	gasFeeCap := tx.GetFeeCap()
 	// return 0 because effectiveFee cant be < 0
+	// transaction max fee is below base fee
 	if gasFeeCap.Lt(baseFee) {
 		return uint256.NewInt(0)
 	}

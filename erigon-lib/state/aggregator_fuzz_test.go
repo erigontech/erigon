@@ -21,6 +21,7 @@ package state
 import (
 	"context"
 	"encoding/binary"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"testing"
 	"time"
 
@@ -31,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/holiman/uint256"
 
 	"github.com/stretchr/testify/require"
@@ -96,8 +96,13 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
 			domains.SetTxNum(txNum)
-
-			buf := types.EncodeAccountBytesV3(1, uint256.NewInt(0), nil, 0)
+			acc := accounts.Account{
+				Nonce:       1,
+				Balance:     *uint256.NewInt(0),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
 			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), nil, buf, nil, 0)
 			require.NoError(t, err)
 
@@ -215,8 +220,13 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
 			domains.SetTxNum(txNum)
-
-			buf := types.EncodeAccountBytesV3(1, uint256.NewInt(txNum*1e6), nil, 0)
+			acc := accounts.Account{
+				Nonce:       1,
+				Balance:     *uint256.NewInt(txNum * 1e6),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
 			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), nil, buf, nil, 0)
 			require.NoError(t, err)
 

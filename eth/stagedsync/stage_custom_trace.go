@@ -85,8 +85,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		}
 
 		txNum = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles() * stepSize
-		log.Info("SpawnCustomTrace", "recpStep", ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles(), "accDomain", ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles())
-		log.Info("SpawnCustomTrace", "files", ac.DbgDomain(kv.ReceiptDomain).Name(), "recp", fmt.Sprintf("%+v", ac.DbgDomain(kv.ReceiptDomain)), "files", ac.DbgDomain(kv.ReceiptDomain).Files())
+		log.Info("[dbg] SpawnCustomTrace", "accountsDomainProgress", ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx), "receiptDomainProgress", ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx), "receiptDomainFiles", ac.DbgDomain(kv.ReceiptDomain).Files())
 		ok, startBlock, err = txNumsReader.FindBlockNum(tx, txNum)
 		if err != nil {
 			return fmt.Errorf("getting last executed block: %w", err)
@@ -109,6 +108,20 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		}
 	}
 
+	log.Info("SpawnCustomTrace finish")
+	if err := cfg.db.View(ctx, func(tx kv.Tx) error {
+		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		receiptProgress := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
+		accProgress := ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
+		if accProgress != receiptProgress {
+			err := fmt.Errorf("[integrity] ReceiptDomain=%d is behind AccountDomain=%d", receiptProgress, accProgress)
+			log.Warn(err.Error())
+			return nil
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -125,10 +138,18 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		if err := customTraceBatch(ctx, cfg, ttx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
 			return err
 		}
+
 		doms.SetTx(tx)
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
+
+		{ //assert
+			if err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
+				return err
+			}
+		}
+
 		lastTxNum = doms.TxNum()
 		if err := tx.Commit(); err != nil {
 			return err
@@ -137,6 +158,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	}); err != nil {
 		return err
 	}
+
 	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	var fromStep, toStep uint64
 	if lastTxNum/agg.StepSize() > 0 {
@@ -165,17 +187,78 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	return nil
 }
 
+func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
+	logEvery := time.NewTicker(10 * time.Second)
+	defer logEvery.Stop()
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
+	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+	if err != nil {
+		return err
+	}
+	if fromTxNum < 2 {
+		fromTxNum = 2 //i don't remember why need this
+	}
+
+	if toBlock > 0 {
+		toBlock-- // [fromBlock,toBlock)
+	}
+	toTxNum, err := txNumsReader.Max(tx, toBlock)
+	if err != nil {
+		return err
+	}
+	prevCumGasUsed := -1
+	prevBN := uint64(1)
+	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
+		cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
+		if err != nil {
+			return err
+		}
+		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
+		//fmt.Printf("[dbg.integrity] cumGasUsed=%d, txNum=%d, blockNum=%d, prevCumGasUsed=%d\n", cumGasUsed, txNum, blockNum, prevCumGasUsed)
+		if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
+			_min, _ := txNumsReader.Min(tx, blockNum)
+			_max, _ := txNumsReader.Max(tx, blockNum)
+			err := fmt.Errorf("bad receipt at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
+			log.Warn(err.Error())
+			return err
+			//panic(err)
+		}
+		prevCumGasUsed = int(cumGasUsed)
+		prevBN = blockNum
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%dk/%dk", txNum/1_000, toTxNum/1_000))
+		default:
+		}
+	}
+	return nil
+}
+
+func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsReader, curTxNum uint64) uint64 {
+	txNumMax, _ := txNumsReader.Max(tx, fromBlock)
+	i := uint64(0)
+	for txNumMax < curTxNum {
+		i++
+		txNumMax, _ = txNumsReader.Max(tx, fromBlock+i)
+	}
+	return fromBlock + i
+}
+
 func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
 
 	var cumulativeBlobGasUsedInBlock uint64
-	//var cumulativeGasUsedTotal = uint256.NewInt(0)
 
-	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
-	/// maybe need startTxNum/endTxNum
-	var prevTxNumLog = fromBlock
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
+	fromTxNum, _ := txNumsReader.Min(tx, fromBlock)
+	prevTxNumLog := fromTxNum
+
 	var m runtime.MemStats
 	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
 		NewTracer: func() exec3.GenericTracer { return nil },
@@ -187,9 +270,6 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			if txTask.Tx != nil {
 				cumulativeBlobGasUsedInBlock += txTask.Tx.GetBlobGas()
 			}
-			//if txTask.Final {
-			//	cumulativeGasUsedTotal.AddUint64(cumulativeGasUsedTotal, cumulativeGasUsedInBlock)
-			//}
 
 			if txTask.Final { // TODO: move asserts to 1 level higher
 				if txTask.Header.BlobGasUsed != nil && *txTask.Header.BlobGasUsed != cumulativeBlobGasUsedInBlock {
@@ -200,9 +280,10 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
+
 			if !txTask.Final {
 				var receipt *types.Receipt
-				if txTask.TxIndex >= 0 && !txTask.Final {
+				if txTask.TxIndex >= 0 {
 					receipt = txTask.BlockReceipts[txTask.TxIndex]
 				}
 				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {

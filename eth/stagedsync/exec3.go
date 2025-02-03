@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	metrics2 "github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -490,11 +489,6 @@ Loop:
 			return fmt.Errorf("nil block %d", blockNum)
 		}
 
-		if execStage.SyncMode() == stages.ModeApplyingBlocks ||
-			execStage.SyncMode() == stages.ModeForkValidation {
-			metrics2.UpdateBlockConsumerPreExecutionDelay(b.Time(), blockNum, logger)
-		}
-
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
@@ -649,11 +643,6 @@ Loop:
 
 		// MA commitTx
 		if !parallel {
-			if execStage.SyncMode() == stages.ModeApplyingBlocks ||
-				execStage.SyncMode() == stages.ModeForkValidation {
-				metrics2.UpdateBlockConsumerPostExecutionDelay(b.Time(), blockNum, logger)
-			}
-
 			select {
 			case <-logEvery.C:
 				if inMemExec || isMining {

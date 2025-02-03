@@ -114,7 +114,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 
 		if !txTask.Final {
 			var receipt *types.Receipt
-			if txTask.TxIndex >= 0 && !txTask.Final {
+			if txTask.TxIndex >= 0 {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
 			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
