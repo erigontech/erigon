@@ -1489,6 +1489,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			//we are inside own goroutine - it's fine to block here
 			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil {
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				close(fin)
 				return //nolint
 			}
 			defer a.snapshotBuildSema.Release(1)
