@@ -143,7 +143,7 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 
 		hashBuffer := make([]byte, 8*32)
 		t.MerkleTree.SetComputeLeafFn(func(idx int, out []byte) {
-			validator := v.Get(idx)
+			validator := t.Get(idx)
 			if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
 				panic(err)
 			}
