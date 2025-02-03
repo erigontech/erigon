@@ -744,7 +744,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		)
 		contractBackend := contracts.NewDirectBackend(ethApi)
 		secondaryTxnProvider := backend.txPool
-		backend.shutterPool = shutter.NewPool(logger, config.Shutter, secondaryTxnProvider, contractBackend)
+		backend.shutterPool = shutter.NewPool(logger, config.Shutter, secondaryTxnProvider, contractBackend, backend.stateDiffClient)
 		txnProvider = backend.shutterPool
 	}
 
