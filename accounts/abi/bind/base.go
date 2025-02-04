@@ -61,8 +61,8 @@ type TransactOpts struct {
 	GasPrice  *big.Int // Gas price to use for the transaction execution (nil = gas price oracle)
 	GasTipCap *big.Int // Gas priority fee cap to use for the 1559 transaction execution (nil = gas price oracle)
 	GasLimit  uint64   // Gas limit to set for the transaction execution (0 = estimate)
-
-	GasMargin uint64 // Arbitrum: adjusts gas estimate by this many basis points (0 = no adjustment)
+	GasMargin uint64   // Arbitrum: adjusts gas estimate by this many basis points (0 = no adjustment)
+	NoSend    bool     // Do all transact steps but do not send the transaction
 
 	Context context.Context // Network context to support cancellation and timeouts (nil = no timeout)
 }
