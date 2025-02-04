@@ -110,7 +110,6 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 			kv.Eth1DataVotes:             getKvGetterForStateTable(db, kv.Eth1DataVotes),
 			kv.IntraRandaoMixes:          getKvGetterForStateTable(db, kv.IntraRandaoMixes),
 			kv.RandaoMixes:               getKvGetterForStateTable(db, kv.RandaoMixes),
-			kv.Proposers:                 getKvGetterForStateTable(db, kv.Proposers),
 			kv.BalancesDump:              getKvGetterForStateTable(db, kv.BalancesDump),
 			kv.EffectiveBalancesDump:     getKvGetterForStateTable(db, kv.EffectiveBalancesDump),
 		},
