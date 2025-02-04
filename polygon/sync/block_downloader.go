@@ -95,6 +95,20 @@ func (d *BlockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, st
 		return nil, err
 	}
 
+	if len(checkpoints) == 0 {
+		return nil, nil
+	}
+
+	firstCheckpoint := checkpoints[0]
+	if firstCheckpointStart := firstCheckpoint.StartBlock().Uint64(); firstCheckpointStart > start {
+		return nil, fmt.Errorf(
+			"unexpected first checkpoint with id %d has start %d which is greater than download start %d",
+			firstCheckpoint.Id,
+			firstCheckpointStart,
+			start,
+		)
+	}
+
 	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(checkpoints), d.checkpointVerifier, end)
 }
 
