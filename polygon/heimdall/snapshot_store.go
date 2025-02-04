@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -187,6 +189,10 @@ func (s *SpanSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, err
 	return lastId, ok, err
 }
 
+func (s *SpanSnapshotStore) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]*Span, error) {
+	return snapshotStoreRangeFromBlockNum(ctx, startBlockNum, s.EntityStore, s.snapshots, s.SnapType(), generics.New[Span])
+}
+
 type milestoneSnapshotStore struct {
 	EntityStore[*Milestone]
 	snapshots *RoSnapshots
@@ -302,6 +308,10 @@ func (r *milestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milest
 	return nil, false, fmt.Errorf("%w: %w", ErrMilestoneNotFound, err)
 }
 
+func (s *milestoneSnapshotStore) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]*Milestone, error) {
+	return snapshotStoreRangeFromBlockNum(ctx, startBlockNum, s.EntityStore, s.snapshots, s.SnapType(), generics.New[Milestone])
+}
+
 type checkpointSnapshotStore struct {
 	EntityStore[*Checkpoint]
 	snapshots *RoSnapshots
@@ -405,4 +415,78 @@ func (r *checkpointSnapshotStore) LastFrozenEntityId() uint64 {
 	index := lastSegment.Src().Index()
 
 	return index.BaseDataID() + index.KeyCount() - 1
+}
+
+func (s *checkpointSnapshotStore) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]*Checkpoint, error) {
+	return snapshotStoreRangeFromBlockNum(ctx, startBlockNum, s.EntityStore, s.snapshots, s.SnapType(), generics.New[Checkpoint])
+}
+
+func snapshotStoreRangeFromBlockNum[T Entity](
+	ctx context.Context,
+	startBlockNum uint64,
+	dbStore EntityStore[T],
+	snapshots *RoSnapshots,
+	snapType snaptype.Type,
+	makeEntity func() T,
+) ([]T, error) {
+	dbEntities, err := dbStore.RangeFromBlockNum(ctx, startBlockNum)
+	if err != nil {
+		return nil, err
+	}
+	if len(dbEntities) > 0 && dbEntities[0].BlockNumRange().End < startBlockNum {
+		// this should not happen unless there is a bug in the db store
+		return nil, fmt.Errorf("unexpected first entity end in db range: expected >= %d, got %d", startBlockNum, dbEntities[0].BlockNumRange().End)
+	}
+	if len(dbEntities) > 0 && dbEntities[0].BlockNumRange().Start >= startBlockNum {
+		// all entities in the given range have been found in the db store
+		return dbEntities, nil
+	}
+
+	// otherwise there may be some earlier entities in the range that are in the snapshot files
+	// (this can happen after "rm -rf chaindata" restart if startBlockNum has been pruned and moved to snapshots)
+	// we start scanning backwards until entityEnd < startBlockNum, or we reach the end
+	var fromEntityStart uint64
+	if len(dbEntities) > 0 {
+		fromEntityStart = dbEntities[0].BlockNumRange().Start
+	}
+	toEntityEnd := startBlockNum
+	tx := snapshots.ViewType(snapType)
+	defer tx.Close()
+	segments := tx.Segments
+	var snapshotEntities []T
+
+OUTER:
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		idx := sn.Src().Index()
+		if idx == nil || idx.KeyCount() == 0 {
+			continue
+		}
+
+		gg := sn.Src().MakeGetter()
+		keyCount := idx.KeyCount()
+		for i := keyCount - 1; i >= 0; i-- {
+			offset := idx.OrdinalLookup(i)
+			gg.Reset(offset)
+			result, _ := gg.Next(nil)
+			entity := makeEntity()
+			if err := json.Unmarshal(result, &entity); err != nil {
+				return nil, err
+			}
+
+			entityStart := entity.BlockNumRange().Start
+			entityEnd := entity.BlockNumRange().End
+			if fromEntityStart > 0 && entityStart >= fromEntityStart {
+				continue
+			} else if entityEnd < toEntityEnd {
+				break OUTER
+			} else {
+				snapshotEntities = append(snapshotEntities, entity)
+			}
+		}
+	}
+
+	// prepend snapshot dbEntities that fall in the range
+	slices.Reverse(snapshotEntities)
+	return append(snapshotEntities, dbEntities...), nil
 }
