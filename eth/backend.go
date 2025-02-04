@@ -1080,7 +1080,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	agg.BuildFilesInBackground(max(agg.DirtyFilesEndTxNumMinimax(), agg.EndTxNumMinimax()))
+	go func() {
+		if err := agg.MergeLoop(ctx); err != nil {
+			logger.Error("snapashot merge loop error", "err", err)
+			ctxCancel()
+		}
+	}()
 
 	return backend, nil
 }
