@@ -30,7 +30,7 @@ func TestPendingBlock(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	engine := ethash.NewFaker()
 	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, nil, false, rpccfg.DefaultEvmCallTimeout, engine,
-		m.Dirs), nil, nil, nil, mining, 5000000, 1e18, 100_000, &ethconfig.Defaults, false, 100_000, 128, log.New(), nil)
+		m.Dirs), nil, nil, nil, mining, 5000000, 1e18, 100_000, &ethconfig.Defaults, false, 100_000, 128, log.New(), nil, 1000)
 	expect := uint64(12345)
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(int64(expect))}))
 	require.NoError(t, err)

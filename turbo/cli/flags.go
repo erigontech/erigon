@@ -506,6 +506,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		TraceCompatibility:                ctx.Bool(utils.RpcTraceCompatFlag.Name),
 		BatchLimit:                        ctx.Int(utils.RpcBatchLimit.Name),
 		ReturnDataLimit:                   ctx.Int(utils.RpcReturnDataLimit.Name),
+		LogsMaxRange:                      ctx.Uint64(utils.RpcLogsMaxRange.Name),
 		AllowUnprotectedTxs:               ctx.Bool(utils.AllowUnprotectedTxs.Name),
 		MaxGetProofRewindBlockCount:       ctx.Int(utils.RpcMaxGetProofRewindBlockCount.Name),
 

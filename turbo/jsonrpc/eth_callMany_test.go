@@ -87,7 +87,7 @@ func TestCallMany(t *testing.T) {
 	db := contractBackend.DB()
 	engine := contractBackend.Engine()
 	api := NewEthAPI(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), contractBackend.Agg(), false, rpccfg.DefaultEvmCallTimeout, engine,
-		datadir.New(t.TempDir())), db, nil, nil, nil, 5000000, 1e18, 100_000, &ethconfig.Defaults, false, 100_000, 128, log.New(), nil)
+		datadir.New(t.TempDir())), db, nil, nil, nil, 5000000, 1e18, 100_000, &ethconfig.Defaults, false, 100_000, 128, log.New(), nil, 1000)
 
 	callArgAddr1 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &nonce,
 		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),

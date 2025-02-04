@@ -919,6 +919,11 @@ var (
 		Usage: "Maximum number of bytes returned from eth_call or similar invocations",
 		Value: 100_000,
 	}
+	RpcLogsMaxRange = cli.Uint64Flag{
+		Name:  "rpc.logs.maxrange",
+		Usage: "Maximum range of logs that can be requested in a single call",
+		Value: 1000,
+	}
 	HTTPTraceFlag = cli.BoolFlag{
 		Name:  "http.trace",
 		Usage: "Print all HTTP requests to logs with INFO level",
