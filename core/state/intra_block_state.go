@@ -653,7 +653,7 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 }
 
 var tracedAccounts = map[libcommon.Address]struct{}{
-	//libcommon.HexToAddress("c0b7cd9f6228fca19fb48b66bdd2182316a9a077"): {},
+	//libcommon.HexToAddress("390dc2368bfde7e7a370af46c0b834b718d570c1"): {},
 	//libcommon.HexToAddress("0000000071727de22e5e9d8baf0edac6f37da032"): {},
 	//libcommon.HexToAddress("3cad627d8cc7ca1dd31bb7b0411b7cfda15571f2"): {},
 	//libcommon.HexToAddress("47c4002f8554fec15828af5386fc63555393650e"): {},
@@ -1184,8 +1184,14 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		if traceAccount(addr) {
 			key := SubpathKey(&addr, BalancePath)
-			if w, ok := sdb.versionedWrites.Get(VersionedWrite{Path: key}); ok {
-				updated := w.Val.(uint256.Int)
+			var updated *uint256.Int
+			if sdb.versionedWrites != nil {
+				if w, ok := sdb.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+					val := w.Val.(uint256.Int)
+					updated = &val
+				}
+			}
+			if updated != nil {
 				fmt.Printf("%d (%d.%d) Balance: %x (%v): %d (%d)\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, isDirty, &stateObject.data.Balance, &updated)
 			} else {
 				fmt.Printf("%d (%d.%d) Balance: %x (%v): %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, isDirty, &stateObject.data.Balance)

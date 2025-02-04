@@ -83,7 +83,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderParallelV3(se.rs.Domains(), se.tx()))
-
+				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 					return core.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */)
 				}

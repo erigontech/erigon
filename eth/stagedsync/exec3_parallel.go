@@ -884,27 +884,27 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 					ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
 					ibs.SetVersion(result.Version().Incarnation)
 
-					if txTask, ok := result.Task.(*exec.TxTask); ok {
-						syscall := func(contract common.Address, data []byte) ([]byte, error) {
-							return core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false)
-						}
+					txTask := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
-						chainReader := consensuschain.NewReader(pe.cfg.chainConfig, pe.applyTx, pe.cfg.blockReader, pe.logger)
-						if pe.isMining {
-							_, txTask.Txs, blockReceipts, _, err =
-								pe.cfg.engine.FinalizeAndAssemble(
-									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
-									txTask.Withdrawals, chainReader, syscall, nil, pe.logger)
-						} else {
-							_, _, _, err =
-								pe.cfg.engine.Finalize(
-									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
-									txTask.Withdrawals, chainReader, syscall, pe.logger)
-						}
+					syscall := func(contract common.Address, data []byte) ([]byte, error) {
+						return core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false)
+					}
 
-						if err != nil {
-							return fmt.Errorf("can't finalize block: %w", err)
-						}
+					chainReader := consensuschain.NewReader(pe.cfg.chainConfig, pe.applyTx, pe.cfg.blockReader, pe.logger)
+					if pe.isMining {
+						_, txTask.Txs, blockReceipts, _, err =
+							pe.cfg.engine.FinalizeAndAssemble(
+								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
+								txTask.Withdrawals, chainReader, syscall, nil, pe.logger)
+					} else {
+						_, _, _, err =
+							pe.cfg.engine.Finalize(
+								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
+								txTask.Withdrawals, chainReader, syscall, pe.logger)
+					}
+
+					if err != nil {
+						return fmt.Errorf("can't finalize block: %w", err)
 					}
 
 					stateWriter := state.NewStateWriterBufferedV3(pe.rs, pe.accumulator)
@@ -928,6 +928,9 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 				}
 
 				if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum+1]; ok {
+					//if blockExecutor.blockNum == 16793696 {
+					//	fmt.Println("Block",blockExecutor.blockNum)
+					//}
 					blockExecutor.scheduleExecution(ctx, pe.in)
 				}
 			}

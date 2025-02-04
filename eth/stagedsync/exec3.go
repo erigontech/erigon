@@ -713,9 +713,9 @@ func ExecV3(ctx context.Context,
 					return err
 				}
 
-				if blockNum == /*16857761, 16853722, 16883726,*/ 16844690 {
-					fmt.Println("Complete", blockNum)
-				}
+				//if blockNum == 16841863 {
+				//	fmt.Println("Complete", blockNum)
+				//}
 				uncommittedGas = se.executedGas - se.committedGas
 				mxExecBlocks.Add(1)
 
