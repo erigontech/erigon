@@ -26,19 +26,37 @@ import (
 )
 
 type CallTracer struct {
+	hooks *tracing.Hooks
 	froms map[libcommon.Address]struct{}
 	tos   map[libcommon.Address]struct{}
 }
 
-func NewCallTracer() *CallTracer {
-	return &CallTracer{}
+func NewCallTracer(hooks *tracing.Hooks) *CallTracer {
+	return &CallTracer{
+		hooks: hooks,
+	}
 }
 
 func (ct *CallTracer) Tracer() *tracers.Tracer {
+	var hooks tracing.Hooks
+
+	if ct.hooks != nil {
+		hooks = *ct.hooks
+
+		if ct.hooks.OnEnter != nil {
+			hooks.OnEnter = func(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+				ct.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
+				ct.hooks.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
+			}
+		}
+	}
+
+	if hooks.OnEnter == nil {
+		hooks.OnEnter = ct.OnEnter
+	}
+
 	return &tracers.Tracer{
-		Hooks: &tracing.Hooks{
-			OnEnter: ct.OnEnter,
-		},
+		Hooks: &hooks,
 	}
 }
 

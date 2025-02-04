@@ -95,7 +95,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 		engine:   engine,
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
-		callTracer:  NewCallTracer(),
+		callTracer:  NewCallTracer(hooks),
 		taskGasPool: new(core.GasPool),
 		hooks:       hooks,
 
@@ -104,7 +104,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 		isMining: isMining,
 	}
 	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
-	w.vmCfg = vm.Config{Debug: true, Tracer: hooks}
+	w.vmCfg = vm.Config{Debug: true, Tracer: w.callTracer.Tracer().Hooks}
 	w.ibs = state.New(w.stateReader)
 	return w
 }
