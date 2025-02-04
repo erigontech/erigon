@@ -289,15 +289,27 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	}
 }
 
+func BenchmarkAggregator_BeginFilesRo_Latency(b *testing.B) {
+	//BenchmarkAggregator_BeginFilesRo/begin_files_ro-16  1737404  737.3 ns/op  3216 B/op  21 allocs/op
+	aggStep := uint64(100_00)
+	_, agg := testDbAndAggregatorBench(b, aggStep)
+
+	b.Run("begin_files_ro", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			agg.BeginFilesRo()
+		}
+	})
+}
+
 var parallel = flag.Int("bench.parallel", 1, "parallelism value") // runs 1 *maxprocs
 var loopv = flag.Int("bench.loopv", 100000, "loop value")
 
-func BenchmarkAggregator_BeginFilesRo(b *testing.B) {
+func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
+	// trying to find BeginFilesRo throughput
 	if !flag.Parsed() {
 		flag.Parse()
 	}
-
-	//b.Logf("Running with parallel=%d work=%d", *parallel, *loopv)
+	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *loopv, *parallel*runtime.GOMAXPROCS(0))
 
 	aggStep := uint64(100_00)
 	_, agg := testDbAndAggregatorBench(b, aggStep)
@@ -313,6 +325,5 @@ func BenchmarkAggregator_BeginFilesRo(b *testing.B) {
 			}
 			tx.Close()
 		}
-
 	})
 }
