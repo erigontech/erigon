@@ -21,6 +21,7 @@ import (
 type MockBlobSidecarsService struct {
 	ctrl     *gomock.Controller
 	recorder *MockBlobSidecarsServiceMockRecorder
+	isgomock struct{}
 }
 
 // MockBlobSidecarsServiceMockRecorder is the mock recorder for MockBlobSidecarsService.
@@ -41,17 +42,17 @@ func (m *MockBlobSidecarsService) EXPECT() *MockBlobSidecarsServiceMockRecorder 
 }
 
 // ProcessMessage mocks base method.
-func (m *MockBlobSidecarsService) ProcessMessage(arg0 context.Context, arg1 *uint64, arg2 *cltypes.BlobSidecar) error {
+func (m *MockBlobSidecarsService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.BlobSidecar) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ProcessMessage", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // ProcessMessage indicates an expected call of ProcessMessage.
-func (mr *MockBlobSidecarsServiceMockRecorder) ProcessMessage(arg0, arg1, arg2 any) *MockBlobSidecarsServiceProcessMessageCall {
+func (mr *MockBlobSidecarsServiceMockRecorder) ProcessMessage(ctx, subnet, msg any) *MockBlobSidecarsServiceProcessMessageCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockBlobSidecarsService)(nil).ProcessMessage), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockBlobSidecarsService)(nil).ProcessMessage), ctx, subnet, msg)
 	return &MockBlobSidecarsServiceProcessMessageCall{Call: call}
 }
 
