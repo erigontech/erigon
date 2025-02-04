@@ -99,7 +99,7 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, baseNumFrom, baseNumTo
 		from, to := BaseNum(step*a.stepSize), BaseNum((step+1)*a.stepSize)
 
 		// can it freeze? just follow base appendable
-		if !a.standalone && to > a.baseAppendable.DirtySegmentsMaxNum() {
+		if !a.standalone && to > a.baseAppendable.DirtySegmentsMaxBaseNum() {
 			break
 		}
 		// maybe also check if segment is already built
@@ -249,7 +249,7 @@ func (a *ProtoAppendable) IsBaseAppendable() bool {
 ///
 
 func calcVisibleFiles(files *btree.BTreeG[*DirtySegment], to BaseNum) VisibleSegments {
-	newVisibleFiles := make([]VisibleSegment, 0, files.Len())
+	newVisibleFiles := make([]*VisibleSegment, 0, files.Len())
 	iToNum := uint64(to)
 	files.Walk(func(items []*DirtySegment) bool {
 		for _, item := range items {
@@ -271,14 +271,14 @@ func calcVisibleFiles(files *btree.BTreeG[*DirtySegment], to BaseNum) VisibleSeg
 				newVisibleFiles = newVisibleFiles[:len(newVisibleFiles)-1]
 			}
 
-			newVisibleFiles = append(newVisibleFiles, VisibleSegment{
+			newVisibleFiles = append(newVisibleFiles, &VisibleSegment{
 				src: item,
 			})
 		}
 		return true
 	})
 	if newVisibleFiles == nil {
-		newVisibleFiles = []VisibleSegment{}
+		newVisibleFiles = []*VisibleSegment{}
 	}
 	return newVisibleFiles
 }

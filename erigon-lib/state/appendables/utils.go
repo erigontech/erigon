@@ -65,4 +65,4 @@ type AppendableWriter struct {
 	values *etl.Collector
 }
 
-func (w *AppendableWriter) Append()
+//func (w *AppendableWriter) Append()

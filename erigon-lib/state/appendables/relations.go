@@ -7,8 +7,8 @@ import "github.com/erigontech/erigon-lib/kv"
 // 1:1; baseNum = Num
 type PointRelation struct{}
 
-func (r *PointRelation) BaseNum2Id(fromBaseNum Num, tx kv.Tx) (Id, error) {
-	return Id(fromBaseNum), nil
+func (r *PointRelation) BaseNum2Id(inp BaseNum, tx kv.Tx) (Id, error) {
+	return Id(inp), nil
 }
 
 func (r *PointRelation) Num2Id(num Num, tx kv.Tx) (Id, error) {
@@ -23,14 +23,14 @@ type ManyToOneRelation struct {
 	entityEndsTbl string
 }
 
-func (r *ManyToOneRelation) BaseNum2Id(fromBaseNum Num, tx kv.Tx) (Id, error) {
+func (r *ManyToOneRelation) BaseNum2Id(inp BaseNum, tx kv.Tx) (Id, error) {
 	c, err := tx.Cursor(r.entityEndsTbl)
 	if err != nil {
 		return 0, err
 	}
 	defer c.Close()
 
-	_, v, err := c.Seek(Encode64ToBytes(uint64(fromBaseNum), true))
+	_, v, err := c.Seek(Encode64ToBytes(uint64(inp), true))
 	if err != nil {
 		return 0, err
 	}
@@ -51,8 +51,8 @@ type OneToManyRelation struct {
 	strictlyAppending bool // i.e. no delete on unwind
 }
 
-func (r *OneToManyRelation) BaseNum2Id(fromBaseNum Num, tx kv.Tx) (Id, error) {
-	prevMaxNum, err := tx.GetOne(r.maxNumTbl, Encode64ToBytes(uint64(fromBaseNum)-1, true))
+func (r *OneToManyRelation) BaseNum2Id(inp BaseNum, tx kv.Tx) (Id, error) {
+	prevMaxNum, err := tx.GetOne(r.maxNumTbl, Encode64ToBytes(uint64(inp)-1, true))
 	if err != nil {
 		return 0, err
 	}
@@ -73,14 +73,14 @@ func (r *OneToManyRelation) Num2Id(num Num, tx kv.Tx) (Id, error) {
 // 1: many; pure function
 // e.g: spans
 // no non-canonical data (id == num)
-type OneToManyRelationPure struct {
-	fn func(baseNum Num) Id
+type OneToManyPureRelation struct {
+	fn func(inp BaseNum) Id
 }
 
-func (r *OneToManyRelationPure) BaseNum2Id(fromBaseNum Num, tx kv.Tx) (Id, error) {
-	return r.fn(fromBaseNum), nil
+func (r *OneToManyPureRelation) BaseNum2Id(inp BaseNum, tx kv.Tx) (Id, error) {
+	return r.fn(inp), nil
 }
 
-func (r *OneToManyRelationPure) Num2Id(num Num, tx kv.Tx) (Id, error) {
+func (r *OneToManyPureRelation) Num2Id(num Num, tx kv.Tx) (Id, error) {
 	return Id(num), nil
 }
