@@ -443,7 +443,6 @@ func snapshotStoreRangeFromBlockNum[T Entity](
 	}
 
 	// otherwise there may be some earlier entities in the range that are in the snapshot files
-	// (this can happen after "rm -rf chaindata" restart if startBlockNum has been pruned and moved to snapshots)
 	// we start scanning backwards until entityEnd < startBlockNum, or we reach the end
 	var fromEntityStart uint64
 	if len(dbEntities) > 0 {
