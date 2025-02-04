@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"time"
@@ -13,6 +14,7 @@ import (
 )
 
 type TxGasLogger struct {
+	ctx             context.Context
 	logEvery        *time.Ticker
 	initialBlock    uint64
 	logBlock        uint64
@@ -30,8 +32,9 @@ type TxGasLogger struct {
 	metric          metrics.Gauge
 }
 
-func NewTxGasLogger(logInterval time.Duration, logBlock, total, gasLimit uint64, logPrefix string, batch *kv.PendingMutations, tx kv.RwTx, metric metrics.Gauge) *TxGasLogger {
+func NewTxGasLogger(ctx context.Context, logInterval time.Duration, logBlock, total, gasLimit uint64, logPrefix string, batch *kv.PendingMutations, tx kv.RwTx, metric metrics.Gauge) *TxGasLogger {
 	return &TxGasLogger{
+		ctx:          ctx,
 		logEvery:     time.NewTicker(logInterval),
 		initialBlock: logBlock,
 		logBlock:     logBlock,
@@ -49,19 +52,33 @@ func NewTxGasLogger(logInterval time.Duration, logBlock, total, gasLimit uint64,
 
 func (g *TxGasLogger) Start() {
 	go func() {
-		for range g.logEvery.C {
-			g.logProgress()
-			g.logTx = g.lastLogTx
-			g.logBlock = g.currentBlockNum
-			g.logTime = time.Now()
-			g.gas = 0
-			if g.tx != nil {
-				g.tx.CollectMetrics()
+		defer g.logEvery.Stop()
+		for {
+			select {
+			case <-g.ctx.Done():
+				log.Info(fmt.Sprintf("[%s] Stopping TxGasLogger", g.logPrefix))
+				return
+			case <-g.logEvery.C:
+				func() {
+					// if tx gets committed during metrics collection, ensure we recover and start logging again
+					defer func() {
+						if r := recover(); r != nil {
+							log.Warn(fmt.Sprintf("[%s] Encountered a panic during TxGasLogger, recovering...", g.logPrefix), "error", r)
+						}
+					}()
+					g.logProgress()
+					g.logTx = g.lastLogTx
+					g.logBlock = g.currentBlockNum
+					g.logTime = time.Now()
+					g.gas = 0
+					if g.tx != nil {
+						g.tx.CollectMetrics()
+					}
+					g.metric.SetUint64(g.logBlock)
+				}()
 			}
-			g.metric.SetUint64(g.logBlock)
 		}
 	}()
-
 }
 
 func (g *TxGasLogger) Stop() {

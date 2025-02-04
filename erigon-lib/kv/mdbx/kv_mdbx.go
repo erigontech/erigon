@@ -879,6 +879,9 @@ func (tx *MdbxTx) IsRo() bool     { return tx.readOnly }
 func (tx *MdbxTx) ViewID() uint64 { return tx.tx.ID() }
 
 func (tx *MdbxTx) CollectMetrics() {
+	if tx == nil {
+		return
+	}
 	if tx.db.opts.label != kv.ChainDB {
 		return
 	}
