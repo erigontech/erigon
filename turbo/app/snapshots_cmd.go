@@ -549,8 +549,16 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 	defer db.Close()
 
+	checks := append([]integrity.Check{}, integrity.AllChecks...)
+	nonDefaultCheck := requestedCheck != "" &&
+		!slices.Contains(integrity.AllChecks, requestedCheck) &&
+		slices.Contains(integrity.NonDefaultChecks, requestedCheck)
+	if nonDefaultCheck {
+		checks = append(checks, integrity.NonDefaultChecks...)
+	}
+
 	blockReader, _ := blockRetire.IO()
-	for _, chk := range integrity.AllChecks {
+	for _, chk := range checks {
 		if requestedCheck != "" && requestedCheck != chk {
 			continue
 		}
