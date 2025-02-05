@@ -6,19 +6,6 @@ set +e # Disable exit on error
 disabled_tests=(
     # Failing after the PR https://github.com/erigontech/erigon/pull/13617 that fixed this incompatibility
     # issues https://hive.pectra-devnet-5.ethpandaops.io/suite.html?suiteid=1738266984-51ae1a2f376e5de5e9ba68f034f80e32.json&suitename=rpc-compat
-    eth_createAccessList/test_07.json
-    eth_createAccessList/test_08.json
-    eth_createAccessList/test_09.json
-    eth_createAccessList/test_10.json
-    eth_createAccessList/test_12.json
-    eth_createAccessList/test_14.json
-    eth_createAccessList/test_17.json
-    eth_getStorageAt/test_01.json
-    eth_getStorageAt/test_02.json
-    eth_getStorageAt/test_03.json
-    eth_getStorageAt/test_04.json
-    eth_getStorageAt/test_05.json
-    eth_getStorageAt/test_06.json
     net_listening/test_1.json
     # Erigon2 and Erigon3 never supported this api methods
     trace_rawTransaction
