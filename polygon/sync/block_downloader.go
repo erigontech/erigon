@@ -147,6 +147,8 @@ func (d *BlockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, sta
 	}
 
 	// we may have gaps in milestones due to their nature, luckily we have a way to handle that
+	// as mentioned earlier we can override the start without breaking the RootHash validity due
+	// to how it is calculated for milestones
 	for i := 1; i < len(milestones); i++ {
 		prev, curr := milestones[i-1], milestones[i]
 		if prev.EndBlock().Uint64()+1 != curr.StartBlock().Uint64() {
