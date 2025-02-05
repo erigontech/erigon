@@ -302,6 +302,10 @@ const (
 	//Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
+
+	ArbOSUtilsBucket        = "arbosUtils"     // arbitrum os utils bucket
+	ArbWasmPrefixBucket     = "arbWasm"        // arbitrum wasm store prefix; wasm version
+	ArbWasmActivationBucket = "wasmActivation" // arbitrum bucket for wasm activations
 )
 
 // Keys
@@ -457,6 +461,10 @@ var ChaindataTables = []string{
 	StorageChangeSetDeprecated,
 	HashedAccountsDeprecated,
 	HashedStorageDeprecated,
+	// arbiturm
+	ArbWasmPrefixBucket,
+	ArbOSUtilsBucket,
+	ArbWasmActivationBucket,
 }
 
 const (
@@ -579,6 +587,9 @@ var ChaindataTablesCfg = TableCfg{
 	TblTracesFromIdx:         {Flags: DupSort},
 	TblTracesToKeys:          {Flags: DupSort},
 	TblTracesToIdx:           {Flags: DupSort},
+	ArbWasmPrefixBucket:      {},
+	ArbOSUtilsBucket:         {},
+	ArbWasmActivationBucket:  {},
 }
 
 var AuRaTablesCfg = TableCfg{
@@ -613,6 +624,12 @@ var ReconTablesCfg = TableCfg{
 	PlainContractD: {Flags: DupSort},
 }
 
+var ArbitrumTablesCfg = TableCfg{
+	ArbWasmPrefixBucket:     {},
+	ArbOSUtilsBucket:        {},
+	ArbWasmActivationBucket: {},
+}
+
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
 	case ChainDB, TemporaryDB, CaplinDB: //TODO: move caplindb tables to own table config
@@ -631,6 +648,9 @@ func TablesCfgByLabel(label Label) TableCfg {
 		return PolygonBridgeTablesCfg
 	case ConsensusDB:
 		return ConsensusTablesCfg
+	case ArbitrumDB, ArbClassicDB, ArbWasmDB:
+		// return ArbitrumTablesCfg
+		return ChaindataTablesCfg
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
