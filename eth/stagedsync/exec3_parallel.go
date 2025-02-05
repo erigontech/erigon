@@ -976,7 +976,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) (err 
 	pe.applyLoopWg.Add(1)
 
 	blockComplete := false
-	applyResults := make(chan applyResult, 10_000)
+	applyResults := make(chan applyResult, 100_000)
 
 	go pe.applyLoop(applyCtx, applyResults)
 
@@ -1006,11 +1006,13 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) (err 
 
 					pe.rs.SetTxNum(applyResult.txNum, applyResult.blockNum)
 
-					if err := pe.rs.ApplyState4(ctx, tx,
-						applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
-						nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
-						pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false); err != nil {
-						return err
+					if true {
+						if err := pe.rs.ApplyState4(ctx, tx,
+							applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
+							nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
+							pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false); err != nil {
+							return err
+						}
 					}
 
 				case *blockResult:
@@ -1280,9 +1282,9 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tx, a
 }
 
 func (pe *parallelExecutor) run(ctx context.Context) context.CancelFunc {
-	pe.blockResults = make(chan *blockResult, 1000)
-	pe.execRequests = make(chan *execRequest, 10_000)
-	pe.in = exec.NewQueueWithRetry(10_000)
+	pe.blockResults = make(chan *blockResult, 100_000)
+	pe.execRequests = make(chan *execRequest, 100_000)
+	pe.in = exec.NewQueueWithRetry(100_000)
 
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
 		pe.RWMutex.RLocker(), pe.accumulator, pe.logger, ctx, true, pe.cfg.db, pe.rs, nil, state.NewNoopWriter(), pe.in,
