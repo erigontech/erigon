@@ -667,6 +667,7 @@ func ExecV3(ctx context.Context,
 			var txTasks []exec.Task
 
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
+				fmt.Println("Block", blockNum, txIndex, inputTxNum)
 				// Do not oversend, wait for the result heap to go under certain size
 				txTask := &exec.TxTask{
 					TxNum:           inputTxNum,
