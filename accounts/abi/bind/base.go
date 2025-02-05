@@ -30,7 +30,7 @@ import (
 	"github.com/holiman/uint256"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/types"
@@ -39,29 +39,31 @@ import (
 
 // SignerFn is a signer function callback when a contract requires a method to
 // sign the transaction before submission.
-type SignerFn func(libcommon.Address, types.Transaction) (types.Transaction, error)
+type SignerFn func(common.Address, types.Transaction) (types.Transaction, error)
 
 // CallOpts is the collection of options to fine tune a contract call request.
 type CallOpts struct {
-	Pending     bool              // Whether to operate on the pending state or the last known one
-	From        libcommon.Address // Optional the sender address, otherwise the first account is used
-	BlockHash   libcommon.Hash    // Optional the block hash on which the call should be performed
-	BlockNumber *big.Int          // Optional the block number on which the call should be performed
-	Context     context.Context   // Network context to support cancellation and timeouts (nil = no timeout)
+	Pending     bool            // Whether to operate on the pending state or the last known one
+	From        common.Address  // Optional the sender address, otherwise the first account is used
+	BlockHash   common.Hash     // Optional the block hash on which the call should be performed
+	BlockNumber *big.Int        // Optional the block number on which the call should be performed
+	Context     context.Context // Network context to support cancellation and timeouts (nil = no timeout)
 }
 
 // TransactOpts is the collection of authorization data required to create a
 // valid Ethereum transaction.
 type TransactOpts struct {
-	From   libcommon.Address // Ethereum account to send the transaction from
-	Nonce  *big.Int          // Nonce to use for the transaction execution (nil = use pending state)
-	Signer SignerFn          // Method to use for signing the transaction (mandatory)
+	From   common.Address // Ethereum account to send the transaction from
+	Nonce  *big.Int       // Nonce to use for the transaction execution (nil = use pending state)
+	Signer SignerFn       // Method to use for signing the transaction (mandatory)
 
-	Value     *big.Int // Funds to transfer along the transaction (nil = 0 = no funds)
-	GasPrice  *big.Int // Gas price to use for the transaction execution (nil = gas price oracle)
+	Value    *big.Int // Funds to transfer along the transaction (nil = 0 = no funds)
+	GasPrice *big.Int // Gas price to use for the transaction execution (nil = gas price oracle)
+	GasLimit uint64   // Gas limit to set for the transaction execution (0 = estimate)
+
 	GasTipCap *big.Int // Gas priority fee cap to use for the 1559 transaction execution (nil = gas price oracle)
-	GasLimit  uint64   // Gas limit to set for the transaction execution (0 = estimate)
 	GasMargin uint64   // Arbitrum: adjusts gas estimate by this many basis points (0 = no adjustment)
+	GasFeeCap *big.Int // Gas fee cap to use for the 1559 transaction execution (nil = gas price oracle)
 	NoSend    bool     // Do all transact steps but do not send the transaction
 
 	Context context.Context // Network context to support cancellation and timeouts (nil = no timeout)
@@ -83,11 +85,34 @@ type WatchOpts struct {
 	Context context.Context // Network context to support cancellation and timeouts (nil = no timeout)
 }
 
+// MetaData collects all metadata for a bound contract.
+type MetaData struct {
+	mu   sync.Mutex
+	Sigs map[string]string
+	Bin  string
+	ABI  string
+	ab   *abi.ABI
+}
+
+func (m *MetaData) GetAbi() (*abi.ABI, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ab != nil {
+		return m.ab, nil
+	}
+	if parsed, err := abi.JSON(strings.NewReader(m.ABI)); err != nil {
+		return nil, err
+	} else {
+		m.ab = &parsed
+	}
+	return m.ab, nil
+}
+
 // BoundContract is the base wrapper object that reflects a contract on the
 // Ethereum network. It contains a collection of methods that are used by the
 // higher level contract bindings to operate.
 type BoundContract struct {
-	address    libcommon.Address  // Deployment address of the contract on the Ethereum blockchain
+	address    common.Address     // Deployment address of the contract on the Ethereum blockchain
 	abi        abi.ABI            // Reflect based ABI to access the correct Ethereum methods
 	caller     ContractCaller     // Read interface to interact with the blockchain
 	transactor ContractTransactor // Write interface to interact with the blockchain
@@ -96,7 +121,7 @@ type BoundContract struct {
 
 // NewBoundContract creates a low level contract interface through which calls
 // and transactions may be made through.
-func NewBoundContract(address libcommon.Address, abi abi.ABI, caller ContractCaller, transactor ContractTransactor, filterer ContractFilterer) *BoundContract {
+func NewBoundContract(address common.Address, abi abi.ABI, caller ContractCaller, transactor ContractTransactor, filterer ContractFilterer) *BoundContract {
 	return &BoundContract{
 		address:    address,
 		abi:        abi,
@@ -108,17 +133,17 @@ func NewBoundContract(address libcommon.Address, abi abi.ABI, caller ContractCal
 
 // DeployContract deploys a contract onto the Ethereum blockchain and binds the
 // deployment address with a Go wrapper.
-func DeployContract(opts *TransactOpts, abi abi.ABI, bytecode []byte, backend ContractBackend, params ...interface{}) (libcommon.Address, types.Transaction, *BoundContract, error) {
+func DeployContract(opts *TransactOpts, abi abi.ABI, bytecode []byte, backend ContractBackend, params ...interface{}) (common.Address, types.Transaction, *BoundContract, error) {
 	// Otherwise try to deploy the contract
-	c := NewBoundContract(libcommon.Address{}, abi, backend, backend, backend)
+	c := NewBoundContract(common.Address{}, abi, backend, backend, backend)
 
 	input, err := c.abi.Pack("", params...)
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	tx, err := c.transact(opts, nil, append(bytecode, input...))
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	c.address = crypto.CreateAddress(opts.From, tx.GetNonce())
 	return c.address, tx, c, nil
@@ -215,7 +240,7 @@ func (c *BoundContract) Transfer(opts *TransactOpts) (types.Transaction, error) 
 
 // transact executes an actual transaction invocation, first deriving any missing
 // authorization fields, and then scheduling the transaction for execution.
-func (c *BoundContract) transact(opts *TransactOpts, contract *libcommon.Address, input []byte) (types.Transaction, error) {
+func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, input []byte) (types.Transaction, error) {
 	var err error
 
 	// Ensure a valid value field and resolve the account nonce
@@ -247,6 +272,27 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *libcommon.Address
 	if overflow {
 		return nil, errors.New("gasPriceBig higher than 2^256-1")
 	}
+
+	// // Estimate TipCap  arbiturm
+	// gasTipCap := opts.GasTipCap
+	// if gasTipCap == nil {
+	// 	tip, err := c.transactor.SuggestGasTipCap(ensureContext(opts.Context))
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	gasTipCap = tip
+	// }
+	// // Estimate FeeCap
+	// gasFeeCap := opts.GasFeeCap
+	// if gasFeeCap == nil {
+	// 	gasFeeCap = new(big.Int).Add(
+	// 		gasTipCap,
+	// 		new(big.Int).Mul(head.BaseFee, big.NewInt(basefeeWiggleMultiplier)),
+	// 	)
+	// }
+	// if gasFeeCap.Cmp(gasTipCap) < 0 {
+	// 	return nil, fmt.Errorf("maxFeePerGas (%v) < maxPriorityFeePerGas (%v)", gasFeeCap, gasTipCap)
+	// }
 	gasLimit := opts.GasLimit
 	if gasLimit == 0 {
 		// Gas estimation cannot succeed without code for method invocations
@@ -307,7 +353,7 @@ func (c *BoundContract) FilterLogs(opts *FilterOpts, name string, query ...[]int
 	logs := make(chan types.Log, 128)
 
 	config := ethereum.FilterQuery{
-		Addresses: []libcommon.Address{c.address},
+		Addresses: []common.Address{c.address},
 		Topics:    topics,
 		FromBlock: new(big.Int).SetUint64(opts.Start),
 	}
@@ -353,7 +399,7 @@ func (c *BoundContract) WatchLogs(opts *WatchOpts, name string, query ...[]inter
 	logs := make(chan types.Log, 128)
 
 	config := ethereum.FilterQuery{
-		Addresses: []libcommon.Address{c.address},
+		Addresses: []common.Address{c.address},
 		Topics:    topics,
 	}
 	if opts.Start != nil {
@@ -405,27 +451,4 @@ func ensureContext(ctx context.Context) context.Context {
 		return context.TODO()
 	}
 	return ctx
-}
-
-// MetaData collects all metadata for a bound contract.
-type MetaData struct {
-	mu   sync.Mutex
-	Sigs map[string]string
-	Bin  string
-	ABI  string
-	ab   *abi.ABI
-}
-
-func (m *MetaData) GetAbi() (*abi.ABI, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.ab != nil {
-		return m.ab, nil
-	}
-	if parsed, err := abi.JSON(strings.NewReader(m.ABI)); err != nil {
-		return nil, err
-	} else {
-		m.ab = &parsed
-	}
-	return m.ab, nil
 }
