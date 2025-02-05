@@ -571,19 +571,26 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.E3HistoryNoSystemTxs(ctx, db, blockReader, agg); err != nil {
 				return err
 			}
-		case integrity.NoBorEventGaps:
-			if err := integrity.NoGapsInBorEvents(ctx, db, blockReader, 0, 0, failFast); err != nil {
+		case integrity.BorEvents:
+			if err := integrity.ValidateBorEvents(ctx, db, blockReader, 0, 0, failFast); err != nil {
+				return err
+			}
+		case integrity.BorSpans:
+			if err := integrity.ValidateBorSpans(logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.BorCheckpoints:
 			if err := integrity.ValidateBorCheckpoints(logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
+		case integrity.BorMilestones:
+			if err := integrity.ValidateBorMilestones(logger, dirs, borSnaps, failFast); err != nil {
+				return err
+			}
 		case integrity.ReceiptsNoDups:
 			if err := integrity.ReceiptsNoDuplicates(ctx, db, blockReader, failFast); err != nil {
 				return err
 			}
-
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
