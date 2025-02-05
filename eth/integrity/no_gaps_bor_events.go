@@ -16,7 +16,7 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
-func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) (err error) {
+func NoGapsInBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) (err error) {
 	defer func() {
 		log.Info("[integrity] NoGapsInBorEvents: done", "err", err)
 	}()
