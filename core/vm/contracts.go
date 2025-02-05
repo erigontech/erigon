@@ -49,8 +49,8 @@ import (
 // requires a deterministic gas count based on the input size of the Run method of the
 // contract.
 type PrecompiledContract interface {
-	RequiredGas(input []byte) uint64  // RequiredPrice calculates the contract gas use
-	Run(input []byte) ([]byte, error) // Run runs the precompiled contract
+	RequiredGas(input []byte) uint64             // RequiredPrice calculates the contract gas use
+	Run(input []byte) ([]byte, *AAReturn, error) // Run runs the precompiled contract
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -149,6 +149,7 @@ var PrecompiledContractsPrague = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{0x11}): &bls12381Pairing{},
 	libcommon.BytesToAddress([]byte{0x12}): &bls12381MapFpToG1{},
 	libcommon.BytesToAddress([]byte{0x13}): &bls12381MapFp2ToG2{},
+	libcommon.BytesToAddress([]byte{0x14}): &aaAcceptAccount{},
 }
 
 var (
@@ -205,20 +206,25 @@ func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 	}
 }
 
+type AAReturn struct {
+	ValidAfter, ValidUntil uint64
+	PaymasterContext       []byte
+}
+
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.
 // It returns
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
 func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64,
-) (ret []byte, remainingGas uint64, err error) {
+) (ret []byte, remainingGas uint64, aaReturn *AAReturn, err error) {
 	gasCost := p.RequiredGas(input)
 	if suppliedGas < gasCost {
-		return nil, 0, ErrOutOfGas
+		return nil, 0, nil, ErrOutOfGas
 	}
 	suppliedGas -= gasCost
-	output, err := p.Run(input)
-	return output, suppliedGas, err
+	output, aaReturn, err := p.Run(input)
+	return output, suppliedGas, aaReturn, err
 }
 
 // ECRECOVER implemented as a native contract.
@@ -228,7 +234,7 @@ func (c *ecrecover) RequiredGas(input []byte) uint64 {
 	return params.EcrecoverGas
 }
 
-func (c *ecrecover) Run(input []byte) ([]byte, error) {
+func (c *ecrecover) Run(input []byte) ([]byte, *AAReturn, error) {
 	const ecRecoverInputLength = 128
 
 	input = libcommon.RightPadBytes(input, ecRecoverInputLength)
@@ -241,7 +247,7 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 
 	// tighter sig s values input homestead only apply to txn sigs
 	if !allZero(input[32:63]) || !crypto.TransactionSignatureIsValid(v, r, s, true /* allowPreEip2s */) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	// We must make sure not to modify the 'input', so placing the 'v' along with
 	// the signature needs to be done on a new allocation
@@ -252,11 +258,11 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	pubKey, err := crypto.Ecrecover(input[:32], sig)
 	// make sure the public key is a valid one
 	if err != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// the first byte of pubkey is bitcoin heritage
-	return libcommon.LeftPadBytes(crypto.Keccak256(pubKey[1:])[12:], 32), nil
+	return libcommon.LeftPadBytes(crypto.Keccak256(pubKey[1:])[12:], 32), nil, nil
 }
 
 // SHA256 implemented as a native contract.
@@ -269,9 +275,9 @@ type sha256hash struct{}
 func (c *sha256hash) RequiredGas(input []byte) uint64 {
 	return uint64(len(input)+31)/32*params.Sha256PerWordGas + params.Sha256BaseGas
 }
-func (c *sha256hash) Run(input []byte) ([]byte, error) {
+func (c *sha256hash) Run(input []byte) ([]byte, *AAReturn, error) {
 	h := sha256.Sum256(input)
-	return h[:], nil
+	return h[:], nil, nil
 }
 
 // RIPEMD160 implemented as a native contract.
@@ -284,10 +290,10 @@ type ripemd160hash struct{}
 func (c *ripemd160hash) RequiredGas(input []byte) uint64 {
 	return uint64(len(input)+31)/32*params.Ripemd160PerWordGas + params.Ripemd160BaseGas
 }
-func (c *ripemd160hash) Run(input []byte) ([]byte, error) {
+func (c *ripemd160hash) Run(input []byte) ([]byte, *AAReturn, error) {
 	ripemd := ripemd160.New()
 	ripemd.Write(input)
-	return libcommon.LeftPadBytes(ripemd.Sum(nil), 32), nil
+	return libcommon.LeftPadBytes(ripemd.Sum(nil), 32), nil, nil
 }
 
 // data copy implemented as a native contract.
@@ -300,8 +306,8 @@ type dataCopy struct{}
 func (c *dataCopy) RequiredGas(input []byte) uint64 {
 	return uint64(len(input)+31)/32*params.IdentityPerWordGas + params.IdentityBaseGas
 }
-func (c *dataCopy) Run(in []byte) ([]byte, error) {
-	return in, nil
+func (c *dataCopy) Run(in []byte) ([]byte, *AAReturn, error) {
+	return in, nil, nil
 }
 
 // bigModExp implements a native big integer exponential modular operation.
@@ -426,7 +432,7 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	return gas.Uint64()
 }
 
-func (c *bigModExp) Run(input []byte) ([]byte, error) {
+func (c *bigModExp) Run(input []byte) ([]byte, *AAReturn, error) {
 	var (
 		baseLen = new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
 		expLen  = new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
@@ -439,7 +445,7 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	}
 	// Handle a special case when both the base and mod length is zero
 	if baseLen == 0 && modLen == 0 {
-		return []byte{}, nil
+		return []byte{}, nil, nil
 	}
 	// Retrieve the operands and execute the exponentiation
 	var (
@@ -451,7 +457,7 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	switch {
 	case mod.BitLen() == 0:
 		// Modulo 0 is undefined, return zero
-		return libcommon.LeftPadBytes([]byte{}, int(modLen)), nil
+		return libcommon.LeftPadBytes([]byte{}, int(modLen)), nil, nil
 	case base.Cmp(libcommon.Big1) == 0:
 		//If base == 1, then we can just return base % mod (if mod >= 1, which it is)
 		v = base.Mod(base, mod).Bytes()
@@ -462,7 +468,7 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		// Modulo is odd
 		v = base.Exp(base, exp, mod).Bytes()
 	}
-	return libcommon.LeftPadBytes(v, int(modLen)), nil
+	return libcommon.LeftPadBytes(v, int(modLen)), nil, nil
 }
 
 // newCurvePoint unmarshals a binary blob into a bn256 elliptic curve point,
@@ -487,18 +493,18 @@ func newTwistPoint(blob []byte) (*bn256.G2, error) {
 
 // runBn256Add implements the Bn256Add precompile, referenced by both
 // Byzantium and Istanbul operations.
-func runBn256Add(input []byte) ([]byte, error) {
+func runBn256Add(input []byte) ([]byte, *AAReturn, error) {
 	x, err := newCurvePoint(getData(input, 0, 64))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	y, err := newCurvePoint(getData(input, 64, 64))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	res := new(bn256.G1)
 	res.Add(x, y)
-	return res.Marshal(), nil
+	return res.Marshal(), nil, nil
 }
 
 // bn256Add implements a native elliptic curve point addition conforming to
@@ -510,7 +516,7 @@ func (c *bn256AddIstanbul) RequiredGas(input []byte) uint64 {
 	return params.Bn256AddGasIstanbul
 }
 
-func (c *bn256AddIstanbul) Run(input []byte) ([]byte, error) {
+func (c *bn256AddIstanbul) Run(input []byte) ([]byte, *AAReturn, error) {
 	return runBn256Add(input)
 }
 
@@ -523,20 +529,20 @@ func (c *bn256AddByzantium) RequiredGas(input []byte) uint64 {
 	return params.Bn256AddGasByzantium
 }
 
-func (c *bn256AddByzantium) Run(input []byte) ([]byte, error) {
+func (c *bn256AddByzantium) Run(input []byte) ([]byte, *AAReturn, error) {
 	return runBn256Add(input)
 }
 
 // runBn256ScalarMul implements the Bn256ScalarMul precompile, referenced by
 // both Byzantium and Istanbul operations.
-func runBn256ScalarMul(input []byte) ([]byte, error) {
+func runBn256ScalarMul(input []byte) ([]byte, *AAReturn, error) {
 	p, err := newCurvePoint(getData(input, 0, 64))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	res := new(bn256.G1)
 	res.ScalarMult(p, new(big.Int).SetBytes(getData(input, 64, 32)))
-	return res.Marshal(), nil
+	return res.Marshal(), nil, nil
 }
 
 // bn256ScalarMulIstanbul implements a native elliptic curve scalar
@@ -548,7 +554,7 @@ func (c *bn256ScalarMulIstanbul) RequiredGas(input []byte) uint64 {
 	return params.Bn256ScalarMulGasIstanbul
 }
 
-func (c *bn256ScalarMulIstanbul) Run(input []byte) ([]byte, error) {
+func (c *bn256ScalarMulIstanbul) Run(input []byte) ([]byte, *AAReturn, error) {
 	return runBn256ScalarMul(input)
 }
 
@@ -561,7 +567,7 @@ func (c *bn256ScalarMulByzantium) RequiredGas(input []byte) uint64 {
 	return params.Bn256ScalarMulGasByzantium
 }
 
-func (c *bn256ScalarMulByzantium) Run(input []byte) ([]byte, error) {
+func (c *bn256ScalarMulByzantium) Run(input []byte) ([]byte, *AAReturn, error) {
 	return runBn256ScalarMul(input)
 }
 
@@ -578,10 +584,10 @@ var (
 
 // runBn256Pairing implements the Bn256Pairing precompile, referenced by both
 // Byzantium and Istanbul operations.
-func runBn256Pairing(input []byte) ([]byte, error) {
+func runBn256Pairing(input []byte) ([]byte, *AAReturn, error) {
 	// Handle some corner cases cheaply
 	if len(input)%192 > 0 {
-		return nil, errBadPairingInput
+		return nil, nil, errBadPairingInput
 	}
 	// Convert the input into a set of coordinates
 	var (
@@ -591,20 +597,20 @@ func runBn256Pairing(input []byte) ([]byte, error) {
 	for i := 0; i < len(input); i += 192 {
 		c, err := newCurvePoint(input[i : i+64])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		t, err := newTwistPoint(input[i+64 : i+192])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		cs = append(cs, c)
 		ts = append(ts, t)
 	}
 	// Execute the pairing checks and return the results
 	if bn256.PairingCheck(cs, ts) {
-		return true32Byte, nil
+		return true32Byte, nil, nil
 	}
-	return false32Byte, nil
+	return false32Byte, nil, nil
 }
 
 // bn256PairingIstanbul implements a pairing pre-compile for the bn256 curve
@@ -616,7 +622,7 @@ func (c *bn256PairingIstanbul) RequiredGas(input []byte) uint64 {
 	return params.Bn256PairingBaseGasIstanbul + uint64(len(input)/192)*params.Bn256PairingPerPointGasIstanbul
 }
 
-func (c *bn256PairingIstanbul) Run(input []byte) ([]byte, error) {
+func (c *bn256PairingIstanbul) Run(input []byte) ([]byte, *AAReturn, error) {
 	return runBn256Pairing(input)
 }
 
@@ -629,7 +635,7 @@ func (c *bn256PairingByzantium) RequiredGas(input []byte) uint64 {
 	return params.Bn256PairingBaseGasByzantium + uint64(len(input)/192)*params.Bn256PairingPerPointGasByzantium
 }
 
-func (c *bn256PairingByzantium) Run(input []byte) ([]byte, error) {
+func (c *bn256PairingByzantium) Run(input []byte) ([]byte, *AAReturn, error) {
 	return runBn256Pairing(input)
 }
 
@@ -655,13 +661,13 @@ var (
 	errBlake2FInvalidFinalFlag   = errors.New("invalid final flag")
 )
 
-func (c *blake2F) Run(input []byte) ([]byte, error) {
+func (c *blake2F) Run(input []byte) ([]byte, *AAReturn, error) {
 	// Make sure the input is valid (correct length and final flag)
 	if len(input) != blake2FInputLength {
-		return nil, errBlake2FInvalidInputLength
+		return nil, nil, errBlake2FInvalidInputLength
 	}
 	if input[212] != blake2FNonFinalBlockBytes && input[212] != blake2FFinalBlockBytes {
-		return nil, errBlake2FInvalidFinalFlag
+		return nil, nil, errBlake2FInvalidFinalFlag
 	}
 	// Parse the input into the Blake2b call parameters
 	var (
@@ -691,7 +697,7 @@ func (c *blake2F) Run(input []byte) ([]byte, error) {
 		offset := i * 8
 		binary.LittleEndian.PutUint64(output[offset:offset+8], h[i])
 	}
-	return output, nil
+	return output, nil, nil
 }
 
 var (
@@ -709,30 +715,30 @@ func (c *bls12381G1Add) RequiredGas(input []byte) uint64 {
 	return params.Bls12381G1AddGas
 }
 
-func (c *bls12381G1Add) Run(input []byte) ([]byte, error) {
+func (c *bls12381G1Add) Run(input []byte) ([]byte, *AAReturn, error) {
 	// Implements EIP-2537 G1Add precompile.
 	// > G1 addition call expects `256` bytes as an input that is interpreted as byte concatenation of two G1 points (`128` bytes each).
 	// > Output is an encoding of addition operation result - single G1 point (`128` bytes).
 	if len(input) != 256 {
-		return nil, errBLS12381InvalidInputLength
+		return nil, nil, errBLS12381InvalidInputLength
 	}
 	var err error
 	var p0, p1 *bls12381.G1Affine
 
 	// Decode G1 point p_0
 	if p0, err = decodePointG1(input[:128]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Decode G1 point p_1
 	if p1, err = decodePointG1(input[128:]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Compute r = p_0 + p_1
 	p0.Add(p0, p1)
 
 	// Encode the G1 point result into 128 bytes
-	return encodePointG1(p0), nil
+	return encodePointG1(p0), nil, nil
 }
 
 // bls12381G1Mul implements EIP-2537 G1Mul precompile.
@@ -743,24 +749,24 @@ func (c *bls12381G1Mul) RequiredGas(input []byte) uint64 {
 	return params.Bls12381G1MulGas
 }
 
-func (c *bls12381G1Mul) Run(input []byte) ([]byte, error) {
+func (c *bls12381G1Mul) Run(input []byte) ([]byte, *AAReturn, error) {
 	// Implements EIP-2537 G1Mul precompile.
 	// > G1 multiplication call expects `160` bytes as an input that is interpreted as byte concatenation of encoding of G1 point (`128` bytes) and encoding of a scalar value (`32` bytes).
 	// > Output is an encoding of multiplication operation result - single G1 point (`128` bytes).
 	if len(input) != 160 {
-		return nil, errBLS12381InvalidInputLength
+		return nil, nil, errBLS12381InvalidInputLength
 	}
 	var err error
 	var p0 *bls12381.G1Affine
 
 	// Decode G1 point
 	if p0, err = decodePointG1(input[:128]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Fast subgroup check
 	if !p0.IsInSubGroup() {
-		return nil, errBLS12381G1PointSubgroup
+		return nil, nil, errBLS12381G1PointSubgroup
 	}
 
 	// Decode scalar value
@@ -771,7 +777,7 @@ func (c *bls12381G1Mul) Run(input []byte) ([]byte, error) {
 	r.ScalarMultiplication(p0, e)
 
 	// Encode the G1 point into 128 bytes
-	return encodePointG1(r), nil
+	return encodePointG1(r), nil, nil
 }
 
 // bls12381G1MultiExp implements EIP-2537 G1MultiExp precompile.
@@ -796,13 +802,13 @@ func (c *bls12381G1MultiExp) RequiredGas(input []byte) uint64 {
 	return (uint64(k) * params.Bls12381G1MulGas * discount) / 1000
 }
 
-func (c *bls12381G1MultiExp) Run(input []byte) ([]byte, error) {
+func (c *bls12381G1MultiExp) Run(input []byte) ([]byte, *AAReturn, error) {
 	// Implements EIP-2537 G1MultiExp precompile.
 	// G1 multiplication call expects `160*k` bytes as an input that is interpreted as byte concatenation of `k` slices each of them being a byte concatenation of encoding of G1 point (`128` bytes) and encoding of a scalar value (`32` bytes).
 	// Output is an encoding of multiexponentiation operation result - single G1 point (`128` bytes).
 	k := len(input) / 160
 	if len(input) == 0 || len(input)%160 != 0 {
-		return nil, errBLS12381InvalidInputLength
+		return nil, nil, errBLS12381InvalidInputLength
 	}
 	points := make([]bls12381.G1Affine, k)
 	scalars := make([]fr.Element, k)
@@ -814,11 +820,11 @@ func (c *bls12381G1MultiExp) Run(input []byte) ([]byte, error) {
 		// Decode G1 point
 		p, err := decodePointG1(input[t0:t1])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		// Fast subgroup check
 		if !p.IsInSubGroup() {
-			return nil, errBLS12381G1PointSubgroup
+			return nil, nil, errBLS12381G1PointSubgroup
 		}
 		points[i] = *p
 		// Decode scalar value
@@ -830,7 +836,7 @@ func (c *bls12381G1MultiExp) Run(input []byte) ([]byte, error) {
 	r.MultiExp(points, scalars, ecc.MultiExpConfig{})
 
 	// Encode the G1 point to 128 bytes
-	return encodePointG1(r), nil
+	return encodePointG1(r), nil, nil
 }
 
 // bls12381G2Add implements EIP-2537 G2Add precompile.
@@ -841,23 +847,23 @@ func (c *bls12381G2Add) RequiredGas(input []byte) uint64 {
 	return params.Bls12381G2AddGas
 }
 
-func (c *bls12381G2Add) Run(input []byte) ([]byte, error) {
+func (c *bls12381G2Add) Run(input []byte) ([]byte, *AAReturn, error) {
 	// Implements EIP-2537 G2Add precompile.
 	// > G2 addition call expects `512` bytes as an input that is interpreted as byte concatenation of two G2 points (`256` bytes each).
 	// > Output is an encoding of addition operation result - single G2 point (`256` bytes).
 	if len(input) != 512 {
-		return nil, errBLS12381InvalidInputLength
+		return nil, nil, errBLS12381InvalidInputLength
 	}
 	var err error
 	var p0, p1 *bls12381.G2Affine
 
 	// Decode G2 point p_0
 	if p0, err = decodePointG2(input[:256]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Decode G2 point p_1
 	if p1, err = decodePointG2(input[256:]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Compute r = p_0 + p_1
@@ -865,7 +871,7 @@ func (c *bls12381G2Add) Run(input []byte) ([]byte, error) {
 	r.Add(p0, p1)
 
 	// Encode the G2 point into 256 bytes
-	return encodePointG2(r), nil
+	return encodePointG2(r), nil, nil
 }
 
 // bls12381G2Mul implements EIP-2537 G2Mul precompile.
@@ -876,24 +882,24 @@ func (c *bls12381G2Mul) RequiredGas(input []byte) uint64 {
 	return params.Bls12381G2MulGas
 }
 
-func (c *bls12381G2Mul) Run(input []byte) ([]byte, error) {
+func (c *bls12381G2Mul) Run(input []byte) ([]byte, *AAReturn, error) {
 	// Implements EIP-2537 G2MUL precompile logic.
 	// > G2 multiplication call expects `288` bytes as an input that is interpreted as byte concatenation of encoding of G2 point (`256` bytes) and encoding of a scalar value (`32` bytes).
 	// > Output is an encoding of multiplication operation result - single G2 point (`256` bytes).
 	if len(input) != 288 {
-		return nil, errBLS12381InvalidInputLength
+		return nil, nil, errBLS12381InvalidInputLength
 	}
 	var err error
 	var p0 *bls12381.G2Affine
 
 	// Decode G2 point
 	if p0, err = decodePointG2(input[:256]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Fast subgroup check
 	if !p0.IsInSubGroup() {
-		return nil, errBLS12381G2PointSubgroup
+		return nil, nil, errBLS12381G2PointSubgroup
 	}
 
 	// Decode scalar value
@@ -904,7 +910,7 @@ func (c *bls12381G2Mul) Run(input []byte) ([]byte, error) {
 	r.ScalarMultiplication(p0, e)
 
 	// Encode the G2 point into 256 bytes
-	return encodePointG2(r), nil
+	return encodePointG2(r), nil, nil
 }
 
 // bls12381G2MultiExp implements EIP-2537 G2MultiExp precompile.
@@ -929,13 +935,13 @@ func (c *bls12381G2MultiExp) RequiredGas(input []byte) uint64 {
 	return (uint64(k) * params.Bls12381G2MulGas * discount) / 1000
 }
 
-func (c *bls12381G2MultiExp) Run(input []byte) ([]byte, error) {
+func (c *bls12381G2MultiExp) Run(input []byte) ([]byte, *AAReturn, error) {
 	// Implements EIP-2537 G2MultiExp precompile logic
 	// > G2 multiplication call expects `288*k` bytes as an input that is interpreted as byte concatenation of `k` slices each of them being a byte concatenation of encoding of G2 point (`256` bytes) and encoding of a scalar value (`32` bytes).
 	// > Output is an encoding of multiexponentiation operation result - single G2 point (`256` bytes).
 	k := len(input) / 288
 	if len(input) == 0 || len(input)%288 != 0 {
-		return nil, errBLS12381InvalidInputLength
+		return nil, nil, errBLS12381InvalidInputLength
 	}
 	points := make([]bls12381.G2Affine, k)
 	scalars := make([]fr.Element, k)
@@ -947,11 +953,11 @@ func (c *bls12381G2MultiExp) Run(input []byte) ([]byte, error) {
 		// Decode G2 point
 		p, err := decodePointG2(input[t0:t1])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		// Fast subgroup check
 		if !p.IsInSubGroup() {
-			return nil, errBLS12381G2PointSubgroup
+			return nil, nil, errBLS12381G2PointSubgroup
 		}
 		points[i] = *p
 		// Decode scalar value
@@ -963,7 +969,7 @@ func (c *bls12381G2MultiExp) Run(input []byte) ([]byte, error) {
 	r.MultiExp(points, scalars, ecc.MultiExpConfig{})
 
 	// Encode the G2 point to 256 bytes.
-	return encodePointG2(r), nil
+	return encodePointG2(r), nil, nil
 }
 
 // bls12381Pairing implements EIP-2537 Pairing precompile.
@@ -974,7 +980,7 @@ func (c *bls12381Pairing) RequiredGas(input []byte) uint64 {
 	return params.Bls12381PairingBaseGas + uint64(len(input)/384)*params.Bls12381PairingPerPairGas
 }
 
-func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
+func (c *bls12381Pairing) Run(input []byte) ([]byte, *AAReturn, error) {
 	// Implements EIP-2537 Pairing precompile logic.
 	// > Pairing call expects `384*k` bytes as an inputs that is interpreted as byte concatenation of `k` slices. Each slice has the following structure:
 	// > - `128` bytes of G1 point encoding
@@ -983,7 +989,7 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 	// > (which is equivalent of Big Endian encoding of Solidity values `uint256(1)` and `uin256(0)` respectively).
 	k := len(input) / 384
 	if len(input) == 0 || len(input)%384 != 0 {
-		return nil, errBLS12381InvalidInputLength
+		return nil, nil, errBLS12381InvalidInputLength
 	}
 
 	var (
@@ -999,21 +1005,21 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 		// Decode G1 point
 		p1, err := decodePointG1(input[t0:t1])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		// Decode G2 point
 		p2, err := decodePointG2(input[t1:t2])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		// 'point is on curve' check already done,
 		// Here we need to apply subgroup checks.
 		if !p1.IsInSubGroup() {
-			return nil, errBLS12381G1PointSubgroup
+			return nil, nil, errBLS12381G1PointSubgroup
 		}
 		if !p2.IsInSubGroup() {
-			return nil, errBLS12381G2PointSubgroup
+			return nil, nil, errBLS12381G2PointSubgroup
 		}
 		p = append(p, *p1)
 		q = append(q, *p2)
@@ -1026,7 +1032,7 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 	if err == nil && ok {
 		out[31] = 1
 	}
-	return out, nil
+	return out, nil, nil
 }
 
 func decodePointG1(in []byte) (*bls12381.G1Affine, error) {
@@ -1126,25 +1132,25 @@ func (c *bls12381MapFpToG1) RequiredGas(input []byte) uint64 {
 	return params.Bls12381MapFpToG1Gas
 }
 
-func (c *bls12381MapFpToG1) Run(input []byte) ([]byte, error) {
+func (c *bls12381MapFpToG1) Run(input []byte) ([]byte, *AAReturn, error) {
 	// Implements EIP-2537 Map_To_G1 precompile.
 	// > Field-to-curve call expects `64` bytes as an input that is interpreted as a an element of the base field.
 	// > Output of this call is `128` bytes and is G1 point following respective encoding rules.
 	if len(input) != 64 {
-		return nil, errBLS12381InvalidInputLength
+		return nil, nil, errBLS12381InvalidInputLength
 	}
 
 	// Decode input field element
 	fe, err := decodeBLS12381FieldElement(input)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Compute mapping
 	r := bls12381.MapToG1(fe)
 
 	// Encode the G1 point to 128 bytes
-	return encodePointG1(&r), nil
+	return encodePointG1(&r), nil, nil
 }
 
 // bls12381MapFp2ToG2 implements EIP-2537 MapG2 precompile.
@@ -1155,29 +1161,29 @@ func (c *bls12381MapFp2ToG2) RequiredGas(input []byte) uint64 {
 	return params.Bls12381MapFp2ToG2Gas
 }
 
-func (c *bls12381MapFp2ToG2) Run(input []byte) ([]byte, error) {
+func (c *bls12381MapFp2ToG2) Run(input []byte) ([]byte, *AAReturn, error) {
 	// Implements EIP-2537 Map_FP2_TO_G2 precompile logic.
 	// > Field-to-curve call expects `128` bytes as an input that is interpreted as a an element of the quadratic extension field.
 	// > Output of this call is `256` bytes and is G2 point following respective encoding rules.
 	if len(input) != 128 {
-		return nil, errBLS12381InvalidInputLength
+		return nil, nil, errBLS12381InvalidInputLength
 	}
 
 	// Decode input field element
 	c0, err := decodeBLS12381FieldElement(input[:64])
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	c1, err := decodeBLS12381FieldElement(input[64:])
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Compute mapping
 	r := bls12381.MapToG2(bls12381.E2{A0: c0, A1: c1})
 
 	// Encode the G2 point to 256 bytes
-	return encodePointG2(&r), nil
+	return encodePointG2(&r), nil, nil
 }
 
 // pointEvaluation implements the EIP-4844 point evaluation precompile
@@ -1189,8 +1195,9 @@ func (c *pointEvaluation) RequiredGas(input []byte) uint64 {
 	return params.PointEvaluationGas
 }
 
-func (c *pointEvaluation) Run(input []byte) ([]byte, error) {
-	return libkzg.PointEvaluationPrecompile(input)
+func (c *pointEvaluation) Run(input []byte) ([]byte, *AAReturn, error) {
+	res, err := libkzg.PointEvaluationPrecompile(input)
+	return res, nil, err
 }
 
 // P256VERIFY (secp256r1 signature verification)
@@ -1203,13 +1210,13 @@ func (c *p256Verify) RequiredGas(input []byte) uint64 {
 }
 
 // Run executes the precompiled contract with given 160 bytes of param, returning the output and the used gas
-func (c *p256Verify) Run(input []byte) ([]byte, error) {
+func (c *p256Verify) Run(input []byte) ([]byte, *AAReturn, error) {
 	// Required input length is 160 bytes
 	const p256VerifyInputLength = 160
 	// Check the input length
 	if len(input) != p256VerifyInputLength {
 		// Input length is invalid
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Extract the hash, r, s, x, y from the input
@@ -1220,9 +1227,26 @@ func (c *p256Verify) Run(input []byte) ([]byte, error) {
 	// Verify the secp256r1 signature
 	if secp256r1.Verify(hash, r, s, x, y) {
 		// Signature is valid
-		return libcommon.LeftPadBytes(big1.Bytes(), 32), nil
+		return libcommon.LeftPadBytes(big1.Bytes(), 32), nil, nil
 	} else {
 		// Signature is invalid
-		return nil, nil
+		return nil, nil, nil
 	}
+}
+
+type aaAcceptAccount struct{}
+
+func (c *aaAcceptAccount) RequiredGas(input []byte) uint64 {
+	return 0
+}
+
+func (c *aaAcceptAccount) Run(input []byte) ([]byte, *AAReturn, error) {
+	// get data back
+	validAfter := binary.BigEndian.Uint64(input[:31])
+	validUntil := binary.BigEndian.Uint64(input[32:64])
+
+	return []byte{0x1}, &AAReturn{
+		ValidAfter: validAfter,
+		ValidUntil: validUntil,
+	}, nil
 }

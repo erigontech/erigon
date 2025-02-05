@@ -277,7 +277,7 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
-	ret, _, err := evm.Call(
+	ret, _, _, err := evm.Call(
 		vm.AccountRef(msg.From()),
 		*msg.To(),
 		msg.Data(),

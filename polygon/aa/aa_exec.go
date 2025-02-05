@@ -1,7 +1,6 @@
 package aa
 
 import (
-	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -14,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
@@ -59,23 +57,7 @@ func ValidateAATransaction(
 
 	// Deployer frame
 	msg := tx.DeployerFrame()
-	validateDeployer := func(ibs evmtypes.IntraBlockState, epc *core.EntryPointCall) error {
-		senderCodeSize, err := ibs.GetCodeSize(*tx.SenderAddress)
-		if err != nil {
-			return wrapError(fmt.Errorf(
-				"error getting code for sender:%s err:%s",
-				tx.SenderAddress.String(), err,
-			))
-		}
-		if senderCodeSize == 0 {
-			return wrapError(fmt.Errorf(
-				"sender not deployed by the deployer, sender:%s deployer:%s",
-				tx.SenderAddress.String(), tx.Deployer.String(),
-			))
-		}
-		return nil
-	}
-	applyRes, err := core.ApplyFrame(evm, msg, gasPool, validateDeployer)
+	applyRes, _, err := core.ApplyFrame(evm, msg, gasPool)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -87,6 +69,19 @@ func ValidateAATransaction(
 			true,
 		)
 	}
+	senderCodeSize, err = ibs.GetCodeSize(*tx.SenderAddress)
+	if err != nil {
+		return nil, 0, wrapError(fmt.Errorf(
+			"error getting code for sender:%s err:%s",
+			tx.SenderAddress.String(), err,
+		))
+	}
+	if senderCodeSize == 0 {
+		return nil, 0, wrapError(fmt.Errorf(
+			"sender not deployed by the deployer, sender:%s deployer:%s",
+			tx.SenderAddress.String(), tx.Deployer.String(),
+		))
+	}
 
 	deploymentGasUsed := applyRes.UsedGas
 
@@ -95,24 +90,8 @@ func ValidateAATransaction(
 	if err != nil {
 		return nil, 0, err
 	}
-	validateValidation := func(ibs evmtypes.IntraBlockState, epc *core.EntryPointCall) error {
-		if epc.Error != nil {
-			return epc.Error
-		}
-		if epc.Input == nil {
-			return errors.New("account validation did not call the EntryPoint 'acceptAccount' callback")
-		}
-		if bytes.Compare(epc.From[:], tx.SenderAddress[:]) == 0 {
-			return errors.New("invalid call to EntryPoint contract from a wrong account address")
-		}
 
-		validityTimeRange, err := types.DecodeAcceptAccount(epc.Input)
-		if err != nil {
-			return err
-		}
-		return validateValidityTimeRange(header.Time, validityTimeRange.ValidAfter, validityTimeRange.ValidUntil)
-	}
-	applyRes, err = core.ApplyFrame(evm, msg, gasPool, validateValidation)
+	applyRes, aaReturn, err := core.ApplyFrame(evm, msg, gasPool)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -124,6 +103,13 @@ func ValidateAATransaction(
 			true,
 		)
 	}
+
+	// NOTE: seems like anyone can call this and not just the account with this approach.
+	// Is this an important security feature? Why was that needed in the first place?
+	err = validateValidityTimeRange(header.Time, aaReturn.ValidAfter, aaReturn.ValidUntil)
+	if err != nil {
+		return nil, 0, err
+	}
 	validationGasUsed += applyRes.UsedGas
 
 	// Paymaster frame
@@ -133,39 +119,7 @@ func ValidateAATransaction(
 	}
 
 	if msg != nil {
-		validatePaymaster := func(ibs evmtypes.IntraBlockState, epc *core.EntryPointCall) error {
-			if epc.Error != nil {
-				return epc.Error
-			}
-			if epc.Input == nil {
-				return errors.New("paymaster validation did not call the EntryPoint 'acceptPaymaster' callback")
-			}
-
-			if bytes.Compare(epc.From[:], tx.Paymaster[:]) != 0 {
-				return errors.New("invalid call to EntryPoint contract from a wrong paymaster address")
-			}
-			paymasterValidity, err := types.DecodeAcceptPaymaster(epc.Input) // TODO: find better name
-			if err != nil {
-				return err
-			}
-
-			if err = validateValidityTimeRange(header.Time, paymasterValidity.ValidAfter, paymasterValidity.ValidUntil); err != nil {
-				return err
-			}
-
-			if len(paymasterValidity.Context) > 0 && tx.PostOpGasLimit == 0 {
-				return wrapError(
-					fmt.Errorf(
-						"paymaster returned a context of size %d but the paymasterPostOpGasLimit is 0",
-						len(paymasterValidity.Context),
-					),
-				)
-			}
-
-			paymasterContext = paymasterValidity.Context
-			return nil
-		}
-		applyRes, err = core.ApplyFrame(evm, msg, gasPool, validatePaymaster)
+		applyRes, aaReturn, err = core.ApplyFrame(evm, msg, gasPool)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -178,6 +132,21 @@ func ValidateAATransaction(
 			)
 		}
 		validationGasUsed += applyRes.UsedGas
+
+		if err = validateValidityTimeRange(header.Time, aaReturn.ValidAfter, aaReturn.ValidUntil); err != nil {
+			return nil, 0, err
+		}
+
+		if len(aaReturn.PaymasterContext) > 0 && tx.PostOpGasLimit == 0 {
+			return nil, 0, wrapError(
+				fmt.Errorf(
+					"paymaster returned a context of size %d but the paymasterPostOpGasLimit is 0",
+					len(aaReturn.PaymasterContext),
+				),
+			)
+		}
+
+		paymasterContext = aaReturn.PaymasterContext
 	}
 
 	return paymasterContext, validationGasUsed, nil
@@ -212,7 +181,7 @@ func ExecuteAATransaction(
 
 	// Execution frame
 	msg := tx.ExecutionFrame()
-	applyRes, err := core.ApplyFrame(evm, msg, gasPool, nil)
+	applyRes, _, err := core.ApplyFrame(evm, msg, gasPool)
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -235,7 +204,7 @@ func ExecuteAATransaction(
 		return 0, nil, nil, err
 	}
 
-	applyRes, err = core.ApplyFrame(evm, msg, gasPool, nil)
+	applyRes, _, err = core.ApplyFrame(evm, msg, gasPool)
 	if err != nil {
 		return 0, nil, nil, err
 	}

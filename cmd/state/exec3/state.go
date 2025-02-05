@@ -320,7 +320,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 				aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction) // type cast checked earlier
 				validationRes := validationResults[i-startIdx]
 
-				execStatus, execReturnData, postOpReturnData, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm)
+				execStatus, execReturnData, postOpReturnData, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, txTask.Header, ibs)
 				if err != nil {
 					outerErr = err
 					break
