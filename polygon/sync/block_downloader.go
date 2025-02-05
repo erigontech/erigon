@@ -109,7 +109,7 @@ func (d *BlockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, st
 		)
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(checkpoints), d.checkpointVerifier, end)
+	return d.downloadBlocksUsingWaypoints(ctx, start, heimdall.AsWaypoints(checkpoints), d.checkpointVerifier, end)
 }
 
 func (d *BlockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64, end *uint64) (*types.Header, error) {
@@ -138,11 +138,12 @@ func (d *BlockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, sta
 		milestones[0].Fields.StartBlock = new(big.Int).SetUint64(start)
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(milestones), d.milestoneVerifier, end)
+	return d.downloadBlocksUsingWaypoints(ctx, start, heimdall.AsWaypoints(milestones), d.milestoneVerifier, end)
 }
 
 func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 	ctx context.Context,
+	start uint64,
 	waypoints heimdall.Waypoints,
 	verifier WaypointHeadersVerifier,
 	end *uint64,
@@ -154,14 +155,18 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 	waypoints = d.limitWaypoints(waypoints)
 	waypoints = limitWaypointsEndBlock(waypoints, end)
 
-	d.logger.Info(
-		syncLogPrefix("downloading blocks using waypoints"),
+	initialInfoLogArgs := []interface{}{
+		"start", start,
 		"waypointsLen", len(waypoints),
-		"start", waypoints[0].StartBlock().Uint64(),
-		"end", waypoints[len(waypoints)-1].EndBlock().Uint64(),
+		"waypointsStart", waypoints[0].StartBlock().Uint64(),
+		"waypointsEnd", waypoints[len(waypoints)-1].EndBlock().Uint64(),
 		"kind", reflect.TypeOf(waypoints[0]),
 		"blockLimit", d.blockLimit,
-	)
+	}
+	if end != nil {
+		initialInfoLogArgs = append(initialInfoLogArgs, "end", *end)
+	}
+	d.logger.Info(syncLogPrefix("downloading blocks using waypoints"), initialInfoLogArgs...)
 
 	// waypoint rootHash->[blocks part of waypoint]
 	waypointBlocksMemo, err := lru.New[common.Hash, []*types.Block](d.p2pService.MaxPeers())
