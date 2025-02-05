@@ -489,6 +489,7 @@ func ExecV3(ctx context.Context,
 	// Temp - need to fix block start up (how do we get cumm gas ?)
 	inputTxNum -= offsetFromBlockBeginning
 	offsetFromBlockBeginning = 0
+	doms.SetTxNum(inputTxNum)
 	// To Here
 
 	applyWorker := cfg.applyWorker
