@@ -109,6 +109,14 @@ func (d *BlockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, st
 		)
 	}
 
+	// validate that there are no gaps
+	for i := 1; i < len(checkpoints); i++ {
+		prev, curr := checkpoints[i-1], checkpoints[i]
+		if curr.RawId() != prev.RawId()+1 {
+			return nil, fmt.Errorf("unexpected checkpoint gap between %d and %d", prev.RawId(), curr.RawId())
+		}
+	}
+
 	return d.downloadBlocksUsingWaypoints(ctx, start, heimdall.AsWaypoints(checkpoints), d.checkpointVerifier, end)
 }
 
@@ -136,6 +144,22 @@ func (d *BlockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, sta
 		)
 
 		milestones[0].Fields.StartBlock = new(big.Int).SetUint64(start)
+	}
+
+	// we may have gaps in milestones due to their nature, luckily we have a way to handle that
+	for i := 1; i < len(milestones); i++ {
+		prev, curr := milestones[i-1], milestones[i]
+		if prev.EndBlock().Uint64()+1 != curr.StartBlock().Uint64() {
+			d.logger.Warn(
+				syncLogPrefix("gap between milestones, overriding milestone start"),
+				"currId", curr.Id,
+				"prevId", prev.Id,
+				"prevEndBlock", prev.EndBlock(),
+				"currStartBlock", curr.StartBlock(),
+			)
+
+			curr.Fields.StartBlock = new(big.Int).SetUint64(prev.EndBlock().Uint64() + 1)
+		}
 	}
 
 	return d.downloadBlocksUsingWaypoints(ctx, start, heimdall.AsWaypoints(milestones), d.milestoneVerifier, end)
