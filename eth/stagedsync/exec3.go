@@ -484,12 +484,6 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	// Temp - need to fix block start up (how do we get cumm gas ?)
-	inputTxNum -= offsetFromBlockBeginning
-	offsetFromBlockBeginning = 0
-	doms.SetTxNum(inputTxNum)
-	// To Here
-
 	applyWorker := cfg.applyWorker
 	defer applyWorker.LogLRUStats()
 
@@ -665,7 +659,6 @@ func ExecV3(ctx context.Context,
 			var txTasks []exec.Task
 
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
-				fmt.Println("Block", blockNum, txIndex, inputTxNum)
 				// Do not oversend, wait for the result heap to go under certain size
 				txTask := &exec.TxTask{
 					TxNum:           inputTxNum,

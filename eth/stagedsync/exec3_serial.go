@@ -56,11 +56,17 @@ func (se *serialExecutor) processEvents(ctx context.Context, wait bool) *blockRe
 
 func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profile bool) (cont bool, err error) {
 	blockReceipts := make([]*types.Receipt, 0, len(tasks))
+	var startTxIndex int
+
+	if len(tasks) > 0 {
+		startTxIndex = tasks[0].(*exec.TxTask).TxIndex
+		if startTxIndex < 0 {
+			startTxIndex = 0
+		}
+	}
 
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
-
-		fmt.Println("Task", txTask.TxIndex, txTask.TxNum)
 
 		result := se.applyWorker.RunTxTaskNoLock(txTask)
 
@@ -121,9 +127,11 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 					panic(err)
 				}
 			} else if txTask.TxIndex >= 0 {
+				// TODO if this is not the start of the block we need
+				// to get the previous reciept
 				var prev *types.Receipt
-				if txTask.TxIndex > 0 {
-					prev = blockReceipts[txTask.TxIndex-1]
+				if txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0 {
+					prev = blockReceipts[txTask.TxIndex-startTxIndex-1]
 				}
 				receipt, err := result.CreateReceipt(prev)
 				if err != nil {
