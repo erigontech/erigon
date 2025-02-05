@@ -1132,6 +1132,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	}
 	blockSnaps.LogStat("block")
 
+	heimdall.RecordWayPoints(true) // needed to load checkpoints and milestones snapshots
 	borSnaps = heimdall.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = borSnaps.OpenFolder(); err != nil {
 		return

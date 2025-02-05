@@ -415,9 +415,14 @@ func (s *CheckpointSnapshotStore) ValidateSnapshots(failFast bool) error {
 	tx := s.snapshots.ViewType(s.SnapType())
 	defer tx.Close()
 
+	segs := tx.Segments
+	if len(segs) == 0 {
+		return errors.New("no segments")
+	}
+
 	var accumulatedErr error
 	var prev *Checkpoint
-	for _, seg := range tx.Segments {
+	for _, seg := range segs {
 		idx := seg.Src().Index()
 		if idx == nil || idx.KeyCount() == 0 {
 			continue
@@ -446,7 +451,7 @@ func (s *CheckpointSnapshotStore) ValidateSnapshots(failFast bool) error {
 				accumulatedErr = errors.New("missing checkpoints")
 			}
 
-			accumulatedErr = fmt.Errorf("%w: from=%d, to=%d", accumulatedErr, expectedId, entity.Id)
+			accumulatedErr = fmt.Errorf("%w: [%d, %d)", accumulatedErr, expectedId, entity.Id)
 			if failFast {
 				return accumulatedErr
 			}
