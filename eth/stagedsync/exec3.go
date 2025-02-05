@@ -430,8 +430,6 @@ func ExecV3(ctx context.Context,
 		defer doms.Close()
 	}
 
-	txNumInDB := doms.TxNum()
-
 	var (
 		inputTxNum               = doms.TxNum()
 		stageProgress            = execStage.BlockNumber
@@ -689,7 +687,7 @@ func ExecV3(ctx context.Context,
 					txTask.Config = cfg.genesis.Config
 				}
 
-				if txTask.TxNum <= txNumInDB && txTask.TxNum > 0 {
+				if txTask.TxNum <= doms.TxNum() && txTask.TxNum > 0 {
 					inputTxNum++
 					skipPostEvaluation = true
 					continue
