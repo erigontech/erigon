@@ -152,7 +152,7 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	tempDir := suite.T().TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	logger := testlog.Logger(suite.T(), log.LvlCrit)
-	store := NewMdbxStore(logger, dataDir, 1)
+	store := NewMdbxStore(logger, dataDir, false, 1)
 	borConfig := suite.chainConfig.Bor.(*borcfg.BorConfig)
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.spansTestDataDir = filepath.Join(suite.testDataDir, "spans")
