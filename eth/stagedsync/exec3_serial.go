@@ -129,7 +129,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 			} else if txTask.TxIndex >= 0 {
 				// TODO if this is not the start of the block we need
 				// to get the previous reciept
-				var prev *types.Receipt
+				/*var prev *types.Receipt
 				if txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0 {
 					prev = blockReceipts[txTask.TxIndex-startTxIndex-1]
 				}
@@ -138,7 +138,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 					return err
 				}
 				blockReceipts = append(blockReceipts, receipt)
-
+				*/
 			}
 
 			if se.cfg.syncCfg.ChaosMonkey {
