@@ -1083,7 +1083,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	go func() {
 		if err := agg.MergeLoop(ctx); err != nil {
 			logger.Error("snapashot merge loop error", "err", err)
-			ctxCancel()
 		}
 	}()
 
