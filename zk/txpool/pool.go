@@ -403,8 +403,6 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error {
 	defer newBlockTimer.UpdateDuration(time.Now())
 
-	isAfterLimbo := len(unwindTxs.Txs) > 0 && p.isDeniedYieldingTransactions()
-
 	cache := p.cache()
 	cache.OnNewBlock(stateChanges)
 	coreTx, err := p.coreDB().BeginRo(ctx)
@@ -532,7 +530,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		log.Info("[txpool] Discarding", "tx-hash", hexutils.BytesToHex(slot.IDHash[:]))
 	}
 	p.finalizeLimboOnNewBlock(limboTxs)
-	if isAfterLimbo {
+	if p.isDeniedYieldingTransactions() {
 		p.allowYieldingTransactions()
 	}
 

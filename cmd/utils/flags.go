@@ -20,14 +20,15 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/ledgerwatch/erigon/zk/zk_config"
-	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_dynamic_genesis"
 	"math/big"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon/zk/zk_config"
+	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_dynamic_genesis"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
@@ -604,6 +605,11 @@ var (
 		Name:  "zkevm.executor-urls",
 		Usage: "A comma separated list of grpc addresses that host executors",
 		Value: "",
+	}
+	ExecutorEnabled = cli.BoolFlag{
+		Name:  "zkevm.executor-enabled",
+		Usage: "Enables the executor. Used for testing limbo, when executor-urls are set, but we don't want to use them, only in limbo to verify limbo transactions. For this case, set it to false. Defaulted to true",
+		Value: true,
 	}
 	ExecutorStrictMode = cli.BoolFlag{
 		Name:  "zkevm.executor-strict",

@@ -223,6 +223,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		ExecutorUrls:                           strings.Split(strings.ReplaceAll(ctx.String(utils.ExecutorUrls.Name), " ", ""), ","),
 		ExecutorStrictMode:                     ctx.Bool(utils.ExecutorStrictMode.Name),
 		ExecutorRequestTimeout:                 ctx.Duration(utils.ExecutorRequestTimeout.Name),
+		ExecutorEnabled:                        ctx.Bool(utils.ExecutorEnabled.Name),
 		DatastreamNewBlockTimeout:              ctx.Duration(utils.DatastreamNewBlockTimeout.Name),
 		WitnessMemdbSize:                       *witnessMemSize,
 		WitnessUnwindLimit:                     witnessUnwindLimit,
@@ -288,6 +289,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	} else {
 		checkFlag(utils.ExecutorUrls.Name, cfg.ExecutorUrls)
 		checkFlag(utils.ExecutorStrictMode.Name, cfg.ExecutorStrictMode)
+		checkFlag(utils.ExecutorEnabled.Name, cfg.ExecutorEnabled)
 		checkFlag(utils.DataStreamHost.Name, cfg.DataStreamHost)
 		checkFlag(utils.DataStreamPort.Name, cfg.DataStreamPort)
 		checkFlag(utils.DataStreamWriteTimeout.Name, cfg.DataStreamWriteTimeout)
@@ -305,7 +307,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 			panic("You cannot disable virtual counters when running in strict mode")
 		}
 
-		if len(cfg.ExecutorUrls) > 0 && cfg.ExecutorUrls[0] != "" && cfg.DisableVirtualCounters {
+		if cfg.UseExecutors() && cfg.DisableVirtualCounters {
 			panic("You cannot disable virtual counters when running with executors")
 		}
 	}
