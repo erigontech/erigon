@@ -745,10 +745,12 @@ func sequencingBatchStep(
 		- it is unwound correctly
 	*/
 
-	// TODO: It is 99% sure that there is no need to write this in any of processInjectedInitialBatch, alignExecutionToDatastream, doCheckForBadBatch but it is worth double checknig
-	// the unwind of this value is handed by UnwindExecutionStageDbWrites
-	if _, err := rawdb.IncrementStateVersionByBlockNumberIfNeeded(batchContext.sdb.tx, block.NumberU64()); err != nil {
-		return fmt.Errorf("writing plain state version: %w", err)
+	if block != nil { // block is nil here if no transactions mined
+		// TODO: It is 99% sure that there is no need to write this in any of processInjectedInitialBatch, alignExecutionToDatastream, doCheckForBadBatch but it is worth double checknig
+		// the unwind of this value is handed by UnwindExecutionStageDbWrites
+		if _, err := rawdb.IncrementStateVersionByBlockNumberIfNeeded(batchContext.sdb.tx, block.NumberU64()); err != nil {
+			return fmt.Errorf("writing plain state version: %w", err)
+		}
 	}
 
 	log.Info(fmt.Sprintf("[%s] Finish batch %d...", batchContext.s.LogPrefix(), batchState.batchNumber))
