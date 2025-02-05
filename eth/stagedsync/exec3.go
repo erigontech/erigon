@@ -142,8 +142,10 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
-			"reads", common.PrettyCounter(readCount - p.prevReadCount),
-			"writes", common.PrettyCounter(writeCount - p.prevWriteCount),
+			"rd", common.PrettyCounter(readCount - p.prevReadCount),
+			"wrt", common.PrettyCounter(writeCount - p.prevWriteCount),
+			"rd/s", common.PrettyCounter(uint64(float64(readCount-p.prevReadCount) / interval.Seconds())),
+			"wrt/s", common.PrettyCounter(uint64(float64(writeCount-p.prevWriteCount) / interval.Seconds())),
 		}
 
 		mxExecRepeats.AddInt(int(repeats))
@@ -451,11 +453,6 @@ func ExecV3(ctx context.Context,
 		shouldGenerateChangesets = false
 	}
 
-	if maxBlockNum > blockNum+16 {
-		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
-	}
-
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
 	shouldReportToTxPool := cfg.notifications != nil && !isMining && maxBlockNum <= blockNum+64
@@ -488,6 +485,11 @@ func ExecV3(ctx context.Context,
 	if maxTxNum == 0 {
 		return nil
 	}
+
+	// Temp - need to fix block start up (how do we get cumm gas ?)
+	inputTxNum -= offsetFromBlockBeginning
+	offsetFromBlockBeginning = 0
+	// To Here
 
 	applyWorker := cfg.applyWorker
 	defer applyWorker.LogLRUStats()
