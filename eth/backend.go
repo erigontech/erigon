@@ -743,7 +743,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		)
 		contractBackend := contracts.NewDirectBackend(ethApi)
 		secondaryTxnProvider := backend.txPool
-		backend.shutterPool = shutter.NewPool(logger, config.Shutter, secondaryTxnProvider, contractBackend)
+		backend.shutterPool = shutter.NewPool(logger, config.Shutter, secondaryTxnProvider, contractBackend, backend.stateDiffClient)
 		txnProvider = backend.shutterPool
 	}
 
@@ -957,6 +957,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			backend.stopNode,
+			&engineAPISwitcher{backend: backend},
 		)
 		backend.syncUnwindOrder = stagedsync.PolygonSyncUnwindOrder
 		backend.syncPruneOrder = stagedsync.PolygonSyncPruneOrder
@@ -1017,7 +1018,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.chainDB, chainConfig, tmpdir, config.Sync),
 		config.InternalCL, // If the chain supports the engine API, then we should not make the server fail.
 		false,
-		config.Miner.EnabledPOS)
+		config.Miner.EnabledPOS,
+		!config.PolygonPosSingleSlotFinality,
+	)
 	backend.engineBackendRPC = engineBackendRPC
 	// If we choose not to run a consensus layer, run our embedded.
 	if config.InternalCL && (clparams.EmbeddedSupported(config.NetworkID) || config.CaplinConfig.IsDevnet()) {
@@ -1034,6 +1037,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if chainConfig.Bor != nil && config.PolygonSync {
 		backend.polygonSyncService = polygonsync.NewService(
+			config,
 			logger,
 			chainConfig,
 			polygonSyncSentry(sentries),
@@ -1044,6 +1048,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			polygonBridge,
 			heimdallService,
 			backend.notifications,
+			backend.engineBackendRPC,
 		)
 
 		// we need to initiate download before the heimdall services start rather than
@@ -1158,7 +1163,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		}()
 	}
 
-	if chainConfig.Bor == nil {
+	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
 		go s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient)
 	}
 
@@ -1834,4 +1839,16 @@ func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.C
 
 func polygonSyncSentry(sentries []protosentry.SentryClient) protosentry.SentryClient {
 	return libsentry.NewSentryMultiplexer(sentries)
+}
+
+type engineAPISwitcher struct {
+	backend *Ethereum
+}
+
+func (e *engineAPISwitcher) SetConsuming(consuming bool) {
+	if e.backend.engineBackendRPC == nil {
+		return
+	}
+
+	e.backend.engineBackendRPC.SetConsuming(consuming)
 }

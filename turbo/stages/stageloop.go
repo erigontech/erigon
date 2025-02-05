@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -786,6 +787,7 @@ func NewPolygonSyncStages(
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
 	stopNode func() error,
+	engineAPISwitcher sync.EngineAPISwitcher,
 ) []*stagedsync.Stage {
 	return stagedsync.PolygonSyncStages(
 		ctx,
@@ -805,6 +807,7 @@ func NewPolygonSyncStages(
 			config.Prune,
 		),
 		stagedsync.NewPolygonSyncStageCfg(
+			config,
 			logger,
 			chainConfig,
 			db,
@@ -819,6 +822,7 @@ func NewPolygonSyncStages(
 			config.LoopBlockLimit,
 			nil, /* userUnwindTypeOverrides */
 			notifications,
+			engineAPISwitcher,
 		),
 		stagedsync.StageSendersCfg(db, chainConfig, config.Sync, false, config.Dirs.Tmp, config.Prune, blockReader, nil),
 		stagedsync.StageExecuteBlocksCfg(db, config.Prune, config.BatchSize, chainConfig, consensusEngine, &vm.Config{}, notifications, config.StateStream, false, config.Dirs, blockReader, nil, config.Genesis, config.Sync, SilkwormForExecutionStage(silkworm, config)),
