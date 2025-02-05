@@ -222,7 +222,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		requests = make(types.FlatRequests, 0)
 		lastReqType := -1
 		for i, r := range executionRequests {
-			if len(r) <= 1 && lastReqType >= 0 && int(r[0]) <= lastReqType {
+			if len(r) <= 1 || lastReqType >= 0 && int(r[0]) <= lastReqType {
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("Invalid Request at index %d", i)}
 			}
 			lastReqType = int(r[0])
