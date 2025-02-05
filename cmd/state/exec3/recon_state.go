@@ -60,7 +60,7 @@ type ReconnWork struct {
 	doneBitmap    roaring64.Bitmap
 	triggers      map[uint64][]*exec.TxTask
 	workCh        chan *exec.TxTask
-	queue         exec.TxTaskQueue
+	queue         exec.Queue[exec.Task]
 	rollbackCount uint64
 	maxTxNum      uint64
 }

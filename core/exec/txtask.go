@@ -76,6 +76,9 @@ type Task interface {
 
 	// elements in dependencies -> transaction indexes on which transaction i is dependent on
 	Dependencies() []int
+
+	compare(other Task) int
+	isNil() bool
 }
 
 // Result is the ouput of the task execute process
@@ -94,6 +97,14 @@ type Result struct {
 	TraceTos   map[libcommon.Address]struct{}
 
 	ShouldRerunWithoutFeeDelay bool
+}
+
+func (r *Result) compare(other *Result) int {
+	return r.Task.compare(other.Task)
+}
+
+func (r *Result) isNil() bool {
+	return r == nil
 }
 
 func (r *Result) CreateReceipt(prev *types.Receipt) (*types.Receipt, error) {
@@ -191,6 +202,21 @@ type TxTask struct {
 	sender  *libcommon.Address
 	message *types.Message
 	signer  *types.Signer
+}
+
+func (t *TxTask) compare(other Task) int {
+	switch {
+	case t.Version().TxNum > other.Version().TxNum:
+		return 1
+	case t.Version().TxNum < other.Version().TxNum:
+		return -1
+	default:
+		return 0
+	}
+}
+
+func (t *TxTask) isNil() bool {
+	return t == nil
 }
 
 func (t *TxTask) Tx() types.Transaction {
@@ -458,28 +484,34 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 }
 
 // TxTaskQueue non-thread-safe priority-queue
-type TxTaskQueue []Task
+type queueable[T any] interface {
+	compare(other T) int
+	isNil() bool
+}
 
-func (h TxTaskQueue) Len() int {
+type Queue[T queueable[T]] []T
+
+func (h Queue[T]) Len() int {
 	return len(h)
 }
-func (h TxTaskQueue) Less(i, j int) bool {
-	return h[i].Version().TxNum < h[j].Version().TxNum
+func (h Queue[T]) Less(i, j int) bool {
+	return h[i].compare(h[j]) < 0
 }
 
-func (h TxTaskQueue) Swap(i, j int) {
+func (h Queue[T]) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
 }
 
-func (h *TxTaskQueue) Push(a interface{}) {
-	*h = append(*h, a.(Task))
+func (h *Queue[T]) Push(a any) {
+	*h = append(*h, a.(T))
 }
 
-func (h *TxTaskQueue) Pop() interface{} {
+func (h *Queue[T]) Pop() any {
 	old := *h
 	n := len(old)
 	x := old[n-1]
-	old[n-1] = nil
+	var none T
+	old[n-1] = none
 	*h = old[:n-1]
 	return x
 }
@@ -491,7 +523,7 @@ func (h *TxTaskQueue) Pop() interface{} {
 type QueueWithRetry struct {
 	closed      bool
 	newTasks    chan Task
-	retires     TxTaskQueue
+	retires     Queue[Task]
 	retiresLock sync.Mutex
 	capacity    int
 }
@@ -619,23 +651,48 @@ func (q *QueueWithRetry) Close() {
 }
 
 // ResultsQueue thread-safe priority-queue of execution results
+
 type ResultsQueue struct {
+	*PriorityQueue[*Result]
+}
+
+func NewResultsQueue(channelLimit, heapLimit int) *ResultsQueue {
+	return &ResultsQueue{NewPriorityQueue[*Result](channelLimit, heapLimit)}
+}
+
+func (q ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].Version().TxNum }
+
+type ResultsQueueIter struct {
+	*PriorityQueueIter[*Result]
+}
+
+func (q ResultsQueue) Iter() *ResultsQueueIter {
+	return &ResultsQueueIter{&PriorityQueueIter[*Result]{q: q.PriorityQueue}}
+}
+
+func (q *ResultsQueueIter) Has(outputTxNum uint64) bool {
+	q.q.RLock()
+	defer q.q.RUnlock()
+	return len(*q.q.results) > 0 && (*q.q.results)[0].Version().TxNum == outputTxNum
+}
+
+type PriorityQueue[T queueable[T]] struct {
 	limit  int
 	closed bool
 
-	resultCh chan *Result
+	resultCh chan T
 	//tick
 	ticker *time.Ticker
 
 	sync.RWMutex
-	results *TxTaskQueue
+	results *Queue[T]
 }
 
-func NewResultsQueue(resultChannelLimit, heapLimit int) *ResultsQueue {
-	r := &ResultsQueue{
-		results:  &TxTaskQueue{},
+func NewPriorityQueue[T queueable[T]](channelLimit, heapLimit int) *PriorityQueue[T] {
+	r := &PriorityQueue[T]{
+		results:  &Queue[T]{},
 		limit:    heapLimit,
-		resultCh: make(chan *Result, resultChannelLimit),
+		resultCh: make(chan T, channelLimit),
 		ticker:   time.NewTicker(2 * time.Second),
 	}
 	heap.Init(r.results)
@@ -643,7 +700,7 @@ func NewResultsQueue(resultChannelLimit, heapLimit int) *ResultsQueue {
 }
 
 // Add result of execution. May block when internal channel is full
-func (q *ResultsQueue) Add(ctx context.Context, task *Result) error {
+func (q *PriorityQueue[T]) Add(ctx context.Context, item T) error {
 
 	q.RLock()
 	resultCh := q.resultCh
@@ -657,14 +714,14 @@ func (q *ResultsQueue) Add(ctx context.Context, task *Result) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case resultCh <- task: // Needs to have outside of the lock
+		case resultCh <- item: // Needs to have outside of the lock
 		}
 	}
 
 	return nil
 }
 
-func (q *ResultsQueue) Drain(ctx context.Context, task *Result) (bool, error) {
+func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 	q.Lock()
 	defer q.Unlock()
 
@@ -672,8 +729,8 @@ func (q *ResultsQueue) Drain(ctx context.Context, task *Result) (bool, error) {
 		return true, nil
 	}
 
-	if task != nil {
-		heap.Push(q.results, task)
+	if !item.isNil() {
+		heap.Push(q.results, item)
 	}
 
 	for {
@@ -684,7 +741,7 @@ func (q *ResultsQueue) Drain(ctx context.Context, task *Result) (bool, error) {
 			if !ok {
 				return true, nil
 			}
-			if txTask == nil {
+			if txTask.isNil() {
 				continue
 			}
 			heap.Push(q.results, txTask)
@@ -697,39 +754,36 @@ func (q *ResultsQueue) Drain(ctx context.Context, task *Result) (bool, error) {
 	}
 }
 
-func (q *ResultsQueue) Iter() *ResultsQueueIter {
-	return &ResultsQueueIter{q: q}
+func (q *PriorityQueue[T]) Iter() *PriorityQueueIter[T] {
+	return &PriorityQueueIter[T]{q: q}
 }
 
-type ResultsQueueIter struct {
-	q *ResultsQueue
+type PriorityQueueIter[T queueable[T]] struct {
+	q *PriorityQueue[T]
 }
 
-func (q *ResultsQueueIter) HasNext() bool {
+func (q *PriorityQueueIter[T]) HasNext() bool {
 	q.q.RLock()
 	defer q.q.RUnlock()
 	return len(*q.q.results) > 0
 }
 
-func (q *ResultsQueueIter) Has(outputTxNum uint64) bool {
-	q.q.RLock()
-	defer q.q.RUnlock()
-	return len(*q.q.results) > 0 && (*q.q.results)[0].Version().TxNum == outputTxNum
-}
-
-func (q *ResultsQueueIter) PopNext() *Result {
+func (q *PriorityQueueIter[T]) PopNext() T {
 	q.q.Lock()
 	defer q.q.Unlock()
-	return heap.Pop(q.q.results).(*Result)
+	return heap.Pop(q.q.results).(T)
 }
 
-func (q *ResultsQueue) ResultCh() chan *Result {
+func (q *PriorityQueue[T]) ResultCh() chan T {
 	return q.resultCh
 }
 
-func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) (bool, error) { return q.Drain(ctx, nil) }
+func (q *PriorityQueue[T]) DrainNonBlocking(ctx context.Context) (bool, error) {
+	var none T
+	return q.Drain(ctx, none)
+}
 
-func (q *ResultsQueue) DropResults(ctx context.Context, f func(t *Result)) {
+func (q *PriorityQueue[T]) Drop(ctx context.Context, f func(t T)) {
 	q.Lock()
 	defer q.Unlock()
 Loop:
@@ -749,11 +803,11 @@ Loop:
 
 	// Drain results queue as well
 	for q.results.Len() > 0 {
-		f(heap.Pop(q.results).(*Result))
+		f(heap.Pop(q.results).(T))
 	}
 }
 
-func (q *ResultsQueue) Close() {
+func (q *PriorityQueue[T]) Close() {
 	if q.closed {
 		return
 	}
@@ -766,19 +820,18 @@ func (q *ResultsQueue) Close() {
 
 	q.ticker.Stop()
 }
-func (q *ResultsQueue) ResultChLen() int { return len(q.resultCh) }
-func (q *ResultsQueue) ResultChCap() int { return cap(q.resultCh) }
-func (q *ResultsQueue) Limit() int       { return q.limit }
-func (q *ResultsQueue) Len() (l int) {
+func (q *PriorityQueue[T]) ResultChLen() int { return len(q.resultCh) }
+func (q *PriorityQueue[T]) ResultChCap() int { return cap(q.resultCh) }
+func (q *PriorityQueue[T]) Limit() int       { return q.limit }
+func (q *PriorityQueue[T]) Len() (l int) {
 	q.Lock()
 	l = q.results.Len()
 	q.Unlock()
 	return l
 }
-func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].Version().TxNum }
-func (q *ResultsQueue) LenLocked() (l int)       { return q.results.Len() }
-func (q *ResultsQueue) HasLocked() bool          { return len(*q.results) > 0 }
-func (q *ResultsQueue) PushLocked(t *Result)     { heap.Push(q.results, t) }
+func (q *ResultsQueue) LenLocked() (l int)   { return q.results.Len() }
+func (q *ResultsQueue) HasLocked() bool      { return len(*q.results) > 0 }
+func (q *ResultsQueue) PushLocked(t *Result) { heap.Push(q.results, t) }
 func (q *ResultsQueue) Push(t *Result) {
 	q.Lock()
 	heap.Push(q.results, t)
@@ -789,7 +842,7 @@ func (q *ResultsQueue) PopLocked() (t *Result) {
 }
 func (q *ResultsQueue) Dbg() (t *Result) {
 	if len(*q.results) > 0 {
-		return (*q.results)[0].(*Result)
+		return (*q.results)[0]
 	}
 	return nil
 }
