@@ -60,6 +60,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
 
+		fmt.Println("Task", txTask.TxIndex, txTask.TxNum)
+
 		result := se.applyWorker.RunTxTaskNoLock(txTask)
 
 		if err := func() error {
@@ -118,7 +120,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 				if err = ibs.MakeWriteSet(se.cfg.chainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter); err != nil {
 					panic(err)
 				}
-
 			} else if txTask.TxIndex >= 0 {
 				var prev *types.Receipt
 				if txTask.TxIndex > 0 {

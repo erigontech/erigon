@@ -323,38 +323,38 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 		return 0, 0, 0, err
 	}
 
-	ok, _blockNum, err := txNumsReader.FindBlockNum(applyTx, doms.TxNum())
+	ok, blockNum, err := txNumsReader.FindBlockNum(applyTx, doms.TxNum())
 	if err != nil {
 		return 0, 0, 0, err
 	}
 	if !ok {
-		_lb, _lt, _ := txNumsReader.Last(applyTx)
-		_fb, _ft, _ := txNumsReader.First(applyTx)
-		return 0, 0, 0, fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d; in db: (%d-%d, %d-%d)", inputTxNum, _fb, _lb, _ft, _lt)
+		lb, lt, _ := txNumsReader.Last(applyTx)
+		fb, ft, _ := txNumsReader.First(applyTx)
+		return 0, 0, 0, fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d; in db: (%d-%d, %d-%d)", inputTxNum, fb, lb, ft, lt)
 	}
 	{
-		_max, _ := txNumsReader.Max(applyTx, _blockNum)
-		if doms.TxNum() == _max {
-			_blockNum++
+		max, _ := txNumsReader.Max(applyTx, blockNum)
+		if doms.TxNum() == max {
+			blockNum++
 		}
 	}
 
-	_min, err := txNumsReader.Min(applyTx, _blockNum)
+	min, err := txNumsReader.Min(applyTx, blockNum)
 	if err != nil {
 		return 0, 0, 0, err
 	}
 
-	if doms.TxNum() > _min {
+	if doms.TxNum() > min {
 		// if stopped in the middle of the block: start from beginning of block.
 		// first part will be executed in HistoryExecution mode
-		offsetFromBlockBeginning = doms.TxNum() - _min
+		offsetFromBlockBeginning = doms.TxNum() - min
 	}
 
-	inputTxNum = _min
+	inputTxNum = min
 
 	//_max, _ := txNumsReader.Max(applyTx, blockNum)
 	//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
-	doms.SetBlockNum(_blockNum)
+	doms.SetBlockNum(blockNum)
 	doms.SetTxNum(inputTxNum)
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, nil
 }
