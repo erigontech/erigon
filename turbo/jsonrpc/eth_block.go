@@ -219,7 +219,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, err
 	}
 	defer tx.Rollback()
-	fmt.Println(number)
 	b, err := api.blockByNumber(ctx, number, tx)
 	if err != nil {
 		return nil, err
