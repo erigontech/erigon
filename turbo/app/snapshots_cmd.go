@@ -36,9 +36,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/urfave/cli/v2"
+
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/urfave/cli/v2"
 
 	"golang.org/x/sync/semaphore"
 
@@ -536,7 +537,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	_, _, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	_, borSnaps, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -572,6 +573,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			}
 		case integrity.NoBorEventGaps:
 			if err := integrity.NoGapsInBorEvents(ctx, db, blockReader, 0, 0, failFast); err != nil {
+				return err
+			}
+		case integrity.BorCheckpoints:
+			if err := integrity.ValidateBorCheckpoints(logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.ReceiptsNoDups:
@@ -1148,8 +1153,8 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if chainConfig.Bor != nil {
 		const PolygonSync = false
 		if PolygonSync {
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, 0), borSnaps, chainConfig.Bor)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, 0), borSnaps)
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), borSnaps, chainConfig.Bor)
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
 		} else {
 			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(chainDB), borSnaps, chainConfig.Bor)
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(chainDB), borSnaps)

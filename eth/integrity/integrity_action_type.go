@@ -24,9 +24,10 @@ const (
 	InvertedIndex      Check = "InvertedIndex"
 	HistoryNoSystemTxs Check = "HistoryNoSystemTxs"
 	NoBorEventGaps     Check = "NoBorEventGaps"
+	BorCheckpoints     Check = "BorCheckpoints"
 	ReceiptsNoDups     Check = "ReceiptsNoDups"
 )
 
 var AllChecks = []Check{
-	Blocks, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, NoBorEventGaps, ReceiptsNoDups,
+	Blocks, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, NoBorEventGaps, BorCheckpoints, ReceiptsNoDups,
 }

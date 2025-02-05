@@ -19,7 +19,7 @@ import (
 func NewSnapshotStore(base Store, snapshots *RoSnapshots) *SnapshotStore {
 	return &SnapshotStore{
 		Store:                       base,
-		checkpoints:                 &checkpointSnapshotStore{base.Checkpoints(), snapshots},
+		checkpoints:                 NewCheckpointSnapshotStore(base.Checkpoints(), snapshots),
 		milestones:                  &milestoneSnapshotStore{base.Milestones(), snapshots},
 		spans:                       NewSpanSnapshotStore(base.Spans(), snapshots),
 		spanBlockProducerSelections: base.SpanBlockProducerSelections(),
@@ -302,12 +302,16 @@ func (r *milestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milest
 	return nil, false, fmt.Errorf("%w: %w", ErrMilestoneNotFound, err)
 }
 
-type checkpointSnapshotStore struct {
+type CheckpointSnapshotStore struct {
 	EntityStore[*Checkpoint]
 	snapshots *RoSnapshots
 }
 
-func (s *checkpointSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
+func NewCheckpointSnapshotStore(base EntityStore[*Checkpoint], snapshots *RoSnapshots) *CheckpointSnapshotStore {
+	return &CheckpointSnapshotStore{base, snapshots}
+}
+
+func (s *CheckpointSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
 		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
@@ -315,7 +319,7 @@ func (s *checkpointSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 		})
 }
 
-func (s *checkpointSnapshotStore) Prepare(ctx context.Context) error {
+func (s *CheckpointSnapshotStore) Prepare(ctx context.Context) error {
 	if err := s.EntityStore.Prepare(ctx); err != nil {
 		return err
 	}
@@ -323,14 +327,14 @@ func (s *checkpointSnapshotStore) Prepare(ctx context.Context) error {
 	return <-s.snapshots.Ready(ctx)
 }
 
-func (s *checkpointSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Checkpoint] {
-	return &checkpointSnapshotStore{txEntityStore[*Checkpoint]{s.EntityStore.(*mdbxEntityStore[*Checkpoint]), tx}, s.snapshots}
+func (s *CheckpointSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Checkpoint] {
+	return &CheckpointSnapshotStore{txEntityStore[*Checkpoint]{s.EntityStore.(*mdbxEntityStore[*Checkpoint]), tx}, s.snapshots}
 }
 
-func (r *checkpointSnapshotStore) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	lastId, ok, err := r.EntityStore.LastEntityId(ctx)
+func (s *CheckpointSnapshotStore) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	lastId, ok, err := s.EntityStore.LastEntityId(ctx)
 
-	snapshotLastCheckpointId := r.LastFrozenEntityId()
+	snapshotLastCheckpointId := s.LastFrozenEntityId()
 
 	if snapshotLastCheckpointId > lastId {
 		return snapshotLastCheckpointId, true, nil
@@ -339,14 +343,14 @@ func (r *checkpointSnapshotStore) LastCheckpointId(ctx context.Context, tx kv.Tx
 	return lastId, ok, err
 }
 
-func (r *checkpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Checkpoint, bool, error) {
-	entity, ok, err := r.EntityStore.Entity(ctx, id)
+func (s *CheckpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Checkpoint, bool, error) {
+	entity, ok, err := s.EntityStore.Entity(ctx, id)
 
 	if ok {
 		return entity, ok, err
 	}
 
-	tx := r.snapshots.ViewType(r.SnapType())
+	tx := s.snapshots.ViewType(s.SnapType())
 	defer tx.Close()
 	segments := tx.Segments
 
@@ -374,12 +378,12 @@ func (r *checkpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Check
 	return nil, false, fmt.Errorf("checkpoint %d: %w", id, ErrCheckpointNotFound)
 }
 
-func (r *checkpointSnapshotStore) LastFrozenEntityId() uint64 {
-	if r.snapshots == nil {
+func (s *CheckpointSnapshotStore) LastFrozenEntityId() uint64 {
+	if s.snapshots == nil {
 		return 0
 	}
 
-	tx := r.snapshots.ViewType(r.SnapType())
+	tx := s.snapshots.ViewType(s.SnapType())
 	defer tx.Close()
 	segments := tx.Segments
 
@@ -405,4 +409,51 @@ func (r *checkpointSnapshotStore) LastFrozenEntityId() uint64 {
 	index := lastSegment.Src().Index()
 
 	return index.BaseDataID() + index.KeyCount() - 1
+}
+
+func (s *CheckpointSnapshotStore) ValidateSnapshots(failFast bool) error {
+	tx := s.snapshots.ViewType(s.SnapType())
+	defer tx.Close()
+
+	var accumulatedErr error
+	var prev *Checkpoint
+	for _, seg := range tx.Segments {
+		idx := seg.Src().Index()
+		if idx == nil || idx.KeyCount() == 0 {
+			continue
+		}
+
+		segGetter := seg.Src().MakeGetter()
+		for segGetter.HasNext() {
+			buf, _ := segGetter.Next(nil)
+			var entity Checkpoint
+			if err := json.Unmarshal(buf, &entity); err != nil {
+				return err
+			}
+
+			if prev == nil {
+				prev = &entity
+				continue
+			}
+
+			expectedId := prev.Id + 1
+			if expectedId == entity.Id {
+				prev = &entity
+				continue
+			}
+
+			if accumulatedErr == nil {
+				accumulatedErr = errors.New("missing checkpoints")
+			}
+
+			accumulatedErr = fmt.Errorf("%w: from=%d, to=%d", accumulatedErr, expectedId, entity.Id)
+			if failFast {
+				return accumulatedErr
+			}
+
+			prev = &entity
+		}
+	}
+
+	return accumulatedErr
 }
