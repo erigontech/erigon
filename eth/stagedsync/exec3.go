@@ -592,6 +592,7 @@ func ExecV3(ctx context.Context,
 
 		// Only needed by bor chains
 		shouldGenerateChangesetsForLastBlocks := false //cfg.chainConfig.Bor != nil
+		havePartialBlock := false
 
 		for ; blockNum <= maxBlockNum; blockNum++ {
 			// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum. this is as a safety net in chains
@@ -649,10 +650,6 @@ func ExecV3(ctx context.Context,
 				accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
 			}
 
-			// During the first block execution, we may have half-block data in the snapshots.
-			// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
-			// So we skip that check for the first block, if we find half-executed data.
-			skipPostEvaluation := false
 			var txTasks []exec.Task
 
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
@@ -678,8 +675,8 @@ func ExecV3(ctx context.Context,
 				}
 
 				if txTask.TxNum > 0 && txTask.TxNum <= outputTxNum.Load() {
+					havePartialBlock = true
 					inputTxNum++
-					skipPostEvaluation = true
 					continue
 				}
 
@@ -695,7 +692,6 @@ func ExecV3(ctx context.Context,
 				}
 			} else {
 				se := executor.(*serialExecutor)
-				se.skipPostEvaluation = skipPostEvaluation
 
 				//fmt.Println("Block",  blockNum)
 
@@ -800,8 +796,12 @@ func ExecV3(ctx context.Context,
 					aggregatorRo := libstate.AggTx(executor.tx())
 
 					needCalcRoot := executor.readState().SizeEstimate() >= commitThreshold ||
-						skipPostEvaluation //|| // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
+						havePartialBlock //|| // If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
 						//TEMP aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
+
+					// this will only happen for the first executed block
+					havePartialBlock = false
+
 					if !needCalcRoot {
 						break
 					}

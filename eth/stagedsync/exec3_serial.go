@@ -23,8 +23,7 @@ import (
 
 type serialExecutor struct {
 	txExecutor
-	applyWorker        *exec3.Worker
-	skipPostEvaluation bool
+	applyWorker *exec3.Worker
 	// outputs
 	txCount         uint64
 	usedGas         uint64
@@ -59,16 +58,17 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 	var startTxIndex int
 
 	if len(tasks) > 0 {
+		// During the first block execution, we may have half-block data in the snapshots.
+		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
+		// So we need to skip that check for the first block, if we find half-executed data (startTxIndex>0).
 		startTxIndex = tasks[0].(*exec.TxTask).TxIndex
 		if startTxIndex < 0 {
 			startTxIndex = 0
 		}
 	}
 
-	for i, task := range tasks {
+	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
-
-		fmt.Println("ExecTX", i, txTask.BlockNumber, txTask.TxNum, txTask.TxIndex)
 
 		result := se.applyWorker.RunTxTaskNoLock(txTask)
 
@@ -110,14 +110,14 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 						blockReceipts, txTask.Withdrawals, chainReader, syscall, se.logger)
 				}
 
-				if !se.isMining && !se.inMemExec && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
+				if !se.isMining && !se.inMemExec && startTxIndex == 0 && !se.execStage.CurrentSyncCycle.IsInitialCycle {
 					// note this assumes the bloach reciepts is a fixed array shared by
 					// all tasks - if that changes this will need to change - robably need to
 					// add this to the executor
 					se.cfg.notifications.RecentLogs.Add(blockReceipts)
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining
-				if txTask.BlockNumber() > 0 && !se.skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+				if txTask.BlockNumber() > 0 && startTxIndex == 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					if err := core.BlockPostValidation(se.usedGas, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
