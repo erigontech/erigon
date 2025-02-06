@@ -439,7 +439,7 @@ func (sdb *IntraBlockState) GetState(addr libcommon.Address, key libcommon.Hash,
 
 	*value = versionedValue
 
-	if sdb.trace || traceAccount(addr) {
+	if sdb.trace || (traceAccount(addr) && traceKey(key)) {
 		fmt.Printf("%d (%d.%d) GetState %x, %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, key, value)
 	}
 
@@ -652,9 +652,18 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 	return nil
 }
 
+var tracedKeys = map[libcommon.Hash]struct{}{
+	libcommon.HexToHash("42b18621a78e3da7af1e2ba633cbabe8986f856a8a1342ee35958ff9e6afca40"): {},
+}
+
+func traceKey(key libcommon.Hash) bool {
+	_, ok := tracedKeys[key]
+	return len(tracedKeys) == 0 || ok
+}
+
 var tracedAccounts = map[libcommon.Address]struct{}{
 	libcommon.HexToAddress("a3e955997667574d4671739e071247d42806ce72"): {},
-	//libcommon.HexToAddress("0000000071727de22e5e9d8baf0edac6f37da032"): {},
+	libcommon.HexToAddress("9b08288c3be4f62bbf8d1c20ac9c5e6f9467d8b7"): {},
 	//libcommon.HexToAddress("3cad627d8cc7ca1dd31bb7b0411b7cfda15571f2"): {},
 	//libcommon.HexToAddress("47c4002f8554fec15828af5386fc63555393650e"): {},
 	//libcommon.HexToAddress("749e27557966db1a6932e60a5dfbde7615b8c503"): {},
@@ -684,7 +693,7 @@ func (sdb *IntraBlockState) Incarnation() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetState(addr libcommon.Address, key libcommon.Hash, value uint256.Int) error {
-	if sdb.trace || traceAccount(addr) {
+	if sdb.trace || (traceAccount(addr) && traceKey(key)) {
 		fmt.Printf("%d (%d.%d) SetState %x, %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, key.Bytes(), &value)
 	}
 
