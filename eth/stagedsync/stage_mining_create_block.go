@@ -231,6 +231,25 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	}
 	ibs := state.New(state.NewReaderV3(txc.Doms))
 
+	if cfg.chainConfig.IsHolocene(header.Time) {
+		if cfg.blockBuilderParameters == nil {
+			return fmt.Errorf("expected eip1559 params, got none")
+		}
+		if err := misc.ValidateHolocene1559Params(cfg.blockBuilderParameters.HoloceneEIP1559Params); err != nil {
+			return err
+		}
+		// If this is a holocene block and the params are 0, we must convert them to their previous
+		// constants in the header.
+		d, e := misc.DecodeHolocene1559Params(cfg.blockBuilderParameters.HoloceneEIP1559Params)
+		if d == 0 {
+			d = misc.GetBaseFeeChangeDenominator(&cfg.chainConfig, params.BaseFeeChangeDenominator, header.Time)
+			e = cfg.chainConfig.ElasticityMultiplier(params.ElasticityMultiplier)
+		}
+		header.Extra = misc.EncodeHoloceneExtraData(uint32(d), uint32(e))
+	} else if cfg.blockBuilderParameters != nil && cfg.blockBuilderParameters.HoloceneEIP1559Params != nil {
+		return fmt.Errorf("got eip1559 params, expected none")
+	}
+
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
 		logger.Error("Failed to prepare header for mining",
 			"err", err,
@@ -246,7 +265,6 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	if cfg.blockBuilderParameters != nil {
 		header.MixDigest = cfg.blockBuilderParameters.PrevRandao
 		header.ParentBeaconBlockRoot = cfg.blockBuilderParameters.ParentBeaconBlockRoot
-
 		current.ParentHeaderTime = parent.Time
 		current.Header = header
 		current.Uncles = nil
