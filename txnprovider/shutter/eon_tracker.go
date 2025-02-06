@@ -25,10 +25,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/sync/errgroup"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/concurrent"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
@@ -40,16 +40,6 @@ type EonTracker interface {
 	RecentEon(index EonIndex) (Eon, bool)
 }
 
-type EonIndex uint64
-
-type Eon struct {
-	Index           EonIndex
-	ActivationBlock uint64
-	Key             []byte
-	Threshold       uint64
-	Members         []libcommon.Address
-}
-
 type KsmEonTracker struct {
 	logger               log.Logger
 	blockListener        BlockListener
@@ -57,7 +47,8 @@ type KsmEonTracker struct {
 	ksmContract          *contracts.KeyperSetManager
 	keyBroadcastContract *contracts.KeyBroadcastContract
 	currentEon           atomic.Pointer[Eon]
-	recentEons           *lru.Cache[EonIndex, Eon]
+	recentEons           *concurrent.SyncMap[EonIndex, Eon]
+	cleanupThreshold     uint64
 	lastCleanupBlockNum  uint64
 }
 
@@ -74,17 +65,13 @@ func NewKsmEonTracker(config Config, blockListener BlockListener, contractBacken
 		panic(fmt.Errorf("failed to create KeyBroadcastContract: %w", err))
 	}
 
-	recentEons, err := lru.New[EonIndex, Eon](config.MaxRecentEons)
-	if err != nil {
-		panic(fmt.Errorf("failed to create recentEons LRU cache: %w", err))
-	}
-
 	return &KsmEonTracker{
 		blockListener:        blockListener,
 		contractBackend:      contractBackend,
 		ksmContract:          ksmContract,
 		keyBroadcastContract: keyBroadcastContract,
-		recentEons:           recentEons,
+		cleanupThreshold:     config.ReorgDepthAwareness,
+		recentEons:           concurrent.NewSyncMap[EonIndex, Eon](),
 	}
 }
 
@@ -107,7 +94,7 @@ func (et *KsmEonTracker) CurrentEon() (Eon, bool) {
 }
 
 func (et *KsmEonTracker) RecentEon(index EonIndex) (Eon, bool) {
-	return et.recentEons.Peek(index)
+	return et.recentEons.Get(index)
 }
 
 func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
@@ -131,7 +118,7 @@ func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
 			}
 
 			et.currentEon.Store(&eon)
-			et.maybeCleanRecentEons(blockEvent.BlockNum)
+			et.maybeCleanup(blockEvent.BlockNum)
 		}
 	}
 }
@@ -210,9 +197,8 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, error) {
 	return eon, nil
 }
 
-func (et *KsmEonTracker) maybeCleanRecentEons(blockNum uint64) {
-	cleanupThreshold := uint64(128) // wait this many blocks before cleaning old eons
-	if blockNum < cleanupThreshold {
+func (et *KsmEonTracker) maybeCleanup(blockNum uint64) {
+	if blockNum < et.cleanupThreshold {
 		// protects from underflow
 		return
 	}
@@ -223,7 +209,7 @@ func (et *KsmEonTracker) maybeCleanRecentEons(blockNum uint64) {
 		return
 	}
 
-	cleanUpTo := blockNum - cleanupThreshold
+	cleanUpTo := blockNum - et.cleanupThreshold
 	if cleanUpTo <= et.lastCleanupBlockNum {
 		// not enough blocks have passed since last cleanup
 		return
@@ -231,12 +217,20 @@ func (et *KsmEonTracker) maybeCleanRecentEons(blockNum uint64) {
 
 	currentEon := et.currentEon.Load()
 	var cleanedEons []EonIndex
-	for _, eon := range et.recentEons.Values() {
+	err := et.recentEons.Range(func(k EonIndex, eon Eon) error {
 		if eon.Index < currentEon.Index && eon.ActivationBlock < cleanUpTo {
 			cleanedEons = append(cleanedEons, eon.Index)
-			et.recentEons.Remove(eon.Index)
 		}
+		return nil
+	})
+	if err != nil { // should never happen since range f never returns err
+		panic("unexpected recentEons.Range error: " + err.Error())
 	}
+
+	for _, eon := range cleanedEons {
+		et.recentEons.Delete(eon)
+	}
+
 	if len(cleanedEons) > 0 {
 		et.logger.Debug(
 			"cleaned recent eons",
@@ -267,7 +261,7 @@ func (et *KsmEonTracker) trackFutureEons(ctx context.Context) error {
 		case event := <-keyperSetAddedEventC:
 			eonIndex := EonIndex(event.Eon)
 			if event.Raw.Removed {
-				et.recentEons.Remove(eonIndex)
+				et.recentEons.Delete(eonIndex)
 				continue
 			}
 
@@ -276,7 +270,7 @@ func (et *KsmEonTracker) trackFutureEons(ctx context.Context) error {
 				return err
 			}
 
-			et.recentEons.Add(eonIndex, eon)
+			et.recentEons.Put(eonIndex, eon)
 		}
 	}
 }

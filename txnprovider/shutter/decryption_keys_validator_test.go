@@ -174,7 +174,7 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 			}),
 			slotCalculator:       mockSlotCalculator(withCurrentSlotMock(16)),
 			eonTracker:           mockEonTracker(),
-			wantErr:              shutter.ErrTxPointerTooLarge,
+			wantErr:              shutter.ErrTxnPointerTooLarge,
 			wantValidationResult: pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{
 				"rejecting decryption keys msg due to",
