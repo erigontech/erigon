@@ -109,13 +109,16 @@ func (a *ApiHandler) GetEthV2BeaconPoolAttestations(w http.ResponseWriter, r *ht
 }
 func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
 	v := r.Header.Get("Eth-Consensus-Version")
-	clVersion, err := clparams.StringToClVersion(v)
-	if err != nil {
-		log.Debug("[Beacon REST] failed to parse version", "version", v, "err", err)
-		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-		return
+	clVersion := clparams.DenebVersion
+	if v != "" {
+		var err error
+		clVersion, err = clparams.StringToClVersion(v)
+		if err != nil {
+			log.Debug("[Beacon REST] failed to parse version", "version", v, "err", err)
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
 	}
-	log.Debug("[Beacon REST] received attestation", "version", clVersion)
 
 	var atts []solid.GeneralAttestation
 	if clVersion >= clparams.ElectraVersion {
