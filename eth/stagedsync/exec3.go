@@ -431,41 +431,24 @@ func ExecV3(ctx context.Context,
 	}
 
 	var (
-		inputTxNum               = doms.TxNum()
-		stageProgress            = execStage.BlockNumber
-		outputTxNum              = atomic.Uint64{}
-		blockComplete            = atomic.Bool{}
-		offsetFromBlockBeginning uint64
-		blockNum, maxTxNum       uint64
+		stageProgress = execStage.BlockNumber
+		outputTxNum   = atomic.Uint64{}
+		blockComplete = atomic.Bool{}
+		blockNum      = doms.BlockNum()
 	)
-
-	blockNum = doms.BlockNum()
-	outputTxNum.Store(doms.TxNum())
 
 	if maxBlockNum < blockNum {
 		return nil
 	}
 
-	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.syncCfg.AlwaysGenerateChangesets
-	if blockNum < cfg.blockReader.FrozenBlocks() {
-		shouldGenerateChangesets = false
-	}
-
+	outputTxNum.Store(doms.TxNum())
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
-	shouldReportToTxPool := cfg.notifications != nil && !isMining && maxBlockNum <= blockNum+64
-	var accumulator *shards.Accumulator
-	if shouldReportToTxPool {
-		accumulator = cfg.notifications.Accumulator
-		if accumulator == nil {
-			accumulator = shards.NewAccumulator()
-		}
-	}
-	rs := state.NewStateV3Buffered(state.NewStateV3(doms, logger))
-
-	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
-	// Now rwLoop closing both (because applyLoop we completely restart)
-	// Maybe need split channels? Maybe don't exit from ApplyLoop? Maybe current way is also ok?
+	var (
+		inputTxNum               uint64
+		offsetFromBlockBeginning uint64
+		maxTxNum                 uint64
+	)
 
 	if applyTx != nil {
 		if inputTxNum, maxTxNum, offsetFromBlockBeginning, err = restoreTxNum(ctx, &cfg, applyTx, doms, maxBlockNum); err != nil {
@@ -483,6 +466,21 @@ func ExecV3(ctx context.Context,
 	if maxTxNum == 0 {
 		return nil
 	}
+
+	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.syncCfg.AlwaysGenerateChangesets
+	if blockNum < cfg.blockReader.FrozenBlocks() {
+		shouldGenerateChangesets = false
+	}
+
+	shouldReportToTxPool := cfg.notifications != nil && !isMining && maxBlockNum <= blockNum+64
+	var accumulator *shards.Accumulator
+	if shouldReportToTxPool {
+		accumulator = cfg.notifications.Accumulator
+		if accumulator == nil {
+			accumulator = shards.NewAccumulator()
+		}
+	}
+	rs := state.NewStateV3Buffered(state.NewStateV3(doms, logger))
 
 	applyWorker := cfg.applyWorker
 	defer applyWorker.LogLRUStats()
@@ -565,7 +563,6 @@ func ExecV3(ctx context.Context,
 
 	ts := time.Duration(0)
 	blockNum = executor.domains().BlockNum()
-	outputTxNum.Store(executor.domains().TxNum())
 
 	if maxBlockNum < blockNum {
 		return nil
@@ -573,7 +570,7 @@ func ExecV3(ctx context.Context,
 
 	if maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", executor.domains().TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
+			"from", blockNum, "to", maxBlockNum, "fromTxNum", outputTxNum.Load(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
@@ -680,7 +677,7 @@ func ExecV3(ctx context.Context,
 					txTask.Config = cfg.genesis.Config
 				}
 
-				if txTask.TxNum > 0 && txTask.TxNum <= doms.TxNum() {
+				if txTask.TxNum > 0 && txTask.TxNum <= outputTxNum.Load() {
 					inputTxNum++
 					skipPostEvaluation = true
 					continue
@@ -696,7 +693,6 @@ func ExecV3(ctx context.Context,
 				if _, err := executor.execute(ctx, txTasks, false); err != nil {
 					return err
 				}
-				agg.BuildFilesInBackground(outputTxNum.Load())
 			} else {
 				se := executor.(*serialExecutor)
 				se.skipPostEvaluation = skipPostEvaluation
@@ -774,6 +770,21 @@ func ExecV3(ctx context.Context,
 				case <-logEvery.C:
 					if inMemExec || isMining {
 						break
+					}
+
+					blockResult := executor.processEvents(ctx, true)
+
+					if blockResult == nil {
+						break
+					}
+
+					if blockResult.Err != nil {
+						return blockResult.Err
+					}
+
+					if blockResult.complete {
+						outputTxNum.Store(blockResult.lastTxNum)
+						stages.SyncMetrics[stages.Execution].SetUint64(blockResult.BlockNum)
 					}
 
 					executor.LogExecuted()

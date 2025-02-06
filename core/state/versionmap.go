@@ -147,6 +147,28 @@ func VersionKeyLess(a, b *VersionKey) bool {
 	}
 }
 
+/*
+type VersionMap struct {
+	s     *map[libcommon.Address]vitem
+	trace bool
+}
+
+type TxIndexCells struct {
+	rw sync.RWMutex
+	tm *btree.Map[int, *WriteCell]
+}
+
+type WriteCell struct {
+	flag        uint
+	incarnation int
+	data        interface{}
+}
+
+type item[T any] struct {
+	v *TxIndexCells[]
+}
+*/
+
 type VersionMap struct {
 	s     *btree.BTreeG[vmItem]
 	trace bool
