@@ -78,6 +78,7 @@ func GetSafeBlockNumber(tx kv.Tx, br services.FullBlockReader) (uint64, error) {
 			return *forkchoiceSafeNum, nil
 		}
 	}
+	fmt.Println("A", br)
 	if br != nil && br.FrozenBlocks() > 0 {
 		return br.FrozenBlocks() - 1, nil
 	}
