@@ -1586,6 +1586,7 @@ func (s *Ethereum) Start() error {
 		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		s.bgComponentsEg.Go(func() error {
+			defer func() { s.logger.Info("polygon sync goroutine terminated") }()
 			// when we're running in stand alone mode we need to run the downloader before we start the
 			// polygon services becuase they will wait for it to complete before opening thier stores
 			// which make use of snapshots and expect them to be initialize
@@ -1609,11 +1610,12 @@ func (s *Ethereum) Start() error {
 			}
 
 			s.logger.Error("polygon sync crashed - stopping node", "err", err)
-			stopErr := s.stopNode()
-			if stopErr != nil {
-				s.logger.Error("could not stop node", "err", stopErr)
-				err = fmt.Errorf("%w: %w", stopErr, err)
-			}
+			go func() { // call stopNode in another goroutine to avoid deadlock
+				stopErr := s.stopNode()
+				if stopErr != nil {
+					s.logger.Error("could not stop node", "err", stopErr)
+				}
+			}()
 
 			return err
 		})
@@ -1643,8 +1645,9 @@ func (s *Ethereum) Start() error {
 		// to initialize it properly.
 		// 2) we cannot propose for block 1 regardless.
 		s.bgComponentsEg.Go(func() error {
+			defer func() { s.logger.Info("devp2p txn pool goroutine terminated") }()
 			err := s.txPool.Run(s.sentryCtx)
-			if err != nil {
+			if err != nil && !errors.Is(err, context.Canceled) {
 				s.logger.Error("txPool.Run error", "err", err)
 			}
 			return err
@@ -1653,8 +1656,9 @@ func (s *Ethereum) Start() error {
 
 	if s.shutterPool != nil {
 		s.bgComponentsEg.Go(func() error {
+			defer func() { s.logger.Info("shutter pool goroutine terminated") }()
 			err := s.shutterPool.Run(s.sentryCtx)
-			if err != nil {
+			if err != nil && !errors.Is(err, context.Canceled) {
 				s.logger.Error("shutterPool.Run error", "err", err)
 			}
 			return err
@@ -1717,7 +1721,7 @@ func (s *Ethereum) Stop() error {
 	}
 
 	if err := s.bgComponentsEg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
-		s.logger.Error("bgComponentsEg.Wait error", "err", err)
+		s.logger.Error("background component error", "err", err)
 	}
 
 	return nil

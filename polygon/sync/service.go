@@ -117,6 +117,7 @@ type Service struct {
 }
 
 func (s *Service) Run(parentCtx context.Context) error {
+	defer func() { s.logger.Info(syncLogPrefix("sync service component stopped")) }()
 	s.logger.Info(syncLogPrefix("running sync service component"))
 
 	group, ctx := errgroup.WithContext(parentCtx)
