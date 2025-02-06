@@ -987,7 +987,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			}
 			cell.setFromUpdate(update)
 			c.accLoaded++
-			fmt.Printf("loaded account during cellHash %x %+v\n", cell.accountAddr[:cell.accountAddrLen], cell.FullString())
+			//fmt.Printf("loaded account during cellHash %x %+v\n", cell.accountAddr[:cell.accountAddrLen], cell.FullString())
 		}
 
 		valLen := cell.accountForHashing(hph.accValBuf, storageRootHash)
