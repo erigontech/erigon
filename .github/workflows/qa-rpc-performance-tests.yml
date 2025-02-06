@@ -80,7 +80,7 @@ jobs:
         run: |
           set +e # Disable exit on error
           failed_test=0
-          commit=$(git -C ${{runner.workspace}}/silkworm rev-parse --short HEAD) # use ${{ github.sha }} or GITHUB_SHA
+          commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD) # use ${{ github.sha }} or GITHUB_SHA
           past_test_dir=$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_perf_$commit
           echo "past_test_dir=$past_test_dir" >> $GITHUB_ENV
           
