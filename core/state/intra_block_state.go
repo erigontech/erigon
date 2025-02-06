@@ -654,6 +654,7 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 
 var tracedKeys = map[libcommon.Hash]struct{}{
 	libcommon.HexToHash("42b18621a78e3da7af1e2ba633cbabe8986f856a8a1342ee35958ff9e6afca40"): {},
+	libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000"): {},
 }
 
 func traceKey(key libcommon.Hash) bool {
