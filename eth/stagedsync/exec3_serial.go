@@ -129,18 +129,18 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 					panic(err)
 				}
 			} else if txTask.TxIndex >= 0 {
-				// TODO if this is not the start of the block we need
-				// to get the previous reciept
-				/*var prev *types.Receipt
+				var prev *types.Receipt
 				if txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0 {
 					prev = blockReceipts[txTask.TxIndex-startTxIndex-1]
+				} else {
+					// TODO get the previous reciept from the DB
 				}
+
 				receipt, err := result.CreateReceipt(prev)
 				if err != nil {
 					return err
 				}
 				blockReceipts = append(blockReceipts, receipt)
-				*/
 			}
 
 			if se.cfg.syncCfg.ChaosMonkey {
@@ -182,7 +182,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 		if !task.IsBlockEnd() {
 			var receipt *types.Receipt
 			if txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
-				receipt = blockReceipts[txTask.TxIndex]
+				receipt = blockReceipts[txTask.TxIndex-startTxIndex]
 			}
 			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed); err != nil {
 				return false, err

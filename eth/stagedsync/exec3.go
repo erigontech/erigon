@@ -885,8 +885,6 @@ func ExecV3(ctx context.Context,
 
 	}
 
-	//log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", mxExecRepeats.GetValueUint64())
-
 	fmt.Println("Wait")
 	executor.wait(ctx)
 
