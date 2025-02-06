@@ -122,6 +122,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 
 	var err error
 	if clVersion >= clparams.ElectraVersion {
+		if att.SingleAttestation == nil {
+			return errors.New("single attestation is empty")
+		}
 		root = att.SingleAttestation.Data.BeaconBlockRoot
 		slot = att.SingleAttestation.Data.Slot
 		committeeIndex = att.SingleAttestation.CommitteeIndex
@@ -130,6 +133,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		data = att.SingleAttestation.Data
 	} else {
 		// deneb and before case
+		if att.Attestation == nil {
+			return errors.New("attestation is empty")
+		}
 		root = att.Attestation.Data.BeaconBlockRoot
 		slot = att.Attestation.Data.Slot
 		committeeIndex = att.Attestation.Data.CommitteeIndex
