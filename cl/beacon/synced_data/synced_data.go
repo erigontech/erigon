@@ -30,7 +30,10 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
-var ErrNotSynced = errors.New("not synced")
+var (
+	ErrNotSynced                 = errors.New("not synced")
+	ErrPreviousStateNotAvailable = errors.New("previous state not available")
+)
 
 var _ SyncedData = (*SyncedDataManager)(nil)
 
@@ -43,11 +46,11 @@ type SyncedDataManager struct {
 	headRoot atomic.Value
 	headSlot atomic.Uint64
 
-	headState *state.CachingBeaconState
+	headState         *state.CachingBeaconState
+	previousHeadState *state.CachingBeaconState
 
 	accessLock sync.RWMutex // lock used for accessing atomic methods
-
-	mu sync.RWMutex
+	mu         sync.RWMutex
 }
 
 func NewSyncedDataManager(cfg *clparams.BeaconChainConfig, enabled bool) *SyncedDataManager {
@@ -57,6 +60,7 @@ func NewSyncedDataManager(cfg *clparams.BeaconChainConfig, enabled bool) *Synced
 	}
 }
 
+// OnHeadState updates the current head state and tracks the previous state.
 func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err error) {
 	if !s.enabled {
 		return
@@ -67,8 +71,21 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	s.accessLock.Lock()
 	defer s.accessLock.Unlock()
 
+	// Save current state as previous state, if available.
+	if s.headState != nil {
+		if s.previousHeadState != nil {
+			err = s.headState.CopyInto(s.previousHeadState)
+		} else {
+			s.previousHeadState, err = s.headState.Copy()
+		}
+		if err != nil {
+			return err
+		}
+	}
+
 	var blkRoot common.Hash
 
+	// Update headState with the new state.
 	if s.headState == nil {
 		s.headState, err = newState.Copy()
 	} else {
@@ -83,9 +100,10 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	}
 	s.headSlot.Store(newState.Slot())
 	s.headRoot.Store(blkRoot)
-	return err
+	return nil
 }
 
+// ViewHeadState allows safe, read-only access to the current head state.
 func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 	_, synced := s.headRoot.Load().(common.Hash)
 	if !s.enabled || !synced {
@@ -110,6 +128,16 @@ func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 		return err
 	}
 	return nil
+}
+
+// ViewPreviousHeadState allows safe, read-only access to the previous head state.
+func (s *SyncedDataManager) ViewPreviousHeadState(fn ViewHeadStateFn) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.previousHeadState == nil {
+		return ErrPreviousStateNotAvailable
+	}
+	return fn(s.previousHeadState)
 }
 
 func (s *SyncedDataManager) Syncing() bool {
@@ -147,6 +175,7 @@ func (s *SyncedDataManager) UnsetHeadState() {
 	s.headRoot = atomic.Value{}
 	s.headSlot.Store(uint64(0))
 	s.headState = nil
+	s.previousHeadState = nil
 }
 
 func (s *SyncedDataManager) ValidatorPublicKeyByIndex(index int) (common.Bytes48, error) {

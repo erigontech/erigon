@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core"
 	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
@@ -491,7 +490,13 @@ func TestCommit(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	buf := types2.EncodeAccountBytesV3(0, uint256.NewInt(7), nil, 1)
+	acc := accounts.Account{
+		Nonce:       0,
+		Balance:     *uint256.NewInt(7),
+		CodeHash:    libcommon.Hash{},
+		Incarnation: 1,
+	}
+	buf := accounts.SerialiseV3(&acc)
 
 	addr := libcommon.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
 	loc := libcommon.Hex2Bytes("24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")

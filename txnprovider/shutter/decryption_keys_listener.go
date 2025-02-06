@@ -45,18 +45,18 @@ const (
 type DecryptionKeysListener struct {
 	logger         log.Logger
 	config         Config
-	observers      *event.Observers[*proto.DecryptionKeys]
 	slotCalculator SlotCalculator
 	eonTracker     EonTracker
+	observers      *event.Observers[*proto.DecryptionKeys]
 }
 
 func NewDecryptionKeysListener(logger log.Logger, config Config, sc SlotCalculator, et EonTracker) DecryptionKeysListener {
 	return DecryptionKeysListener{
 		logger:         logger,
 		config:         config,
-		observers:      event.NewObservers[*proto.DecryptionKeys](),
 		slotCalculator: sc,
 		eonTracker:     et,
+		observers:      event.NewObservers[*proto.DecryptionKeys](),
 	}
 }
 

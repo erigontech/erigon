@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/lightclient_utils"
@@ -126,14 +127,15 @@ type forkGraphDisk struct {
 	sszSnappyWriter *snappy.Writer
 	sszSnappyReader *snappy.Reader
 
-	rcfg    beacon_router_configuration.RouterConfiguration
-	emitter *beaconevents.EventEmitter
+	rcfg       beacon_router_configuration.RouterConfiguration
+	emitter    *beaconevents.EventEmitter
+	syncedData synced_data.SyncedData
 
 	stateDumpLock sync.Mutex
 }
 
 // Initialize fork graph with a new state
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, emitter *beaconevents.EventEmitter) ForkGraph {
+func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, emitter *beaconevents.EventEmitter) ForkGraph {
 	farthestExtendingPath := make(map[libcommon.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -156,6 +158,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, r
 		anchorSlot:  anchorState.Slot(),
 		rcfg:        rcfg,
 		emitter:     emitter,
+		syncedData:  syncedData,
 	}
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
@@ -179,7 +182,7 @@ func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot libcommon.Hash) boo
 }
 
 // Add a new node and edge to the graph
-func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation, shallowImport bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
+func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
 	block := signedBlock.Block
 	blockRoot, err := block.HashSSZ()
 	if err != nil {
@@ -273,9 +276,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	}
 
 	f.currentState = newState
-	if shallowImport {
-		return newState, Success, nil
-	}
 
 	// update diff storages.
 	if f.rcfg.Beacon || f.rcfg.Validator || f.rcfg.Lighthouse {
@@ -341,6 +341,66 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 	return f.getState(blockRoot, alwaysCopy, false)
 }
 
+func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot libcommon.Hash, in *state.CachingBeaconState) (out *state.CachingBeaconState, ok bool, err error) {
+	if f.syncedData == nil {
+		return
+	}
+	if f.syncedData.HeadRoot() == blockRoot {
+		err = f.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			headBlockRoot, err := headState.BlockRoot()
+			if err != nil {
+				return err
+			}
+			if headBlockRoot != blockRoot {
+				return nil
+			}
+			ok = true
+			var err2 error
+
+			if in != nil {
+				err2 = headState.CopyInto(in)
+				out = in
+			} else {
+				out, err2 = headState.Copy()
+			}
+			return err2
+		})
+		if errors.Is(err, synced_data.ErrNotSynced) {
+			err = nil
+		}
+		return
+	}
+
+	// check if the state is in the cache
+	err = f.syncedData.ViewPreviousHeadState(func(prevHeadState *state.CachingBeaconState) error {
+		prevHeadBlockRoot, err := prevHeadState.BlockRoot()
+		if err != nil {
+			return err
+		}
+
+		if prevHeadBlockRoot != blockRoot {
+			log.Warn("Not Using a cached beacon state", "blockRoot", blockRoot)
+			return nil
+		}
+		ok = true
+
+		var err2 error
+		if in != nil {
+			err2 = prevHeadState.CopyInto(in)
+			out = in
+		} else {
+			out, err2 = prevHeadState.Copy()
+		}
+
+		return err2
+	})
+	if errors.Is(err, synced_data.ErrPreviousStateNotAvailable) || errors.Is(err, synced_data.ErrNotSynced) {
+		err = nil
+	}
+
+	return
+}
+
 func (f *forkGraphDisk) getState(blockRoot libcommon.Hash, alwaysCopy bool, addChainSegment bool) (*state.CachingBeaconState, error) {
 	if f.currentState != nil && !alwaysCopy {
 		currentStateBlockRoot, err := f.currentState.BlockRoot()
@@ -349,6 +409,11 @@ func (f *forkGraphDisk) getState(blockRoot libcommon.Hash, alwaysCopy bool, addC
 		}
 		if currentStateBlockRoot == blockRoot {
 			return f.currentState, nil
+		}
+	}
+	if addChainSegment && !alwaysCopy {
+		if state, ok, err := f.useCachedStateIfPossible(blockRoot, f.currentState); ok {
+			return state, err
 		}
 	}
 
@@ -463,7 +528,6 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.headers.Delete(root)
 		f.blockRewards.Delete(root)
 		f.fs.Remove(getBeaconStateFilename(root))
-		f.fs.Remove(getBeaconStateCacheFilename(root))
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return
