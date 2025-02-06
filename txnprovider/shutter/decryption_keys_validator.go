@@ -111,8 +111,14 @@ func (v DecryptionKeysValidator) validateSlot(msg *proto.DecryptionKeys) error {
 		return fmt.Errorf("%w: %d", ErrSlotTooLarge, msgSlot)
 	}
 
+	// we are ok with a buffer of +/- 1 slot
 	currentSlot := v.slotCalculator.CalcCurrentSlot()
-	if msgSlot < currentSlot {
+	var slotBeforeCurrent uint64
+	if currentSlot > 0 {
+		slotBeforeCurrent = currentSlot - 1
+	}
+
+	if msgSlot < slotBeforeCurrent {
 		return fmt.Errorf("%w: msgSlot=%d, currentSlot=%d", ErrSlotInThePast, msgSlot, currentSlot)
 	}
 
