@@ -77,7 +77,7 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 		return err
 	}
 
-	if err := v.validateKeys(msg); err != nil {
+	if err := v.validateKeys(msg, eon); err != nil {
 		return err
 	}
 
@@ -182,7 +182,7 @@ func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, e
 	return nil
 }
 
-func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys) error {
+func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys, eon Eon) error {
 	if len(msg.Keys) == 0 {
 		return ErrEmptyKeys
 	}
@@ -191,11 +191,24 @@ func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys) error {
 		return fmt.Errorf("%w: %d", ErrTooManyKeys, len(msg.Keys))
 	}
 
-	//
-	// TODO when we add the shcrypto library and smart contract state accessors:
-	//      - add DecryptionKeys.Validate() equivalent which checks the Key unmarshalling into shcrypto.EpochSecretKey
-	//      - add validation VerifyEpochSecretKey: check if we should be doing this validation
-	//
+	eonPublicKey, err := eon.PublicKey()
+	if err != nil {
+		return err
+	}
+
+	for _, key := range msg.Keys {
+		k, err := key.EpochSecretKey()
+		if err != nil {
+			return fmt.Errorf("error getting epochSecretKey for identity: %w: %d", err, key.IdentityPreimage)
+		}
+		ok, err := crypto.VerifyEpochSecretKey(k, &eonPublicKey, key.IdentityPreimage)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("verification of epoch secret key failed for identity %s", key.IdentityPreimage)
+		}
+	}
 
 	return nil
 }

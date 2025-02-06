@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 )
 
 var ErrInvalidKeyperIndex = fmt.Errorf("invalid keyper index")
@@ -24,4 +25,10 @@ func (e Eon) KeyperAt(index uint64) (libcommon.Address, error) {
 	}
 
 	return e.Members[index], nil
+}
+
+func (e Eon) PublicKey() (crypto.EonPublicKey, error) {
+	eonPublicKey := crypto.EonPublicKey{}
+	err := eonPublicKey.Unmarshal(e.Key)
+	return eonPublicKey, err
 }
