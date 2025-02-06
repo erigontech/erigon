@@ -48,3 +48,14 @@ func (e Eon) PublicKey() (crypto.EonPublicKey, error) {
 	err := eonPublicKey.Unmarshal(e.Key)
 	return eonPublicKey, err
 }
+
+type EonSecretKey = crypto.EpochSecretKey
+
+func EonSecretKeyFromBytes(b []byte) (*EonSecretKey, error) {
+	epochSecretKey := new(EonSecretKey)
+	if err := epochSecretKey.Unmarshal(b); err != nil {
+		return nil, err
+	}
+
+	return epochSecretKey, nil
+}
