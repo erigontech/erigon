@@ -55,12 +55,12 @@ func GetFinalizedBlockNumber(tx kv.Tx, br services.FullBlockReader) (uint64, err
 	if forkchoiceFinalizedHash != (libcommon.Hash{}) {
 		forkchoiceFinalizedNum := rawdb.ReadHeaderNumber(tx, forkchoiceFinalizedHash)
 		if forkchoiceFinalizedNum != nil && *forkchoiceFinalizedNum > 0 {
+			if br != nil && br.FrozenBlocks() > *forkchoiceFinalizedNum {
+				fmt.Println("br.FrozenBlocks() - 1", br.FrozenBlocks()-1)
+				return br.FrozenBlocks() - 1, nil
+			}
 			return *forkchoiceFinalizedNum, nil
 		}
-	}
-
-	if br != nil && br.FrozenBlocks() > 0 {
-		return br.FrozenBlocks() - 1, nil
 	}
 
 	return 0, nil
@@ -70,7 +70,11 @@ func GetSafeBlockNumber(tx kv.Tx, br services.FullBlockReader) (uint64, error) {
 	forkchoiceSafeHash := rawdb.ReadForkchoiceSafe(tx)
 	if forkchoiceSafeHash != (libcommon.Hash{}) {
 		forkchoiceSafeNum := rawdb.ReadHeaderNumber(tx, forkchoiceSafeHash)
-		if forkchoiceSafeNum != nil && *forkchoiceSafeNum != 0 {
+		if forkchoiceSafeNum != nil && *forkchoiceSafeNum > 0 {
+			if br != nil && br.FrozenBlocks() > *forkchoiceSafeNum {
+				fmt.Println(" safu br.FrozenBlocks() - 1", br.FrozenBlocks()-1)
+				return br.FrozenBlocks() - 1, nil
+			}
 			return *forkchoiceSafeNum, nil
 		}
 	}
