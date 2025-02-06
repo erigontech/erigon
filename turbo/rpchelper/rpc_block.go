@@ -37,7 +37,7 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
 	if forkchoiceHeadHash != (libcommon.Hash{}) {
 		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
-		if forkchoiceHeadNum != nil {
+		if forkchoiceHeadNum != nil && *forkchoiceHeadNum > 0 {
 			return *forkchoiceHeadNum, nil
 		}
 	}
@@ -91,5 +91,6 @@ func GetLatestExecutedBlockNumber(tx kv.Tx) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	fmt.Println("latestExecutedBn", blockNum)
 	return blockNum, err
 }
