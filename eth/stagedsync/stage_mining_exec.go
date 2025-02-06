@@ -482,15 +482,16 @@ func addTransactionsToMiningBlock(
 		blobGasSnap := gasPool.BlobGas()
 		snap := ibs.Snapshot()
 
-		fmt.Println(chainConfig.IsOptimismHolocene(header.Time), header.Time)
-
 		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, header.BlobGasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
 			gasPool = new(core.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs
 			return nil, err
 		}
-		fmt.Println(receipt.GasUsed, receipt.TransactionIndex)
+		b, _ := receipt.MarshalJSON()
+		if txn.Hash() == libcommon.HexToHash("0xb94a97b160df4e95bb00d54306b787899716cdb7feebc68d04d2d61dbaf9a8a1") {
+			fmt.Println("receipt", string(b))
+		}
 
 		current.Txns = append(current.Txns, txn)
 		current.Receipts = append(current.Receipts, receipt)
