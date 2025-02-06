@@ -111,6 +111,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 	v := r.Header.Get("Eth-Consensus-Version")
 	clVersion, err := clparams.StringToClVersion(v)
 	if err != nil {
+		log.Debug("[Beacon REST] failed to parse version", "version", v, "err", err)
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
