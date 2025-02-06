@@ -463,3 +463,41 @@ func (c *MockSyncedDataViewHeadStateCall) DoAndReturn(f func(synced_data.ViewHea
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// ViewPreviousHeadState mocks base method.
+func (m *MockSyncedData) ViewPreviousHeadState(arg0 synced_data.ViewHeadStateFn) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ViewPreviousHeadState", arg0)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ViewPreviousHeadState indicates an expected call of ViewPreviousHeadState.
+func (mr *MockSyncedDataMockRecorder) ViewPreviousHeadState(arg0 any) *MockSyncedDataViewPreviousHeadStateCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ViewPreviousHeadState", reflect.TypeOf((*MockSyncedData)(nil).ViewPreviousHeadState), arg0)
+	return &MockSyncedDataViewPreviousHeadStateCall{Call: call}
+}
+
+// MockSyncedDataViewPreviousHeadStateCall wrap *gomock.Call
+type MockSyncedDataViewPreviousHeadStateCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncedDataViewPreviousHeadStateCall) Return(arg0 error) *MockSyncedDataViewPreviousHeadStateCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncedDataViewPreviousHeadStateCall) Do(f func(synced_data.ViewHeadStateFn) error) *MockSyncedDataViewPreviousHeadStateCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncedDataViewPreviousHeadStateCall) DoAndReturn(f func(synced_data.ViewHeadStateFn) error) *MockSyncedDataViewPreviousHeadStateCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}

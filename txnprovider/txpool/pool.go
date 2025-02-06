@@ -1852,6 +1852,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 // promote/demote transactions
 // reorgs
 func (p *TxPool) Run(ctx context.Context) error {
+	defer func() { p.logger.Info("[txpool] stopped") }()
 	defer p.poolDB.Close()
 	p.p2pFetcher.ConnectCore()
 	p.p2pFetcher.ConnectSentries()

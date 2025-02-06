@@ -75,6 +75,9 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	// 3. calculate commitment with all data +removed key
 	expectedHash, err := domains.ComputeCommitment(context.Background(), false, domains.txNum/stepSize, "")
 	require.NoError(t, err)
+	err = domains.Flush(ctx, rwTx)
+	require.NoError(t, err)
+
 	domains.Close()
 
 	err = rwTx.Commit()

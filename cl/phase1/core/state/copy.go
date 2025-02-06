@@ -42,27 +42,10 @@ func (bs *CachingBeaconState) reinitCaches() error {
 	if bs.Version() == clparams.Phase0Version {
 		return bs.InitBeaconState()
 	}
-	if bs.publicKeyIndicies == nil {
-		bs.publicKeyIndicies = make(map[[48]byte]uint64)
-	}
+	bs.publicKeyIndicies = make(map[[48]byte]uint64)
 
-	// We regenerate public keys from the copied state to avoid concurrency issues.
-	for k, idx := range bs.publicKeyIndicies {
-		if idx >= uint64(bs.ValidatorSet().Length()) {
-			delete(bs.publicKeyIndicies, k)
-			continue
-		}
-		pk := bs.ValidatorSet().Get(int(idx)).PublicKey()
-		if pk != k {
-			delete(bs.publicKeyIndicies, k)
-		}
-	}
 	bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		pk := v.PublicKey()
-		if _, ok := bs.publicKeyIndicies[pk]; ok {
-			return true
-		}
-		bs.publicKeyIndicies[pk] = uint64(idx)
+		bs.publicKeyIndicies[v.PublicKey()] = uint64(idx)
 		return true
 	})
 

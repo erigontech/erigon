@@ -19,11 +19,11 @@ jobs:
       ERIGON_DIR: /opt/erigon-versions/reference-version
       ERIGON_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
-      ERIGON_QA_PATH: /opt/erigon-qa
+      ERIGON_QA_PATH: /home/qarunner/erigon-qa
       CHAIN: ${{ matrix.chain }}
 
     steps:
-      - name: Checkout Silkworm repository
+      - name: Checkout Erigon repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -34,7 +34,6 @@ jobs:
           rm -rf ${{runner.workspace}}/rpc-tests
           git -c advice.detachedHead=false clone --depth 1 --branch v1.27.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{runner.workspace}}/rpc-tests
-          pip3 install -r requirements.txt --break-system-packages
 
       - name: Clean Erigon Build Directory
         run: |
@@ -50,14 +49,16 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
       - name: Run RpcDaemon
+        id: rpcdaemon_running_step
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           echo "RpcDaemon starting..."
           
-          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
+          ./rpcdaemon --datadir $ERIGON_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
+          echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
           
           echo "RpcDaemon started"
 
@@ -81,7 +82,7 @@ jobs:
         run: |
           set +e # Disable exit on error
           failed_test=0
-          commit=$(git -C ${{runner.workspace}}/silkworm rev-parse --short HEAD) # use ${{ github.sha }} or GITHUB_SHA
+          commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD) # use ${{ github.sha }} or GITHUB_SHA
           past_test_dir=$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_perf_$commit
           echo "past_test_dir=$past_test_dir" >> $GITHUB_ENV
           
@@ -106,6 +107,7 @@ jobs:
                                       --test-sequence "$sequence" \
                                       --repetitions 5 \
                                       --erigon-dir $ERIGON_DATA_DIR \
+                                      --silk-dir ${{runner.workspace}}/erigon \
                                       --test-mode 2 \
                                       --test-report \
                                       --json-report ./reports/mainnet/result.json \
@@ -148,7 +150,7 @@ jobs:
               cd ${{runner.workspace}}/rpc-tests/perf/reports/mainnet/
               python3 $ERIGON_QA_PATH/test_system/qa-tests/rpc-tests/perf_hdr_analysis.py \
                 --test_name erigon-$method \
-                --input_file ./result.json \
+                --input_file ./erigon-$method-result.json \
                 --output_file ./erigon-$method-latency_hdr_analysis.pdf
             else
               failed_test=1
@@ -191,6 +193,7 @@ jobs:
           fi
 
       - name: Stop Erigon RpcDaemon
+        if: steps.rpcdaemon_running_step.outputs.rpc_daemon_started == 'true'
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           # Clean up rpcdaemon process if it's still running
@@ -231,7 +234,7 @@ jobs:
         if: steps.test_step.outputs.TEST_RESULT == 'success'
         run: echo "::notice::Tests completed successfully"
 
-      - name: Action for Not Success
+      - name: Action for Failure
         if: steps.test_step.outputs.TEST_RESULT != 'success'
         run: |
           echo "::error::Error detected during tests"
