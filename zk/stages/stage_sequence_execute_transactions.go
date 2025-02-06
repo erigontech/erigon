@@ -132,7 +132,7 @@ func attemptAddTransaction(
 	l1Recovery bool,
 	forkId, l1InfoIndex uint64,
 	blockDataSizeChecker *BlockDataChecker,
-	normalcyGasPool *core.GasPool,
+	ethBlockGasPool *core.GasPool,
 ) (*types.Receipt, *core.ExecutionResult, *vm.TransactionCounter, overflowType, error) {
 	var batchDataOverflow, overflow bool
 	var err error
@@ -165,7 +165,7 @@ func attemptAddTransaction(
 	if !cfg.chainConfig.IsNormalcy(blockContext.BlockNumber) {
 		gasPool = new(core.GasPool).AddGas(transactionGasLimit)
 	} else {
-		gasPool = normalcyGasPool
+		gasPool = ethBlockGasPool
 	}
 
 	// set the counter collector on the config so that we can gather info during the execution
