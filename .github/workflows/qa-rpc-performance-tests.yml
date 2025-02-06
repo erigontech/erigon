@@ -151,7 +151,7 @@ jobs:
               cd ${{runner.workspace}}/rpc-tests/perf/reports/mainnet/
               python3 $ERIGON_QA_PATH/test_system/qa-tests/rpc-tests/perf_hdr_analysis.py \
                 --test_name erigon-$method \
-                --input_file ./result.json \
+                --input_file ./erigon-$method-result.json \
                 --output_file ./erigon-$method-latency_hdr_analysis.pdf
             else
               failed_test=1
