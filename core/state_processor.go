@@ -20,6 +20,8 @@
 package core
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -38,6 +40,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64,
 	evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
 	rules := evm.ChainRules()
+	fmt.Println(rules.IsOptimismHolocene)
 	blockNum := header.Number.Uint64()
 	msg, err := txn.AsMessage(*types.MakeSigner(config, blockNum, header.Time), header.BaseFee, rules)
 	if err != nil {
