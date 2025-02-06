@@ -573,7 +573,7 @@ func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.I
 		prev, _ := sdb.GetBalance(addr)
 		defer func() {
 			bal, _ := sdb.GetBalance(addr)
-			fmt.Printf("%d (%d.%d) SubBalance %x, %d+%d=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &prev, amount, &bal)
+			fmt.Printf("%d (%d.%d) SubBalance %x, %d-%d=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &prev, amount, &bal)
 		}()
 	}
 
@@ -653,7 +653,7 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 }
 
 var tracedAccounts = map[libcommon.Address]struct{}{
-	//libcommon.HexToAddress("390dc2368bfde7e7a370af46c0b834b718d570c1"): {},
+	libcommon.HexToAddress("a3e955997667574d4671739e071247d42806ce72"): {},
 	//libcommon.HexToAddress("0000000071727de22e5e9d8baf0edac6f37da032"): {},
 	//libcommon.HexToAddress("3cad627d8cc7ca1dd31bb7b0411b7cfda15571f2"): {},
 	//libcommon.HexToAddress("47c4002f8554fec15828af5386fc63555393650e"): {},
