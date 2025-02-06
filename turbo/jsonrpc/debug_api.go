@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -34,8 +35,10 @@ import (
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
+	// types2 "github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
+	// bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/rpchelper"
@@ -65,6 +68,7 @@ type PrivateDebugAPI interface {
 	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error)
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutility.Bytes, error)
 	GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error)
+	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutility.Bytes, error)
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
@@ -358,6 +362,7 @@ type AccountResult struct {
 	CodeHash common.Hash      `json:"codeHash"`
 }
 
+// GetRawHeader implements debug_getRawHeader - returns a an RLP-encoded header, given a block number or hash
 func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -378,6 +383,7 @@ func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash 
 	return rlp.EncodeToBytes(header)
 }
 
+// Implements debug_getRawBlock - Returns an RLP-encoded block
 func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -398,7 +404,7 @@ func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash r
 	return rlp.EncodeToBytes(block)
 }
 
-// GetRawReceipts retrieves the binary-encoded receipts of a single block.
+// GetRawReceipts implements debug_getRawReceipts - retrieves and returns an array of EIP-2718 binary-encoded receipts of a single block
 func (api *PrivateDebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutility.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -450,6 +456,7 @@ func (api *PrivateDebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHas
 	return result, nil
 }
 
+// GetBadBlocks implements debug_getBadBlocks - Returns an array of recent bad blocks that the client has seen on the network
 func (api *PrivateDebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -484,4 +491,64 @@ func (api *PrivateDebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]
 	}
 
 	return results, nil
+}
+
+// GetRawTransaction implements debug_getRawTransaction - Returns an array of EIP-2718 binary-encoded transactions
+func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.Hash) (hexutility.Bytes, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
+	if err != nil {
+		return nil, err
+	}
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
+	// Private API returns 0 if transaction is not found.
+	if blockNum == 0 && chainConfig.Bor != nil {
+		if api.useBridgeReader {
+			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
+		} else {
+			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
+		}
+
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if !ok {
+		return nil, nil
+	}
+
+	txNumMin, err := txNumsReader.Min(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	if txNumMin+2 > txNum {
+		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
+	}
+
+	var txnIndex uint64 = txNum - txNumMin - 2
+
+	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txnIndex))
+	if err != nil {
+		return nil, err
+	}
+
+	if txn != nil {
+		var buf bytes.Buffer
+		err = txn.MarshalBinary(&buf)
+		return buf.Bytes(), err
+	}
+
+	return nil, nil
 }
