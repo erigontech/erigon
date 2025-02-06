@@ -135,6 +135,8 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 					Index:   i,
 					Message: "invalid number of on bits in committee bits",
 				})
+				bytes, _ := json.Marshal(attestation)
+				log.Warn("[Beacon REST] invalid number of on bits in committee bits", "attestation", string(bytes))
 				continue
 			}
 			cIndex = uint64(indices[0])
