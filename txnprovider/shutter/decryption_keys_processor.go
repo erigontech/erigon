@@ -56,9 +56,6 @@ func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
 	//         - keep these in a doubly linked list of size 128 (for forking depth in blocks)
 	//         - when len > 128 start cleaning up backwards until len <= 128
 	//         - upon reorgs will need to
-	//       - this also raises the question - is it possible for the validator to reject old TxPointers:
-	//         - i believe that once we verify key share identities that means we've received 100% reliable msgs from keypers
-	//         - in that case, the validator can also keep track of "last validated keys txpointer" and reject those with txpointer < prev one
 	//
 
 	for {
