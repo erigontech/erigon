@@ -23,7 +23,7 @@ jobs:
       CHAIN: ${{ matrix.chain }}
 
     steps:
-      - name: Checkout Silkworm repository
+      - name: Checkout Erigon repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
