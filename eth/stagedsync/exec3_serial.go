@@ -65,8 +65,10 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 		}
 	}
 
-	for _, task := range tasks {
+	for i, task := range tasks {
 		txTask := task.(*exec.TxTask)
+
+		fmt.Println("ExecTX", i, txTask.BlockNumber, txTask.TxNum, txTask.TxIndex)
 
 		result := se.applyWorker.RunTxTaskNoLock(txTask)
 

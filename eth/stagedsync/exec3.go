@@ -680,12 +680,13 @@ func ExecV3(ctx context.Context,
 					txTask.Config = cfg.genesis.Config
 				}
 
-				if txTask.TxNum <= doms.TxNum() && txTask.TxNum > 0 {
+				if txTask.TxNum > 0 && txTask.TxNum <= doms.TxNum() {
 					inputTxNum++
 					skipPostEvaluation = true
 					continue
 				}
 
+				fmt.Println("AddTX", len(txTasks), blockNum, inputTxNum, txIndex)
 				txTasks = append(txTasks, txTask)
 				stageProgress = blockNum
 				inputTxNum++
