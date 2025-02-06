@@ -17,6 +17,7 @@
 package engineapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -42,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/params"
@@ -646,8 +648,20 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
 	}
 
-	if s.config.Optimism != nil && payloadAttributes.GasLimit == nil {
-		return nil, &engine_helpers.InvalidPayloadAttributesErr
+	if s.config.Optimism != nil {
+		if s.config.Optimism != nil {
+			if payloadAttributes.GasLimit == nil {
+				return nil, &engine_helpers.InvalidPayloadAttributesErr
+			}
+			if s.config.IsHolocene(payloadAttributes.Timestamp.Uint64()) {
+				if err := misc.ValidateHolocene1559Params(payloadAttributes.HoloceneEIP1559Params); err != nil {
+					return nil, err
+				}
+				req.HoloceneEIP1559Params = bytes.Clone(payloadAttributes.HoloceneEIP1559Params)
+			} else if len(payloadAttributes.HoloceneEIP1559Params) != 0 {
+				return nil, &engine_helpers.InvalidPayloadAttributesErr
+			}
+		}
 	}
 
 	if payloadAttributes.GasLimit != nil {

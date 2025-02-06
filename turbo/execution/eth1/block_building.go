@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
@@ -88,6 +89,7 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		param.Transactions = req.Transactions
 		param.NoTxPool = req.NoTxPool
 		param.GasLimit = req.GasLimit
+		param.HoloceneEIP1559Params = common.CopyBytes(req.HoloceneEIP1559Params)
 	}
 
 	if err := e.checkWithdrawalsPresence(param.Timestamp, param.Withdrawals); err != nil {
