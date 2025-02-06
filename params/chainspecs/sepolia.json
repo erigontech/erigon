@@ -17,6 +17,7 @@
   "mergeNetsplitBlock": 1735371,
   "shanghaiTime": 1677557088,
   "cancunTime": 1706655072,
+  "pragueTime": 1741159776,
   "blobSchedule": {
     "cancun": {
       "target": 3,
