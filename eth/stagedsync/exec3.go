@@ -680,7 +680,6 @@ func ExecV3(ctx context.Context,
 					continue
 				}
 
-				fmt.Println("AddTX", len(txTasks), blockNum, inputTxNum, txIndex)
 				txTasks = append(txTasks, txTask)
 				stageProgress = blockNum
 				inputTxNum++
