@@ -108,38 +108,54 @@ func (a *ApiHandler) GetEthV2BeaconPoolAttestations(w http.ResponseWriter, r *ht
 	return newBeaconResponse(ret), nil
 }
 func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
-	req := []*solid.Attestation{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	v := r.Header.Get("Eth-Consensus-Version")
+	clVersion, err := clparams.StringToClVersion(v)
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
+	log.Debug("[Beacon REST] received attestation", "version", clVersion)
+
+	var atts []solid.GeneralAttestation
+	if clVersion >= clparams.ElectraVersion {
+		req := []*solid.SingleAttestation{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+		for _, a := range req {
+			atts = append(atts, a)
+		}
+	} else {
+		req := []*solid.Attestation{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+		for _, a := range req {
+			atts = append(atts, a)
+		}
+	}
 
 	failures := []poolingFailure{}
-	for i, attestation := range req {
+	for i, attestation := range atts {
 		if a.syncedData.Syncing() {
 			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
 			return
 		}
 		var (
-			slot                  = attestation.Data.Slot
-			epoch                 = a.ethClock.GetEpochAtSlot(slot)
-			attClVersion          = a.beaconChainCfg.GetCurrentStateVersion(epoch)
-			cIndex                = attestation.Data.CommitteeIndex
-			committeeCountPerSlot = a.syncedData.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
-		)
-
-		if attClVersion >= clparams.ElectraVersion {
-			indices := attestation.CommitteeBits.GetOnIndices()
-			if len(indices) != 1 {
-				failures = append(failures, poolingFailure{
-					Index:   i,
-					Message: "invalid number of on bits in committee bits",
-				})
-				bytes, _ := json.Marshal(attestation)
-				log.Warn("[Beacon REST] invalid number of on bits in committee bits", "attestation", string(bytes))
-				continue
+			slot                      = attestation.AttestationData().Slot
+			cIndex                    = attestation.AttestationData().CommitteeIndex
+			committeeCountPerSlot     = a.syncedData.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
+			attestationWithGossipData = &services.AttestationForGossip{
+				ImmediateProcess: true, // we want to process attestation immediately
 			}
-			cIndex = uint64(indices[0])
+		)
+		if clVersion >= clparams.ElectraVersion {
+			cIndex = attestation.(*solid.SingleAttestation).CommitteeIndex
+			attestationWithGossipData.SingleAttestation = attestation.(*solid.SingleAttestation)
+		} else {
+			attestationWithGossipData.Attestation = attestation.(*solid.Attestation)
 		}
 
 		subnet := subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
@@ -147,10 +163,6 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
-		}
-		attestationWithGossipData := &services.AttestationForGossip{
-			Attestation:      attestation,
-			ImmediateProcess: true, // we want to process attestation immediately
 		}
 
 		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
