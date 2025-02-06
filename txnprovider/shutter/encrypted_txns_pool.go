@@ -33,6 +33,11 @@ import (
 
 type TxnIndex uint64
 
+type EncryptedTxnSubmissionKey struct {
+	EonIndex EonIndex
+	TxnIndex TxnIndex
+}
+
 // EncryptedTxnSubmission mimics contracts.SequencerTransactionSubmitted but without the "Raw" attribute to save memory.
 type EncryptedTxnSubmission struct {
 	EonIndex             EonIndex
@@ -44,10 +49,17 @@ type EncryptedTxnSubmission struct {
 	BlockNum             uint64
 }
 
+func (ets EncryptedTxnSubmission) Key() EncryptedTxnSubmissionKey {
+	return EncryptedTxnSubmissionKey{
+		EonIndex: ets.EonIndex,
+		TxnIndex: ets.TxnIndex,
+	}
+}
+
 type EncryptedTxnsPool struct {
 	logger            log.Logger
 	sequencerContract *contracts.Sequencer
-	submissions       *lru.Cache[TxnIndex, EncryptedTxnSubmission]
+	submissions       *lru.Cache[EncryptedTxnSubmissionKey, EncryptedTxnSubmission]
 }
 
 func NewEncryptedTxnsPool(logger log.Logger, config Config, contractBackend bind.ContractBackend) EncryptedTxnsPool {
@@ -57,7 +69,7 @@ func NewEncryptedTxnsPool(logger log.Logger, config Config, contractBackend bind
 		panic(fmt.Errorf("failed to create shutter sequencer contract: %w", err))
 	}
 
-	submissions, err := lru.New[TxnIndex, EncryptedTxnSubmission](int(config.MaxPooledEncryptedTxns))
+	submissions, err := lru.New[EncryptedTxnSubmissionKey, EncryptedTxnSubmission](int(config.MaxPooledEncryptedTxns))
 	if err != nil {
 		panic(fmt.Errorf("failed to create shutter submissions LRU cache: %w", err))
 	}
@@ -97,19 +109,24 @@ func (etp EncryptedTxnsPool) Run(ctx context.Context) error {
 			}
 
 			if event.Raw.Removed {
-				etp.submissions.Remove(encryptedTxnSubmission.TxnIndex)
+				etp.submissions.Remove(encryptedTxnSubmission.Key())
 			} else {
-				etp.submissions.Add(encryptedTxnSubmission.TxnIndex, encryptedTxnSubmission)
+				etp.submissions.Add(encryptedTxnSubmission.Key(), encryptedTxnSubmission)
 			}
 		}
 	}
 }
 
-func (etp EncryptedTxnsPool) Txns(from, to TxnIndex, gasLimit uint64) ([]EncryptedTxnSubmission, error) {
+func (etp EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uint64) ([]EncryptedTxnSubmission, error) {
 	var txns []EncryptedTxnSubmission
 	var accumulatedGasLimit uint64
 	for i := from; i < to; i++ {
-		submission, ok := etp.submissions.Peek(i) // use peek not to change "recently used metric"
+		key := EncryptedTxnSubmissionKey{
+			EonIndex: eon,
+			TxnIndex: i,
+		}
+
+		submission, ok := etp.submissions.Peek(key) // use peek not to change "recently used metric"
 		if !ok {
 
 			//

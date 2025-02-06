@@ -49,12 +49,16 @@ func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
 
 	//
 	// TODO - the dkp can actually clean the encrypted and decrypted pools (so we wont have to use LRU)
-	//      - uses block listener - when a new block comes in - calculate its slots using its timestamp (need changes to StateChange) - remove all decrypted txns for slots <= slot
-	//      - remember previous txn pointer from the previous decryption keys msg - when the new one comes if the txn pointer has moved forward then drop all <= old tx pointer
-	//        (this also raises the question - is it possible for the validator to reject old TxPointers:
-	//          - i believe that once we verify key share identities that means we've received 100% reliable msgs from keypers
-	//          - in that case, the validator can also keep track of "last validated keys txpointer" and reject those with txpointer < prev one
-	//         )
+	//      - uses block listener
+	//         - for decrypted pool: when a new block comes in - calculate its slots using its timestamp (need changes to StateChange) - remove all decrypted txns for slots <= slot
+	//         - for encrypted pool: remember previous eon+txn pointer from the previous decryption keys msg - when the new one comes if the eon+txn pointer have moved forward then drop all <= old tx pointer
+	//      - to handle reorgs:
+	//         - keep these in a doubly linked list of size 128 (for forking depth in blocks)
+	//         - when len > 128 start cleaning up backwards until len <= 128
+	//         - upon reorgs will need to
+	//       - this also raises the question - is it possible for the validator to reject old TxPointers:
+	//         - i believe that once we verify key share identities that means we've received 100% reliable msgs from keypers
+	//         - in that case, the validator can also keep track of "last validated keys txpointer" and reject those with txpointer < prev one
 	//
 
 	for {
@@ -89,9 +93,10 @@ func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 		"txPointer", msg.GetGnosis().TxPointer,
 	)
 
+	eonIndex := EonIndex(msg.Eon)
 	from := TxnIndex(msg.GetGnosis().TxPointer)
 	to := from + TxnIndex(len(msg.Keys))
-	encryptedTxns, err := dkp.encryptedTxnsPool.Txns(from, to, dkp.config.EncryptedGasLimit)
+	encryptedTxns, err := dkp.encryptedTxnsPool.Txns(eonIndex, from, to, dkp.config.EncryptedGasLimit)
 	if err != nil {
 		return err
 	}
