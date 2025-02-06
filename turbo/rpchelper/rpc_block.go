@@ -54,7 +54,7 @@ func GetFinalizedBlockNumber(tx kv.Tx, br services.FullBlockReader) (uint64, err
 	forkchoiceFinalizedHash := rawdb.ReadForkchoiceFinalized(tx)
 	if forkchoiceFinalizedHash != (libcommon.Hash{}) {
 		forkchoiceFinalizedNum := rawdb.ReadHeaderNumber(tx, forkchoiceFinalizedHash)
-		if forkchoiceFinalizedNum != nil {
+		if forkchoiceFinalizedNum != nil && *forkchoiceFinalizedNum > 0 {
 			return *forkchoiceFinalizedNum, nil
 		}
 	}
@@ -70,7 +70,7 @@ func GetSafeBlockNumber(tx kv.Tx, br services.FullBlockReader) (uint64, error) {
 	forkchoiceSafeHash := rawdb.ReadForkchoiceSafe(tx)
 	if forkchoiceSafeHash != (libcommon.Hash{}) {
 		forkchoiceSafeNum := rawdb.ReadHeaderNumber(tx, forkchoiceSafeHash)
-		if forkchoiceSafeNum != nil {
+		if forkchoiceSafeNum != nil && *forkchoiceSafeNum != 0 {
 			return *forkchoiceSafeNum, nil
 		}
 	}
