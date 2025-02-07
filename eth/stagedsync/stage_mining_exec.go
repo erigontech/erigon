@@ -126,6 +126,21 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
 		forceTxs := current.ForceTxs
+
+		yielded := mapset.NewSet[[32]byte]()
+		var simStateReader state.StateReader
+		var simStateWriter state.StateWriter
+
+		mb := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
+		defer mb.Close()
+		sd, err := state2.NewSharedDomains(mb, logger)
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		simStateWriter = state.NewWriterV4(sd)
+		simStateReader = state.NewReaderV3(sd)
+
 		if len(forceTxs) > 0 {
 			// forceTxs is sent by Optimism consensus client, and all force txs must be included in the payload.
 			// Therefore, interrupts to block building must not be handled while force txs are being processed.
@@ -146,20 +161,6 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			}
 			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
 		} else if !cfg.noTxPool {
-
-			yielded := mapset.NewSet[[32]byte]()
-			var simStateReader state.StateReader
-			var simStateWriter state.StateWriter
-
-			mb := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
-			defer mb.Close()
-			sd, err := state2.NewSharedDomains(mb, logger)
-			if err != nil {
-				return err
-			}
-			defer sd.Close()
-			simStateWriter = state.NewWriterV4(sd)
-			simStateReader = state.NewReaderV3(sd)
 
 			executionAt, err := s.ExecutionAt(mb)
 			if err != nil {
