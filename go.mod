@@ -13,7 +13,7 @@ replace github.com/ledgerwatch/erigon-lib => ./erigon-lib
 
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
-	github.com/0xPolygonHermez/zkevm-data-streamer v0.2.7
+	github.com/0xPolygonHermez/zkevm-data-streamer v0.2.8
 	github.com/99designs/gqlgen v0.17.40
 	github.com/Giulio2002/bls v0.0.0-20240315151443-652e18a3d188
 	github.com/Masterminds/sprig/v3 v3.2.3
