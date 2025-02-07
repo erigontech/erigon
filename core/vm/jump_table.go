@@ -277,6 +277,7 @@ func newHomesteadInstructionSet() JumpTable {
 		numPop:      6,
 		numPush:     1,
 		memorySize:  memoryDelegateCall,
+		string:      stDelegateCall,
 	}
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
@@ -1286,6 +1287,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:      7,
 			numPush:     1,
 			memorySize:  memoryCall,
+			string:      stCall,
 		},
 		CALLCODE: {
 			execute:     opCallCode,

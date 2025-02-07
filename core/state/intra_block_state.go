@@ -425,7 +425,13 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (lib
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr libcommon.Address, key libcommon.Hash, value *uint256.Int) error {
-	versionedValue, err := versionedRead(sdb, StateKey(&addr, &key), false, *u256.N0,
+	var isDirty bool
+
+	if so, ok := sdb.stateObjects[addr]; ok {
+		_, isDirty = so.dirtyStorage[key]
+	}
+
+	versionedValue, err := versionedRead(sdb, StateKey(&addr, &key), !isDirty, *u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
 		},
@@ -440,7 +446,7 @@ func (sdb *IntraBlockState) GetState(addr libcommon.Address, key libcommon.Hash,
 	*value = versionedValue
 
 	if sdb.trace || (traceAccount(addr) && traceKey(key)) {
-		fmt.Printf("%d (%d.%d) GetState %x, %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, key, value)
+		fmt.Printf("%d (%d.%d) GetState %x (%v), %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, isDirty, key, value)
 	}
 
 	return err

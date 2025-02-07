@@ -7,10 +7,36 @@ import (
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 const FlagDone = 0
 const FlagEstimate = 1
+
+type AccountPath int8
+
+func (p AccountPath) String() string {
+	switch p {
+	case AddressPath:
+		return "Address"
+	case BalancePath:
+		return "Balance"
+	case NoncePath:
+		return "Nonce"
+	case CodePath:
+		return "Code"
+	case CodeHashPath:
+		return "Code Hash"
+	case CodeSizePath:
+		return "Code Size"
+	case SelfDestructPath:
+		return "Destruct"
+	case StatePath:
+		return "State"
+	default:
+		return fmt.Sprintf(" Unknown %d", p)
+	}
+}
 
 const AddressPath = 0
 const BalancePath = 1
@@ -19,6 +45,7 @@ const CodePath = 3
 const CodeHashPath = 4
 const CodeSizePath = 5
 const SelfDestructPath = 6
+const StatePath = 7
 
 type VersionKey struct {
 	addr    *common.Address
@@ -147,10 +174,134 @@ func VersionKeyLess(a, b *VersionKey) bool {
 	}
 }
 
-/*
-type VersionMap struct {
-	s     *map[libcommon.Address]vitem
+type cellKey struct {
+	subpath AccountPath
+	key     *libcommon.Hash
+}
+
+func (k cellKey) String() string {
+	if k.subpath == StatePath && k.key != nil {
+		return fmt.Sprintf("%x", k.key)
+	}
+
+	return k.subpath.String()
+}
+
+type VersionMap1 struct {
+	s     map[libcommon.Address]map[cellKey]*TxIndexCells
 	trace bool
+}
+
+func (vm *VersionMap1) getKeyCells(addr libcommon.Address, path AccountPath, key libcommon.Hash, fNoKey func(addr libcommon.Address, path AccountPath, key libcommon.Hash) *TxIndexCells) (cells *TxIndexCells) {
+	it, ok := vm.s[addr]
+
+	if ok {
+		cells, ok = it[cellKey{path, &key}]
+	}
+
+	if !ok {
+		cells = fNoKey(addr, path, key)
+	}
+
+	return
+}
+
+func (vm *VersionMap1) Write(addr libcommon.Address, path AccountPath, key libcommon.Hash, v Version, data interface{}, complete bool) {
+	cells := vm.getKeyCells(addr, path, key, func(addr libcommon.Address, path AccountPath, key libcommon.Hash) (cells *TxIndexCells) {
+		it, ok := vm.s[addr]
+		cells = &TxIndexCells{
+			rw: sync.RWMutex{},
+			tm: &btree.Map[int, *WriteCell]{},
+		}
+		var pkey *libcommon.Hash
+		if path == StatePath {
+			pkey = &key
+		}
+		if ok {
+			it[cellKey{path, pkey}] = cells
+		} else {
+			vm.s[addr] = map[cellKey]*TxIndexCells{
+				{path, pkey}: cells,
+			}
+		}
+		return
+	})
+
+	cells.rw.Lock()
+	defer cells.rw.Unlock()
+	ci, ok := cells.tm.Get(v.TxIndex)
+
+	var flag uint = FlagDone
+
+	if !complete {
+		flag = FlagEstimate
+	}
+
+	if ok {
+		if ci.incarnation > v.Incarnation {
+			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %x %s, %v", addr, cellKey{path, &key}, v.TxIndex))
+		}
+
+		ci.flag = flag
+		ci.incarnation = v.Incarnation
+		ci.data = data
+	} else {
+		if ci, ok = cells.tm.Get(v.TxIndex); !ok {
+			cells.tm.Set(v.TxIndex, &WriteCell{
+				flag:        flag,
+				incarnation: v.Incarnation,
+				data:        data,
+			})
+		} else {
+			ci.flag = flag
+			ci.incarnation = v.Incarnation
+			ci.data = data
+		}
+	}
+}
+
+func (vm *VersionMap1) MarkEstimate(addr libcommon.Address, path AccountPath, key libcommon.Hash, txIdx int) {
+	cells := vm.getKeyCells(addr, path, key, func(_ libcommon.Address, _ AccountPath, _ libcommon.Hash) *TxIndexCells {
+		panic(fmt.Errorf("path must already exist"))
+	})
+
+	cells.rw.RLock()
+	defer cells.rw.RUnlock()
+	if ci, ok := cells.tm.Get(txIdx); !ok {
+		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x %s, cells keys: %v", txIdx, addr, cellKey{path, &key}, cells.tm.Keys()))
+	} else {
+		ci.flag = FlagEstimate
+	}
+}
+
+func (vm *VersionMap1) MarkComplete(addr libcommon.Address, path AccountPath, key libcommon.Hash, txIdx int) {
+	cells := vm.getKeyCells(addr, path, key, func(_ libcommon.Address, _ AccountPath, _ libcommon.Hash) *TxIndexCells {
+		panic(fmt.Errorf("path must already exist"))
+	})
+
+	cells.rw.RLock()
+	defer cells.rw.RUnlock()
+	if ci, ok := cells.tm.Get(txIdx); !ok {
+		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x s, cells keys: %v", txIdx, cellKey{path, &key}, cells.tm.Keys()))
+	} else {
+		ci.flag = FlagDone
+	}
+}
+
+func (vm *VersionMap1) Delete(addr libcommon.Address, path AccountPath, key libcommon.Hash, txIdx int, checkExists bool) {
+	cells := vm.getKeyCells(addr, path, key, func(_ libcommon.Address, _ AccountPath, _ libcommon.Hash) *TxIndexCells { return nil })
+
+	if cells == nil {
+		if !checkExists {
+			return
+		}
+
+		panic(fmt.Errorf("path must already exist"))
+	}
+
+	cells.rw.Lock()
+	defer cells.rw.Unlock()
+	cells.tm.Delete(txIdx)
 }
 
 type TxIndexCells struct {
@@ -164,20 +315,9 @@ type WriteCell struct {
 	data        interface{}
 }
 
-type item[T any] struct {
-	v *TxIndexCells[]
-}
-*/
-
 type VersionMap struct {
 	s     *btree.BTreeG[vmItem]
 	trace bool
-}
-
-type WriteCell struct {
-	flag        uint
-	incarnation int
-	data        interface{}
 }
 
 type vmItem struct {
@@ -187,11 +327,6 @@ type vmItem struct {
 
 func vmiLess(a, b vmItem) bool {
 	return VersionKeyLess(&a.k, &b.k)
-}
-
-type TxIndexCells struct {
-	rw sync.RWMutex
-	tm *btree.Map[int, *WriteCell]
 }
 
 type Version struct {

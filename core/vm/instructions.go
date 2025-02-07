@@ -990,6 +990,16 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	return ret, nil
 }
 
+func stCall(_ uint64, scope *ScopeContext) string {
+	stack := scope.Stack
+	addr, _, inOffset, inSize := stack.Data[len(stack.Data)-2], stack.Data[len(stack.Data)-3], stack.Data[len(stack.Data)-4], stack.Data[len(stack.Data)-5]
+	toAddr := common.Address(addr.Bytes20())
+	// Get the arguments from the memory.
+	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
+
+	return fmt.Sprintf("%s %x %x", CALL.String(), toAddr, args)
+}
+
 func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
 	stack := scope.Stack
@@ -1024,6 +1034,16 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	return ret, nil
 }
 
+func stCallCode(_ uint64, scope *ScopeContext) string {
+	stack := scope.Stack
+	addr, _, inOffset, inSize := stack.Data[len(stack.Data)-2], stack.Data[len(stack.Data)-3], stack.Data[len(stack.Data)-4], stack.Data[len(stack.Data)-5]
+	toAddr := common.Address(addr.Bytes20())
+	// Get the arguments from the memory.
+	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
+
+	return fmt.Sprintf("%s %x %x", CALLCODE.String(), toAddr, args)
+}
+
 func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	stack := scope.Stack
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
@@ -1052,6 +1072,16 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 
 	interpreter.returnData = ret
 	return ret, nil
+}
+
+func stDelegateCall(_ uint64, scope *ScopeContext) string {
+	stack := scope.Stack
+	addr, _, inOffset, inSize := stack.Data[len(stack.Data)-2], stack.Data[len(stack.Data)-3], stack.Data[len(stack.Data)-4], stack.Data[len(stack.Data)-5]
+	toAddr := common.Address(addr.Bytes20())
+	// Get the arguments from the memory.
+	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
+
+	return fmt.Sprintf("%s %x %x", DELEGATECALL.String(), toAddr, args)
 }
 
 func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
