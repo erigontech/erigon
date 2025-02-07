@@ -346,6 +346,10 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 	if err != nil {
 		return err
 	}
+	if ch.key == checkHash {
+		fmt.Printf("revert: %x %x\n", *ch.account, ch.key)
+	}
+
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			key := StateKey(ch.account, &ch.key)
