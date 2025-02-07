@@ -904,7 +904,7 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.CapellaForkVersion = 0x90000072
 	cfg.DenebForkEpoch = 132608
 	cfg.DenebForkVersion = 0x90000073
-	cfg.ElectraForkEpoch = 7118848
+	cfg.ElectraForkEpoch = 222464
 	cfg.ElectraForkVersion = 0x90000074
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
@@ -932,7 +932,7 @@ func holeskyConfig() BeaconChainConfig {
 	cfg.CapellaForkVersion = 0x04017000
 	cfg.DenebForkEpoch = 29696
 	cfg.DenebForkVersion = 0x05017000
-	cfg.ElectraForkEpoch = 3710976
+	cfg.ElectraForkEpoch = 115968
 	cfg.ElectraForkVersion = 0x06017000
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
