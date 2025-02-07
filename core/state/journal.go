@@ -125,9 +125,10 @@ type (
 		prev    uint64
 	}
 	storageChange struct {
-		account  *libcommon.Address
-		key      libcommon.Hash
-		prevalue uint256.Int
+		account     *libcommon.Address
+		key         libcommon.Hash
+		prevalue    uint256.Int
+		wasCommited bool
 	}
 	fakeStorageChange struct {
 		account  *libcommon.Address
@@ -201,6 +202,21 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 		obj.selfdestructed = ch.prev
 		obj.setBalance(&ch.prevbalance)
 	}
+	if s.versionMap != nil {
+		if obj.original.Balance == ch.prevbalance {
+			key := SubpathKey(ch.account, BalancePath)
+			s.versionedWrites.Delete(VersionedWrite{Path: key})
+		} else {
+			key := SubpathKey(ch.account, BalancePath)
+			if v, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+				v.Val = ch.prev
+				s.versionedWrites.Set(v)
+			}
+		}
+		key := SubpathKey(ch.account, SelfDestructPath)
+		s.versionedWrites.Delete(VersionedWrite{Path: key})
+	}
+
 	return nil
 }
 
@@ -301,6 +317,23 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 		return err
 	}
 	obj.setCode(ch.prevhash, ch.prevcode)
+	if s.versionMap != nil {
+		if obj.original.CodeHash == ch.prevhash {
+			key := SubpathKey(ch.account, CodePath)
+			s.versionedWrites.Delete(VersionedWrite{Path: key})
+			key = SubpathKey(ch.account, CodeHashPath)
+			s.versionedWrites.Delete(VersionedWrite{Path: key})
+		} else {
+			key := SubpathKey(ch.account, CodePath)
+			if wv, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+				wv.Val = ch.prevcode
+			}
+			key = SubpathKey(ch.account, CodeHashPath)
+			if wv, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+				wv.Val = ch.prevhash
+			}
+		}
+	}
 	return nil
 }
 
@@ -312,6 +345,17 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 	obj, err := s.getStateObject(*ch.account)
 	if err != nil {
 		return err
+	}
+	if s.versionMap != nil {
+		if ch.wasCommited {
+			key := StateKey(ch.account, &ch.key)
+			s.versionedWrites.Delete(VersionedWrite{Path: key})
+		} else {
+			key := StateKey(ch.account, &ch.key)
+			if wv, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+				wv.Val = ch.prevalue
+			}
+		}
 	}
 	obj.setState(ch.key, ch.prevalue)
 	return nil

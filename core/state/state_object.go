@@ -159,13 +159,13 @@ func (so *stateObject) touch() {
 var checkHash = libcommon.HexToHash("c004799b511ddd5df3c27a0ad9657f58c998bc031c427527e7c81edc7a8a20ca")
 
 // GetState returns a value from account storage.
-func (so *stateObject) GetState(key libcommon.Hash, out *uint256.Int) {
+func (so *stateObject) GetState(key libcommon.Hash, out *uint256.Int) bool {
 	check := (key == checkHash)
 
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
 	if so.fakeStorage != nil {
 		*out = so.fakeStorage[key]
-		return
+		return false
 	}
 	value, dirty := so.dirtyStorage[key]
 	if dirty {
@@ -173,10 +173,11 @@ func (so *stateObject) GetState(key libcommon.Hash, out *uint256.Int) {
 			fmt.Printf("Get dirty %p: %x: %x\n", so, key, &value)
 		}
 		*out = value
-		return
+		return false
 	}
 	// Otherwise return the entry's original value
 	so.GetCommittedState(key, out)
+	return true
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
@@ -228,16 +229,17 @@ func (so *stateObject) SetState(key libcommon.Hash, value uint256.Int) bool {
 	}
 	// If the new value is the same as old, don't set
 	var prev uint256.Int
-	so.GetState(key, &prev)
+	commited := so.GetState(key, &prev)
 	if prev == value {
 		return false
 	}
 
 	// New value is different, update and journal the change
 	so.db.journal.append(storageChange{
-		account:  &so.address,
-		key:      key,
-		prevalue: prev,
+		account:     &so.address,
+		key:         key,
+		prevalue:    prev,
+		wasCommited: commited,
 	})
 
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
