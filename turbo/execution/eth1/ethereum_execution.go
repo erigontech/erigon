@@ -316,6 +316,9 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 }
 
 func (e *EthereumExecutionModule) Start(ctx context.Context) {
+	if e.blockReader.FreezingCfg().NoDownloader {
+		e.blockReader.Snapshots().DownloadComplete()
+	}
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
@@ -328,6 +331,9 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
+	}
+	if e.blockReader.FreezingCfg().NoDownloader {
+		e.blockReader.Snapshots().DownloadComplete()
 	}
 }
 
