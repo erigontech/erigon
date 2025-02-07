@@ -170,7 +170,7 @@ func (so *stateObject) GetState(key libcommon.Hash, out *uint256.Int) {
 	value, dirty := so.dirtyStorage[key]
 	if dirty {
 		if check {
-			fmt.Printf("Got dirty %x\n", value)
+			fmt.Printf("Get dirty %p: %x: %x\n", so, key, &value)
 		}
 		*out = value
 		return
@@ -267,6 +267,9 @@ func (so *stateObject) SetStorage(storage Storage) {
 }
 
 func (so *stateObject) setState(key libcommon.Hash, value uint256.Int) {
+	if key == checkHash {
+		fmt.Printf("Set dirty %p: %x: %x\n", so, key, &value)
+	}
 	so.dirtyStorage[key] = value
 }
 
