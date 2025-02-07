@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var ErrIsSuperset = errors.New("attestation is superset of existing attestation")
