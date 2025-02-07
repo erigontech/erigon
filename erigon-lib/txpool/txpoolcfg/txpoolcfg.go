@@ -83,7 +83,7 @@ var DefaultConfig = Config{
 	PriceBump:          10,  // Price bump percentage to replace an already existing transaction
 	BlobPriceBump:      100,
 
-	NoGossip: false,
+	NoGossip: true, // centralised sequencing for [zkevm] doesn't need tx gossiping
 
 	OverrideShanghaiTime: nil,
 }

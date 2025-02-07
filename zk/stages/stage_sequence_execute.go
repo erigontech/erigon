@@ -2,7 +2,6 @@ package stages
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -250,8 +249,11 @@ func sequencingBatchStep(
 	// once the batch ticker has ticked we need a signal to close the batch after the next block is done
 	batchTimedOut := false
 
-	minedTxsToRemove := make([]common.Hash, 0)
 	var header *types.Header
+
+	// to avoid nonce problems when a transaction causes the batch to overflow we need to temporarily skip handling transactions from the same sender
+	// until the next batch starts
+	sendersToSkip := make(map[common.Address]struct{})
 
 	for blockNumber := executionAt + 1; runLoopBlocks; blockNumber++ {
 		if batchTimedOut {
@@ -453,7 +455,8 @@ func sequencingBatchStep(
 
 				txHash := transaction.Hash()
 
-				if _, ok := transaction.GetSender(); !ok {
+				txSender, ok := transaction.GetSender()
+				if !ok {
 					signer := types.MakeSigner(cfg.chainConfig, executionAt, 0)
 					sender, err := signer.Sender(transaction)
 					if err != nil {
@@ -466,6 +469,11 @@ func sequencingBatchStep(
 					}
 
 					transaction.SetSender(sender)
+					txSender = sender
+				}
+
+				if _, found := sendersToSkip[txSender]; found {
+					continue
 				}
 
 				effectiveGas := batchState.blockState.getL1EffectiveGases(cfg, i)
@@ -500,34 +508,26 @@ func sequencingBatchStep(
 						continue
 					}
 
-					if isOkKnownError(err) {
-						// if this is a known error that could be caused by some edge case coming from the pool we want to warn
-						// about it and continue on as normal but ensure we don't continue to keep trying to add this transaction
-						// to the block
-						log.Warn(fmt.Sprintf("[%s] known error adding transaction to block, skipping for now: %v", logPrefix, err),
-							"hash", txHash)
-						badTxHashes = append(badTxHashes, txHash)
-					} else {
-						// if we have an error at this point something has gone wrong, either in the pool or otherwise
-						// to stop the pool growing and hampering further processing of good transactions here
-						// we mark it for being discarded
-						log.Warn(fmt.Sprintf("[%s] error adding transaction to batch, discarding from pool", logPrefix), "hash", txHash, "err", err)
-						badTxHashes = append(badTxHashes, txHash)
-						batchState.blockState.transactionsToDiscard = append(batchState.blockState.transactionsToDiscard, batchState.blockState.transactionHashesToSlots[txHash])
-					}
+					// if we have an error at this point something has gone wrong, either in the pool or otherwise
+					// to stop the pool growing and hampering further processing of good transactions here
+					// we mark it for being discarded
+					log.Warn(fmt.Sprintf("[%s] error adding transaction to batch, discarding from pool", logPrefix), "hash", txHash, "err", err)
+					badTxHashes = append(badTxHashes, txHash)
+					batchState.blockState.transactionsToDiscard = append(batchState.blockState.transactionsToDiscard, batchState.blockState.transactionHashesToSlots[txHash])
 				}
 
 				switch anyOverflow {
 				case overflowCounters:
-					// as we know this has caused an overflow we need to make sure we don't keep it in the inclusion list and attempt to add it again in the
-					// next block
-					badTxHashes = append(badTxHashes, txHash)
-
 					if batchState.isLimboRecovery() {
 						panic("limbo transaction has already been executed once so they must not overflow counters while re-executing")
 					}
 
 					if !batchState.isL1Recovery() {
+						// we need to now skip any further transactions from the same sender in this batch as we will encounter nonce problems
+						if sender, ok := transaction.GetSender(); ok {
+							sendersToSkip[sender] = struct{}{}
+						}
+
 						/*
 							here we check if the transaction on it's own would overdflow the batch counters
 							by creating a new counter collector and priming it for a single block with just this transaction
@@ -559,6 +559,9 @@ func sequencingBatchStep(
 								return err
 							}
 							log.Info(fmt.Sprintf("[%s] single transaction %s cannot fit into batch - overflow", logPrefix, txHash), "context", ocs, "times_seen", counter)
+
+							// ensure this transaction is not attempted again in the next block
+							badTxHashes = append(badTxHashes, txHash)
 						} else {
 							batchState.newOverflowTransaction()
 							transactionNotAddedText := fmt.Sprintf("[%s] transaction %s was not included in this batch because it overflowed.", logPrefix, txHash)
@@ -678,8 +681,22 @@ func sequencingBatchStep(
 			return err
 		}
 
-		minedTxsToRemove = append(minedTxsToRemove, batchState.blockState.transactionsToDiscard...)
-		minedTxsToRemove = append(minedTxsToRemove, batchState.blockState.builtBlockElements.txSlots...)
+		// add a check to the verifier and also check for responses
+		batchState.onBuiltBlock(blockNumber)
+
+		if !batchState.isL1Recovery() {
+			// commit block data here so it is accessible in other threads
+			if errCommitAndStart := sdb.CommitAndStart(); errCommitAndStart != nil {
+				return errCommitAndStart
+			}
+			defer sdb.tx.Rollback()
+		}
+
+		// remove mined transactions from the pool
+		toRemove := append(batchState.blockState.builtBlockElements.txSlots, batchState.blockState.transactionsToDiscard...)
+		if err := cfg.txPool.RemoveMinedTransactions(ctx, sdb.tx, header.GasLimit, toRemove); err != nil {
+			return err
+		}
 
 		if batchState.isLimboRecovery() {
 			stateRoot := block.Root()
@@ -698,17 +715,6 @@ func sequencingBatchStep(
 			log.Info(fmt.Sprintf("[%s] Finish block %d with %d transactions... (%d gas/s)", logPrefix, blockNumber, len(batchState.blockState.builtBlockElements.transactions), int(gasPerSecond)), "info-tree-index", infoTreeIndexProgress, "taken", time.Since(startTime))
 		} else {
 			log.Info(fmt.Sprintf("[%s] Finish block %d with %d transactions...", logPrefix, blockNumber, len(batchState.blockState.builtBlockElements.transactions)), "info-tree-index", infoTreeIndexProgress, "taken", time.Since(startTime))
-		}
-
-		// add a check to the verifier and also check for responses
-		batchState.onBuiltBlock(blockNumber)
-
-		if !batchState.isL1Recovery() {
-			// commit block data here so it is accessible in other threads
-			if errCommitAndStart := sdb.CommitAndStart(); errCommitAndStart != nil {
-				return errCommitAndStart
-			}
-			defer sdb.tx.Rollback()
 		}
 
 		// do not use remote executor in l1recovery mode
@@ -756,11 +762,7 @@ func sequencingBatchStep(
 
 	log.Info(fmt.Sprintf("[%s] Finish batch %d...", batchContext.s.LogPrefix(), batchState.batchNumber))
 
-	if err := sdb.tx.Commit(); err != nil {
-		return err
-	}
-
-	return removeMinedTransactionsFromPool(ctx, cfg, header.GasLimit, minedTxsToRemove, logPrefix)
+	return sdb.tx.Commit()
 }
 
 func removeInclusionTransaction(orig []types.Transaction, index int) []types.Transaction {
@@ -778,23 +780,4 @@ func handleBadTxHashCounter(hermezDb *hermez_db.HermezDb, txHash common.Hash) (u
 	newCounter := counter + 1
 	hermezDb.WriteBadTxHashCounter(txHash, newCounter)
 	return newCounter, nil
-}
-
-func isOkKnownError(err error) bool {
-	return err == nil ||
-		errors.Is(err, core.ErrNonceTooHigh)
-}
-
-func removeMinedTransactionsFromPool(ctx context.Context, cfg SequenceBlockCfg, gasLimit uint64, minedTxsToRemove []common.Hash, logPrefix string) error {
-	roTx, err := cfg.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer roTx.Rollback()
-
-	if err = cfg.txPool.RemoveMinedTransactions(ctx, roTx, gasLimit, minedTxsToRemove); err != nil {
-		return fmt.Errorf("[%s] removing mined transactions from pool: %w", logPrefix, err)
-	}
-
-	return nil
 }

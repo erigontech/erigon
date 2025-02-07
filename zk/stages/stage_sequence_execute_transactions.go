@@ -21,9 +21,6 @@ import (
 )
 
 func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, []common.Hash, bool, error) {
-	cfg.txPool.LockFlusher()
-	defer cfg.txPool.UnlockFlusher()
-
 	var ids []common.Hash
 	var transactions []types.Transaction
 	var allConditionsOk bool
@@ -57,9 +54,6 @@ func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executio
 }
 
 func getLimboTransaction(ctx context.Context, cfg SequenceBlockCfg, txHash *common.Hash, executionAt uint64) ([]types.Transaction, error) {
-	cfg.txPool.LockFlusher()
-	defer cfg.txPool.UnlockFlusher()
-
 	var transactions []types.Transaction
 	// ensure we don't spin forever looking for transactions, attempt for a while then exit up to the caller
 	if err := cfg.txPoolDb.View(ctx, func(poolTx kv.Tx) error {

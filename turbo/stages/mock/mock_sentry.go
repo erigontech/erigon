@@ -319,6 +319,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		londonBlock := mock.ChainConfig.LondonBlock
 		shanghaiTime := mock.ChainConfig.ShanghaiTime
 
+		// we want to enable gossip testing for the majority of tests even though in a zk context we don't want it enabled - having it disabled stops the
+		// p2p sentry pickup on events from the txpool
+		txpoolcfg.DefaultConfig.NoGossip = false
+
 		mock.TxPool, err = txpool.New(newTxs, mock.DB, txpoolcfg.DefaultConfig, &ethconfig.Defaults, kvcache.NewDummy(), *chainID, shanghaiTime, londonBlock, mock.DB)
 		if err != nil {
 			tb.Fatal(err)

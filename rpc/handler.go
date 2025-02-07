@@ -432,8 +432,11 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "t", time.Since(start),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
 			} else {
-				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "t", time.Since(start),
-					"err", resp.Error.Message)
+				errMsg := resp.Error.Message
+				if shouldWarn(errMsg) {
+					h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "t", time.Since(start),
+						"err", errMsg)
+				}
 			}
 		}
 		if h.traceRequests {
@@ -623,4 +626,8 @@ func (id idForLog) String() string {
 		return s
 	}
 	return string(id)
+}
+
+func shouldWarn(msg string) bool {
+	return msg != "ALREADY_EXISTS: already known"
 }

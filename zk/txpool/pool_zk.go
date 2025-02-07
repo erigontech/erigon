@@ -156,6 +156,11 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 // zk: the implementation of best here is changed only to not take into account block gas limits as we don't care about
 // these in zk.  Instead we do a quick check on the transaction maximum gas in zk
 func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
+	// we need to take a lock here to avoid a potential deadlock with the pool flush routine.  Nested locks are not a good pattern
+	// but it is difficult to avoid here as the flush routine needs to wait until the best queue is unlocked before it can flush
+	p.flushMtx.Lock()
+	defer p.flushMtx.Unlock()
+
 	p.lock.Lock()
 	defer p.lock.Unlock()
 

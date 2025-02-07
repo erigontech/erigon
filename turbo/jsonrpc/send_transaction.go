@@ -103,19 +103,6 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
 
-	// this has been moved to prior to adding of transactions to capture the
-	// pre state of the db - which is used for logging in the messages below
-	tx, err = api.db.BeginRo(ctx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	defer tx.Rollback()
-
-	cc, err = api.chainConfig(ctx, tx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
 	if txn.Protected() {
 		txnChainId := txn.GetChainID()
 		chainId := cc.ChainID

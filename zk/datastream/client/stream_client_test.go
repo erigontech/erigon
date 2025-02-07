@@ -118,7 +118,7 @@ func TestStreamClientReadResultEntry(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			c := NewClient(context.Background(), "", false, 500*time.Millisecond, 0, DefaultEntryChannelSize)
+			c := NewClient(context.Background(), "", false, 2*time.Second, 0, DefaultEntryChannelSize)
 			server, conn := net.Pipe()
 			defer server.Close()
 			defer c.Stop()

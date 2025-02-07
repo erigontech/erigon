@@ -696,16 +696,19 @@ func (db *MdbxKV) trackTxBegin() bool {
 }
 
 func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
+	db.txsCountMutex.Lock()
+	defer db.txsCountMutex.Unlock()
 	return (db.txsCount == 0) && db.closed.Load()
 }
 
 func (db *MdbxKV) trackTxEnd() {
 	db.txsCountMutex.Lock()
-	defer db.txsCountMutex.Unlock()
 
 	if db.txsCount > 0 {
 		db.txsCount--
+		db.txsCountMutex.Unlock()
 	} else {
+		db.txsCountMutex.Unlock()
 		panic("MdbxKV: unmatched trackTxEnd")
 	}
 
@@ -715,9 +718,6 @@ func (db *MdbxKV) trackTxEnd() {
 }
 
 func (db *MdbxKV) waitTxsAllDoneOnClose() {
-	db.txsCountMutex.Lock()
-	defer db.txsCountMutex.Unlock()
-
 	for !db.hasTxsAllDoneAndClosed() {
 		db.txsAllDoneOnCloseCond.Wait()
 	}
@@ -751,14 +751,13 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		// otherwise carry on
 	}
 
-	if !db.trackTxBegin() {
-		return nil, fmt.Errorf("db closed")
-	}
-
 	// will return nil err if context is cancelled (may appear to acquire the semaphore)
 	if semErr := db.readTxLimiter.Acquire(ctx, 1); semErr != nil {
-		db.trackTxEnd()
 		return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
+	}
+
+	if !db.trackTxBegin() {
+		return nil, fmt.Errorf("db closed")
 	}
 
 	defer func() {

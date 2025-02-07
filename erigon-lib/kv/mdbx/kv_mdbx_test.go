@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,9 +30,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"sync"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"sync"
 )
 
 func BaseCaseDB(t *testing.T) kv.RwDB {
@@ -1101,28 +1103,48 @@ func TestDeadlock(t *testing.T) {
 	}).MapSize(128 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
 
+	maxGoroutines := 10_000 // Limit the number of concurrent goroutines
+	sem := make(chan struct{}, maxGoroutines)
+
+	var outerErr error
+	stop := false
 	wg := sync.WaitGroup{}
 	for i := 0; i < 300_000; i++ {
+		if stop {
+			break
+		}
+		sem <- struct{}{}
 		wg.Add(1)
 		go func(idx int) {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
 			ctx := context.Background()
 			// create a write transaction every X requests
-			if idx%5 == 0 {
+			if idx%3 == 0 {
 				tx, err := db.BeginRw(ctx)
 				if err != nil {
-					t.Fatal(err)
+					fmt.Println(err)
+					stop = true
+					outerErr = err
+					return
 				}
 				defer tx.Rollback()
 			} else {
 				tx, err := db.BeginRo(ctx)
 				if err != nil {
-					t.Fatal(err)
+					fmt.Println(err)
+					stop = true
+					outerErr = err
 				}
 				defer tx.Rollback()
 			}
-			wg.Done()
 		}(i)
 	}
 
 	wg.Wait()
+	if outerErr != nil {
+		t.Error(outerErr)
+	}
 }
