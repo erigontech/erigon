@@ -1584,7 +1584,6 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				return fmt.Errorf("failed to encode deletion of pre-existed branch: %w", err)
 			}
 
-			// if err = hph.ctx.PutBranch(common.Copy(updateKey), common.Copy(branchUpdate), nil, 0); err != nil {
 			if err = hph.ctx.PutBranch(updateKey, branchUpdate, nil, 0); err != nil {
 				return fmt.Errorf("failed to encode deletion of pre-existed branch: %w", err)
 			}
@@ -1613,9 +1612,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
-			// if err = hph.ctx.PutBranch(common.Copy(updateKey), common.Copy(del), nil, 0); err != nil {
 			if err = hph.ctx.PutBranch(updateKey, del, nil, 0); err != nil {
-				// if err = hph.ctx.PutBranch(updateKey, del, nil, 0); err != nil {
 				return fmt.Errorf("failed to collect leaf node update: %w", err)
 			}
 		}
@@ -1677,8 +1674,6 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		return nil
 	}
 
-	// bot kv has to be copied :(
-	// if err = hph.ctx.PutBranch(common.Copy(updateKey), common.Copy(branchUpdate), prev, prevStep); err != nil {
 	if err = hph.ctx.PutBranch(updateKey, branchUpdate, prev, prevStep); err != nil {
 		return fmt.Errorf("failed to collect trie update: %w", err)
 	}
