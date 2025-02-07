@@ -335,6 +335,13 @@ func (res *ReadResult) Value() interface{} {
 	return res.value
 }
 
+func (res *ReadResult) Version() Version {
+	return Version{
+		TxIndex:     res.depIdx,
+		Incarnation: res.incarnation,
+	}
+}
+
 func (mvr ReadResult) Status() int {
 	if mvr.depIdx != -1 {
 		if mvr.incarnation == -1 {
@@ -411,24 +418,21 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, che
 
 	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
 		readSet.Scan(func(vr *VersionedRead) bool {
-			readResult := versionMap.Read(vr.Path, txIdx)
-			switch readResult.Status() {
+			rr := versionMap.Read(vr.Path, txIdx)
+			switch rr.Status() {
 			case MVReadResultDone:
-				valid = checkVersion(vr.Source, vr.Version, Version{
-					TxIndex:     readResult.depIdx,
-					Incarnation: readResult.incarnation,
-				})
+				valid = checkVersion(vr.Source, vr.Version, rr.Version())
 			case MVReadResultDependency:
 				valid = false
 			case MVReadResultNone:
 				valid = vr.Source == StorageRead
 			default:
-				panic(fmt.Errorf("should not happen - undefined vm read status: %v", readResult.Status()))
+				panic(fmt.Errorf("should not happen - undefined vm read status: %v", rr.Status()))
 			}
 
 			if versionMap.trace {
 				fmt.Println("RD", vr.Path, txIdx, func() string {
-					switch readResult.Status() {
+					switch rr.Status() {
 					case MVReadResultDone:
 						return "done"
 					case MVReadResultDependency:
@@ -438,7 +442,7 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, che
 					default:
 						return "unknown"
 					}
-				}(), vr.Version, readResult.depIdx, readResult.incarnation, valid)
+				}(), vr.Version, rr.depIdx, rr.incarnation, valid)
 			}
 
 			return valid
