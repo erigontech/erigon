@@ -602,7 +602,7 @@ func (s *RoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
 
 func (s *RoSnapshots) DownloadComplete() {
 	wasReady := s.downloadReady.Swap(true)
-
+	fmt.Println(wasReady, s.SegmentsReady())
 	if !wasReady && s.SegmentsReady() {
 		s.ready.set()
 	}
