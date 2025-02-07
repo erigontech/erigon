@@ -149,6 +149,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation) error {
 	indices := inAtt.CommitteeBits.GetOnIndices()
 	if len(indices) != 1 {
+		log.Debug("attestation is not in a single committee", "indices", indices)
 		// it's composed of multiple committees, so ignore
 		return nil
 	}
