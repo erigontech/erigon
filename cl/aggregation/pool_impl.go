@@ -25,11 +25,13 @@ import (
 
 	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var ErrIsSuperset = errors.New("attestation is superset of existing attestation")
@@ -186,6 +188,7 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation) err
 		Data:            att.Data,
 		Signature:       mergedSig,
 	})
+	log.Debug("aggregated attestation by committee", "committeeIndex", committeeIndex, "dataRoot", hashRoot, "slot", inAtt.Data.Slot)
 	return nil
 }
 

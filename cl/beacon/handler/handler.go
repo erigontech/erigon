@@ -349,7 +349,7 @@ func (a *ApiHandler) init() {
 					})
 					r.Route("/pool", func(r chi.Router) {
 						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV2BeaconPoolAttestations))
-						r.Post("/attestations", a.PostEthV2BeaconPoolAttestations)                                         // reuse
+						r.Post("/attestations", a.PostEthV2BeaconPoolAttestations)
 						r.Get("/attester_slashings", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttesterSlashings)) // reuse
 						r.Post("/attester_slashings", a.PostEthV1BeaconPoolAttesterSlashings)                              // resue
 					})
