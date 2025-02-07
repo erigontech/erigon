@@ -1009,20 +1009,18 @@ func (c *AuRa) SealHash(header *types.Header) libcommon.Hash {
 // This is thread-safe: it only accesses the `certifier` which is used behind a RWLock
 func (c *AuRa) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
 	c.certifierLock.Lock()
+	defer c.certifierLock.Unlock()
 	if c.certifier == nil && c.cfg.Registrar != nil {
 		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
 	}
 	if c.certifier == nil {
 		return false
 	}
-	certifier := *c.certifier
-	c.certifierLock.Unlock()
-
 	packed, err := certifierAbi().Pack("certified", sender)
 	if err != nil {
 		panic(err)
 	}
-	out, err := syscall(certifier, packed)
+	out, err := syscall(*c.certifier, packed)
 	if err != nil {
 		panic(err)
 	}
