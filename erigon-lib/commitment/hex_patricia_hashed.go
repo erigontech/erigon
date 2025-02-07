@@ -400,7 +400,10 @@ func (cell *cell) fillFromFields(data []byte, pos int, fieldBits cellFields) (in
 	}
 
 	cell.reset()
-	for _, f := range fields {
+	for i, f := range fields {
+		if len(data) >= pos {
+			return 0, fmt.Errorf("buffer too small for %d %+v", i, f.field)
+		}
 		if fieldBits.Has(f.field) {
 			l, n, err := readUvarint(data[pos:])
 			if err != nil {
@@ -1334,6 +1337,10 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 		return false, fmt.Errorf("empty branch data read during unfold, prefix %x", key)
 	}
 	hph.branchBefore[row] = true
+
+	tm := [2]byte{0, 0}
+	copy(tm[:], branchData[:2])
+
 	bitmap := binary.BigEndian.Uint16(branchData[0:])
 	pos := 2
 	if deleted {
@@ -1350,10 +1357,13 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		cell := &hph.grid[row][nibble]
+		if len(branchData) >= pos {
+			fmt.Printf("prefix '%x' OOB branch %x %x\n", pos, append(append([]byte{}, tm[:]...), branchData...))
+		}
 		fieldBits := branchData[pos]
 		pos++
 		if pos, err = cell.fillFromFields(branchData, pos, cellFields(fieldBits)); err != nil {
-			return false, fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], branchData, err)
+			return false, fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], append(append([]byte{}, tm[:]...), branchData...), err)
 		}
 		if hph.trace {
 			fmt.Printf("cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
