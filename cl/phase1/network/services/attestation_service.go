@@ -230,7 +230,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			// [REJECT] The attester is a member of the committee -- i.e. attestation.attester_index in get_beacon_committee(state, attestation.data.slot, index).
 			memIndexInCommittee := contains(att.SingleAttestation.AttesterIndex, beaconCommittee)
 			if memIndexInCommittee < 0 {
-				return errors.New("attester is not a member of the committee")
+				//return errors.New("attester is not a member of the committee")
+				return fmt.Errorf("attester is not a member of the committee. attester index %d committee %v committeeIndex %v", att.SingleAttestation.AttesterIndex, beaconCommittee, committeeIndex)
 			}
 			vIndex = att.SingleAttestation.AttesterIndex
 			attestation = att.SingleAttestation.ToAttestation(memIndexInCommittee)
