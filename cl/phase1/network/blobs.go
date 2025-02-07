@@ -17,6 +17,7 @@
 package network
 
 import (
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -86,6 +87,8 @@ func RequestBlobsFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, req *soli
 	var atomicResp atomic.Value
 
 	atomicResp.Store(&PeerAndSidecars{})
+	timer := time.NewTimer(requestBlobBatchExpiration)
+	defer timer.Stop()
 	reqInterval := time.NewTicker(100 * time.Millisecond)
 	defer reqInterval.Stop()
 Loop:
@@ -98,11 +101,12 @@ Loop:
 				}
 				// this is so we do not get stuck on a side-fork
 				responses, pid, err := r.SendBlobsSidecarByIdentifierReq(ctx, req)
-
 				if err != nil {
+					log.Trace("RequestBlobsFrantically: error", "err", err, "peer", pid)
 					return
 				}
 				if responses == nil {
+					log.Trace("RequestBlobsFrantically: response is nil", "peer", pid)
 					return
 				}
 				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
@@ -115,9 +119,9 @@ Loop:
 			}()
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(requestBlobBatchExpiration):
-			log.Debug("RequestBlobsFrantically: timeout")
-			return nil, nil
+		case <-timer.C:
+			log.Trace("RequestBlobsFrantically: timeout")
+			return nil, errors.New("timeout")
 		default:
 			if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
 				break Loop

@@ -18,10 +18,8 @@ package solid
 
 import (
 	"encoding/json"
-	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -93,7 +91,7 @@ func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
 func (v *ValidatorSet) Append(val Validator) {
 	offset := v.EncodingSizeSSZ()
 	// we are overflowing the buffer? append.
-	if offset >= len(v.buffer) {
+	if offset+validatorSize >= len(v.buffer) {
 		v.expandBuffer(v.l + 1)
 		v.phase0Data = append(v.phase0Data, Phase0Data{})
 	}
@@ -142,9 +140,23 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 			t.MerkleTree = &merkle_tree.MerkleTree{}
 		}
 		v.MerkleTree.CopyInto(t.MerkleTree)
+
+		hashBuffer := make([]byte, 8*32)
+		t.MerkleTree.SetComputeLeafFn(func(idx int, out []byte) {
+			validator := t.Get(idx)
+			if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
+				panic(err)
+			}
+			hashBuffer = hashBuffer[:(8 * 32)]
+			if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, out); err != nil {
+				panic(err)
+			}
+		})
+	} else {
+		t.MerkleTree = nil
 	}
 	// skip copying (unsupported for phase0)
-	t.phase0Data = make([]Phase0Data, t.l)
+	t.phase0Data = make([]Phase0Data, v.l)
 	copy(t.buffer, v.buffer)
 	copy(t.attesterBits, v.attesterBits)
 	t.attesterBits = t.attesterBits[:v.l]
@@ -208,27 +220,12 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	return utils.Sha256(coreRoot[:], lengthRoot[:]), nil
 }
 
-func computeFlatRootsToBuffer(depth uint8, layerBuffer, output []byte) error {
-	for i := uint8(0); i < depth; i++ {
-		// Sequential
-		if len(layerBuffer)%64 != 0 {
-			layerBuffer = append(layerBuffer, merkle_tree.ZeroHashes[i][:]...)
-		}
-		if err := merkle_tree.HashByteSlice(layerBuffer, layerBuffer); err != nil {
-			return err
-		}
-		layerBuffer = layerBuffer[:len(layerBuffer)/2]
-	}
-
-	copy(output, layerBuffer[:length.Hash])
-	return nil
-}
-
 func (v *ValidatorSet) Set(idx int, val Validator) {
 	if idx >= v.l {
 		panic("ValidatorSet -- Set: out of bounds")
 	}
 	copy(v.buffer[idx*validatorSize:(idx*validatorSize)+validatorSize], val)
+	v.zeroTreeHash(idx)
 }
 
 func (v *ValidatorSet) getPhase0(idx int) *Phase0Data {
@@ -387,36 +384,4 @@ func (v *ValidatorSet) UnmarshalJSON(data []byte) error {
 		v.Append(val)
 	}
 	return nil
-}
-
-func (v *ValidatorSet) ReadMerkleTree(r io.Reader) error {
-	if v.MerkleTree == nil {
-		v.MerkleTree = &merkle_tree.MerkleTree{}
-		hashBuffer := make([]byte, 8*32)
-		v.MerkleTree.Initialize(v.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
-			validator := v.Get(idx)
-			if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
-				panic(err)
-			}
-			hashBuffer = hashBuffer[:(8 * 32)]
-			if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, out); err != nil {
-				panic(err)
-			}
-		}, nil)
-	}
-	return v.MerkleTree.ReadMerkleTree(r)
-}
-
-func (arr *ValidatorSet) WriteMerkleTree(w io.Writer) error {
-	if arr.MerkleTree == nil {
-		arr.MerkleTree = &merkle_tree.MerkleTree{}
-		cap := uint64(arr.c)
-		arr.MerkleTree.Initialize(arr.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
-			validator := arr.Get(idx)
-			if err := validator.CopyHashBufferTo(out); err != nil {
-				panic(err)
-			}
-		}, &cap)
-	}
-	return arr.MerkleTree.WriteMerkleTree(w)
 }

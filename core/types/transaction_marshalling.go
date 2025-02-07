@@ -68,20 +68,20 @@ type txJSON struct {
 }
 
 type JsonAuthorization struct {
-	ChainID hexutil.Uint64    `json:"chainId"`
+	ChainID hexutil.Big       `json:"chainId"`
 	Address libcommon.Address `json:"address"`
 	Nonce   hexutil.Uint64    `json:"nonce"`
-	V       hexutil.Uint64    `json:"v"`
+	YParity hexutil.Uint64    `json:"yParity"`
 	R       hexutil.Big       `json:"r"`
 	S       hexutil.Big       `json:"s"`
 }
 
 func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAuthorization {
-	a.ChainID = (hexutil.Uint64)(authorization.ChainID)
+	a.ChainID = hexutil.Big(*authorization.ChainID.ToBig())
 	a.Address = authorization.Address
 	a.Nonce = (hexutil.Uint64)(authorization.Nonce)
 
-	a.V = (hexutil.Uint64)(authorization.YParity)
+	a.YParity = (hexutil.Uint64)(authorization.YParity)
 	a.R = hexutil.Big(*authorization.R.ToBig())
 	a.S = hexutil.Big(*authorization.S.ToBig())
 	return a
@@ -89,11 +89,15 @@ func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAu
 
 func (a JsonAuthorization) ToAuthorization() (Authorization, error) {
 	auth := Authorization{
-		ChainID: a.ChainID.Uint64(),
 		Address: a.Address,
 		Nonce:   a.Nonce.Uint64(),
 	}
-	yParity := a.V.Uint64()
+	chainId, overflow := uint256.FromBig((*big.Int)(&a.ChainID))
+	if overflow {
+		return auth, errors.New("chainId in authorization does not fit in 256 bits")
+	}
+	auth.ChainID = *chainId
+	yParity := a.YParity.Uint64()
 	if yParity >= 1<<8 {
 		return auth, errors.New("y parity in authorization does not fit in 8 bits")
 	}

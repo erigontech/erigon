@@ -24,7 +24,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -37,6 +36,7 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -53,9 +53,8 @@ func TestFetch(t *testing.T) {
 
 	m := NewMockSentry(ctx, sentryServer)
 	sentryClient := direct.NewSentryClientDirect(direct.ETH67, m)
-	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, nil, *u256.N1, log.New())
 	var wg sync.WaitGroup
-	fetch.SetWaitGroup(&wg)
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, *u256.N1, log.New(), WithP2PFetcherWg(&wg))
 	m.StreamWg.Add(2)
 	fetch.ConnectSentries()
 	m.StreamWg.Wait()
@@ -74,7 +73,7 @@ func TestFetch(t *testing.T) {
 	wg.Wait()
 }
 
-func TestSendTxPropagate(t *testing.T) {
+func TestSendTxnPropagate(t *testing.T) {
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
 	t.Run("few remote byHash", func(t *testing.T) {
@@ -102,7 +101,7 @@ func TestSendTxPropagate(t *testing.T) {
 				}).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
+		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
 		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
 
@@ -132,7 +131,7 @@ func TestSendTxPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
+		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
 		list := make(Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
 			b := []byte(fmt.Sprintf("%x", i))
@@ -167,7 +166,7 @@ func TestSendTxPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
+		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
 		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
 
@@ -207,7 +206,7 @@ func TestSendTxPropagate(t *testing.T) {
 				}).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
+		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
 		expectPeers := toPeerIDs(1, 2, 42)
 		send.PropagatePooledTxnsToPeersList(expectPeers, []byte{0, 1}, []uint32{10, 15}, toHashes(1, 42))
 
@@ -231,10 +230,10 @@ func decodeHex(in string) []byte {
 func TestOnNewBlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	coreDB, db := memdb.NewTestDB(t, kv.ChainDB), memdb.NewTestDB(t, kv.TxPoolDB)
+	_, db := memdb.NewTestDB(t, kv.ChainDB), memdb.NewTestDB(t, kv.TxPoolDB)
 	ctrl := gomock.NewController(t)
 
-	stream := remote.NewMockKV_StateChangesClient(ctrl)
+	stream := remote.NewMockKV_StateChangesClient[*remote.StateChangeBatch](ctrl)
 	i := 0
 	stream.EXPECT().
 		Recv().
@@ -286,7 +285,7 @@ func TestOnNewBlock(t *testing.T) {
 		}).
 		Times(1)
 
-	fetch := NewFetch(ctx, nil, pool, stateChanges, coreDB, db, *u256.N1, log.New())
+	fetch := NewFetch(ctx, nil, pool, stateChanges, db, *u256.N1, log.New())
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
 	assert.Equal(t, 3, len(minedTxns.Txns))

@@ -26,8 +26,8 @@ import (
 
 	"github.com/Giulio2002/bls"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -59,6 +59,13 @@ type syncContributionService struct {
 	mu sync.Mutex
 }
 
+// SignedContributionAndProofWithGossipData type represents SignedContributionAndProof with the gossip data where it's coming from.
+type SignedContributionAndProofForGossip struct {
+	SignedContributionAndProof *cltypes.SignedContributionAndProof
+	Receiver                   *sentinel.Peer
+	ImmediateVerification      bool
+}
+
 // NewSyncContributionService creates a new sync contribution service
 func NewSyncContributionService(
 	syncedDataManager *synced_data.SyncedDataManager,
@@ -82,7 +89,7 @@ func NewSyncContributionService(
 }
 
 // ProcessMessage processes a sync contribution message
-func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *uint64, signedContribution *cltypes.SignedContributionAndProofWithGossipData) error {
+func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *uint64, signedContribution *SignedContributionAndProofForGossip) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -138,7 +145,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 			return err
 		}
 
-		aggregateVerificationData.GossipData = signedContribution.GossipData
+		aggregateVerificationData.SendingPeer = signedContribution.Receiver
 
 		// further processing will be done after async signature verification
 		aggregateVerificationData.F = func() {
@@ -174,7 +181,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 func (s *syncContributionService) GetSignaturesOnContributionSignatures(
 	headState *state.CachingBeaconState,
 	contributionAndProof *cltypes.ContributionAndProof,
-	signedContribution *cltypes.SignedContributionAndProofWithGossipData,
+	signedContribution *SignedContributionAndProofForGossip,
 	subcommiteePubsKeys []libcommon.Bytes48) (*AggregateVerificationData, error) {
 
 	// [REJECT] The contribution_and_proof.selection_proof is a valid signature of the SyncAggregatorSelectionData derived from the contribution by the validator with index contribution_and_proof.aggregator_index.
@@ -285,14 +292,11 @@ func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState,
 	}
 
 	msg := utils.Sha256(contribution.BeaconBlockRoot[:], domain)
-	if err != nil {
-		return nil, nil, nil, err
-	}
 	// only use the ones pertaining to the aggregation bits
 	subCommitteePubsKeys := make([][]byte, 0, len(subCommitteeKeys))
 	for i, key := range subCommitteeKeys {
 		if utils.IsBitOn(contribution.AggregationBits, i) {
-			subCommitteePubsKeys = append(subCommitteePubsKeys, common.Copy(key[:]))
+			subCommitteePubsKeys = append(subCommitteePubsKeys, libcommon.CopyBytes(key[:]))
 		}
 	}
 

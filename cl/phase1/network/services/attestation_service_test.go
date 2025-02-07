@@ -77,7 +77,10 @@ func (t *attestationTestSuite) SetupTest() {
 	t.syncedData.OnHeadState(st)
 	t.committeeSubscibe = mockCommittee.NewMockCommitteeSubscribe(t.gomockCtrl)
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
-	t.beaconConfig = &clparams.BeaconChainConfig{SlotsPerEpoch: mockSlotsPerEpoch}
+	t.beaconConfig = &clparams.BeaconChainConfig{
+		SlotsPerEpoch:    mockSlotsPerEpoch,
+		ElectraForkEpoch: 100000,
+	}
 	netConfig := &clparams.NetworkConfig{}
 	emitters := beaconevents.NewEventEmitter()
 	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
@@ -331,7 +334,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: mockFinalizedCheckPoint.Root,
 				}
 				t.mockForkChoice.FinalizedCheckpointVal = *mockFinalizedCheckPoint
-				t.committeeSubscibe.EXPECT().NeedToAggregate(att).Return(true).Times(1)
+				//t.committeeSubscibe.EXPECT().NeedToAggregate(att).Return(true).Times(1)
 				t.committeeSubscibe.EXPECT().AggregateAttestation(att).Return(nil).Times(1)
 			},
 			args: args{
@@ -346,7 +349,10 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		log.Printf("test case: %s", tt.name)
 		t.SetupTest()
 		tt.mock()
-		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, &AttestationWithGossipData{Attestation: tt.args.msg, GossipData: nil, ImmediateProcess: true})
+		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, &AttestationForGossip{
+			Attestation:      tt.args.msg,
+			ImmediateProcess: true,
+		})
 		time.Sleep(time.Millisecond * 60)
 		if tt.wantErr {
 			t.Require().Error(err)

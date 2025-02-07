@@ -31,7 +31,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
@@ -376,7 +375,8 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 
 func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
-	codeSize, err := interpreter.evm.IntraBlockState().ResolveCodeSize(slot.Bytes20())
+	addr := slot.Bytes20()
+	codeSize, err := interpreter.evm.IntraBlockState().GetCodeSize(addr)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
@@ -417,10 +417,11 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	addr := libcommon.Address(a.Bytes20())
 	len64 := length.Uint64()
 
-	code, err := interpreter.evm.IntraBlockState().ResolveCode(addr)
+	code, err := interpreter.evm.IntraBlockState().GetCode(addr)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
+
 	codeCopy := getDataBig(code, &codeOffset, len64)
 	scope.Memory.Set(memOffset.Uint64(), len64, codeCopy)
 	return nil, nil
@@ -474,9 +475,10 @@ func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	if empty {
 		slot.Clear()
 	} else {
-		codeHash, err := interpreter.evm.IntraBlockState().ResolveCodeHash(address)
+		var codeHash libcommon.Hash
+		codeHash, err = interpreter.evm.IntraBlockState().GetCodeHash(address)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		slot.SetBytes(codeHash.Bytes())
 	}
@@ -997,7 +999,7 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		}
 
 		integer := new(uint256.Int)
-		scope.Stack.Push(integer.SetBytes(common.RightPadBytes(
+		scope.Stack.Push(integer.SetBytes(libcommon.RightPadBytes(
 			// So it doesn't matter what we push onto the stack.
 			scope.Contract.Code[startMin:endMin], pushByteSize)))
 

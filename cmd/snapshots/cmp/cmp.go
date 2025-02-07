@@ -225,7 +225,7 @@ func cmp(cliCtx *cli.Context) error {
 		return errors.New("no first session established")
 	}
 
-	if session1 == nil {
+	if session2 == nil {
 		return errors.New("no second session established")
 	}
 
@@ -402,6 +402,11 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 	var downloadTime uint64
 	var compareTime uint64
 
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.NoDownloader = true
+	freezeCfg.ProduceE2 = false
+	freezeCfg.ChainName = c.chain
+
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
 
@@ -477,19 +482,13 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 
 				info1, _, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Name())
 
-				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					ProduceE2:    false,
-					NoDownloader: true,
-				}, info1.Dir(), info1.From, logger)
+				f1snaps := freezeblocks.NewRoSnapshots(freezeCfg, info1.Dir(), info1.From, logger)
 
 				f1snaps.OpenList([]string{ent1.Name()}, false)
 
 				info2, _, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent1.Name())
 
-				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					ProduceE2:    false,
-					NoDownloader: true,
-				}, info2.Dir(), info2.From, logger)
+				f2snaps := freezeblocks.NewRoSnapshots(freezeCfg, info2.Dir(), info2.From, logger)
 
 				f2snaps.OpenList([]string{ent2.Name()}, false)
 
@@ -580,6 +579,11 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 	var downloadTime uint64
 	var indexTime uint64
 	var compareTime uint64
+
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.NoDownloader = true
+	freezeCfg.ProduceE2 = false
+	freezeCfg.ChainName = c.chain
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
@@ -756,19 +760,13 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 
 				info1, _, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Body.Name())
 
-				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					ProduceE2:    false,
-					NoDownloader: true,
-				}, info1.Dir(), info1.From, logger)
+				f1snaps := freezeblocks.NewRoSnapshots(freezeCfg, info1.Dir(), info1.From, logger)
 
 				f1snaps.OpenList([]string{ent1.Body.Name(), ent1.Transactions.Name()}, false)
 
 				info2, _, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent2.Body.Name())
 
-				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					ProduceE2:    false,
-					NoDownloader: true,
-				}, info2.Dir(), info2.From, logger)
+				f2snaps := freezeblocks.NewRoSnapshots(freezeCfg, info2.Dir(), info2.From, logger)
 
 				f2snaps.OpenList([]string{ent2.Body.Name(), ent2.Transactions.Name()}, false)
 

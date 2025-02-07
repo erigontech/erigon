@@ -24,18 +24,16 @@ type SelectedStaticFilesV3 struct {
 	d     [kv.DomainLen][]*filesItem
 	dHist [kv.DomainLen][]*filesItem
 	dIdx  [kv.DomainLen][]*filesItem
-	ii    [kv.StandaloneIdxLen][]*filesItem
+	ii    [][]*filesItem
 }
 
 func (sf SelectedStaticFilesV3) Close() {
-	clist := make([][]*filesItem, 0, int(kv.DomainLen)+int(kv.StandaloneIdxLen))
+	clist := make([][]*filesItem, 0, int(kv.DomainLen)+len(sf.ii))
 	for id := range sf.d {
 		clist = append(clist, sf.d[id], sf.dIdx[id], sf.dHist[id])
 	}
 
-	for _, i := range sf.ii {
-		clist = append(clist, i)
-	}
+	clist = append(clist, sf.ii...)
 	for _, group := range clist {
 		for _, item := range group {
 			if item != nil {
@@ -50,7 +48,8 @@ func (sf SelectedStaticFilesV3) Close() {
 	}
 }
 
-func (ac *AggregatorRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFilesV3, err error) {
+func (ac *AggregatorRoTx) staticFilesInRange(r *RangesV3) (*SelectedStaticFilesV3, error) {
+	sf := &SelectedStaticFilesV3{ii: make([][]*filesItem, len(r.invertedIndex))}
 	for id := range ac.d {
 		if !r.domain[id].any() {
 			continue
@@ -63,14 +62,14 @@ func (ac *AggregatorRoTx) staticFilesInRange(r RangesV3) (sf SelectedStaticFiles
 		}
 		sf.ii[id] = ac.iis[id].staticFilesInRange(rng.from, rng.to)
 	}
-	return sf, err
+	return sf, nil
 }
 
 type MergedFilesV3 struct {
 	d     [kv.DomainLen]*filesItem
 	dHist [kv.DomainLen]*filesItem
 	dIdx  [kv.DomainLen]*filesItem
-	iis   [kv.StandaloneIdxLen]*filesItem
+	iis   []*filesItem
 }
 
 func (mf MergedFilesV3) FrozenList() (frozen []string) {
@@ -100,8 +99,7 @@ func (mf MergedFilesV3) Close() {
 	for id := range mf.d {
 		clist = append(clist, mf.d[id], mf.dHist[id], mf.dIdx[id])
 	}
-	clist = append(clist, mf.iis[:]...)
-
+	clist = append(clist, mf.iis...)
 	for _, item := range clist {
 		if item != nil {
 			if item.decompressor != nil {

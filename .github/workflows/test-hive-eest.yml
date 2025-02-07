@@ -14,8 +14,8 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v4
         with:
-          repository: danceratopz/hive
-          ref: prague-devnet-4
+          repository: ethereum/hive
+          # ref: prague-devnet-4
           path: hive
       - name: Setup go env and cache
         uses: actions/setup-go@v5
@@ -47,7 +47,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eest/consume-engine' --client erigon 2>&1 | tee output.log || {
+            ./hive --sim 'ethereum/eest/consume-engine' --client erigon --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/pectra-devnet-6%40v1.0.0/fixtures_pectra-devnet-6.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -68,11 +68,25 @@ jobs:
 
             if (( tests < 4 )); then
               echo "Too few tests run for suite ${1} - ${tests} tests"
+              echo "failed" > failed.log
               exit 1
             fi
             if (( failed*2 > tests )); then
               echo "Too many failures for suite ${1} - ${failed} failed out of ${tests}"
+              echo "failed" > failed.log
               exit 1
             fi
           }
           run_suite eest/consume-engine
+        continue-on-error: true
+      - name: Upload output log
+        uses: actions/upload-artifact@v4
+        with:
+          name: hive-workspace-log
+          path: hive/workspace/logs
+      - name: Check for failures
+        run: |
+          if grep -q "failed" hive/failed.log; then
+            echo "One or more tests failed."
+            exit 1
+          fi

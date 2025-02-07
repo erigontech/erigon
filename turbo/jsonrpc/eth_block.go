@@ -30,8 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
@@ -47,7 +45,7 @@ import (
 )
 
 func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stateBlockNumberOrHash rpc.BlockNumberOrHash, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +64,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	var txs types.Transactions
 
 	for _, txHash := range txHashes {
-		blockNum, ok, err := api.txnLookup(ctx, tx, txHash)
+		blockNum, _, ok, err := api.txnLookup(ctx, tx, txHash)
 		if err != nil {
 			return nil, err
 		}
@@ -121,7 +119,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	blockNumber := stateBlockNumber + 1
 
-	timestamp := parent.Time + clparams.MainnetBeaconConfig.SecondsPerSlot
+	timestamp := parent.Time + chainConfig.SecondsPerSlot()
 
 	coinbase := parent.Coinbase
 	header := &types.Header{
@@ -216,7 +214,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 // GetBlockByNumber implements eth_getBlockByNumber. Returns information about a block given the block's number.
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -230,16 +228,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 	additionalFields := make(map[string]interface{})
 
-	// =============================
-	// TODO - remove this after https://github.com/ethereum/execution-apis/pull/570 is implemented by Hive and rest of the community
-	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
-	if err != nil {
-		return nil, err
-	}
-	if td != nil {
-		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
-	}
-	// =================================
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -247,9 +235,21 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	var borTx types.Transaction
 	var borTxHash common.Hash
 	if chainConfig.Bor != nil {
-		borTx = rawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
-		if borTx != nil {
-			borTxHash = bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
+		if api.useBridgeReader {
+			possibleBorTxnHash := bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
+			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				borTx = bortypes.NewBorTransaction()
+				borTxHash = possibleBorTxnHash
+			}
+		} else {
+			borTx = rawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
+			if borTx != nil {
+				borTxHash = bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
+			}
 		}
 	}
 
@@ -260,6 +260,12 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 			response[field] = nil
 		}
 	}
+
+	if chainConfig.Bor != nil {
+		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+		response["miner"], _ = ecrecover(b.Header(), borConfig)
+	}
+
 	return response, err
 }
 
@@ -276,7 +282,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 
 	hash := *numberOrHash.BlockHash
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -293,17 +299,6 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 	number := block.NumberU64()
 
-	// =============================
-	// TODO - remove this after https://github.com/ethereum/execution-apis/pull/570 is implemented by Hive and rest of the community
-	td, err := rawdb.ReadTd(tx, hash, number)
-	if err != nil {
-		return nil, err
-	}
-	if td != nil {
-		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
-	}
-	// ==============================
-
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -311,31 +306,43 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	var borTx types.Transaction
 	var borTxHash common.Hash
 	if chainConfig.Bor != nil {
-		borTx = rawdb.ReadBorTransactionForBlock(tx, number)
-		if borTx != nil {
-			borTxHash = bortypes.ComputeBorTxHash(number, block.Hash())
+		if api.useBridgeReader {
+			possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
+			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				borTx = bortypes.NewBorTransaction()
+				borTxHash = possibleBorTxnHash
+			}
+		} else {
+			borTx = rawdb.ReadBorTransactionForBlock(tx, number)
+			if borTx != nil {
+				borTxHash = bortypes.ComputeBorTxHash(number, block.Hash())
+			}
 		}
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
-
-	if chainConfig.Bor != nil {
-		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-		response["miner"], _ = ecrecover(block.Header(), borConfig)
-	}
-
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
 		}
 	}
+
+	if chainConfig.Bor != nil {
+		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+		response["miner"], _ = ecrecover(block.Header(), borConfig)
+	}
+
 	return response, err
 }
 
 // GetBlockTransactionCountByNumber implements eth_getBlockTransactionCountByNumber. Returns the number of transactions in a block given the block's block number.
 func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +413,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 
 // GetBlockTransactionCountByHash implements eth_getBlockTransactionCountByHash. Returns the number of transactions in a block given the block's block hash.
 func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}

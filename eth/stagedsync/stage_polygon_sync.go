@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -55,6 +56,7 @@ import (
 var errBreakPolygonSyncStage = errors.New("break polygon sync stage")
 
 func NewPolygonSyncStageCfg(
+	config *ethconfig.Config,
 	logger log.Logger,
 	chainConfig *chain.Config,
 	db kv.RwDB,
@@ -69,6 +71,7 @@ func NewPolygonSyncStageCfg(
 	blockLimit uint,
 	userUnwindTypeOverrides []string,
 	notifications *shards.Notifications,
+	engineAPISwitcher sync.EngineAPISwitcher,
 ) PolygonSyncStageCfg {
 	// using a buffered channel to preserve order of tx actions,
 	// do not expect to ever have more than 50 goroutines blocking on this channel
@@ -137,6 +140,7 @@ func NewPolygonSyncStageCfg(
 	)
 	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService)
 	sync := polygonsync.NewSync(
+		config,
 		logger,
 		syncStore,
 		executionEngine,
@@ -150,6 +154,7 @@ func NewPolygonSyncStageCfg(
 		events.Events(),
 		notifications,
 		sync.NewWiggleCalculator(borConfig, signaturesCache, heimdallService),
+		engineAPISwitcher,
 	)
 	syncService := &polygonSyncStageService{
 		logger:          logger,
@@ -240,8 +245,8 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 	}
 
 	// headers
-	unwindBlock := u.Reason.Block != nil
-	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, unwindBlock); err != nil {
+	badBlock := u.Reason.IsBadBlock()
+	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, badBlock); err != nil {
 		return err
 	}
 
@@ -1001,7 +1006,7 @@ func (s polygonSyncStageBridgeStore) LastProcessedBlockInfo(ctx context.Context)
 	return r.info, r.ok, r.err
 }
 
-func (s polygonSyncStageBridgeStore) PutProcessedBlockInfo(ctx context.Context, info bridge.ProcessedBlockInfo) error {
+func (s polygonSyncStageBridgeStore) PutProcessedBlockInfo(ctx context.Context, info []bridge.ProcessedBlockInfo) error {
 	type response struct {
 		err error
 	}
@@ -1039,7 +1044,7 @@ func (s polygonSyncStageBridgeStore) LastEventIdWithinWindow(ctx context.Context
 		return 0, err
 	}
 	if r.err != nil {
-		return 0, err
+		return 0, r.err
 	}
 
 	return r.id, nil
@@ -1114,7 +1119,7 @@ func (s polygonSyncStageBridgeStore) Events(context.Context, uint64, uint64) ([]
 	panic("polygonSyncStageBridgeStore.Events not supported")
 }
 
-func (s polygonSyncStageBridgeStore) BlockEventIdsRange(context.Context, uint64) (uint64, uint64, error) {
+func (s polygonSyncStageBridgeStore) BlockEventIdsRange(context.Context, uint64) (uint64, uint64, bool, error) {
 	// used for accessing events in execution
 	// astrid stage integration intends to use the bridge only for scrapping
 	// not for reading which remains the same in execution (via BlockReader)

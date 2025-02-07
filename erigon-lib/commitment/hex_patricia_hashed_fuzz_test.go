@@ -53,8 +53,8 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 
 		ms := NewMockState(t)
 		ms2 := NewMockState(t)
-		hph := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
-		hphAnother := NewHexPatriciaHashed(length.Addr, ms2, ms2.TempDir())
+		hph := NewHexPatriciaHashed(length.Addr, ms)
+		hphAnother := NewHexPatriciaHashed(length.Addr, ms2)
 
 		hph.SetTrace(false)
 		hphAnother.SetTrace(false)
@@ -65,13 +65,13 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 		err = ms2.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		upds := WrapKeyUpdates(t, ModeDirect, hph.hashAndNibblizeKey, nil, nil)
+		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, nil, nil)
 		rootHashDirect, err := hph.Process(ctx, upds, "")
 		require.NoError(t, err)
 		require.Len(t, rootHashDirect, length.Hash, "invalid root hash length")
 		upds.Close()
 
-		anotherUpds := WrapKeyUpdates(t, ModeUpdate, hphAnother.hashAndNibblizeKey, nil, nil)
+		anotherUpds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, nil, nil)
 		rootHashUpdate, err := hphAnother.Process(ctx, anotherUpds, "")
 		require.NoError(t, err)
 		require.Len(t, rootHashUpdate, length.Hash, "invalid root hash length")
@@ -138,8 +138,8 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 
 		ms := NewMockState(t)
 		ms2 := NewMockState(t)
-		hph := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
-		hphAnother := NewHexPatriciaHashed(length.Addr, ms2, ms2.TempDir())
+		hph := NewHexPatriciaHashed(length.Addr, ms)
+		hphAnother := NewHexPatriciaHashed(length.Addr, ms2)
 
 		trace := false
 		hph.SetTrace(trace)
@@ -149,7 +149,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 			err := ms.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 			require.NoError(t, err)
 
-			updsDirect := WrapKeyUpdates(t, ModeDirect, hph.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+			updsDirect := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 			rootHashDirect, err := hph.Process(ctx, updsDirect, "")
 			updsDirect.Close()
 			require.NoError(t, err)
@@ -158,7 +158,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 			err = ms2.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 			require.NoError(t, err)
 
-			upds := WrapKeyUpdates(t, ModeUpdate, hphAnother.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+			upds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 			rootHashAnother, err := hphAnother.Process(ctx, upds, "")
 			upds.Close()
 			require.NoError(t, err)
@@ -206,14 +206,14 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 		t.Logf("keys count: %d", kc)
 
 		ms := NewMockState(t)
-		hph := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
+		hph := NewHexPatriciaHashed(length.Addr, ms)
 
 		plainKeys, updates := builder.Build()
 		if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
 			t.Fatal(err)
 		}
 
-		upds := WrapKeyUpdates(t, ModeDirect, hph.hashAndNibblizeKey, plainKeys, updates)
+		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 		defer upds.Close()
 
 		rootHash, err := hph.Process(ctx, upds, "")

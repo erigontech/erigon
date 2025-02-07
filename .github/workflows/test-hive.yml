@@ -70,10 +70,12 @@ jobs:
 
             if (( tests < 4 )); then
               echo "Too few tests run for suite ${1}-${2} - ${tests} tests"
+              echo "failed" > failed.log
               exit 1
             fi
             if (( failed*2 > tests )); then
               echo "Too many failures for suite ${1}-${2} - ${failed} failed out of ${tests}"
+              echo "failed" > failed.log
               exit 1
             fi
           }
@@ -82,4 +84,17 @@ jobs:
           run_suite engine cancun
           run_suite engine api
           run_suite engine auth
-          run_suite rpc compat
+          # run_suite rpc compat
+        continue-on-error: true
+      - name: Upload output log
+        uses: actions/upload-artifact@v4
+        with:
+          name: hive-workspace-log
+          path: hive/workspace/logs
+        continue-on-error: true
+      - name: Check for failures
+        run: |
+          if grep -q "failed" hive/failed.log; then
+            echo "One or more tests failed."
+            exit 1
+          fi

@@ -280,7 +280,7 @@ func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
 		Times(1)
 
-	tip, err := test.blockDownloader.DownloadBlocksUsingMilestones(context.Background(), 1)
+	tip, err := test.blockDownloader.DownloadBlocksUsingMilestones(context.Background(), 1, nil)
 	require.NoError(t, err)
 	require.Len(t, blocks, 48) // 4 milestones x 12 blocks each
 	// check blocks are written in order
@@ -289,6 +289,44 @@ func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 	require.Equal(t, uint64(3), blocks[2].Header().Number.Uint64())
 	require.Equal(t, uint64(4), blocks[3].Header().Number.Uint64())
 	require.Equal(t, uint64(48), blocks[47].Header().Number.Uint64())
+	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
+}
+
+func TestBlockDownloaderDownloadBlocksUsingMilestonesLimitEndBlock(t *testing.T) {
+	test := newBlockDownloaderTest(t)
+	test.waypointReader.EXPECT().
+		MilestonesFromBlock(gomock.Any(), gomock.Any()).
+		Return(test.fakeMilestones(4), nil).
+		Times(1)
+	test.p2pService.EXPECT().
+		ListPeersMayHaveBlockNum(gomock.Any()).
+		Return(test.fakePeers(8)).
+		Times(1)
+	test.p2pService.EXPECT().
+		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchHeadersMock()).
+		Times(1)
+	test.p2pService.EXPECT().
+		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchBodiesMock()).
+		Times(1)
+	var blocks []*types.Block
+	test.store.EXPECT().
+		InsertBlocks(gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
+		Times(1)
+
+	syncTo := uint64(10)
+
+	tip, err := test.blockDownloader.DownloadBlocksUsingMilestones(context.Background(), 1, &syncTo)
+	require.NoError(t, err)
+	require.Len(t, blocks, 10) // 4 milestones x 12 blocks each but we limited it by 10
+	// check blocks are written in order
+	require.Equal(t, uint64(1), blocks[0].Header().Number.Uint64())
+	require.Equal(t, uint64(2), blocks[1].Header().Number.Uint64())
+	require.Equal(t, uint64(3), blocks[2].Header().Number.Uint64())
+	require.Equal(t, uint64(4), blocks[3].Header().Number.Uint64())
+	require.Equal(t, uint64(10), blocks[9].Header().Number.Uint64())
 	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }
 
@@ -318,7 +356,7 @@ func TestBlockDownloaderDownloadBlocksUsingMilestonesWhenStartIsBeforeFirstMiles
 		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
 		Times(1)
 
-	tip, err := test.blockDownloader.DownloadBlocksUsingMilestones(context.Background(), 1)
+	tip, err := test.blockDownloader.DownloadBlocksUsingMilestones(context.Background(), 1, nil)
 	require.NoError(t, err)
 	// 3 milestones x 12 blocks each + 12 because we override milestones[0].StartBlock=1 to fill the gap
 	require.Len(t, blocks, 48)
@@ -353,7 +391,7 @@ func TestBlockDownloaderDownloadBlocksUsingCheckpoints(t *testing.T) {
 		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
 		Times(4)
 
-	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
+	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1, nil)
 	require.NoError(t, err)
 	require.Len(t, blocks, 8192) // 8 checkpoints x 1024 blocks each
 	// check blocks are written in order
@@ -429,7 +467,7 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDow
 			Times(3),
 	)
 
-	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
+	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1, nil)
 	require.NoError(t, err)
 	require.Len(t, blocksBatch1, 1024)
 	require.Len(t, blocksBatch2, 5120)
@@ -467,7 +505,7 @@ func TestBlockDownloaderDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
 			Times(4),
 	)
 
-	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
+	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1, nil)
 	require.NoError(t, err)
 	require.Len(t, blocks, 8192)
 	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
@@ -533,7 +571,7 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDown
 			Times(3),
 	)
 
-	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
+	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1, nil)
 	require.NoError(t, err)
 	require.Len(t, blocksBatch1, 1024)
 	require.Len(t, blocksBatch2, 5120)
@@ -600,7 +638,7 @@ func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDown
 			Times(3),
 	)
 
-	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
+	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1, nil)
 	require.NoError(t, err)
 	require.Len(t, blocksBatch1, 1024)
 	require.Len(t, blocksBatch2, 5120)
@@ -642,7 +680,7 @@ func TestBlockDownloaderDownloadBlocksRespectsMaxWorkers(t *testing.T) {
 	// 100 peers
 	// 2 waypoints
 	// the downloader should fetch the 2 waypoints in 2 separate batches
-	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
+	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1, nil)
 	require.NoError(t, err)
 	require.Len(t, blocksBatch1, 1024)
 	require.Len(t, blocksBatch2, 1024)
@@ -716,7 +754,7 @@ func TestBlockDownloaderDownloadBlocksRespectsBlockLimit(t *testing.T) {
 				DoAndReturn(test.defaultInsertBlocksMock(&insertedBlocks)).
 				Times(1)
 
-			_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
+			_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1, nil)
 			require.NoError(t, err)
 			require.Len(t, insertedBlocks, tc.wantNumInsertedBlocks)
 		})

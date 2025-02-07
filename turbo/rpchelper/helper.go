@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 
+	state2 "github.com/erigontech/erigon-lib/state"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
@@ -43,6 +45,14 @@ func (e nonCanonocalHashError) ErrorCode() int { return -32603 }
 
 func (e nonCanonocalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
+}
+
+type BlockNotFoundErr struct {
+	Hash libcommon.Hash
+}
+
+func (e BlockNotFoundErr) Error() string {
+	return fmt.Sprintf("block %x not found", e.Hash)
 }
 
 func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, libcommon.Hash, bool, error) {
@@ -119,7 +129,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return 0, libcommon.Hash{}, false, false, err
 		}
 		if number == nil {
-			return 0, libcommon.Hash{}, false, false, fmt.Errorf("block %x not found", hash)
+			return 0, libcommon.Hash{}, false, false, BlockNotFoundErr{Hash: hash}
 		}
 		blockNumber = *number
 
@@ -134,7 +144,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 	return blockNumber, hash, blockNumber == plainStateBlockNumber, true, nil
 }
 
-func CreateStateReader(ctx context.Context, tx kv.Tx, br services.FullBlockReader, blockNrOrHash rpc.BlockNumberOrHash, txnIndex int, filters *Filters, stateCache kvcache.Cache, chainName string) (state.StateReader, error) {
+func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, blockNrOrHash rpc.BlockNumberOrHash, txnIndex int, filters *Filters, stateCache kvcache.Cache, chainName string) (state.StateReader, error) {
 	blockNumber, _, latest, _, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
 	if err != nil {
 		return nil, err
@@ -142,7 +152,7 @@ func CreateStateReader(ctx context.Context, tx kv.Tx, br services.FullBlockReade
 	return CreateStateReaderFromBlockNumber(ctx, tx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br)), blockNumber, latest, txnIndex, stateCache, chainName)
 }
 
-func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, chainName string) (state.StateReader, error) {
+func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, chainName string) (state.StateReader, error) {
 	if latest {
 		cacheView, err := stateCache.View(ctx, tx)
 		if err != nil {
@@ -153,7 +163,7 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, txNumsReade
 	return CreateHistoryStateReader(tx, txNumsReader, blockNumber+1, txnIndex, chainName)
 }
 
-func CreateHistoryStateReader(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, txnIndex int, chainName string) (state.StateReader, error) {
+func CreateHistoryStateReader(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, txnIndex int, chainName string) (state.StateReader, error) {
 	r := state.NewHistoryReaderV3()
 	r.SetTx(tx)
 	//r.SetTrace(true)
@@ -161,8 +171,29 @@ func CreateHistoryStateReader(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, block
 	if err != nil {
 		return nil, err
 	}
-	r.SetTxNum(uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1))
+	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
+	earliestTxNum := r.StateHistoryStartFrom()
+	if txNum < earliestTxNum {
+		// data available only starting from earliestTxNum, throw error to avoid unintended
+		// consequences of using this StateReader
+		return r, state.PrunedError
+	}
+	r.SetTxNum(txNum)
 	return r, nil
+}
+
+func NewLatestDomainStateReader(sd *state2.SharedDomains) state.StateReader {
+	return state.NewReaderV3(sd)
+}
+
+func NewLatestDomainStateWriter(domains *state2.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
+	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)
+	if err != nil {
+		panic(err)
+	}
+	domains.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1))
+	return state.NewWriterV4(domains)
+
 }
 
 func NewLatestStateReader(tx kv.Tx) state.StateReader {

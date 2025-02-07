@@ -3,7 +3,7 @@ package log
 import (
 	"bytes"
 	"errors"
-	"io/ioutil"
+	"io"
 	"testing"
 	"time"
 )
@@ -134,7 +134,7 @@ func BenchmarkDescendant8(b *testing.B) {
 // (MIT License)
 func newLog15() Logger {
 	logger := New()
-	logger.SetHandler(StreamHandler(ioutil.Discard, JsonFormat()))
+	logger.SetHandler(StreamHandler(io.Discard, JsonFormat()))
 	return logger
 }
 

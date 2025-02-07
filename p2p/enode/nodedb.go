@@ -32,11 +32,11 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-
-	"github.com/erigontech/erigon-lib/log/v3"
+	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -124,6 +124,8 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		WithTableCfg(bucketsConfig).
 		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
+		Flags(func(f uint) uint { return f ^ mdbx1.Durable | mdbx1.SafeNoSync }).
+		SyncPeriod(2 * time.Second).
 		DirtySpace(uint64(64 * datasize.MB)).
 		Open(ctx)
 	if err != nil {
@@ -141,6 +143,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		_, v, errGet := c.SeekExact([]byte(dbVersionKey))
 		if errGet != nil {
 			return errGet
@@ -381,6 +384,7 @@ func deleteRangeInBucket(tx kv.RwTx, prefix []byte, bucket string) error {
 	if err != nil {
 		return err
 	}
+	defer c.Close()
 	var k []byte
 	for k, _, err = c.Seek(prefix); (err == nil) && (k != nil) && bytes.HasPrefix(k, prefix); k, _, err = c.Next() {
 		if err = c.DeleteCurrent(); err != nil {
@@ -431,6 +435,7 @@ func (db *DB) expireNodes() {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		p := []byte(dbNodePrefix)
 		var prevId ID
 		var empty = true
@@ -564,6 +569,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 	seek:
 		for seeks := 0; len(nodes) < n && seeks < n*5; seeks++ {
 			// seekInFiles to a random entry. The first byte is incremented by a

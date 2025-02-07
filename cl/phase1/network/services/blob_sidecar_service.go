@@ -86,10 +86,12 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 	}
 
 	// [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
-	if msg.Index >= b.beaconCfg.MaxBlobsPerBlock {
+	blockVersion := b.beaconCfg.GetCurrentStateVersion(msg.SignedBlockHeader.Header.Slot / b.beaconCfg.SlotsPerEpoch)
+	maxBlobsPerBlock := b.beaconCfg.MaxBlobsPerBlockByVersion(blockVersion)
+	if msg.Index >= maxBlobsPerBlock {
 		return errors.New("blob index out of range")
 	}
-	sidecarSubnetIndex := msg.Index % b.beaconCfg.MaxBlobsPerBlock
+	sidecarSubnetIndex := msg.Index % maxBlobsPerBlock
 	if sidecarSubnetIndex != *subnetId {
 		return ErrBlobIndexOutOfRange
 	}
@@ -139,7 +141,7 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(msg *cltypes.BlobSidecar)
 	}
 
 	start := time.Now()
-	if err := kzgCtx.VerifyBlobKZGProof(gokzg4844.Blob(msg.Blob), gokzg4844.KZGCommitment(msg.KzgCommitment), gokzg4844.KZGProof(msg.KzgProof)); err != nil {
+	if err := kzgCtx.VerifyBlobKZGProof(msg.Blob[:], gokzg4844.KZGCommitment(msg.KzgCommitment), gokzg4844.KZGProof(msg.KzgProof)); err != nil {
 		return fmt.Errorf("blob KZG proof verification failed: %v", err)
 	}
 

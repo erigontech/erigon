@@ -616,6 +616,32 @@ func EncodeBigInt(i *big.Int, w io.Writer, buffer []byte) error {
 	return err
 }
 
+func EncodeUint256(i *uint256.Int, w io.Writer, buffer []byte) error {
+	buffer[0] = 0x80
+	if i == nil {
+		_, err := w.Write(buffer[:1])
+		return err
+	}
+	nBits := i.BitLen()
+	if nBits == 0 {
+		_, err := w.Write(buffer[:1])
+		return err
+	}
+	buffer[0] = byte(i[0])
+	if nBits <= 7 {
+		_, err := w.Write(buffer[:1])
+		return err
+	}
+	nBytes := byte(libcommon.BitLenToByteLen(nBits))
+	buffer[0] = 0x80 + nBytes
+	if _, err := w.Write(buffer[:1]); err != nil {
+		return err
+	}
+	i.PutUint256(buffer)
+	_, err := w.Write(buffer[32-nBytes : 32])
+	return err
+}
+
 func EncodeString(s []byte, w io.Writer, buffer []byte) error {
 	switch len(s) {
 	case 0:
@@ -672,10 +698,53 @@ func EncodeOptionalAddress(addr *libcommon.Address, w io.Writer, buffer []byte) 
 		return err
 	}
 	if addr != nil {
-		if _, err := w.Write(addr.Bytes()); err != nil {
+		if _, err := w.Write(addr[:]); err != nil {
 			return err
 		}
 	}
 
+	return nil
+}
+
+func EncodeStructSizePrefix(size int, w io.Writer, buffer []byte) error {
+	if size >= 56 {
+		beSize := libcommon.BitLenToByteLen(bits.Len(uint(size)))
+		binary.BigEndian.PutUint64(buffer[1:], uint64(size))
+		buffer[8-beSize] = byte(beSize) + 247
+		if _, err := w.Write(buffer[8-beSize : 9]); err != nil {
+			return err
+		}
+	} else {
+		buffer[0] = byte(size) + 192
+		if _, err := w.Write(buffer[:1]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ByteSliceSliceSize(bb [][]byte) int {
+	size := 0
+	for i := 0; i < len(bb); i++ {
+		size += StringLen(bb[i])
+	}
+	return size + ListPrefixLen(size)
+}
+
+func EncodeByteSliceSlice(bb [][]byte, w io.Writer, b []byte) error {
+	totalSize := 0
+	for i := 0; i < len(bb); i++ {
+		totalSize += StringLen(bb[i])
+	}
+
+	if err := EncodeStructSizePrefix(totalSize, w, b); err != nil {
+		return err
+	}
+
+	for i := 0; i < len(bb); i++ {
+		if err := EncodeString(bb[i], w, b); err != nil {
+			return err
+		}
+	}
 	return nil
 }

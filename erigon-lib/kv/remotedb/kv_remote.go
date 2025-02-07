@@ -228,6 +228,7 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) 
 func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
+func (db *DB) OnFreeze(f kv.OnFreezeFunc) { panic("not implemented") }
 
 func (tx *tx) ViewID() uint64  { return tx.viewID }
 func (tx *tx) CollectMetrics() {}
@@ -261,7 +262,7 @@ func (tx *tx) statelessCursor(bucket string) (kv.Cursor, error) {
 	c, ok := tx.statelessCursors[bucket]
 	if !ok {
 		var err error
-		c, err = tx.Cursor(bucket)
+		c, err = tx.Cursor(bucket) // nolint:gocritic
 		if err != nil {
 			return nil, err
 		}
@@ -281,6 +282,7 @@ func (tx *tx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte)
 	if err != nil {
 		return err
 	}
+	defer it.Close()
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
@@ -626,16 +628,22 @@ func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) { return c.pre
 func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.lastDup() }
 
 // Temporal Methods
-func (tx *tx) GetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remote.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, K2: k2, Ts: ts})
+
+func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
+	// TODO: not yet implemented, return 0 for now
+	return 0
+}
+
+func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remote.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, Ts: ts})
 	if err != nil {
 		return nil, false, err
 	}
 	return reply.V, reply.Ok, nil
 }
 
-func (tx *tx) GetLatest(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
-	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remote.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, K2: k2, Latest: true})
+func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
+	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remote.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, Latest: true})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -682,9 +690,9 @@ func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 func (tx *tx) Prefix(table string, prefix []byte) (stream.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
-		return tx.Range(table, prefix, nil, order.Asc, kv.Unlim)
+		return tx.Range(table, prefix, nil, order.Asc, kv.Unlim) //nolint:gocritic
 	}
-	return tx.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim)
+	return tx.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim) //nolint:gocritic
 }
 
 func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {

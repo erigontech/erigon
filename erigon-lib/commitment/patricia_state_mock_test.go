@@ -55,7 +55,7 @@ func (ms *MockState) TempDir() string {
 
 func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
 	// updates already merged by trie
-	ms.cm[string(prefix)] = data
+	ms.cm[toStringZeroCopy(prefix)] = common.Copy(data)
 	return nil
 }
 
@@ -416,8 +416,9 @@ func WrapKeyUpdatesParallel(tb testing.TB, mode Mode, hasher keyHasher, keys [][
 	upd := NewUpdates(mode, tb.TempDir(), hasher)
 	upd.SetConcurrentCommitment()
 	for i, key := range keys {
-		upd.TouchPlainKey(key, nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = key
+		ks := toStringZeroCopy(key)
+		upd.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
+			c.plainKey = ks
 			c.hashedKey = hasher(key)
 			c.update = &updates[i]
 		})
@@ -430,8 +431,8 @@ func WrapKeyUpdates(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, u
 
 	upd := NewUpdates(mode, tb.TempDir(), hasher)
 	for i, key := range keys {
-		upd.TouchPlainKey(key, nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = key
+		upd.TouchPlainKey(string(key), nil, func(c *KeyUpdate, _ []byte) {
+			c.plainKey = string(key)
 			c.hashedKey = hasher(key)
 			c.update = &updates[i]
 		})
@@ -443,7 +444,7 @@ func WrapKeyUpdates(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, u
 func WrapKeyUpdatesInto(tb testing.TB, upd *Updates, keys [][]byte, updates []Update) {
 	tb.Helper()
 	for i, key := range keys {
-		upd.TouchPlainKey(key, nil, func(c *KeyUpdate, _ []byte) {
+		upd.TouchPlainKey(string(key), nil, func(c *KeyUpdate, _ []byte) {
 			c.update = &updates[i]
 		})
 	}

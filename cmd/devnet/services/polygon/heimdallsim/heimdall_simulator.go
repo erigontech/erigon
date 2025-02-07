@@ -83,8 +83,8 @@ func (noopBridgeStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcomm
 func (noopBridgeStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	return nil, errors.New("noop")
 }
-func (noopBridgeStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, err error) {
-	return 0, 0, errors.New("noop")
+func (noopBridgeStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, ok bool, err error) {
+	return 0, 0, false, errors.New("noop")
 }
 func (noopBridgeStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[libcommon.Hash]uint64) error {
 	return nil
@@ -95,7 +95,7 @@ func (noopBridgeStore) PutEvents(ctx context.Context, events []*heimdall.EventRe
 func (noopBridgeStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
 	return nil
 }
-func (noopBridgeStore) PutProcessedBlockInfo(ctx context.Context, info bridge.ProcessedBlockInfo) error {
+func (noopBridgeStore) PutProcessedBlockInfo(ctx context.Context, info []bridge.ProcessedBlockInfo) error {
 	return nil
 }
 func (noopBridgeStore) Unwind(ctx context.Context, blockNum uint64) error {

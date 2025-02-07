@@ -98,7 +98,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
 	preparedTxns := current.PreparedTxns
-	noempty := true
+
 	var (
 		stateReader state.StateReader
 	)
@@ -110,74 +110,62 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	//}
 	execCfg.author = &cfg.miningState.MiningConfig.Etherbase
 
-	// Create an empty block based on temporary copied state for
-	// sealing in advance without waiting block execution finished.
-	if !noempty {
-		logger.Info("Commit an empty block", "number", current.Header.Number)
-		return nil
-	}
 	getHeader := func(hash libcommon.Hash, number uint64) *types.Header { return rawdb.ReadHeader(txc.Tx, hash, number) }
 
-	// Short circuit if there is no available pending transactions.
-	// But if we disable empty precommit already, ignore it. Since
-	// empty block is necessary to keep the liveness of the network.
-	if noempty {
+	if len(preparedTxns) > 0 {
+		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+		if err != nil {
+			return err
+		}
+		NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+	} else {
 
-		if len(preparedTxns) > 0 {
-			logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+		yielded := mapset.NewSet[[32]byte]()
+		var simStateReader state.StateReader
+		var simStateWriter state.StateWriter
+
+		mb := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
+		defer mb.Close()
+		sd, err := state2.NewSharedDomains(mb, logger)
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		simStateWriter = state.NewWriterV4(sd)
+		simStateReader = state.NewReaderV3(sd)
+
+		executionAt, err := s.ExecutionAt(mb)
+		if err != nil {
+			return err
+		}
+
+		const amount = 50
+		for {
+			txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, simStateReader, simStateWriter, logger)
 			if err != nil {
 				return err
 			}
-			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
-		} else {
 
-			yielded := mapset.NewSet[[32]byte]()
-			var simStateReader state.StateReader
-			var simStateWriter state.StateWriter
-
-			mb := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
-			defer mb.Close()
-			sd, err := state2.NewSharedDomains(mb, logger)
-			if err != nil {
-				return err
-			}
-			defer sd.Close()
-			simStateWriter = state.NewWriterV4(sd)
-			simStateReader = state.NewReaderV3(sd)
-
-			executionAt, err := s.ExecutionAt(mb)
-			if err != nil {
-				return err
-			}
-
-			const amount = 50
-			for {
-				txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, simStateReader, simStateWriter, logger)
+			if len(txns) > 0 {
+				logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
 				if err != nil {
 					return err
 				}
-
-				if len(txns) > 0 {
-					logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
-					if err != nil {
-						return err
-					}
-					NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
-					if stop {
-						break
-					}
-				} else {
+				NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+				if stop {
 					break
 				}
-
-				// if we yielded less than the count we wanted, assume the txpool has run dry now and stop to save another loop
-				if len(txns) < amount {
-					break
-				}
+			} else {
+				break
 			}
 
-			metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
+			// if we yielded less than the count we wanted, assume the txpool has run dry now and stop to save another loop
+			if len(txns) < amount {
+				break
+			}
 		}
+
+		metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
 	}
 
 	logger.Debug("SpawnMiningExecStage", "block", current.Header.Number, "txn", current.Txns.Len(), "payload", cfg.payloadId)
@@ -266,10 +254,10 @@ func getNextTransactions(
 	remainingGas := header.GasLimit - header.GasUsed
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
-		remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed
+		remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed
 	}
 
-	yieldOpts := []txnprovider.YieldOption{
+	provideOpts := []txnprovider.ProvideOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
 		txnprovider.WithGasTarget(remainingGas),
@@ -277,7 +265,7 @@ func getNextTransactions(
 		txnprovider.WithTxnIdsFilter(alreadyYielded),
 	}
 
-	txns, err := cfg.txnProvider.Yield(ctx, yieldOpts...)
+	txns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +436,7 @@ func addTransactionsToMiningBlock(
 	txnIdx := ibs.TxnIndex() + 1
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
-		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed)
+		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
 	}
 	signer := types.MakeSigner(&chainConfig, header.Number.Uint64(), header.Time)
 

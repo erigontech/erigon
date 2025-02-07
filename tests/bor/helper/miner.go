@@ -147,20 +147,16 @@ func InitMiner(ctx context.Context, dirName string, genesis *types.Genesis, priv
 		Downloader:      downloaderConfig,
 		WithoutHeimdall: withoutHeimdall,
 		ImportMode:      ethconfig.Defaults.ImportMode,
-
-		DeprecatedTxPool: ethconfig.Defaults.DeprecatedTxPool,
-		RPCGasCap:        50000000,
-		RPCTxFeeCap:      1, // 1 ether
-		Snapshot:         ethconfig.BlocksFreezing{NoDownloader: true},
-		StateStream:      true,
+		RPCGasCap:       50000000,
+		RPCTxFeeCap:     1, // 1 ether
+		Snapshot:        ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
+		StateStream:     true,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool
-	ethCfg.DeprecatedTxPool.CommitEvery = 15 * time.Second
-	ethCfg.DeprecatedTxPool.StartOnInit = true
+	ethCfg.TxPool.CommitEvery = 15 * time.Second
 	ethCfg.Downloader.ClientConfig.ListenPort = utils.TorrentPortFlag.Value + minerID
 	ethCfg.TxPool.AccountSlots = 1000000
-	ethCfg.DeprecatedTxPool.AccountSlots = 1000000
-	ethCfg.DeprecatedTxPool.GlobalSlots = 1000000
+	ethCfg.TxPool.PendingSubPoolLimit = 1000000
 
 	ethBackend, err := eth.New(ctx, stack, ethCfg, logger)
 	if err != nil {

@@ -18,9 +18,12 @@ package exec3
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -47,7 +50,7 @@ type Worker struct {
 	lock        sync.Locker
 	logger      log.Logger
 	chainDb     kv.RoDB
-	chainTx     kv.Tx
+	chainTx     kv.TemporalTx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
 	in          *state.QueueWithRetry
@@ -98,7 +101,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 
 		isMining: isMining,
 	}
-	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
+	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0))
 	w.vmCfg = vm.Config{Debug: true, Tracer: w.callTracer}
 	w.ibs = state.New(w.stateReader)
 	return w
@@ -116,21 +119,27 @@ func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator)
 	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
 }
 
-func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
-func (rw *Worker) DiscardReadList() { rw.stateReader.DiscardReadList() }
+func (rw *Worker) Tx() kv.TemporalTx { return rw.chainTx }
+func (rw *Worker) DiscardReadList()  { rw.stateReader.DiscardReadList() }
 func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
 		rw.chainTx = nil
 	}
 	if chainTx != nil {
-		rw.chainTx = chainTx
+		rw.chainTx = chainTx.(kv.TemporalTx)
 		rw.stateReader.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	}
 }
 
-func (rw *Worker) Run() error {
+func (rw *Worker) Run() (err error) {
+	defer func() { // convert panic to err - because it's background workers
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("exec3.Worker panic: %s, %s", rec, dbg.Stack())
+		}
+	}()
+
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		//fmt.Println("RTX", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, txTask.Final)
 		rw.RunTxTask(txTask, rw.isMining)
@@ -181,7 +190,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 	}
 	if rw.background && rw.chainTx == nil {
 		var err error
-		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {
+		if rw.chainTx, err = rw.chainDb.(kv.TemporalRoDB).BeginTemporalRo(rw.ctx); err != nil {
 			panic(err)
 		}
 		rw.stateReader.SetTx(rw.chainTx)
@@ -254,7 +263,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			}
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGas(), rw.chainConfig.GetMaxBlobGasPerBlock())
+		rw.taskGasPool.Reset(txTask.Tx.GetGas(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)

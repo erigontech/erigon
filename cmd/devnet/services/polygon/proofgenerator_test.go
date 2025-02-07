@@ -31,7 +31,6 @@ import (
 	"github.com/pion/randutil"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -51,7 +50,7 @@ import (
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 	"github.com/erigontech/erigon/turbo/transactions"
@@ -112,11 +111,11 @@ func (rg *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.B
 	if bn := int(blockNum.Uint64()); bn < len(rg.chain.Blocks) {
 		block := rg.chain.Blocks[bn]
 
-		transactions := make([]*jsonrpc.RPCTransaction, len(block.Transactions()))
+		transactions := make([]*ethapi.RPCTransaction, len(block.Transactions()))
 
 		for i, txn := range block.Transactions() {
 			rg.txBlockMap[txn.Hash()] = block
-			transactions[i] = jsonrpc.NewRPCTransaction(txn, block.Hash(), blockNum.Uint64(), uint64(i), block.BaseFee())
+			transactions[i] = ethapi.NewRPCTransaction(txn, block.Hash(), blockNum.Uint64(), uint64(i), block.BaseFee())
 		}
 
 		return &requests.Block{
@@ -148,7 +147,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 		chain: rg.chain,
 	}
 
-	tx, err := rg.sentry.DB.BeginRo(context.Background())
+	tx, err := rg.sentry.DB.BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -162,11 +161,11 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 	var usedGas uint64
 	var usedBlobGas uint64
 
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Header().Time))
 
 	noopWriter := state.NewNoopWriter()
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
+	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 		h, e := reader.Header(ctx, tx, hash, number)
 		if e != nil {
 			log.Error("getHeader error", "number", number, "hash", hash, "err", e)

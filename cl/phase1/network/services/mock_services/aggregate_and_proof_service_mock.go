@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	services "github.com/erigontech/erigon/cl/phase1/network/services"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -42,7 +42,7 @@ func (m *MockAggregateAndProofService) EXPECT() *MockAggregateAndProofServiceMoc
 }
 
 // ProcessMessage mocks base method.
-func (m *MockAggregateAndProofService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedAggregateAndProofData) error {
+func (m *MockAggregateAndProofService) ProcessMessage(ctx context.Context, subnet *uint64, msg *services.SignedAggregateAndProofForGossip) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
 	ret0, _ := ret[0].(error)
@@ -68,13 +68,13 @@ func (c *MockAggregateAndProofServiceProcessMessageCall) Return(arg0 error) *Moc
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockAggregateAndProofServiceProcessMessageCall) Do(f func(context.Context, *uint64, *cltypes.SignedAggregateAndProofData) error) *MockAggregateAndProofServiceProcessMessageCall {
+func (c *MockAggregateAndProofServiceProcessMessageCall) Do(f func(context.Context, *uint64, *services.SignedAggregateAndProofForGossip) error) *MockAggregateAndProofServiceProcessMessageCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockAggregateAndProofServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *cltypes.SignedAggregateAndProofData) error) *MockAggregateAndProofServiceProcessMessageCall {
+func (c *MockAggregateAndProofServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *services.SignedAggregateAndProofForGossip) error) *MockAggregateAndProofServiceProcessMessageCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

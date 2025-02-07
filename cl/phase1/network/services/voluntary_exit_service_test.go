@@ -80,7 +80,7 @@ func (t *voluntaryExitTestSuite) TearDownTest() {
 func (t *voluntaryExitTestSuite) TestProcessMessage() {
 	curEpoch := uint64(100)
 	mockValidatorIndex := uint64(10)
-	mockMsg := &cltypes.SignedVoluntaryExitWithGossipData{
+	mockMsg := &SignedVoluntaryExitForGossip{
 		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
 			VoluntaryExit: &cltypes.VoluntaryExit{
 				Epoch:          1,
@@ -88,10 +88,9 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 			},
 			Signature: [96]byte{},
 		},
-		GossipData:            nil,
 		ImmediateVerification: true,
 	}
-	mockMsg2 := &cltypes.SignedVoluntaryExitWithGossipData{
+	mockMsg2 := &SignedVoluntaryExitForGossip{
 		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
 			VoluntaryExit: &cltypes.VoluntaryExit{
 				Epoch:          1,
@@ -99,7 +98,6 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 			},
 			Signature: [96]byte{},
 		},
-		GossipData:            nil,
 		ImmediateVerification: true,
 	}
 
@@ -108,7 +106,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 	tests := []struct {
 		name    string
 		mock    func()
-		msg     *cltypes.SignedVoluntaryExitWithGossipData
+		msg     *SignedVoluntaryExitForGossip
 		wantErr bool
 		err     error
 	}{

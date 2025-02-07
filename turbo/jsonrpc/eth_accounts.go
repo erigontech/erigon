@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -32,13 +33,12 @@ import (
 
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/rpc"
 )
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
-	tx, err1 := api.db.BeginRo(ctx)
+	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
 	}
@@ -74,7 +74,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address libcommon.A
 			return (*hexutil.Uint64)(&reply.Nonce), nil
 		}
 	}
-	tx, err1 := api.db.BeginRo(ctx)
+	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getTransactionCount cannot open tx: %w", err1)
 	}
@@ -93,7 +93,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address libcommon.A
 
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
 func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
-	tx, err1 := api.db.BeginRo(ctx)
+	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getCode cannot open tx: %w", err1)
 	}
@@ -121,20 +121,27 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 // GetStorageAt implements eth_getStorageAt. Returns the value from a storage position at a given address.
 func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	var empty []byte
+	indexBytes := hexutility.FromHex(index)
+	if len(indexBytes) < 32 {
+		return "", errors.New("unable to decode storage key: hex string invalid")
+	}
+	if len(indexBytes) > 32 {
+		return "", errors.New("unable to decode storage key: hex string too long, want at most 32 bytes")
+	}
 
-	tx, err1 := api.db.BeginRo(ctx)
+	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
-		return hexutility.Encode(common.LeftPadBytes(empty, 32)), err1
+		return hexutility.Encode(libcommon.LeftPadBytes(empty, 32)), err1
 	}
 	defer tx.Rollback()
 
 	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, "")
 	if err != nil {
-		return hexutility.Encode(common.LeftPadBytes(empty, 32)), err
+		return hexutility.Encode(libcommon.LeftPadBytes(empty, 32)), err
 	}
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
-		return hexutility.Encode(common.LeftPadBytes(empty, 32)), err
+		return hexutility.Encode(libcommon.LeftPadBytes(empty, 32)), err
 	}
 
 	location := libcommon.HexToHash(index)
@@ -142,12 +149,12 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address,
 	if err != nil {
 		res = empty
 	}
-	return hexutility.Encode(common.LeftPadBytes(res, 32)), err
+	return hexutility.Encode(libcommon.LeftPadBytes(res, 32)), err
 }
 
 // Exist returns whether an account for a given address exists in the database.
 func (api *APIImpl) Exist(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
-	tx, err1 := api.db.BeginRo(ctx)
+	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return false, err1
 	}

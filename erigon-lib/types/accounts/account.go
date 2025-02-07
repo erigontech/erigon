@@ -27,7 +27,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 )
 
 // Account is the Ethereum consensus representation of accounts.
@@ -96,7 +95,7 @@ func (a *Account) EncodingLengthForHashing() uint {
 
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
 
-	return uint(rlp2.ListPrefixLen(structLength) + structLength)
+	return uint(rlp.ListPrefixLen(structLength) + structLength)
 }
 
 func (a *Account) EncodeForStorage(buffer []byte) {
@@ -195,6 +194,13 @@ func (a *Account) EncodeRLP(w io.Writer) error {
 	a.EncodeForHashing(buf)
 	_, err := w.Write(buf)
 	return err
+}
+
+// returns the RLP encoding of the account directly as a []byte
+func (a *Account) RLP() []byte {
+	accRlp := make([]byte, a.EncodingLengthForHashing())
+	a.EncodeForHashing(accRlp)
+	return accRlp
 }
 
 func (a *Account) EncodeForHashing(buffer []byte) {
@@ -784,4 +790,40 @@ func SerialiseV3To(a *Account, value []byte) {
 			inc >>= 8
 		}
 	}
+}
+
+// Decode the sender's balance and nonce from encoded byte-slice
+func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
+	if len(enc) == 0 {
+		return
+	}
+
+	var fieldSet = enc[0]
+	var pos = 1
+
+	if fieldSet&1 > 0 {
+		decodeLength := int(enc[pos])
+
+		if len(enc) < pos+decodeLength+1 {
+			return nonce, balance, fmt.Errorf(
+				"malformed CBOR for Account.Nonce: %s, Length %d",
+				enc[pos+1:], decodeLength)
+		}
+
+		nonce = libcommon.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
+		pos += decodeLength + 1
+	}
+
+	if fieldSet&2 > 0 {
+		decodeLength := int(enc[pos])
+
+		if len(enc) < pos+decodeLength+1 {
+			return nonce, balance, fmt.Errorf(
+				"malformed CBOR for Account.Nonce: %s, Length %d",
+				enc[pos+1:], decodeLength)
+		}
+
+		(&balance).SetBytes(enc[pos+1 : pos+decodeLength+1])
+	}
+	return
 }

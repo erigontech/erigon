@@ -260,8 +260,8 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 				if err != nil {
 					return fmt.Errorf("kvserver: %w", err)
 				}
-				c.k = bytesCopy(k)
-				c.v = bytesCopy(v)
+				c.k = common.CopyBytes(k)
+				c.v = common.CopyBytes(v)
 			}
 
 			if err := s.renew(stream.Context(), id); err != nil {
@@ -270,7 +270,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			if err := s.with(id, func(tx kv.Tx) error {
 				for _, c := range cursors { // restore all cursors position
 					var err error
-					c.c, err = tx.Cursor(c.bucket)
+					c.c, err = tx.Cursor(c.bucket) //nolint:gocritic
 					if err != nil {
 						return err
 					}
@@ -311,7 +311,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			CursorID++
 			var err error
 			if err := s.with(id, func(tx kv.Tx) error {
-				c, err = tx.Cursor(in.BucketName)
+				c, err = tx.Cursor(in.BucketName) //nolint:gocritic
 				if err != nil {
 					return err
 				}
@@ -331,7 +331,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			CursorID++
 			var err error
 			if err := s.with(id, func(tx kv.Tx) error {
-				c, err = tx.CursorDupSort(in.BucketName)
+				c, err = tx.CursorDupSort(in.BucketName) //nolint:gocritic
 				if err != nil {
 					return err
 				}
@@ -419,15 +419,6 @@ func handleOp(c kv.Cursor, stream remote.KV_TxServer, in *remote.Cursor) error {
 	}
 
 	return nil
-}
-
-func bytesCopy(b []byte) []byte {
-	if b == nil {
-		return nil
-	}
-	copiedBytes := make([]byte, len(b))
-	copy(copiedBytes, b)
-	return copiedBytes
 }
 
 func (s *KvServer) StateChanges(_ *remote.StateChangeRequest, server remote.KV_StateChangesServer) error {
@@ -538,12 +529,12 @@ func (s *KvServer) GetLatest(_ context.Context, req *remote.GetLatestReq) (reply
 			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
 		if req.Latest {
-			reply.V, _, err = ttx.GetLatest(domainName, req.K, req.K2)
+			reply.V, _, err = ttx.GetLatest(domainName, req.K)
 			if err != nil {
 				return err
 			}
 		} else {
-			reply.V, reply.Ok, err = ttx.GetAsOf(domainName, req.K, req.K2, req.Ts)
+			reply.V, reply.Ok, err = ttx.GetAsOf(domainName, req.K, req.Ts)
 			if err != nil {
 				return err
 			}
@@ -647,8 +638,8 @@ func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) 
 			if err != nil {
 				return err
 			}
-			key := bytesCopy(k)
-			value := bytesCopy(v)
+			key := common.CopyBytes(k)
+			value := common.CopyBytes(v)
 			reply.Keys = append(reply.Keys, key)
 			reply.Values = append(reply.Values, value)
 		}
@@ -692,8 +683,8 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remote.RangeAsOfReq) (*remo
 			if err != nil {
 				return err
 			}
-			key := bytesCopy(k)
-			value := bytesCopy(v)
+			key := common.CopyBytes(k)
+			value := common.CopyBytes(v)
 			reply.Keys = append(reply.Keys, key)
 			reply.Values = append(reply.Values, value)
 			limit--
