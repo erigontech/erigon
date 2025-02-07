@@ -127,7 +127,7 @@ func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {
 
 	var overflow bool
 	var newWithdrawableEpoch uint64
-	if newWithdrawableEpoch, overflow = math.SafeAdd(exitQueueEpoch, b.BeaconConfig().MinValidatorWithdrawabilityDelay); overflow {
+	if newWithdrawableEpoch, overflow = math.SafeAdd(validatorExitEpoch, b.BeaconConfig().MinValidatorWithdrawabilityDelay); overflow {
 		return errors.New("withdrawable epoch is too big")
 	}
 	b.SetExitEpochForValidatorAtIndex(int(index), exitQueueEpoch)
