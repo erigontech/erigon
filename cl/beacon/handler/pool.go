@@ -107,7 +107,7 @@ func (a *ApiHandler) GetEthV2BeaconPoolAttestations(w http.ResponseWriter, r *ht
 
 	return newBeaconResponse(ret), nil
 }
-func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
+func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
 	v := r.Header.Get("Eth-Consensus-Version")
 	clVersion := clparams.DenebVersion
 	if v != "" {
@@ -119,6 +119,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			return
 		}
 	}
+	log.Debug("[Beacon REST] received attestation", "version", clVersion, "header", v)
 
 	var atts []solid.GeneralAttestation
 	if clVersion >= clparams.ElectraVersion {

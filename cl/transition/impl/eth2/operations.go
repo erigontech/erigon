@@ -1105,7 +1105,6 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	}
 	pendingBalanceToWithdraw := getPendingBalanceToWithdraw(s, vindex)
 	if isFullExitRequest {
-		log.Debug("Initiating full exit", "validator", vindex, "amount", amount, "pendingBalanceToWithdraw", pendingBalanceToWithdraw)
 		// Only exit validator if it has no pending withdrawals in the queue
 		if pendingBalanceToWithdraw == 0 {
 			return s.InitiateValidatorExit(vindex)
