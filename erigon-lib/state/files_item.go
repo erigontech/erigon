@@ -50,6 +50,7 @@ type filesItem struct {
 	bindex               *BtIndex
 	existence            *ExistenceFilter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
+	firstEntityNum       int64
 
 	// Frozen: file of size StepsInFrozenFile. Completely immutable.
 	// Cold: file of size < StepsInFrozenFile. Immutable, but can be closed/removed after merge to bigger file.
@@ -66,7 +67,7 @@ func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
 	frozen := endStep-startStep == config3.StepsInFrozenFile
-	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
+	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen, firstEntityNum: -1}
 }
 
 // isSubsetOf - when `j` covers `i` but not equal `i`

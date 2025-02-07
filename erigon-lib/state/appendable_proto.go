@@ -1,0 +1,64 @@
+package state
+
+import (
+	"context"
+	"sync"
+
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/tidwall/btree"
+	btree2 "github.com/tidwall/btree"
+)
+
+// appendable struct with basic functionality it's not intended to be used directly.
+// Can be embedded in other concrete appendable structs
+type ProtoAppendable struct {
+	freezer Freezer
+
+	a          AppendableId
+	builders   []AccessorIndexBuilder
+	dirtyFiles *btree.BTreeG[*filesItem]
+	_visible   visibleFiles
+
+	visibleLock sync.RWMutex
+
+	logger log.Logger
+}
+
+func NewProto(a AppendableId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoAppendable {
+	return &ProtoAppendable{
+		a:          a,
+		builders:   builders,
+		freezer:    freezer,
+		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		logger:     logger,
+	}
+}
+
+func (a *ProtoAppendable) VisibleFilesMaxRootNum() RootNum {
+	latest := a._visible[len(a._visible)-1]
+	return RootNum(latest.src.endTxNum)
+}
+
+func (a *ProtoAppendable) DirtyFilesMaxRootNum() RootNum {
+	latest, found := a.dirtyFiles.Max()
+	if latest == nil || !found {
+		return 0
+	}
+	return RootNum(latest.endTxNum)
+}
+
+func (a *ProtoAppendable) VisibleFilesMaxNum() RootNum {
+	//latest := a._visible[len(a._visible)-1]
+	// need to store first entity num in snapshots for this
+	// TODO: just sending max root num now; so it won't work if rootnum!=num;
+	// maybe we should just test bodies and headers till then.
+
+	return a.VisibleFilesMaxRootNum()
+}
+
+func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, dv kv.RoDB, ps *background.ProgressSet) error {
+
+}

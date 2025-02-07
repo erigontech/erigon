@@ -1,4 +1,4 @@
-package appendableutils
+package state
 
 import (
 	"bytes"
@@ -6,18 +6,17 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/state"
 )
 
 // default freezer implementation for relational appendables (which have RootRelationI)
-// implements state.Freezer interface
+// implements Freezer interface
 type SimpleRelationalFreezer struct {
-	rel     state.RootRelationI
+	rel     RootRelationI
 	valsTbl string
-	coll    state.Collector
+	coll    Collector
 }
 
-func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to state.RootNum, tx kv.Tx) error {
+func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to RootNum, tx kv.Tx) error {
 	_entityIdFrom, err := sf.rel.RootNum2Id(from, tx)
 	if err != nil {
 		return err
@@ -50,6 +49,6 @@ func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to state.Ro
 	return nil
 }
 
-func (sf *SimpleRelationalFreezer) SetCollector(coll state.Collector) {
+func (sf *SimpleRelationalFreezer) SetCollector(coll Collector) {
 	sf.coll = coll
 }

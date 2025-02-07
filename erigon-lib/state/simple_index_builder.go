@@ -1,4 +1,4 @@
-package appendableutils
+package state
 
 import (
 	"context"
@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/state"
 )
 
 // interfaces defined here are not required to be implemented by
@@ -79,7 +78,7 @@ func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 	s.args = args
 }
 
-func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to state.RootNum) *DecompressorIndexInputDataQuery {
+func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
 	// just segname?
 	sgname := SegName(s.id, snaptype.Version(1), from, to)
 	decomp, _ := seg.NewDecompressor(sgname)
@@ -94,7 +93,7 @@ func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 	return s.args.enums
 }
 
-func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to state.RootNum, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
+func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
 	iidq := s.GetInputDataQuery(from, to)
 	idxFile := IdxName(s.id, snaptype.Version(1), from, to, s.indexPos)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
