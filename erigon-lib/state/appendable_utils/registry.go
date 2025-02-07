@@ -2,113 +2,81 @@ package appendableutils
 
 import (
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/state"
 )
 
 // AppendableId id as a uint64, returned by `RegisterAppendable`
 // dependent on the order of registration
 // counting on it being constant across reboots might be tricky
 // and is not recommended.
-type AppendableId struct {
-	*appendableId
+
+type AppendableId uint16
+
+type holder struct {
+	name             string
+	snapshotNameBase string   // name to be used in snapshot file
+	indexNameBases   []string // one indexNameBase for each index
+	dirs             datadir.Dirs
 }
 
-type appendableId struct {
-	uint64
-	name           string
-	snapshotPrefix string
-	indexBuilders  []state.AccessorIndexBuilder
-	indexPrefix    []string
-	freezer        state.Freezer
-	dirs           datadir.Dirs
-}
-
-var appendableRegistry []AppendableId
-var last uint64
+var appendableRegistry []holder
+var curr uint16
 
 // decisions/TODOs:
-// 1. last and appendableRegistry should be made concurrency safe
-// 2. is it better to return a simple uint64 (and make fielld accesses more expensive); or to return pointer to struct (and maybe cheaper field access?)
-func RegisterAppendable(name string, dirs datadir.Dirs, salt uint32, options ...AppendableIdOptions) AppendableId {
-	curr := last
-	id := appendableId{
+// 1. curr and appendableRegistry should be made concurrency safe
+func RegisterAppendable(name string, dirs datadir.Dirs, salt uint32, options ...AppendableIdOption) AppendableId {
+	h := &holder{
 		name: name,
 		dirs: dirs,
 	}
 	for _, opt := range options {
-		opt(&id)
+		opt(h)
 	}
 
-	if id.snapshotPrefix == "" {
-		id.snapshotPrefix = name
+	if h.snapshotNameBase == "" {
+		h.snapshotNameBase = name
 	}
 
-	if id.indexBuilders == nil {
+	if h.indexNameBases == nil {
 		// default
-		// mapping num -> offset (ordinal map)
-		builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false, false, salt), curr)
-		id.indexBuilders = []state.AccessorIndexBuilder{builder}
-		id.indexPrefix = []string{name}
+		h.indexNameBases = []string{name}
 	}
 
-	aid := AppendableId{&id}
-	appendableRegistry = append(appendableRegistry, aid)
-	last++
-	return aid
+	appendableRegistry = append(appendableRegistry, *h)
+	curr++
+
+	return AppendableId(curr - 1)
 }
 
-type AppendableIdOptions func(*appendableId)
+type AppendableIdOption func(*holder)
 
-func WithSnapshotPrefix(prefix string) AppendableIdOptions {
-	return func(a *appendableId) {
-		a.snapshotPrefix = prefix
+func WithSnapshotPrefix(prefix string) AppendableIdOption {
+	return func(a *holder) {
+		a.snapshotNameBase = prefix
 	}
 }
 
-func WithIndexBuilders(builders []state.AccessorIndexBuilder) AppendableIdOptions {
-	return func(a *appendableId) {
-		a.indexBuilders = builders
-	}
-}
-
-func WithIndexFileType(indexFileType []string) AppendableIdOptions {
-	return func(a *appendableId) {
-		a.indexPrefix = indexFileType
-	}
-}
-
-func WithFreezer(freezer state.Freezer) AppendableIdOptions {
-	return func(a *appendableId) {
-		a.freezer = freezer
-	}
-}
-
-func WithDirs(dirs datadir.Dirs) AppendableIdOptions {
-	return func(a *appendableId) {
-		a.dirs = dirs
+func WithIndexFileType(indexFileType []string) AppendableIdOption {
+	return func(a *holder) {
+		a.indexNameBases = indexFileType
 	}
 }
 
 func (a AppendableId) Id() uint64 {
-	return a.uint64
+	return uint64(a)
 }
 
 func (a AppendableId) Name() string {
-	return a.name
+	return appendableRegistry[a].name
 }
 
 func (a AppendableId) SnapshotPrefix() string {
-	return a.snapshotPrefix
-}
-
-func (a AppendableId) IndexBuilders() []state.AccessorIndexBuilder {
-	return a.indexBuilders
+	return appendableRegistry[a].snapshotNameBase
 }
 
 func (a AppendableId) IndexPrefix() []string {
-	return a.indexPrefix
+	return appendableRegistry[a].indexNameBases
 }
 
-func (a AppendableId) Freezer() state.Freezer {
-	return a.freezer
+func (a AppendableId) String() string {
+	return appendableRegistry[a].name
 }
