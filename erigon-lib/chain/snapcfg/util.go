@@ -20,7 +20,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -402,10 +401,6 @@ func (c Cfg) Seedable(info snaptype.FileInfo) bool {
 
 // IsFrozen - can't be merged to bigger files
 func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
-	fmt.Println(info.TypeString)
-	if strings.Contains(info.Name(), "caplin") {
-		return true
-	}
 	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
 	return info.To-info.From == mergeLimit
 }
