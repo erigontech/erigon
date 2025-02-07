@@ -981,7 +981,6 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 				return nil, err
 			}
 			cell.setFromUpdate(update)
-			c.accLoaded++
 		}
 
 		valLen := cell.accountForHashing(hph.accValBuf, storageRootHash)
