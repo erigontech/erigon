@@ -113,17 +113,17 @@ func TestGetProof(t *testing.T) {
 	m, bankAddr, contractAddr := chainWithDeployedContract(t)
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, maxGetProofRewindBlockCount, 128, log.New())
 
-	key := func(b byte) libcommon.Hash {
+	key := func(b byte) hexutility.Bytes {
 		result := libcommon.Hash{}
 		result[31] = b
-		return result
+		return result.Bytes()
 	}
 
 	tests := []struct {
 		name        string
 		blockNum    uint64
 		addr        libcommon.Address
-		storageKeys []libcommon.Hash
+		storageKeys []hexutility.Bytes
 		stateVal    uint64
 		expectedErr string
 	}{
@@ -146,27 +146,27 @@ func TestGetProof(t *testing.T) {
 			name:        "currentBlockWithState",
 			addr:        contractAddr,
 			blockNum:    3,
-			storageKeys: []libcommon.Hash{key(0), key(4), key(8), key(10)},
+			storageKeys: []hexutility.Bytes{key(0), key(4), key(8), key(10)},
 			stateVal:    2,
 		},
 		{
 			name:        "currentBlockWithMissingState",
 			addr:        contractAddr,
-			storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
+			storageKeys: []hexutility.Bytes{hexutility.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
 			blockNum:    3,
 			stateVal:    0,
 		},
 		{
 			name:        "currentBlockEOAMissingState",
 			addr:        bankAddr,
-			storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
+			storageKeys: []hexutility.Bytes{hexutility.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
 			blockNum:    3,
 			stateVal:    0,
 		},
 		{
 			name:        "currentBlockNoAccountMissingState",
 			addr:        libcommon.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
-			storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
+			storageKeys: []hexutility.Bytes{hexutility.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
 			blockNum:    3,
 			stateVal:    0,
 		},
@@ -215,7 +215,10 @@ func TestGetProof(t *testing.T) {
 			for _, storageKey := range tt.storageKeys {
 				found := false
 				for _, storageProof := range proof.StorageProof {
-					if storageProof.Key != storageKey {
+					var proofKeyHash, storageKeyHash libcommon.Hash
+					proofKeyHash.SetBytes(hexutility.FromHex(storageProof.Key))
+					storageKeyHash.SetBytes(uint256.NewInt(0).SetBytes(storageKey).Bytes())
+					if proofKeyHash != storageKeyHash {
 						continue
 					}
 					found = true

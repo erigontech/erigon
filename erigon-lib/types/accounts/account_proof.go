@@ -33,7 +33,7 @@ type AccProofResult struct {
 	StorageProof []StorProofResult  `json:"storageProof"`
 }
 type StorProofResult struct {
-	Key   libcommon.Hash     `json:"key"`
+	Key   string             `json:"key"`
 	Value *hexutil.Big       `json:"value"`
 	Proof []hexutility.Bytes `json:"proof"`
 }
