@@ -402,7 +402,7 @@ func (cell *cell) fillFromFields(data []byte, pos int, fieldBits cellFields) (in
 	cell.reset()
 	for i, f := range fields {
 		if len(data) <= pos {
-			return 0, fmt.Errorf("buffer too small for %d %+v", i, f.field)
+			return 0, fmt.Errorf("buffer too small for %v", f.field)
 		}
 		if fieldBits.Has(f.field) {
 			l, n, err := readUvarint(data[pos:])
