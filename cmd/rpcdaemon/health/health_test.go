@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,6 +42,15 @@ func (e *ethApiStub) Syncing(_ context.Context) (interface{}, error) {
 	return e.syncingResult, e.syncingError
 }
 
+type txPoolApiStub struct {
+	txPoolResult interface{}
+	txPoolError  error
+}
+
+func (t *txPoolApiStub) Content(_ context.Context) (interface{}, error) {
+	return t.txPoolResult, t.txPoolError
+}
+
 func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 	cases := []struct {
 		headers             []string
@@ -49,6 +60,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 		ethApiBlockError    error
 		ethApiSyncingResult interface{}
 		ethApiSyncingError  error
+		txPoolResult        interface{}
+		txPoolError         error
 		expectedStatusCode  int
 		expectedBody        map[string]string
 	}{
@@ -61,6 +74,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusOK,
 			expectedBody: map[string]string{
 				synced:           "HEALTHY",
@@ -78,6 +93,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: struct{}{},
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusInternalServerError,
 			expectedBody: map[string]string{
 				synced:           "ERROR: not synced",
@@ -95,6 +112,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: struct{}{},
 			ethApiSyncingError:  errors.New("problem checking sync"),
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusInternalServerError,
 			expectedBody: map[string]string{
 				synced:           "ERROR: problem checking sync",
@@ -112,6 +131,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusOK,
 			expectedBody: map[string]string{
 				synced:           "DISABLED",
@@ -129,6 +150,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusInternalServerError,
 			expectedBody: map[string]string{
 				synced:           "DISABLED",
@@ -146,6 +169,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusInternalServerError,
 			expectedBody: map[string]string{
 				synced:           "DISABLED",
@@ -163,6 +188,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusInternalServerError,
 			expectedBody: map[string]string{
 				synced:           "DISABLED",
@@ -180,6 +207,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusOK,
 			expectedBody: map[string]string{
 				synced:           "DISABLED",
@@ -197,6 +226,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusInternalServerError,
 			expectedBody: map[string]string{
 				synced:           "DISABLED",
@@ -214,6 +245,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    errors.New("problem checking block"),
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusInternalServerError,
 			expectedBody: map[string]string{
 				synced:           "DISABLED",
@@ -231,6 +264,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusInternalServerError,
 			expectedBody: map[string]string{
 				synced:           "DISABLED",
@@ -250,6 +285,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusOK,
 			expectedBody: map[string]string{
 				synced:           "DISABLED",
@@ -269,6 +306,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusInternalServerError,
 			expectedBody: map[string]string{
 				synced:           "DISABLED",
@@ -288,6 +327,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusInternalServerError,
 			expectedBody: map[string]string{
 				synced:           "DISABLED",
@@ -305,6 +346,8 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusInternalServerError,
 			expectedBody: map[string]string{
 				synced:           "DISABLED",
@@ -324,12 +367,81 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
 			expectedStatusCode:  http.StatusOK,
 			expectedBody: map[string]string{
 				synced:           "HEALTHY",
 				minPeerCount:     "HEALTHY",
 				checkBlock:       "HEALTHY",
 				maxSecondsBehind: "HEALTHY",
+			},
+		},
+		// 16 - check last block time
+		{
+			headers:        []string{"last_block_time"},
+			netApiResponse: hexutil.Uint(1),
+			netApiError:    nil,
+			ethApiBlockResult: map[string]interface{}{
+				"timestamp": hexutil.Uint64(time.Now().Add(-1 * time.Minute).Unix()),
+			},
+			ethApiBlockError:    nil,
+			ethApiSyncingResult: false,
+			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
+			expectedStatusCode:  http.StatusOK,
+			expectedBody: map[string]string{
+				synced:           "DISABLED",
+				minPeerCount:     "DISABLED",
+				checkBlock:       "DISABLED",
+				maxSecondsBehind: "DISABLED",
+				lastBlockTime:    "last block was mined more than 60 seconds ago",
+			},
+		},
+		// 17 - tx pool healthy
+		{
+			headers:             []string{"tx_pool_enable"},
+			netApiResponse:      hexutil.Uint(1),
+			netApiError:         nil,
+			ethApiBlockResult:   map[string]interface{}{},
+			ethApiBlockError:    nil,
+			ethApiSyncingResult: false,
+			ethApiSyncingError:  nil,
+			txPoolResult:        map[string]map[string]map[string]*jsonrpc.RPCTransaction{},
+			txPoolError:         nil,
+			expectedStatusCode:  http.StatusOK,
+			expectedBody: map[string]string{
+				synced:           "DISABLED",
+				minPeerCount:     "DISABLED",
+				checkBlock:       "DISABLED",
+				maxSecondsBehind: "DISABLED",
+				txPoolEnable:     "HEALTHY",
+			},
+		},
+		// 18 - tx pending with 0 tx block
+		{
+			headers:        []string{"tx_pool_enable"},
+			netApiResponse: hexutil.Uint(1),
+			netApiError:    nil,
+			ethApiBlockResult: map[string]interface{}{
+				"transactions": []interface{}{},
+				"number":       (*hexutil.Big)(big.NewInt(100)),
+			},
+			ethApiBlockError:    nil,
+			ethApiSyncingResult: false,
+			ethApiSyncingError:  nil,
+			txPoolResult: map[string]map[string]map[string]*jsonrpc.RPCTransaction{
+				"pending": {"1": {"1": &jsonrpc.RPCTransaction{}}},
+			},
+			txPoolError:        nil,
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedBody: map[string]string{
+				synced:           "DISABLED",
+				minPeerCount:     "DISABLED",
+				checkBlock:       "DISABLED",
+				maxSecondsBehind: "DISABLED",
+				txPoolEnable:     "ERROR: found transactions in pending pool but last 5 blocks have no transactions",
 			},
 		},
 	}
@@ -367,9 +479,20 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			Public: false,
 		}
 
-		apis := make([]rpc.API, 2)
+		txPoolAPI := rpc.API{
+			Namespace: "",
+			Version:   "",
+			Service: &txPoolApiStub{
+				txPoolResult: c.txPoolResult,
+				txPoolError:  c.txPoolError,
+			},
+			Public: false,
+		}
+
+		apis := make([]rpc.API, 3)
 		apis[0] = netAPI
 		apis[1] = ethAPI
+		apis[2] = txPoolAPI
 
 		ProcessHealthcheckIfNeeded(w, r, apis)
 
