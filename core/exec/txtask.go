@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/holiman/uint256"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -56,7 +55,7 @@ type Task interface {
 
 	Version() state.Version
 	VersionMap() *state.VersionMap
-	VersionedReads(ibs *state.IntraBlockState) *btree.BTreeG[*state.VersionedRead]
+	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
 	VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites
 	Reset(ibs *state.IntraBlockState)
 
@@ -87,7 +86,7 @@ type Result struct {
 	ExecutionResult *evmtypes.ExecutionResult
 	Err             error
 	Coinbase        libcommon.Address
-	TxIn            *btree.BTreeG[*state.VersionedRead]
+	TxIn            state.ReadSet
 	TxOut           state.VersionedWrites
 
 	Receipt *types.Receipt
@@ -318,7 +317,7 @@ func (t *TxTask) VersionMap() *state.VersionMap {
 	return nil
 }
 
-func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) *btree.BTreeG[*state.VersionedRead] {
+func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
 	return ibs.VersionedReads()
 }
 
@@ -437,15 +436,13 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 				}
 
 				reads := ibs.VersionedReads()
-				coinbaseKey := state.SubpathKey(&evm.Context.Coinbase, state.BalancePath)
 
-				if _, ok := reads.Get(&state.VersionedRead{Path: coinbaseKey}); ok {
+				if _, ok := reads[applyRes.BurntContractAddress][state.AccountKey{Path: state.BalancePath}]; ok {
 					log.Debug("Coinbase is in versiopnedMap", "address", evm.Context.Coinbase)
 					result.ShouldRerunWithoutFeeDelay = true
 				}
 
-				burnKey := state.SubpathKey(&applyRes.BurntContractAddress, state.BalancePath)
-				if _, ok := reads.Get(&state.VersionedRead{Path: burnKey}); ok {
+				if _, ok := reads[evm.Context.Coinbase][state.AccountKey{Path: state.BalancePath}]; ok {
 					log.Debug("BurntContractAddress is in versiopnedMap", "address", applyRes.BurntContractAddress)
 					result.ShouldRerunWithoutFeeDelay = true
 				}

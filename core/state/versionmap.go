@@ -50,7 +50,7 @@ const StatePath = 7
 type VersionKey struct {
 	addr    *common.Address
 	key     *common.Hash
-	subpath int8
+	subpath AccountPath
 }
 
 func (k VersionKey) String() string {
@@ -126,7 +126,7 @@ func (k VersionKey) GetStateKey() common.Hash {
 	return *k.key
 }
 
-func (k VersionKey) GetSubpath() int8 {
+func (k VersionKey) GetSubpath() AccountPath {
 	return k.subpath
 }
 
@@ -142,7 +142,7 @@ func StateKey(addr *common.Address, hash *common.Hash) VersionKey {
 		key:  hash}
 }
 
-func SubpathKey(addr *common.Address, subpath int8) VersionKey {
+func SubpathKey(addr *common.Address, subpath AccountPath) VersionKey {
 	return VersionKey{
 		addr:    addr,
 		subpath: subpath,
@@ -175,16 +175,16 @@ func VersionKeyLess(a, b *VersionKey) bool {
 }
 
 type AccountKey struct {
-	subpath AccountPath
-	key     *libcommon.Hash
+	Path AccountPath
+	Key  *libcommon.Hash
 }
 
 func (k AccountKey) String() string {
-	if k.subpath == StatePath && k.key != nil {
-		return fmt.Sprintf("%x", k.key)
+	if k.Path == StatePath && k.Key != nil {
+		return fmt.Sprintf("%x", k.Key)
 	}
 
-	return k.subpath.String()
+	return k.Path.String()
 }
 
 type VersionMap1 struct {

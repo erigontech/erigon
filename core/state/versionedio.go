@@ -23,8 +23,55 @@ const (
 	StorageRead = 1
 )
 
-type readSet map[libcommon.Address]map[AccountKey]*VersionedRead
-type writeSet map[libcommon.Address]map[AccountKey]*VersionedWrite
+type ReadSet map[libcommon.Address]map[AccountKey]*VersionedRead
+
+func (rs ReadSet) Set(v *VersionedRead) {
+	parts, ok := rs[*v.Path.addr]
+
+	if !ok {
+		rs[*v.Path.addr] = map[AccountKey]*VersionedRead{
+			{v.Path.subpath, v.Path.key}: v,
+		}
+	} else {
+		parts[AccountKey{v.Path.subpath, v.Path.key}] = v
+	}
+}
+
+func (rs ReadSet) Scan(yield func(input *VersionedRead) bool) {
+	for _, paths := range rs {
+		for _, v := range paths {
+			if !yield(v) {
+				return
+			}
+		}
+	}
+}
+
+func (rs ReadSet) Len() int {
+	var l int
+	for _, p := range rs {
+		l += len(p)
+	}
+	return l
+}
+
+type writeSet map[libcommon.Address]map[AccountKey]*VersionedWrite1
+
+type VersionedRead1 struct {
+	Address libcommon.Address
+	Key     AccountKey
+	Source  ReadSource
+	Version Version
+	Val     interface{}
+}
+
+type VersionedWrite1 struct {
+	Address libcommon.Address
+	Key     AccountKey
+	Version Version
+	Val     interface{}
+	Reason  tracing.BalanceChangeReason
+}
 
 type VersionedRead struct {
 	Path    VersionKey
@@ -52,12 +99,12 @@ func VersionedWriteLess(a, b VersionedWrite) bool {
 
 type versionedStateReader struct {
 	txIndex     int
-	reads       *btree.BTreeG[*VersionedRead]
+	reads       ReadSet
 	versionMap  *VersionMap
 	stateReader StateReader
 }
 
-func NewVersionedStateReader(txIndex int, reads *btree.BTreeG[*VersionedRead], versionMap *VersionMap) *versionedStateReader {
+func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap) *versionedStateReader {
 	return &versionedStateReader{txIndex, reads, versionMap, nil}
 }
 
@@ -66,8 +113,7 @@ func (vr *versionedStateReader) SetStateReader(stateReader StateReader) {
 }
 
 func (vr *versionedStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	key := AddressKey(&address)
-	if r, ok := vr.reads.Get(&VersionedRead{Path: key}); ok && r.Val != nil {
+	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
 		if account, ok := r.Val.(accounts.Account); ok {
 			updated := vr.applyVersionedUpdates(address, account)
 			return &updated, nil
@@ -117,8 +163,7 @@ func (vr versionedStateReader) applyVersionedUpdates(address common.Address, acc
 }
 
 func (vr versionedStateReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
-	key := AddressKey(&address)
-	if r, ok := vr.reads.Get(&VersionedRead{Path: key}); ok && r.Val != nil {
+	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
 		if account, ok := r.Val.(accounts.Account); ok {
 			updated := vr.applyVersionedUpdates(address, account)
 			return &updated, nil
@@ -140,8 +185,7 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address common.Address) (
 }
 
 func (vr versionedStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	path := StateKey(&address, key)
-	if r, ok := vr.reads.Get(&VersionedRead{Path: path}); ok && r.Val != nil {
+	if r, ok := vr.reads[address][AccountKey{Path: StatePath, Key: key}]; ok && r.Val != nil {
 		val := r.Val.(uint256.Int)
 		return (&val).Bytes(), nil
 	}
@@ -154,8 +198,7 @@ func (vr versionedStateReader) ReadAccountStorage(address common.Address, incarn
 }
 
 func (vr versionedStateReader) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
-	key := SubpathKey(&address, CodePath)
-	if r, ok := vr.reads.Get(&VersionedRead{Path: key}); ok && r.Val != nil {
+	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
 		if code, ok := r.Val.([]byte); ok {
 			return code, nil
 		}
@@ -169,8 +212,7 @@ func (vr versionedStateReader) ReadAccountCode(address common.Address, incarnati
 }
 
 func (vr versionedStateReader) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
-	key := SubpathKey(&address, CodePath)
-	if r, ok := vr.reads.Get(&VersionedRead{Path: key}); ok && r.Val != nil {
+	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
 		if code, ok := r.Val.([]byte); ok {
 			return len(code), nil
 		}
@@ -184,8 +226,7 @@ func (vr versionedStateReader) ReadAccountCodeSize(address common.Address, incar
 }
 
 func (vr versionedStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	key := AddressKey(&address)
-	if r, ok := vr.reads.Get(&VersionedRead{Path: key}); ok && r.Val != nil {
+	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
 		return r.Val.(accounts.Account).Incarnation, nil
 	}
 
@@ -343,7 +384,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 	switch res.Status() {
 	case MVReadResultDone:
 		if versionedReads := s.versionedReads; versionedReads != nil {
-			if pr, ok := versionedReads.Get(&VersionedRead{Path: k}); ok {
+			if pr, ok := versionedReads[k.GetAddress()][AccountKey{Path: k.subpath, Key: k.key}]; ok {
 				if pr.Version == vr.Version {
 					return pr.Val.(T), nil
 				}
@@ -374,7 +415,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 
 	case MVReadResultNone:
 		if versionedReads := s.versionedReads; versionedReads != nil {
-			if pr, ok := versionedReads.Get(&VersionedRead{Path: k}); ok {
+			if pr, ok := versionedReads[k.GetAddress()][AccountKey{Path: k.subpath, Key: k.key}]; ok {
 				if pr.Version == vr.Version {
 					return pr.Val.(T), nil
 				}
@@ -403,7 +444,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 	}
 
 	if s.versionedReads == nil {
-		s.versionedReads = btree.NewBTreeGOptions(VersionedReadLess, btree.Options{NoLocks: true})
+		s.versionedReads = ReadSet{}
 	}
 
 	s.versionedReads.Set(&vr)
@@ -431,17 +472,17 @@ func ApplyVersionedWrites(chainRules *chain.Rules, writes VersionedWrites, state
 
 // note that TxIndex starts at -1 (the begin system tx)
 type VersionedIO struct {
-	inputs     []*btree.BTreeG[*VersionedRead]
+	inputs     []ReadSet
 	outputs    []VersionedWrites // write sets that should be checked during validation
 	outputsSet []*btree.BTreeG[*VersionKey]
 	allOutputs []VersionedWrites // entire write sets in MVHashMap. allOutputs should always be a parent set of outputs
 }
 
-func (io *VersionedIO) Inputs() []*btree.BTreeG[*VersionedRead] {
+func (io *VersionedIO) Inputs() []ReadSet {
 	return io.inputs
 }
 
-func (io *VersionedIO) ReadSet(txnIdx int) *btree.BTreeG[*VersionedRead] {
+func (io *VersionedIO) ReadSet(txnIdx int) ReadSet {
 	if len(io.inputs) <= txnIdx+1 {
 		return nil
 	}
@@ -497,16 +538,16 @@ func (io *VersionedIO) HasWritten(txnIdx int, k VersionKey) bool {
 
 func NewVersionedIO(numTx int) *VersionedIO {
 	return &VersionedIO{
-		inputs:     make([]*btree.BTreeG[*VersionedRead], numTx+1),
+		inputs:     make([]ReadSet, numTx+1),
 		outputs:    make([]VersionedWrites, numTx+1),
 		outputsSet: make([]*btree.BTreeG[*VersionKey], numTx+1),
 		allOutputs: make([]VersionedWrites, numTx+1),
 	}
 }
 
-func (io *VersionedIO) RecordReads(txId int, input *btree.BTreeG[*VersionedRead]) {
+func (io *VersionedIO) RecordReads(txId int, input ReadSet) {
 	if len(io.inputs) <= txId+1 {
-		io.inputs = append(io.inputs, make([]*btree.BTreeG[*VersionedRead], txId+2-len(io.inputs))...)
+		io.inputs = append(io.inputs, make([]ReadSet, txId+2-len(io.inputs))...)
 	}
 	io.inputs[txId+1] = input
 }
@@ -540,13 +581,13 @@ type DAG struct {
 
 type TxDep struct {
 	Index         int
-	Reads         *btree.BTreeG[*VersionedRead]
+	Reads         ReadSet
 	FullWriteList []VersionedWrites
 }
 
-func HasReadDep(txFrom VersionedWrites, txTo *btree.BTreeG[*VersionedRead]) bool {
+func HasReadDep(txFrom VersionedWrites, txTo ReadSet) bool {
 	for _, rd := range txFrom {
-		if _, ok := txTo.Get(&VersionedRead{Path: rd.Path}); ok {
+		if _, ok := txTo[rd.Path.GetAddress()][AccountKey{Path: rd.Path.subpath, Key: rd.Path.key}]; ok {
 			return true
 		}
 	}
@@ -593,7 +634,7 @@ func BuildDAG(deps *VersionedIO, logger log.Logger) (d DAG) {
 	return
 }
 
-func depsHelper(dependencies map[int]map[int]bool, txFrom VersionedWrites, txTo *btree.BTreeG[*VersionedRead], i int, j int) map[int]map[int]bool {
+func depsHelper(dependencies map[int]map[int]bool, txFrom VersionedWrites, txTo ReadSet, i int, j int) map[int]map[int]bool {
 	if HasReadDep(txFrom, txTo) {
 		dependencies[i][j] = true
 

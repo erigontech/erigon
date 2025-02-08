@@ -99,7 +99,7 @@ type IntraBlockState struct {
 	// at the block level
 	versionMap      *VersionMap
 	versionedWrites *btree.BTreeG[VersionedWrite]
-	versionedReads  *btree.BTreeG[*VersionedRead]
+	versionedReads  ReadSet
 	version         int
 	dep             int
 }
@@ -1377,7 +1377,7 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 		// this is not used by the version map wich works
 		// at the level of individual account elements
 		if s.versionedReads == nil {
-			s.versionedReads = btree.NewBTreeGOptions(VersionedReadLess, btree.Options{NoLocks: true})
+			s.versionedReads = ReadSet{}
 		}
 
 		k := AddressKey(&addr)
@@ -1390,7 +1390,6 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 		})
 	}
 }
-
 
 func (s *IntraBlockState) versionWritten(k VersionKey, val any) {
 	if s.versionMap != nil {
@@ -1443,7 +1442,7 @@ func (s *IntraBlockState) Version() Version {
 	}
 }
 
-func (ibs *IntraBlockState) VersionedReads() *btree.BTreeG[*VersionedRead] {
+func (ibs *IntraBlockState) VersionedReads() ReadSet {
 	return ibs.versionedReads
 }
 

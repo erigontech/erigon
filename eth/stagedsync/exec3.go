@@ -667,7 +667,7 @@ func ExecV3(ctx context.Context,
 					// use history reader instead of state reader to catch up to the tx where we left off
 					HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 					Config:           chainConfig,
-					Trace:            false, // blockNum == 66921903 && txIndex == 57, 66921898
+					Trace:            blockNum == 66921989 && txIndex == 136,
 				}
 
 				if cfg.genesis != nil {
@@ -700,7 +700,7 @@ func ExecV3(ctx context.Context,
 					return err
 				}
 
-				if blockNum == 66922063 {
+				if blockNum == 66921989 {
 					fmt.Println("Complete", blockNum)
 					panic("done")
 				}

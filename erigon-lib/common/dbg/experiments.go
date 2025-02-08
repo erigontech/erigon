@@ -68,9 +68,14 @@ var (
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel = EnvBool("ERIGON_EXEC3_PARALLEL", false)
+	Exec3Parallel = EnvBool("EXEC3_PARALLEL", false)
 	numWorkers    = runtime.NumCPU() / 2
-	Exec3Workers  = EnvInt("ERIGON_EXEC3_WORKERS", numWorkers)
+	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
+
+	TraceAccounts  = EnvStrings("TRACE_ACCOUNTS", ",", nil)
+	TraceStateKeys = EnvStrings("TRACE_STATE_KEYS", ",", nil)
+	TraceBlocks    = EnvInts("TRACE_BLOCKS", ",", nil)
+	TraceTxIndexes = EnvInts("TRACE_TXINDEXES", ",", nil)
 
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 )

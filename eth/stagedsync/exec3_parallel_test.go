@@ -51,7 +51,7 @@ type Op struct {
 type testExecTask struct {
 	*exec.TxTask
 	ops          []Op
-	readMap      *btree.BTreeG[*state.VersionedRead]
+	readMap      state.ReadSet
 	writeMap     *btree.BTreeG[state.VersionedWrite]
 	sender       common.Address
 	nonce        int
@@ -78,7 +78,7 @@ func NewTestExecTask(txIdx int, ops []Op, sender common.Address, nonce int) *tes
 			TxIndex: txIdx,
 		},
 		ops:          ops,
-		readMap:      btree.NewBTreeGOptions(state.VersionedReadLess, btree.Options{NoLocks: true}),
+		readMap:      state.ReadSet{},
 		writeMap:     btree.NewBTreeGOptions(state.VersionedWriteLess, btree.Options{NoLocks: true}),
 		sender:       sender,
 		nonce:        nonce,
@@ -110,7 +110,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 	version := t.Version()
 
-	t.readMap = btree.NewBTreeGOptions(state.VersionedReadLess, btree.Options{NoLocks: true})
+	t.readMap = state.ReadSet{}
 	t.writeMap = btree.NewBTreeGOptions(state.VersionedWriteLess, btree.Options{NoLocks: true})
 
 	dep := -1
@@ -179,7 +179,7 @@ func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) state.Versioned
 	return writes
 }
 
-func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) *btree.BTreeG[*state.VersionedRead] {
+func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) state.ReadSet {
 	return t.readMap
 }
 
