@@ -74,8 +74,9 @@ var (
 
 	TraceAccounts  = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys = EnvStrings("TRACE_STATE_KEYS", ",", nil)
-	TraceBlocks    = EnvInts("TRACE_BLOCKS", ",", nil)
+	TraceBlocks    = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes = EnvInts("TRACE_TXINDEXES", ",", nil)
+	StopAfterBlock = EnvUint("STOP_AFTER_BLOCK", 0)
 
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 )

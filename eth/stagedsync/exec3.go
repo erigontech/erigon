@@ -367,6 +367,37 @@ func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum 
 	return lastTxNum == inputTxNum, nil
 }
 
+var tracedBlocks map[uint64]struct{}
+var tracedTxIndexes map[int64]struct{}
+
+func traceTx(blockNum uint64, txIndex int) bool {
+	if tracedBlocks == nil {
+		tracedBlocks = map[uint64]struct{}{}
+		for _, blockNum := range dbg.TraceBlocks {
+			tracedBlocks[blockNum] = struct{}{}
+		}
+	}
+
+	if _, ok := tracedBlocks[blockNum]; !ok {
+		return false
+	}
+
+	if tracedTxIndexes == nil {
+		tracedTxIndexes = map[int64]struct{}{}
+		for _, index := range dbg.TraceTxIndexes {
+			tracedTxIndexes[index] = struct{}{}
+		}
+	}
+
+	if len(tracedTxIndexes) != 0 {
+		if _, ok := tracedTxIndexes[int64(txIndex)]; !ok {
+			return false
+		}
+	}
+
+	return true
+}
+
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer,
 	parallel bool, //nolint
@@ -667,7 +698,7 @@ func ExecV3(ctx context.Context,
 					// use history reader instead of state reader to catch up to the tx where we left off
 					HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 					Config:           chainConfig,
-					Trace:            blockNum == 66921989 && txIndex == 136,
+					Trace:            traceTx(blockNum, txIndex),
 				}
 
 				if cfg.genesis != nil {
@@ -700,9 +731,8 @@ func ExecV3(ctx context.Context,
 					return err
 				}
 
-				if blockNum == 66921989 {
-					fmt.Println("Complete", blockNum)
-					panic("done")
+				if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
+					return fmt.Errorf("stopping: block %d complete", blockNum)
 				}
 
 				uncommittedGas = se.executedGas - se.committedGas

@@ -862,8 +862,8 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 
 			if blockResult.complete {
 				//fmt.Println("Block Complete", blockResult.BlockNum)
-				if blockResult.BlockNum == 66921989 {
-					return fmt.Errorf("break block bomplete: %d", blockResult.BlockNum)
+				if dbg.StopAfterBlock > 0 && blockResult.BlockNum == dbg.StopAfterBlock {
+					return fmt.Errorf("stopping: block %d complete", blockResult.BlockNum)
 				}
 
 				if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum]; ok {

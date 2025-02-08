@@ -102,6 +102,24 @@ func EnvInt(envVarName string, defaultVal int) int {
 	return defaultVal
 }
 
+func EnvUint(envVarName string, defaultVal uint64) uint64 {
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		WarnOnErigonPrefix(envVarName)
+		i := MustParseUint(v)
+		log.Info("[env]", envVarName, i)
+		return i
+	}
+
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v != "" {
+		i := MustParseUint(v)
+		log.Info("[env]", envVarName, i)
+		return i
+	}
+	return defaultVal
+}
+
 func EnvInts(envVarName string, sep string, defaultVal []int64) []int64 {
 	v, _ := os.LookupEnv(envVarName)
 	if v != "" {
