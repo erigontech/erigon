@@ -31,16 +31,15 @@ import (
 
 const (
 	TestInstanceId           = 123
-	TestMaxNumKeysPerMessage = 3
+	TestMaxNumKeysPerMessage = 10
 )
 
 type MockDecryptionKeysMsgOptions struct {
-	Eon                  uint64
-	Keys                 [][]byte
-	IdentityPreimages    [][]byte
+	EonIndex             shutter.EonIndex
+	Keys                 []*shutterproto.Key
 	NilExtra             bool
 	Slot                 uint64
-	TxPointer            uint64
+	TxnPointer           uint64
 	SignerIndices        []uint64
 	Signatures           [][]byte
 	InstanceIdOverride   uint64
@@ -82,22 +81,15 @@ func MockDecryptionKeysEnvelopeData(t *testing.T, opts MockDecryptionKeysMsgOpti
 
 	decryptionKeys := &shutterproto.DecryptionKeys{
 		InstanceId: instanceId,
-		Eon:        opts.Eon,
-	}
-
-	require.Equal(t, len(opts.Keys), len(opts.IdentityPreimages))
-	for i := range opts.Keys {
-		decryptionKeys.Keys = append(decryptionKeys.Keys, &shutterproto.Key{
-			Key:              opts.Keys[i],
-			IdentityPreimage: opts.IdentityPreimages[i],
-		})
+		Eon:        uint64(opts.EonIndex),
+		Keys:       opts.Keys,
 	}
 
 	if !opts.NilExtra {
 		decryptionKeys.Extra = &shutterproto.DecryptionKeys_Gnosis{
 			Gnosis: &shutterproto.GnosisDecryptionKeysExtra{
 				Slot:          opts.Slot,
-				TxPointer:     opts.TxPointer,
+				TxPointer:     opts.TxnPointer,
 				SignerIndices: opts.SignerIndices,
 				Signatures:    opts.Signatures,
 			},

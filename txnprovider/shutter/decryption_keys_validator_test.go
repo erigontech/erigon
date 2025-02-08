@@ -95,6 +95,10 @@ type decryptionKeysValidationTestCase struct {
 }
 
 func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTestCase {
+	ekg := testhelpers.MockEonKeyGeneration()
+	eon := ekg.Eon()
+	slot := uint64(6336)
+
 	return []decryptionKeysValidationTestCase{
 		{
 			name: "instance id mismatch",
@@ -111,83 +115,11 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 			},
 		},
 		{
-			name: "missing gnosis extra data",
-			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
-				NilExtra: true,
-			}),
-			slotCalculator:       mockSlotCalculator(),
-			eonTracker:           mockEonTracker(),
-			wantErr:              shutter.ErrMissingGnosisExtraData,
-			wantValidationResult: pubsub.ValidationReject,
-			wantValidationLogMsgs: []string{
-				"rejecting decryption keys msg due to",
-				"missing gnosis extra data",
-			},
-		},
-		{
-			name: "slot too large",
-			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
-				Slot: math.MaxInt64 + 1,
-			}),
-			slotCalculator:       mockSlotCalculator(),
-			eonTracker:           mockEonTracker(),
-			wantErr:              shutter.ErrSlotTooLarge,
-			wantValidationResult: pubsub.ValidationReject,
-			wantValidationLogMsgs: []string{
-				"rejecting decryption keys msg due to",
-				"slot too large: 9223372036854775808",
-			},
-		},
-		{
-			name: "slot in the past",
-			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
-				Slot: 15,
-			}),
-			slotCalculator:       mockSlotCalculator(withCurrentSlotMock(16)),
-			eonTracker:           mockEonTracker(),
-			wantErr:              shutter.ErrSlotInThePast,
-			wantValidationResult: pubsub.ValidationReject,
-			wantValidationLogMsgs: []string{
-				"rejecting decryption keys msg due to",
-				"slot in the past: msgSlot=15, currentSlot=16",
-			},
-		},
-		{
-			name: "slot in the future",
-			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
-				Slot: 18,
-			}),
-			slotCalculator:       mockSlotCalculator(withCurrentSlotMock(16)),
-			eonTracker:           mockEonTracker(),
-			wantErr:              shutter.ErrSlotInTheFuture,
-			wantValidationResult: pubsub.ValidationReject,
-			wantValidationLogMsgs: []string{
-				"rejecting decryption keys msg due to",
-				"slot in the future: msgSlot=18, currentSlot=16",
-			},
-		},
-		{
-			name: "tx pointer too large",
-			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
-				Slot:      16,
-				TxPointer: math.MaxInt32 + 1,
-			}),
-			slotCalculator:       mockSlotCalculator(withCurrentSlotMock(16)),
-			eonTracker:           mockEonTracker(),
-			wantErr:              shutter.ErrTxnPointerTooLarge,
-			wantValidationResult: pubsub.ValidationReject,
-			wantValidationLogMsgs: []string{
-				"rejecting decryption keys msg due to",
-				"tx pointer too large: 2147483648",
-			},
-		},
-		{
 			name: "eon too large",
 			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
-				Slot: 16,
-				Eon:  math.MaxInt64 + 1,
+				EonIndex: math.MaxInt64 + 1,
 			}),
-			slotCalculator:       mockSlotCalculator(withCurrentSlotMock(16)),
+			slotCalculator:       mockSlotCalculator(),
 			eonTracker:           mockEonTracker(),
 			wantErr:              shutter.ErrEonTooLarge,
 			wantValidationResult: pubsub.ValidationReject,
@@ -199,10 +131,9 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 		{
 			name: "current eon unavailable",
 			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
-				Slot: 16,
-				Eon:  2,
+				EonIndex: 2,
 			}),
-			slotCalculator:       mockSlotCalculator(withCurrentSlotMock(16)),
+			slotCalculator:       mockSlotCalculator(),
 			eonTracker:           mockEonTracker(withCurrentEonMock(currentEonMock{eon: shutter.Eon{}, ok: false})),
 			wantErr:              shutter.ErrCurrentEonUnavailable,
 			wantValidationResult: pubsub.ValidationIgnore,
@@ -214,10 +145,9 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 		{
 			name: "eon in the past",
 			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
-				Slot: 16,
-				Eon:  1,
+				EonIndex: 1,
 			}),
-			slotCalculator: mockSlotCalculator(withCurrentSlotMock(16)),
+			slotCalculator: mockSlotCalculator(),
 			eonTracker: mockEonTracker(
 				withCurrentEonMock(currentEonMock{eon: shutter.Eon{Index: 2}, ok: true}),
 				withRecentEonMock(recentEonMock{eon: shutter.Eon{}, ok: false}),
@@ -232,10 +162,9 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 		{
 			name: "eon in the future",
 			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
-				Slot: 16,
-				Eon:  3,
+				EonIndex: 3,
 			}),
-			slotCalculator: mockSlotCalculator(withCurrentSlotMock(16)),
+			slotCalculator: mockSlotCalculator(),
 			eonTracker: mockEonTracker(
 				withCurrentEonMock(currentEonMock{eon: shutter.Eon{Index: 2}, ok: true}),
 				withRecentEonMock(recentEonMock{eon: shutter.Eon{}, ok: false}),
@@ -250,15 +179,13 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 		{
 			name: "empty keys",
 			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
-				Slot:              16,
-				Eon:               2,
-				Keys:              [][]byte{},
-				IdentityPreimages: [][]byte{},
+				EonIndex: eon.Index,
+				Keys:     []*shutterproto.Key{},
 			}),
-			slotCalculator: mockSlotCalculator(withCurrentSlotMock(16)),
+			slotCalculator: mockSlotCalculator(),
 			eonTracker: mockEonTracker(
-				withCurrentEonMock(currentEonMock{eon: shutter.Eon{Index: 2}, ok: true}),
-				withRecentEonMock(recentEonMock{eon: shutter.Eon{Index: 2}, ok: true}),
+				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
+				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
 			),
 			wantErr:              shutter.ErrEmptyKeys,
 			wantValidationResult: pubsub.ValidationReject,
@@ -270,21 +197,118 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 		{
 			name: "too many keys",
 			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
-				Slot:              16,
-				Eon:               2,
-				Keys:              [][]byte{[]byte("key1"), []byte("key2"), []byte("key3"), []byte("key4")},
-				IdentityPreimages: [][]byte{[]byte("id1"), []byte("id2"), []byte("id3"), []byte("id4")},
+				EonIndex: eon.Index,
+				Keys: ekg.DecryptionKeys(
+					slot,
+					// note 1 ip is appended by ekg.DecryptionKeys(slot, ips) so the below will breach the max
+					testhelpers.MockIdentityPreimages(testhelpers.TestMaxNumKeysPerMessage)...,
+				),
 			}),
-			slotCalculator: mockSlotCalculator(withCurrentSlotMock(16)),
+			slotCalculator: mockSlotCalculator(),
 			eonTracker: mockEonTracker(
-				withCurrentEonMock(currentEonMock{eon: shutter.Eon{Index: 2}, ok: true}),
-				withRecentEonMock(recentEonMock{eon: shutter.Eon{Index: 2}, ok: true}),
+				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
+				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
 			),
 			wantErr:              shutter.ErrTooManyKeys,
 			wantValidationResult: pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{
 				"rejecting decryption keys msg due to",
-				"too many keys: 4",
+				"too many keys: 11",
+			},
+		},
+		{
+			name: "missing gnosis extra data",
+			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
+				EonIndex: eon.Index,
+				Keys:     ekg.DecryptionKeys(slot, testhelpers.MockIdentityPreimages(2)...),
+				NilExtra: true,
+			}),
+			slotCalculator: mockSlotCalculator(),
+			eonTracker: mockEonTracker(
+				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
+				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
+			),
+			wantErr:              shutter.ErrMissingGnosisExtraData,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to",
+				"missing gnosis extra data",
+			},
+		},
+		{
+			name: "txn pointer too large",
+			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
+				EonIndex:   eon.Index,
+				Keys:       ekg.DecryptionKeys(slot, testhelpers.MockIdentityPreimages(2)...),
+				TxnPointer: math.MaxInt32 + 1,
+			}),
+			slotCalculator: mockSlotCalculator(),
+			eonTracker: mockEonTracker(
+				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
+				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
+			),
+			wantErr:              shutter.ErrTxnPointerTooLarge,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to",
+				"txn pointer too large: 2147483648",
+			},
+		},
+		{
+			name: "slot too large",
+			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
+				EonIndex: eon.Index,
+				Keys:     ekg.DecryptionKeys(slot, testhelpers.MockIdentityPreimages(2)...),
+				Slot:     math.MaxInt64 + 1,
+			}),
+			slotCalculator: mockSlotCalculator(),
+			eonTracker: mockEonTracker(
+				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
+				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
+			),
+			wantErr:              shutter.ErrSlotTooLarge,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to",
+				"slot too large: 9223372036854775808",
+			},
+		},
+		{
+			name: "slot in the past",
+			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
+				EonIndex: eon.Index,
+				Keys:     ekg.DecryptionKeys(slot, testhelpers.MockIdentityPreimages(2)...),
+				Slot:     14,
+			}),
+			slotCalculator: mockSlotCalculator(withCurrentSlotMock(16)),
+			eonTracker: mockEonTracker(
+				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
+				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
+			),
+			wantErr:              shutter.ErrSlotInThePast,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to",
+				"slot in the past: msgSlot=14, currentSlot=16",
+			},
+		},
+		{
+			name: "slot in the future",
+			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
+				EonIndex: eon.Index,
+				Keys:     ekg.DecryptionKeys(slot, testhelpers.MockIdentityPreimages(2)...),
+				Slot:     18,
+			}),
+			slotCalculator: mockSlotCalculator(withCurrentSlotMock(16)),
+			eonTracker: mockEonTracker(
+				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
+				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
+			),
+			wantErr:              shutter.ErrSlotInTheFuture,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to",
+				"slot in the future: msgSlot=18, currentSlot=16",
 			},
 		},
 	}
