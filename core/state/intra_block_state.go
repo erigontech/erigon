@@ -1404,8 +1404,8 @@ func (s *IntraBlockState) versionWritten(addr libcommon.Address, path AccountPat
 		}
 
 		var pk *libcommon.Hash
-		if key!=(libcommon.Hash{}){
-			pk=&key
+		if path == StatePath {
+			pk = &key
 		}
 		s.versionedWrites.Set(&VersionedWrite{
 			Address: addr,

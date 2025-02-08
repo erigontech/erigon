@@ -95,7 +95,7 @@ func (k VersionKey) IsAddress() bool {
 }
 
 func (k VersionKey) IsState() bool {
-	return k.key != nil
+	return k.subpath == StatePath
 }
 
 func (k VersionKey) IsSubpath() bool {
