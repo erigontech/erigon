@@ -23,7 +23,6 @@ import (
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/testlog"
@@ -105,8 +104,8 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
 				InstanceIdOverride: 999999,
 			}),
-			slotCalculator:       mockSlotCalculator(),
-			eonTracker:           mockEonTracker(),
+			slotCalculator:       testhelpers.MockSlotCalculatorCreator(),
+			eonTracker:           testhelpers.MockEonTrackerCreator(),
 			wantErr:              shutter.ErrInstanceIdMismatch,
 			wantValidationResult: pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{
@@ -119,8 +118,8 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
 				EonIndex: math.MaxInt64 + 1,
 			}),
-			slotCalculator:       mockSlotCalculator(),
-			eonTracker:           mockEonTracker(),
+			slotCalculator:       testhelpers.MockSlotCalculatorCreator(),
+			eonTracker:           testhelpers.MockEonTrackerCreator(),
 			wantErr:              shutter.ErrEonTooLarge,
 			wantValidationResult: pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{
@@ -133,8 +132,10 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
 				EonIndex: 2,
 			}),
-			slotCalculator:       mockSlotCalculator(),
-			eonTracker:           mockEonTracker(withCurrentEonMock(currentEonMock{eon: shutter.Eon{}, ok: false})),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: shutter.Eon{}, Ok: false}),
+			),
 			wantErr:              shutter.ErrCurrentEonUnavailable,
 			wantValidationResult: pubsub.ValidationIgnore,
 			wantValidationLogMsgs: []string{
@@ -147,10 +148,10 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
 				EonIndex: 1,
 			}),
-			slotCalculator: mockSlotCalculator(),
-			eonTracker: mockEonTracker(
-				withCurrentEonMock(currentEonMock{eon: shutter.Eon{Index: 2}, ok: true}),
-				withRecentEonMock(recentEonMock{eon: shutter.Eon{}, ok: false}),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: shutter.Eon{Index: 2}, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{Eon: shutter.Eon{}, Ok: false}),
 			),
 			wantErr:              shutter.ErrEonInThePast,
 			wantValidationResult: pubsub.ValidationReject,
@@ -164,10 +165,10 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
 				EonIndex: 3,
 			}),
-			slotCalculator: mockSlotCalculator(),
-			eonTracker: mockEonTracker(
-				withCurrentEonMock(currentEonMock{eon: shutter.Eon{Index: 2}, ok: true}),
-				withRecentEonMock(recentEonMock{eon: shutter.Eon{}, ok: false}),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: shutter.Eon{Index: 2}, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{Eon: shutter.Eon{}, Ok: false}),
 			),
 			wantErr:              shutter.ErrEonInTheFuture,
 			wantValidationResult: pubsub.ValidationIgnore,
@@ -182,10 +183,10 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 				EonIndex: eon.Index,
 				Keys:     []*shutterproto.Key{},
 			}),
-			slotCalculator: mockSlotCalculator(),
-			eonTracker: mockEonTracker(
-				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
-				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: eon, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{Eon: eon, Ok: true}),
 			),
 			wantErr:              shutter.ErrEmptyKeys,
 			wantValidationResult: pubsub.ValidationReject,
@@ -204,10 +205,10 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 					testhelpers.MockIdentityPreimages(testhelpers.TestMaxNumKeysPerMessage)...,
 				),
 			}),
-			slotCalculator: mockSlotCalculator(),
-			eonTracker: mockEonTracker(
-				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
-				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: eon, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{Eon: eon, Ok: true}),
 			),
 			wantErr:              shutter.ErrTooManyKeys,
 			wantValidationResult: pubsub.ValidationReject,
@@ -223,10 +224,10 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 				Keys:     ekg.DecryptionKeys(slot, testhelpers.MockIdentityPreimages(2)...),
 				NilExtra: true,
 			}),
-			slotCalculator: mockSlotCalculator(),
-			eonTracker: mockEonTracker(
-				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
-				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: eon, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{Eon: eon, Ok: true}),
 			),
 			wantErr:              shutter.ErrMissingGnosisExtraData,
 			wantValidationResult: pubsub.ValidationReject,
@@ -242,10 +243,10 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 				Keys:       ekg.DecryptionKeys(slot, testhelpers.MockIdentityPreimages(2)...),
 				TxnPointer: math.MaxInt32 + 1,
 			}),
-			slotCalculator: mockSlotCalculator(),
-			eonTracker: mockEonTracker(
-				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
-				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: eon, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{Eon: eon, Ok: true}),
 			),
 			wantErr:              shutter.ErrTxnPointerTooLarge,
 			wantValidationResult: pubsub.ValidationReject,
@@ -261,10 +262,10 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 				Keys:     ekg.DecryptionKeys(slot, testhelpers.MockIdentityPreimages(2)...),
 				Slot:     math.MaxInt64 + 1,
 			}),
-			slotCalculator: mockSlotCalculator(),
-			eonTracker: mockEonTracker(
-				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
-				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: eon, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{Eon: eon, Ok: true}),
 			),
 			wantErr:              shutter.ErrSlotTooLarge,
 			wantValidationResult: pubsub.ValidationReject,
@@ -280,10 +281,12 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 				Keys:     ekg.DecryptionKeys(slot, testhelpers.MockIdentityPreimages(2)...),
 				Slot:     14,
 			}),
-			slotCalculator: mockSlotCalculator(withCurrentSlotMock(16)),
-			eonTracker: mockEonTracker(
-				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
-				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(
+				testhelpers.WithCalcCurrentSlotMockResult(16),
+			),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: eon, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{Eon: eon, Ok: true}),
 			),
 			wantErr:              shutter.ErrSlotInThePast,
 			wantValidationResult: pubsub.ValidationReject,
@@ -299,10 +302,12 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 				Keys:     ekg.DecryptionKeys(slot, testhelpers.MockIdentityPreimages(2)...),
 				Slot:     18,
 			}),
-			slotCalculator: mockSlotCalculator(withCurrentSlotMock(16)),
-			eonTracker: mockEonTracker(
-				withCurrentEonMock(currentEonMock{eon: eon, ok: true}),
-				withRecentEonMock(recentEonMock{eon: eon, ok: true}),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(
+				testhelpers.WithCalcCurrentSlotMockResult(16),
+			),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: eon, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{Eon: eon, Ok: true}),
 			),
 			wantErr:              shutter.ErrSlotInTheFuture,
 			wantValidationResult: pubsub.ValidationReject,
@@ -322,8 +327,8 @@ func decryptionKeysP2pValidatorExTestCases(t *testing.T) []decryptionKeysValidat
 				msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
 					EnvelopeDataOverride: []byte("invalid"),
 				}),
-				slotCalculator:       mockSlotCalculator(),
-				eonTracker:           mockEonTracker(),
+				slotCalculator:       testhelpers.MockSlotCalculatorCreator(),
+				eonTracker:           testhelpers.MockEonTrackerCreator(),
 				wantValidationResult: pubsub.ValidationReject,
 				wantValidationLogMsgs: []string{
 					"rejecting decryption keys msg due to unmarshalling error",
@@ -333,80 +338,4 @@ func decryptionKeysP2pValidatorExTestCases(t *testing.T) []decryptionKeysValidat
 		},
 		decryptionKeysValidatorTestCases(t)...,
 	)
-}
-
-type mockSlotCalculatorOpt func(mock *testhelpers.MockSlotCalculator)
-
-func mockSlotCalculator(opts ...mockSlotCalculatorOpt) func(t *testing.T) shutter.SlotCalculator {
-	return func(t *testing.T) shutter.SlotCalculator {
-		ctrl := gomock.NewController(t)
-		sc := testhelpers.NewMockSlotCalculator(ctrl)
-		for _, opt := range opts {
-			opt(sc)
-		}
-		return sc
-	}
-}
-
-func withCurrentSlotMock(vals ...uint64) mockSlotCalculatorOpt {
-	i := -1
-	return func(sc *testhelpers.MockSlotCalculator) {
-		sc.EXPECT().
-			CalcCurrentSlot().
-			DoAndReturn(func() uint64 {
-				i++
-				return vals[i]
-			}).
-			Times(len(vals))
-	}
-}
-
-type mockEonTracerOpt func(mock *testhelpers.MockEonTracker)
-
-func mockEonTracker(opts ...mockEonTracerOpt) func(t *testing.T) shutter.EonTracker {
-	return func(t *testing.T) shutter.EonTracker {
-		ctrl := gomock.NewController(t)
-		et := testhelpers.NewMockEonTracker(ctrl)
-		for _, opt := range opts {
-			opt(et)
-		}
-
-		return et
-	}
-}
-
-type currentEonMock struct {
-	eon shutter.Eon
-	ok  bool
-}
-
-func withCurrentEonMock(vals ...currentEonMock) mockEonTracerOpt {
-	i := -1
-	return func(et *testhelpers.MockEonTracker) {
-		et.EXPECT().
-			CurrentEon().
-			DoAndReturn(func() (shutter.Eon, bool) {
-				i++
-				return vals[i].eon, vals[i].ok
-			}).
-			Times(len(vals))
-	}
-}
-
-type recentEonMock struct {
-	eon shutter.Eon
-	ok  bool
-}
-
-func withRecentEonMock(vals ...recentEonMock) mockEonTracerOpt {
-	i := -1
-	return func(et *testhelpers.MockEonTracker) {
-		et.EXPECT().
-			RecentEon(gomock.Any()).
-			DoAndReturn(func(index shutter.EonIndex) (shutter.Eon, bool) {
-				i++
-				return vals[i].eon, vals[i].ok
-			}).
-			Times(len(vals))
-	}
 }
