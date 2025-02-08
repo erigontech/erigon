@@ -54,7 +54,7 @@ func (ms *MockState) TempDir() string {
 
 func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
 	// updates already merged by trie
-	ms.cm[toStringZeroCopy(prefix)] = common.Copy(data)
+	ms.cm[string(prefix)] = data
 	return nil
 }
 

@@ -515,7 +515,8 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	defer tx.Rollback()
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
-		if errors.Is(err, rpchelper.BlockNotFoundErr{Hash: blockHash}) {
+		bnh, _ := numberOrHash.Hash()
+		if errors.Is(err, rpchelper.BlockNotFoundErr{Hash: bnh}) {
 			return nil, nil
 		}
 		return nil, err
