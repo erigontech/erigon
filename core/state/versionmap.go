@@ -189,6 +189,7 @@ func (k AccountKey) String() string {
 }
 
 type VersionMap1 struct {
+	mu    sync.RWMutex
 	s     map[libcommon.Address]map[AccountKey]*TxIndexCells
 	trace bool
 }
@@ -208,6 +209,9 @@ func (vm *VersionMap1) getKeyCells(addr libcommon.Address, path AccountPath, key
 }
 
 func (vm *VersionMap1) Write(addr libcommon.Address, path AccountPath, key libcommon.Hash, v Version, data interface{}, complete bool) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
 	cells := vm.getKeyCells(addr, path, key, func(addr libcommon.Address, path AccountPath, key libcommon.Hash) (cells *TxIndexCells) {
 		it, ok := vm.s[addr]
 		cells = &TxIndexCells{
@@ -258,6 +262,9 @@ func (vm *VersionMap1) Write(addr libcommon.Address, path AccountPath, key libco
 }
 
 func (vm *VersionMap1) MarkEstimate(addr libcommon.Address, path AccountPath, key libcommon.Hash, txIdx int) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
 	cells := vm.getKeyCells(addr, path, key, func(_ libcommon.Address, _ AccountPath, _ libcommon.Hash) *TxIndexCells {
 		panic(fmt.Errorf("path must already exist"))
 	})
@@ -272,6 +279,9 @@ func (vm *VersionMap1) MarkEstimate(addr libcommon.Address, path AccountPath, ke
 }
 
 func (vm *VersionMap1) MarkComplete(addr libcommon.Address, path AccountPath, key libcommon.Hash, txIdx int) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
 	cells := vm.getKeyCells(addr, path, key, func(_ libcommon.Address, _ AccountPath, _ libcommon.Hash) *TxIndexCells {
 		panic(fmt.Errorf("path must already exist"))
 	})
@@ -286,6 +296,8 @@ func (vm *VersionMap1) MarkComplete(addr libcommon.Address, path AccountPath, ke
 }
 
 func (vm *VersionMap1) Delete(addr libcommon.Address, path AccountPath, key libcommon.Hash, txIdx int, checkExists bool) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
 	cells := vm.getKeyCells(addr, path, key, func(_ libcommon.Address, _ AccountPath, _ libcommon.Hash) *TxIndexCells { return nil })
 
 	if cells == nil {

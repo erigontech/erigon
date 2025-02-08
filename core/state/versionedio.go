@@ -396,7 +396,14 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 		}
 	}
 
-	k := VersionKey{&addr, &key, path}
+	var pk *libcommon.Hash
+
+	if path == StatePath {
+		pk = &key
+	}
+
+	k := VersionKey{&addr, pk, path}
+
 	res := s.versionMap.Read(k, s.txIndex)
 
 	var v T

@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/trie"
@@ -561,7 +562,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 
 	update := new(uint256.Int).Add(&prev, amount)
 	stateObject.SetBalance(update, reason)
-	sdb.versionWritten(SubpathKey(&addr, BalancePath), *update)
+	sdb.versionWritten(addr, BalancePath, libcommon.Hash{}, *update)
 	return nil
 }
 
@@ -592,7 +593,7 @@ func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.I
 
 	update := new(uint256.Int).Sub(&prev, amount)
 	stateObject.SetBalance(update, reason)
-	sdb.versionWritten(SubpathKey(&addr, BalancePath), *update)
+	sdb.versionWritten(addr, BalancePath, libcommon.Hash{}, *update)
 
 	return nil
 }
@@ -607,7 +608,7 @@ func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.I
 		return err
 	}
 	stateObject.SetBalance(amount, reason)
-	sdb.versionWritten(SubpathKey(&addr, BalancePath), stateObject.Balance())
+	sdb.versionWritten(addr, BalancePath, libcommon.Hash{}, stateObject.Balance())
 	return nil
 }
 
@@ -623,7 +624,7 @@ func (sdb *IntraBlockState) SetNonce(addr libcommon.Address, nonce uint64) error
 	}
 
 	stateObject.SetNonce(nonce)
-	sdb.versionWritten(SubpathKey(&addr, NoncePath), stateObject.Nonce())
+	sdb.versionWritten(addr, NoncePath, libcommon.Hash{}, stateObject.Nonce())
 	return nil
 }
 
@@ -645,32 +646,34 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 	}
 	codeHash := crypto.Keccak256Hash(code)
 	stateObject.SetCode(codeHash, code)
-	sdb.versionWritten(SubpathKey(&addr, CodePath), code)
-	sdb.versionWritten(SubpathKey(&addr, CodeHashPath), codeHash)
-	sdb.versionWritten(SubpathKey(&addr, CodeSizePath), len(code))
+	sdb.versionWritten(addr, CodePath, libcommon.Hash{}, code)
+	sdb.versionWritten(addr, CodeHashPath, libcommon.Hash{}, codeHash)
+	sdb.versionWritten(addr, CodeSizePath, libcommon.Hash{}, len(code))
 	return nil
 }
 
-var tracedKeys = map[libcommon.Hash]struct{}{
-	//libcommon.HexToHash("42b18621a78e3da7af1e2ba633cbabe8986f856a8a1342ee35958ff9e6afca40"): {},
-	//libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000"): {},
-}
+var tracedKeys map[libcommon.Hash]struct{}
 
 func traceKey(key libcommon.Hash) bool {
+	if tracedKeys == nil {
+		tracedKeys = map[libcommon.Hash]struct{}{}
+		for _, key := range dbg.TraceStateKeys {
+			tracedKeys[libcommon.HexToHash(key)] = struct{}{}
+		}
+	}
 	_, ok := tracedKeys[key]
 	return len(tracedKeys) == 0 || ok
 }
 
-var tracedAccounts = map[libcommon.Address]struct{}{
-	libcommon.HexToAddress("dfc3280009e736b55b2b869001487d96d9adff1b"): {},
-	//libcommon.HexToAddress("9b08288c3be4f62bbf8d1c20ac9c5e6f9467d8b7"): {},
-	//libcommon.HexToAddress("3cad627d8cc7ca1dd31bb7b0411b7cfda15571f2"): {},
-	//libcommon.HexToAddress("47c4002f8554fec15828af5386fc63555393650e"): {},
-	//libcommon.HexToAddress("749e27557966db1a6932e60a5dfbde7615b8c503"): {},
-	//libcommon.HexToAddress("343300b5d84d444b2adc9116fef1bed02be49cf2"): {},
-}
+var tracedAccounts map[libcommon.Address]struct{}
 
 func traceAccount(addr libcommon.Address) bool {
+	if tracedAccounts == nil {
+		tracedAccounts = map[libcommon.Address]struct{}{}
+		for _, account := range dbg.TraceAccounts {
+			tracedAccounts[libcommon.HexToAddress(account)] = struct{}{}
+		}
+	}
 	_, ok := tracedAccounts[addr]
 	return ok
 }
@@ -702,7 +705,7 @@ func (sdb *IntraBlockState) SetState(addr libcommon.Address, key libcommon.Hash,
 		return err
 	}
 	if stateObject.SetState(key, value) {
-		sdb.versionWritten(StateKey(&addr, &key), value)
+		sdb.versionWritten(addr, StatePath, key, value)
 	}
 	return nil
 }
@@ -775,8 +778,8 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) (bool, error) {
 	stateObject.createdContract = false
 	stateObject.data.Balance.Clear()
 
-	sdb.versionWritten(SubpathKey(&addr, SelfDestructPath), stateObject.selfdestructed)
-	sdb.versionWritten(SubpathKey(&addr, BalancePath), uint256.Int{})
+	sdb.versionWritten(addr, SelfDestructPath, libcommon.Hash{}, stateObject.selfdestructed)
+	sdb.versionWritten(addr, BalancePath, libcommon.Hash{}, uint256.Int{})
 
 	return true, nil
 }
@@ -937,7 +940,7 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 	}
 	newobj.newlyCreated = true
 	sdb.setStateObject(addr, newobj)
-	sdb.versionWritten(AddressKey(&addr), newobj.deepCopy(nil))
+	sdb.versionWritten(addr, AddressPath, libcommon.Hash{}, newobj.deepCopy(nil))
 	return newobj
 }
 
@@ -985,8 +988,8 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 	}
 
 	account := newObj.data
-	sdb.versionWritten(AddressKey(&addr), &account)
-	sdb.versionWritten(SubpathKey(&addr, BalancePath), newObj.Balance())
+	sdb.versionWritten(addr, AddressPath, libcommon.Hash{}, &account)
+	sdb.versionWritten(addr, BalancePath, libcommon.Hash{}, newObj.Balance())
 	return nil
 }
 
@@ -1381,6 +1384,8 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 		k := AddressKey(&addr)
 
 		s.versionedReads.Set(&VersionedRead{
+			Address: addr,
+			Key:     AccountKey{Path: AddressPath},
 			Path:    k,
 			Source:  StorageRead,
 			Version: s.Version(),
@@ -1389,14 +1394,16 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 	}
 }
 
-func (s *IntraBlockState) versionWritten(k VersionKey, val any) {
+func (s *IntraBlockState) versionWritten(addr libcommon.Address, path AccountPath, key libcommon.Hash, val any) {
 	if s.versionMap != nil {
 		if s.versionedWrites == nil {
 			s.versionedWrites = WriteSet{}
 		}
 
 		s.versionedWrites.Set(&VersionedWrite{
-			Path:    k,
+			Address: addr,
+			Key:     AccountKey{path, key},
+			Path:    VersionKey{&addr, &key, path},
 			Version: s.Version(),
 			Val:     val,
 		})
