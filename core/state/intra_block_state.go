@@ -1391,6 +1391,7 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 	}
 }
 
+
 func (s *IntraBlockState) versionWritten(k VersionKey, val any) {
 	if s.versionMap != nil {
 		if s.versionedWrites == nil {

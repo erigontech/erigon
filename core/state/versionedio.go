@@ -23,6 +23,9 @@ const (
 	StorageRead = 1
 )
 
+type readSet map[libcommon.Address]map[AccountKey]*VersionedRead
+type writeSet map[libcommon.Address]map[AccountKey]*VersionedWrite
+
 type VersionedRead struct {
 	Path    VersionKey
 	Source  ReadSource
