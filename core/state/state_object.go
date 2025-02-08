@@ -156,12 +156,8 @@ func (so *stateObject) touch() {
 	}
 }
 
-var checkHash = libcommon.HexToHash("c004799b511ddd5df3c27a0ad9657f58c998bc031c427527e7c81edc7a8a20ca")
-
 // GetState returns a value from account storage.
 func (so *stateObject) GetState(key libcommon.Hash, out *uint256.Int) bool {
-	check := (key == checkHash)
-
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
 	if so.fakeStorage != nil {
 		*out = so.fakeStorage[key]
@@ -169,9 +165,6 @@ func (so *stateObject) GetState(key libcommon.Hash, out *uint256.Int) bool {
 	}
 	value, dirty := so.dirtyStorage[key]
 	if dirty {
-		if check {
-			fmt.Printf("Get dirty %p: %x: %x\n", so, key, &value)
-		}
 		*out = value
 		return false
 	}
@@ -269,9 +262,6 @@ func (so *stateObject) SetStorage(storage Storage) {
 }
 
 func (so *stateObject) setState(key libcommon.Hash, value uint256.Int) {
-	if key == checkHash {
-		fmt.Printf("Set dirty %p: %x: %x\n", so, key, &value)
-	}
 	so.dirtyStorage[key] = value
 }
 

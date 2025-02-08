@@ -653,8 +653,8 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 }
 
 var tracedKeys = map[libcommon.Hash]struct{}{
-	libcommon.HexToHash("42b18621a78e3da7af1e2ba633cbabe8986f856a8a1342ee35958ff9e6afca40"): {},
-	libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000"): {},
+	//libcommon.HexToHash("42b18621a78e3da7af1e2ba633cbabe8986f856a8a1342ee35958ff9e6afca40"): {},
+	//libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000"): {},
 }
 
 func traceKey(key libcommon.Hash) bool {
@@ -663,8 +663,8 @@ func traceKey(key libcommon.Hash) bool {
 }
 
 var tracedAccounts = map[libcommon.Address]struct{}{
-	libcommon.HexToAddress("a3e955997667574d4671739e071247d42806ce72"): {},
-	libcommon.HexToAddress("9b08288c3be4f62bbf8d1c20ac9c5e6f9467d8b7"): {},
+	libcommon.HexToAddress("dfc3280009e736b55b2b869001487d96d9adff1b"): {},
+	//libcommon.HexToAddress("9b08288c3be4f62bbf8d1c20ac9c5e6f9467d8b7"): {},
 	//libcommon.HexToAddress("3cad627d8cc7ca1dd31bb7b0411b7cfda15571f2"): {},
 	//libcommon.HexToAddress("47c4002f8554fec15828af5386fc63555393650e"): {},
 	//libcommon.HexToAddress("749e27557966db1a6932e60a5dfbde7615b8c503"): {},
