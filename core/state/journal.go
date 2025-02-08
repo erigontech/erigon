@@ -298,8 +298,9 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 			s.versionedWrites.Delete(VersionedWrite{Path: key})
 		} else {
 			key := SubpathKey(ch.account, NoncePath)
-			if wv, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
-				wv.Val = ch.prev
+			if v, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+				v.Val = ch.prev
+				s.versionedWrites.Set(v)
 			}
 		}
 	}
@@ -325,12 +326,14 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 			s.versionedWrites.Delete(VersionedWrite{Path: key})
 		} else {
 			key := SubpathKey(ch.account, CodePath)
-			if wv, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
-				wv.Val = ch.prevcode
+			if v, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+				v.Val = ch.prevcode
+				s.versionedWrites.Set(v)
 			}
 			key = SubpathKey(ch.account, CodeHashPath)
-			if wv, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
-				wv.Val = ch.prevhash
+			if v, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+				v.Val = ch.prevhash
+				s.versionedWrites.Set(v)
 			}
 		}
 	}
@@ -347,7 +350,7 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 		return err
 	}
 	if ch.key == checkHash {
-		fmt.Printf("revert: %x %x: prev: %d\n", *ch.account, ch.key, &ch.prevalue)
+		fmt.Printf("revert: %x %x: prev: %x\n", *ch.account, ch.key, &ch.prevalue)
 	}
 
 	if s.versionMap != nil {
@@ -359,11 +362,12 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 			s.versionedWrites.Delete(VersionedWrite{Path: key})
 		} else {
 			key := StateKey(ch.account, &ch.key)
-			if wv, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+			if v, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
 				if ch.key == checkHash {
 					fmt.Printf("revert: %x %x: change wrt\n", *ch.account, ch.key)
 				}
-				wv.Val = ch.prevalue
+				v.Val = ch.prevalue
+				s.versionedWrites.Set(v)
 			}
 		}
 	}
