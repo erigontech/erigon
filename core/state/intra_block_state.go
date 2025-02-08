@@ -26,7 +26,6 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -98,7 +97,7 @@ type IntraBlockState struct {
 	// are maintaned across transactions until they are reset
 	// at the block level
 	versionMap      *VersionMap
-	versionedWrites *btree.BTreeG[VersionedWrite]
+	versionedWrites WriteSet
 	versionedReads  ReadSet
 	version         int
 	dep             int
@@ -1034,7 +1033,7 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 		var revertedWrites []VersionKey
 
 		if sdb.versionedWrites != nil {
-			sdb.versionedWrites.Scan(func(v VersionedWrite) bool {
+			sdb.versionedWrites.Scan(func(v *VersionedWrite) bool {
 				if _, isDirty := sdb.journal.dirties[v.Path.GetAddress()]; !isDirty {
 					revertedWrites = append(revertedWrites, v.Path)
 				}
@@ -1044,7 +1043,7 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 
 		for _, key := range revertedWrites {
 			sdb.versionMap.Delete(key, sdb.txIndex, false)
-			sdb.versionedWrites.Delete(VersionedWrite{Path: key})
+			sdb.versionedWrites.Delete(key.GetAddress(), AccountKey{key.subpath, key.key})
 		}
 	}
 
@@ -1193,10 +1192,9 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		if traceAccount(addr) {
-			key := SubpathKey(&addr, BalancePath)
 			var updated *uint256.Int
 			if sdb.versionedWrites != nil {
-				if w, ok := sdb.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+				if w, ok := sdb.versionedWrites[addr][AccountKey{Path: BalancePath}]; ok {
 					val := w.Val.(uint256.Int)
 					updated = &val
 				}
@@ -1215,7 +1213,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	var revertedWrites []VersionKey
 
 	if sdb.versionedWrites != nil {
-		sdb.versionedWrites.Scan(func(v VersionedWrite) bool {
+		sdb.versionedWrites.Scan(func(v *VersionedWrite) bool {
 			if _, isDirty := sdb.stateObjectsDirty[v.Path.GetAddress()]; !isDirty {
 				revertedWrites = append(revertedWrites, v.Path)
 			}
@@ -1225,7 +1223,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 
 	for _, key := range revertedWrites {
 		sdb.versionMap.Delete(key, sdb.txIndex, false)
-		sdb.versionedWrites.Delete(VersionedWrite{Path: key})
+		sdb.versionedWrites.Delete(key.GetAddress(), AccountKey{Path: key.subpath, Key: key.key})
 	}
 
 	// Invalidate journal because reverting across transactions is not allowed.
@@ -1394,10 +1392,10 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 func (s *IntraBlockState) versionWritten(k VersionKey, val any) {
 	if s.versionMap != nil {
 		if s.versionedWrites == nil {
-			s.versionedWrites = btree.NewBTreeGOptions(VersionedWriteLess, btree.Options{NoLocks: true})
+			s.versionedWrites = WriteSet{}
 		}
 
-		s.versionedWrites.Set(VersionedWrite{
+		s.versionedWrites.Set(&VersionedWrite{
 			Path:    k,
 			Version: s.Version(),
 			Val:     val,
@@ -1405,19 +1403,19 @@ func (s *IntraBlockState) versionWritten(k VersionKey, val any) {
 	}
 }
 
-func (sdb *IntraBlockState) versionedWrite(k VersionKey) (VersionedWrite, bool) {
+func (sdb *IntraBlockState) versionedWrite(k VersionKey) (*VersionedWrite, bool) {
 	if sdb.versionMap == nil || sdb.versionedWrites == nil {
-		return VersionedWrite{}, false
+		return nil, false
 	}
 
-	v, ok := sdb.versionedWrites.Get(VersionedWrite{Path: k})
+	v, ok := sdb.versionedWrites[k.GetAddress()][AccountKey{Path: k.subpath, Key: k.key}]
 
 	if !ok {
-		return VersionedWrite{}, ok
+		return nil, ok
 	}
 
 	if _, isDirty := sdb.journal.dirties[k.GetAddress()]; !isDirty {
-		return VersionedWrite{}, false
+		return nil, false
 	}
 
 	return v, ok
@@ -1457,7 +1455,7 @@ func (ibs *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 	if ibs.versionedWrites != nil {
 		writes = make(VersionedWrites, 0, ibs.versionedWrites.Len())
 
-		ibs.versionedWrites.Scan(func(v VersionedWrite) bool {
+		ibs.versionedWrites.Scan(func(v *VersionedWrite) bool {
 			if checkDirty {
 				if _, isDirty := ibs.journal.dirties[v.Path.GetAddress()]; isDirty {
 					writes = append(writes, v)
@@ -1484,7 +1482,7 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 
 		if val != nil {
 			if path.IsState() {
-				stateKey := path.GetStateKey()
+				stateKey := *path.GetStateKey()
 				state := val.(uint256.Int)
 				s.SetState(addr, stateKey, state)
 			} else if path.IsAddress() {

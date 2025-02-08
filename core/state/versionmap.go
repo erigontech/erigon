@@ -119,11 +119,8 @@ func (k VersionKey) GetAddress() common.Address {
 	return *k.addr
 }
 
-func (k VersionKey) GetStateKey() common.Hash {
-	if k.key == nil {
-		return common.Hash{}
-	}
-	return *k.key
+func (k VersionKey) GetStateKey() *common.Hash {
+	return k.key
 }
 
 func (k VersionKey) GetSubpath() AccountPath {

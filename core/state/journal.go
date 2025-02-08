@@ -204,17 +204,13 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 	}
 	if s.versionMap != nil {
 		if obj.original.Balance == ch.prevbalance {
-			key := SubpathKey(ch.account, BalancePath)
-			s.versionedWrites.Delete(VersionedWrite{Path: key})
+			s.versionedWrites.Delete(*ch.account, AccountKey{Path: BalancePath})
 		} else {
-			key := SubpathKey(ch.account, BalancePath)
-			if v, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: BalancePath}]; ok {
 				v.Val = ch.prev
-				s.versionedWrites.Set(v)
 			}
 		}
-		key := SubpathKey(ch.account, SelfDestructPath)
-		s.versionedWrites.Delete(VersionedWrite{Path: key})
+		s.versionedWrites.Delete(*ch.account, AccountKey{Path: SelfDestructPath})
 	}
 
 	return nil
@@ -245,13 +241,10 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 	obj.setBalance(&ch.prev)
 	if s.versionMap != nil {
 		if obj.original.Balance == ch.prev {
-			key := SubpathKey(ch.account, BalancePath)
-			s.versionedWrites.Delete(VersionedWrite{Path: key})
+			s.versionedWrites.Delete(*ch.account, AccountKey{Path: BalancePath})
 		} else {
-			key := SubpathKey(ch.account, BalancePath)
-			if v, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: BalancePath}]; ok {
 				v.Val = ch.prev
-				s.versionedWrites.Set(v)
 			}
 		}
 	}
@@ -294,13 +287,10 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 	obj.setNonce(ch.prev)
 	if s.versionMap != nil {
 		if obj.original.Nonce == ch.prev {
-			key := SubpathKey(ch.account, NoncePath)
-			s.versionedWrites.Delete(VersionedWrite{Path: key})
+			s.versionedWrites.Delete(*ch.account, AccountKey{Path: NoncePath})
 		} else {
-			key := SubpathKey(ch.account, NoncePath)
-			if v, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: NoncePath}]; ok {
 				v.Val = ch.prev
-				s.versionedWrites.Set(v)
 			}
 		}
 	}
@@ -320,20 +310,14 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 	obj.setCode(ch.prevhash, ch.prevcode)
 	if s.versionMap != nil {
 		if obj.original.CodeHash == ch.prevhash {
-			key := SubpathKey(ch.account, CodePath)
-			s.versionedWrites.Delete(VersionedWrite{Path: key})
-			key = SubpathKey(ch.account, CodeHashPath)
-			s.versionedWrites.Delete(VersionedWrite{Path: key})
+			s.versionedWrites.Delete(*ch.account, AccountKey{Path: CodePath})
+			s.versionedWrites.Delete(*ch.account, AccountKey{Path: CodeHashPath})
 		} else {
-			key := SubpathKey(ch.account, CodePath)
-			if v, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: CodePath}]; ok {
 				v.Val = ch.prevcode
-				s.versionedWrites.Set(v)
 			}
-			key = SubpathKey(ch.account, CodeHashPath)
-			if v, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: CodeHashPath}]; ok {
 				v.Val = ch.prevhash
-				s.versionedWrites.Set(v)
 			}
 		}
 	}
@@ -352,11 +336,9 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 
 	if s.versionMap != nil {
 		if ch.wasCommited {
-			key := StateKey(ch.account, &ch.key)
-			s.versionedWrites.Delete(VersionedWrite{Path: key})
+			s.versionedWrites.Delete(*ch.account, AccountKey{Path: StatePath, Key: &ch.key})
 		} else {
-			key := StateKey(ch.account, &ch.key)
-			if v, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: &ch.key}]; ok {
 				v.Val = ch.prevalue
 				s.versionedWrites.Set(v)
 			}

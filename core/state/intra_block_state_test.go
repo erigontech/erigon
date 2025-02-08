@@ -782,7 +782,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance2, b)
 
 	// Tx1 delete
-	states[1].versionedWrites.Scan(func(v VersionedWrite) bool {
+	states[1].versionedWrites.Scan(func(v *VersionedWrite) bool {
 		mvhm.Delete(v.Path, 1, true)
 		return true
 	})
@@ -803,7 +803,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx0 delete
-	states[0].versionedWrites.Scan(func(v VersionedWrite) bool {
+	states[0].versionedWrites.Scan(func(v *VersionedWrite) bool {
 		mvhm.Delete(v.Path, 1, true)
 		return true
 	})
@@ -906,7 +906,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx2 delete
-	states[2].versionedWrites.Scan(func(v VersionedWrite) bool {
+	states[2].versionedWrites.Scan(func(v *VersionedWrite) bool {
 		mvhm.Delete(v.Path, 1, true)
 		return true
 	})
@@ -936,7 +936,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, uint256.NewInt(0), b)
 
 	// Tx1 delete
-	states[1].versionedWrites.Scan(func(v VersionedWrite) bool {
+	states[1].versionedWrites.Scan(func(v *VersionedWrite) bool {
 		mvhm.Delete(v.Path, 1, true)
 		return true
 	})

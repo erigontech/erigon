@@ -52,7 +52,7 @@ type testExecTask struct {
 	*exec.TxTask
 	ops          []Op
 	readMap      state.ReadSet
-	writeMap     *btree.BTreeG[state.VersionedWrite]
+	writeMap     state.WriteSet
 	sender       common.Address
 	nonce        int
 	dependencies []int
@@ -79,7 +79,7 @@ func NewTestExecTask(txIdx int, ops []Op, sender common.Address, nonce int) *tes
 		},
 		ops:          ops,
 		readMap:      state.ReadSet{},
-		writeMap:     btree.NewBTreeGOptions(state.VersionedWriteLess, btree.Options{NoLocks: true}),
+		writeMap:     state.WriteSet{},
 		sender:       sender,
 		nonce:        nonce,
 		dependencies: []int{},
@@ -111,7 +111,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	version := t.Version()
 
 	t.readMap = state.ReadSet{}
-	t.writeMap = btree.NewBTreeGOptions(state.VersionedWriteLess, btree.Options{NoLocks: true})
+	t.writeMap = state.WriteSet{}
 
 	dep := -1
 
@@ -120,7 +120,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 		switch op.opType {
 		case readType:
-			if _, ok := t.writeMap.Get(state.VersionedWrite{Path: k}); ok {
+			if _, ok := t.writeMap[k.GetAddress()][state.AccountKey{Path: k.GetSubpath(), Key: k.GetStateKey()}]; ok {
 				sleep(op.duration)
 				continue
 			}
@@ -153,7 +153,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			t.readMap.Set(&state.VersionedRead{Path: k, Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
-			t.writeMap.Set(state.VersionedWrite{Path: k, Version: version, Val: op.val})
+			t.writeMap.Set(&state.VersionedWrite{Path: k, Version: version, Val: op.val})
 		case otherType:
 			sleep(op.duration)
 		default:
@@ -171,7 +171,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) state.VersionedWrites {
 	writes := make(state.VersionedWrites, 0, t.writeMap.Len())
 
-	t.writeMap.Scan(func(v state.VersionedWrite) bool {
+	t.writeMap.Scan(func(v *state.VersionedWrite) bool {
 		writes = append(writes, v)
 		return true
 	})

@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/accounts"
@@ -26,20 +25,20 @@ const (
 type ReadSet map[libcommon.Address]map[AccountKey]*VersionedRead
 
 func (rs ReadSet) Set(v *VersionedRead) {
-	parts, ok := rs[*v.Path.addr]
+	reads, ok := rs[*v.Path.addr]
 
 	if !ok {
 		rs[*v.Path.addr] = map[AccountKey]*VersionedRead{
 			{v.Path.subpath, v.Path.key}: v,
 		}
 	} else {
-		parts[AccountKey{v.Path.subpath, v.Path.key}] = v
+		reads[AccountKey{v.Path.subpath, v.Path.key}] = v
 	}
 }
 
-func (rs ReadSet) Scan(yield func(input *VersionedRead) bool) {
-	for _, paths := range rs {
-		for _, v := range paths {
+func (s ReadSet) Scan(yield func(input *VersionedRead) bool) {
+	for _, reads := range s {
+		for _, v := range reads {
 			if !yield(v) {
 				return
 			}
@@ -47,33 +46,58 @@ func (rs ReadSet) Scan(yield func(input *VersionedRead) bool) {
 	}
 }
 
-func (rs ReadSet) Len() int {
+func (s ReadSet) Len() int {
 	var l int
-	for _, p := range rs {
+	for _, p := range s {
 		l += len(p)
 	}
 	return l
 }
 
-type writeSet map[libcommon.Address]map[AccountKey]*VersionedWrite1
+type WriteSet map[libcommon.Address]map[AccountKey]*VersionedWrite
 
-type VersionedRead1 struct {
-	Address libcommon.Address
-	Key     AccountKey
-	Source  ReadSource
-	Version Version
-	Val     interface{}
+func (s WriteSet) Set(v *VersionedWrite) {
+	reads, ok := s[*v.Path.addr]
+
+	if !ok {
+		s[*v.Path.addr] = map[AccountKey]*VersionedWrite{
+			{v.Path.subpath, v.Path.key}: v,
+		}
+	} else {
+		reads[AccountKey{v.Path.subpath, v.Path.key}] = v
+	}
 }
 
-type VersionedWrite1 struct {
-	Address libcommon.Address
-	Key     AccountKey
-	Version Version
-	Val     interface{}
-	Reason  tracing.BalanceChangeReason
+func (s WriteSet) Delete(addr libcommon.Address, key AccountKey) {
+	if writes, ok := s[addr]; ok {
+		delete(writes, key)
+		if len(writes) == 0 {
+			delete(s, addr)
+		}
+	}
+}
+
+func (s WriteSet) Len() int {
+	var l int
+	for _, p := range s {
+		l += len(p)
+	}
+	return l
+}
+
+func (s WriteSet) Scan(yield func(input *VersionedWrite) bool) {
+	for _, writes := range s {
+		for _, v := range writes {
+			if !yield(v) {
+				return
+			}
+		}
+	}
 }
 
 type VersionedRead struct {
+	Address libcommon.Address
+	Key     AccountKey
 	Path    VersionKey
 	Source  ReadSource
 	Version Version
@@ -81,6 +105,8 @@ type VersionedRead struct {
 }
 
 type VersionedWrite struct {
+	Address libcommon.Address
+	Key     AccountKey
 	Path    VersionKey
 	Version Version
 	Val     interface{}
@@ -112,7 +138,7 @@ func (vr *versionedStateReader) SetStateReader(stateReader StateReader) {
 	vr.stateReader = stateReader
 }
 
-func (vr *versionedStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (vr *versionedStateReader) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
 		if account, ok := r.Val.(accounts.Account); ok {
 			updated := vr.applyVersionedUpdates(address, account)
@@ -148,21 +174,21 @@ func versionedUpdate[T any](versionMap *VersionMap, k VersionKey, txIndex int) (
 // may lead to updated from pervious transactions being missed where we only update a subset of the fiels as these won't
 // be recored as reads and hence the varification process will miss them.  We don't want to creat a fail but
 // we do  want to capture the updates
-func (vr versionedStateReader) applyVersionedUpdates(address common.Address, account accounts.Account) accounts.Account {
+func (vr versionedStateReader) applyVersionedUpdates(address libcommon.Address, account accounts.Account) accounts.Account {
 	if update, ok := versionedUpdate[*uint256.Int](vr.versionMap, SubpathKey(&address, BalancePath), vr.txIndex); ok {
 		account.Balance = *update
 	}
 	if update, ok := versionedUpdate[uint64](vr.versionMap, SubpathKey(&address, NoncePath), vr.txIndex); ok {
 		account.Nonce = update
 	}
-	if update, ok := versionedUpdate[common.Hash](vr.versionMap, SubpathKey(&address, CodeHashPath), vr.txIndex); ok {
+	if update, ok := versionedUpdate[libcommon.Hash](vr.versionMap, SubpathKey(&address, CodeHashPath), vr.txIndex); ok {
 		account.CodeHash = update
 	}
 
 	return account
 }
 
-func (vr versionedStateReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+func (vr versionedStateReader) ReadAccountDataForDebug(address libcommon.Address) (*accounts.Account, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
 		if account, ok := r.Val.(accounts.Account); ok {
 			updated := vr.applyVersionedUpdates(address, account)
@@ -184,7 +210,7 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address common.Address) (
 	return nil, nil
 }
 
-func (vr versionedStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (vr versionedStateReader) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: StatePath, Key: key}]; ok && r.Val != nil {
 		val := r.Val.(uint256.Int)
 		return (&val).Bytes(), nil
@@ -197,7 +223,7 @@ func (vr versionedStateReader) ReadAccountStorage(address common.Address, incarn
 	return nil, nil
 }
 
-func (vr versionedStateReader) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
+func (vr versionedStateReader) ReadAccountCode(address libcommon.Address, incarnation uint64) ([]byte, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
 		if code, ok := r.Val.([]byte); ok {
 			return code, nil
@@ -211,7 +237,7 @@ func (vr versionedStateReader) ReadAccountCode(address common.Address, incarnati
 	return nil, nil
 }
 
-func (vr versionedStateReader) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+func (vr versionedStateReader) ReadAccountCodeSize(address libcommon.Address, incarnation uint64) (int, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
 		if code, ok := r.Val.([]byte); ok {
 			return len(code), nil
@@ -225,7 +251,7 @@ func (vr versionedStateReader) ReadAccountCodeSize(address common.Address, incar
 	return 0, nil
 }
 
-func (vr versionedStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (vr versionedStateReader) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
 		return r.Val.(accounts.Account).Incarnation, nil
 	}
@@ -237,10 +263,10 @@ func (vr versionedStateReader) ReadAccountIncarnation(address common.Address) (u
 	return 0, nil
 }
 
-type VersionedWrites []VersionedWrite
+type VersionedWrites []*VersionedWrite
 
 // hasNewWrite: returns true if the current set has a new write compared to the input
-func (writes VersionedWrites) HasNewWrite(cmpSet []VersionedWrite) bool {
+func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
 	if len(writes) == 0 {
 		return false
 	} else if len(cmpSet) == 0 || len(writes) > len(cmpSet) {
@@ -292,10 +318,10 @@ func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObje
 			if path.IsState() {
 				stateKey := path.GetStateKey()
 				var state uint256.Int
-				so.GetState(stateKey, &state)
+				so.GetState(*stateKey, &state)
 				if len(prevs) > 0 {
 					var prevState uint256.Int
-					prevs[len(prevs)-1].GetState(stateKey, &state)
+					prevs[len(prevs)-1].GetState(*stateKey, &state)
 					if prevState.Eq(&state) {
 						continue
 					}
