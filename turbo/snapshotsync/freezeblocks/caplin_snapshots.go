@@ -171,113 +171,66 @@ Loop:
 		if !ok {
 			continue
 		}
-		var processed bool = true
-		switch f.Type.Enum() {
-		case snaptype.CaplinEnums.BeaconBlocks:
-			var sn *snapshotsync.DirtySegment
-			var exists bool
-			s.dirty[snaptype.BeaconBlocks.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-				for _, sn2 := range segments {
-					if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-						continue
-					}
-					if fName == sn2.FileName() {
-						sn = sn2
-						exists = true
-						break
-					}
+
+		sType := f.Type
+		updateProgress := sType.Enum() == snaptype.CaplinEnums.BeaconBlocks
+
+		var sn *snapshotsync.DirtySegment
+		var exists bool
+		s.dirty[sType.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
+			for _, sn2 := range segments {
+				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
+					continue
 				}
-				return true
-			})
-			if !exists {
-				sn = snapshotsync.NewDirtySegment(
-					snaptype.BeaconBlocks,
-					f.Version,
-					f.From, f.To,
-					true)
+				if fName == sn2.FileName() {
+					sn = sn2
+					exists = true
+					break
+				}
 			}
-			if err := sn.Open(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					if optimistic {
-						continue Loop
-					} else {
-						break Loop
-					}
-				}
+			return true
+		})
+		if !exists {
+			sn = snapshotsync.NewDirtySegment(
+				sType,
+				f.Version,
+				f.From, f.To,
+				true)
+		}
+		if err := sn.Open(s.dir); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
 				if optimistic {
-					s.logger.Warn("[snapshots] open segment", "err", err)
 					continue Loop
 				} else {
-					return err
+					break Loop
 				}
 			}
-
-			if !exists {
-				// it's possible to iterate over .seg file even if you don't have index
-				// then make segment available even if index open may fail
-				s.dirty[snaptype.BeaconBlocks.Enum()].Set(sn)
-			}
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
-				return err
-			}
-			// Only bob sidecars count for progression
-			if processed {
-				if f.To > 0 {
-					segmentsMax = f.To - 1
-				} else {
-					segmentsMax = 0
-				}
-				segmentsMaxSet = true
-			}
-		case snaptype.CaplinEnums.BlobSidecars:
-			var sn *snapshotsync.DirtySegment
-			var exists bool
-			s.dirty[snaptype.BlobSidecars.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-				for _, sn2 := range segments {
-					if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-						continue
-					}
-					if fName == sn2.FileName() {
-						sn = sn2
-						exists = true
-						break
-					}
-				}
-				return true
-			})
-			if !exists {
-				sn = snapshotsync.NewDirtySegment(
-					snaptype.BlobSidecars,
-					f.Version,
-					f.From, f.To,
-					true)
-			}
-			if err := sn.Open(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					if optimistic {
-						continue Loop
-					} else {
-						break Loop
-					}
-				}
-				if optimistic {
-					s.logger.Warn("[snapshots] open segment", "err", err)
-					continue Loop
-				} else {
-					return err
-				}
-			}
-
-			if !exists {
-				// it's possible to iterate over .seg file even if you don't have index
-				// then make segment available even if index open may fail
-				s.dirty[snaptype.BlobSidecars.Enum()].Set(sn)
-			}
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+			if optimistic {
+				s.logger.Warn("[snapshots] open segment", "err", err)
+				continue Loop
+			} else {
 				return err
 			}
 		}
 
+		if !exists {
+			// it's possible to iterate over .seg file even if you don't have index
+			// then make segment available even if index open may fail
+			s.dirty[sType.Enum()].Set(sn)
+		}
+
+		if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+			return err
+		}
+		// Only beacon blocks count for progression
+		if updateProgress {
+			if f.To > 0 {
+				segmentsMax = f.To - 1
+			} else {
+				segmentsMax = 0
+			}
+			segmentsMaxSet = true
+		}
 	}
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
