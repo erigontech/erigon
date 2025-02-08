@@ -29,6 +29,7 @@ import (
 	"errors"
 	"math/rand"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 )
@@ -50,37 +51,35 @@ func NewID() ID {
 	return globalGen()
 }
 
-// randomIDGenerator returns a function that generates cryptographically secure random IDs.
+// randomIDGenerator returns a function generates a random IDs.
 func randomIDGenerator() func() ID {
-    return func() ID {
-        id := make([]byte, 16)
-        if _, err := crand.Read(id); err != nil {
-            // Fallback to less secure but still functional method
-            binary.BigEndian.PutUint64(id[:8], uint64(time.Now().UnixNano()))
-            binary.BigEndian.PutUint64(id[8:], rand.Uint64())
-        }
-        return encodeID(id)
-    }
+	var buf = make([]byte, 8)
+	var seed int64
+	if _, err := crand.Read(buf); err == nil {
+		seed = int64(binary.BigEndian.Uint64(buf))
+	} else {
+		seed = int64(time.Now().Nanosecond())
+	}
+	var (
+		mu  sync.Mutex
+		rng = rand.New(rand.NewSource(seed)) // nolint: gosec
+	)
+	return func() ID {
+		mu.Lock()
+		defer mu.Unlock()
+		id := make([]byte, 16)
+		rng.Read(id)
+		return encodeID(id)
+	}
 }
 
-// encodeID converts a byte slice to a subscription ID.
-// The input must be exactly 16 bytes long.
 func encodeID(b []byte) ID {
-    if len(b) != 16 {
-        panic("invalid ID length, expected 16 bytes")
-    }
-    
-    // More efficient string building
-    hexStr := hex.EncodeToString(b)
-    // Find first non-zero character
-    start := 0
-    for start < len(hexStr) && hexStr[start] == '0' {
-        start++
-    }
-    if start == len(hexStr) {
-        return "0x0"
-    }
-    return ID("0x" + hexStr[start:])
+	id := hex.EncodeToString(b)
+	id = strings.TrimLeft(id, "0")
+	if id == "" {
+		id = "0" // ID's are RPC quantities, no leading zero's and 0 is 0x0.
+	}
+	return ID("0x" + id)
 }
 
 type notifierKey struct{}
@@ -176,8 +175,14 @@ func (n *Notifier) activate() error {
 }
 
 func (n *Notifier) send(sub *Subscription, data json.RawMessage) error {
-	params, _ := json.Marshal(&subscriptionResult{ID: string(sub.ID), Result: data})
-	ctx := context.Background()
+	params, err := json.Marshal(&subscriptionResult{ID: string(sub.ID), Result: data})
+	if err != nil {
+		return err
+	}
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	return n.h.conn.WriteJSON(ctx, &jsonrpcMessage{
 		Version: vsn,
 		Method:  n.namespace + notificationMethodSuffix,
@@ -249,4 +254,85 @@ func (sub *ClientSubscription) Err() <-chan error {
 func (sub *ClientSubscription) Unsubscribe() {
 	sub.quitWithError(true, nil)
 	sub.errOnce.Do(func() { close(sub.err) })
+}
+
+func (sub *ClientSubscription) quitWithError(unsubscribeServer bool, err error) {
+	sub.quitOnce.Do(func() {
+		// The dispatch loop won't be able to execute the unsubscribe call
+		// if it is blocked on deliver. Close sub.quit first because it
+		// unblocks deliver.
+		close(sub.quit)
+		if unsubscribeServer {
+			sub.requestUnsubscribe()
+		}
+		if err != nil {
+			if errors.Is(err, ErrClientQuit) {
+				err = nil // Adhere to subscription semantics.
+			}
+			sub.err <- err
+		}
+	})
+}
+
+func (sub *ClientSubscription) deliver(result json.RawMessage) (ok bool) {
+	select {
+	case sub.in <- result:
+		return true
+	case <-sub.quit:
+		return false
+	}
+}
+
+func (sub *ClientSubscription) start() {
+	sub.quitWithError(sub.forward())
+}
+
+func (sub *ClientSubscription) forward() (unsubscribeServer bool, err error) {
+	cases := []reflect.SelectCase{
+		{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(sub.quit)},
+		{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(sub.in)},
+		{Dir: reflect.SelectSend, Chan: sub.channel},
+	}
+	buffer := list.New()
+	defer buffer.Init()
+	for {
+		var chosen int
+		var recv reflect.Value
+		if buffer.Len() == 0 {
+			// Idle, omit send case.
+			chosen, recv, _ = reflect.Select(cases[:2])
+		} else {
+			// Non-empty buffer, send the first queued item.
+			cases[2].Send = reflect.ValueOf(buffer.Front().Value)
+			chosen, recv, _ = reflect.Select(cases)
+		}
+
+		switch chosen {
+		case 0: // <-sub.quit
+			return false, nil
+		case 1: // <-sub.in
+			val, err := sub.unmarshal(recv.Interface().(json.RawMessage))
+			if err != nil {
+				return true, err
+			}
+			if buffer.Len() == maxClientSubscriptionBuffer {
+				return true, ErrSubscriptionQueueOverflow
+			}
+			buffer.PushBack(val)
+		case 2: // sub.channel<-
+			cases[2].Send = reflect.Value{} // Don't hold onto the value.
+			buffer.Remove(buffer.Front())
+		}
+	}
+}
+
+func (sub *ClientSubscription) unmarshal(result json.RawMessage) (interface{}, error) {
+	val := reflect.New(sub.etype)
+	err := json.Unmarshal(result, val.Interface())
+	return val.Elem().Interface(), err
+}
+
+func (sub *ClientSubscription) requestUnsubscribe() error {
+	var result interface{}
+	return sub.client.Call(&result, sub.namespace+unsubscribeMethodSuffix, sub.subid)
 }
