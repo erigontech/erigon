@@ -41,6 +41,9 @@ func TestDecryptionKeysValidator(t *testing.T) {
 			msg, err := shutterproto.UnmarshallDecryptionKeys(tc.msg.Data)
 			require.NoError(t, err)
 
+			//
+			// TODO move this inside the test case and remove static consts from testhelpers pkg
+			//
 			config := shutter.Config{
 				InstanceId:           testhelpers.TestInstanceId,
 				MaxNumKeysPerMessage: testhelpers.TestMaxNumKeysPerMessage,
@@ -65,6 +68,9 @@ func TestDecryptionKeysP2pValidatorEx(t *testing.T) {
 			logHandler := testhelpers.NewCollectingLogHandler(logger.GetHandler())
 			logger.SetHandler(logHandler)
 
+			//
+			// TODO move this inside the test case and remove static consts from testhelpers pkg
+			//
 			config := shutter.Config{
 				InstanceId:           testhelpers.TestInstanceId,
 				MaxNumKeysPerMessage: testhelpers.TestMaxNumKeysPerMessage,
@@ -97,6 +103,15 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 	ekg := testhelpers.MockEonKeyGeneration()
 	eon := ekg.Eon()
 	slot := uint64(6336)
+
+	//
+	// TODO add test cases for:
+	//        - validateSigners simple errs
+	//        - validateSignatures simple errs
+	//        - "no err" case
+	//        - try to break VerifyEpochSecretKey
+	//        - try to break signatureData.Verify(sig, signer)
+	//
 
 	return []decryptionKeysValidationTestCase{
 		{
