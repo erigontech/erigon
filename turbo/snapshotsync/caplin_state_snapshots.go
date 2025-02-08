@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -307,7 +306,7 @@ Loop:
 				// segType: f.Type, Unsupported
 				version:  f.Version,
 				Range:    Range{f.From, f.To},
-				frozen:   snapcfg.IsFrozen(s.cfg.ChainName, f),
+				frozen:   true,
 				filePath: filePath,
 			}
 		}
