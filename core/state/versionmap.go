@@ -138,8 +138,9 @@ func AddressKey(addr *common.Address) VersionKey {
 
 func StateKey(addr *common.Address, hash *common.Hash) VersionKey {
 	return VersionKey{
-		addr: addr,
-		key:  hash}
+		subpath: StatePath,
+		addr:    addr,
+		key:     hash}
 }
 
 func SubpathKey(addr *common.Address, subpath AccountPath) VersionKey {

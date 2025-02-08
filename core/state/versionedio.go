@@ -32,7 +32,7 @@ func (rs ReadSet) Set(v *VersionedRead) {
 			{v.Path.subpath, v.Path.GetStateKey()}: v,
 		}
 	} else {
-		reads[AccountKey{v.Path.subpath,v.Path.GetStateKey()}] = v
+		reads[AccountKey{v.Path.subpath, v.Path.GetStateKey()}] = v
 	}
 }
 
@@ -378,9 +378,9 @@ func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObje
 	return stateObjects, nil
 }
 
-func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, error) {
+func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path AccountPath, key libcommon.Hash, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, error) {
 	if s.versionMap == nil {
-		so, err := s.getStateObject(k.GetAddress())
+		so, err := s.getStateObject(addr)
 
 		if err != nil || readStorage == nil {
 			return defaultV, err
@@ -390,12 +390,13 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 	}
 
 	if !commited {
-		if vw, ok := s.versionedWrite(k); ok {
+		if vw, ok := s.versionedWrite(addr, path, key); ok {
 			val := vw.Val.(T)
 			return val, nil
 		}
 	}
 
+	k := VersionKey{&addr, &key, path}
 	res := s.versionMap.Read(k, s.txIndex)
 
 	var v T
@@ -410,7 +411,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 	switch res.Status() {
 	case MVReadResultDone:
 		if versionedReads := s.versionedReads; versionedReads != nil {
-			if pr, ok := versionedReads[k.GetAddress()][AccountKey{Path: k.subpath, Key: k.GetStateKey()}]; ok {
+			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 				if pr.Version == vr.Version {
 					return pr.Val.(T), nil
 				}
@@ -441,7 +442,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 
 	case MVReadResultNone:
 		if versionedReads := s.versionedReads; versionedReads != nil {
-			if pr, ok := versionedReads[k.GetAddress()][AccountKey{Path: k.subpath, Key: k.GetStateKey()}]; ok {
+			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 				if pr.Version == vr.Version {
 					return pr.Val.(T), nil
 				}
@@ -453,7 +454,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 		}
 
 		vr.Source = StorageRead
-		so, err := s.getStateObject(k.GetAddress())
+		so, err := s.getStateObject(addr)
 
 		if err != nil {
 			return defaultV, nil
