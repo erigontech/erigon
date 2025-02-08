@@ -1043,7 +1043,7 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 
 		for _, key := range revertedWrites {
 			sdb.versionMap.Delete(key, sdb.txIndex, false)
-			sdb.versionedWrites.Delete(key.GetAddress(), AccountKey{key.subpath, key.key})
+			sdb.versionedWrites.Delete(key.GetAddress(), AccountKey{key.subpath, key.GetStateKey()})
 		}
 	}
 
@@ -1223,7 +1223,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 
 	for _, key := range revertedWrites {
 		sdb.versionMap.Delete(key, sdb.txIndex, false)
-		sdb.versionedWrites.Delete(key.GetAddress(), AccountKey{Path: key.subpath, Key: key.key})
+		sdb.versionedWrites.Delete(key.GetAddress(), AccountKey{Path: key.subpath, Key: key.GetStateKey()})
 	}
 
 	// Invalidate journal because reverting across transactions is not allowed.
@@ -1408,7 +1408,7 @@ func (sdb *IntraBlockState) versionedWrite(k VersionKey) (*VersionedWrite, bool)
 		return nil, false
 	}
 
-	v, ok := sdb.versionedWrites[k.GetAddress()][AccountKey{Path: k.subpath, Key: k.key}]
+	v, ok := sdb.versionedWrites[k.GetAddress()][AccountKey{Path: k.subpath, Key: k.GetStateKey()}]
 
 	if !ok {
 		return nil, ok
@@ -1482,7 +1482,7 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 
 		if val != nil {
 			if path.IsState() {
-				stateKey := *path.GetStateKey()
+				stateKey := path.GetStateKey()
 				state := val.(uint256.Int)
 				s.SetState(addr, stateKey, state)
 			} else if path.IsAddress() {

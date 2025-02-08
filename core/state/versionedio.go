@@ -29,10 +29,10 @@ func (rs ReadSet) Set(v *VersionedRead) {
 
 	if !ok {
 		rs[*v.Path.addr] = map[AccountKey]*VersionedRead{
-			{v.Path.subpath, v.Path.key}: v,
+			{v.Path.subpath, v.Path.GetStateKey()}: v,
 		}
 	} else {
-		reads[AccountKey{v.Path.subpath, v.Path.key}] = v
+		reads[AccountKey{v.Path.subpath,v.Path.GetStateKey()}] = v
 	}
 }
 
@@ -61,10 +61,10 @@ func (s WriteSet) Set(v *VersionedWrite) {
 
 	if !ok {
 		s[*v.Path.addr] = map[AccountKey]*VersionedWrite{
-			{v.Path.subpath, v.Path.key}: v,
+			{v.Path.subpath, v.Path.GetStateKey()}: v,
 		}
 	} else {
-		reads[AccountKey{v.Path.subpath, v.Path.key}] = v
+		reads[AccountKey{v.Path.subpath, v.Path.GetStateKey()}] = v
 	}
 }
 
@@ -211,7 +211,7 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address libcommon.Address
 }
 
 func (vr versionedStateReader) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: StatePath, Key: key}]; ok && r.Val != nil {
+	if r, ok := vr.reads[address][AccountKey{Path: StatePath, Key: *key}]; ok && r.Val != nil {
 		val := r.Val.(uint256.Int)
 		return (&val).Bytes(), nil
 	}
@@ -318,10 +318,10 @@ func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObje
 			if path.IsState() {
 				stateKey := path.GetStateKey()
 				var state uint256.Int
-				so.GetState(*stateKey, &state)
+				so.GetState(stateKey, &state)
 				if len(prevs) > 0 {
 					var prevState uint256.Int
-					prevs[len(prevs)-1].GetState(*stateKey, &state)
+					prevs[len(prevs)-1].GetState(stateKey, &state)
 					if prevState.Eq(&state) {
 						continue
 					}
@@ -410,7 +410,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 	switch res.Status() {
 	case MVReadResultDone:
 		if versionedReads := s.versionedReads; versionedReads != nil {
-			if pr, ok := versionedReads[k.GetAddress()][AccountKey{Path: k.subpath, Key: k.key}]; ok {
+			if pr, ok := versionedReads[k.GetAddress()][AccountKey{Path: k.subpath, Key: k.GetStateKey()}]; ok {
 				if pr.Version == vr.Version {
 					return pr.Val.(T), nil
 				}
@@ -441,7 +441,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 
 	case MVReadResultNone:
 		if versionedReads := s.versionedReads; versionedReads != nil {
-			if pr, ok := versionedReads[k.GetAddress()][AccountKey{Path: k.subpath, Key: k.key}]; ok {
+			if pr, ok := versionedReads[k.GetAddress()][AccountKey{Path: k.subpath, Key: k.GetStateKey()}]; ok {
 				if pr.Version == vr.Version {
 					return pr.Val.(T), nil
 				}
@@ -613,7 +613,7 @@ type TxDep struct {
 
 func HasReadDep(txFrom VersionedWrites, txTo ReadSet) bool {
 	for _, rd := range txFrom {
-		if _, ok := txTo[rd.Path.GetAddress()][AccountKey{Path: rd.Path.subpath, Key: rd.Path.key}]; ok {
+		if _, ok := txTo[rd.Path.GetAddress()][AccountKey{Path: rd.Path.subpath, Key: rd.Path.GetStateKey()}]; ok {
 			return true
 		}
 	}

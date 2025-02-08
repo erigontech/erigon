@@ -119,8 +119,11 @@ func (k VersionKey) GetAddress() common.Address {
 	return *k.addr
 }
 
-func (k VersionKey) GetStateKey() *common.Hash {
-	return k.key
+func (k VersionKey) GetStateKey() common.Hash {
+	if k.key == nil {
+		return common.Hash{}
+	}
+	return *k.key
 }
 
 func (k VersionKey) GetSubpath() AccountPath {
@@ -173,11 +176,11 @@ func VersionKeyLess(a, b *VersionKey) bool {
 
 type AccountKey struct {
 	Path AccountPath
-	Key  *libcommon.Hash
+	Key  libcommon.Hash
 }
 
 func (k AccountKey) String() string {
-	if k.Path == StatePath && k.Key != nil {
+	if k.Path == StatePath {
 		return fmt.Sprintf("%x", k.Key)
 	}
 
@@ -193,7 +196,7 @@ func (vm *VersionMap1) getKeyCells(addr libcommon.Address, path AccountPath, key
 	it, ok := vm.s[addr]
 
 	if ok {
-		cells, ok = it[AccountKey{path, &key}]
+		cells, ok = it[AccountKey{path, key}]
 	}
 
 	if !ok {
@@ -210,15 +213,11 @@ func (vm *VersionMap1) Write(addr libcommon.Address, path AccountPath, key libco
 			rw: sync.RWMutex{},
 			tm: &btree.Map[int, *WriteCell]{},
 		}
-		var pkey *libcommon.Hash
-		if path == StatePath {
-			pkey = &key
-		}
 		if ok {
-			it[AccountKey{path, pkey}] = cells
+			it[AccountKey{path, key}] = cells
 		} else {
 			vm.s[addr] = map[AccountKey]*TxIndexCells{
-				{path, pkey}: cells,
+				{path, key}: cells,
 			}
 		}
 		return
@@ -236,7 +235,7 @@ func (vm *VersionMap1) Write(addr libcommon.Address, path AccountPath, key libco
 
 	if ok {
 		if ci.incarnation > v.Incarnation {
-			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %x %s, %v", addr, AccountKey{path, &key}, v.TxIndex))
+			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %x %s, %v", addr, AccountKey{path, key}, v.TxIndex))
 		}
 
 		ci.flag = flag
@@ -265,7 +264,7 @@ func (vm *VersionMap1) MarkEstimate(addr libcommon.Address, path AccountPath, ke
 	cells.rw.RLock()
 	defer cells.rw.RUnlock()
 	if ci, ok := cells.tm.Get(txIdx); !ok {
-		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x %s, cells keys: %v", txIdx, addr, AccountKey{path, &key}, cells.tm.Keys()))
+		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x %s, cells keys: %v", txIdx, addr, AccountKey{path, key}, cells.tm.Keys()))
 	} else {
 		ci.flag = FlagEstimate
 	}
@@ -279,7 +278,7 @@ func (vm *VersionMap1) MarkComplete(addr libcommon.Address, path AccountPath, ke
 	cells.rw.RLock()
 	defer cells.rw.RUnlock()
 	if ci, ok := cells.tm.Get(txIdx); !ok {
-		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x s, cells keys: %v", txIdx, AccountKey{path, &key}, cells.tm.Keys()))
+		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x s, cells keys: %v", txIdx, AccountKey{path, key}, cells.tm.Keys()))
 	} else {
 		ci.flag = FlagDone
 	}
