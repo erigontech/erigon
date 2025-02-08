@@ -862,9 +862,6 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 
 			if blockResult.complete {
 				//fmt.Println("Block Complete", blockResult.BlockNum)
-				if blockResult.BlockNum == 66921837 {
-					panic(blockResult.BlockNum)
-				}
 
 				if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum]; ok {
 					pe.execCount.Add(int64(blockExecutor.cntExec))

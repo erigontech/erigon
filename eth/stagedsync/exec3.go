@@ -667,7 +667,7 @@ func ExecV3(ctx context.Context,
 					// use history reader instead of state reader to catch up to the tx where we left off
 					HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 					Config:           chainConfig,
-					Trace:            blockNum == 66921837 && txIndex == 7,
+					Trace:            false, //blockNum == 66921837 && txIndex == 7,
 				}
 
 				if cfg.genesis != nil {
