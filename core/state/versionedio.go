@@ -325,7 +325,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 		if vw, ok := s.versionedWrite(k); ok {
 			val := vw.Val.(T)
 			if checkKey {
-				fmt.Printf("WRT %x, %x: %d\n", k.GetAddress(), k.GetStateKey(), val)
+				fmt.Printf("WRT %x, %x: %d\n", k.GetAddress(), k.GetStateKey(), &val)
 			}
 			return val, nil
 		}
@@ -371,7 +371,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 
 		vr.Val = copyV(v)
 		if checkKey {
-			fmt.Printf("RD %x, %x: %d\n", k.GetAddress(), k.GetStateKey(), v)
+			fmt.Printf("RD %x, %x: %d\n", k.GetAddress(), k.GetStateKey(), &v)
 		}
 	case MVReadResultDependency:
 		s.dep = res.DepIdx()
@@ -403,7 +403,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 
 		vr.Val = copyV(v)
 		if checkKey {
-			fmt.Printf("ST %x, %x: %d\n", k.GetAddress(), k.GetStateKey(), v)
+			fmt.Printf("ST %x, %x: %d\n", k.GetAddress(), k.GetStateKey(), &v)
 		}
 
 	default:

@@ -347,16 +347,22 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 		return err
 	}
 	if ch.key == checkHash {
-		fmt.Printf("revert: %x %x\n", *ch.account, ch.key)
+		fmt.Printf("revert: %x %x: prev: %d\n", *ch.account, ch.key, &ch.prevalue)
 	}
 
 	if s.versionMap != nil {
 		if ch.wasCommited {
+			if ch.key == checkHash {
+				fmt.Printf("revert: %x %x: del wrt\n", *ch.account, ch.key)
+			}
 			key := StateKey(ch.account, &ch.key)
 			s.versionedWrites.Delete(VersionedWrite{Path: key})
 		} else {
 			key := StateKey(ch.account, &ch.key)
 			if wv, ok := s.versionedWrites.Get(VersionedWrite{Path: key}); ok {
+				if ch.key == checkHash {
+					fmt.Printf("revert: %x %x: change wrt\n", *ch.account, ch.key)
+				}
 				wv.Val = ch.prevalue
 			}
 		}
