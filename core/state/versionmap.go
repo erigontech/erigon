@@ -38,14 +38,16 @@ func (p AccountPath) String() string {
 	}
 }
 
-const AddressPath = 0
-const BalancePath = 1
-const NoncePath = 2
-const CodePath = 3
-const CodeHashPath = 4
-const CodeSizePath = 5
-const SelfDestructPath = 6
-const StatePath = 7
+const (
+	AddressPath = iota
+	BalancePath
+	NoncePath
+	CodePath
+	CodeHashPath
+	CodeSizePath
+	SelfDestructPath
+	StatePath
+)
 
 type VersionKey struct {
 	addr    *common.Address
@@ -228,8 +230,6 @@ func (vm *VersionMap1) Write(addr libcommon.Address, path AccountPath, key libco
 		return
 	})
 
-	cells.rw.Lock()
-	defer cells.rw.Unlock()
 	ci, ok := cells.tm.Get(v.TxIndex)
 
 	var flag uint = FlagDone
@@ -269,8 +269,6 @@ func (vm *VersionMap1) MarkEstimate(addr libcommon.Address, path AccountPath, ke
 		panic(fmt.Errorf("path must already exist"))
 	})
 
-	cells.rw.RLock()
-	defer cells.rw.RUnlock()
 	if ci, ok := cells.tm.Get(txIdx); !ok {
 		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x %s, cells keys: %v", txIdx, addr, AccountKey{path, key}, cells.tm.Keys()))
 	} else {
@@ -286,8 +284,6 @@ func (vm *VersionMap1) MarkComplete(addr libcommon.Address, path AccountPath, ke
 		panic(fmt.Errorf("path must already exist"))
 	})
 
-	cells.rw.RLock()
-	defer cells.rw.RUnlock()
 	if ci, ok := cells.tm.Get(txIdx); !ok {
 		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x s, cells keys: %v", txIdx, AccountKey{path, key}, cells.tm.Keys()))
 	} else {
@@ -308,8 +304,6 @@ func (vm *VersionMap1) Delete(addr libcommon.Address, path AccountPath, key libc
 		panic(fmt.Errorf("path must already exist"))
 	}
 
-	cells.rw.Lock()
-	defer cells.rw.Unlock()
 	cells.tm.Delete(txIdx)
 }
 
