@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/holiman/uint256"
 
@@ -658,6 +659,7 @@ func traceKey(key libcommon.Hash) bool {
 	if tracedKeys == nil {
 		tracedKeys = map[libcommon.Hash]struct{}{}
 		for _, key := range dbg.TraceStateKeys {
+			key, _ = strings.CutPrefix(strings.ToLower(key), "Ox")
 			tracedKeys[libcommon.HexToHash(key)] = struct{}{}
 		}
 	}
@@ -671,6 +673,7 @@ func traceAccount(addr libcommon.Address) bool {
 	if tracedAccounts == nil {
 		tracedAccounts = map[libcommon.Address]struct{}{}
 		for _, account := range dbg.TraceAccounts {
+			account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
 			tracedAccounts[libcommon.HexToAddress(account)] = struct{}{}
 		}
 	}
