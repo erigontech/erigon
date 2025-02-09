@@ -159,7 +159,7 @@ func makeAccessListTx(commonTx *types.CommonTx, rawTx map[string]interface{}) *t
 		accessListTx.ChainID = new(uint256.Int)
 		accessListTx.ChainID.SetFromBig(convertHexToBigInt(chainIdStr))
 	}
-	accessListTx.AccessList = decodeAccessList(rawTx["accessList"].([]map[string]interface{}))
+	accessListTx.AccessList = decodeAccessList(rawTx["accessList"].([]interface{}))
 	return accessListTx
 }
 
@@ -246,7 +246,7 @@ func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) *type
 		tx.ChainID = new(uint256.Int)
 		tx.ChainID.SetFromBig(convertHexToBigInt(chainIdStr))
 	}
-	tx.AccessList = decodeAccessList(rawTx["accessList"].([]map[string]interface{}))
+	tx.AccessList = decodeAccessList(rawTx["accessList"].([]interface{}))
 	if okTip {
 		tx.Tip = new(uint256.Int)
 		tx.Tip.SetFromBig(convertHexToBigInt(tip))
@@ -295,7 +295,7 @@ func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) *type
 		tx.ChainID = new(uint256.Int)
 		tx.ChainID.SetFromBig(convertHexToBigInt(chainIdStr))
 	}
-	tx.AccessList = decodeAccessList(rawTx["accessList"].([]map[string]interface{}))
+	tx.AccessList = decodeAccessList(rawTx["accessList"].([]interface{}))
 	if okTip {
 		tx.Tip = new(uint256.Int)
 		tx.Tip.SetFromBig(convertHexToBigInt(tip))
