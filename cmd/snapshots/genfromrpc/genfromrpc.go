@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -62,8 +63,8 @@ type BlockJson struct {
 	TxHash      common.Hash      `json:"transactionsRoot" gencodec:"required"`
 	ReceiptHash common.Hash      `json:"receiptsRoot"     gencodec:"required"`
 	Bloom       types.Bloom      `json:"logsBloom"        gencodec:"required"`
-	Difficulty  *big.Int         `json:"difficulty"       gencodec:"required"`
-	Number      *big.Int         `json:"number"           gencodec:"required"`
+	Difficulty  *hexutil.Big     `json:"difficulty"       gencodec:"required"`
+	Number      *hexutil.Big     `json:"number"           gencodec:"required"`
 	GasLimit    uint64           `json:"gasLimit"         gencodec:"required"`
 	GasUsed     uint64           `json:"gasUsed"          gencodec:"required"`
 	Time        uint64           `json:"timestamp"        gencodec:"required"`
@@ -74,7 +75,7 @@ type BlockJson struct {
 	AuRaStep uint64
 	AuRaSeal []byte
 
-	BaseFee         *big.Int     `json:"baseFeePerGas"`   // EIP-1559
+	BaseFee         *hexutil.Big `json:"baseFeePerGas"`   // EIP-1559
 	WithdrawalsHash *common.Hash `json:"withdrawalsRoot"` // EIP-4895
 
 	// BlobGasUsed & ExcessBlobGas were added by EIP-4844 and are ignored in legacy headers.
