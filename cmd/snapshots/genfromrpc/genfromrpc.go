@@ -120,9 +120,9 @@ func decodeAccessList(rawAccessList []interface{}) types.AccessList {
 		rawSlot := rawSlotInterface.(map[string]interface{})
 		addressStr := rawSlot["address"].(string)
 		accessTuple.Address = common.HexToAddress(addressStr)
-		storageKeys := rawSlot["storageKeys"].([]string)
+		storageKeys := rawSlot["storageKeys"].([]interface{})
 		for _, keyStr := range storageKeys {
-			key := common.HexToHash(keyStr)
+			key := common.HexToHash(keyStr.(string))
 			accessTuple.StorageKeys = append(accessTuple.StorageKeys, key)
 		}
 		accessList = append(accessList, accessTuple)
