@@ -328,7 +328,6 @@ func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions,
 			sStr, okS         = rawTx["s"].(string)
 		)
 
-		fmt.Println(inputStr)
 		commonTx := types.CommonTx{}
 		commonTx.Nonce = convertHexToBigInt(nonceStr).Uint64()
 		commonTx.Gas = convertHexToBigInt(gasStr).Uint64()
@@ -367,7 +366,6 @@ func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions,
 		default:
 			panic("unknown tx type")
 		}
-		fmt.Println(tx.Hash())
 		txs = append(txs, tx)
 	}
 	return txs, nil
