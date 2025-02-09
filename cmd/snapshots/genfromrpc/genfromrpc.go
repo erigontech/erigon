@@ -58,7 +58,35 @@ type HashJson struct {
 }
 
 type BlockJson struct {
-	types.Header
+	ParentHash  common.Hash      `json:"parentHash"       gencodec:"required"`
+	UncleHash   common.Hash      `json:"sha3Uncles"       gencodec:"required"`
+	Coinbase    common.Address   `json:"miner"`
+	Root        common.Hash      `json:"stateRoot"        gencodec:"required"`
+	TxHash      common.Hash      `json:"transactionsRoot" gencodec:"required"`
+	ReceiptHash common.Hash      `json:"receiptsRoot"     gencodec:"required"`
+	Bloom       types.Bloom      `json:"logsBloom"        gencodec:"required"`
+	Difficulty  *big.Int         `json:"difficulty"       gencodec:"required"`
+	Number      *big.Int         `json:"number"           gencodec:"required"`
+	GasLimit    uint64           `json:"gasLimit"         gencodec:"required"`
+	GasUsed     uint64           `json:"gasUsed"          gencodec:"required"`
+	Time        uint64           `json:"timestamp"        gencodec:"required"`
+	Extra       []byte           `json:"extraData"        gencodec:"required"`
+	MixDigest   common.Hash      `json:"mixHash"` // prevRandao after EIP-4399
+	Nonce       types.BlockNonce `json:"nonce"`
+	// AuRa extensions (alternative to MixDigest & Nonce)
+	AuRaStep uint64
+	AuRaSeal []byte
+
+	BaseFee         *big.Int     `json:"baseFeePerGas"`   // EIP-1559
+	WithdrawalsHash *common.Hash `json:"withdrawalsRoot"` // EIP-4895
+
+	// BlobGasUsed & ExcessBlobGas were added by EIP-4844 and are ignored in legacy headers.
+	BlobGasUsed   *uint64 `json:"blobGasUsed"`
+	ExcessBlobGas *uint64 `json:"excessBlobGas"`
+
+	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
+
+	RequestsHash *common.Hash `json:"requestsHash"` // EIP-7685
 
 	Uncles       []*types.Header          `json:"uncles"`
 	Withdrawals  types.Withdrawals        `json:"withdrawals"`
@@ -287,7 +315,7 @@ func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) *type
 
 func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions, error) {
 	var txs types.Transactions
-	fmt.Println(len(rawTxs))
+
 	for _, rawTx := range rawTxs {
 		var tx types.Transaction
 		status := rawTx["status"].(string)
