@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -397,6 +398,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 	var blockNumber big.Int
 	// Loop through last 10 blocks
 	for i := uint64(0); i < latestBlock.Uint64(); {
+		timer := time.NewTimer(20 * time.Second)
 		if err := db.Update(context.TODO(), func(tx kv.RwTx) error {
 			for blockNum := uint64(i); blockNum < latestBlock.Uint64(); blockNum++ {
 				blockNumber.SetUint64(blockNum)
@@ -414,9 +416,10 @@ func genFromRPc(cliCtx *cli.Context) error {
 				if blockNum > 0 {
 					i = blockNum - 1
 				}
-				if blockNum%10_000 == 0 {
-					fmt.Println("Commiting")
-					break
+				select {
+				case <-timer.C:
+					return nil
+				default:
 				}
 			}
 			return nil
@@ -424,6 +427,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 			log.Warn("Error updating db", "err", err)
 			return err
 		}
+		timer.Stop()
 	}
 	return nil
 }
