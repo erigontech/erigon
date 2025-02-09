@@ -77,7 +77,7 @@ func TestEonPublicKeyShare(t *testing.T) {
 		gammas = append(gammas, []*blst.P2{})
 		for j := 0; j < len(*gammasAff[i]); j++ {
 			gammas[i] = append(gammas[i], new(blst.P2))
-			gammas[i][j].FromAffine((*blst.P2Affine)((*gammasAff[i])[j]))
+			gammas[i][j].FromAffine((*gammasAff[i])[j])
 		}
 	}
 

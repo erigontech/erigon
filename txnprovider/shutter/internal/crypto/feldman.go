@@ -65,7 +65,7 @@ func bigToScalar(i *big.Int) *blst.Scalar {
 // range of them.
 func NewPolynomial(coefficients []*big.Int) (*Polynomial, error) {
 	if len(coefficients) == 0 {
-		return nil, fmt.Errorf("no coefficients given")
+		return nil, errors.New("no coefficients given")
 	}
 	for i, v := range coefficients {
 		if v.Sign() < 0 {
@@ -190,9 +190,6 @@ func (g *Gammas) GobDecode(data []byte) error {
 	for i := 0; i < len(data); i += blst.BLST_P2_COMPRESS_BYTES {
 		p := new(blst.P2Affine)
 		p.Uncompress(data[i : i+blst.BLST_P2_COMPRESS_BYTES])
-		if p == nil {
-			return errors.New("failed to deserialize gammas")
-		}
 		if !p.InG2() {
 			return errors.New("gamma is not on curve")
 		}
