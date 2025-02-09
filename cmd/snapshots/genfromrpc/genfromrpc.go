@@ -417,7 +417,7 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 	})
 	if verify {
 		if blk.Hash() != block.BlkHash {
-			return nil, fmt.Errorf("block hash mismatch, expected %s, got %s. num=%d", blk.Hash(), h.BlkHash, blockNumber)
+			return nil, fmt.Errorf("block hash mismatch, expected %s, got %s. num=%d", blk.Hash(), block.BlkHash, blockNumber)
 		}
 	}
 	return blk, nil
