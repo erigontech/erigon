@@ -411,7 +411,9 @@ func genFromRPc(cliCtx *cli.Context) error {
 					return fmt.Errorf("Error writing canonical hash %d: %w", blockNum, err)
 				}
 				fmt.Println("Block Number: , block Hash: ", block.NumberU64(), block.Hash())
-				i = blockNum - 1
+				if blockNum > 0 {
+					i = blockNum - 1
+				}
 				if blockNum%10_000 == 0 {
 					fmt.Println("Commiting")
 					break
