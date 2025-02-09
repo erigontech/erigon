@@ -1912,7 +1912,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		var tr *trie.Trie
 		var computedRootHash []byte
 
-		fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+		// fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 
 		if len(plainKey) == 20 { // account
 			account, err := hph.ctx.Account(plainKey)
@@ -1942,7 +1942,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("unfold: %w", err)
 			}
 		}
-		hph.PrintGrid()
+		// hph.PrintGrid()
 
 		// convert grid to trie.Trie
 		tr, err = hph.ToTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
@@ -1950,7 +1950,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 			return err
 		}
 		computedRootHash = tr.Root()
-		fmt.Printf("computedRootHash = %x\n", computedRootHash)
+		// fmt.Printf("computedRootHash = %x\n", computedRootHash)
 
 		if !bytes.Equal(computedRootHash, expectedRootHash) {
 			err = fmt.Errorf("root hash mismatch computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
@@ -1989,7 +1989,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 	witnessTrieRootHash := witnessTrie.Root()
 
-	fmt.Printf("mergedTrieRootHash = %x\n", witnessTrieRootHash)
+	// fmt.Printf("mergedTrieRootHash = %x\n", witnessTrieRootHash)
 
 	if !bytes.Equal(witnessTrieRootHash, expectedRootHash) {
 		return nil, nil, fmt.Errorf("root hash mismatch witnessTrieRootHash(%x)!=expectedRootHash(%x)", witnessTrieRootHash, expectedRootHash)
