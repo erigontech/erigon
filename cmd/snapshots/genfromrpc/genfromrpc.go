@@ -110,7 +110,7 @@ func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]interface{}) *types
 
 	legacyTx.GasPrice = new(uint256.Int)
 	legacyTx.GasPrice.SetFromBig(convertHexToBigInt(gasPriceStr))
-
+	fmt.Println(legacyTx.GasPrice.Uint64())
 	return legacyTx
 }
 
