@@ -106,11 +106,11 @@ func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]interface{}) *types
 		R:     commonTx.R,
 		S:     commonTx.S,
 	}}
-	gasPriceStr, ok := rawTx["gasPrice"].(string)
-	if ok {
-		legacyTx.GasPrice = new(uint256.Int)
-		legacyTx.GasPrice.SetFromBig(convertHexToBigInt(gasPriceStr))
-	}
+	gasPriceStr := rawTx["gasPrice"].(string)
+
+	legacyTx.GasPrice = new(uint256.Int)
+	legacyTx.GasPrice.SetFromBig(convertHexToBigInt(gasPriceStr))
+
 	return legacyTx
 }
 
