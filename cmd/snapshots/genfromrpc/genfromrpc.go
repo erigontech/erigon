@@ -405,6 +405,8 @@ func genFromRPc(cliCtx *cli.Context) error {
 	var blockNumber big.Int
 	// Loop through last 10 blocks
 	for i := cliCtx.Uint64(FromBlock.Name); i < latestBlock.Uint64(); {
+		prev := i
+		prevTime := time.Now()
 		timer := time.NewTimer(40 * time.Second)
 		if err := db.Update(context.TODO(), func(tx kv.RwTx) error {
 			for blockNum := uint64(i); blockNum < latestBlock.Uint64(); blockNum++ {
@@ -424,7 +426,9 @@ func genFromRPc(cliCtx *cli.Context) error {
 				}
 				select {
 				case <-timer.C:
-					log.Info("Block processed", "block", blockNum, "hash", block.Hash())
+					// compute blk/s
+					blkSec := float64(blockNum-prev) / time.Since(prevTime).Seconds()
+					log.Info("Block processed", "block", blockNum, "hash", block.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec))
 					return nil
 				default:
 				}
