@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/params"
 	"github.com/stretchr/testify/assert"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -42,7 +41,7 @@ const redCross = "❌"
 const threeRockets = "🚀🚀🚀"
 
 type Op struct {
-	key      state.VersionKey
+	key      opkey
 	duration time.Duration
 	opType   OpType
 	val      int
@@ -58,7 +57,7 @@ type testExecTask struct {
 	dependencies []int
 }
 
-type PathGenerator func(addr common.Address, i int, j int, total int) state.VersionKey
+type PathGenerator func(addr common.Address, i int, j int, total int) opkey
 
 type TaskRunner func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration)
 
@@ -120,12 +119,12 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 		switch op.opType {
 		case readType:
-			if _, ok := t.writeMap[k.GetAddress()][state.AccountKey{Path: k.GetSubpath(), Key: k.GetStateKey()}]; ok {
+			if _, ok := t.writeMap[k.addr][state.AccountKey{Path: k.path, Key: k.key}]; ok {
 				sleep(op.duration)
 				continue
 			}
 
-			result := ibs.ReadVersion(k, version.TxIndex)
+			result := ibs.ReadVersion(k.addr, k.path, k.key, version.TxIndex)
 
 			val := result.Value()
 
@@ -151,9 +150,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			sleep(op.duration)
 
-			t.readMap.Set(&state.VersionedRead{Path: k, Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
+			t.readMap.Set(&state.VersionedRead{Address: k.addr, Path: k.path, Key: k.key, Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
-			t.writeMap.Set(&state.VersionedWrite{Path: k, Version: version, Val: op.val})
+			t.writeMap.Set(&state.VersionedWrite{Address: k.addr, Path: k.path, Key: k.key, Version: version, Val: op.val})
 		case otherType:
 			sleep(op.duration)
 		default:
@@ -225,19 +224,25 @@ func longTailTimeGenerator(min time.Duration, max time.Duration, i int, j int) f
 	}
 }
 
-var randomPathGenerator = func(sender common.Address, i int, j int, total int) state.VersionKey {
-	addr := common.BigToAddress((big.NewInt(int64(i % 10))))
-	hash := common.BigToHash((big.NewInt(int64(total))))
-	return state.StateKey(&addr, &hash)
+type opkey struct {
+	addr    common.Address
+	key     common.Hash
+	path state.AccountPath
 }
 
-var dexPathGenerator = func(sender common.Address, i int, j int, total int) state.VersionKey {
+var randomPathGenerator = func(sender common.Address, i int, j int, total int) opkey {
+	addr := common.BigToAddress((big.NewInt(int64(i % 10))))
+	hash := common.BigToHash((big.NewInt(int64(total))))
+	return opkey{addr, hash, state.StatePath}
+}
+
+var dexPathGenerator = func(sender common.Address, i int, j int, total int) opkey {
 	if j == total-1 || j == 2 {
 		addr := common.BigToAddress(big.NewInt(int64(0)))
-		return state.SubpathKey(&addr, 1)
+		return opkey{addr: addr, path: state.BalancePath}
 	} else {
 		addr := common.BigToAddress(big.NewInt(int64(j)))
-		return state.SubpathKey(&addr, 1)
+		return opkey{addr: addr, path: state.BalancePath}
 	}
 }
 
@@ -258,11 +263,11 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 		// Set first two ops to always read and write nonce
 		ops := make([]Op, 0, readsPerT+writesPerT+nonIOPerT)
 
-		ops = append(ops, Op{opType: readType, key: state.SubpathKey(&s, 2), duration: readTime(i, 0), val: senderNonces[s]})
+		ops = append(ops, Op{opType: readType, key: opkey{addr: s, path: state.NoncePath}, duration: readTime(i, 0), val: senderNonces[s]})
 
 		senderNonces[s]++
 
-		ops = append(ops, Op{opType: writeType, key: state.SubpathKey(&s, 2), duration: writeTime(i, 1), val: senderNonces[s]})
+		ops = append(ops, Op{opType: writeType, key: opkey{addr: s, path: state.NoncePath}, duration: writeTime(i, 1), val: senderNonces[s]})
 
 		for j := 0; j < readsPerT-1; j++ {
 			ops = append(ops, Op{opType: readType})
@@ -513,26 +518,27 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 
 	// Need to apply the final write set to storage
 
-	type it struct {
-		k *state.VersionKey
-		d time.Duration
-	}
-
-	finalWriteSet := btree.NewBTreeGOptions(func(a, b it) bool { return state.VersionKeyLess(a.k, b.k) }, btree.Options{NoLocks: true})
+	finalWriteSet := map[common.Address]map[state.AccountKey]time.Duration{}
 
 	for _, task := range tasks {
 		task := task.(*testExecTask)
 		for _, op := range task.ops {
 			if op.opType == writeType {
-				finalWriteSet.Set(it{&op.key, op.duration})
+				writes, ok := finalWriteSet[op.key.addr]
+				if !ok {
+					writes=map[state.AccountKey]time.Duration{}
+					finalWriteSet[op.key.addr]=writes
+				}
+				writes[state.AccountKey{Path:op.key.path, Key:op.key.key}]=op.duration
 			}
 		}
 	}
 
-	finalWriteSet.Scan(func(i it) bool {
-		sleep(i.d)
-		return true
-	})
+	for _, writes := range finalWriteSet {
+		for _, d := range writes {
+			sleep(d)
+		}
+	}
 
 	duration := time.Since(start)
 

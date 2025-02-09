@@ -488,8 +488,8 @@ func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) (bool, err
 		})
 }
 
-func (sdb *IntraBlockState) ReadVersion(k VersionKey, txIdx int) ReadResult {
-	return sdb.versionMap.Read(k, txIdx)
+func (sdb *IntraBlockState) ReadVersion(addr libcommon.Address, path AccountPath, key libcommon.Hash, txIdx int) ReadResult {
+	return sdb.versionMap.Read(addr, path, key, txIdx)
 }
 
 // AddBalance adds amount to the account associated with addr.
@@ -1036,20 +1036,17 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 	sdb.validRevisions = sdb.validRevisions[:idx]
 
 	if sdb.versionMap != nil {
-		var revertedWrites []VersionKey
+		var reverted []libcommon.Address
 
-		if sdb.versionedWrites != nil {
-			sdb.versionedWrites.Scan(func(v *VersionedWrite) bool {
-				if _, isDirty := sdb.journal.dirties[v.Path.GetAddress()]; !isDirty {
-					revertedWrites = append(revertedWrites, v.Path)
-				}
-				return true
-			})
+		for addr := range sdb.versionedWrites {
+			if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
+				reverted = append(reverted, addr)
+			}
 		}
 
-		for _, key := range revertedWrites {
-			sdb.versionMap.Delete(key, sdb.txIndex, false)
-			sdb.versionedWrites.Delete(key.GetAddress(), AccountKey{key.subpath, key.GetStateKey()})
+		for _, addr := range reverted {
+			sdb.versionMap.DeleteAll(addr, sdb.txIndex)
+			delete(sdb.versionedWrites, addr)
 		}
 	}
 
@@ -1216,20 +1213,17 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		}
 	}
 
-	var revertedWrites []VersionKey
+	var reverted []libcommon.Address
 
-	if sdb.versionedWrites != nil {
-		sdb.versionedWrites.Scan(func(v *VersionedWrite) bool {
-			if _, isDirty := sdb.stateObjectsDirty[v.Path.GetAddress()]; !isDirty {
-				revertedWrites = append(revertedWrites, v.Path)
-			}
-			return true
-		})
+	for addr := range sdb.versionedWrites {
+		if _, isDirty := sdb.stateObjectsDirty[addr]; !isDirty {
+			reverted = append(reverted, addr)
+		}
 	}
 
-	for _, key := range revertedWrites {
-		sdb.versionMap.Delete(key, sdb.txIndex, false)
-		sdb.versionedWrites.Delete(key.GetAddress(), AccountKey{Path: key.subpath, Key: key.GetStateKey()})
+	for _, addr := range reverted {
+		sdb.versionMap.DeleteAll(addr, sdb.txIndex)
+		delete(sdb.versionedWrites, addr)
 	}
 
 	// Invalidate journal because reverting across transactions is not allowed.
@@ -1384,12 +1378,9 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 			s.versionedReads = ReadSet{}
 		}
 
-		k := AddressKey(&addr)
-
 		s.versionedReads.Set(&VersionedRead{
 			Address: addr,
-			Key:     AccountKey{Path: AddressPath},
-			Path:    k,
+			Path:    AddressPath,
 			Source:  StorageRead,
 			Version: s.Version(),
 			Val:     *account,
@@ -1403,14 +1394,10 @@ func (s *IntraBlockState) versionWritten(addr libcommon.Address, path AccountPat
 			s.versionedWrites = WriteSet{}
 		}
 
-		var pk *libcommon.Hash
-		if path == StatePath {
-			pk = &key
-		}
 		s.versionedWrites.Set(&VersionedWrite{
 			Address: addr,
-			Key:     AccountKey{path, key},
-			Path:    VersionKey{&addr, pk, path},
+			Path:    path,
+			Key:     key,
 			Version: s.Version(),
 			Val:     val,
 		})
@@ -1471,10 +1458,10 @@ func (ibs *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 
 		ibs.versionedWrites.Scan(func(v *VersionedWrite) bool {
 			if checkDirty {
-				if _, isDirty := ibs.journal.dirties[v.Path.GetAddress()]; isDirty {
+				if _, isDirty := ibs.journal.dirties[v.Address]; isDirty {
 					writes = append(writes, v)
 				} else {
-					ibs.versionMap.Delete(v.Path, ibs.txIndex, false)
+					ibs.versionMap.Delete(v.Address, v.Path, v.Key, ibs.txIndex, false)
 				}
 			} else {
 				writes = append(writes, v)
@@ -1492,17 +1479,17 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 	for i := range writes {
 		path := writes[i].Path
 		val := writes[i].Val
-		addr := path.GetAddress()
+		addr := writes[i].Address
 
 		if val != nil {
-			if path.IsState() {
-				stateKey := path.GetStateKey()
+			if path == StatePath {
+				stateKey := writes[i].Key
 				state := val.(uint256.Int)
 				s.SetState(addr, stateKey, state)
-			} else if path.IsAddress() {
+			} else if path == AddressPath {
 				continue
 			} else {
-				switch path.GetSubpath() {
+				switch path {
 				case BalancePath:
 					balance := val.(uint256.Int)
 					s.SetBalance(addr, &balance, writes[i].Reason)
@@ -1520,7 +1507,7 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 						s.Selfdestruct(addr)
 					}
 				default:
-					panic(fmt.Errorf("unknown key type: %d", path.GetSubpath()))
+					panic(fmt.Errorf("unknown key type: %d", path))
 				}
 			}
 		}

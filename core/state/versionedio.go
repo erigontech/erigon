@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
-	"github.com/tidwall/btree"
 )
 
 type ReadSource int
@@ -25,14 +24,14 @@ const (
 type ReadSet map[libcommon.Address]map[AccountKey]*VersionedRead
 
 func (rs ReadSet) Set(v *VersionedRead) {
-	reads, ok := rs[*v.Path.addr]
+	reads, ok := rs[v.Address]
 
 	if !ok {
-		rs[*v.Path.addr] = map[AccountKey]*VersionedRead{
-			{v.Path.subpath, v.Path.GetStateKey()}: v,
+		rs[v.Address] = map[AccountKey]*VersionedRead{
+			{v.Path, v.Key}: v,
 		}
 	} else {
-		reads[AccountKey{v.Path.subpath, v.Path.GetStateKey()}] = v
+		reads[AccountKey{v.Path, v.Key}] = v
 	}
 }
 
@@ -57,14 +56,14 @@ func (s ReadSet) Len() int {
 type WriteSet map[libcommon.Address]map[AccountKey]*VersionedWrite
 
 func (s WriteSet) Set(v *VersionedWrite) {
-	reads, ok := s[*v.Path.addr]
+	reads, ok := s[v.Address]
 
 	if !ok {
-		s[*v.Path.addr] = map[AccountKey]*VersionedWrite{
-			{v.Path.subpath, v.Path.GetStateKey()}: v,
+		s[v.Address] = map[AccountKey]*VersionedWrite{
+			{v.Path, v.Key}: v,
 		}
 	} else {
-		reads[AccountKey{v.Path.subpath, v.Path.GetStateKey()}] = v
+		reads[AccountKey{v.Path, v.Key}] = v
 	}
 }
 
@@ -97,8 +96,8 @@ func (s WriteSet) Scan(yield func(input *VersionedWrite) bool) {
 
 type VersionedRead struct {
 	Address libcommon.Address
-	Key     AccountKey
-	Path    VersionKey
+	Path    AccountPath
+	Key     libcommon.Hash
 	Source  ReadSource
 	Version Version
 	Val     interface{}
@@ -106,22 +105,14 @@ type VersionedRead struct {
 
 type VersionedWrite struct {
 	Address libcommon.Address
-	Key     AccountKey
-	Path    VersionKey
+	Path    AccountPath
+	Key     libcommon.Hash
 	Version Version
 	Val     interface{}
 	Reason  tracing.BalanceChangeReason
 }
 
 var ErrDependency = errors.New("found dependency")
-
-func VersionedReadLess(a, b *VersionedRead) bool {
-	return VersionKeyLess(&a.Path, &b.Path)
-}
-
-func VersionedWriteLess(a, b VersionedWrite) bool {
-	return VersionKeyLess(&a.Path, &b.Path)
-}
 
 type versionedStateReader struct {
 	txIndex     int
@@ -160,8 +151,8 @@ func (vr *versionedStateReader) ReadAccountData(address libcommon.Address) (*acc
 	return nil, nil
 }
 
-func versionedUpdate[T any](versionMap *VersionMap, k VersionKey, txIndex int) (T, bool) {
-	if res := versionMap.Read(k, txIndex); res.Status() == MVReadResultDone {
+func versionedUpdate[T any](versionMap *VersionMap, addr libcommon.Address, path AccountPath, key libcommon.Hash, txIndex int) (T, bool) {
+	if res := versionMap.Read(addr, path, key, txIndex); res.Status() == MVReadResultDone {
 		v, ok := res.Value().(T)
 		return v, ok
 	}
@@ -175,16 +166,15 @@ func versionedUpdate[T any](versionMap *VersionMap, k VersionKey, txIndex int) (
 // be recored as reads and hence the varification process will miss them.  We don't want to creat a fail but
 // we do  want to capture the updates
 func (vr versionedStateReader) applyVersionedUpdates(address libcommon.Address, account accounts.Account) accounts.Account {
-	if update, ok := versionedUpdate[*uint256.Int](vr.versionMap, SubpathKey(&address, BalancePath), vr.txIndex); ok {
+	if update, ok := versionedUpdate[*uint256.Int](vr.versionMap, address, BalancePath, libcommon.Hash{}, vr.txIndex); ok {
 		account.Balance = *update
 	}
-	if update, ok := versionedUpdate[uint64](vr.versionMap, SubpathKey(&address, NoncePath), vr.txIndex); ok {
+	if update, ok := versionedUpdate[uint64](vr.versionMap, address, NoncePath, libcommon.Hash{}, vr.txIndex); ok {
 		account.Nonce = update
 	}
-	if update, ok := versionedUpdate[libcommon.Hash](vr.versionMap, SubpathKey(&address, CodeHashPath), vr.txIndex); ok {
+	if update, ok := versionedUpdate[libcommon.Hash](vr.versionMap, address, CodeHashPath, libcommon.Hash{}, vr.txIndex); ok {
 		account.CodeHash = update
 	}
-
 	return account
 }
 
@@ -273,14 +263,20 @@ func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
 		return true
 	}
 
-	cmpMap := *btree.NewBTreeG[*VersionKey](VersionKeyLess)
+	cmpMap := map[libcommon.Address]map[AccountKey]struct{}{}
 
 	for i := 0; i < len(cmpSet); i++ {
-		cmpMap.Set(&cmpSet[i].Path)
+		vw := cmpSet[i]
+		keys, ok := cmpMap[vw.Address]
+		if !ok {
+			keys = map[AccountKey]struct{}{}
+			cmpMap[vw.Address] = keys
+		}
+		keys[AccountKey{vw.Path, vw.Key}] = struct{}{}
 	}
 
 	for _, v := range writes {
-		if _, ok := cmpMap.Get(&v.Path); !ok {
+		if _, ok := cmpMap[v.Address][AccountKey{v.Path, v.Key}]; !ok {
 			return true
 		}
 	}
@@ -292,9 +288,9 @@ func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObje
 	stateObjects := map[libcommon.Address][]*stateObject{}
 
 	for i := range writes {
-		path := writes[i].Path
 		so := writes[i].Val.(*stateObject)
-		addr := path.GetAddress()
+		addr := writes[i].Address
+		path := writes[i].Path
 
 		if so != nil {
 			prevs, ok := stateObjects[addr]
@@ -315,8 +311,8 @@ func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObje
 				stateObjects[addr] = []*stateObject{so}
 			}
 
-			if path.IsState() {
-				stateKey := path.GetStateKey()
+			if path == StatePath {
+				stateKey := writes[i].Key
 				var state uint256.Int
 				so.GetState(stateKey, &state)
 				if len(prevs) > 0 {
@@ -326,10 +322,10 @@ func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObje
 						continue
 					}
 				}
-			} else if path.IsAddress() {
+			} else if path == AddressPath {
 				continue
 			} else {
-				switch path.GetSubpath() {
+				switch path {
 				case BalancePath:
 					b := so.Balance()
 					if len(prevs) > 0 {
@@ -367,7 +363,7 @@ func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObje
 						}
 					}
 				default:
-					panic(fmt.Errorf("unknown key type: %d", path.GetSubpath()))
+					panic(fmt.Errorf("unknown key type: %d", path))
 				}
 
 				stateObjects[addr] = append(prevs, so)
@@ -396,23 +392,17 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 		}
 	}
 
-	var pk *libcommon.Hash
-
-	if path == StatePath {
-		pk = &key
-	}
-
-	k := VersionKey{&addr, pk, path}
-
-	res := s.versionMap.Read(k, s.txIndex)
+	res := s.versionMap.Read(addr, path, key, s.txIndex)
 
 	var v T
 	var vr = VersionedRead{
+		Address: addr,
+		Path:    path,
+		Key:     key,
 		Version: Version{
 			TxIndex:     res.DepIdx(),
 			Incarnation: res.Incarnation(),
 		},
-		Path: k,
 	}
 
 	switch res.Status() {
@@ -508,7 +498,7 @@ func ApplyVersionedWrites(chainRules *chain.Rules, writes VersionedWrites, state
 type VersionedIO struct {
 	inputs     []ReadSet
 	outputs    []VersionedWrites // write sets that should be checked during validation
-	outputsSet []*btree.BTreeG[*VersionKey]
+	outputsSet []map[libcommon.Address]map[AccountKey]struct{}
 	allOutputs []VersionedWrites // entire write sets in MVHashMap. allOutputs should always be a parent set of outputs
 }
 
@@ -559,14 +549,14 @@ func (io *VersionedIO) HasReads(txnIdx int) bool {
 	if len(io.outputsSet) <= txnIdx+1 {
 		return false
 	}
-	return io.outputsSet[txnIdx+1] != nil && io.outputsSet[txnIdx+1].Len() > 0
+	return len(io.outputsSet[txnIdx+1]) > 0
 }
 
-func (io *VersionedIO) HasWritten(txnIdx int, k VersionKey) bool {
+func (io *VersionedIO) HasWritten(txnIdx int, addr libcommon.Address, path AccountPath, key libcommon.Hash) bool {
 	if len(io.outputsSet) <= txnIdx+1 {
 		return false
 	}
-	_, ok := io.outputsSet[txnIdx+1].Get(&k)
+	_, ok := io.outputsSet[txnIdx+1][addr][AccountKey{path, key}]
 	return ok
 }
 
@@ -574,7 +564,7 @@ func NewVersionedIO(numTx int) *VersionedIO {
 	return &VersionedIO{
 		inputs:     make([]ReadSet, numTx+1),
 		outputs:    make([]VersionedWrites, numTx+1),
-		outputsSet: make([]*btree.BTreeG[*VersionKey], numTx+1),
+		outputsSet: make([]map[libcommon.Address]map[AccountKey]struct{}, numTx+1),
 		allOutputs: make([]VersionedWrites, numTx+1),
 	}
 }
@@ -593,12 +583,17 @@ func (io *VersionedIO) RecordWrites(txId int, output VersionedWrites) {
 	io.outputs[txId+1] = output
 
 	if len(io.outputsSet) <= txId+1 {
-		io.outputsSet = append(io.outputsSet, make([]*btree.BTreeG[*VersionKey], txId+2-len(io.outputsSet))...)
+		io.outputsSet = append(io.outputsSet, make([]map[libcommon.Address]map[AccountKey]struct{}, txId+2-len(io.outputsSet))...)
 	}
-	io.outputsSet[txId+1] = btree.NewBTreeGOptions(VersionKeyLess, btree.Options{NoLocks: true})
+	io.outputsSet[txId+1] = map[libcommon.Address]map[AccountKey]struct{}{}
 
 	for _, v := range output {
-		io.outputsSet[txId+1].Set(&v.Path)
+		keys, ok := io.outputsSet[txId+1][v.Address]
+		if !ok {
+			keys := map[AccountKey]struct{}{}
+			io.outputsSet[txId+1][v.Address] = keys
+		}
+		keys[AccountKey{v.Path, v.Key}] = struct{}{}
 	}
 }
 
@@ -621,11 +616,10 @@ type TxDep struct {
 
 func HasReadDep(txFrom VersionedWrites, txTo ReadSet) bool {
 	for _, rd := range txFrom {
-		if _, ok := txTo[rd.Path.GetAddress()][AccountKey{Path: rd.Path.subpath, Key: rd.Path.GetStateKey()}]; ok {
+		if _, ok := txTo[rd.Address][AccountKey{Path: rd.Path, Key: rd.Key}]; ok {
 			return true
 		}
 	}
-
 	return false
 }
 

@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -549,15 +549,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 			// Remove entries that were previously written but are no longer written
 
-			cmpMap := btree.NewBTreeGOptions(func(a, b state.VersionKey) bool { return state.VersionKeyLess(&a, &b) }, btree.Options{NoLocks: true})
+			cmpMap := map[libcommon.Address]map[state.AccountKey]struct{}{}
 
 			for _, w := range res.TxOut {
-				cmpMap.Set(w.Path)
+				keys, ok := cmpMap[w.Address]
+				if !ok {
+					keys = map[state.AccountKey]struct{}{}
+					cmpMap[w.Address] = keys
+				}
+				keys[state.AccountKey{Path: w.Path, Key: w.Key}] = struct{}{}
 			}
 
 			for _, v := range prevWrite {
-				if _, ok := cmpMap.Get(v.Path); !ok {
-					be.versionMap.Delete(v.Path, txIndex, true)
+				if _, ok := cmpMap[v.Address][state.AccountKey{Path: v.Path, Key: v.Key}]; !ok {
+					be.versionMap.Delete(v.Address, v.Path, v.Key, txIndex, true)
 				}
 			}
 

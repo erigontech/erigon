@@ -692,7 +692,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 
 	// Tx1 mark estimate
 	for _, v := range states[1].VersionedWrites(true) {
-		mvhm.MarkEstimate(v.Path, 1)
+		mvhm.MarkEstimate(v.Address, v.Path, v.Key, 1)
 	}
 
 	defer func() {
@@ -783,7 +783,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 
 	// Tx1 delete
 	states[1].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Path, 1, true)
+		mvhm.Delete(v.Address, v.Path, v.Key, 1, true)
 		return true
 	})
 	states[1].versionedWrites = nil
@@ -804,7 +804,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 
 	// Tx0 delete
 	states[0].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Path, 1, true)
+		mvhm.Delete(v.Address, v.Path, v.Key, 1, true)
 		return true
 	})
 	states[0].versionedWrites = nil
@@ -907,7 +907,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 	// Tx2 delete
 	states[2].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Path, 1, true)
+		mvhm.Delete(v.Address, v.Path, v.Key, 1, true)
 		return true
 	})
 	states[2].versionedWrites = nil
@@ -937,7 +937,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 	// Tx1 delete
 	states[1].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Path, 1, true)
+		mvhm.Delete(v.Address, v.Path, v.Key, 1, true)
 		return true
 	})
 	states[1].versionedWrites = nil
