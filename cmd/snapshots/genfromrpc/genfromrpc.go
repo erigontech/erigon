@@ -340,8 +340,9 @@ func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions,
 			commonTx.Value = new(uint256.Int)
 		}
 		commonTx.Value.SetFromBig(convertHexToBigInt(valueStr))
-		commonTx.Data = common.Hex2Bytes(inputStr)
-		fmt.Println(commonTx.Data)
+		if len(inputStr) > 0 && inputStr[0] == '0' && inputStr[1] == 'x' {
+			commonTx.Data = common.Hex2Bytes(inputStr[2:])
+		}
 		if okV {
 			commonTx.V.SetFromBig(convertHexToBigInt(vStr))
 		}
