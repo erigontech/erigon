@@ -412,12 +412,12 @@ func genFromRPc(cliCtx *cli.Context) error {
 				if err := rawdb.WriteCanonicalHash(tx, block.Hash(), blockNumber.Uint64()); err != nil {
 					return fmt.Errorf("Error writing canonical hash %d: %w", blockNum, err)
 				}
-				fmt.Println("Block Number: , block Hash: ", block.NumberU64(), block.Hash())
 				if blockNum > 0 {
 					i = blockNum - 1
 				}
 				select {
 				case <-timer.C:
+					log.Info("Block processed", "block", blockNumber, "hash", block.Hash())
 					return nil
 				default:
 				}
