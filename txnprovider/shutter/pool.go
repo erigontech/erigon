@@ -58,7 +58,8 @@ func NewPool(
 	slotCalculator := NewBeaconChainSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot)
 	blockListener := NewBlockListener(logger, stateChangesClient)
 	eonTracker := NewKsmEonTracker(config, blockListener, contractBackend)
-	decryptionKeysListener := NewDecryptionKeysListener(logger, config, slotCalculator, eonTracker)
+	decryptionKeysValidator := NewDecryptionKeysExtendedValidator(logger, config, slotCalculator, eonTracker)
+	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysValidator)
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
 	encryptedTxnsPool := NewEncryptedTxnsPool(logger, config, contractBackend)
 	return &Pool{
