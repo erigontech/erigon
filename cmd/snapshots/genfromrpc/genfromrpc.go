@@ -424,7 +424,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 				}
 				select {
 				case <-timer.C:
-					log.Info("Block processed", "block", blockNumber, "hash", block.Hash())
+					log.Info("Block processed", "block", blockNum, "hash", block.Hash())
 					return nil
 				default:
 				}
