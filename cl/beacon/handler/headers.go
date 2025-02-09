@@ -126,13 +126,10 @@ func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconh
 		return nil, err
 	}
 
-	version := a.beaconChainCfg.GetCurrentStateVersion(signedHeader.Header.Slot / a.beaconChainCfg.SlotsPerEpoch)
-
 	return newBeaconResponse(&headerResponse{
 		Root:      root,
 		Canonical: canonicalRoot == root,
 		Header:    signedHeader,
 	}).WithFinalized(canonicalRoot == root && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()).
-		WithVersion(version).
 		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 }
