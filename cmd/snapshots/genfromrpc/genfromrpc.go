@@ -314,7 +314,7 @@ func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions,
 
 	for _, rawTx := range rawTxs {
 		var tx types.Transaction
-		status := rawTx["status"].(string)
+		typeTx := rawTx["type"].(string)
 
 		// each field is an hex string
 		var (
@@ -350,7 +350,7 @@ func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions,
 			commonTx.S.SetFromBig(convertHexToBigInt(sStr))
 		}
 
-		switch status {
+		switch typeTx {
 		case "0x0": // legacy
 			tx = makeLegacyTx(&commonTx, rawTx)
 		case "0x1": // access list
