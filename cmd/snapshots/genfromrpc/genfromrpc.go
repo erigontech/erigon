@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -65,22 +66,19 @@ type BlockJson struct {
 	Bloom       types.Bloom      `json:"logsBloom"        gencodec:"required"`
 	Difficulty  *hexutil.Big     `json:"difficulty"       gencodec:"required"`
 	Number      *hexutil.Big     `json:"number"           gencodec:"required"`
-	GasLimit    uint64           `json:"gasLimit"         gencodec:"required"`
-	GasUsed     uint64           `json:"gasUsed"          gencodec:"required"`
-	Time        uint64           `json:"timestamp"        gencodec:"required"`
-	Extra       []byte           `json:"extraData"        gencodec:"required"`
+	GasLimit    hexutil.Uint64   `json:"gasLimit"         gencodec:"required"`
+	GasUsed     hexutil.Uint64   `json:"gasUsed"          gencodec:"required"`
+	Time        hexutil.Uint64   `json:"timestamp"        gencodec:"required"`
+	Extra       hexutility.Bytes `json:"extraData"        gencodec:"required"`
 	MixDigest   common.Hash      `json:"mixHash"` // prevRandao after EIP-4399
 	Nonce       types.BlockNonce `json:"nonce"`
-	// AuRa extensions (alternative to MixDigest & Nonce)
-	AuRaStep uint64
-	AuRaSeal []byte
 
 	BaseFee         *hexutil.Big `json:"baseFeePerGas"`   // EIP-1559
 	WithdrawalsHash *common.Hash `json:"withdrawalsRoot"` // EIP-4895
 
 	// BlobGasUsed & ExcessBlobGas were added by EIP-4844 and are ignored in legacy headers.
-	BlobGasUsed   *uint64 `json:"blobGasUsed"`
-	ExcessBlobGas *uint64 `json:"excessBlobGas"`
+	BlobGasUsed   *hexutil.Uint64 `json:"blobGasUsed"`
+	ExcessBlobGas *hexutil.Uint64 `json:"excessBlobGas"`
 
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 
@@ -386,29 +384,26 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 	}
 	block.TxHash = types.DeriveSha(txs)
 	blk := types.NewBlockFromNetwork(&types.Header{
-		ParentHash:  block.ParentHash,
-		UncleHash:   block.UncleHash,
-		Coinbase:    block.Coinbase,
-		Root:        block.Root,
-		TxHash:      block.TxHash,
-		ReceiptHash: block.ReceiptHash,
-		Bloom:       block.Bloom,
-		Difficulty:  block.Difficulty,
-		Number:      block.Number,
-		GasLimit:    block.GasLimit,
-		GasUsed:     block.GasUsed,
-		Time:        block.Time,
-		Extra:       block.Extra,
-		MixDigest:   block.MixDigest,
-		Nonce:       block.Nonce,
-		// AuRa extensions (alternative to MixDigest & Nonce)
-		AuRaStep:        block.AuRaStep,
-		AuRaSeal:        block.AuRaSeal,
-		BaseFee:         block.BaseFee,
+		ParentHash:      block.ParentHash,
+		UncleHash:       block.UncleHash,
+		Coinbase:        block.Coinbase,
+		Root:            block.Root,
+		TxHash:          block.TxHash,
+		ReceiptHash:     block.ReceiptHash,
+		Bloom:           block.Bloom,
+		Difficulty:      (*big.Int)(block.Difficulty),
+		Number:          (*big.Int)(block.Number),
+		GasLimit:        block.GasLimit.Uint64(),
+		GasUsed:         block.GasUsed.Uint64(),
+		Time:            block.Time.Uint64(),
+		Extra:           block.Extra,
+		MixDigest:       block.MixDigest,
+		Nonce:           block.Nonce,
+		BaseFee:         (*big.Int)(block.BaseFee),
 		WithdrawalsHash: block.WithdrawalsHash,
 		// BlobGasUsed & ExcessBlobGas were added by EIP-4844 and are ignored in legacy headers.
-		BlobGasUsed:           block.BlobGasUsed,
-		ExcessBlobGas:         block.ExcessBlobGas,
+		BlobGasUsed:           (*uint64)(block.BlobGasUsed),
+		ExcessBlobGas:         (*uint64)(block.ExcessBlobGas),
 		ParentBeaconBlockRoot: block.ParentBeaconBlockRoot,
 		RequestsHash:          block.RequestsHash,
 	}, &types.Body{
