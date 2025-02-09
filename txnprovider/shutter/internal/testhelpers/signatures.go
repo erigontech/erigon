@@ -19,33 +19,18 @@ package testhelpers
 import (
 	"testing"
 
-	"go.uber.org/mock/gomock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/txnprovider/shutter"
 )
 
-type MockSlotCalculatorCreatorOpt func(mock *MockSlotCalculator)
-
-func MockSlotCalculatorCreator(opts ...MockSlotCalculatorCreatorOpt) func(t *testing.T) shutter.SlotCalculator {
-	return func(t *testing.T) shutter.SlotCalculator {
-		ctrl := gomock.NewController(t)
-		sc := NewMockSlotCalculator(ctrl)
-		for _, opt := range opts {
-			opt(sc)
-		}
-		return sc
+func Signatures(t *testing.T, signers []Keyper, data shutter.DecryptionKeysSignatureData) [][]byte {
+	sigs := make([][]byte, len(signers))
+	for i, signer := range signers {
+		var err error
+		sigs[i], err = data.Sign(signer.PrivateKey)
+		require.NoError(t, err)
 	}
-}
 
-func WithCalcCurrentSlotMockResult(results ...uint64) MockSlotCalculatorCreatorOpt {
-	return func(sc *MockSlotCalculator) {
-		i := -1
-		sc.EXPECT().
-			CalcCurrentSlot().
-			DoAndReturn(func() uint64 {
-				i++
-				return results[i]
-			}).
-			Times(len(results))
-	}
+	return sigs
 }

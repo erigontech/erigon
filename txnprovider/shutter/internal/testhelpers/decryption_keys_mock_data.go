@@ -29,86 +29,52 @@ import (
 	shutterproto "github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 )
 
-const (
-	TestInstanceId           = 123
-	TestMaxNumKeysPerMessage = 10
-)
-
-type MockDecryptionKeysMsgOptions struct {
-	EonIndex             shutter.EonIndex
-	Keys                 []*shutterproto.Key
-	NilExtra             bool
-	Slot                 uint64
-	TxnPointer           uint64
-	SignerIndices        []uint64
-	Signatures           [][]byte
-	InstanceIdOverride   uint64
-	VersionOverride      string
-	TopicOverride        string
-	EnvelopeDataOverride []byte
+type MockDecryptionKeysEnvelopeDataOptions struct {
+	EonIndex      shutter.EonIndex
+	Keys          []*shutterproto.Key
+	NilExtra      bool
+	Slot          uint64
+	TxnPointer    uint64
+	SignerIndices []uint64
+	Signatures    [][]byte
+	InstanceId    uint64
+	Version       string
 }
 
-func MockDecryptionKeysMsg(t *testing.T, opts MockDecryptionKeysMsgOptions) *pubsub.Message {
-	var data []byte
-	if opts.EnvelopeDataOverride != nil {
-		data = opts.EnvelopeDataOverride
-	} else {
-		data = MockDecryptionKeysEnvelopeData(t, opts)
-	}
-
-	var topic string
-	if opts.TopicOverride != "" {
-		topic = opts.TopicOverride
-	} else {
-		topic = shutter.DecryptionKeysTopic
-	}
-
-	return &pubsub.Message{
-		Message: &pb.Message{
-			Data:  data,
-			Topic: &topic,
-		},
-	}
-}
-
-func MockDecryptionKeysEnvelopeData(t *testing.T, opts MockDecryptionKeysMsgOptions) []byte {
-	var instanceId uint64
-	if opts.InstanceIdOverride != 0 {
-		instanceId = opts.InstanceIdOverride
-	} else {
-		instanceId = TestInstanceId
-	}
-
+func MockDecryptionKeysEnvelopeData(t *testing.T, opts MockDecryptionKeysEnvelopeDataOptions) []byte {
 	decryptionKeys := &shutterproto.DecryptionKeys{
-		InstanceId: instanceId,
+		InstanceId: opts.InstanceId,
 		Eon:        uint64(opts.EonIndex),
 		Keys:       opts.Keys,
-	}
-
-	if !opts.NilExtra {
-		decryptionKeys.Extra = &shutterproto.DecryptionKeys_Gnosis{
+		Extra: &shutterproto.DecryptionKeys_Gnosis{
 			Gnosis: &shutterproto.GnosisDecryptionKeysExtra{
 				Slot:          opts.Slot,
 				TxPointer:     opts.TxnPointer,
 				SignerIndices: opts.SignerIndices,
 				Signatures:    opts.Signatures,
 			},
-		}
+		},
 	}
 
-	var version string
-	if opts.VersionOverride != "" {
-		version = opts.VersionOverride
-	} else {
-		version = shutterproto.EnvelopeVersion
+	if opts.NilExtra {
+		decryptionKeys.Extra = nil
 	}
 
 	decryptionKeysMsg, err := anypb.New(decryptionKeys)
 	require.NoError(t, err)
 	envelopeData, err := proto.Marshal(&shutterproto.Envelope{
-		Version: version,
+		Version: opts.Version,
 		Message: decryptionKeysMsg,
 	})
 	require.NoError(t, err)
 	return envelopeData
+}
+
+func MockDecryptionKeysMsg(topic string, envelopeData []byte) *pubsub.Message {
+	return &pubsub.Message{
+		Message: &pb.Message{
+			Topic: &topic,
+			Data:  envelopeData,
+		},
+	}
 }

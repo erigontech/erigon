@@ -169,10 +169,10 @@ func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, e
 		}
 
 		signatureData := DecryptionKeysSignatureData{
-			InstanceID:        msg.InstanceId,
-			Eon:               msg.Eon,
+			InstanceId:        msg.InstanceId,
+			Eon:               EonIndex(msg.Eon),
 			Slot:              extraData.Slot,
-			TxPointer:         extraData.TxPointer,
+			TxnPointer:        extraData.TxPointer,
 			IdentityPreimages: identityPreimages,
 		}
 
@@ -244,7 +244,7 @@ func (v DecryptionKeysValidator) validateEonIndex(msg *proto.DecryptionKeys) (Eo
 	return eon, nil
 }
 
-func NewDecryptionKeysP2pValidatorEx(logger log.Logger, config Config, sc SlotCalculator, et EonTracker) pubsub.ValidatorEx {
+func NewDecryptionKeysExtendedValidator(logger log.Logger, config Config, sc SlotCalculator, et EonTracker) pubsub.ValidatorEx {
 	dkv := NewDecryptionKeysValidator(config, sc, et)
 	return func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		if topic := msg.GetTopic(); topic != DecryptionKeysTopic {

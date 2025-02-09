@@ -35,43 +35,43 @@ type IdentityPreimage []byte
 
 type IdentityPreimages []IdentityPreimage
 
-func (i IdentityPreimages) Validate() error {
-	if len(i) > 1024 {
+func (ips IdentityPreimages) Validate() error {
+	if len(ips) > 1024 {
 		return ErrTooManyIdentityPreimages
 	}
 
-	for i, identityPreimage := range i {
-		if len(identityPreimage) > 52 {
-			return fmt.Errorf("%w: i=%d, len=%d", ErrIdentityPreimageTooBig, i, len(identityPreimage))
+	for i, ip := range ips {
+		if len(ip) > 52 {
+			return fmt.Errorf("%w: ips=%d, len=%d", ErrIdentityPreimageTooBig, i, len(ip))
 		}
 	}
 
 	return nil
 }
 
-func (i IdentityPreimages) HashSSZ() ([32]byte, error) {
-	if err := i.Validate(); err != nil {
+func (ips IdentityPreimages) HashSSZ() ([32]byte, error) {
+	if err := ips.Validate(); err != nil {
 		return [32]byte{}, err
 	}
 
-	schema := make([]interface{}, len(i))
-	for i, identityPreimage := range i {
-		schema[i] = identityPreimage
+	schema := make([]interface{}, len(ips))
+	for i, ip := range ips {
+		schema[i] = []byte(ip)
 	}
 
 	return merkletree.HashTreeRoot(schema...)
 }
 
 type DecryptionKeysSignatureData struct {
-	InstanceID        uint64
-	Eon               uint64
+	InstanceId        uint64
+	Eon               EonIndex
 	Slot              uint64
-	TxPointer         uint64
+	TxnPointer        uint64
 	IdentityPreimages IdentityPreimages
 }
 
 func (d DecryptionKeysSignatureData) HashSSZ() ([32]byte, error) {
-	r, err := merkletree.HashTreeRoot(d.InstanceID, d.Eon, d.Slot, d.TxPointer, d.IdentityPreimages)
+	r, err := merkletree.HashTreeRoot(d.InstanceId, uint64(d.Eon), d.Slot, d.TxnPointer, d.IdentityPreimages)
 	if err != nil {
 		return [32]byte{}, fmt.Errorf("%w: slot=%d, eon=%d", err, d.Slot, d.Eon)
 	}
@@ -94,7 +94,7 @@ func (d DecryptionKeysSignatureData) Verify(signature []byte, address libcommon.
 		return false, err
 	}
 
-	pubKey, err := crypto.SigToPub(signature, h[:])
+	pubKey, err := crypto.SigToPub(h[:], signature)
 	if err != nil {
 		return false, err
 	}

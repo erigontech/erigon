@@ -1,11 +1,28 @@
+// Copyright 2025 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package testhelpers
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"math/big"
-	mathrand "math/rand"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -37,12 +54,10 @@ func (ekg EonKeyGeneration) Eon() shutter.Eon {
 	}
 }
 
-func (ekg EonKeyGeneration) DecryptionKeys(slot uint64, ips ...shutter.IdentityPreimage) []*proto.Key {
-	slotIp := makeSlotIdentityPreimage(slot)
-	allIps := append([]shutter.IdentityPreimage{slotIp}, ips...)
-	keys := make([]*proto.Key, len(allIps))
-	for i, ip := range allIps {
-		epochSecretKey := ekg.EpochSecretKey(ip)
+func (ekg EonKeyGeneration) DecryptionKeys(t *testing.T, signers []Keyper, ips []shutter.IdentityPreimage) []*proto.Key {
+	keys := make([]*proto.Key, len(ips))
+	for i, ip := range ips {
+		epochSecretKey := ekg.EpochSecretKey(t, signers, ip)
 		keys[i] = &proto.Key{
 			IdentityPreimage: ip,
 			Key:              epochSecretKey.Marshal(),
@@ -52,23 +67,16 @@ func (ekg EonKeyGeneration) DecryptionKeys(slot uint64, ips ...shutter.IdentityP
 	return keys
 }
 
-func (ekg EonKeyGeneration) EpochSecretKey(ip shutter.IdentityPreimage) *shuttercrypto.EpochSecretKey {
-	keypers := make([]Keyper, len(ekg.Keypers))
-	copy(keypers, ekg.Keypers)
-	mathrand.Shuffle(int(ekg.Threshold), func(i, j int) { keypers[i], keypers[j] = keypers[j], keypers[i] })
-	keypers = keypers[:ekg.Threshold]
-	epochSecretKeyShares := make([]*shuttercrypto.EpochSecretKeyShare, len(keypers))
-	keyperIndices := make([]int, len(keypers))
-	for i, keyper := range keypers {
+func (ekg EonKeyGeneration) EpochSecretKey(t *testing.T, signers []Keyper, ip shutter.IdentityPreimage) *shuttercrypto.EpochSecretKey {
+	epochSecretKeyShares := make([]*shuttercrypto.EpochSecretKeyShare, len(signers))
+	keyperIndices := make([]int, len(signers))
+	for i, keyper := range signers {
 		keyperIndices[i] = keyper.Index
 		epochSecretKeyShares[i] = keyper.EpochSecretKeyShare(ip)
 	}
 
 	epochSecretKey, err := shuttercrypto.ComputeEpochSecretKey(keyperIndices, epochSecretKeyShares, ekg.Threshold)
-	if err != nil {
-		panic(err)
-	}
-
+	require.NoError(t, err)
 	return epochSecretKey
 }
 
@@ -92,17 +100,13 @@ func (k Keyper) EpochSecretKeyShare(ip shutter.IdentityPreimage) *shuttercrypto.
 	return shuttercrypto.ComputeEpochSecretKeyShare(k.EonSecretKeyShare, id)
 }
 
-func MockEonKeyGeneration() EonKeyGeneration {
-	threshold := uint64(2)
-	numKeypers := uint64(3)
+func MockEonKeyGeneration(t *testing.T, idx shutter.EonIndex, threshold, numKeypers uint64) EonKeyGeneration {
 	keypers := make([]Keyper, numKeypers)
 	polynomials := make([]*shuttercrypto.Polynomial, numKeypers)
 	gammas := make([]*shuttercrypto.Gammas, numKeypers)
 	for i := 0; i < int(numKeypers); i++ {
 		polynomial, err := shuttercrypto.RandomPolynomial(rand.Reader, threshold-1)
-		if err != nil {
-			panic(err)
-		}
+		require.NoError(t, err)
 
 		polynomials[i] = polynomial
 		gammas[i] = polynomial.Gammas()
@@ -110,9 +114,7 @@ func MockEonKeyGeneration() EonKeyGeneration {
 
 	for i := 0; i < int(numKeypers); i++ {
 		privKey, err := crypto.GenerateKey()
-		if err != nil {
-			panic(err)
-		}
+		require.NoError(t, err)
 
 		keyperX := shuttercrypto.KeyperX(i)
 		polynomialEvals := make([]*big.Int, numKeypers)
@@ -129,20 +131,10 @@ func MockEonKeyGeneration() EonKeyGeneration {
 	}
 
 	return EonKeyGeneration{
-		EonIndex:        shutter.EonIndex(78),
+		EonIndex:        idx,
 		ActivationBlock: 32123,
 		Threshold:       threshold,
 		Keypers:         keypers,
 		EonPublicKey:    shuttercrypto.ComputeEonPublicKey(gammas),
 	}
-}
-
-func makeSlotIdentityPreimage(slot uint64) shutter.IdentityPreimage {
-	// 32 bytes of zeros plus the block number as 20 byte big endian (ie starting with lots of
-	// zeros as well). This ensures the block identity preimage is always alphanumerically before
-	// any transaction identity preimages, because sender addresses cannot be that small.
-	var buf bytes.Buffer
-	buf.Write(libcommon.BigToHash(libcommon.Big0).Bytes())
-	buf.Write(libcommon.BigToHash(new(big.Int).SetUint64(slot)).Bytes()[12:])
-	return buf.Bytes()
 }
