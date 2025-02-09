@@ -34,13 +34,16 @@ var Command = cli.Command{
 	Description: ``,
 }
 
+type HashJson struct {
+	BlkHash common.Hash `json:"hash"`
+}
+
 type BlockJson struct {
 	types.Header
 
 	Uncles       []*types.Header          `json:"uncles"`
 	Withdrawals  types.Withdrawals        `json:"withdrawals"`
 	Transactions []map[string]interface{} `json:"transactions"`
-	BlockHash    common.Hash              `json:"blockHash"`
 }
 
 func convertHexToBigInt(hex string) *big.Int {
@@ -329,6 +332,11 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int) (*types.Block, e
 	if err != nil {
 		return nil, err
 	}
+	var h HashJson
+	err = client.CallContext(context.Background(), &h, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), false)
+	if err != nil {
+		return nil, err
+	}
 	txs, err := unMarshalTransactions(block.Transactions)
 	if err != nil {
 		return nil, err
@@ -339,8 +347,8 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int) (*types.Block, e
 		Withdrawals:  block.Withdrawals,
 	})
 
-	if blk.Hash() != block.BlockHash {
-		return nil, fmt.Errorf("block hash mismatch, expected %s, got %s. num=%d", blk.Hash(), block.BlockHash, blockNumber)
+	if blk.Hash() != h.BlkHash {
+		return nil, fmt.Errorf("block hash mismatch, expected %s, got %s. num=%d", blk.Hash(), h.BlkHash, blockNumber)
 	}
 	return blk, nil
 }
@@ -375,10 +383,11 @@ func genFromRPc(cliCtx *cli.Context) error {
 		return err
 	}
 	fmt.Println("received", blk.NumberU64(), blk.Hash())
+	var blockNumber big.Int
 	// Loop through last 10 blocks
 	for i := uint64(0); i < latestBlock.Uint64(); i++ {
-		blockNumber := new(big.Int).Sub(latestBlock, big.NewInt(int64(i)))
-		block, err := getBlockByNumber(client, blockNumber)
+		blockNumber.SetInt64(int64(i))
+		block, err := getBlockByNumber(client, &blockNumber)
 		if err != nil {
 			log.Error("Error fetching block", "blockNumber", blockNumber, "err", err)
 			return err
