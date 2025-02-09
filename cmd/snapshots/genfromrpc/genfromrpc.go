@@ -40,6 +40,7 @@ type BlockJson struct {
 	Uncles       []*types.Header          `json:"uncles"`
 	Withdrawals  types.Withdrawals        `json:"withdrawals"`
 	Transactions []map[string]interface{} `json:"transactions"`
+	BlockHash    common.Hash              `json:"blockHash"`
 }
 
 func convertHexToBigInt(hex string) *big.Int {
@@ -332,12 +333,16 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int) (*types.Block, e
 	if err != nil {
 		return nil, err
 	}
-
-	return types.NewBlockFromNetwork(&block.Header, &types.Body{
+	blk := types.NewBlockFromNetwork(&block.Header, &types.Body{
 		Transactions: txs,
 		Uncles:       block.Uncles,
 		Withdrawals:  block.Withdrawals,
-	}), nil
+	})
+
+	if blk.Hash() != block.BlockHash {
+		return nil, fmt.Errorf("block hash mismatch, expected %s, got %s. num=%d", blk.Hash(), block.BlockHash, blockNumber)
+	}
+	return blk, nil
 }
 
 func genFromRPc(cliCtx *cli.Context) error {
