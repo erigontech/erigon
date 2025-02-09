@@ -114,10 +114,11 @@ func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]interface{}) *types
 	return legacyTx
 }
 
-func decodeAccessList(rawAccessList []map[string]interface{}) types.AccessList {
+func decodeAccessList(rawAccessList []interface{}) types.AccessList {
 	var accessList types.AccessList
-	for _, rawSlot := range rawAccessList {
+	for _, rawSlotInterface := range rawAccessList {
 		accessTuple := types.AccessTuple{}
+		rawSlot := rawSlotInterface.(map[string]interface{})
 		addressStr := rawSlot["address"].(string)
 		accessTuple.Address = common.HexToAddress(addressStr)
 		storageKeys := rawSlot["storageKeys"].([]string)
@@ -191,7 +192,7 @@ func makeEip1559Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) *type
 		tx.ChainID = new(uint256.Int)
 		tx.ChainID.SetFromBig(convertHexToBigInt(chainIdStr))
 	}
-	tx.AccessList = decodeAccessList(rawTx["accessList"].([]map[string]interface{}))
+	tx.AccessList = decodeAccessList(rawTx["accessList"].([]interface{}))
 	if okTip {
 		tx.Tip = new(uint256.Int)
 		tx.Tip.SetFromBig(convertHexToBigInt(tip))
