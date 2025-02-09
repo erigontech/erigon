@@ -287,6 +287,7 @@ func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) *type
 
 func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions, error) {
 	var txs types.Transactions
+	fmt.Println(len(rawTxs))
 	for _, rawTx := range rawTxs {
 		var tx types.Transaction
 		status := rawTx["status"].(string)
