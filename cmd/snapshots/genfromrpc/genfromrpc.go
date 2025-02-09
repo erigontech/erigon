@@ -53,11 +53,8 @@ var Command = cli.Command{
 	Description: ``,
 }
 
-type HashJson struct {
-	BlkHash common.Hash `json:"hash"`
-}
-
 type BlockJson struct {
+	BlkHash     common.Hash      `json:"hash"`
 	ParentHash  common.Hash      `json:"parentHash"       gencodec:"required"`
 	UncleHash   common.Hash      `json:"sha3Uncles"       gencodec:"required"`
 	Coinbase    common.Address   `json:"miner"`
@@ -381,25 +378,45 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 	if err != nil {
 		return nil, err
 	}
-	var h HashJson
-	if verify {
-		err = client.CallContext(context.Background(), &h, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), false)
-		if err != nil {
-			return nil, err
-		}
-	}
+
 	txs, err := unMarshalTransactions(block.Transactions)
 	if err != nil {
 		return nil, err
 	}
 	block.TxHash = types.DeriveSha(txs)
-	blk := types.NewBlockFromNetwork(&block.Header, &types.Body{
+	blk := types.NewBlockFromNetwork(&types.Header{
+		ParentHash:  block.ParentHash,
+		UncleHash:   block.UncleHash,
+		Coinbase:    block.Coinbase,
+		Root:        block.Root,
+		TxHash:      block.TxHash,
+		ReceiptHash: block.ReceiptHash,
+		Bloom:       block.Bloom,
+		Difficulty:  block.Difficulty,
+		Number:      block.Number,
+		GasLimit:    block.GasLimit,
+		GasUsed:     block.GasUsed,
+		Time:        block.Time,
+		Extra:       block.Extra,
+		MixDigest:   block.MixDigest,
+		Nonce:       block.Nonce,
+		// AuRa extensions (alternative to MixDigest & Nonce)
+		AuRaStep:        block.AuRaStep,
+		AuRaSeal:        block.AuRaSeal,
+		BaseFee:         block.BaseFee,
+		WithdrawalsHash: block.WithdrawalsHash,
+		// BlobGasUsed & ExcessBlobGas were added by EIP-4844 and are ignored in legacy headers.
+		BlobGasUsed:           block.BlobGasUsed,
+		ExcessBlobGas:         block.ExcessBlobGas,
+		ParentBeaconBlockRoot: block.ParentBeaconBlockRoot,
+		RequestsHash:          block.RequestsHash,
+	}, &types.Body{
 		Transactions: txs,
 		Uncles:       block.Uncles,
 		Withdrawals:  block.Withdrawals,
 	})
 	if verify {
-		if blk.Hash() != h.BlkHash {
+		if blk.Hash() != block.BlkHash {
 			return nil, fmt.Errorf("block hash mismatch, expected %s, got %s. num=%d", blk.Hash(), h.BlkHash, blockNumber)
 		}
 	}
