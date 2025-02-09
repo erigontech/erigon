@@ -2,6 +2,7 @@ package genfromrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+// CLI flags
 var RpcAddr = cli.StringFlag{
 	Name:     "rpcaddr",
 	Usage:    `Rpc address to scrape`,
@@ -40,21 +42,14 @@ var FromBlock = cli.Uint64Flag{
 }
 
 var Command = cli.Command{
-	Action: func(cliCtx *cli.Context) error {
-		return genFromRPc(cliCtx)
-	},
-	Name:  "genfromrpc",
-	Usage: "genfromrpc utilities",
-	Flags: []cli.Flag{
-		&utils.DataDirFlag,
-		//&utils.ChainFlag,
-		&RpcAddr,
-		&Verify,
-		&FromBlock,
-	},
+	Action:      func(cliCtx *cli.Context) error { return genFromRPc(cliCtx) },
+	Name:        "genfromrpc",
+	Usage:       "genfromrpc utilities",
+	Flags:       []cli.Flag{&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock},
 	Description: ``,
 }
 
+// BlockJson is the JSON representation of a block returned from the RPC.
 type BlockJson struct {
 	BlkHash     common.Hash      `json:"hash"`
 	ParentHash  common.Hash      `json:"parentHash"       gencodec:"required"`
@@ -73,305 +68,230 @@ type BlockJson struct {
 	MixDigest   common.Hash      `json:"mixHash"` // prevRandao after EIP-4399
 	Nonce       types.BlockNonce `json:"nonce"`
 
-	BaseFee         *hexutil.Big `json:"baseFeePerGas"`   // EIP-1559
-	WithdrawalsHash *common.Hash `json:"withdrawalsRoot"` // EIP-4895
-
-	// BlobGasUsed & ExcessBlobGas were added by EIP-4844 and are ignored in legacy headers.
-	BlobGasUsed   *hexutil.Uint64 `json:"blobGasUsed"`
-	ExcessBlobGas *hexutil.Uint64 `json:"excessBlobGas"`
+	BaseFee         *hexutil.Big    `json:"baseFeePerGas"`   // EIP-1559
+	WithdrawalsHash *common.Hash    `json:"withdrawalsRoot"` // EIP-4895
+	BlobGasUsed     *hexutil.Uint64 `json:"blobGasUsed"`
+	ExcessBlobGas   *hexutil.Uint64 `json:"excessBlobGas"`
 
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
-
-	RequestsHash *common.Hash `json:"requestsHash"` // EIP-7685
+	RequestsHash          *common.Hash `json:"requestsHash"`          // EIP-7685
 
 	Uncles       []*types.Header          `json:"uncles"`
 	Withdrawals  types.Withdrawals        `json:"withdrawals"`
 	Transactions []map[string]interface{} `json:"transactions"`
 }
 
-func convertHexToBigInt(hex string) *big.Int {
-	bigInt := new(big.Int)
-	bigInt.SetString(hex[2:], 16)
-	return bigInt
+// --- Helper functions ---
+
+// convertHexToBigInt converts a hex string (with a "0x" prefix) to a *big.Int.
+func convertHexToBigInt(hexStr string) *big.Int {
+	bi := new(big.Int)
+	// Assumes hexStr starts with "0x"
+	bi.SetString(hexStr[2:], 16)
+	return bi
 }
 
-func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]interface{}) *types.LegacyTx {
-	legacyTx := &types.LegacyTx{CommonTx: types.CommonTx{
-		Nonce: commonTx.Nonce,
-		Gas:   commonTx.Gas,
-		To:    commonTx.To,
-		Value: commonTx.Value,
-		Data:  commonTx.Data,
-		V:     commonTx.V,
-		R:     commonTx.R,
-		S:     commonTx.S,
-	}}
-	gasPriceStr := rawTx["gasPrice"].(string)
-
-	legacyTx.GasPrice = new(uint256.Int)
-	legacyTx.GasPrice.SetFromBig(convertHexToBigInt(gasPriceStr))
-	return legacyTx
+// getUint256FromField returns a *uint256.Int from the rawTx field if present.
+func getUint256FromField(rawTx map[string]interface{}, field string) *uint256.Int {
+	if val, ok := rawTx[field].(string); ok {
+		i := new(uint256.Int)
+		i.SetFromBig(convertHexToBigInt(val))
+		return i
+	}
+	return nil
 }
 
+// buildDynamicFeeFields sets the common dynamic fee fields from rawTx.
+func buildDynamicFeeFields(tx *types.DynamicFeeTransaction, rawTx map[string]interface{}) {
+	if chainID := getUint256FromField(rawTx, "chainId"); chainID != nil {
+		tx.ChainID = chainID
+	}
+	if accessListRaw, ok := rawTx["accessList"].([]interface{}); ok {
+		tx.AccessList = decodeAccessList(accessListRaw)
+	}
+	if tip := getUint256FromField(rawTx, "maxPriorityFeePerGas"); tip != nil {
+		tx.Tip = tip
+	}
+	if feeCap := getUint256FromField(rawTx, "maxFeePerGas"); feeCap != nil {
+		tx.FeeCap = feeCap
+	}
+}
+
+// parseCommonTx extracts the shared fields from a raw transaction into a CommonTx.
+func parseCommonTx(rawTx map[string]interface{}) (*types.CommonTx, error) {
+	var commonTx types.CommonTx
+
+	nonceStr, ok := rawTx["nonce"].(string)
+	if !ok {
+		return nil, errors.New("missing nonce")
+	}
+	commonTx.Nonce = convertHexToBigInt(nonceStr).Uint64()
+
+	gasStr, ok := rawTx["gas"].(string)
+	if !ok {
+		return nil, errors.New("missing gas")
+	}
+	commonTx.Gas = convertHexToBigInt(gasStr).Uint64()
+
+	if toStr, ok := rawTx["to"].(string); ok && toStr != "" {
+		addr := common.HexToAddress(toStr)
+		commonTx.To = &addr
+	}
+	if valueStr, ok := rawTx["value"].(string); ok {
+		commonTx.Value = new(uint256.Int)
+		commonTx.Value.SetFromBig(convertHexToBigInt(valueStr))
+	}
+	if inputStr, ok := rawTx["input"].(string); ok && len(inputStr) >= 2 && inputStr[:2] == "0x" {
+		commonTx.Data = common.Hex2Bytes(inputStr[2:])
+	}
+	if vStr, ok := rawTx["v"].(string); ok {
+		commonTx.V.SetFromBig(convertHexToBigInt(vStr))
+	}
+	if rStr, ok := rawTx["r"].(string); ok {
+		commonTx.R.SetFromBig(convertHexToBigInt(rStr))
+	}
+	if sStr, ok := rawTx["s"].(string); ok {
+		commonTx.S.SetFromBig(convertHexToBigInt(sStr))
+	}
+	return &commonTx, nil
+}
+
+// decodeAccessList converts a raw access list (slice of interface{}) into types.AccessList.
 func decodeAccessList(rawAccessList []interface{}) types.AccessList {
 	var accessList types.AccessList
 	for _, rawSlotInterface := range rawAccessList {
-		accessTuple := types.AccessTuple{}
-		rawSlot := rawSlotInterface.(map[string]interface{})
-		addressStr := rawSlot["address"].(string)
-		accessTuple.Address = common.HexToAddress(addressStr)
-		storageKeys := rawSlot["storageKeys"].([]interface{})
-		for _, keyStr := range storageKeys {
-			key := common.HexToHash(keyStr.(string))
-			accessTuple.StorageKeys = append(accessTuple.StorageKeys, key)
+		slot, ok := rawSlotInterface.(map[string]interface{})
+		if !ok {
+			continue
 		}
-		accessList = append(accessList, accessTuple)
+		tuple := types.AccessTuple{}
+		if addrStr, ok := slot["address"].(string); ok {
+			tuple.Address = common.HexToAddress(addrStr)
+		}
+		if storageKeys, ok := slot["storageKeys"].([]interface{}); ok {
+			for _, keyIface := range storageKeys {
+				if keyStr, ok := keyIface.(string); ok {
+					tuple.StorageKeys = append(tuple.StorageKeys, common.HexToHash(keyStr))
+				}
+			}
+		}
+		accessList = append(accessList, tuple)
 	}
 	return accessList
 }
 
-func makeAccessListTx(commonTx *types.CommonTx, rawTx map[string]interface{}) *types.AccessListTx {
-	var (
-		gasPriceStr, ok       = rawTx["gasPrice"].(string)
-		chainIdStr, okChainId = rawTx["chainId"].(string)
-	)
-	var gasPrice *uint256.Int
-	if ok {
-		gasPrice = new(uint256.Int)
-		gasPrice.SetFromBig(convertHexToBigInt(gasPriceStr))
-	}
-
-	accessListTx := &types.AccessListTx{LegacyTx: types.LegacyTx{
-		CommonTx: types.CommonTx{
-			Nonce: commonTx.Nonce,
-			Gas:   commonTx.Gas,
-			To:    commonTx.To,
-			Value: commonTx.Value,
-			Data:  commonTx.Data,
-			V:     commonTx.V,
-			R:     commonTx.R,
-			S:     commonTx.S,
-		},
-		GasPrice: gasPrice,
-	}}
-	if okChainId {
-		accessListTx.ChainID = new(uint256.Int)
-		accessListTx.ChainID.SetFromBig(convertHexToBigInt(chainIdStr))
-	}
-	accessListTx.AccessList = decodeAccessList(rawTx["accessList"].([]interface{}))
-	return accessListTx
-}
-
-func makeEip1559Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) *types.DynamicFeeTransaction {
-	var (
-		gasPriceStr, ok       = rawTx["gasPrice"].(string)
-		chainIdStr, okChainId = rawTx["chainId"].(string)
-		tip, okTip            = rawTx["maxPriorityFeePerGas"].(string)
-		feeCap, okFeeCap      = rawTx["maxFeePerGas"].(string)
-	)
-	var gasPrice *uint256.Int
-	if ok {
-		gasPrice = new(uint256.Int)
-		gasPrice.SetFromBig(convertHexToBigInt(gasPriceStr))
-	}
-
-	tx := &types.DynamicFeeTransaction{
-		CommonTx: types.CommonTx{
-			Nonce: commonTx.Nonce,
-			Gas:   commonTx.Gas,
-			To:    commonTx.To,
-			Value: commonTx.Value,
-			Data:  commonTx.Data,
-			V:     commonTx.V,
-			R:     commonTx.R,
-			S:     commonTx.S,
-		},
-	}
-	if okChainId {
-		tx.ChainID = new(uint256.Int)
-		tx.ChainID.SetFromBig(convertHexToBigInt(chainIdStr))
-	}
-	tx.AccessList = decodeAccessList(rawTx["accessList"].([]interface{}))
-	if okTip {
-		tx.Tip = new(uint256.Int)
-		tx.Tip.SetFromBig(convertHexToBigInt(tip))
-	}
-	if okFeeCap {
-		tx.FeeCap = new(uint256.Int)
-		tx.FeeCap.SetFromBig(convertHexToBigInt(feeCap))
-	}
-
-	return tx
-}
-
+// decodeBlobVersionedHashes converts a slice of hex strings to a slice of common.Hash.
 func decodeBlobVersionedHashes(rawVersionedHashes []string) []common.Hash {
-	var versionedHashes []common.Hash
-	for _, hashStr := range rawVersionedHashes {
-		hash := common.HexToHash(hashStr)
-		versionedHashes = append(versionedHashes, hash)
+	var hashes []common.Hash
+	for _, s := range rawVersionedHashes {
+		hashes = append(hashes, common.HexToHash(s))
 	}
-	return versionedHashes
+	return hashes
 }
 
-func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) *types.BlobTx {
-	var (
-		gasPriceStr, ok                      = rawTx["gasPrice"].(string)
-		chainIdStr, okChainId                = rawTx["chainId"].(string)
-		tip, okTip                           = rawTx["maxPriorityFeePerGas"].(string)
-		feeCap, okFeeCap                     = rawTx["maxFeePerGas"].(string)
-		maxFeePerBlobGas, okMaxFeePerBlobGas = rawTx["maxFeePerBlobGas"].(string)
-	)
-	var gasPrice *uint256.Int
-	if ok {
-		gasPrice = new(uint256.Int)
-		gasPrice.SetFromBig(convertHexToBigInt(gasPriceStr))
-	}
+// --- Transaction builders ---
 
-	tx := &types.BlobTx{
-		DynamicFeeTransaction: types.DynamicFeeTransaction{
-			CommonTx: types.CommonTx{
-				Nonce: commonTx.Nonce,
-				Gas:   commonTx.Gas,
-				To:    commonTx.To,
-				Value: commonTx.Value,
-				Data:  commonTx.Data,
-				V:     commonTx.V,
-				R:     commonTx.R,
-				S:     commonTx.S,
-			},
-		},
+// makeLegacyTx builds a legacy transaction.
+func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+	tx := &types.LegacyTx{
+		CommonTx: *commonTx,
+		GasPrice: getUint256FromField(rawTx, "gasPrice"),
 	}
-	if okChainId {
-		tx.ChainID = new(uint256.Int)
-		tx.ChainID.SetFromBig(convertHexToBigInt(chainIdStr))
-	}
-	tx.AccessList = decodeAccessList(rawTx["accessList"].([]interface{}))
-	if okTip {
-		tx.Tip = new(uint256.Int)
-		tx.Tip.SetFromBig(convertHexToBigInt(tip))
-	}
-	if okFeeCap {
-		tx.FeeCap = new(uint256.Int)
-		tx.FeeCap.SetFromBig(convertHexToBigInt(feeCap))
-	}
-	if okMaxFeePerBlobGas {
-		tx.MaxFeePerBlobGas = new(uint256.Int)
-		tx.MaxFeePerBlobGas.SetFromBig(convertHexToBigInt(maxFeePerBlobGas))
-	}
-	tx.BlobVersionedHashes = decodeBlobVersionedHashes(rawTx["blobVersionedHashes"].([]string))
 	return tx
 }
 
-func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) *types.SetCodeTransaction {
-	var (
-		gasPriceStr, ok       = rawTx["gasPrice"].(string)
-		chainIdStr, okChainId = rawTx["chainId"].(string)
-		tip, okTip            = rawTx["maxPriorityFeePerGas"].(string)
-		feeCap, okFeeCap      = rawTx["maxFeePerGas"].(string)
-	)
-	var gasPrice *uint256.Int
-	if ok {
-		gasPrice = new(uint256.Int)
-		gasPrice.SetFromBig(convertHexToBigInt(gasPriceStr))
+// makeAccessListTx builds an access-list transaction.
+func makeAccessListTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+	tx := &types.AccessListTx{
+		LegacyTx: types.LegacyTx{
+			CommonTx: *commonTx,
+			GasPrice: getUint256FromField(rawTx, "gasPrice"),
+		},
 	}
+	if chainID := getUint256FromField(rawTx, "chainId"); chainID != nil {
+		tx.ChainID = chainID
+	}
+	if accessListRaw, ok := rawTx["accessList"].([]interface{}); ok {
+		tx.AccessList = decodeAccessList(accessListRaw)
+	}
+	return tx
+}
 
+// makeEip1559Tx builds an EIP-1559 dynamic fee transaction.
+func makeEip1559Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+	tx := &types.DynamicFeeTransaction{CommonTx: *commonTx}
+	buildDynamicFeeFields(tx, rawTx)
+	return tx
+}
+
+// makeEip4844Tx builds an EIP-4844 blob transaction.
+func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+	blobTx := &types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: *commonTx},
+	}
+	buildDynamicFeeFields(&blobTx.DynamicFeeTransaction, rawTx)
+	blobTx.MaxFeePerBlobGas = getUint256FromField(rawTx, "maxFeePerBlobGas")
+	// The raw JSON is expected to contain a slice of strings.
+	if rawHashes, ok := rawTx["blobVersionedHashes"].([]interface{}); ok {
+		var hashStrs []string
+		for _, h := range rawHashes {
+			if s, ok := h.(string); ok {
+				hashStrs = append(hashStrs, s)
+			}
+		}
+		blobTx.BlobVersionedHashes = decodeBlobVersionedHashes(hashStrs)
+	}
+	return blobTx
+}
+
+// makeEip7702Tx builds an EIP-7702 transaction.
+// (Implementation details remain to be determined.)
+func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
 	tx := &types.SetCodeTransaction{
-		DynamicFeeTransaction: types.DynamicFeeTransaction{
-			CommonTx: types.CommonTx{
-				Nonce: commonTx.Nonce,
-				Gas:   commonTx.Gas,
-				To:    commonTx.To,
-				Value: commonTx.Value,
-				Data:  commonTx.Data,
-				V:     commonTx.V,
-				R:     commonTx.R,
-				S:     commonTx.S,
-			},
-		},
+		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: *commonTx},
 	}
-
-	if okChainId {
-		tx.ChainID = new(uint256.Int)
-		tx.ChainID.SetFromBig(convertHexToBigInt(chainIdStr))
-	}
-	tx.AccessList = decodeAccessList(rawTx["accessList"].([]interface{}))
-	if okTip {
-		tx.Tip = new(uint256.Int)
-		tx.Tip.SetFromBig(convertHexToBigInt(tip))
-	}
-	if okFeeCap {
-		tx.FeeCap = new(uint256.Int)
-		tx.FeeCap.SetFromBig(convertHexToBigInt(feeCap))
-	}
-
-	panic("not sure how to implement")
-
+	buildDynamicFeeFields(&tx.DynamicFeeTransaction, rawTx)
+	// TODO: Add any additional EIP-7702–specific processing here.
 	return tx
 }
 
+// unMarshalTransactions decodes a slice of raw transactions into types.Transactions.
 func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions, error) {
 	var txs types.Transactions
 
 	for _, rawTx := range rawTxs {
+		commonTx, err := parseCommonTx(rawTx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse common fields: %w", err)
+		}
+
 		var tx types.Transaction
-		typeTx := rawTx["type"].(string)
-
-		// each field is an hex string
-		var (
-			nonceStr          = rawTx["nonce"].(string)
-			gasStr            = rawTx["gas"].(string)
-			toStr, okTo       = rawTx["to"].(string)
-			valueStr, okValue = rawTx["value"].(string)
-			inputStr          = rawTx["input"].(string)
-			vStr, okV         = rawTx["v"].(string)
-			rStr, okR         = rawTx["r"].(string)
-			sStr, okS         = rawTx["s"].(string)
-		)
-
-		commonTx := types.CommonTx{}
-		commonTx.Nonce = convertHexToBigInt(nonceStr).Uint64()
-		commonTx.Gas = convertHexToBigInt(gasStr).Uint64()
-		if okTo {
-			commonTx.To = new(common.Address)
-			*commonTx.To = common.HexToAddress(toStr)
-		}
-		if okValue {
-			commonTx.Value = new(uint256.Int)
-		}
-		commonTx.Value.SetFromBig(convertHexToBigInt(valueStr))
-		if len(inputStr) > 0 && inputStr[0] == '0' && inputStr[1] == 'x' {
-			commonTx.Data = common.Hex2Bytes(inputStr[2:])
-		}
-		if okV {
-			commonTx.V.SetFromBig(convertHexToBigInt(vStr))
-		}
-		if okR {
-			commonTx.R.SetFromBig(convertHexToBigInt(rStr))
-		}
-		if okS {
-			commonTx.S.SetFromBig(convertHexToBigInt(sStr))
+		// Determine the transaction type based on the "type" field.
+		typeTx, ok := rawTx["type"].(string)
+		if !ok {
+			return nil, errors.New("missing tx type")
 		}
 
 		switch typeTx {
-		case "0x0": // legacy
-			tx = makeLegacyTx(&commonTx, rawTx)
-		case "0x1": // access list
-			tx = makeAccessListTx(&commonTx, rawTx)
-		case "0x2": // eip1559
-			tx = makeEip1559Tx(&commonTx, rawTx)
-		case "0x3": // eip4844
-			tx = makeEip4844Tx(&commonTx, rawTx)
-		case "0x4": // eip7702
-			tx = makeEip7702Tx(&commonTx, rawTx)
+		case "0x0": // Legacy
+			tx = makeLegacyTx(commonTx, rawTx)
+		case "0x1": // Access List
+			tx = makeAccessListTx(commonTx, rawTx)
+		case "0x2": // EIP-1559
+			tx = makeEip1559Tx(commonTx, rawTx)
+		case "0x3": // EIP-4844
+			tx = makeEip4844Tx(commonTx, rawTx)
+		case "0x4": // EIP-7702
+			tx = makeEip7702Tx(commonTx, rawTx)
 		default:
-			panic("unknown tx type")
+			return nil, fmt.Errorf("unknown tx type: %s", typeTx)
 		}
 		txs = append(txs, tx)
 	}
 	return txs, nil
 }
 
-// Obtain block by number and decode it from json
+// getBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
 func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
 	var block BlockJson
 	err := client.CallContext(context.Background(), &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
@@ -383,6 +303,8 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 	if err != nil {
 		return nil, err
 	}
+
+	// Derive the TxHash from the decoded transactions.
 	block.TxHash = types.DeriveSha(txs)
 	blk := types.NewBlockFromNetwork(&types.Header{
 		ParentHash:      block.ParentHash,
@@ -402,9 +324,9 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 		Nonce:           block.Nonce,
 		BaseFee:         (*big.Int)(block.BaseFee),
 		WithdrawalsHash: block.WithdrawalsHash,
-		// BlobGasUsed & ExcessBlobGas were added by EIP-4844 and are ignored in legacy headers.
-		BlobGasUsed:           (*uint64)(block.BlobGasUsed),
-		ExcessBlobGas:         (*uint64)(block.ExcessBlobGas),
+		BlobGasUsed:     (*uint64)(block.BlobGasUsed),
+		ExcessBlobGas:   (*uint64)(block.ExcessBlobGas),
+		// Optional fields:
 		ParentBeaconBlockRoot: block.ParentBeaconBlockRoot,
 		RequestsHash:          block.RequestsHash,
 	}, &types.Body{
@@ -420,11 +342,14 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 	return blk, nil
 }
 
+// genFromRPc connects to the RPC, fetches blocks starting from the given block,
+// and writes them into the local database.
 func genFromRPc(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	jsonRpcAddr := cliCtx.String(RpcAddr.Name)
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(log.LvlInfo), log.StderrHandler))
-	// Connect to Arbitrum One RPC
+
+	// Connect to RPC.
 	client, err := rpc.Dial(jsonRpcAddr, log.Root())
 	if err != nil {
 		log.Warn("Error connecting to RPC", "err", err)
@@ -435,55 +360,55 @@ func genFromRPc(cliCtx *cli.Context) error {
 	db := mdbx.MustOpen(dirs.Chaindata)
 	defer db.Close()
 
-	// Query latest block number
+	// Query latest block number.
 	var latestBlockHex string
-	err = client.CallContext(context.Background(), &latestBlockHex, "eth_blockNumber")
-	if err != nil {
+	if err := client.CallContext(context.Background(), &latestBlockHex, "eth_blockNumber"); err != nil {
 		log.Warn("Error fetching latest block number", "err", err)
 		return err
 	}
-
-	// Convert block number from hex to integer
 	latestBlock := new(big.Int)
 	latestBlock.SetString(latestBlockHex[2:], 16)
 
 	var blockNumber big.Int
-	// Loop through last 10 blocks
-	for i := cliCtx.Uint64(FromBlock.Name); i < latestBlock.Uint64(); {
+	start := cliCtx.Uint64(FromBlock.Name)
+	// Process blocks from the starting block up to the latest.
+	for i := start; i < latestBlock.Uint64(); {
 		prev := i
 		prevTime := time.Now()
 		timer := time.NewTimer(40 * time.Second)
-		if err := db.Update(context.TODO(), func(tx kv.RwTx) error {
-			for blockNum := uint64(i); blockNum < latestBlock.Uint64(); blockNum++ {
+		err := db.Update(context.TODO(), func(tx kv.RwTx) error {
+			for blockNum := i; blockNum < latestBlock.Uint64(); blockNum++ {
 				blockNumber.SetUint64(blockNum)
-				block, err := getBlockByNumber(client, &blockNumber, verification)
+				blk, err := getBlockByNumber(client, &blockNumber, verification)
 				if err != nil {
-					return fmt.Errorf("Error fetching block %d: %w", blockNum, err)
+					return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 				}
-				if err := rawdb.WriteBlock(tx, block); err != nil {
-					return fmt.Errorf("Error writing block %d: %w", blockNum, err)
+				if err := rawdb.WriteBlock(tx, blk); err != nil {
+					return fmt.Errorf("error writing block %d: %w", blockNum, err)
 				}
-				if err := rawdb.WriteCanonicalHash(tx, block.Hash(), blockNumber.Uint64()); err != nil {
-					return fmt.Errorf("Error writing canonical hash %d: %w", blockNum, err)
+				if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+					return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
 				}
-				if blockNum > 0 {
-					i = blockNum - 1
-				}
+
+				// Update the progress counter.
+				i = blockNum + 1
+
 				select {
 				case <-timer.C:
-					// compute blk/s
 					blkSec := float64(blockNum-prev) / time.Since(prevTime).Seconds()
-					log.Info("Block processed", "block", blockNum, "hash", block.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec))
+					log.Info("Block processed", "block", blockNum, "hash", blk.Hash(), "blk/s", fmt.Sprintf("%.2f", blkSec))
 					return nil
 				default:
+					// continue processing without waiting
 				}
 			}
 			return nil
-		}); err != nil {
+		})
+		timer.Stop()
+		if err != nil {
 			log.Warn("Error updating db", "err", err)
 			return err
 		}
-		timer.Stop()
 	}
 	return nil
 }
