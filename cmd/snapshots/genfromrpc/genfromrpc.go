@@ -31,6 +31,12 @@ var Verify = cli.BoolFlag{
 	Value: true,
 }
 
+var FromBlock = cli.Uint64Flag{
+	Name:  "from",
+	Usage: "Block number to start from",
+	Value: 0,
+}
+
 var Command = cli.Command{
 	Action: func(cliCtx *cli.Context) error {
 		return genFromRPc(cliCtx)
@@ -42,6 +48,7 @@ var Command = cli.Command{
 		//&utils.ChainFlag,
 		&RpcAddr,
 		&Verify,
+		&FromBlock,
 	},
 	Description: ``,
 }
@@ -397,8 +404,8 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 	var blockNumber big.Int
 	// Loop through last 10 blocks
-	for i := uint64(0); i < latestBlock.Uint64(); {
-		timer := time.NewTimer(20 * time.Second)
+	for i := cliCtx.Uint64(FromBlock.Name); i < latestBlock.Uint64(); {
+		timer := time.NewTimer(40 * time.Second)
 		if err := db.Update(context.TODO(), func(tx kv.RwTx) error {
 			for blockNum := uint64(i); blockNum < latestBlock.Uint64(); blockNum++ {
 				blockNumber.SetUint64(blockNum)
