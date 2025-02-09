@@ -375,18 +375,16 @@ func genFromRPc(cliCtx *cli.Context) error {
 		return err
 	}
 	fmt.Println("received", blk.NumberU64(), blk.Hash())
-	return nil
 	// Loop through last 10 blocks
-	// for i := uint64(0); i < latestBlock.Uint64(); i++ {
-	// 	blockNumber := new(big.Int).Sub(latestBlock, big.NewInt(int64(i)))
-	// 	block, err := getBlockByNumber(client, blockNumber)
-	// 	if err != nil {
-	// 		log.Error("Error fetching block", "blockNumber", blockNumber, "err", err)
-	// 		return err
-	// 	}
+	for i := uint64(0); i < latestBlock.Uint64(); i++ {
+		blockNumber := new(big.Int).Sub(latestBlock, big.NewInt(int64(i)))
+		block, err := getBlockByNumber(client, blockNumber)
+		if err != nil {
+			log.Error("Error fetching block", "blockNumber", blockNumber, "err", err)
+			return err
+		}
 
-	// 	// Print block details
-	// 	blockJSON, _ := json.MarshalIndent(block, "", "  ")
-	// 	fmt.Println(string(blockJSON))
-	// }
+		fmt.Println("Block Number: , block Hash: ", block.NumberU64(), block.Hash())
+	}
+	return nil
 }
