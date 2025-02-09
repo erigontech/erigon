@@ -339,6 +339,7 @@ func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions,
 		default:
 			panic("unknown tx type")
 		}
+		fmt.Println(tx.Hash())
 		txs = append(txs, tx)
 	}
 	return txs, nil
