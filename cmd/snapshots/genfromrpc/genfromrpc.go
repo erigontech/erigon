@@ -110,7 +110,6 @@ func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]interface{}) *types
 
 	legacyTx.GasPrice = new(uint256.Int)
 	legacyTx.GasPrice.SetFromBig(convertHexToBigInt(gasPriceStr))
-	fmt.Println(legacyTx.GetData())
 	return legacyTx
 }
 
@@ -329,6 +328,7 @@ func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions,
 			sStr, okS         = rawTx["s"].(string)
 		)
 
+		fmt.Println(inputStr)
 		commonTx := types.CommonTx{}
 		commonTx.Nonce = convertHexToBigInt(nonceStr).Uint64()
 		commonTx.Gas = convertHexToBigInt(gasStr).Uint64()
