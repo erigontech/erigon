@@ -47,6 +47,7 @@ var (
 	ErrTooManyKeys              = errors.New("too many keys")
 	ErrIgnoreMsg                = errors.New("ignoring msg")
 	ErrInvalidSignature         = errors.New("invalid signature")
+	ErrInvalidKey               = errors.New("invalid key")
 	ErrSignersThresholdMismatch = errors.New("signers threshold mismatch")
 	ErrDuplicateSigners         = errors.New("duplicate signers")
 	ErrUnorderedSigners         = errors.New("unordered signers")
@@ -212,7 +213,8 @@ func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys, eon Eon
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("verification of eon secret key failed for identity %s", key.IdentityPreimage)
+			ip := IdentityPreimage(key.IdentityPreimage)
+			return fmt.Errorf("verification of eon secret key failed: %w: ip=%s", ErrInvalidKey, ip)
 		}
 	}
 

@@ -36,6 +36,7 @@ type EonKeyGeneration struct {
 	ActivationBlock uint64
 	Threshold       uint64
 	Keypers         []Keyper
+	MaliciousKeyper Keyper
 	EonPublicKey    *shuttercrypto.EonPublicKey
 }
 
@@ -130,11 +131,33 @@ func MockEonKeyGeneration(t *testing.T, idx shutter.EonIndex, threshold, numKeyp
 		}
 	}
 
+	eonPublicKey := shuttercrypto.ComputeEonPublicKey(gammas)
+
+	// generate 1 malicious keyper for last index
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	lastIdx := int(numKeypers - 1)
+	polynomials[lastIdx], err = shuttercrypto.RandomPolynomial(rand.Reader, threshold-1)
+	require.NoError(t, err)
+	gammas[lastIdx] = polynomials[lastIdx].Gammas()
+	keyperX := shuttercrypto.KeyperX(lastIdx)
+	polynomialEvals := make([]*big.Int, numKeypers)
+	for j := 0; j < int(numKeypers); j++ {
+		polynomialEvals[j] = polynomials[j].Eval(keyperX)
+	}
+	maliciousKeyper := Keyper{
+		Index:             lastIdx,
+		PrivateKey:        privKey,
+		EonSecretKeyShare: shuttercrypto.ComputeEonSecretKeyShare(polynomialEvals),
+		EonPublicKeyShare: shuttercrypto.ComputeEonPublicKeyShare(lastIdx, gammas),
+	}
+
 	return EonKeyGeneration{
 		EonIndex:        idx,
 		ActivationBlock: 32123,
 		Threshold:       threshold,
 		Keypers:         keypers,
-		EonPublicKey:    shuttercrypto.ComputeEonPublicKey(gammas),
+		MaliciousKeyper: maliciousKeyper,
+		EonPublicKey:    eonPublicKey,
 	}
 }

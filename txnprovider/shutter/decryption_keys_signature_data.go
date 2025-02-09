@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
 	merkletree "github.com/erigontech/erigon/cl/merkle_tree"
 )
@@ -32,6 +33,10 @@ var (
 )
 
 type IdentityPreimage []byte
+
+func (ip IdentityPreimage) String() string {
+	return hexutility.Encode(ip)
+}
 
 type IdentityPreimages []IdentityPreimage
 

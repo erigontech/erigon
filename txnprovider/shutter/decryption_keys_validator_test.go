@@ -36,6 +36,10 @@ func TestDecryptionKeysValidators(t *testing.T) {
 
 	instanceId := uint64(123)
 	maxNumKeysPerMessage := uint64(10)
+	config := shutter.Config{
+		InstanceId:           instanceId,
+		MaxNumKeysPerMessage: maxNumKeysPerMessage,
+	}
 	eonIndex := shutter.EonIndex(76)
 	threshold := uint64(2)
 	numKeypers := uint64(3)
@@ -55,15 +59,9 @@ func TestDecryptionKeysValidators(t *testing.T) {
 	signers := []testhelpers.Keyper{ekg.Keypers[signerIndices[0]], ekg.Keypers[signerIndices[1]]}
 	keys := ekg.DecryptionKeys(t, signers, ips)
 	sigs := testhelpers.Signatures(t, signers, sigData)
-	config := shutter.Config{
-		InstanceId:           instanceId,
-		MaxNumKeysPerMessage: maxNumKeysPerMessage,
-	}
-
-	//
-	// TODO add test cases for:
-	//        - try to break VerifyEpochSecretKey
-	//
+	maliciousSigners := []testhelpers.Keyper{ekg.Keypers[0], ekg.MaliciousKeyper}
+	maliciousKeys := ekg.DecryptionKeys(t, maliciousSigners, ips)
+	maliciousSigs := testhelpers.Signatures(t, maliciousSigners, sigData)
 
 	for _, baseAndExtendedTc := range []decryptionKeysValidationTestCase{
 		{
@@ -473,6 +471,31 @@ func TestDecryptionKeysValidators(t *testing.T) {
 				"rejecting decryption keys msg due to",
 				"invalid signature: i=0, slot=6336, eon=76",
 			},
+		},
+		{
+			name:   "invalid key",
+			config: config,
+			msg: testhelpers.MockDecryptionKeysMsg(
+				shutter.DecryptionKeysTopic,
+				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+					Version:       shutterproto.EnvelopeVersion,
+					InstanceId:    instanceId,
+					EonIndex:      eonIndex,
+					Keys:          maliciousKeys,
+					TxnPointer:    txnPointer,
+					Slot:          slot,
+					SignerIndices: signerIndices,
+					Signatures:    maliciousSigs,
+				}),
+			),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: eon, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{Eon: eon, Ok: true}),
+			),
+			wantErr:               shutter.ErrInvalidKey,
+			wantValidationResult:  pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{"rejecting decryption keys msg due to", "invalid key: ip=0x"},
 		},
 		{
 			name:   "accept valid msg",
