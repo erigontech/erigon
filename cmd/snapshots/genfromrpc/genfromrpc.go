@@ -362,6 +362,7 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 	if err != nil {
 		return nil, err
 	}
+	block.TxHash = types.DeriveSha(txs)
 	blk := types.NewBlockFromNetwork(&block.Header, &types.Body{
 		Transactions: txs,
 		Uncles:       block.Uncles,
