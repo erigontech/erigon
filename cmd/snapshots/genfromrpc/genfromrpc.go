@@ -6,8 +6,12 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/holiman/uint256"
@@ -20,6 +24,12 @@ var RpcAddr = cli.StringFlag{
 	Required: true,
 }
 
+var Verify = cli.BoolFlag{
+	Name:  "verify",
+	Usage: "Verify block hash",
+	Value: true,
+}
+
 var Command = cli.Command{
 	Action: func(cliCtx *cli.Context) error {
 		return genFromRPc(cliCtx)
@@ -30,6 +40,7 @@ var Command = cli.Command{
 		&utils.DataDirFlag,
 		//&utils.ChainFlag,
 		&RpcAddr,
+		&Verify,
 	},
 	Description: ``,
 }
@@ -326,16 +337,18 @@ func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions,
 }
 
 // Obtain block by number and decode it from json
-func getBlockByNumber(client *rpc.Client, blockNumber *big.Int) (*types.Block, error) {
+func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
 	var block BlockJson
 	err := client.CallContext(context.Background(), &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
 	if err != nil {
 		return nil, err
 	}
 	var h HashJson
-	err = client.CallContext(context.Background(), &h, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), false)
-	if err != nil {
-		return nil, err
+	if verify {
+		err = client.CallContext(context.Background(), &h, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), false)
+		if err != nil {
+			return nil, err
+		}
 	}
 	txs, err := unMarshalTransactions(block.Transactions)
 	if err != nil {
@@ -346,14 +359,16 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int) (*types.Block, e
 		Uncles:       block.Uncles,
 		Withdrawals:  block.Withdrawals,
 	})
-
-	if blk.Hash() != h.BlkHash {
-		return nil, fmt.Errorf("block hash mismatch, expected %s, got %s. num=%d", blk.Hash(), h.BlkHash, blockNumber)
+	if verify {
+		if blk.Hash() != h.BlkHash {
+			return nil, fmt.Errorf("block hash mismatch, expected %s, got %s. num=%d", blk.Hash(), h.BlkHash, blockNumber)
+		}
 	}
 	return blk, nil
 }
 
 func genFromRPc(cliCtx *cli.Context) error {
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	jsonRpcAddr := cliCtx.String(RpcAddr.Name)
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(log.LvlInfo), log.StderrHandler))
 	// Connect to Arbitrum One RPC
@@ -362,6 +377,10 @@ func genFromRPc(cliCtx *cli.Context) error {
 		log.Warn("Error connecting to RPC", "err", err)
 		return err
 	}
+
+	verification := cliCtx.Bool(Verify.Name)
+	db := mdbx.MustOpen(dirs.Chaindata)
+	defer db.Close()
 
 	// Query latest block number
 	var latestBlockHex string
@@ -375,25 +394,34 @@ func genFromRPc(cliCtx *cli.Context) error {
 	latestBlock := new(big.Int)
 	latestBlock.SetString(latestBlockHex[2:], 16)
 
-	fmt.Printf("Latest Block: %d\n", latestBlock)
-	//
-	blk, err := getBlockByNumber(client, common.Big2)
-	if err != nil {
-		log.Warn("Error fetching block", "err", err)
-		return err
-	}
-	fmt.Println("received", blk.NumberU64(), blk.Hash())
 	var blockNumber big.Int
 	// Loop through last 10 blocks
-	for i := uint64(0); i < latestBlock.Uint64(); i++ {
-		blockNumber.SetInt64(int64(i))
-		block, err := getBlockByNumber(client, &blockNumber)
-		if err != nil {
-			log.Error("Error fetching block", "blockNumber", blockNumber, "err", err)
+	for i := uint64(0); i < latestBlock.Uint64(); {
+		if err := db.Update(context.TODO(), func(tx kv.RwTx) error {
+			for blockNum := uint64(i); blockNum < latestBlock.Uint64(); blockNum++ {
+				blockNumber.SetUint64(blockNum)
+				block, err := getBlockByNumber(client, &blockNumber, verification)
+				if err != nil {
+					return fmt.Errorf("Error fetching block %d: %w", blockNum, err)
+				}
+				if err := rawdb.WriteBlock(tx, block); err != nil {
+					return fmt.Errorf("Error writing block %d: %w", blockNum, err)
+				}
+				if err := rawdb.WriteCanonicalHash(tx, block.Hash(), blockNumber.Uint64()); err != nil {
+					return fmt.Errorf("Error writing canonical hash %d: %w", blockNum, err)
+				}
+				fmt.Println("Block Number: , block Hash: ", block.NumberU64(), block.Hash())
+				i = blockNum - 1
+				if blockNum%10_000 == 0 {
+					fmt.Println("Commiting")
+					break
+				}
+			}
+			return nil
+		}); err != nil {
+			log.Warn("Error updating db", "err", err)
 			return err
 		}
-
-		fmt.Println("Block Number: , block Hash: ", block.NumberU64(), block.Hash())
 	}
 	return nil
 }
