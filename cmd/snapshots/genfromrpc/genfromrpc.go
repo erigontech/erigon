@@ -633,7 +633,7 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 		return nil, err
 	}
 
-	txs, err := unMarshalTransactions(block.Transactions)
+	txs, err := unMarshalTransactions(block.Transactions, verify)
 	if err != nil {
 		return nil, err
 	}
