@@ -150,9 +150,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			sleep(op.duration)
 
-			t.readMap.Set(&state.VersionedRead{Address: k.addr, Path: k.path, Key: k.key, Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
+			t.readMap.Set(state.VersionedRead{Address: k.addr, Path: k.path, Key: k.key, Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
-			t.writeMap.Set(&state.VersionedWrite{Address: k.addr, Path: k.path, Key: k.key, Version: version, Val: op.val})
+			t.writeMap.Set(state.VersionedWrite{Address: k.addr, Path: k.path, Key: k.key, Version: version, Val: op.val})
 		case otherType:
 			sleep(op.duration)
 		default:
@@ -225,8 +225,8 @@ func longTailTimeGenerator(min time.Duration, max time.Duration, i int, j int) f
 }
 
 type opkey struct {
-	addr    common.Address
-	key     common.Hash
+	addr common.Address
+	key  common.Hash
 	path state.AccountPath
 }
 
@@ -526,10 +526,10 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 			if op.opType == writeType {
 				writes, ok := finalWriteSet[op.key.addr]
 				if !ok {
-					writes=map[state.AccountKey]time.Duration{}
-					finalWriteSet[op.key.addr]=writes
+					writes = map[state.AccountKey]time.Duration{}
+					finalWriteSet[op.key.addr] = writes
 				}
-				writes[state.AccountKey{Path:op.key.path, Key:op.key.key}]=op.duration
+				writes[state.AccountKey{Path: op.key.path, Key: op.key.key}] = op.duration
 			}
 		}
 	}

@@ -642,8 +642,8 @@ func (sd *StateDiff) DeleteAccount(address libcommon.Address, original *accounts
 	return nil
 }
 
-func (sd *StateDiff) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
-	if *original == *value {
+func (sd *StateDiff) WriteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash, original, value uint256.Int) error {
+	if original == value {
 		return nil
 	}
 	accountDiff := sd.sdMap[address]
@@ -653,7 +653,16 @@ func (sd *StateDiff) WriteAccountStorage(address libcommon.Address, incarnation 
 	}
 	m := make(map[string]interface{})
 	m["*"] = &StateDiffStorage{From: libcommon.BytesToHash(original.Bytes()), To: libcommon.BytesToHash(value.Bytes())}
-	accountDiff.Storage[*key] = m
+	accountDiff.Storage[key] = m
+	return nil
+}
+
+func (sd *StateDiff) DeleteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash) error {
+	accountDiff := sd.sdMap[address]
+	if accountDiff == nil {
+		return nil
+	}
+	delete(accountDiff.Storage, key)
 	return nil
 }
 
@@ -1366,7 +1375,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 				stateSyncEvents,
 			)
 		} else {
-			ibs.SetTxContext(header.Number.Uint64(),txIndex)
+			ibs.SetTxContext(header.Number.Uint64(), txIndex)
 			txCtx := core.NewEVMTxContext(msg)
 			evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 			gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
@@ -1564,7 +1573,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 			stateSyncEvents,
 		)
 	} else {
-		ibs.SetTxContext(header.Number.Uint64(),txIndex)
+		ibs.SetTxContext(header.Number.Uint64(), txIndex)
 		txCtx := core.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())

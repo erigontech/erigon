@@ -20,6 +20,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -60,18 +61,22 @@ func (cw *CachedWriter) DeleteAccount(address common.Address, original *accounts
 	return nil
 }
 
-func (cw *CachedWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (cw *CachedWriter) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	if err := cw.w.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
 		return err
 	}
-	if *original == *value {
+	if original == value {
 		return nil
 	}
-	if value.IsZero() {
-		cw.cache.SetStorageDelete(address.Bytes(), incarnation, key.Bytes())
-	} else {
-		cw.cache.SetStorageWrite(address.Bytes(), incarnation, key.Bytes(), value.Bytes())
+	cw.cache.SetStorageWrite(address.Bytes(), incarnation, key[:], value.Bytes())
+	return nil
+}
+
+func (cw *CachedWriter) DeleteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash) error {
+	if err := cw.w.DeleteAccountStorage(address, incarnation, key); err != nil {
+		return err
 	}
+	cw.cache.SetStorageDelete(address[:], incarnation, key[:])
 	return nil
 }
 

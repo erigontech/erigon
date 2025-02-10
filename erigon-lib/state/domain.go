@@ -1707,38 +1707,41 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 		return nil, 0, false, nil
 	}
 
-	var v, foundInvStep []byte
+	var v []byte
 	var found bool
+	var foundStep uint64
 
 	err := roTx.Apply(func(tx kv.Tx) (err error) {
-		v, foundInvStep, found, err = func() ([]byte, []byte, bool, error) {
+		v, foundStep, found, err = func() ([]byte, uint64, bool, error) {
+
 			valsC, err := dt.valsCursor(tx)
 			if err != nil {
-				return nil, nil, false, err
+				return nil, 0, false, err
 			}
 
 			if dt.d.largeValues {
 				fullkey, v, err := valsC.Seek(key)
 				if err != nil {
-					return nil, nil, false, fmt.Errorf("valsCursor.Seek: %w", err)
+					return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
 				}
 				if len(fullkey) == 0 {
-					return nil, nil, false, nil // This key is not in DB
+					return nil, 0, false, nil // This key is not in DB
 				}
 				if !bytes.Equal(fullkey[:len(fullkey)-8], key) {
-					return nil, nil, false, nil // This key is not in DB
+					return nil, 0, false, nil // This key is not in DB
 				}
-				return v, fullkey[len(fullkey)-8:], true, nil
+
+				return v, ^binary.BigEndian.Uint64(fullkey[len(fullkey)-8:]), true, nil
 			} else {
 				_, stepWithVal, err := valsC.SeekExact(key)
 				if err != nil {
-					return nil, nil, false, fmt.Errorf("valsCursor.SeekExact: %w", err)
+					return nil, 0, false, fmt.Errorf("valsCursor.SeekExact: %w", err)
 				}
 				if len(stepWithVal) == 0 {
-					return nil, nil, false, nil
+					return nil, 0, false, nil
 				}
 
-				return stepWithVal[8:], stepWithVal[:8], true, nil
+				return stepWithVal[8:], ^binary.BigEndian.Uint64(stepWithVal[:8]), true, nil
 			}
 		}()
 
@@ -1746,8 +1749,6 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	})
 
 	if found {
-		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
-
 		if lastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.files.EndTxNum() {
 			return v, foundStep, true, nil
 		}

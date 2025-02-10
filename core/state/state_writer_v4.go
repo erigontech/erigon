@@ -76,11 +76,18 @@ func (w *WriterV4) DeleteAccount(address libcommon.Address, original *accounts.A
 	return w.sd.DomainDel(kv.AccountsDomain, w.tx, address.Bytes(), nil, nil, 0)
 }
 
-func (w *WriterV4) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
+func (w *WriterV4) WriteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash, original, value uint256.Int) error {
 	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
+		fmt.Printf("storage: %x,%x,%x\n", address, key, value.Bytes())
 	}
-	return w.sd.DomainPut(kv.StorageDomain, w.tx, address.Bytes(), key.Bytes(), value.Bytes(), nil, 0)
+	return w.sd.DomainPut(kv.StorageDomain, w.tx, address[:], key[:], value.Bytes(), nil, 0)
+}
+
+func (w *WriterV4) DeleteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash) error {
+	if w.trace {
+		fmt.Printf("storage delete: %x,%x,%x\n", address, key)
+	}
+	return w.sd.DomainDel(kv.StorageDomain, w.tx, address[:], key[:], nil, 0)
 }
 
 func (w *WriterV4) CreateContract(address libcommon.Address) (err error) {

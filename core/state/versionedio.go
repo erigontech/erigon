@@ -23,15 +23,19 @@ const (
 
 type ReadSet map[libcommon.Address]map[AccountKey]*VersionedRead
 
-func (rs ReadSet) Set(v *VersionedRead) {
+func (rs ReadSet) Set(v VersionedRead) {
 	reads, ok := rs[v.Address]
 
 	if !ok {
 		rs[v.Address] = map[AccountKey]*VersionedRead{
-			{v.Path, v.Key}: v,
+			{v.Path, v.Key}: &v,
 		}
 	} else {
-		reads[AccountKey{v.Path, v.Key}] = v
+		if read, ok := reads[AccountKey{v.Path, v.Key}]; ok {
+			*read = v
+		} else {
+			reads[AccountKey{v.Path, v.Key}] = &v
+		}
 	}
 }
 
@@ -55,15 +59,19 @@ func (s ReadSet) Len() int {
 
 type WriteSet map[libcommon.Address]map[AccountKey]*VersionedWrite
 
-func (s WriteSet) Set(v *VersionedWrite) {
-	reads, ok := s[v.Address]
+func (s WriteSet) Set(v VersionedWrite) {
+	writes, ok := s[v.Address]
 
 	if !ok {
 		s[v.Address] = map[AccountKey]*VersionedWrite{
-			{v.Path, v.Key}: v,
+			{v.Path, v.Key}: &v,
 		}
 	} else {
-		reads[AccountKey{v.Path, v.Key}] = v
+		if write, ok := writes[AccountKey{v.Path, v.Key}]; ok {
+			*write = v
+		} else {
+			writes[AccountKey{v.Path, v.Key}] = &v
+		}
 	}
 }
 
@@ -200,17 +208,17 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address libcommon.Address
 	return nil, nil
 }
 
-func (vr versionedStateReader) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: StatePath, Key: *key}]; ok && r.Val != nil {
+func (vr versionedStateReader) ReadAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash) (uint256.Int, bool, error) {
+	if r, ok := vr.reads[address][AccountKey{Path: StatePath, Key: key}]; ok && r.Val != nil {
 		val := r.Val.(uint256.Int)
-		return (&val).Bytes(), nil
+		return val, true, nil
 	}
 
 	if vr.stateReader != nil {
 		return vr.stateReader.ReadAccountStorage(address, incarnation, key)
 	}
 
-	return nil, nil
+	return uint256.Int{}, false, nil
 }
 
 func (vr versionedStateReader) ReadAccountCode(address libcommon.Address, incarnation uint64) ([]byte, error) {
@@ -471,7 +479,7 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 		s.versionedReads = ReadSet{}
 	}
 
-	s.versionedReads.Set(&vr)
+	s.versionedReads.Set(vr)
 
 	return v, nil
 }
@@ -590,7 +598,7 @@ func (io *VersionedIO) RecordWrites(txId int, output VersionedWrites) {
 	for _, v := range output {
 		keys, ok := io.outputsSet[txId+1][v.Address]
 		if !ok {
-			keys := map[AccountKey]struct{}{}
+			keys = map[AccountKey]struct{}{}
 			io.outputsSet[txId+1][v.Address] = keys
 		}
 		keys[AccountKey{v.Path, v.Key}] = struct{}{}

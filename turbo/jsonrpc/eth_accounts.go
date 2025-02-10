@@ -137,11 +137,11 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address,
 	}
 
 	location := libcommon.HexToHash(index)
-	res, err := reader.ReadAccountStorage(address, acc.Incarnation, &location)
-	if err != nil {
-		res = empty
+	res, ok, err := reader.ReadAccountStorage(address, acc.Incarnation, location)
+	if !ok || err != nil {
+		return hexutility.Encode(libcommon.LeftPadBytes(empty, 32)), err
 	}
-	return hexutility.Encode(libcommon.LeftPadBytes(res, 32)), err
+	return res.Hex(), err
 }
 
 // Exist returns whether an account for a given address exists in the database.

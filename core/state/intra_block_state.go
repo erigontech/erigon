@@ -700,7 +700,7 @@ func (sdb *IntraBlockState) Incarnation() int {
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetState(addr libcommon.Address, key libcommon.Hash, value uint256.Int) error {
 	if sdb.trace || (traceAccount(addr) && traceKey(key)) {
-		fmt.Printf("%d (%d.%d) SetState %x, %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, key.Bytes(), &value)
+		fmt.Printf("%d (%d.%d) SetState %x, %x=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, key[:], value.Hex())
 	}
 
 	stateObject, err := sdb.GetOrNewStateObject(addr)
@@ -1335,7 +1335,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 func (sdb *IntraBlockState) AddAddressToAccessList(addr libcommon.Address) (addrMod bool) {
 	addrMod = sdb.accessList.AddAddress(addr)
 	if addrMod {
-		sdb.journal.append(accessListAddAccountChange{&addr})
+		sdb.journal.append(accessListAddAccountChange{addr})
 	}
 	return addrMod
 }
@@ -1348,12 +1348,12 @@ func (sdb *IntraBlockState) AddSlotToAccessList(addr libcommon.Address, slot lib
 		// scope of 'address' without having the 'address' become already added
 		// to the access list (via call-variant, create, etc).
 		// Better safe than sorry, though
-		sdb.journal.append(accessListAddAccountChange{&addr})
+		sdb.journal.append(accessListAddAccountChange{addr})
 	}
 	if slotMod {
 		sdb.journal.append(accessListAddSlotChange{
-			address: &addr,
-			slot:    &slot,
+			address: addr,
+			slot:    slot,
 		})
 	}
 	return addrMod, slotMod
@@ -1378,7 +1378,7 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 			s.versionedReads = ReadSet{}
 		}
 
-		s.versionedReads.Set(&VersionedRead{
+		s.versionedReads.Set(VersionedRead{
 			Address: addr,
 			Path:    AddressPath,
 			Source:  StorageRead,
@@ -1394,7 +1394,7 @@ func (s *IntraBlockState) versionWritten(addr libcommon.Address, path AccountPat
 			s.versionedWrites = WriteSet{}
 		}
 
-		s.versionedWrites.Set(&VersionedWrite{
+		s.versionedWrites.Set(VersionedWrite{
 			Address: addr,
 			Path:    path,
 			Key:     key,

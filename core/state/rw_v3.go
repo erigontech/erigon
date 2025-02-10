@@ -407,19 +407,18 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 	return nil
 }
 
-func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	if *original == *value {
+func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+	if original == value {
 		return nil
 	}
-	compositeS := string(append(address.Bytes(), key.Bytes()...))
+	compositeS := string(append(address[:], key[:]...))
 	w.writeLists[kv.StorageDomain.String()].Push(compositeS, value.Bytes())
 	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
+		fmt.Printf("storage: %x,%x,%x\n", address, key, value.Bytes())
 	}
-	if w.accumulator != nil && key != nil && value != nil {
-		k := *key
+	if w.accumulator != nil {
 		v := value.Bytes()
-		w.accumulator.ChangeStorage(address, incarnation, k, v)
+		w.accumulator.ChangeStorage(address, incarnation, key, v)
 	}
 	w.rs.accountsMutex.Lock()
 	obj, ok := w.rs.accounts[address]
@@ -428,12 +427,30 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 	}
 	if obj.storage == nil {
 		obj.storage = map[common.Hash]uint256.Int{
-			*key: *value,
+			key: value,
 		}
 	} else {
-		obj.storage[*key] = *value
+		obj.storage[key] = value
 	}
 	w.rs.accounts[address] = obj
+	w.rs.accountsMutex.Unlock()
+	return nil
+}
+
+func (w *StateWriterBufferedV3) DeleteAccountStorage(address common.Address, incarnation uint64, key common.Hash) error {
+	compositeS := string(append(address[:], key[:]...))
+	w.writeLists[kv.StorageDomain.String()].Push(compositeS, nil)
+	if w.trace {
+		fmt.Printf("storage delete: %x,%x\n", address, key)
+	}
+	w.rs.accountsMutex.Lock()
+	obj, ok := w.rs.accounts[address]
+	if !ok {
+		obj = &bufferedAccount{}
+	}
+	if obj.storage != nil {
+		delete(obj.storage, key)
+	}
 	w.rs.accountsMutex.Unlock()
 	return nil
 }
@@ -533,25 +550,29 @@ func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts
 	return nil
 }
 
-func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	if *original == *value {
+func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+	if original == value {
 		return nil
 	}
 
-	composite := append(address.Bytes(), key.Bytes()...)
+	composite := append(address[:], key[:]...)
 	v := value.Bytes()
 	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, *key, v)
+		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
 	}
-	if len(v) == 0 {
-		return w.rs.domains.DomainDel(kv.StorageDomain, w.tx, composite, nil, nil, 0)
-	}
-	if w.accumulator != nil && key != nil && value != nil {
-		k := *key
-		w.accumulator.ChangeStorage(address, incarnation, k, v)
+	if w.accumulator != nil {
+		w.accumulator.ChangeStorage(address, incarnation, key, v)
 	}
 
 	return w.rs.domains.DomainPut(kv.StorageDomain, w.tx, composite, nil, v, nil, 0)
+}
+
+func (w *StateWriterV3) DeleteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash) error {
+	if w.trace {
+		fmt.Printf("storage delete: %x,%x,%x\n", address, key)
+	}
+	composite := append(address[:], key[:]...)
+	return w.rs.domains.DomainDel(kv.StorageDomain, w.tx, composite, nil, nil, 0)
 }
 
 func (w *StateWriterV3) CreateContract(address common.Address) error {
@@ -618,14 +639,14 @@ func (r *ReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Ac
 	return r.ReadAccountData(address)
 }
 
-func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key common.Hash) (uint256.Int, bool, error) {
 	var composite [20 + 32]byte
 	copy(composite[0:20], address[0:20])
-	copy(composite[20:], key.Bytes())
+	copy(composite[20:], key[:])
 
 	enc, _, err := r.sd.GetLatest(kv.StorageDomain, r.tx, composite[:])
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
 	if r.trace {
 		if enc == nil {
@@ -634,7 +655,9 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64
 			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", composite[:], enc, r.txNum)
 		}
 	}
-	return enc, nil
+	var res uint256.Int
+	(&res).SetBytes(enc)
+	return res, true, nil
 }
 
 func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
@@ -699,19 +722,19 @@ func (r *ReaderParallelV3) ReadAccountDataForDebug(address common.Address) (*acc
 	return r.ReaderV3.ReadAccountDataForDebug(address)
 }
 
-func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	enc, err := r.ReaderV3.ReadAccountStorage(address, incarnation, key)
+func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, incarnation uint64, key common.Hash) (uint256.Int, bool, error) {
+	enc, ok, err := r.ReaderV3.ReadAccountStorage(address, incarnation, key)
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
-	if !r.discardReadList {
+	if ok && !r.discardReadList {
 		var composite [20 + 32]byte
 		copy(composite[0:20], address[0:20])
-		copy(composite[20:], key.Bytes())
-		r.readLists[kv.StorageDomain.String()].Push(string(composite[:]), enc)
+		copy(composite[20:], key[:])
+		r.readLists[kv.StorageDomain.String()].Push(string(composite[:]), enc.Bytes())
 	}
 
-	return enc, nil
+	return enc, ok, nil
 }
 
 func (r *ReaderParallelV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
@@ -792,16 +815,16 @@ func (r *bufferedReader) ReadAccountDataForDebug(address common.Address) (*accou
 	return r.reader.ReadAccountDataForDebug(address)
 }
 
-func (r *bufferedReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (r *bufferedReader) ReadAccountStorage(address common.Address, incarnation uint64, key common.Hash) (uint256.Int, bool, error) {
 	r.bufferedState.accountsMutex.RLock()
 	so, ok := r.bufferedState.accounts[address]
 
 	if ok && so.storage != nil {
-		value, ok := so.storage[*key]
+		value, ok := so.storage[key]
 
 		if ok {
 			r.bufferedState.accountsMutex.RUnlock()
-			return value.Bytes(), nil
+			return value, true, nil
 		}
 	}
 

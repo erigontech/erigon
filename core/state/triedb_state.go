@@ -658,24 +658,24 @@ func (tds *TrieDbState) ReadAccountData(address libcommon.Address) (*accounts.Ac
 	return account, nil
 }
 
-func (tds *TrieDbState) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
+func (tds *TrieDbState) ReadAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash) (uint256.Int, bool, error) {
 	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
 	if tds.currentBuffer != nil {
 		if _, ok := tds.currentBuffer.deleted[addrHash]; ok {
-			return nil, nil
+			return uint256.Int{}, false, nil
 		}
 	}
 	if tds.aggregateBuffer != nil {
 		if _, ok := tds.aggregateBuffer.deleted[addrHash]; ok {
-			return nil, nil
+			return uint256.Int{}, false, nil
 		}
 	}
-	seckey, err := libcommon.HashData(key.Bytes())
+	seckey, err := libcommon.HashData(key[:])
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
 
-	storagePlainKey := dbutils.GenerateStoragePlainKey(address, *key)
+	storagePlainKey := dbutils.GenerateStoragePlainKey(address, key)
 
 	if tds.resolveReads {
 		var storageKey common.StorageKey
@@ -687,14 +687,16 @@ func (tds *TrieDbState) ReadAccountStorage(address libcommon.Address, incarnatio
 	defer tds.tMu.Unlock()
 	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
 	if !ok {
-		enc, err := tds.StateReader.ReadAccountStorage(address, incarnation, key)
+		enc, ok, err := tds.StateReader.ReadAccountStorage(address, incarnation, key)
 		if err != nil {
-			return nil, err
+			return uint256.Int{}, false, err
 		}
-		return enc, nil
+		return enc, ok, nil
 	}
 
-	return enc, nil
+	var res uint256.Int
+	(&res).SetBytes(enc)
+	return res, true, nil
 }
 
 func (tds *TrieDbState) readAccountCodeFromTrie(addrHash []byte) ([]byte, bool) {
@@ -830,7 +832,7 @@ func (tsw *TrieStateWriter) UpdateAccountCode(address libcommon.Address, incarna
 	return nil
 }
 
-func (tsw *TrieStateWriter) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
+func (tsw *TrieStateWriter) WriteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash, original, value uint256.Int) error {
 	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
 
 	v := value.Bytes()
@@ -847,13 +849,30 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address libcommon.Address, incar
 	var storageKey common.StorageKey
 	copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
 
-	storagePlainKey := dbutils.GenerateStoragePlainKey(address, *key)
+	storagePlainKey := dbutils.GenerateStoragePlainKey(address, key)
 	tsw.tds.currentBuffer.storageReads[storageKey] = storagePlainKey
-	if len(v) > 0 {
-		m[seckey] = v
-	} else {
-		m[seckey] = nil
+	m[seckey] = v
+	//fmt.Printf("WriteAccountStorage %x %x: %x, buffer %d\n", addrHash, seckey, value, len(tsw.tds.buffers))
+	return nil
+}
+
+func (tsw *TrieStateWriter) DeleteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash) error {
+	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
+
+	m, ok := tsw.tds.currentBuffer.storageUpdates[addrHash]
+	if !ok {
+		return nil
 	}
+	tsw.tds.currentBuffer.storageIncarnation[addrHash] = incarnation
+	seckey, err := libcommon.HashData(key.Bytes())
+	if err != nil {
+		return err
+	}
+	var storageKey common.StorageKey
+	copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
+
+	delete(tsw.tds.currentBuffer.storageReads, storageKey)
+	delete(m, seckey)
 	//fmt.Printf("WriteAccountStorage %x %x: %x, buffer %d\n", addrHash, seckey, value, len(tsw.tds.buffers))
 	return nil
 }

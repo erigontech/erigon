@@ -154,11 +154,11 @@ type (
 
 	// Changes to the access list
 	accessListAddAccountChange struct {
-		address *libcommon.Address
+		address libcommon.Address
 	}
 	accessListAddSlotChange struct {
-		address *libcommon.Address
-		slot    *libcommon.Hash
+		address libcommon.Address
+		slot    libcommon.Hash
 	}
 
 	transientStorageChange struct {
@@ -340,7 +340,6 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 		} else {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
 				v.Val = ch.prevalue
-				s.versionedWrites.Set(v)
 			}
 		}
 	}
@@ -410,7 +409,7 @@ func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
 		(addr) at this point, since no storage adds can remain when come upon
 		a single (addr) change.
 	*/
-	s.accessList.DeleteAddress(*ch.address)
+	s.accessList.DeleteAddress(ch.address)
 	return nil
 }
 
@@ -419,7 +418,7 @@ func (ch accessListAddAccountChange) dirtied() *libcommon.Address {
 }
 
 func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
-	s.accessList.DeleteSlot(*ch.address, *ch.slot)
+	s.accessList.DeleteSlot(ch.address, ch.slot)
 	return nil
 }
 

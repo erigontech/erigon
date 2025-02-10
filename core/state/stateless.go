@@ -111,25 +111,27 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 
 // ReadAccountStorage is a part of the StateReader interface
 // This implementation attempts to look up the storage in the state trie, and fails if it is not found
-func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint64, key common.Hash) (uint256.Int, bool, error) {
 	if s.trace {
 		fmt.Printf("Stateless: ReadAccountStorage(address=%x, incarnation=%d, key=%x)\n", address.Bytes(), incarnation, key.Bytes())
 	}
 	seckey, err := common.HashData(key[:])
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
 
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
 
 	if enc, ok := s.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey)); ok {
-		return enc, nil
+		var res uint256.Int
+		(&res).SetBytes(enc)
+		return res, true, nil
 	}
 
-	return nil, nil
+	return uint256.Int{}, false, nil
 }
 
 // ReadAccountCode is a part of the StateReader interface
@@ -223,12 +225,11 @@ func (s *Stateless) UpdateAccountCode(address common.Address, incarnation uint64
 
 // WriteAccountStorage is a part of the StateWriter interface
 // This implementation registeres the change of the account's storage in the internal double map `storageUpdates`
-func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return err
 	}
-
 	v := value.Bytes()
 	m, ok := s.storageUpdates[addrHash]
 	if !ok {
@@ -239,13 +240,30 @@ func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint
 	if err != nil {
 		return err
 	}
-	if len(v) > 0 {
-		m[seckey] = v
-	} else {
-		m[seckey] = nil
-	}
+	m[seckey] = v
 	if s.trace {
-		fmt.Printf("Stateless: WriteAccountStorage %x key %x val %x\n", address, *key, *value)
+		fmt.Printf("Stateless: WriteAccountStorage %x key %x val %x\n", address, key, value)
+	}
+	return nil
+}
+
+func (s *Stateless) DeleteAccountStorage(address common.Address, incarnation uint64, key common.Hash) error {
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return err
+	}
+
+	m, ok := s.storageUpdates[addrHash]
+	if !ok {
+		return nil
+	}
+	seckey, err := common.HashData(key[:])
+	if err != nil {
+		return err
+	}
+	delete(m, seckey)
+	if s.trace {
+		fmt.Printf("Stateless: DeleteAccountStorage %x key %x\n", address, key)
 	}
 	return nil
 }

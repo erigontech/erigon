@@ -193,18 +193,16 @@ func (so *stateObject) GetCommittedState(key libcommon.Hash, out *uint256.Int) e
 		return nil
 	}
 	// Load from DB in case it is missing.
-	enc, err := so.db.stateReader.ReadAccountStorage(so.address, so.data.GetIncarnation(), &key)
+	res, ok, err := so.db.stateReader.ReadAccountStorage(so.address, so.data.GetIncarnation(), key)
 	if err != nil {
 		out.Clear()
 		return err
 	}
-	if enc != nil {
-		out.SetBytes(enc)
-	} else {
-		out.Clear()
+	if ok {
+		*out = res
+		so.originStorage[key] = res
+		so.blockOriginStorage[key] = res
 	}
-	so.originStorage[key] = *out
-	so.blockOriginStorage[key] = *out
 	return nil
 }
 
@@ -236,7 +234,7 @@ func (so *stateObject) SetState(key libcommon.Hash, value uint256.Int) bool {
 	})
 
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
-		so.db.tracingHooks.OnStorageChange(so.address, &key, prev, value)
+		so.db.tracingHooks.OnStorageChange(so.address, key, prev, value)
 	}
 	so.setState(key, value)
 
@@ -270,7 +268,7 @@ func (so *stateObject) updateTrie(stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {
 		original := so.blockOriginStorage[key]
 		so.originStorage[key] = value
-		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), &key, &original, &value); err != nil {
+		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, original, value); err != nil {
 			return err
 		}
 	}

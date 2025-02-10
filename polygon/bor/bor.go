@@ -174,7 +174,8 @@ func Ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libc
 	signature := header.Extra[len(header.Extra)-types.ExtraSealLength:]
 
 	// Recover the public key and the Ethereum address
-	pubkey, err := crypto.Ecrecover(SealHash(header, c).Bytes(), signature)
+	sealHash := SealHash(header, c)
+	pubkey, err := crypto.Ecrecover(sealHash[:], signature)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
@@ -1510,8 +1511,8 @@ func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
 		header := crypto.Keccak256(AppendBytes32(
 			blockHeader.Number.Bytes(),
 			new(big.Int).SetUint64(blockHeader.Time).Bytes(),
-			blockHeader.TxHash.Bytes(),
-			blockHeader.ReceiptHash.Bytes(),
+			blockHeader.TxHash[:],
+			blockHeader.ReceiptHash[:],
 		))
 
 		var arr [32]byte

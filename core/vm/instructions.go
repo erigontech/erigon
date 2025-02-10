@@ -389,11 +389,12 @@ func opBalance(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 }
 
 func opOrigin(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.Push(new(uint256.Int).SetBytes(interpreter.evm.Origin.Bytes()))
+	scope.Stack.Push(new(uint256.Int).SetBytes(interpreter.evm.Origin[:]))
 	return nil, nil
 }
 func opCaller(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.Push(new(uint256.Int).SetBytes(scope.Contract.Caller().Bytes()))
+	caller := scope.Contract.Caller()
+	scope.Stack.Push(new(uint256.Int).SetBytes(caller[:]))
 	return nil, nil
 }
 

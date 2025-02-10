@@ -489,7 +489,7 @@ func (mr *MocktracerMockRecorder) OpcodeHook(pc, op, gas, cost, scope, rData, de
 }
 
 // StorageChangeHook mocks base method.
-func (m *Mocktracer) StorageChangeHook(addr common.Address, slot *common.Hash, prev, new uint256.Int) {
+func (m *Mocktracer) StorageChangeHook(addr common.Address, slot common.Hash, prev, new uint256.Int) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "StorageChangeHook", addr, slot, prev, new)
 }
