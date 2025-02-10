@@ -409,7 +409,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		writeTxLimiter: opts.writeTxLimiter,
 
 		txsCountMutex:         txsCountMutex,
-		txsAllDoneOnCloseCond: sync.NewCond(txsCountMutex),
+		txsAllDoneOnCloseCond: sync.NewCond(&sync.Mutex{}),
 
 		leakDetector: dbg.NewLeakDetector("db."+opts.label.String(), dbg.SlowTx()),
 
