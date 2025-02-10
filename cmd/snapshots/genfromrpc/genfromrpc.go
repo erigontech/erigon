@@ -41,6 +41,12 @@ var FromBlock = cli.Uint64Flag{
 	Value: 0,
 }
 
+var NoWrite = cli.BoolFlag{
+	Name:  "no-write",
+	Usage: "Avoid writing to the database",
+	Value: false,
+}
+
 var Command = cli.Command{
 	Action:      func(cliCtx *cli.Context) error { return genFromRPc(cliCtx) },
 	Name:        "genfromrpc",
@@ -328,6 +334,21 @@ func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions,
 			tx = makeEip4844Tx(commonTx, rawTx)
 		case "0x4": // EIP-7702
 			tx = makeEip7702Tx(commonTx, rawTx)
+		case "0x64": // ArbitrumDepositTxType
+			// tx = &types.ArbitrumDepositTx{
+			return nil, fmt.Errorf("ArbitrumDepositTxType not supported")
+		case "0x65": // ArbitrumUnsignedTxType
+			return nil, fmt.Errorf("ArbitrumUnsignedTxType not supported")
+		case "0x66": // ArbitrumContractTxType
+			return nil, fmt.Errorf("ArbitrumContractTxType not supported")
+		case "0x68": // ArbitrumRetryTxType
+			return nil, fmt.Errorf("ArbitrumRetryTxType not supported")
+		case "0x69": // ArbitrumSubmitRetryableTxType
+			return nil, fmt.Errorf("ArbitrumSubmitRetryableTxType not supported")
+		case "0x6A": // ArbitrumInternalTxType
+			return nil, fmt.Errorf("ArbitrumInternalTxType not supported")
+		case "0x78": // ArbitrumLegacyTxType
+			return nil, fmt.Errorf("ArbitrumLegacyTxType not supported")
 		default:
 			return nil, fmt.Errorf("unknown tx type: %s", typeTx)
 		}
@@ -413,6 +434,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 	}
 	latestBlock := new(big.Int)
 	latestBlock.SetString(latestBlockHex[2:], 16)
+	noWrite := cliCtx.Bool(NoWrite.Name)
 
 	var blockNumber big.Int
 	start := cliCtx.Uint64(FromBlock.Name)
@@ -428,11 +450,13 @@ func genFromRPc(cliCtx *cli.Context) error {
 				if err != nil {
 					return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 				}
-				if err := rawdb.WriteBlock(tx, blk); err != nil {
-					return fmt.Errorf("error writing block %d: %w", blockNum, err)
-				}
-				if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
-					return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
+				if !noWrite {
+					if err := rawdb.WriteBlock(tx, blk); err != nil {
+						return fmt.Errorf("error writing block %d: %w", blockNum, err)
+					}
+					if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+						return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
+					}
 				}
 
 				// Update the progress counter.
