@@ -1586,7 +1586,7 @@ func (s *Ethereum) Start() error {
 		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		s.bgComponentsEg.Go(func() error {
-			defer func() { s.logger.Info("polygon sync goroutine terminated") }()
+			defer s.logger.Info("polygon sync goroutine terminated")
 			// when we're running in stand alone mode we need to run the downloader before we start the
 			// polygon services becuase they will wait for it to complete before opening thier stores
 			// which make use of snapshots and expect them to be initialize
@@ -1645,7 +1645,7 @@ func (s *Ethereum) Start() error {
 		// to initialize it properly.
 		// 2) we cannot propose for block 1 regardless.
 		s.bgComponentsEg.Go(func() error {
-			defer func() { s.logger.Info("devp2p txn pool goroutine terminated") }()
+			defer s.logger.Info("devp2p txn pool goroutine terminated")
 			err := s.txPool.Run(s.sentryCtx)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				s.logger.Error("txPool.Run error", "err", err)
@@ -1656,7 +1656,7 @@ func (s *Ethereum) Start() error {
 
 	if s.shutterPool != nil {
 		s.bgComponentsEg.Go(func() error {
-			defer func() { s.logger.Info("shutter pool goroutine terminated") }()
+			defer s.logger.Info("shutter pool goroutine terminated")
 			err := s.shutterPool.Run(s.sentryCtx)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				s.logger.Error("shutterPool.Run error", "err", err)

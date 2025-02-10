@@ -52,22 +52,23 @@ type KsmEonTracker struct {
 	lastCleanupBlockNum  uint64
 }
 
-func NewKsmEonTracker(config Config, blockListener BlockListener, contractBackend bind.ContractBackend) *KsmEonTracker {
+func NewKsmEonTracker(logger log.Logger, config Config, bl BlockListener, cb bind.ContractBackend) *KsmEonTracker {
 	ksmContractAddr := libcommon.HexToAddress(config.KeyperSetManagerContractAddress)
-	ksmContract, err := contracts.NewKeyperSetManager(ksmContractAddr, contractBackend)
+	ksmContract, err := contracts.NewKeyperSetManager(ksmContractAddr, cb)
 	if err != nil {
 		panic(fmt.Errorf("failed to create KeyperSetManager: %w", err))
 	}
 
 	keyBroadcastContractAddr := libcommon.HexToAddress(config.KeyBroadcastContractAddress)
-	keyBroadcastContract, err := contracts.NewKeyBroadcastContract(keyBroadcastContractAddr, contractBackend)
+	keyBroadcastContract, err := contracts.NewKeyBroadcastContract(keyBroadcastContractAddr, cb)
 	if err != nil {
 		panic(fmt.Errorf("failed to create KeyBroadcastContract: %w", err))
 	}
 
 	return &KsmEonTracker{
-		blockListener:        blockListener,
-		contractBackend:      contractBackend,
+		logger:               logger,
+		blockListener:        bl,
+		contractBackend:      cb,
 		ksmContract:          ksmContract,
 		keyBroadcastContract: keyBroadcastContract,
 		cleanupThreshold:     config.ReorgDepthAwareness,
@@ -76,12 +77,13 @@ func NewKsmEonTracker(config Config, blockListener BlockListener, contractBacken
 }
 
 func (et *KsmEonTracker) Run(ctx context.Context) error {
+	defer et.logger.Info("eon tracker stopped")
 	et.logger.Info("running eon tracker")
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return et.trackCurrentEon(ctx) })
 	eg.Go(func() error { return et.trackFutureEons(ctx) })
-	return nil
+	return eg.Wait()
 }
 
 func (et *KsmEonTracker) CurrentEon() (Eon, bool) {

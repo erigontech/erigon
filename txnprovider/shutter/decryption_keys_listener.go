@@ -61,6 +61,7 @@ func (dkl DecryptionKeysListener) RegisterObserver(observer event.Observer[*prot
 }
 
 func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
+	defer dkl.logger.Info("decryption keys listener stopped")
 	dkl.logger.Info("running decryption keys listener")
 
 	p2pHost, err := dkl.initP2pHost()

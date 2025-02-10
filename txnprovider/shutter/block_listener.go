@@ -48,6 +48,7 @@ func (bl BlockListener) RegisterObserver(o event.Observer[BlockEvent]) event.Unr
 }
 
 func (bl BlockListener) Run(ctx context.Context) error {
+	defer bl.logger.Info("block listener stopped")
 	bl.logger.Info("running block listener")
 
 	sub, err := bl.stateChangesClient.StateChanges(ctx, &remoteproto.StateChangeRequest{})
