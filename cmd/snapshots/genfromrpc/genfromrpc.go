@@ -182,7 +182,7 @@ func decodeAccessList(rawAccessList []interface{}) types.AccessList {
 
 // decodeBlobVersionedHashes converts a slice of hex strings to a slice of common.Hash.
 func decodeBlobVersionedHashes(rawVersionedHashes []string) []common.Hash {
-	var hashes []common.Hash
+	hashes := make([]common.Hash, 0, len(rawVersionedHashes))
 	for _, s := range rawVersionedHashes {
 		hashes = append(hashes, common.HexToHash(s))
 	}
