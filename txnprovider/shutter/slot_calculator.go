@@ -18,6 +18,7 @@ package shutter
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -42,8 +43,8 @@ func NewBeaconChainSlotCalculator(genesisTimestamp uint64, secondsPerSlot uint64
 }
 
 func (sc BeaconChainSlotCalculator) CalcSlot(timestamp uint64) (uint64, error) {
-	if sc.genesisTimestamp < timestamp {
-		return 0, ErrTimestampBeforeGenesis
+	if timestamp < sc.genesisTimestamp {
+		return 0, fmt.Errorf("%w: %d < %d", ErrTimestampBeforeGenesis, timestamp, sc.genesisTimestamp)
 	}
 
 	return (timestamp - sc.genesisTimestamp) / sc.secondsPerSlot, nil

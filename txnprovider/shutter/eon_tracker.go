@@ -121,6 +121,7 @@ func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
 
 			et.logger.Debug("current eon at block", "blockNum", blockEvent.BlockNum, "eonIndex", eon.Index)
 			et.currentEon.Store(&eon)
+			et.recentEons.Put(eon.Index, eon)
 			et.maybeCleanup(blockEvent.BlockNum)
 		}
 	}

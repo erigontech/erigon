@@ -163,6 +163,29 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			},
 		},
 		{
+			name:   "eon not in recent",
+			config: config,
+			msg: testhelpers.MockDecryptionKeysMsg(
+				shutter.DecryptionKeysTopic,
+				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+					Version:    shutterproto.EnvelopeVersion,
+					InstanceId: instanceId,
+					EonIndex:   eonIndex,
+				}),
+			),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: eon, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{}),
+			),
+			wantErr:              shutter.ErrEonNotInRecent,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to",
+				"eon not in recent: msgEonIndex=76, currentEonIndex=76",
+			},
+		},
+		{
 			name:   "empty keys",
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
