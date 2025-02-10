@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"io/fs"
 	"math"
 	randOld "math/rand"
@@ -46,7 +47,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -1031,6 +1031,7 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.hist.iiCfg.salt = &salt
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.aggregationStep = aggStep
+	cfg.hist.iiCfg.name = kv.InvertedIdx("dummy")
 
 	d, err := NewDomain(cfg, log.New())
 	if err != nil {
@@ -1183,7 +1184,13 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		writer.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
-			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			acc := accounts3.Account{
+				Nonce:       uint64(i),
+				Balance:     *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts3.SerialiseV3(&acc)
 
 			err = writer.PutWithPrev(keys[j], nil, buf, prev, 0)
 			require.NoError(t, err)
@@ -1394,7 +1401,13 @@ func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	for i := uint64(0); i < keyTxsLimit; i++ {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 		jitter := r.IntN(10e7)
-		value := types.EncodeAccountBytesV3(i, uint256.NewInt(i*10e4+uint64(jitter)), nil, 0)
+		acc := accounts3.Account{
+			Nonce:       i,
+			Balance:     *uint256.NewInt(i*10e4 + uint64(jitter)),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		value := accounts3.SerialiseV3(&acc)
 
 		updates = append(updates, upd{txNum: txNum, value: value})
 		usedTxNums[txNum] = true

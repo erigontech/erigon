@@ -67,7 +67,8 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 		return err
 	}
 
-	return ethutils.ValidateBlobs(block.BlobGasUsed, cfg.MaxBlobGasPerBlock, cfg.MaxBlobsPerBlock, expectedBlobHashes, &transactions)
+	maxBlobsPerBlock := cfg.MaxBlobsPerBlockByVersion(block.Version())
+	return ethutils.ValidateBlobs(block.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
 }
 
 func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint64) {
@@ -77,80 +78,6 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint
 	}
 	initialSlotTime := ethClock.GetSlotTime(slot)
 	monitor.ObserveBlockImportingLatency(initialSlotTime)
-}
-
-func (f *ForkChoiceStore) ProcessBlockExecution(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
-	blockRoot, err := block.Block.HashSSZ()
-	if err != nil {
-		return err
-	}
-
-	if f.engine == nil || f.verifiedExecutionPayload.Contains(blockRoot) {
-		return nil
-	}
-
-	var versionedHashes []libcommon.Hash
-	if f.engine != nil && block.Version() >= clparams.DenebVersion {
-		versionedHashes = []libcommon.Hash{}
-		solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
-			versionedHash, err := utils.KzgCommitmentToVersionedHash(libcommon.Bytes48(*k))
-			if err != nil {
-				return err
-			}
-			versionedHashes = append(versionedHashes, versionedHash)
-			return nil
-		})
-	}
-
-	if block.Version() >= clparams.DenebVersion {
-		if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block.Body.ExecutionPayload, block.Block.Body.BlobKzgCommitments); err != nil {
-			return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
-		}
-	}
-
-	var executionRequestsList []hexutility.Bytes = nil
-	if block.Version() >= clparams.ElectraVersion {
-		executionRequestsList = block.Block.Body.GetExecutionRequestsList()
-	}
-
-	timeStartExec := time.Now()
-	payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
-	monitor.ObserveNewPayloadTime(timeStartExec)
-	switch payloadStatus {
-	case execution_client.PayloadStatusInvalidated:
-		log.Warn("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot), "err", err)
-		f.forkGraph.MarkHeaderAsInvalid(blockRoot)
-		// remove from optimistic candidate
-		if err := f.optimisticStore.InvalidateBlock(block.Block); err != nil {
-			return fmt.Errorf("failed to remove block from optimistic store: %v", err)
-		}
-		return errors.New("block is invalid")
-	case execution_client.PayloadStatusValidated:
-		log.Trace("OnBlock: block is validated", "block", libcommon.Hash(blockRoot))
-		// remove from optimistic candidate
-		if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
-			return fmt.Errorf("failed to validate block in optimistic store: %v", err)
-		}
-		f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
-	}
-	if err != nil {
-		return fmt.Errorf("newPayload failed: %v", err)
-	}
-	return nil
-}
-
-func (f *ForkChoiceStore) ProcessBlockConsensus(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	start := time.Now()
-	_, _, err := f.forkGraph.AddChainSegment(block, true, true)
-	if err != nil {
-		return fmt.Errorf("ProcessBlockConsensus: replay block, status %+v", err)
-	}
-	if time.Since(start) > 1*time.Millisecond {
-		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
-	}
-	return nil
 }
 
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
@@ -244,7 +171,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
 	startStateProcess := time.Now()
-	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation, false)
+	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if err != nil {
 		return err
 	}

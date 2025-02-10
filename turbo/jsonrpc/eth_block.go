@@ -231,16 +231,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 	additionalFields := make(map[string]interface{})
 
-	// =============================
-	// TODO - remove this after https://github.com/ethereum/execution-apis/pull/570 is implemented by Hive and rest of the community
-	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
-	if err != nil {
-		return nil, err
-	}
-	if td != nil {
-		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
-	}
-	// =================================
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -312,17 +302,6 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 	number := block.NumberU64()
 
-	// =============================
-	// TODO - remove this after https://github.com/ethereum/execution-apis/pull/570 is implemented by Hive and rest of the community
-	td, err := rawdb.ReadTd(tx, hash, number)
-	if err != nil {
-		return nil, err
-	}
-	if td != nil {
-		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
-	}
-	// ==============================
-
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -362,42 +341,6 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 
 	return response, err
-}
-
-func (api *APIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	blocks, err := rawdb.GetLatestBadBlocks(tx)
-	if err != nil || len(blocks) == 0 {
-		return nil, err
-	}
-
-	results := make([]map[string]interface{}, 0, len(blocks))
-	for _, block := range blocks {
-		var blockRlp string
-		if rlpBytes, err := rlp.EncodeToBytes(block); err != nil {
-			blockRlp = err.Error() // hack
-		} else {
-			blockRlp = fmt.Sprintf("%#x", rlpBytes)
-		}
-
-		blockJson, err := ethapi.RPCMarshalBlock(block, true, true, nil)
-		if err != nil {
-			log.Error("Failed to marshal block", "err", err)
-			blockJson = map[string]interface{}{}
-		}
-		results = append(results, map[string]interface{}{
-			"hash":  block.Hash(),
-			"block": blockRlp,
-			"rlp":   blockJson,
-		})
-	}
-
-	return results, nil
 }
 
 // GetBlockTransactionCountByNumber implements eth_getBlockTransactionCountByNumber. Returns the number of transactions in a block given the block's block number.

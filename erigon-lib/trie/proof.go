@@ -66,7 +66,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 				key = key[len(nKey):]
 			}
 			if fromLevel > 0 {
-				fromLevel -= len(nKey)
+				fromLevel--
 			}
 		case *DuoNode:
 			if fromLevel == 0 {
@@ -338,7 +338,9 @@ func VerifyAccountProofByHash(stateRoot libcommon.Hash, accountKey libcommon.Has
 }
 
 func VerifyStorageProof(storageRoot libcommon.Hash, proof accounts.StorProofResult) error {
-	storageKey := crypto.Keccak256Hash(proof.Key[:])
+	keyhash := &libcommon.Hash{}
+	keyhash.SetBytes(hexutility.FromHex(proof.Key))
+	storageKey := crypto.Keccak256Hash(keyhash[:])
 	return VerifyStorageProofByHash(storageRoot, storageKey, proof)
 }
 
@@ -350,15 +352,21 @@ func VerifyStorageProofByHash(storageRoot libcommon.Hash, keyHash libcommon.Hash
 		if proof.Value.ToInt().Sign() != 0 {
 			return errors.New("empty storage root cannot have non-zero values")
 		}
-		// The spec here is a bit unclear.  The yellow paper makes it clear that the
-		// EmptyRoot hash is a special case where the trie is empty.  Since the trie
-		// is empty there are no proof elements to collect.  But, EIP-1186 also
-		// clearly states that the proof must be "starting with the
-		// storageHash-Node", which could imply an RLP encoded `[]byte(nil)` (the
-		// pre-image of the EmptyRoot) should be included.  This implementation
-		// chooses to require the proof be empty.
-		if len(proof.Proof) > 0 {
-			return errors.New("empty storage root should not have proof nodes")
+		// if storage root is zero (0000000) then we should have an empty proof
+		// if it corresponds to empty storage tree, having value EmptyRoot above
+		// then proof should be RLP encoding of empty proof (0x80)
+		if storageRoot == EmptyRoot {
+			for i := range proof.Proof {
+				if len(proof.Proof[i]) != 1 || proof.Proof[i][0] != 0x80 {
+					return errors.New("empty storage root should have RLP encoding of empty proof")
+				}
+			}
+		} else {
+			for i := range proof.Proof {
+				if len(proof.Proof[i]) != 0 {
+					return errors.New("zero storage root should have empty proof")
+				}
+			}
 		}
 		return nil
 	}

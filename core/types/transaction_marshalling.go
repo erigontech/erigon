@@ -71,7 +71,7 @@ type JsonAuthorization struct {
 	ChainID hexutil.Big       `json:"chainId"`
 	Address libcommon.Address `json:"address"`
 	Nonce   hexutil.Uint64    `json:"nonce"`
-	V       hexutil.Uint64    `json:"v"`
+	YParity hexutil.Uint64    `json:"yParity"`
 	R       hexutil.Big       `json:"r"`
 	S       hexutil.Big       `json:"s"`
 }
@@ -81,7 +81,7 @@ func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAu
 	a.Address = authorization.Address
 	a.Nonce = (hexutil.Uint64)(authorization.Nonce)
 
-	a.V = (hexutil.Uint64)(authorization.YParity)
+	a.YParity = (hexutil.Uint64)(authorization.YParity)
 	a.R = hexutil.Big(*authorization.R.ToBig())
 	a.S = hexutil.Big(*authorization.S.ToBig())
 	return a
@@ -97,7 +97,7 @@ func (a JsonAuthorization) ToAuthorization() (Authorization, error) {
 		return auth, errors.New("chainId in authorization does not fit in 256 bits")
 	}
 	auth.ChainID = *chainId
-	yParity := a.V.Uint64()
+	yParity := a.YParity.Uint64()
 	if yParity >= 1<<8 {
 		return auth, errors.New("y parity in authorization does not fit in 8 bits")
 	}

@@ -30,6 +30,7 @@ type SyncedData interface {
 	OnHeadState(newState *state.CachingBeaconState) error
 	UnsetHeadState()
 	ViewHeadState(fn ViewHeadStateFn) error
+	ViewPreviousHeadState(fn ViewHeadStateFn) error
 	Syncing() bool
 	HeadSlot() uint64
 	HeadRoot() common.Hash

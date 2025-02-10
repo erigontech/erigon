@@ -46,8 +46,12 @@ func NewNetAPIImpl(eth rpchelper.ApiBackend) *NetAPIImpl {
 }
 
 // Listening implements net_listening. Returns true if client is actively listening for network connections.
-// TODO: Remove hard coded value
-func (api *NetAPIImpl) Listening(_ context.Context) (bool, error) {
+// If we can get peers info, it means the network interface is up and listening
+func (api *NetAPIImpl) Listening(ctx context.Context) (bool, error) {
+	_, err := api.ethBackend.Peers(ctx)
+	if err != nil {
+		return false, nil
+	}
 	return true, nil
 }
 

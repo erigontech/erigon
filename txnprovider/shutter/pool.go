@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -22,9 +22,10 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/txnprovider"
-	"github.com/erigontech/erigon/txnprovider/shutter/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 )
 
 var _ txnprovider.TxnProvider = (*Pool)(nil)
@@ -33,17 +34,30 @@ type Pool struct {
 	logger                  log.Logger
 	config                  Config
 	secondaryTxnProvider    txnprovider.TxnProvider
+	blockListener           BlockListener
+	eonTracker              EonTracker
 	decryptionKeysListener  DecryptionKeysListener
 	decryptionKeysProcessor DecryptionKeysProcessor
 }
 
-func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.TxnProvider) *Pool {
+func NewPool(
+	logger log.Logger,
+	config Config,
+	secondaryTxnProvider txnprovider.TxnProvider,
+	contractBackend bind.ContractBackend,
+	stateChangesClient stateChangesClient,
+) *Pool {
 	logger = logger.New("component", "shutter")
-	decryptionKeysListener := NewDecryptionKeysListener(logger, config)
+	slotCalculator := NewBeaconChainSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot)
+	blockListener := NewBlockListener(logger, stateChangesClient)
+	eonTracker := NewKsmEonTracker(config, blockListener, contractBackend)
+	decryptionKeysListener := NewDecryptionKeysListener(logger, config, slotCalculator, eonTracker)
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
 	return &Pool{
 		logger:                  logger,
 		config:                  config,
+		blockListener:           blockListener,
+		eonTracker:              eonTracker,
 		secondaryTxnProvider:    secondaryTxnProvider,
 		decryptionKeysListener:  decryptionKeysListener,
 		decryptionKeysProcessor: decryptionKeysProcessor,
@@ -51,6 +65,7 @@ func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.
 }
 
 func (p Pool) Run(ctx context.Context) error {
+	defer func() { p.logger.Info("pool stopped") }()
 	p.logger.Info("running pool")
 
 	unregisterDkpObserver := p.decryptionKeysListener.RegisterObserver(func(msg *proto.DecryptionKeys) {
@@ -59,6 +74,8 @@ func (p Pool) Run(ctx context.Context) error {
 	defer unregisterDkpObserver()
 
 	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return p.blockListener.Run(ctx) })
+	eg.Go(func() error { return p.eonTracker.Run(ctx) })
 	eg.Go(func() error { return p.decryptionKeysListener.Run(ctx) })
 	eg.Go(func() error { return p.decryptionKeysProcessor.Run(ctx) })
 	return eg.Wait()

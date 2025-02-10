@@ -328,3 +328,9 @@ func TestExp(t *testing.T) {
 		}
 	}
 }
+
+func TestHexOrDecimal256UnmarshalJSON(t *testing.T) {
+	input := []byte{'"'}
+	var num HexOrDecimal256
+	_ = num.UnmarshalJSON(input)
+}

@@ -167,12 +167,13 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 	currentHeader := header
 
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
-		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, currentHeader.ParentHash, currentHeader.Number.Uint64()-1)
+		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
+		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, parentBlockHash, parentBlockNum)
 		if err != nil {
 			return err
 		}
 		if currentHeader == nil {
-			return fmt.Errorf("header %v not found", currentHeader.Hash())
+			return fmt.Errorf("header %d, %x not found", parentBlockNum, parentBlockHash)
 		}
 	}
 	if err := e.hook.BeforeRun(tx, true); err != nil {
@@ -291,6 +292,8 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 		return err
 	}
 
+	dbHeadHash := rawdb.ReadHeadBlockHash(tx)
+
 	currentHash := headHash
 	currentNumber := *tip
 	for currentHash != latestValidHash {
@@ -298,6 +301,13 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 		if err != nil {
 			return err
 		}
+
+		// TODO: find a better way to handle this
+		if currentHash == dbHeadHash {
+			// We can't delete the head block stored in the database as that is our canonical reconnection point.
+			return nil
+		}
+
 		rawdb.DeleteHeader(tx, currentHash, currentNumber)
 		currentHash = currentHeader.ParentHash
 		currentNumber--

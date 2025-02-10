@@ -19,11 +19,9 @@ package state
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"io"
 	"runtime"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
@@ -265,9 +263,7 @@ func (b *CachingBeaconState) initCaches() error {
 }
 
 func (b *CachingBeaconState) InitBeaconState() error {
-	b.totalActiveBalanceCache = nil
-	b._refreshActiveBalancesIfNeeded()
-	b.previousStateRoot = common.Hash{}
+
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
 	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 		b.publicKeyIndicies[validator.PublicKey()] = uint64(i)
@@ -275,85 +271,15 @@ func (b *CachingBeaconState) InitBeaconState() error {
 		return true
 	})
 
+	b.totalActiveBalanceCache = nil
+	b._refreshActiveBalancesIfNeeded()
+	b.previousStateRoot = common.Hash{}
 	b.initCaches()
 	if err := b._updateProposerIndex(); err != nil {
 		return err
 	}
 	if b.Version() >= clparams.Phase0Version {
 		return b._initializeValidatorsPhase0()
-	}
-
-	return nil
-}
-
-// EncodeCaches, encodes the beacon state caches into a byte slice
-func (b *CachingBeaconState) EncodeCaches(w io.Writer) error {
-	if _, err := w.Write(b.previousStateRoot[:]); err != nil {
-		return err
-	}
-
-	// Write merkle tree caches
-	if err := b.BeaconState.ValidatorSet().WriteMerkleTree(w); err != nil {
-		return err
-	}
-	if err := b.BeaconState.RandaoMixes().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
-		return err
-	}
-	if err := b.BeaconState.Balances().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
-		return err
-	}
-	if err := b.BeaconState.Slashings().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
-		return err
-	}
-	if err := b.BeaconState.StateRoots().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
-		return err
-	}
-	if err := b.BeaconState.BlockRoots().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
-		return err
-	}
-	if b.Version() >= clparams.AltairVersion {
-		if err := b.BeaconState.InactivityScores().(merkle_tree.HashTreeEncodable).WriteMerkleTree(w); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (b *CachingBeaconState) DecodeCaches(r io.Reader) error {
-	b.shuffledSetsCache, _ = lru.New[common.Hash, []uint64]("beacon_shuffled_sets_cache", shuffledSetsCacheSize)
-	b.activeValidatorsCache, _ = lru.New[uint64, []uint64]("beacon_active_validators_cache", activeValidatorsCacheSize)
-	b.totalActiveBalanceCache = nil
-	b.proposerIndex = nil
-
-	if _, err := r.Read(b.previousStateRoot[:]); err != nil {
-		return err
-	}
-
-	// Read merkle tree caches
-	if err := b.BeaconState.ValidatorSet().ReadMerkleTree(r); err != nil {
-		return err
-	}
-	if err := b.BeaconState.RandaoMixes().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
-		return err
-	}
-
-	if err := b.BeaconState.Balances().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
-		return err
-	}
-	if err := b.BeaconState.Slashings().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
-		return err
-	}
-	if err := b.BeaconState.StateRoots().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
-		return err
-	}
-	if err := b.BeaconState.BlockRoots().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
-		return err
-	}
-	if b.Version() >= clparams.AltairVersion {
-		if err := b.BeaconState.InactivityScores().(merkle_tree.HashTreeEncodable).ReadMerkleTree(r); err != nil {
-			return err
-		}
 	}
 
 	return nil

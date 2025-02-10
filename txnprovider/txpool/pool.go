@@ -143,8 +143,7 @@ type TxPool struct {
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
 	isPostPrague            atomic.Bool
-	maxBlobsPerBlock        uint64
-	maxBlobsPerBlockPrague  *uint64
+	blobSchedule            *chain.BlobSchedule
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -170,8 +169,7 @@ func New(
 	agraBlock *big.Int,
 	cancunTime *big.Int,
 	pragueTime *big.Int,
-	maxBlobsPerBlock uint64,
-	maxBlobsPerBlockPrague *uint64,
+	blobSchedule *chain.BlobSchedule,
 	sentryClients []sentryproto.SentryClient,
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
@@ -224,8 +222,7 @@ func New(
 		unprocessedRemoteByHash: map[string]int{},
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
-		maxBlobsPerBlock:        maxBlobsPerBlock,
-		maxBlobsPerBlockPrague:  maxBlobsPerBlockPrague,
+		blobSchedule:            blobSchedule,
 		feeCalculator:           options.feeCalculator,
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
@@ -327,9 +324,12 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		p.lock.Unlock()
 	}()
 
+	pendingPre := p.pending.Len()
 	defer func() {
-		available := len(p.pending.best.ms)
-		p.logger.Debug("[txpool] New block", "block", block, "unwound", len(unwindTxns.Txns), "mined", len(minedTxns.Txns), "baseFee", baseFee, "pending-pre", available, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len(), "err", err)
+		p.logger.Debug("[txpool] New block", "block", block,
+			"unwound", len(unwindTxns.Txns), "mined", len(minedTxns.Txns), "blockBaseFee", baseFee,
+			"pending-pre", pendingPre, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len(),
+			"err", err)
 	}()
 
 	if assert.Enable {
@@ -508,13 +508,24 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		return err
 	}
 
-	announcements, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
+	announcements, reasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
 		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
 	if err != nil {
 		return err
 	}
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
+
+	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
+	for i, reason := range reasons {
+		if reason == txpoolcfg.Success {
+			txn := newTxns.Txns[i]
+			if txn.Traced {
+				p.logger.Info(fmt.Sprintf("TX TRACING: processRemoteTxns promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
+			}
+			p.promoted.Append(txn.Type, txn.Size, txn.IDHash[:])
+		}
+	}
 
 	if p.promoted.Len() > 0 {
 		select {
@@ -842,12 +853,10 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 	}
 }
 
-func toBlobs(_blobs [][]byte) []gokzg4844.Blob {
-	blobs := make([]gokzg4844.Blob, len(_blobs))
+func toBlobs(_blobs [][]byte) []gokzg4844.BlobRef {
+	blobs := make([]gokzg4844.BlobRef, len(_blobs))
 	for i, _blob := range _blobs {
-		var b gokzg4844.Blob
-		copy(b[:], _blob)
-		blobs[i] = b
+		blobs[i] = _blob
 	}
 	return blobs
 }
@@ -1086,14 +1095,7 @@ func (p *TxPool) isPrague() bool {
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
-	if p.isPrague() {
-		if p.maxBlobsPerBlockPrague != nil {
-			return *p.maxBlobsPerBlockPrague
-		}
-		return 9 // EIP-7691 default
-	} else {
-		return p.maxBlobsPerBlock
-	}
+	return p.blobSchedule.MaxBlobsPerBlock(p.isPrague())
 }
 
 // Check that the serialized txn should not exceed a certain max size
@@ -1850,6 +1852,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 // promote/demote transactions
 // reorgs
 func (p *TxPool) Run(ctx context.Context) error {
+	defer func() { p.logger.Info("[txpool] stopped") }()
 	defer p.poolDB.Close()
 	p.p2pFetcher.ConnectCore()
 	p.p2pFetcher.ConnectSentries()
