@@ -20,7 +20,6 @@
 package ethapi
 
 import (
-	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -37,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/rpc"
 )
 
 // CallArgs represents the arguments for a call.
@@ -622,52 +620,52 @@ func (args *SendTxArgs) toTransaction() types.Transaction {
 	return tx
 }
 
-// DoEstimateGas returns the lowest possible gas limit that allows the transaction to run
-// successfully at block `blockNrOrHash`. It returns error if the transaction would revert, or if
-// there are unexpected failures. The gas limit is capped by both `args.Gas` (if non-nil &
-// non-zero) and `gasCap` (if non-zero).
-func DoEstimateGas(ctx context.Context, b Backend, args SendTxArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverrides, gasCap uint64) (hexutil.Uint64, error) {
-	// Retrieve the base state and mutate it with any overrides
-	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
-	if state == nil || err != nil {
-		return 0, err
-	}
-	if err = overrides.Apply(state); err != nil {
-		return 0, err
-	}
-	header = updateHeaderForPendingBlocks(blockNrOrHash, header)
+// // DoEstimateGas returns the lowest possible gas limit that allows the transaction to run
+// // successfully at block `blockNrOrHash`. It returns error if the transaction would revert, or if
+// // there are unexpected failures. The gas limit is capped by both `args.Gas` (if non-nil &
+// // non-zero) and `gasCap` (if non-zero).
+// func DoEstimateGas(ctx context.Context, b Backend, args SendTxArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverrides, gasCap uint64) (hexutil.Uint64, error) {
+// 	// Retrieve the base state and mutate it with any overrides
+// 	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
+// 	if state == nil || err != nil {
+// 		return 0, err
+// 	}
+// 	if err = overrides.Apply(state); err != nil {
+// 		return 0, err
+// 	}
+// 	header = updateHeaderForPendingBlocks(blockNrOrHash, header)
 
-	// Construct the gas estimator option from the user input
-	opts := &gasestimator.Options{
-		Config:           b.ChainConfig(),
-		Chain:            NewChainContext(ctx, b),
-		Header:           header,
-		State:            state,
-		Backend:          b,
-		ErrorRatio:       gasestimator.EstimateGasErrorRatio,
-		RunScheduledTxes: runScheduledTxes,
-	}
-	// Run the gas estimation andwrap any revertals into a custom return
-	// Arbitrum: this also appropriately recursively calls another args.ToMessage with increased gasCap by posterCostInL2Gas amount
-	call, err := args.ToMessage(gasCap, header, state, types.MessageGasEstimationMode)
-	if err != nil {
-		return 0, err
-	}
+// 	// Construct the gas estimator option from the user input
+// 	opts := &gasestimator.Options{
+// 		Config:           b.ChainConfig(),
+// 		Chain:            NewChainContext(ctx, b),
+// 		Header:           header,
+// 		State:            state,
+// 		Backend:          b,
+// 		ErrorRatio:       gasestimator.EstimateGasErrorRatio,
+// 		RunScheduledTxes: runScheduledTxes,
+// 	}
+// 	// Run the gas estimation andwrap any revertals into a custom return
+// 	// Arbitrum: this also appropriately recursively calls another args.ToMessage with increased gasCap by posterCostInL2Gas amount
+// 	call, err := args.ToMessage(gasCap, header, state, types.MessageGasEstimationMode)
+// 	if err != nil {
+// 		return 0, err
+// 	}
 
-	// Arbitrum: raise the gas cap to ignore L1 costs so that it's compute-only
-	{
-		gasCap, err = args.L2OnlyGasCap(gasCap, header, state, types.MessageGasEstimationMode)
-		if err != nil {
-			return 0, err
-		}
-	}
+// 	// Arbitrum: raise the gas cap to ignore L1 costs so that it's compute-only
+// 	{
+// 		gasCap, err = args.L2OnlyGasCap(gasCap, header, state, types.MessageGasEstimationMode)
+// 		if err != nil {
+// 			return 0, err
+// 		}
+// 	}
 
-	estimate, revert, err := gasestimator.Estimate(ctx, call, opts, gasCap)
-	if err != nil {
-		if len(revert) > 0 {
-			return 0, newRevertError(revert)
-		}
-		return 0, err
-	}
-	return hexutil.Uint64(estimate), nil
-}
+// 	estimate, revert, err := gasestimator.Estimate(ctx, call, opts, gasCap)
+// 	if err != nil {
+// 		if len(revert) > 0 {
+// 			return 0, newRevertError(revert)
+// 		}
+// 		return 0, err
+// 	}
+// 	return hexutil.Uint64(estimate), nil
+// }

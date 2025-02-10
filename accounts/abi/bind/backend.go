@@ -86,9 +86,9 @@ type ContractTransactor interface {
 	// SendTransaction injects the transaction into the pending pool for execution.
 	SendTransaction(ctx context.Context, txn types.Transaction) error
 
-	// HeaderByNumber returns a block header from the current canonical chain. If
-	// number is nil, the latest known header is returned.
-	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
+	//// HeaderByNumber returns a block header from the current canonical chain. If
+	//// number is nil, the latest known header is returned.
+	//HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
 }
 
 // ContractFilterer defines the methods needed to access log events using one-off

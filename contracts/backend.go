@@ -31,6 +31,14 @@ func NewDirectBackend(api jsonrpc.EthAPI) Backend {
 	}
 }
 
+//func (b Backend) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
+//	block, err := b.api.GetBlockByNumber(ctx, BlockNumArg(number), false)
+//	if err != nil {
+//		return nil, err
+//	}
+//	return block
+//}
+
 func (b Backend) CodeAt(ctx context.Context, contract libcommon.Address, blockNum *big.Int) ([]byte, error) {
 	return b.api.GetCode(ctx, contract, BlockNumArg(blockNum))
 }
