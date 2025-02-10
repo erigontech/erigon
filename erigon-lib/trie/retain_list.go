@@ -205,7 +205,7 @@ func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) 
 
 	result.StorageProof = make([]accounts.StorProofResult, len(pr.storageKeys))
 	for i, sk := range pr.storageKeys {
-		result.StorageProof[i].Key = sk
+		result.StorageProof[i].Key = uint256.NewInt(0).SetBytes(sk[:]).Hex()
 		hexKey := pr.storageHexKeys[i]
 		if !pr.acc.Initialised || result.StorageHash == EmptyRoot {
 			// The yellow paper makes it clear that the EmptyRoot is a special case
