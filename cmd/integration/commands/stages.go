@@ -961,7 +961,7 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	defer tx.Rollback()
 
 	if integritySlow {
-		secp256k1.ContextForThread(1)
+		secp256k1.ContextForThread(0)
 		for i := block; ; i++ {
 			if err := common2.Stopped(ctx.Done()); err != nil {
 				return err
