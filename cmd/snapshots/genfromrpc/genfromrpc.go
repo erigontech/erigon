@@ -194,7 +194,16 @@ func decodeBlobVersionedHashes(rawVersionedHashes []string) []common.Hash {
 // makeLegacyTx builds a legacy transaction.
 func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
 	tx := &types.LegacyTx{
-		CommonTx: *commonTx,
+		CommonTx: types.CommonTx{
+			Nonce: commonTx.Nonce,
+			Gas:   commonTx.Gas,
+			To:    commonTx.To,
+			Value: commonTx.Value,
+			Data:  commonTx.Data,
+			V:     commonTx.V,
+			R:     commonTx.R,
+			S:     commonTx.S,
+		},
 		GasPrice: getUint256FromField(rawTx, "gasPrice"),
 	}
 	return tx
@@ -204,7 +213,16 @@ func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.
 func makeAccessListTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
 	tx := &types.AccessListTx{
 		LegacyTx: types.LegacyTx{
-			CommonTx: *commonTx,
+			CommonTx: types.CommonTx{
+				Nonce: commonTx.Nonce,
+				Gas:   commonTx.Gas,
+				To:    commonTx.To,
+				Value: commonTx.Value,
+				Data:  commonTx.Data,
+				V:     commonTx.V,
+				R:     commonTx.R,
+				S:     commonTx.S,
+			},
 			GasPrice: getUint256FromField(rawTx, "gasPrice"),
 		},
 	}
@@ -219,7 +237,16 @@ func makeAccessListTx(commonTx *types.CommonTx, rawTx map[string]interface{}) ty
 
 // makeEip1559Tx builds an EIP-1559 dynamic fee transaction.
 func makeEip1559Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.DynamicFeeTransaction{CommonTx: *commonTx}
+	tx := &types.DynamicFeeTransaction{CommonTx: types.CommonTx{
+		Nonce: commonTx.Nonce,
+		Gas:   commonTx.Gas,
+		To:    commonTx.To,
+		Value: commonTx.Value,
+		Data:  commonTx.Data,
+		V:     commonTx.V,
+		R:     commonTx.R,
+		S:     commonTx.S,
+	}}
 	buildDynamicFeeFields(tx, rawTx)
 	return tx
 }
@@ -227,7 +254,16 @@ func makeEip1559Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 // makeEip4844Tx builds an EIP-4844 blob transaction.
 func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
 	blobTx := &types.BlobTx{
-		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: *commonTx},
+		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{
+			Nonce: commonTx.Nonce,
+			Gas:   commonTx.Gas,
+			To:    commonTx.To,
+			Value: commonTx.Value,
+			Data:  commonTx.Data,
+			V:     commonTx.V,
+			R:     commonTx.R,
+			S:     commonTx.S,
+		}},
 	}
 	buildDynamicFeeFields(&blobTx.DynamicFeeTransaction, rawTx)
 	blobTx.MaxFeePerBlobGas = getUint256FromField(rawTx, "maxFeePerBlobGas")
@@ -248,7 +284,16 @@ func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 // (Implementation details remain to be determined.)
 func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
 	tx := &types.SetCodeTransaction{
-		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: *commonTx},
+		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{
+			Nonce: commonTx.Nonce,
+			Gas:   commonTx.Gas,
+			To:    commonTx.To,
+			Value: commonTx.Value,
+			Data:  commonTx.Data,
+			V:     commonTx.V,
+			R:     commonTx.R,
+			S:     commonTx.S,
+		}},
 	}
 	buildDynamicFeeFields(&tx.DynamicFeeTransaction, rawTx)
 	// TODO: Add any additional EIP-7702–specific processing here.
@@ -347,7 +392,7 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 func genFromRPc(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	jsonRpcAddr := cliCtx.String(RpcAddr.Name)
-	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(log.LvlInfo), log.StderrHandler))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	// Connect to RPC.
 	client, err := rpc.Dial(jsonRpcAddr, log.Root())
