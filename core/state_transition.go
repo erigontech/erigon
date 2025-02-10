@@ -564,3 +564,23 @@ func (st *StateTransition) refundGas() {
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
 }
+
+// IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
+// TODO: convert the input to a struct
+func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860, isPrague bool, authorizationsLen uint64) (uint64, uint64, error) {
+	// Zero and non-zero bytes are priced differently
+	dataLen := uint64(len(data))
+	dataNonZeroLen := uint64(0)
+	for _, byt := range data {
+		if byt != 0 {
+			dataNonZeroLen++
+		}
+	}
+
+	// TODO arbitrum - do we need a separate one intrinsic estimator
+	gas, floorGas7623, overflow := fixedgas.CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, uint64(len(accessList)), uint64(accessList.StorageKeys()), isContractCreation, isHomestead, isEIP2028, isEIP3860, isPrague)
+	if overflow != false {
+		return 0, 0, ErrGasUintOverflow
+	}
+	return gas, floorGas7623, nil
+}
