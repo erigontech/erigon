@@ -41,7 +41,6 @@ type heimdallSynchronizer interface {
 }
 
 type bridgeSynchronizer interface {
-	Synchronize(ctx context.Context, blockNum uint64) error
 	Unwind(ctx context.Context, blockNum uint64) error
 	ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error
 	Ready(ctx context.Context) <-chan error
@@ -122,12 +121,7 @@ func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finali
 	}
 
 	blockNum := newTip.Number.Uint64()
-
 	if err := s.heimdallSync.SynchronizeSpans(ctx, blockNum); err != nil {
-		return err
-	}
-
-	if err := s.bridgeSync.Synchronize(ctx, blockNum); err != nil {
 		return err
 	}
 
@@ -168,10 +162,6 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 
 	// wait for any possibly unprocessed previous block inserts to finish
 	if err := s.store.Flush(ctx); err != nil {
-		return err
-	}
-
-	if err := s.bridgeSync.Synchronize(ctx, tipNum); err != nil {
 		return err
 	}
 
@@ -527,10 +517,6 @@ func (s *Sync) handleBridgeOnForkChange(ctx context.Context, ccb *CanonicalChain
 		return err
 	}
 
-	if err := s.bridgeSync.Synchronize(ctx, oldTip.Number.Uint64()); err != nil {
-		return err
-	}
-
 	return s.reorganiseBridge(ctx, ccb, lca)
 }
 
@@ -568,11 +554,8 @@ func (s *Sync) reorganiseBridge(ctx context.Context, ccb *CanonicalChainBuilder,
 	for i, header := range canonicalHeaders {
 		canonicalBlocks[i] = types.NewBlockWithHeader(header)
 	}
-	if err := s.bridgeSync.ProcessNewBlocks(ctx, canonicalBlocks); err != nil {
-		return err
-	}
 
-	return s.bridgeSync.Synchronize(ctx, newTipNum)
+	return s.bridgeSync.ProcessNewBlocks(ctx, canonicalBlocks)
 }
 
 func (s *Sync) handleBridgeOnBlocksInsertAheadOfTip(ctx context.Context, tipNum, lastInsertedNum uint64) error {
@@ -588,11 +571,6 @@ func (s *Sync) handleBridgeOnBlocksInsertAheadOfTip(ctx context.Context, tipNum,
 
 	// wait for the insert blocks flush
 	if err := s.store.Flush(ctx); err != nil {
-		return err
-	}
-
-	// wait for the bridge processing
-	if err := s.bridgeSync.Synchronize(ctx, lastInsertedNum); err != nil {
 		return err
 	}
 
