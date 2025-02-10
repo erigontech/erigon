@@ -102,3 +102,7 @@ func (a AppendableId) String() string {
 func (a AppendableId) Dirs() datadir.Dirs {
 	return appendableRegistry[a].dirs
 }
+
+func (a AppendableId) SnapshotCreationConfig() *SnapshotCreationConfig {
+	return appendableRegistry[a].snapshotCreationConfig
+}
