@@ -119,6 +119,7 @@ func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
 				return err
 			}
 
+			et.logger.Debug("current eon at block", "blockNum", blockEvent.BlockNum, "eonIndex", eon.Index)
 			et.currentEon.Store(&eon)
 			et.maybeCleanup(blockEvent.BlockNum)
 		}
@@ -176,8 +177,8 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, error) {
 	if err != nil {
 		return Eon{}, err
 	}
-	if activationBlock < blockNum {
-		return Eon{}, fmt.Errorf("unexpected invalid activation block: %d < %d", activationBlock, blockNum)
+	if activationBlock > blockNum {
+		return Eon{}, fmt.Errorf("unexpected invalid activation block: %d > %d", activationBlock, blockNum)
 	}
 
 	finalized, err := keyperSet.IsFinalized(callOpts)
@@ -185,7 +186,7 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, error) {
 		return Eon{}, err
 	}
 	if !finalized {
-		return Eon{}, fmt.Errorf("unexpected KeyperSet is not finalized: eon=%d, address=%s", eonIndex, keyperSetAddress)
+		return Eon{}, fmt.Errorf("unexpected keyper set is not finalized: eon=%d, address=%s", eonIndex, keyperSetAddress)
 	}
 
 	eon := Eon{
@@ -261,6 +262,7 @@ func (et *KsmEonTracker) trackFutureEons(ctx context.Context) error {
 		case err := <-keyperSetAddedEventSub.Err():
 			return err
 		case event := <-keyperSetAddedEventC:
+			et.logger.Debug("keyper set added event", "eon", event.Eon, "removed", event.Raw.Removed)
 			eonIndex := EonIndex(event.Eon)
 			if event.Raw.Removed {
 				et.recentEons.Delete(eonIndex)

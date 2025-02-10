@@ -58,7 +58,7 @@ func (bl BlockListener) Run(ctx context.Context) error {
 
 	// note the changes stream is ctx-aware so Recv should terminate with err if ctx gets done
 	var batch *remoteproto.StateChangeBatch
-	for batch, err = sub.Recv(); err != nil; batch, err = sub.Recv() {
+	for batch, err = sub.Recv(); err == nil; batch, err = sub.Recv() {
 		if batch == nil || len(batch.ChangeBatch) == 0 {
 			continue
 		}
