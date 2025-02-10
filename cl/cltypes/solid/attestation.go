@@ -37,11 +37,6 @@ const (
 	aggregationBitsSizeElectra = maxCommitteesPerSlot * maxValidatorsPerCommittee
 )
 
-var (
-	_ GeneralAttestation = (*Attestation)(nil)
-	_ GeneralAttestation = (*SingleAttestation)(nil)
-)
-
 // Attestation type represents a statement or confirmation of some occurrence or phenomenon.
 type Attestation struct {
 	AggregationBits *BitList          `json:"aggregation_bits"`
@@ -171,10 +166,6 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (a *Attestation) AttestationData() *AttestationData {
-	return a.Data
-}
-
 // class SingleAttestation(Container):
 //
 //	committee_index: CommitteeIndex
@@ -230,9 +221,4 @@ func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int) *Attestati
 
 func (s *SingleAttestation) AttestationData() *AttestationData {
 	return s.Data
-}
-
-type GeneralAttestation interface {
-	AttestationData() *AttestationData
-	ssz.EncodableSSZ
 }

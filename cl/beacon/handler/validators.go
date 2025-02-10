@@ -819,7 +819,6 @@ func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter
 
 	attDataRootHash := libcommon.HexToHash(attDataRoot)
 	att := a.aggregatePool.GetAggregatationByRootAndCommittee(attDataRootHash, committeeIndexNum)
-	log.Debug("[Beacon REST API] GetEthV2ValidatorAggregateAttestation", "att", att, "attDataRoot", attDataRootHash, "committeeIndex", committeeIndexNum, "slot", slotNum)
 	if att == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))
 	}
