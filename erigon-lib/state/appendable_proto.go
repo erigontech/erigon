@@ -7,6 +7,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	ae "github.com/erigontech/erigon-lib/state/appendables_extras"
 
 	"github.com/tidwall/btree"
 	btree2 "github.com/tidwall/btree"
@@ -17,7 +18,7 @@ import (
 type ProtoAppendable struct {
 	freezer Freezer
 
-	a          AppendableId
+	a          ae.AppendableId
 	builders   []AccessorIndexBuilder
 	dirtyFiles *btree.BTreeG[*filesItem]
 	_visible   visibleFiles
@@ -27,7 +28,7 @@ type ProtoAppendable struct {
 	logger log.Logger
 }
 
-func NewProto(a AppendableId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoAppendable {
+func NewProto(a ae.AppendableId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoAppendable {
 	return &ProtoAppendable{
 		a:          a,
 		builders:   builders,
@@ -60,5 +61,5 @@ func (a *ProtoAppendable) VisibleFilesMaxNum() RootNum {
 }
 
 func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, dv kv.RoDB, ps *background.ProgressSet) error {
-
+	return nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	ae "github.com/erigontech/erigon-lib/state/appendables_extras"
 )
 
 // interfaces defined here are not required to be implemented by
@@ -55,11 +56,11 @@ func NewAccessorArgs(enums, lessFalsePositives, nofsync bool, salt uint32) *Acce
 type SimpleAccessorBuilder struct {
 	args     *AccessorArgs
 	indexPos uint64
-	id       AppendableId
+	id       ae.AppendableId
 	kf       IndexKeyFactory
 }
 
-func NewSimpleAccessorBuilder(args *AccessorArgs, id AppendableId) *SimpleAccessorBuilder {
+func NewSimpleAccessorBuilder(args *AccessorArgs, id ae.AppendableId) *SimpleAccessorBuilder {
 	return &SimpleAccessorBuilder{
 		args: args,
 		id:   id,
