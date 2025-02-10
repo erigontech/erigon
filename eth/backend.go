@@ -857,6 +857,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// If we choose not to run a consensus layer, run our embedded.
 	if config.InternalCL && clparams.EmbeddedSupported(config.NetworkID) {
+		panic("Caplin (--internalcl) in Erigon 2 is not ready for Pectra. Either upgrade to Erigon 3 or use an external CL.")
+
 		networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
 		if err != nil {
 			return nil, err
