@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
@@ -252,22 +254,31 @@ func WriteOrTestGenblock(chainDb kv.TemporalRwTx, initData statetransfer.InitDat
 		}
 		timestamp = prevHeader.Time
 	}
+
 	stateDatabase := state.NewReaderV3(chainDb)
-	statedb := state.NewArbitrum(state.New(stateDatabase))
+	ss := state.New(stateDatabase)
+	ss.SetTrace(true)
+	statedb := state.NewArbitrum(ss)
 
 	stateRoot, err := arbosState.InitializeArbosInDatabase(statedb, initData, chainConfig, initMessage, timestamp, accountsPerSync)
 	if err != nil {
 		return err
 	}
 
+	fmt.Printf("init arbos state root %x\n", stateRoot)
+	gen := core.GenesisBlockByChainName(chainConfig.ChainName)
+	fmt.Printf("genesis block %v\n", gen)
+
 	genBlock := arbosState.MakeGenesisBlock(prevHash, blockNumber, timestamp, stateRoot, chainConfig)
 	blockHash := genBlock.Hash()
 
 	if storedGenHash == EmptyHash {
 		// chainDb did not have genesis block. Initialize it.
-		rawdb.WriteHeadBlockHash(chainDb, genBlock.Hash())
+		// rawdb.WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis)
+		chainConfig, genBlock, err = core.WriteGenesisBlock(chainDb, gen, chainConfig.PragueTime, datadir.New(os.TempDir()), log.New())
+		// raw/* d */b.WriteHeadBlockHash(chainDb, blockHash)
 		// core.WriteHeadBlock(chainDb, genBlock, prevDifficulty)
-		log.Info("wrote genesis block", "number", blockNumber, "hash", blockHash)
+		log.Info("wrote genesis block", "number", blockNumber, "hash", blockHash, "err", err)
 	} else if storedGenHash != blockHash {
 		return fmt.Errorf("database contains data inconsistent with initialization: database has genesis hash %v but we built genesis hash %v", storedGenHash, blockHash)
 	} else {

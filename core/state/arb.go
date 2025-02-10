@@ -335,6 +335,42 @@ func (s *IntraBlockState) GetSelfDestructs() []common.Address {
 	return selfDestructs
 }
 
+func (sdb *IntraBlockState) ActivatedAsm(target WasmTarget, moduleHash common.Hash) (asm []byte, err error) {
+	return nil, nil
+	//TODO implement me
+	panic("implement me")
+}
+
+func (sdb *IntraBlockState) WasmStore() kv.RwDB {
+	//TODO implement me
+	return nil
+	panic("implement me")
+}
+
+func (sdb *IntraBlockState) WasmCacheTag() uint32 {
+	return 0
+	//TODO implement me
+	panic("implement me")
+}
+
+func (sdb *IntraBlockState) WasmTargets() []WasmTarget {
+	return []WasmTarget{}
+	//TODO implement me
+	panic("implement me")
+}
+
+func (sdb *IntraBlockState) GetReceiptsByHash(hash common.Hash) types.Receipts {
+	return nil
+	//TODO implement me
+	panic("implement me")
+}
+
+func (sdb *IntraBlockState) Commit(bn uint64, _ bool) (common.Hash, error) {
+	return common.Hash{}, nil
+	//TODO implement me
+	panic("implement me")
+}
+
 // making the function public to be used by external tests
 // func ForEachStorage(s *IntraBlockState, addr common.Address, cb func(key, value common.Hash) bool) error {
 // 	return forEachStorage(s, addr, cb)

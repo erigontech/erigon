@@ -390,6 +390,25 @@ func TestGenesisBlock() *types.Genesis {
 	return &types.Genesis{Config: params.TestChainConfig}
 }
 
+func ArbSepoliaRollupGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     nil,
+		Nonce:      0x0000000000000001,
+		Timestamp:  0x0,
+		ExtraData:  libcommon.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   0x4000000000000, // as given in hex
+		Difficulty: big.NewInt(1),   // "0x1"
+		Mixhash:    libcommon.HexToHash("0x00000000000000000000000000000000000000000000000a0000000000000000"),
+		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Alloc:      types.GenesisAlloc{}, // assume no preallocated state provided
+		Number:     0x0,                  // block number 0
+		GasUsed:    0x0,
+		ParentHash: libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		BaseFee:    big.NewInt(100000000),
+		// Alloc:      readPrealloc("allocs/bor_devnet.json"),
+	}
+}
+
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
@@ -630,6 +649,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return SepoliaGenesisBlock()
 	case networkname.Amoy:
 		return AmoyGenesisBlock()
+	case networkname.ArbiturmSepolia:
+		return ArbSepoliaRollupGenesisBlock()
 	case networkname.BorMainnet:
 		return BorMainnetGenesisBlock()
 	case networkname.BorDevnet:

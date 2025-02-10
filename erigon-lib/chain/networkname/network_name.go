@@ -27,6 +27,8 @@ const (
 	Gnosis              = "gnosis"
 	BorE2ETestChain2Val = "bor-e2e-test-2Val"
 	Chiado              = "chiado"
+	ArbiturmMainnet     = "arb1"
+	ArbiturmSepolia     = "sepolia-rollup"
 	Test                = "test"
 )
 
@@ -39,6 +41,8 @@ var All = []string{
 	BorDevnet,
 	Gnosis,
 	Chiado,
+	ArbiturmMainnet,
+	ArbiturmSepolia,
 	Test,
 }
 
