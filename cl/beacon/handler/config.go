@@ -23,11 +23,22 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 )
 
 func (a *ApiHandler) getSpec(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	return newBeaconResponse(a.beaconChainCfg), nil
+	outSpec := struct {
+		*clparams.BeaconChainConfig
+		*clparams.NetworkConfig
+		MinEpochsForBlockRequests uint64 `json:"MIN_EPOCHS_FOR_BLOCK_REQUESTS,string"`
+	}{
+		BeaconChainConfig:         a.beaconChainCfg,
+		NetworkConfig:             a.netConfig,
+		MinEpochsForBlockRequests: a.beaconChainCfg.MinEpochsForBlockRequests(),
+	}
+
+	return newBeaconResponse(outSpec), nil
 }
 
 func (a *ApiHandler) getDepositContract(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {

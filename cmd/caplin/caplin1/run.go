@@ -146,14 +146,13 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		if config.HaveInvalidDevnetParams() {
 			return errors.New("devnet config and genesis state paths must be set together")
 		}
-		networkConfig, _ = clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
-		tmp, err := clparams.CustomConfig(config.CustomConfigPath)
+		customBeaconCfg, customNetworkCfg, err := clparams.CustomConfig(config.CustomConfigPath)
 		if err != nil {
 			return err
 		}
-		beaconConfig = &tmp
+		beaconConfig = &customBeaconCfg
+		networkConfig = &customNetworkCfg
 		genesisDb = genesisdb.NewGenesisDB(beaconConfig, dirs.CaplinGenesis)
-
 		stateBytes, err := os.ReadFile(config.CustomGenesisStatePath)
 		if err != nil {
 			return fmt.Errorf("could not read provided genesis state file: %s", err)
