@@ -19,12 +19,28 @@ func getPkgDir(path string) string {
 	if r[0] != "github.com" {
 		panic("expected github.com to be the first item")
 	}
-	result := "./" + r[4]
-	if len(r) > 4 {
-		for i := 4; i < len(r); i++ {
-			result += ("/" + r[i])
+
+	var result string
+
+	if r[2] == "erigon" {
+		result = "./" + r[3]
+		if len(r) > 4 {
+			for i := 4; i < len(r); i++ {
+				result += ("/" + r[i])
+			}
 		}
+	} else if r[2] == "erigon-lib" {
+		result = "./" + r[2]
+		if len(r) > 3 {
+			for i := 3; i < len(r); i++ {
+				result += ("/" + r[i])
+			}
+		}
+	} else {
+		fmt.Println(r)
+		panic("getPkgDir: unhnadled")
 	}
+
 	return result
 }
 
@@ -48,13 +64,13 @@ func findType(scope *types.Scope, typename string) (*types.Named, error) {
 	return nil, errors.New("not a named type")
 }
 
-func loadPkg(pkgdir *string) []*packages.Package {
+func loadPkg(pkgdir string) []*packages.Package {
 	pcfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedTypes,
-		Dir:  *pkgdir,
+		Dir:  pkgdir,
 	}
 
-	fmt.Println("loading package from directory: ", *pkgdir)
+	fmt.Println("loading package from directory: ", pkgdir)
 
 	ps, err := packages.Load(pcfg, ".")
 
@@ -62,7 +78,7 @@ func loadPkg(pkgdir *string) []*packages.Package {
 		_exit(fmt.Sprint("error loading package: ", err))
 	}
 	if len(ps) != 1 {
-		_exit(fmt.Sprintf("expected to load package: 1) %v\n \tgot %v", *pkgdir, len(ps)))
+		_exit(fmt.Sprintf("expected to load package: 1) %v\n \tgot %v", pkgdir, len(ps)))
 	}
 
 	if err := checkPackageErrors(ps[0]); err != nil {
