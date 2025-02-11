@@ -172,13 +172,11 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 
 func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
 	v := r.Header.Get("Eth-Consensus-Version")
-	clVersion := clparams.DenebVersion
 	if v == "" {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("missing version header")).WriteTo(w)
 		return
 	}
-	var err error
-	clVersion, err = clparams.StringToClVersion(v)
+	clVersion, err := clparams.StringToClVersion(v)
 	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
