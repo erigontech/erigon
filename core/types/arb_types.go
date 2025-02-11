@@ -1691,13 +1691,105 @@ func (d *ArbitrumDepositTx) Protected() bool {
 }
 
 func (d *ArbitrumDepositTx) EncodingSize() int {
-	//TODO implement me
-	panic("implement me")
+	payloadSize := d.payloadSize()
+	// Add envelope size and type size
+	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (d *ArbitrumDepositTx) EncodeRLP(w io.Writer) error {
-	//TODO implement me
-	panic("implement me")
+	payloadSize := d.payloadSize()
+
+	// size of struct prefix and TxType
+	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+
+	// envelope
+	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
+
+	// encode TxType
+	b[0] = ArbitrumDepositTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := d.encodePayload(w, b[:], payloadSize); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *ArbitrumDepositTx) payloadSize() int {
+	size := 0
+
+	// ChainId: header + length of big.Int (excluding header)
+	size++ // header for ChainId
+	size += rlp.BigIntLenExcludingHead(tx.ChainId)
+
+	// L1RequestId: header + 32 bytes
+	size++ // header for L1RequestId
+	size += 32
+
+	// From: header + 20 bytes
+	size++ // header for From
+	size += 20
+
+	// To: header + 20 bytes
+	size++ // header for To
+	size += 20
+
+	// Value: header + length of big.Int (excluding header)
+	size++ // header for Value
+	size += rlp.BigIntLenExcludingHead(tx.Value)
+
+	return size
+}
+
+func (tx *ArbitrumDepositTx) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+	// Write the RLP list prefix.
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+
+	// Encode ChainId.
+	if err := rlp.EncodeBigInt(tx.ChainId, w, b); err != nil {
+		return err
+	}
+
+	// Encode L1RequestId (common.Hash, 32 bytes).
+	b[0] = 128 + 32
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(tx.L1RequestId[:]); err != nil {
+		return err
+	}
+
+	// Encode From (common.Address, 20 bytes).
+	b[0] = 128 + 20
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(tx.From[:]); err != nil {
+		return err
+	}
+
+	// Encode To (common.Address, 20 bytes).
+	b[0] = 128 + 20
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(tx.To[:]); err != nil {
+		return err
+	}
+
+	// Encode Value.
+	if err := rlp.EncodeBigInt(tx.Value, w, b); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (tx *ArbitrumDepositTx) DecodeRLP(s *rlp.Stream) error {
@@ -1756,8 +1848,18 @@ func (tx *ArbitrumDepositTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (d *ArbitrumDepositTx) MarshalBinary(w io.Writer) error {
-	//TODO implement me
-	panic("implement me")
+	payloadSize := d.payloadSize()
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// encode TxType
+	b[0] = ArbitrumDepositTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := d.encodePayload(w, b[:], payloadSize); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (d *ArbitrumDepositTx) Sender(signer Signer) (common.Address, error) {

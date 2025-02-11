@@ -911,8 +911,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if header == nil {
 		return nil
 	}
-	body, err := ReadBodyWithTransactions(tx, hash, number)
-	fmt.Println(err)
+	body, _ := ReadBodyWithTransactions(tx, hash, number)
 	if body == nil {
 		return nil
 	}

@@ -56,3 +56,21 @@ func TestArbitrumSubmitRetryTx(t *testing.T) {
 
 	require.Equal(t, rawInitial, b.Bytes())
 }
+
+func TestArbitrumDepsitTx(t *testing.T) {
+	rawInitial := common.FromHex("0x64f85883066eeea0000000000000000000000000000000000000000000000000000000000000000f9499998aa374dbde60d26433e275ad700b658731749488888aa374dbde60d26433e275ad700b65872063880de0b6b3a7640000")
+	var tx ArbitrumDepositTx
+
+	if err := rlp.DecodeBytes(rawInitial[1:], &tx); err != nil {
+		t.Fatal(err)
+	}
+
+	require.Equal(t, tx.Hash(), common.HexToHash("0x733c1300c06ac4ced959e68f16f565ee8918a4e75c9f9e3913bc7a7e939c60db"))
+
+	var b bytes.Buffer
+
+	// now encode and decode again
+	require.NoError(t, tx.MarshalBinary(&b))
+
+	require.Equal(t, rawInitial, b.Bytes())
+}
