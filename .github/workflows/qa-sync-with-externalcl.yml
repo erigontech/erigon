@@ -1,4 +1,4 @@
-name: QA - Sync from scratch with external CL
+name: QA - Sync with external CL
 
 on:
   push:
