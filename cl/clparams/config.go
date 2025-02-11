@@ -205,10 +205,10 @@ type NetworkConfig struct {
 	RespTimeout                     ConfigDurationSec  `yaml:"-" json:"RESP_TIMEOUT"`                                                               // The maximum time for complete response transfer.
 
 	// DiscoveryV5 Config
-	Eth2key                    string // ETH2Key is the ENR key of the Ethereum consensus object in an enr.
-	AttSubnetKey               string // AttSubnetKey is the ENR key of the subnet bitfield in the enr.
-	SyncCommsSubnetKey         string // SyncCommsSubnetKey is the ENR key of the sync committee subnet bitfield in the enr.
-	MinimumPeersInSubnetSearch uint64 // PeersInSubnetSearch is the required amount of peers that we need to be able to lookup in a subnet search.
+	Eth2key                    string `yaml:"-" json:"-"` // ETH2Key is the ENR key of the Ethereum consensus object in an enr.
+	AttSubnetKey               string `yaml:"-" json:"-"` // AttSubnetKey is the ENR key of the subnet bitfield in the enr.
+	SyncCommsSubnetKey         string `yaml:"-" json:"-"` // SyncCommsSubnetKey is the ENR key of the sync committee subnet bitfield in the enr.
+	MinimumPeersInSubnetSearch uint64 `yaml:"-" json:"-"` // PeersInSubnetSearch is the required amount of peers that we need to be able to lookup in a subnet search.
 
 	BootNodes   []string
 	StaticPeers []string
@@ -361,7 +361,7 @@ func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
 type ConfigDurationSec time.Duration
 
 func (d *ConfigDurationSec) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf("\"%d\"", time.Duration(*d).Seconds())), nil
+	return []byte(fmt.Sprintf("\"%d\"", int64(time.Duration(*d).Seconds()))), nil
 }
 
 type ConfigDurationMSec time.Duration
@@ -373,7 +373,7 @@ func (d *ConfigDurationMSec) MarshalJSON() ([]byte, error) {
 type ConfigByte byte
 
 func (b ConfigByte) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf("\"0x%x\"", b)), nil
+	return []byte(fmt.Sprintf("\"0x%02x\"", b)), nil
 }
 
 type RequestTypePrefix byte
@@ -920,24 +920,23 @@ func mainnetConfig() BeaconChainConfig {
 }
 
 func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
-	cfg := MainnetBeaconConfig
+	networkConfig, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
 	b, err := os.ReadFile(configFile) // just pass the file name
 	if err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
 
 	// setup beacon chain config
-	if err := yaml.Unmarshal(b, &cfg); err != nil {
+	if err := yaml.Unmarshal(b, &beaconCfg); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
-	cfg.InitializeForkSchedule()
+	beaconCfg.InitializeForkSchedule()
 
 	// setup network config
-	networkConfig := NetworkConfig{}
 	if err := yaml.Unmarshal(b, &networkConfig); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
-	return cfg, networkConfig, nil
+	return *beaconCfg, *networkConfig, nil
 }
 
 func sepoliaConfig() BeaconChainConfig {
