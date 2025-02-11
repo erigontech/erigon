@@ -12,3 +12,11 @@ type Id uint64
 type RootNum uint64
 
 type Bytes []byte
+
+func (n Num) Step(a AppendableId) uint64 {
+	return uint64(n) / a.SnapshotConfig().EntitiesPerStep
+}
+
+func (n RootNum) Step(a AppendableId) uint64 {
+	return uint64(n) / a.SnapshotConfig().EntitiesPerStep
+}

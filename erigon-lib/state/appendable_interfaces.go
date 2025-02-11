@@ -30,6 +30,6 @@ type Collector func(values []byte) error
 /** index building **/
 
 type AccessorIndexBuilder interface {
-	Build(ctx context.Context, from, to RootNum, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error)
+	Build(ctx context.Context, from, to RootNum, tmpDir string, p *background.ProgressSet, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error)
 	AllowsOrdinalLookupByNum() bool
 }

@@ -18,7 +18,6 @@ import (
 // interfaces defined here are not required to be implemented by
 // appendables. These are just helpers when SimpleAccessorBuilder is used. Also can be used to provide some structure
 // to build more custom indexes.
-
 type IndexInputDataQuery interface {
 	GetStream(ctx context.Context) stream.Trio[[]byte, uint64, uint64] // (word/value, index, offset)
 	GetBaseDataId() uint64
@@ -27,7 +26,7 @@ type IndexInputDataQuery interface {
 
 type IndexKeyFactory interface {
 	// IndexInputDataQuery elements passed here to create key for index
-	// `value` is snapshot element; 
+	// `value` is snapshot element;
 	// `index` is the corresponding sequence number in the file.
 	Make(value []byte, index uint64) []byte
 }
@@ -62,19 +61,29 @@ type SimpleAccessorBuilder struct {
 	kf       IndexKeyFactory
 }
 
-func NewSimpleAccessorBuilder(args *AccessorArgs, id ae.AppendableId) *SimpleAccessorBuilder {
-	return &SimpleAccessorBuilder{
+func NewSimpleAccessorBuilder(args *AccessorArgs, id ae.AppendableId, options ...SimpleABOptions) *SimpleAccessorBuilder {
+	b := &SimpleAccessorBuilder{
 		args: args,
 		id:   id,
 		kf:   simpleIndexKeyFactoryInstance,
 	}
+
+	for _, opt := range options {
+		opt(b)
+	}
+
+	return b
 }
 
-func (s *SimpleAccessorBuilder) SetIndexPos(indexPos uint64) {
-	if int(s.indexPos) >= len(s.id.IndexPrefix()) {
-		panic("indexPos greater than indexPrefix length")
+type SimpleABOptions func(*SimpleAccessorBuilder)
+
+func WithIndexPos(indexPos uint64) SimpleABOptions {
+	return func(s *SimpleAccessorBuilder) {
+		if int(s.indexPos) >= len(s.id.IndexPrefix()) {
+			panic("indexPos greater than indexPrefix length")
+		}
+		s.indexPos = indexPos
 	}
-	s.indexPos = indexPos
 }
 
 func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
@@ -96,11 +105,16 @@ func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 	return s.args.enums
 }
 
-func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
+func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmpDir string, ps *background.ProgressSet, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
 	iidq := s.GetInputDataQuery(from, to)
 	idxFile := ae.IdxName(s.id, snaptype.Version(1), from, to, s.indexPos)
+
+	keyCount := iidq.GetCount()
+	p := ps.AddNew(idxFile, keyCount)
+	defer ps.Delete(p)
+
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:           int(iidq.GetCount()),
+		KeyCount:           int(keyCount),
 		Enums:              true,
 		BucketSize:         2000,
 		IndexFile:          idxFile,
@@ -126,6 +140,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmp
 			if err = rs.AddKey(key, offset); err != nil {
 				return nil, err
 			}
+			p.Processed.Add(1)
 			select {
 			case <-ctx.Done():
 				stream.Close()
@@ -135,6 +150,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmp
 		}
 		stream.Close()
 		if err = rs.Build(ctx); err != nil {
+			p.Processed.CompareAndSwap(p.Processed.Load(), 0)
 			// collision handling
 			if errors.Is(err, recsplit.ErrCollision) {
 				rs.ResetNextSalt()

@@ -15,7 +15,7 @@ type holder struct {
 	snapshotNameBase       string   // name to be used in snapshot file
 	indexNameBases         []string // one indexNameBase for each index
 	dirs                   datadir.Dirs
-	snapshotCreationConfig *SnapshotCreationConfig
+	snapshotCreationConfig *SnapshotConfig
 }
 
 var appendableRegistry []holder
@@ -73,7 +73,7 @@ func WithIndexFileType(indexFileType []string) AppendableIdOption {
 	}
 }
 
-func WithSnapshotCreationConfig(cfg *SnapshotCreationConfig) AppendableIdOption {
+func WithSnapshotCreationConfig(cfg *SnapshotConfig) AppendableIdOption {
 	return func(a *holder) {
 		a.snapshotCreationConfig = cfg
 	}
@@ -103,6 +103,6 @@ func (a AppendableId) Dirs() datadir.Dirs {
 	return appendableRegistry[a].dirs
 }
 
-func (a AppendableId) SnapshotCreationConfig() *SnapshotCreationConfig {
+func (a AppendableId) SnapshotConfig() *SnapshotConfig {
 	return appendableRegistry[a].snapshotCreationConfig
 }

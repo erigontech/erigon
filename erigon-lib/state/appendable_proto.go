@@ -5,8 +5,11 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
 	ae "github.com/erigontech/erigon-lib/state/appendables_extras"
 
 	"github.com/tidwall/btree"
@@ -61,7 +64,74 @@ func (a *ProtoAppendable) VisibleFilesMaxNum() RootNum {
 	return a.VisibleFilesMaxRootNum()
 }
 
-func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, dv kv.RoDB, ps *background.ProgressSet) error {
+func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) error {
+	log.Debug("freezing %s from %d to %d", a.a.Name(), from, to)
+	calcFrom, calcTo := from, to
+	var canFreeze bool
+	cfg := a.a.SnapshotConfig()
+	for {
+		calcFrom, calcTo, canFreeze = ae.GetFreezingRange(calcFrom, calcTo, a.a)
+		if !canFreeze {
+			break
+		}
+
+		log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
+		path := ae.SegName(a.a, snaptype.Version(1), calcFrom, calcTo)
+		sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, a.logger)
+		if err != nil {
+			return err
+		}
+
+		{
+			a.freezer.SetCollector(func(values []byte) error {
+				return sn.AddWord(values)
+			})
+			tx, err := db.BeginRo(ctx)
+			if err != nil {
+				return err
+			}
+
+			defer tx.Rollback()
+			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, tx); err != nil {
+				return err
+			}
+			tx.Rollback()
+		}
+
+		{
+			p := ps.AddNew(path, 1)
+			defer ps.Delete(p)
+			if err := sn.Compress(); err != nil {
+				return err
+			}
+			sn.Close()
+			sn = nil
+			ps.Delete(p)
+		}
+
+		valuesDecomp, err := seg.NewDecompressor(path)
+		if err != nil {
+			return err
+		}
+
+		df := newFilesItemWithFrozenSteps(uint64(calcFrom), uint64(calcTo), cfg.MinimumSize, cfg.StepsInFrozenFile())
+		df.decompressor = valuesDecomp
+
+		indexes := make([]*recsplit.Index, len(a.builders))
+		for i, ib := range a.builders {
+			recsplitIdx, err := ib.Build(ctx, from, to, "sometmpdir", ps, log.LvlInfo, nil)
+			if err != nil {
+				return err
+			}
+
+			indexes[i] = recsplitIdx
+		}
+		// TODO: add support for multiple indexes in filesItem.
+		df.index = indexes[0]
+
+		calcFrom = calcTo
+		calcTo = to
+	}
 
 	return nil
 }

@@ -38,12 +38,24 @@ type SnapshotCreationConfig struct {
 	MinimumSize uint64
 
 	// preverified can have larger files than that indicated by `MergeSteps.last`.
-	// This is because previously different values might have been used.
+	// This is because previously, different values might have been used.
 	//Preverified       snapcfg.Preverified
 	preverifiedParsed []*FileInfo
 }
 
-func (s *SnapshotCreationConfig) SetupConfig(id AppendableId, dirs datadir.Dirs, pre snapcfg.Preverified) {
+type SnapshotConfig struct {
+	*SnapshotCreationConfig
+
+	// alignment means that the read-only snapshot view of this entity
+	// is aligned to those of the root entity.
+	RootAligned bool
+}
+
+func (s *SnapshotConfig) StepsInFrozenFile() uint64 {
+	return s.MergeStages[len(s.MergeStages)-1] / s.EntitiesPerStep
+}
+
+func (s *SnapshotConfig) SetupConfig(id AppendableId, dirs datadir.Dirs, pre snapcfg.Preverified) {
 	if s.preverifiedParsed != nil {
 		return
 	}
@@ -82,7 +94,7 @@ func parseFileName(id AppendableId, dir, fileName string) (res *FileInfo, ok boo
 	if err != nil {
 		return res, false
 	}
-	eps := id.SnapshotCreationConfig().EntitiesPerStep
+	eps := id.SnapshotConfig().EntitiesPerStep
 	res.From = from * eps
 	to, err := strconv.ParseUint(parts[2], 10, 64)
 	if err != nil {
@@ -124,16 +136,18 @@ func (f *FileInfo) IsSeg() bool { return strings.Compare(f.Ext, ".seg") == 0 }
 func (f *FileInfo) Len() uint64 { return f.To - f.From }
 
 // TODO: snaptype.Version should be replaced??
-func fileName(baseName string, version snaptype.Version, from, to RootNum) string {
+
+func fileName(baseName string, version snaptype.Version, from, to uint64) string {
+	// from, to are in units of steps and not in number of entities
 	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from, to, baseName)
 }
 
 func SegName(id AppendableId, version snaptype.Version, from, to RootNum) string {
-	return fileName(id.Name(), version, from, to) + ".seg"
+	return fileName(id.Name(), version, from.Step(id), to.Step(id)) + ".seg"
 }
 
 func IdxName(id AppendableId, version snaptype.Version, from, to RootNum, idxNum uint64) string {
-	return fileName(id.IndexPrefix()[idxNum], version, from, to) + ".idx"
+	return fileName(id.IndexPrefix()[idxNum], version, from.Step(id), to.Step(id)) + ".idx"
 }
 
 // determine freezing ranges, given snapshot creation config
@@ -145,7 +159,11 @@ func GetFreezingRange(rootFrom, rootTo RootNum, id AppendableId) (freezeFrom Roo
 	    as allowed by the MergeSteps or MinimumSize.
 	**/
 
-	cfg := id.SnapshotCreationConfig()
+	if rootFrom <= rootTo {
+		return rootFrom, rootTo, false
+	}
+
+	cfg := id.SnapshotConfig()
 	from := uint64(rootFrom)
 	to := uint64(rootTo)
 
@@ -197,7 +215,7 @@ func GetFreezingRange(rootFrom, rootTo RootNum, id AppendableId) (freezeFrom Roo
 
 func getMergeLimit(id AppendableId, from uint64) uint64 {
 	//return 0
-	cfg := id.SnapshotCreationConfig()
+	cfg := id.SnapshotConfig()
 	maxMergeLimit := cfg.MergeStages[len(cfg.MergeStages)-1]
 
 	for _, info := range cfg.preverifiedParsed {
