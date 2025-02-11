@@ -11,7 +11,6 @@ jobs:
     timeout-minutes: 360 # 6 hours
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
-      PRYSM_DATA_DIR: ${{ github.workspace }}/prysm_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
       TOTAL_TIME_SECONDS: 18000 # 5 hours
