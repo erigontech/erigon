@@ -166,7 +166,26 @@ type Processor interface {
 // }
 
 func NewBlockChain(db kv.RwTx /*cacheConfig *CacheConfig, */, chainConfig *chain.Config, genesis *types.Genesis /* overrides *types.ChainOverrides, */, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(header *types.Header) bool, txLookupLimit *uint64) (BlockChain, error) {
-	return nil, nil
+	return &BlockChainArbitrum{
+		db:             db,
+		chainConfig:    chainConfig,
+		engine:         engine,
+		vmConfig:       vmConfig,
+		shouldPreserve: shouldPreserve,
+		txLookupLimit:  txLookupLimit,
+	}, nil
+}
+
+func NewBlockChainSD(db kv.RwTx, sd *state2.SharedDomains, chainConfig *chain.Config, genesis *types.Genesis /* overrides *types.ChainOverrides, */, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(header *types.Header) bool, txLookupLimit *uint64) (BlockChain, error) {
+	return &BlockChainArbitrum{
+		db:             db,
+		chainConfig:    chainConfig,
+		sd:             sd,
+		engine:         engine,
+		vmConfig:       vmConfig,
+		shouldPreserve: shouldPreserve,
+		txLookupLimit:  txLookupLimit,
+	}, nil
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -395,3 +414,354 @@ func NewBlockChain(db kv.RwTx /*cacheConfig *CacheConfig, */, chainConfig *chain
 // 	}
 // 	return bc, nil
 // }
+
+type BlockChainArbitrum struct {
+	db             kv.RwTx
+	agg            *state2.Aggregator
+	sd             *state2.SharedDomains
+	chainConfig    *chain.Config
+	engine         consensus.Engine
+	vmConfig       vm.Config
+	shouldPreserve func(header *types.Header) bool
+	txLookupLimit  *uint64
+	//genesis *types.Genesis
+}
+
+func (b BlockChainArbitrum) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) CurrentBlock(db kv.Tx) (*types.Block, error) {
+	bn := rawdb.ReadCurrentBlockNumber(db)
+	if bn != nil {
+		fmt.Printf("current block number: %d\n", *bn)
+	}
+	return &types.Block{}, nil
+	////TODO implement me
+	//panic("implement me")
+}
+
+func (b BlockChainArbitrum) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) IterateFrozenBodies(f func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, err error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) Integrity(ctx context.Context) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) EventLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) LastFrozenEventId() uint64 {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) LastFrozenEventBlockNum() uint64 {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) LastFrozenSpanId() uint64 {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) Milestone(ctx context.Context, tx kv.Tx, milestoneId uint64) (*heimdall.Milestone, bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) Checkpoint(ctx context.Context, tx kv.Tx, checkpointId uint64) (*heimdall.Checkpoint, bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) FirstTxnNumNotInSnapshots() uint64 {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (h common.Hash, ok bool, err error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) FrozenBlocks() uint64 {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) FrozenBorBlocks() uint64 {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) FrozenFiles() (list []string) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) FreezingCfg() ethconfig.BlocksFreezing {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) Snapshots() snapshotsync.BlockSnapshots {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) BorSnapshots() snapshotsync.BlockSnapshots {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) Ready(ctx context.Context) <-chan error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) AllTypes() []snaptype.Type {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) ChainReader() consensus.ChainHeaderReader {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) Engine() consensus.Engine {
+	return b.engine
+}
+
+func (b BlockChainArbitrum) Config() *chain.Config {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) Genesis() *types.Block {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) Stop() {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) State() (state.IntraBlockStateArbitrum, error) {
+	r := state.NewReaderV3(b.sd)
+	return state.NewArbitrum(state.New(r)), nil
+}
+
+func (b BlockChainArbitrum) StateAt(root common.Hash) (state.IntraBlockStateArbitrum, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) ClipToPostNitroGenesis(blockNum rpc.BlockNumber) (rpc.BlockNumber, rpc.BlockNumber) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) RecoverState(block *types.Block) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) ReorgToOldBlock(newHead *types.Block) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) WriteBlockAndSetHeadWithTime(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state state.IntraBlockStateArbitrum, emitHeadEvent bool, processTime time.Duration) (status WriteStatus, err error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) GetReceiptsByHash(hash common.Hash) types.Receipts {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) StateCache() state.WasmIface {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) SharedDomains() *state2.SharedDomains {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) ResetWithGenesisBlock(gb *types.Block) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) SubscribeNewTxsEvent(ch chan<- NewTxsEvent) event.Subscription {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) EnqueueL2Message(ctx context.Context, tx types.Transaction, options *arbitrum_types.ConditionalOptions) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) InsertChain(chain types.Blocks) (int, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) GetVMConfig() *vm.Config {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) GetTd(hash common.Hash, u uint64) *big.Int {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b BlockChainArbitrum) Processor() Processor {
+	//TODO implement me
+	panic("implement me")
+}
