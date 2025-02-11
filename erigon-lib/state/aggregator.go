@@ -692,7 +692,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 		return false, nil
 	}
 
-	outs, err := aggTx.staticFilesInRange(r)
+	outs, err := aggTx.StaticFilesInRange(r)
 	defer func() {
 		if closeAll {
 			outs.Close()
@@ -1242,6 +1242,10 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 type RangesV3 struct {
 	domain        [kv.DomainLen]DomainRanges
 	invertedIndex []*MergeRange
+}
+
+func NewRangesV3(domain [kv.DomainLen]DomainRanges, invertedIndex []*MergeRange) RangesV3 {
+	return RangesV3{domain: domain, invertedIndex: invertedIndex}
 }
 
 func (r RangesV3) String() string {
