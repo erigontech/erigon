@@ -28,7 +28,7 @@ import (
 	"github.com/valyala/fastjson"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 )
 
 type CallResult struct {
@@ -145,7 +145,7 @@ func (g *RequestGenerator) getProof(bn uint64, account libcommon.Address, storag
 	return fmt.Sprintf(template, account, strings.Join(storageStr, ","), bn, g.reqID)
 }
 
-func (g *RequestGenerator) traceCall(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutility.Bytes, bn uint64) string {
+func (g *RequestGenerator) traceCall(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn uint64) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_call", "params": [{"from":"0x%x"`, from)
 	if to != nil {
@@ -168,7 +168,7 @@ func (g *RequestGenerator) traceCall(from libcommon.Address, to *libcommon.Addre
 	return sb.String()
 }
 
-func (g *RequestGenerator) traceCallMany(from []libcommon.Address, to []*libcommon.Address, gas []*hexutil.Big, gasPrice []*hexutil.Big, value []*hexutil.Big, data []hexutility.Bytes, bn uint64) string {
+func (g *RequestGenerator) traceCallMany(from []libcommon.Address, to []*libcommon.Address, gas []*hexutil.Big, gasPrice []*hexutil.Big, value []*hexutil.Big, data []hexutil.Bytes, bn uint64) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_callMany", "params": [[`)
 	for i, f := range from {
@@ -197,7 +197,7 @@ func (g *RequestGenerator) traceCallMany(from []libcommon.Address, to []*libcomm
 	return sb.String()
 }
 
-func (g *RequestGenerator) debugTraceCall(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutility.Bytes, bn uint64) string {
+func (g *RequestGenerator) debugTraceCall(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn uint64) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "debug_traceCall", "params": [{"from":"0x%x"`, from)
 	if to != nil {
@@ -245,7 +245,7 @@ func (g *RequestGenerator) traceReplayTransaction(hash string) string {
 	return fmt.Sprintf(template, hash, g.reqID)
 }
 
-func (g *RequestGenerator) ethCall(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutility.Bytes, bn uint64) string {
+func (g *RequestGenerator) ethCall(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn uint64) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_call", "params": [{"from":"0x%x"`, from)
 	if to != nil {
@@ -267,7 +267,7 @@ func (g *RequestGenerator) ethCall(from libcommon.Address, to *libcommon.Address
 	return sb.String()
 }
 
-func (g *RequestGenerator) ethCreateAccessList(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutility.Bytes, bn uint64) string {
+func (g *RequestGenerator) ethCreateAccessList(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn uint64) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_createAccessList", "params": [{"from":"0x%x"`, from)
 	if to != nil {
@@ -289,7 +289,7 @@ func (g *RequestGenerator) ethCreateAccessList(from libcommon.Address, to *libco
 	return sb.String()
 }
 
-func (g *RequestGenerator) ethCallLatest(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutility.Bytes) string {
+func (g *RequestGenerator) ethCallLatest(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_call", "params": [{"from":"0x%x"`, from)
 	if to != nil {

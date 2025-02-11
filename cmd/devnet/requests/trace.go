@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
@@ -35,7 +35,7 @@ type TraceCall struct {
 }
 
 type TraceCallResult struct {
-	Output    hexutility.Bytes                         `json:"output"`
+	Output    hexutil.Bytes                            `json:"output"`
 	Trace     []CallTrace                              `json:"trace"`
 	StateDiff map[libcommon.Address]TraceCallStateDiff `json:"stateDiff"`
 }
@@ -58,16 +58,16 @@ type TraceCallAction struct {
 	Gas           hexutil.Big       `json:"gas"`
 	Value         hexutil.Big       `json:"value"`
 	Balance       hexutil.Big       `json:"balance"`
-	Init          hexutility.Bytes  `json:"init"`
-	Input         hexutility.Bytes  `json:"input"`
+	Init          hexutil.Bytes     `json:"init"`
+	Input         hexutil.Bytes     `json:"input"`
 	CallType      string            `json:"callType"`
 }
 
 type CallResult struct {
 	GasUsed hexutil.Big       `json:"gasUsed"`
-	Output  hexutility.Bytes  `json:"output"`
+	Output  hexutil.Bytes     `json:"output"`
 	Address libcommon.Address `json:"address"`
-	Code    hexutility.Bytes  `json:"code"`
+	Code    hexutil.Bytes     `json:"code"`
 }
 
 type TraceCallStateDiff struct {
@@ -111,7 +111,7 @@ func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args etha
 	var b TraceCall
 
 	if args.Data == nil {
-		args.Data = &hexutility.Bytes{}
+		args.Data = &hexutil.Bytes{}
 	}
 
 	argsVal, err := json.Marshal(args)

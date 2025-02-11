@@ -34,7 +34,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/consensus"
@@ -64,7 +63,7 @@ type callLog struct {
 	Index   uint64            `json:"index"`
 	Address libcommon.Address `json:"address"`
 	Topics  []libcommon.Hash  `json:"topics"`
-	Data    hexutility.Bytes  `json:"data"`
+	Data    hexutil.Bytes     `json:"data"`
 }
 
 // callTrace is the result of a callTracer run.
@@ -73,8 +72,8 @@ type callTrace struct {
 	Gas      *hexutil.Uint64   `json:"gas"`
 	GasUsed  *hexutil.Uint64   `json:"gasUsed"`
 	To       libcommon.Address `json:"to,omitempty"`
-	Input    hexutility.Bytes  `json:"input"`
-	Output   hexutility.Bytes  `json:"output,omitempty"`
+	Input    hexutil.Bytes     `json:"input"`
+	Output   hexutil.Bytes     `json:"output,omitempty"`
 	Error    string            `json:"error,omitempty"`
 	Revertal string            `json:"revertReason,omitempty"`
 	Calls    []callTrace       `json:"calls,omitempty"`

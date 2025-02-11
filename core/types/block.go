@@ -34,7 +34,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -66,12 +65,12 @@ func (n BlockNonce) Uint64() uint64 {
 
 // MarshalText encodes n as a hex string with 0x prefix.
 func (n BlockNonce) MarshalText() ([]byte, error) {
-	return hexutility.Bytes(n[:]).MarshalText()
+	return hexutil.Bytes(n[:]).MarshalText()
 }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (n *BlockNonce) UnmarshalText(input []byte) error {
-	return hexutility.UnmarshalFixedText("BlockNonce", input, n[:])
+	return hexutil.UnmarshalFixedText("BlockNonce", input, n[:])
 }
 
 //()go:generate gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
@@ -571,7 +570,7 @@ type headerMarshaling struct {
 	GasLimit      hexutil.Uint64
 	GasUsed       hexutil.Uint64
 	Time          hexutil.Uint64
-	Extra         hexutility.Bytes
+	Extra         hexutil.Bytes
 	BaseFee       *hexutil.Big
 	BlobGasUsed   *hexutil.Uint64
 	ExcessBlobGas *hexutil.Uint64
@@ -682,7 +681,7 @@ func TxCountToTxAmount(txsLen int) uint32 {
 
 func (b BaseTxnID) U64() uint64 { return uint64(b) }
 
-func (b BaseTxnID) Bytes() []byte { return hexutility.EncodeTs(uint64(b)) }
+func (b BaseTxnID) Bytes() []byte { return hexutil.EncodeTs(uint64(b)) }
 
 // First non-system txn number in block
 // as if baseTxnID is first original transaction in block

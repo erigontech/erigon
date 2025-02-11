@@ -14,16 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package hexutility
+package hexutil
 
 import (
 	"encoding/hex"
 	"fmt"
 )
 
-const (
-	badNibble = ^uint64(0)
-)
+const badNibble = ^uint64(0)
 
 // UnmarshalFixedText decodes the input as a string with 0x prefix. The length of out
 // determines the required input length. This function is commonly used to implement the

@@ -25,7 +25,7 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/accounts/abi/bind"
@@ -95,7 +95,7 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 
 	// compare the log events
 	errs, ok := requests.Compare(requests.NewLog(eventHash, blockNum, address,
-		devnetutils.GenerateTopic("SubscriptionEvent()"), hexutility.Bytes{}, 1,
+		devnetutils.GenerateTopic("SubscriptionEvent()"), hexutil.Bytes{}, 1,
 		block.Hash, hexutil.Uint(0), false), logs[0])
 
 	if !ok {
