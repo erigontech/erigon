@@ -40,7 +40,8 @@ type Stateless struct {
 	t              *trie.Trie             // State trie
 	codeUpdates    map[common.Hash][]byte // Lookup index from code hashes to corresponding bytecode
 	blockNr        uint64                 // Current block number
-	storageUpdates map[common.Hash]map[common.Hash][]byte
+	storageWrites  map[common.Hash]map[common.Hash]uint256.Int
+	storageDeletes map[common.Hash]map[common.Hash]struct{}
 	accountUpdates map[common.Hash]*accounts.Account
 	deleted        map[common.Hash]struct{}
 	created        map[common.Hash]struct{}
@@ -70,7 +71,8 @@ func NewStateless(stateRoot common.Hash, blockWitness *trie.Witness, blockNr uin
 	return &Stateless{
 		t:              t,
 		codeUpdates:    make(map[common.Hash][]byte),
-		storageUpdates: make(map[common.Hash]map[common.Hash][]byte),
+		storageWrites:  make(map[common.Hash]map[common.Hash]uint256.Int),
+		storageDeletes: make(map[common.Hash]map[common.Hash]struct{}),
 		accountUpdates: make(map[common.Hash]*accounts.Account),
 		deleted:        make(map[common.Hash]struct{}),
 		created:        make(map[common.Hash]struct{}),
@@ -230,17 +232,19 @@ func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint
 	if err != nil {
 		return err
 	}
-	v := value.Bytes()
-	m, ok := s.storageUpdates[addrHash]
+	m, ok := s.storageWrites[addrHash]
 	if !ok {
-		m = make(map[common.Hash][]byte)
-		s.storageUpdates[addrHash] = m
+		m = make(map[common.Hash]uint256.Int)
+		s.storageWrites[addrHash] = m
 	}
 	seckey, err := common.HashData(key[:])
 	if err != nil {
 		return err
 	}
-	m[seckey] = v
+	m[seckey] = value
+	if d, ok := s.storageDeletes[addrHash]; ok {
+		delete(d, seckey)
+	}
 	if s.trace {
 		fmt.Printf("Stateless: WriteAccountStorage %x key %x val %x\n", address, key, value)
 	}
@@ -253,15 +257,22 @@ func (s *Stateless) DeleteAccountStorage(address common.Address, incarnation uin
 		return err
 	}
 
-	m, ok := s.storageUpdates[addrHash]
+	d, ok := s.storageDeletes[addrHash]
 	if !ok {
-		return nil
+		d = make(map[common.Hash]struct{})
+		s.storageDeletes[addrHash] = d
 	}
+
 	seckey, err := common.HashData(key[:])
 	if err != nil {
 		return err
 	}
-	delete(m, seckey)
+	d[seckey] = struct{}{}
+
+	if m, ok := s.storageWrites[addrHash]; ok {
+		delete(m, seckey)
+	}
+
 	if s.trace {
 		fmt.Printf("Stateless: DeleteAccountStorage %x key %x\n", address, key)
 	}
@@ -329,20 +340,38 @@ func (s *Stateless) Finalize() common.Hash {
 			s.t.Delete(addrHash[:])
 		}
 	}
-	for addrHash, m := range s.storageUpdates {
+
+	updatedAccounts := map[common.Hash]struct{}{}
+
+	for addrHash, m := range s.storageWrites {
 		if _, ok := s.deleted[addrHash]; ok {
 			// Deleted contracts will be dealth with later, in the next loop
 			continue
 		}
 
+		updatedAccounts[addrHash] = struct{}{}
+
 		for keyHash, v := range m {
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
-			if len(v) > 0 {
-				s.t.Update(cKey, v)
-			} else {
-				s.t.Delete(cKey)
-			}
+			// TODO v.Bytes32() will avoid GC - is trie construct is adjusted
+			s.t.Update(cKey, v.Bytes())
 		}
+	}
+	for addrHash, m := range s.storageDeletes {
+		if _, ok := s.deleted[addrHash]; ok {
+			// Deleted contracts will be dealth with later, in the next loop
+			continue
+		}
+
+		updatedAccounts[addrHash] = struct{}{}
+
+		for keyHash := range m {
+			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
+			s.t.Delete(cKey)
+		}
+	}
+
+	for addrHash := range updatedAccounts {
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
 			ok, root := s.t.DeepHash(addrHash[:])
 			if ok {
@@ -352,6 +381,7 @@ func (s *Stateless) Finalize() common.Hash {
 			}
 		}
 	}
+
 	// For the contracts that got deleted
 	for addrHash := range s.deleted {
 		if _, ok := s.created[addrHash]; ok {
@@ -371,7 +401,8 @@ func (s *Stateless) Finalize() common.Hash {
 		s.t.DeleteSubtree(addrHash[:])
 	}
 
-	s.storageUpdates = make(map[common.Hash]map[common.Hash][]byte)
+	s.storageWrites = make(map[common.Hash]map[common.Hash]uint256.Int)
+	s.storageDeletes = make(map[common.Hash]map[common.Hash]struct{})
 	s.accountUpdates = make(map[common.Hash]*accounts.Account)
 	s.deleted = make(map[common.Hash]struct{})
 	s.created = make(map[common.Hash]struct{})

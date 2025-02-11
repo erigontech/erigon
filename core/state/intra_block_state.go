@@ -667,16 +667,16 @@ func traceKey(key libcommon.Hash) bool {
 	return len(tracedKeys) == 0 || ok
 }
 
-var tracedAccounts map[libcommon.Address]struct{}
+var tracedAccounts map[libcommon.Address]struct{} = func() map[libcommon.Address]struct{} {
+	ta := map[libcommon.Address]struct{}{}
+	for _, account := range dbg.TraceAccounts {
+		account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
+		ta[libcommon.HexToAddress(account)] = struct{}{}
+	}
+	return ta
+}()
 
 func traceAccount(addr libcommon.Address) bool {
-	if tracedAccounts == nil {
-		tracedAccounts = map[libcommon.Address]struct{}{}
-		for _, account := range dbg.TraceAccounts {
-			account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
-			tracedAccounts[libcommon.HexToAddress(account)] = struct{}{}
-		}
-	}
 	_, ok := tracedAccounts[addr]
 	return ok
 }

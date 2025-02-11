@@ -412,13 +412,13 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 		return nil
 	}
 	compositeS := string(append(address[:], key[:]...))
-	w.writeLists[kv.StorageDomain.String()].Push(compositeS, value.Bytes())
+	vb := value.Bytes32() // using [32]byte instead of []byte to avoid heap escape
+	w.writeLists[kv.StorageDomain.String()].Push(compositeS, vb[32-value.ByteLen():])
 	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, key, value.Bytes())
+		fmt.Printf("storage: %x,%x,%x\n", address, key, vb[32-value.ByteLen():])
 	}
 	if w.accumulator != nil {
-		v := value.Bytes()
-		w.accumulator.ChangeStorage(address, incarnation, key, v)
+		w.accumulator.ChangeStorage(address, incarnation, key, vb[32-value.ByteLen():])
 	}
 	w.rs.accountsMutex.Lock()
 	obj, ok := w.rs.accounts[address]

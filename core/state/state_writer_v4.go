@@ -77,15 +77,16 @@ func (w *WriterV4) DeleteAccount(address libcommon.Address, original *accounts.A
 }
 
 func (w *WriterV4) WriteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash, original, value uint256.Int) error {
+	vb := value.Bytes32() // using [32]byte instead of []byte to avoid heap escape
 	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, key, value.Bytes())
+		fmt.Printf("storage: %x,%x,%x\n", address, key, vb[32-value.ByteLen():])
 	}
-	return w.sd.DomainPut(kv.StorageDomain, w.tx, address[:], key[:], value.Bytes(), nil, 0)
+	return w.sd.DomainPut(kv.StorageDomain, w.tx, address[:], key[:], vb[32-value.ByteLen():], nil, 0)
 }
 
 func (w *WriterV4) DeleteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash) error {
 	if w.trace {
-		fmt.Printf("storage delete: %x,%x,%x\n", address, key)
+		fmt.Printf("storage delete: %x,%x\n", address, key)
 	}
 	return w.sd.DomainDel(kv.StorageDomain, w.tx, address[:], key[:], nil, 0)
 }
