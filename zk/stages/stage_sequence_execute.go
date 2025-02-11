@@ -684,6 +684,14 @@ func sequencingBatchStep(
 		// add a check to the verifier and also check for responses
 		batchState.onBuiltBlock(blockNumber)
 
+		// check if we are in limbo recovery and update the pool with the new state root for the latest transaction
+		// being checked then return before committing anything about the block to the DB
+		if batchState.isLimboRecovery() {
+			stateRoot := block.Root()
+			cfg.txPool.UpdateLimboRootByTxHash(batchState.limboRecoveryData.limboTxHash, &stateRoot)
+			return fmt.Errorf("[%s] %w: %s = %s", s.LogPrefix(), zk.ErrLimboState, batchState.limboRecoveryData.limboTxHash.Hex(), stateRoot.Hex())
+		}
+
 		if !batchState.isL1Recovery() {
 			// commit block data here so it is accessible in other threads
 			if errCommitAndStart := sdb.CommitAndStart(); errCommitAndStart != nil {
@@ -696,12 +704,6 @@ func sequencingBatchStep(
 		toRemove := append(batchState.blockState.builtBlockElements.txSlots, batchState.blockState.transactionsToDiscard...)
 		if err := cfg.txPool.RemoveMinedTransactions(ctx, sdb.tx, header.GasLimit, toRemove); err != nil {
 			return err
-		}
-
-		if batchState.isLimboRecovery() {
-			stateRoot := block.Root()
-			cfg.txPool.UpdateLimboRootByTxHash(batchState.limboRecoveryData.limboTxHash, &stateRoot)
-			return fmt.Errorf("[%s] %w: %s = %s", s.LogPrefix(), zk.ErrLimboState, batchState.limboRecoveryData.limboTxHash.Hex(), stateRoot.Hex())
 		}
 
 		t.LogTimer()
