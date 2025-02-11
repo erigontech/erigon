@@ -1,4 +1,4 @@
-name: QA - Sync from scratch (minimal node) - Prysm CL
+name: QA - Sync from scratch (minimal node) - External CL
 
 on:
   schedule:
