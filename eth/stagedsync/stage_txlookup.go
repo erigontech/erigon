@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -174,15 +173,22 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 
 // txnLookupTransform - [startKey, endKey)
 func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, quitCh <-chan struct{}, cfg TxLookupCfg, logger log.Logger) error {
-	bigNum := new(big.Int)
+	data := make([]byte, 16)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
-		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
+		binary.BigEndian.PutUint64(data[:8], blocknum)
 
 		// we add state sync transactions every bor Sprint amount of blocks
 		if cfg.borConfig.IsSprintStart(blocknum) && rawdb.HasBorReceipts(tx, blocknum) {
+			txNumNextBlock, err := rawdbv3.TxNums.Min(tx, blocknum+1)
+			if err != nil {
+				return err
+			}
+			txNumStateTx := txNumNextBlock - 1
+			binary.BigEndian.PutUint64(data[8:], txNumStateTx)
+
 			txnHash := bortypes.ComputeBorTxHash(blocknum, blockHash)
-			if err := next(k, txnHash.Bytes(), blockNumBytes); err != nil {
+			if err := next(k, txnHash.Bytes(), data); err != nil {
 				return err
 			}
 		}
