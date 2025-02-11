@@ -1974,8 +1974,7 @@ func (tx *ArbitrumInternalTx) MarshalBinary(w io.Writer) error {
 }
 
 func (tx *ArbitrumInternalTx) Sender(signer Signer) (common.Address, error) {
-	//TODO implement me
-	panic("implement me")
+	panic("not supported in ArbitrumInternalTx")
 }
 
 func (tx *ArbitrumInternalTx) cachedSender() (common.Address, bool) {
@@ -1987,7 +1986,7 @@ func (tx *ArbitrumInternalTx) GetSender() (common.Address, bool) {
 }
 
 func (tx *ArbitrumInternalTx) SetSender(address common.Address) {
-	panic("implement me")
+	panic("not supported in ArbitrumInternalTx")
 }
 
 func (tx *ArbitrumInternalTx) IsContractDeploy() bool {
