@@ -220,22 +220,19 @@ func (tx *ArbitrumUnsignedTx) Sender(signer Signer) (common.Address, error) {
 }
 
 func (tx *ArbitrumUnsignedTx) cachedSender() (common.Address, bool) {
-	//TODO implement me
-	panic("implement me")
+	return tx.From, true
 }
 
 func (tx *ArbitrumUnsignedTx) GetSender() (common.Address, bool) {
-	//TODO implement me
-	panic("implement me")
+	return tx.From, true
 }
 
 func (tx *ArbitrumUnsignedTx) SetSender(address common.Address) {
-	//TODO implement me
-	panic("implement me")
+	tx.From = address
 }
 
 func (tx *ArbitrumUnsignedTx) IsContractDeploy() bool {
-	return false
+	return tx.To == nil
 }
 
 func (tx *ArbitrumUnsignedTx) Unwrap() Transaction {
@@ -404,28 +401,23 @@ func (tx *ArbitrumContractTx) MarshalBinary(w io.Writer) error {
 }
 
 func (tx *ArbitrumContractTx) Sender(signer Signer) (common.Address, error) {
-	//TODO implement me
 	panic("implement me")
 }
 
 func (tx *ArbitrumContractTx) cachedSender() (common.Address, bool) {
-	//TODO implement me
-	panic("implement me")
+	return tx.From, true
 }
 
 func (tx *ArbitrumContractTx) GetSender() (common.Address, bool) {
-	//TODO implement me
-	panic("implement me")
+	return tx.From, true
 }
 
 func (tx *ArbitrumContractTx) SetSender(address common.Address) {
-	//TODO implement me
-	panic("implement me")
+	tx.From = address
 }
 
 func (tx *ArbitrumContractTx) IsContractDeploy() bool {
-	//TODO implement me
-	panic("implement me")
+	return tx.To == nil
 }
 
 func (tx *ArbitrumContractTx) Unwrap() Transaction {
@@ -791,18 +783,15 @@ func (tx *ArbitrumRetryTx) cachedSender() (common.Address, bool) {
 }
 
 func (tx *ArbitrumRetryTx) GetSender() (common.Address, bool) {
-	//TODO implement me
-	panic("implement me")
+	return tx.From, true
 }
 
 func (tx *ArbitrumRetryTx) SetSender(address common.Address) {
-	//TODO implement me
-	panic("implement me")
+	tx.From = address
 }
 
 func (tx *ArbitrumRetryTx) IsContractDeploy() bool {
-	//TODO implement me
-	panic("implement me")
+	return tx.To == nil
 }
 
 func (tx *ArbitrumRetryTx) Unwrap() Transaction {
@@ -1172,28 +1161,23 @@ func (tx *ArbitrumSubmitRetryableTx) MarshalBinary(w io.Writer) error {
 }
 
 func (tx *ArbitrumSubmitRetryableTx) Sender(signer Signer) (common.Address, error) {
-	//TODO implement me
 	panic("implement me")
 }
 
 func (tx *ArbitrumSubmitRetryableTx) cachedSender() (common.Address, bool) {
-	//TODO implement me
-	panic("implement me")
+	return tx.From, true
 }
 
 func (tx *ArbitrumSubmitRetryableTx) GetSender() (common.Address, bool) {
-	//TODO implement me
-	panic("implement me")
+	return tx.From, true
 }
 
 func (tx *ArbitrumSubmitRetryableTx) SetSender(address common.Address) {
-	//TODO implement me
-	panic("implement me")
+	tx.From = address
 }
 
 func (tx *ArbitrumSubmitRetryableTx) IsContractDeploy() bool {
-	//TODO implement me
-	panic("implement me")
+	return tx.RetryTo == nil
 }
 
 func (tx *ArbitrumSubmitRetryableTx) Unwrap() Transaction {
@@ -1345,7 +1329,6 @@ func (d *ArbitrumDepositTx) MarshalBinary(w io.Writer) error {
 }
 
 func (d *ArbitrumDepositTx) Sender(signer Signer) (common.Address, error) {
-	//TODO implement me
 	panic("implement me")
 }
 
@@ -1355,13 +1338,11 @@ func (d *ArbitrumDepositTx) cachedSender() (common.Address, bool) {
 }
 
 func (d *ArbitrumDepositTx) GetSender() (common.Address, bool) {
-	//TODO implement me
-	panic("implement me")
+	return d.From, true
 }
 
 func (d *ArbitrumDepositTx) SetSender(address common.Address) {
-	//TODO implement me
-	panic("implement me")
+	d.From = address
 }
 
 func (d *ArbitrumDepositTx) IsContractDeploy() bool {
@@ -1542,8 +1523,7 @@ func (tx *ArbitrumInternalTx) cachedSender() (common.Address, bool) {
 }
 
 func (tx *ArbitrumInternalTx) GetSender() (common.Address, bool) {
-	//TODO implement me
-	panic("implement me")
+	return common.Address{}, false
 }
 
 func (tx *ArbitrumInternalTx) SetSender(address common.Address) {
