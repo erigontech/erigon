@@ -59,9 +59,9 @@ jobs:
           RPC_DAEMON_PID=$!          
           RPC_DAEMON_EXIT_STATUS=$?
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
+          tail erigon.log
           
-          if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then
-            tail erigon.log
+          if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then            
             echo "RpcDaemon failed to start"
             echo "::error::Error detected during tests: RpcDaemon failed to start"
             exit 1
