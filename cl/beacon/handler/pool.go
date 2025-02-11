@@ -122,8 +122,8 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			return
 		}
 		var (
-			slot                      = attestation.AttestationData().Slot
-			cIndex                    = attestation.AttestationData().CommitteeIndex
+			slot                      = attestation.Data.Slot
+			cIndex                    = attestation.Data.CommitteeIndex
 			committeeCountPerSlot     = a.syncedData.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
 			attestationWithGossipData = &services.AttestationForGossip{
 				Attestation:      attestation,
