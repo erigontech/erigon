@@ -773,6 +773,41 @@ func (tx *ArbitrumSubmitRetryableTx) RawSignatureValues() (*uint256.Int, *uint25
 	return uintZero, uintZero, uintZero
 }
 
+func (tx *ArbitrumSubmitRetryableTx) payloadSize() int {
+	size := 0
+	size++
+	size += rlp.BigIntLenExcludingHead(tx.ChainId)
+	size++
+	size += 32
+	size++
+	size += 20
+	size++
+	size += rlp.BigIntLenExcludingHead(tx.L1BaseFee)
+	size++
+	size += rlp.BigIntLenExcludingHead(tx.DepositValue)
+	size++
+	size += rlp.BigIntLenExcludingHead(tx.GasFeeCap)
+	size++
+	size += rlp.IntLenExcludingHead(tx.Gas)
+	size++
+	if tx.RetryTo != nil {
+		size += 20
+	}
+	size++
+	size += rlp.BigIntLenExcludingHead(tx.RetryValue)
+	size++
+	size += 20
+	size++
+	size += rlp.BigIntLenExcludingHead(tx.MaxSubmissionFee)
+	size++
+	size += 20
+	size += rlp.StringLen(tx.RetryData)
+	return size
+}
+
+func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
+}
+
 func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
 	//TODO implement me
 	panic("implement me")
