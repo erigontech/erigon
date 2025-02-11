@@ -343,7 +343,7 @@ func makeRetryableTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{})
 	}
 
 	// GasFeeCap: expected as a hex string.
-	if gasFeeCapHex, ok := rawTx["gasFeeCap"].(string); ok {
+	if gasFeeCapHex, ok := rawTx["maxFeePerGas"].(string); ok {
 		tx.GasFeeCap = convertHexToBigInt(gasFeeCapHex)
 	}
 
@@ -380,6 +380,12 @@ func makeRetryableTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{})
 	if retryDataHex, ok := rawTx["retryData"].(string); ok && len(retryDataHex) >= 2 && retryDataHex[:2] == "0x" {
 		tx.RetryData = common.Hex2Bytes(retryDataHex[2:])
 	}
+	fmt.Println(tx)
+
+	// GasPrice: expected as a hex string.
+	// if gasPriceHex, ok := rawTx["gasPrice"].(string); ok {
+	// 	tx.Fee = convertHexToBigInt(gasPriceHex)
+	// }
 
 	return tx
 }
@@ -401,7 +407,7 @@ func makeArbitrumRetryTx(commonTx *types.CommonTx, rawTx map[string]interface{})
 	}
 
 	// GasFeeCap (expected as a hex string)
-	if gasFeeCapHex, ok := rawTx["gasFeeCap"].(string); ok {
+	if gasFeeCapHex, ok := rawTx["maxFeePerGas"].(string); ok {
 		tx.GasFeeCap = convertHexToBigInt(gasFeeCapHex)
 	}
 
@@ -442,6 +448,7 @@ func makeArbitrumRetryTx(commonTx *types.CommonTx, rawTx map[string]interface{})
 	if submissionFeeRefundHex, ok := rawTx["submissionFeeRefund"].(string); ok {
 		tx.SubmissionFeeRefund = convertHexToBigInt(submissionFeeRefundHex)
 	}
+	fmt.Println(tx)
 
 	return tx
 }
@@ -467,7 +474,7 @@ func makeArbitrumContractTx(commonTx *types.CommonTx, rawTx map[string]interface
 	}
 
 	// GasFeeCap (expected as a hex string)
-	if gasFeeCapHex, ok := rawTx["gasFeeCap"].(string); ok {
+	if gasFeeCapHex, ok := rawTx["maxFeePerGas"].(string); ok {
 		tx.GasFeeCap = convertHexToBigInt(gasFeeCapHex)
 	}
 
@@ -509,7 +516,7 @@ func makeArbitrumUnsignedTx(commonTx *types.CommonTx, rawTx map[string]interface
 	tx.Nonce = commonTx.Nonce
 
 	// GasFeeCap: expected as a hex string.
-	if gasFeeCapHex, ok := rawTx["gasFeeCap"].(string); ok {
+	if gasFeeCapHex, ok := rawTx["maxFeePerGas"].(string); ok {
 		tx.GasFeeCap = convertHexToBigInt(gasFeeCapHex)
 	}
 
@@ -580,6 +587,7 @@ func unMarshalTransactions(rawTxs []map[string]interface{}, arbitrum bool) (type
 		if !ok {
 			return nil, errors.New("missing tx type")
 		}
+		fmt.Println(typeTx)
 
 		switch typeTx {
 		case "0x0": // Legacy
@@ -619,6 +627,7 @@ func unMarshalTransactions(rawTxs []map[string]interface{}, arbitrum bool) (type
 		default:
 			return nil, fmt.Errorf("unknown tx type: %s", typeTx)
 		}
+		fmt.Println(tx.Hash())
 		txs = append(txs, tx)
 
 	}

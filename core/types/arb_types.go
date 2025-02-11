@@ -156,7 +156,16 @@ func (tx *ArbitrumUnsignedTx) WithSignature(signer Signer, sig []byte) (Transact
 
 func (tx *ArbitrumUnsignedTx) Hash() common.Hash {
 	//TODO implement me
-	panic("implement me")
+	return prefixedRlpHash(ArbitrumUnsignedTxType, []interface{}{
+		tx.ChainId,
+		tx.From,
+		tx.Nonce,
+		tx.GasFeeCap,
+		tx.Gas,
+		tx.To,
+		tx.Value,
+		tx.Data,
+	})
 }
 
 func (tx *ArbitrumUnsignedTx) SigningHash(chainID *big.Int) common.Hash {
@@ -352,7 +361,16 @@ func (tx *ArbitrumContractTx) WithSignature(signer Signer, sig []byte) (Transact
 
 func (tx *ArbitrumContractTx) Hash() common.Hash {
 	//TODO implement me
-	panic("implement me")
+	return prefixedRlpHash(ArbitrumContractTxType, []interface{}{
+		tx.ChainId,
+		tx.RequestId,
+		tx.From,
+		tx.GasFeeCap,
+		tx.Gas,
+		tx.To,
+		tx.Value,
+		tx.Data,
+	})
 }
 
 func (tx *ArbitrumContractTx) SigningHash(chainID *big.Int) common.Hash {
@@ -551,7 +569,20 @@ func (tx *ArbitrumRetryTx) WithSignature(signer Signer, sig []byte) (Transaction
 
 func (tx *ArbitrumRetryTx) Hash() common.Hash {
 	//TODO implement me
-	panic("implement me")
+	return prefixedRlpHash(ArbitrumRetryTxType, []interface{}{
+		tx.ChainId,
+		tx.Nonce,
+		tx.From,
+		tx.GasFeeCap,
+		tx.Gas,
+		tx.To,
+		tx.Value,
+		tx.Data,
+		tx.TicketId,
+		tx.RefundTo,
+		tx.MaxRefund,
+		tx.SubmissionFeeRefund,
+	})
 }
 
 func (tx *ArbitrumRetryTx) SigningHash(chainID *big.Int) common.Hash {
@@ -773,7 +804,7 @@ func (tx *ArbitrumSubmitRetryableTx) RawSignatureValues() (*uint256.Int, *uint25
 	return uintZero, uintZero, uintZero
 }
 
-func (tx *ArbitrumSubmitRetryableTx) payloadSize() int {
+func (tx *ArbitrumSubmitRetryableTx) payloadSize() (payloadSize int, gasLen int) {
 	size := 0
 	size++
 	size += rlp.BigIntLenExcludingHead(tx.ChainId)
@@ -788,7 +819,8 @@ func (tx *ArbitrumSubmitRetryableTx) payloadSize() int {
 	size++
 	size += rlp.BigIntLenExcludingHead(tx.GasFeeCap)
 	size++
-	size += rlp.IntLenExcludingHead(tx.Gas)
+	gasLen = rlp.IntLenExcludingHead(tx.Gas)
+	size += gasLen
 	size++
 	if tx.RetryTo != nil {
 		size += 20
@@ -802,10 +834,108 @@ func (tx *ArbitrumSubmitRetryableTx) payloadSize() int {
 	size++
 	size += 20
 	size += rlp.StringLen(tx.RetryData)
-	return size
+	return size, gasLen
 }
 
-func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
+func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloadSize, gasLen int) error {
+	// Write the RLP list prefix.
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+
+	// ChainId (big.Int)
+	if err := rlp.EncodeBigInt(tx.ChainId, w, b); err != nil {
+		return err
+	}
+
+	// RequestId (common.Hash, 32 bytes)
+	b[0] = 128 + 32
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(tx.RequestId[:]); err != nil {
+		return err
+	}
+
+	// From (common.Address, 20 bytes)
+	b[0] = 128 + 20
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(tx.From[:]); err != nil {
+		return err
+	}
+
+	// L1BaseFee (big.Int)
+	if err := rlp.EncodeBigInt(tx.L1BaseFee, w, b); err != nil {
+		return err
+	}
+
+	// DepositValue (big.Int)
+	if err := rlp.EncodeBigInt(tx.DepositValue, w, b); err != nil {
+		return err
+	}
+
+	// GasFeeCap (big.Int)
+	if err := rlp.EncodeBigInt(tx.GasFeeCap, w, b); err != nil {
+		return err
+	}
+
+	// Gas (uint64)
+	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+		return err
+	}
+
+	// RetryTo (pointer to common.Address, 20 bytes if non-nil; otherwise RLP nil)
+	if tx.RetryTo == nil {
+		b[0] = 128
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + 20
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write((*tx.RetryTo)[:]); err != nil {
+			return err
+		}
+	}
+
+	// RetryValue (big.Int)
+	if err := rlp.EncodeBigInt(tx.RetryValue, w, b); err != nil {
+		return err
+	}
+
+	// Beneficiary (common.Address, 20 bytes)
+	b[0] = 128 + 20
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(tx.Beneficiary[:]); err != nil {
+		return err
+	}
+
+	// MaxSubmissionFee (big.Int)
+	if err := rlp.EncodeBigInt(tx.MaxSubmissionFee, w, b); err != nil {
+		return err
+	}
+
+	// FeeRefundAddr (common.Address, 20 bytes)
+	b[0] = 128 + 20
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(tx.FeeRefundAddr[:]); err != nil {
+		return err
+	}
+
+	// RetryData ([]byte)
+	if err := rlp.EncodeString(tx.RetryData, w, b); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
@@ -819,8 +949,21 @@ func (tx *ArbitrumSubmitRetryableTx) WithSignature(signer Signer, sig []byte) (T
 }
 
 func (tx *ArbitrumSubmitRetryableTx) Hash() common.Hash {
-	//TODO implement me
-	panic("implement me")
+	return prefixedRlpHash(ArbitrumSubmitRetryableTxType, []interface{}{
+		tx.ChainId,
+		tx.RequestId,
+		tx.From,
+		tx.L1BaseFee,
+		tx.DepositValue,
+		tx.GasFeeCap,
+		tx.Gas,
+		tx.RetryTo,
+		tx.RetryValue,
+		tx.Beneficiary,
+		tx.MaxSubmissionFee,
+		tx.FeeRefundAddr,
+		tx.RetryData,
+	})
 }
 
 func (tx *ArbitrumSubmitRetryableTx) SigningHash(chainID *big.Int) common.Hash {
@@ -849,8 +992,18 @@ func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (tx *ArbitrumSubmitRetryableTx) MarshalBinary(w io.Writer) error {
-	//TODO implement me
-	panic("implement me")
+	payloadSize, gasLen := tx.payloadSize()
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// encode TxType
+	b[0] = ArbitrumSubmitRetryableTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, gasLen); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (tx *ArbitrumSubmitRetryableTx) Sender(signer Signer) (common.Address, error) {
@@ -987,7 +1140,13 @@ func (d *ArbitrumDepositTx) WithSignature(signer Signer, sig []byte) (Transactio
 
 func (d *ArbitrumDepositTx) Hash() common.Hash {
 	//TODO implement me
-	panic("implement me")
+	return prefixedRlpHash(ArbitrumDepositTxType, []interface{}{
+		d.ChainId,
+		d.L1RequestId,
+		d.From,
+		d.To,
+		d.Value,
+	})
 }
 
 func (d *ArbitrumDepositTx) SigningHash(chainID *big.Int) common.Hash {
@@ -1129,7 +1288,10 @@ func (tx *ArbitrumInternalTx) WithSignature(signer Signer, sig []byte) (Transact
 
 func (tx *ArbitrumInternalTx) Hash() common.Hash {
 	//TODO implement me
-	panic("implement me")
+	return prefixedRlpHash(ArbitrumInternalTxType, []interface{}{
+		tx.ChainId,
+		tx.Data,
+	})
 }
 
 func (tx *ArbitrumInternalTx) SigningHash(chainID *big.Int) common.Hash {
