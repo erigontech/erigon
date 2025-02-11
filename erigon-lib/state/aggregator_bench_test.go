@@ -338,19 +338,19 @@ func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
 	})
 }
 
-func BenchmarkAggregator_BeginFilesRo_Throughput2(b *testing.B) {
+func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
 	/**
 	for cpu in $(seq 0 20); do
 	    cpus=$((1 << $cpu))  # Same as 2^cpu
 	    echo -n "($cpus, "
-	    echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkAggregator_BeginFilesRo_Throughput2$ github.com/erigontech/erigon-lib/state  \
-		-bench.parallel=$cpus -bench.loopv=1000 | grep 'BenchmarkAggregator_BeginFilesRo_Throughput2' | cut -f3 | xargs|cut -d' ' -f1)
+	    echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkDb_BeginFiles_Throughput$ github.com/erigontech/erigon-lib/state  \
+		-bench.parallel=$cpus -bench.loopv=1000 | grep 'BenchmarkDb_BeginFiles_Throughput' | cut -f3 | xargs|cut -d' ' -f1)
 	    echo -n "), "
 	done
 	**/
 
-	// result: deteriorates after 2^21 goroutines.
 	// trying to find BeginFilesRo and Rollback throughput
+	// result: deteriorates after 2^21 goroutines.
 	if !flag.Parsed() {
 		flag.Parse()
 	}
