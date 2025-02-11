@@ -888,7 +888,18 @@ func (tx *ArbitrumRetryTx) EncodingSize() int {
 }
 
 func (tx *ArbitrumRetryTx) EncodeRLP(w io.Writer) error {
-	panic("implement me")
+	payloadSize, nonceLen, gasLen := tx.payloadSize()
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// encode TxType
+	b[0] = ArbitrumRetryTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
@@ -1370,8 +1381,18 @@ func (tx *ArbitrumSubmitRetryableTx) EncodingSize() int {
 }
 
 func (tx *ArbitrumSubmitRetryableTx) EncodeRLP(w io.Writer) error {
-	//TODO implement me
-	panic("implement me")
+	payloadSize, gasLen := tx.payloadSize()
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// encode TxType
+	b[0] = ArbitrumSubmitRetryableTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, gasLen); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
@@ -1724,8 +1745,7 @@ func (d *ArbitrumDepositTx) Sender(signer Signer) (common.Address, error) {
 }
 
 func (d *ArbitrumDepositTx) cachedSender() (common.Address, bool) {
-	//TODO implement me
-	panic("implement me")
+	return d.From, true
 }
 
 func (d *ArbitrumDepositTx) GetSender() (common.Address, bool) {
@@ -1737,8 +1757,7 @@ func (d *ArbitrumDepositTx) SetSender(address common.Address) {
 }
 
 func (d *ArbitrumDepositTx) IsContractDeploy() bool {
-	//TODO implement me
-	panic("implement me")
+	return false
 }
 
 func (d *ArbitrumDepositTx) Unwrap() Transaction {
@@ -1879,8 +1898,24 @@ func (tx *ArbitrumInternalTx) encodePayload(w io.Writer, b []byte, payloadSize i
 }
 
 func (tx *ArbitrumInternalTx) EncodeRLP(w io.Writer) error {
-	//TODO implement me
-	panic("implement me")
+	payloadSize := tx.payloadSize()
+	// size of struct prefix and TxType
+	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// envelope
+	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode TxType
+	b[0] = ArbitrumInternalTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (tx *ArbitrumInternalTx) DecodeRLP(s *rlp.Stream) error {
