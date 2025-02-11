@@ -883,8 +883,9 @@ func (tx *ArbitrumRetryTx) payloadSize() (payloadSize int, nonceLen, gasLen int)
 }
 
 func (tx *ArbitrumRetryTx) EncodingSize() int {
-	//TODO implement me
-	panic("implement me")
+	payloadSize, _, _ := tx.payloadSize()
+	// Add envelope size and type size
+	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (tx *ArbitrumRetryTx) EncodeRLP(w io.Writer) error {
@@ -1384,8 +1385,9 @@ func (tx *ArbitrumSubmitRetryableTx) Protected() bool {
 }
 
 func (tx *ArbitrumSubmitRetryableTx) EncodingSize() int {
-	//TODO implement me
-	panic("implement me")
+	payloadSize, _ := tx.payloadSize()
+	// Add envelope size and type size
+	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (tx *ArbitrumSubmitRetryableTx) EncodeRLP(w io.Writer) error {
@@ -1879,8 +1881,9 @@ func (tx *ArbitrumInternalTx) Protected() bool {
 }
 
 func (tx *ArbitrumInternalTx) EncodingSize() int {
-	//TODO implement me
-	panic("implement me")
+	payloadSize := tx.payloadSize()
+	// Add envelope size and type size
+	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (tx *ArbitrumInternalTx) payloadSize() int {
