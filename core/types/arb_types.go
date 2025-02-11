@@ -889,8 +889,16 @@ func (tx *ArbitrumRetryTx) EncodingSize() int {
 
 func (tx *ArbitrumRetryTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
+
+	// size of struct prefix and TxType
+	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
+	// envelope
+	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
+
 	// encode TxType
 	b[0] = ArbitrumRetryTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -1382,8 +1390,18 @@ func (tx *ArbitrumSubmitRetryableTx) EncodingSize() int {
 
 func (tx *ArbitrumSubmitRetryableTx) EncodeRLP(w io.Writer) error {
 	payloadSize, gasLen := tx.payloadSize()
+
+	// size of struct prefix and TxType
+	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
+
+	// envelope
+
+	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
+
 	// encode TxType
 	b[0] = ArbitrumSubmitRetryableTxType
 	if _, err := w.Write(b[:1]); err != nil {
