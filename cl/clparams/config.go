@@ -190,17 +190,18 @@ var (
 )
 
 type NetworkConfig struct {
-	GossipMaxSize                   uint64        `json:"gossip_max_size"`                    // The maximum allowed size of uncompressed gossip messages.
-	GossipMaxSizeBellatrix          uint64        `json:"gossip_max_size_bellatrix"`          // The maximum allowed size of bellatrix uncompressed gossip messages.
-	MaxRequestBlocks                uint64        `json:"max_request_blocks"`                 // Maximum number of blocks in a single request
-	MaxChunkSize                    uint64        `json:"max_chunk_size"`                     // The maximum allowed size of uncompressed req/resp chunked responses.
-	AttestationSubnetCount          uint64        `json:"attestation_subnet_count"`           // The number of attestation subnets used in the gossipsub protocol.
-	TtfbTimeout                     time.Duration `json:"ttfbt_timeout"`                      // The maximum time to wait for first byte of request response (time-to-first-byte).
-	RespTimeout                     time.Duration `json:"resp_timeout"`                       // The maximum time for complete response transfer.
-	AttestationPropagationSlotRange uint64        `json:"attestation_propagation_slot_range"` // The maximum number of slots during which an attestation can be propagated.
-	MaximumGossipClockDisparity     time.Duration `json:"maximum_gossip_clock_disparity"`     // The maximum milliseconds of clock disparity assumed between honest nodes.
-	MessageDomainInvalidSnappy      [4]byte       `json:"message_domain_invalid_snappy"`      // 4-byte domain for gossip message-id isolation of invalid snappy messages
-	MessageDomainValidSnappy        [4]byte       `json:"message_domain_valid_snappy"`        // 4-byte domain for gossip message-id isolation of valid snappy messages
+	GossipMaxSize                   uint64        `yaml:"GOSSIP_MAX_SIZE" json:"GOSSIP_MAX_SIZE,string"`                                       // The maximum allowed size of uncompressed gossip messages.
+	GossipMaxSizeBellatrix          uint64        `json:"gossip_max_size_bellatrix"`                                                           // The maximum allowed size of bellatrix uncompressed gossip messages.
+	MaxChunkSize                    uint64        `yaml:"MAX_CHUNK_SIZE" json:"MAX_CHUNK_SIZE,string"`                                         // The maximum allowed size of uncompressed req/resp chunked responses.
+	AttestationSubnetCount          uint64        `json:"attestation_subnet_count"`                                                            // The number of attestation subnets used in the gossipsub protocol.
+	TtfbTimeout                     time.Duration `json:"ttfbt_timeout"`                                                                       // The maximum time to wait for first byte of request response (time-to-first-byte).
+	RespTimeout                     time.Duration `json:"resp_timeout"`                                                                        // The maximum time for complete response transfer.
+	AttestationPropagationSlotRange uint64        `yaml:"ATTESTATION_PROPAGATION_SLOT_RANGE" json:"ATTESTATION_PROPAGATION_SLOT_RANGE,string"` // The maximum number of slots during which an attestation can be propagated.
+	AttestationSubnetPrefixBits     uint64        `yaml:"ATTESTATION_SUBNET_PREFIX_BITS" json:"ATTESTATION_SUBNET_PREFIX_BITS,string"`         // The number of bits in the subnet prefix.
+	BlobSidecarSubnetCount          uint64        `yaml:"BLOB_SIDECAR_SUBNET_COUNT" json:"BLOB_SIDECAR_SUBNET_COUNT,string"`                   // The number of blob sidecar subnets used in the gossipsub protocol.
+	MaximumGossipClockDisparity     time.Duration `json:"maximum_gossip_clock_disparity"`                                                      // The maximum milliseconds of clock disparity assumed between honest nodes.
+	MessageDomainInvalidSnappy      [4]byte       `json:"message_domain_invalid_snappy"`                                                       // 4-byte domain for gossip message-id isolation of invalid snappy messages
+	MessageDomainValidSnappy        [4]byte       `json:"message_domain_valid_snappy"`                                                         // 4-byte domain for gossip message-id isolation of valid snappy messages
 
 	// DiscoveryV5 Config
 	Eth2key                    string // ETH2Key is the ENR key of the Ethereum consensus object in an enr.
@@ -214,12 +215,13 @@ type NetworkConfig struct {
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
 	MainnetNetwork: {
-		GossipMaxSize:                   15728640,
+		GossipMaxSize:                   10485760,
 		GossipMaxSizeBellatrix:          15728640,
 		MaxChunkSize:                    MaxChunkSize,
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
-		MaxRequestBlocks:                1 << 10, // 1024
+		AttestationSubnetPrefixBits:     6,
+		BlobSidecarSubnetCount:          6,
 		TtfbTimeout:                     ReqTimeout,
 		RespTimeout:                     RespTimeout,
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
@@ -233,12 +235,13 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	SepoliaNetwork: {
-		GossipMaxSize:                   15728640,
+		GossipMaxSize:                   10485760,
 		GossipMaxSizeBellatrix:          15728640,
 		MaxChunkSize:                    15728640,
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
-		MaxRequestBlocks:                1 << 10, // 1024
+		AttestationSubnetPrefixBits:     6,
+		BlobSidecarSubnetCount:          6,
 		TtfbTimeout:                     ReqTimeout,
 		RespTimeout:                     RespTimeout,
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
@@ -252,12 +255,13 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	GnosisNetwork: {
-		GossipMaxSize:                   15728640, // 15 MiB
+		GossipMaxSize:                   10485760,
 		GossipMaxSizeBellatrix:          15728640,
 		MaxChunkSize:                    15728640, // 15 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
-		MaxRequestBlocks:                1 << 10, // 1024
+		AttestationSubnetPrefixBits:     6,
+		BlobSidecarSubnetCount:          6,
 		TtfbTimeout:                     ReqTimeout,
 		RespTimeout:                     RespTimeout,
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
@@ -271,12 +275,13 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	ChiadoNetwork: {
-		GossipMaxSize:                   15728640, // 15 MiB
+		GossipMaxSize:                   10485760,
 		GossipMaxSizeBellatrix:          15728640,
 		MaxChunkSize:                    15728640, // 15 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
-		MaxRequestBlocks:                1 << 10, // 1024
+		AttestationSubnetPrefixBits:     6,
+		BlobSidecarSubnetCount:          6,
 		TtfbTimeout:                     ReqTimeout,
 		RespTimeout:                     RespTimeout,
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
@@ -290,12 +295,13 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	HoleskyNetwork: {
-		GossipMaxSize:                   15728640, // 15 MiB
+		GossipMaxSize:                   10485760,
 		GossipMaxSizeBellatrix:          15728640,
 		MaxChunkSize:                    15728640, // 15 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
-		MaxRequestBlocks:                1 << 10, // 1024
+		AttestationSubnetPrefixBits:     6,
+		BlobSidecarSubnetCount:          6,
 		TtfbTimeout:                     ReqTimeout,
 		RespTimeout:                     RespTimeout,
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
@@ -386,22 +392,29 @@ type BeaconChainConfig struct {
 	JustificationBitsLength  uint64 `yaml:"JUSTIFICATION_BITS_LENGTH" json:"JUSTIFICATION_BITS_LENGTH,string"`     // JustificationBitsLength defines number of epochs to track when implementing k-finality in Casper FFG.
 
 	// Misc constants.
-	PresetBase                       string `yaml:"PRESET_BASE" spec:"true" json:"PRESET_BASE"`                                                            // PresetBase represents the underlying spec preset this config is based on.
-	ConfigName                       string `yaml:"CONFIG_NAME" spec:"true" json:"CONFIG_NAME"`                                                            // ConfigName for allowing an easy human-readable way of knowing what chain is being used.
-	TargetCommitteeSize              uint64 `yaml:"TARGET_COMMITTEE_SIZE" spec:"true" json:"TARGET_COMMITTEE_SIZE,string"`                                 // TargetCommitteeSize is the number of validators in a committee when the chain is healthy.
-	MaxValidatorsPerCommittee        uint64 `yaml:"MAX_VALIDATORS_PER_COMMITTEE" spec:"true" json:"MAX_VALIDATORS_PER_COMMITTEE,string"`                   // MaxValidatorsPerCommittee defines the upper bound of the size of a committee.
-	MaxCommitteesPerSlot             uint64 `yaml:"MAX_COMMITTEES_PER_SLOT" spec:"true" json:"MAX_COMMITTEES_PER_SLOT,string"`                             // MaxCommitteesPerSlot defines the max amount of committee in a single slot.
-	MinPerEpochChurnLimit            uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT" spec:"true" json:"MIN_PER_EPOCH_CHURN_LIMIT,string"`                         // MinPerEpochChurnLimit is the minimum amount of churn allotted for validator rotations.
-	ChurnLimitQuotient               uint64 `yaml:"CHURN_LIMIT_QUOTIENT" spec:"true" json:"CHURN_LIMIT_QUOTIENT,string"`                                   // ChurnLimitQuotient is used to determine the limit of how many validators can rotate per epoch.
-	MaxPerEpochActivationChurnLimit  uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT,string"`   // MaxPerEpochActivationChurnLimit defines the maximum amount of churn allowed in one epoch from deneb.
-	ShuffleRoundCount                uint64 `yaml:"SHUFFLE_ROUND_COUNT" spec:"true" json:"SHUFFLE_ROUND_COUNT,string"`                                     // ShuffleRoundCount is used for retrieving the permuted index.
-	MinGenesisActiveValidatorCount   uint64 `yaml:"MIN_GENESIS_ACTIVE_VALIDATOR_COUNT" spec:"true" json:"MIN_GENESIS_ACTIVE_VALIDATOR_COUNT,string"`       // MinGenesisActiveValidatorCount defines how many validator deposits needed to kick off beacon chain.
-	MinGenesisTime                   uint64 `yaml:"MIN_GENESIS_TIME" spec:"true" json:"MIN_GENESIS_TIME,string"`                                           // MinGenesisTime is the time that needed to pass before kicking off beacon chain.
-	TargetAggregatorsPerCommittee    uint64 `yaml:"TARGET_AGGREGATORS_PER_COMMITTEE" spec:"true" json:"TARGET_AGGREGATORS_PER_COMMITTEE,string"`           // TargetAggregatorsPerCommittee defines the number of aggregators inside one committee.
-	HysteresisQuotient               uint64 `yaml:"HYSTERESIS_QUOTIENT" spec:"true" json:"HYSTERESIS_QUOTIENT,string"`                                     // HysteresisQuotient defines the hysteresis quotient for effective balance calculations.
-	HysteresisDownwardMultiplier     uint64 `yaml:"HYSTERESIS_DOWNWARD_MULTIPLIER" spec:"true" json:"HYSTERESIS_DOWNWARD_MULTIPLIER,string"`               // HysteresisDownwardMultiplier defines the hysteresis downward multiplier for effective balance calculations.
-	HysteresisUpwardMultiplier       uint64 `yaml:"HYSTERESIS_UPWARD_MULTIPLIER" spec:"true" json:"HYSTERESIS_UPWARD_MULTIPLIER,string"`                   // HysteresisUpwardMultiplier defines the hysteresis upward multiplier for effective balance calculations.
-	MinEpochsForBlobSidecarsRequests uint64 `yaml:"MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS" spec:"true" json:"MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS,string"` // MinEpochsForBlobSidecarsRequests defines the minimum number of epochs to wait before requesting blobs sidecars.
+	PresetBase                        string `yaml:"PRESET_BASE" spec:"true" json:"PRESET_BASE"`                                                            // PresetBase represents the underlying spec preset this config is based on.
+	ConfigName                        string `yaml:"CONFIG_NAME" spec:"true" json:"CONFIG_NAME"`                                                            // ConfigName for allowing an easy human-readable way of knowing what chain is being used.
+	TargetCommitteeSize               uint64 `yaml:"TARGET_COMMITTEE_SIZE" spec:"true" json:"TARGET_COMMITTEE_SIZE,string"`                                 // TargetCommitteeSize is the number of validators in a committee when the chain is healthy.
+	MaxValidatorsPerCommittee         uint64 `yaml:"MAX_VALIDATORS_PER_COMMITTEE" spec:"true" json:"MAX_VALIDATORS_PER_COMMITTEE,string"`                   // MaxValidatorsPerCommittee defines the upper bound of the size of a committee.
+	MaxCommitteesPerSlot              uint64 `yaml:"MAX_COMMITTEES_PER_SLOT" spec:"true" json:"MAX_COMMITTEES_PER_SLOT,string"`                             // MaxCommitteesPerSlot defines the max amount of committee in a single slot.
+	MinPerEpochChurnLimit             uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT" spec:"true" json:"MIN_PER_EPOCH_CHURN_LIMIT,string"`                         // MinPerEpochChurnLimit is the minimum amount of churn allotted for validator rotations.
+	ChurnLimitQuotient                uint64 `yaml:"CHURN_LIMIT_QUOTIENT" spec:"true" json:"CHURN_LIMIT_QUOTIENT,string"`                                   // ChurnLimitQuotient is used to determine the limit of how many validators can rotate per epoch.
+	MaxPerEpochActivationChurnLimit   uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT,string"`   // MaxPerEpochActivationChurnLimit defines the maximum amount of churn allowed in one epoch from deneb.
+	ShuffleRoundCount                 uint64 `yaml:"SHUFFLE_ROUND_COUNT" spec:"true" json:"SHUFFLE_ROUND_COUNT,string"`                                     // ShuffleRoundCount is used for retrieving the permuted index.
+	MinGenesisActiveValidatorCount    uint64 `yaml:"MIN_GENESIS_ACTIVE_VALIDATOR_COUNT" spec:"true" json:"MIN_GENESIS_ACTIVE_VALIDATOR_COUNT,string"`       // MinGenesisActiveValidatorCount defines how many validator deposits needed to kick off beacon chain.
+	MinGenesisTime                    uint64 `yaml:"MIN_GENESIS_TIME" spec:"true" json:"MIN_GENESIS_TIME,string"`                                           // MinGenesisTime is the time that needed to pass before kicking off beacon chain.
+	TargetAggregatorsPerCommittee     uint64 `yaml:"TARGET_AGGREGATORS_PER_COMMITTEE" spec:"true" json:"TARGET_AGGREGATORS_PER_COMMITTEE,string"`           // TargetAggregatorsPerCommittee defines the number of aggregators inside one committee.
+	HysteresisQuotient                uint64 `yaml:"HYSTERESIS_QUOTIENT" spec:"true" json:"HYSTERESIS_QUOTIENT,string"`                                     // HysteresisQuotient defines the hysteresis quotient for effective balance calculations.
+	HysteresisDownwardMultiplier      uint64 `yaml:"HYSTERESIS_DOWNWARD_MULTIPLIER" spec:"true" json:"HYSTERESIS_DOWNWARD_MULTIPLIER,string"`               // HysteresisDownwardMultiplier defines the hysteresis downward multiplier for effective balance calculations.
+	HysteresisUpwardMultiplier        uint64 `yaml:"HYSTERESIS_UPWARD_MULTIPLIER" spec:"true" json:"HYSTERESIS_UPWARD_MULTIPLIER,string"`                   // HysteresisUpwardMultiplier defines the hysteresis upward multiplier for effective balance calculations.
+	MinEpochsForBlobSidecarsRequests  uint64 `yaml:"MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS" spec:"true" json:"MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS,string"` // MinEpochsForBlobSidecarsRequests defines the minimum number of epochs to wait before requesting blobs sidecars.
+	FieldElementsPerBlob              uint64 `yaml:"FIELD_ELEMENTS_PER_BLOB" spec:"true" json:"FIELD_ELEMENTS_PER_BLOB,string"`                             // FieldElementsPerBlob defines the number of field elements per blob.
+	MaxBytesPerTransaction            uint64 `yaml:"MAX_BYTES_PER_TRANSACTION" spec:"true" json:"MAX_BYTES_PER_TRANSACTION,string"`                         // MaxBytesPerTransaction defines the maximum number of bytes per transaction.
+	MaximumGossipClockDisparityMillis uint64 `yaml:"MAXIMUM_GOSSIP_CLOCK_DISPARITY_MILLIS" json:"MAXIMUM_GOSSIP_CLOCK_DISPARITY_MILLIS,string"`             // The maximum milliseconds of clock disparity assumed between honest nodes.
+	MaxExtraDataBytes                 uint64 `yaml:"MAX_EXTRA_DATA_BYTES" spec:"true" json:"MAX_EXTRA_DATA_BYTES,string"`                                   // MaxExtraDataBytes defines the maximum number of bytes in the extra data field.
+	MaxRequestBlobSidecars            uint64 `yaml:"MAX_REQUEST_BLOB_SIDECARS" spec:"true" json:"MAX_REQUEST_BLOB_SIDECARS,string"`                         // MaxRequestBlobSidecars defines the maximum number of blob sidecars to request.
+	MaxRequestBlocks                  uint64 `yaml:"MAX_REQUEST_BLOCKS" spec:"true" json:"MAX_REQUEST_BLOCKS,string"`                                       // Maximum number of blocks in a single request
+	MaxRequestBlocksDeneb             uint64 `yaml:"MAX_REQUEST_BLOCKS_DENEB" spec:"true" json:"MAX_REQUEST_BLOCKS_DENEB,string"`                           // Maximum number of blocks in a single request
 
 	// Gwei value constants.
 	MinDepositAmount           uint64 `yaml:"MIN_DEPOSIT_AMOUNT" spec:"true" json:"MIN_DEPOSIT_AMOUNT,string"`                       // MinDepositAmount is the minimum amount of Gwei a validator can send to the deposit contract at once (lower amounts will be reverted).
@@ -412,8 +425,8 @@ type BeaconChainConfig struct {
 	EffectiveBalanceIncrement  uint64 `yaml:"EFFECTIVE_BALANCE_INCREMENT" spec:"true" json:"EFFECTIVE_BALANCE_INCREMENT,string"`     // EffectiveBalanceIncrement is used for converting the high balance into the low balance for validators.
 
 	// Initial value constants.
-	BLSWithdrawalPrefixByte         ConfigByte `yaml:"BLS_WITHDRAWAL_PREFIX" spec:"true" json:"BLS_WITHDRAWAL_PREFIX"`                    // BLSWithdrawalPrefixByte is used for BLS withdrawal and it's the first byte.
-	ETH1AddressWithdrawalPrefixByte ConfigByte `yaml:"ETH1_ADDRESS_WITHDRAWAL_PREFIX" spec:"true" json:"ETH1AddressWithdrawalPrefixByte"` // ETH1AddressWithdrawalPrefixByte is used for withdrawals and it's the first byte.
+	BLSWithdrawalPrefixByte         ConfigByte `yaml:"BLS_WITHDRAWAL_PREFIX" spec:"true" json:"BLS_WITHDRAWAL_PREFIX"`                   // BLSWithdrawalPrefixByte is used for BLS withdrawal and it's the first byte.
+	ETH1AddressWithdrawalPrefixByte ConfigByte `yaml:"ETH1_ADDRESS_WITHDRAWAL_PREFIX" spec:"true" json:"ETH1_ADDRESS_WITHDRAWAL_PREFIX"` // ETH1_ADDRESS_WITHDRAWAL_PREFIX is used for withdrawals and it's the first byte.
 
 	// Time parameters constants.
 	GenesisDelay                              uint64 `yaml:"GENESIS_DELAY" spec:"true" json:"GENESIS_DELAY,string"`                                             // GenesisDelay is the minimum number of seconds to delay starting the Ethereum Beacon Chain genesis. Must be at least 1 second.
@@ -531,6 +544,7 @@ type BeaconChainConfig struct {
 	InactivityScoreBias          uint64 `yaml:"INACTIVITY_SCORE_BIAS" spec:"true" json:"INACTIVITY_SCORE_BIAS,string"`                       // InactivityScoreBias for calculating score bias penalties during inactivity
 	InactivityScoreRecoveryRate  uint64 `yaml:"INACTIVITY_SCORE_RECOVERY_RATE" spec:"true" json:"INACTIVITY_SCORE_RECOVERY_RATE,string"`     // InactivityScoreRecoveryRate for recovering score bias penalties during inactivity.
 	EpochsPerSyncCommitteePeriod uint64 `yaml:"EPOCHS_PER_SYNC_COMMITTEE_PERIOD" spec:"true" json:"EPOCHS_PER_SYNC_COMMITTEE_PERIOD,string"` // EpochsPerSyncCommitteePeriod defines how many epochs per sync committee period.
+	BytesPerLogsBloom            uint64 `yaml:"BYTES_PER_LOGS_BLOOM" spec:"true" json:"BYTES_PER_LOGS_BLOOM,string"`                         // BytesPerLogsBloom defines the number of bytes in the logs bloom filter.
 
 	// Updated penalty values. This moves penalty parameters toward their final, maximum security values.
 	// Note: We do not override previous configuration values but instead creates new values and replaces usage throughout.
@@ -661,20 +675,27 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	GenesisDelay:             604800, // 1 week.
 
 	// Misc constant.
-	TargetCommitteeSize:              128,
-	MaxValidatorsPerCommittee:        2048,
-	MaxCommitteesPerSlot:             64,
-	MinPerEpochChurnLimit:            4,
-	ChurnLimitQuotient:               1 << 16,
-	MaxPerEpochActivationChurnLimit:  8,
-	ShuffleRoundCount:                90,
-	MinGenesisActiveValidatorCount:   16384,
-	MinGenesisTime:                   1606824000, // Dec 1, 2020, 12pm UTC.
-	TargetAggregatorsPerCommittee:    16,
-	HysteresisQuotient:               4,
-	HysteresisDownwardMultiplier:     1,
-	HysteresisUpwardMultiplier:       5,
-	MinEpochsForBlobSidecarsRequests: 4096,
+	TargetCommitteeSize:               128,
+	MaxValidatorsPerCommittee:         2048,
+	MaxCommitteesPerSlot:              64,
+	MinPerEpochChurnLimit:             4,
+	ChurnLimitQuotient:                1 << 16,
+	MaxPerEpochActivationChurnLimit:   8,
+	ShuffleRoundCount:                 90,
+	MinGenesisActiveValidatorCount:    16384,
+	MinGenesisTime:                    1606824000, // Dec 1, 2020, 12pm UTC.
+	TargetAggregatorsPerCommittee:     16,
+	HysteresisQuotient:                4,
+	HysteresisDownwardMultiplier:      1,
+	HysteresisUpwardMultiplier:        5,
+	MinEpochsForBlobSidecarsRequests:  4096,
+	FieldElementsPerBlob:              4096,
+	MaxBytesPerTransaction:            1073741824,
+	MaximumGossipClockDisparityMillis: 500,
+	MaxExtraDataBytes:                 32,
+	MaxRequestBlobSidecars:            768,
+	MaxRequestBlocks:                  1024,
+	MaxRequestBlocksDeneb:             128,
 
 	// Gwei value constants.
 	MinDepositAmount:           1 * 1e9,
@@ -809,6 +830,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	InactivityScoreBias:          4,
 	InactivityScoreRecoveryRate:  16,
 	EpochsPerSyncCommitteePeriod: 256,
+	BytesPerLogsBloom:            256,
 
 	// Updated penalty values.
 	InactivityPenaltyQuotientAltair:         3 * 1 << 24, //50331648
@@ -874,11 +896,11 @@ func mainnetConfig() BeaconChainConfig {
 	return cfg
 }
 
-func CustomConfig(configFile string) (BeaconChainConfig, error) {
+func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	cfg := MainnetBeaconConfig
 	b, err := os.ReadFile(configFile) // just pass the file name
 	if err != nil {
-		return BeaconChainConfig{}, nil
+		return BeaconChainConfig{}, NetworkConfig{}, nil
 	}
 	err = yaml.Unmarshal(b, &cfg)
 	cfg.InitializeForkSchedule()
