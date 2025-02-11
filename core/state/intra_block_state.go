@@ -118,12 +118,6 @@ func New(stateReader StateReader) *IntraBlockState {
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
 		txIndex:           0,
-		arbExtraData: &ArbitrumExtraData{
-			unexpectedBalanceDelta: new(uint256.Int),
-			userWasms:              map[libcommon.Hash]ActivatedWasm{},
-			activatedWasms:         map[libcommon.Hash]ActivatedWasm{},
-			recentWasms:            NewRecentWasms(),
-		},
 		//trace:             true,
 	}
 }
