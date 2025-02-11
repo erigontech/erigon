@@ -18,6 +18,13 @@ package core
 
 import (
 	"context"
+	"fmt"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"math/big"
 	"time"
 
@@ -41,12 +48,12 @@ var ReadyEVMForL2 func(evm *vm.EVM, msg *types.Message)
 
 // Allows ArbOS to swap out or return early from an RPC message to support the NodeInterface virtual contract
 var InterceptRPCMessage = func(
-	msg *types.Message,
-	ctx context.Context,
-	statedb *state.IntraBlockState,
-	header *types.Header,
-	backend NodeInterfaceBackendAPI,
-	blockCtx *evmtypes.BlockContext,
+		msg *types.Message,
+		ctx context.Context,
+		statedb *state.IntraBlockState,
+		header *types.Header,
+		backend NodeInterfaceBackendAPI,
+		blockCtx *evmtypes.BlockContext,
 ) (*types.Message, *evmtypes.ExecutionResult, error) {
 	return msg, nil, nil
 }
