@@ -52,7 +52,7 @@ func RegisterAppendable(name string, dirs datadir.Dirs, salt uint32, pre snapcfg
 	appendableRegistry = append(appendableRegistry, *h)
 	id := AppendableId(curr)
 
-	h.snapshotCreationConfig.parseConfig(id, dirs, pre)
+	h.snapshotCreationConfig.SetupConfig(id, dirs, pre)
 
 	curr++
 

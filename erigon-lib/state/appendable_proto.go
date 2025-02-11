@@ -23,7 +23,8 @@ type ProtoAppendable struct {
 	dirtyFiles *btree.BTreeG[*filesItem]
 	_visible   visibleFiles
 
-	visibleLock sync.RWMutex
+	visibleLock   sync.RWMutex
+	sameKeyAsRoot bool
 
 	logger log.Logger
 }
@@ -38,17 +39,17 @@ func NewProto(a ae.AppendableId, builders []AccessorIndexBuilder, freezer Freeze
 	}
 }
 
-func (a *ProtoAppendable) VisibleFilesMaxRootNum() RootNum {
+func (a *ProtoAppendable) VisibleFilesMaxRootNum() ae.RootNum {
 	latest := a._visible[len(a._visible)-1]
-	return RootNum(latest.src.endTxNum)
+	return ae.RootNum(latest.src.endTxNum)
 }
 
-func (a *ProtoAppendable) DirtyFilesMaxRootNum() RootNum {
+func (a *ProtoAppendable) DirtyFilesMaxRootNum() ae.RootNum {
 	latest, found := a.dirtyFiles.Max()
 	if latest == nil || !found {
 		return 0
 	}
-	return RootNum(latest.endTxNum)
+	return ae.RootNum(latest.endTxNum)
 }
 
 func (a *ProtoAppendable) VisibleFilesMaxNum() RootNum {
@@ -61,5 +62,6 @@ func (a *ProtoAppendable) VisibleFilesMaxNum() RootNum {
 }
 
 func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, dv kv.RoDB, ps *background.ProgressSet) error {
+
 	return nil
 }

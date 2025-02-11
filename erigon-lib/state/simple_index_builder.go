@@ -27,6 +27,8 @@ type IndexInputDataQuery interface {
 
 type IndexKeyFactory interface {
 	// IndexInputDataQuery elements passed here to create key for index
+	// `value` is snapshot element; 
+	// `index` is the corresponding sequence number in the file.
 	Make(value []byte, index uint64) []byte
 }
 
@@ -81,7 +83,7 @@ func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 
 func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
 	// just segname?
-	sgname := SegName(s.id, snaptype.Version(1), from, to)
+	sgname := ae.SegName(s.id, snaptype.Version(1), from, to)
 	decomp, _ := seg.NewDecompressor(sgname)
 	return &DecompressorIndexInputDataQuery{decomp: decomp}
 }
@@ -96,7 +98,7 @@ func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 
 func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
 	iidq := s.GetInputDataQuery(from, to)
-	idxFile := IdxName(s.id, snaptype.Version(1), from, to, s.indexPos)
+	idxFile := ae.IdxName(s.id, snaptype.Version(1), from, to, s.indexPos)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:           int(iidq.GetCount()),
 		Enums:              true,

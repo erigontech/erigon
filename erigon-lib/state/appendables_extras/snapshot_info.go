@@ -1,6 +1,7 @@
 package appendables_extras
 
 import (
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -10,19 +11,26 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 )
 
-const EntitiesPerStep = uint64(1000)
+//const EntitiesPerStep = uint64(1000)
 
 type SnapshotCreationConfig struct {
+	// number of entities per step
+	// should be same for all entitiin a entity set
+	EntitiesPerStep uint64
+
 	// all the following configs are in terms of number of entities
 	// 1 step has `EntitiesPerStep` entities
 
-	// how many items to leave in db (and not consider for freezing) this is needed
-	// since blockchains reorg
+	// how many (root) entities to leave in db (and not consider for freezing) this is needed
+	// since blockchains reorg and so we don't freeze latest entities.
 	SafetyMargin uint64
 
 	// progressively merge smaller files into large ones maximum size (merge limit)
-	// is the last element of MergeSteps
-	MergeSteps []uint64
+	// is the last element of MergeStages
+	// decreasing order expected, each step is a multiple of the previous one
+	// e.g. [1000, 20000, 600000] --> first stage creates files of size 1000; then 20 of these merged to
+	// create size 10000; then 30 of these merged to create size 100000
+	MergeStages []uint64
 
 	// minimum snapshot size
 	MinimumSize uint64
@@ -33,7 +41,7 @@ type SnapshotCreationConfig struct {
 	preverifiedParsed []*FileInfo
 }
 
-func (s *SnapshotCreationConfig) parseConfig(id AppendableId, dirs datadir.Dirs, pre snapcfg.Preverified) {
+func (s *SnapshotCreationConfig) SetupConfig(id AppendableId, dirs datadir.Dirs, pre snapcfg.Preverified) {
 	if s.preverifiedParsed != nil {
 		return
 	}
@@ -72,12 +80,13 @@ func parseFileName(id AppendableId, dir, fileName string) (res *FileInfo, ok boo
 	if err != nil {
 		return res, false
 	}
-	res.From = from * EntitiesPerStep
+	eps := id.SnapshotCreationConfig().EntitiesPerStep
+	res.From = from * eps
 	to, err := strconv.ParseUint(parts[2], 10, 64)
 	if err != nil {
 		return res, false
 	}
-	res.To = to * EntitiesPerStep
+	res.To = to * eps
 
 	res.Id = id
 	name := parts[3]
@@ -112,8 +121,21 @@ func (f *FileInfo) IsSeg() bool { return strings.Compare(f.Ext, ".seg") == 0 }
 
 func (f *FileInfo) Len() uint64 { return f.To - f.From }
 
+// TODO: snaptype.Version should be replaced??
+func fileName(baseName string, version snaptype.Version, from, to RootNum) string {
+	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from, to, baseName)
+}
+
+func SegName(id AppendableId, version snaptype.Version, from, to RootNum) string {
+	return fileName(id.Name(), version, from, to) + ".seg"
+}
+
+func IdxName(id AppendableId, version snaptype.Version, from, to RootNum, idxNum uint64) string {
+	return fileName(id.IndexPrefix()[idxNum], version, from, to) + ".idx"
+}
+
 // determine freezing ranges, given snapshot creation config
-func GetFreezingRange(from, to uint64, id AppendableId) (freezeFrom uint64, freezeTo uint64, canFreeze bool) {
+func GetFreezingRange(rootFrom, rootTo RootNum, id AppendableId) (freezeFrom RootNum, freezeTo RootNum, canFreeze bool) {
 	/**
 	 1. `from`, `to` must be round off to minimum size (atleast) and then also mergeLimit
 	 2. mergeLimit is a function: (from, preverified files, some mergeLimit defaults) -> biggest file size at `from`
@@ -122,46 +144,59 @@ func GetFreezingRange(from, to uint64, id AppendableId) (freezeFrom uint64, free
 	**/
 
 	cfg := id.SnapshotCreationConfig()
+	from := uint64(rootFrom)
+	to := uint64(rootTo)
 
 	to = to - cfg.SafetyMargin
 	from = (from / cfg.MinimumSize) * cfg.MinimumSize
 	to = (to / cfg.MinimumSize) * cfg.MinimumSize
 
 	mergeLimit := getMergeLimit(id, from)
-	maxJump := EntitiesPerStep
+	maxJump := cfg.EntitiesPerStep
 
-	if maxJump%mergeLimit == 0 {
+	if from%mergeLimit == 0 {
 		maxJump = mergeLimit
 	} else {
-		for i := len(cfg.MergeSteps) - 1; i >= 0; i-- {
-			if maxJump%cfg.MergeSteps[i] == 0 {
-				maxJump = cfg.MergeSteps[i]
+		for i := len(cfg.MergeStages) - 1; i >= 0; i-- {
+			if from%cfg.MergeStages[i] == 0 {
+				maxJump = cfg.MergeStages[i]
 				break
 			}
 		}
 	}
 
-	freezeFrom = from
-	freezeTo = from
-	jump := min(maxJump, to-from)
-	if jump >= mergeLimit {
-		freezeTo = from + mergeLimit
-	} else {
-		for i := len(cfg.MergeSteps) - 1; i >= 0; i-- {
-			if jump >= cfg.MergeSteps[i] {
-				freezeTo = from + cfg.MergeSteps[i]
+	_freezeFrom := from
+	var _freezeTo uint64
+	jump := to - from
+
+	switch {
+	case jump >= maxJump:
+		// enough data, max jump
+		_freezeTo = _freezeFrom + maxJump
+	case jump >= cfg.MergeStages[0]:
+		// else find if a merge step can be used
+		// assuming merge step multiple of each other
+		for i := len(cfg.MergeStages) - 1; i >= 0; i-- {
+			if jump >= cfg.MergeStages[i] {
+				_freezeTo = _freezeFrom + cfg.MergeStages[i]
 				break
 			}
 		}
+	case jump >= cfg.MinimumSize:
+		// else use minimum size
+		_freezeTo = _freezeFrom + cfg.MinimumSize
+
+	default:
+		_freezeTo = _freezeFrom
 	}
 
-	return freezeFrom, freezeTo, freezeTo-freezeFrom >= cfg.MinimumSize
+	return RootNum(_freezeFrom), RootNum(_freezeTo), uint64(freezeTo-freezeFrom) >= cfg.MinimumSize
 }
 
 func getMergeLimit(id AppendableId, from uint64) uint64 {
 	//return 0
 	cfg := id.SnapshotCreationConfig()
-	maxMergeLimit := cfg.MergeSteps[len(cfg.MergeSteps)-1]
+	maxMergeLimit := cfg.MergeStages[len(cfg.MergeStages)-1]
 
 	for _, info := range cfg.preverifiedParsed {
 		if !info.IsSeg() {
@@ -182,5 +217,4 @@ func getMergeLimit(id AppendableId, from uint64) uint64 {
 	}
 
 	return maxMergeLimit
-
 }

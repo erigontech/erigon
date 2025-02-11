@@ -7,22 +7,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
+	ae "github.com/erigontech/erigon-lib/state/appendables_extras"
 )
 
-/** custom types **/
-
-// canonical sequence number of entity (in context)
-type Num uint64
-
-// sequence number of entity - might contain non-canonical values
-type Id uint64
-
-// canonical sequence number of the root entity (or secondary key)
-type RootNum uint64
-
-type Bytes []byte
-
-/** freezers **/
+type RootNum = ae.RootNum
+type Num = ae.Num
+type Id = ae.Id
 
 // Freezer takes hot data (e.g. from db) and transforms it
 // to snapshot cold data.
