@@ -595,13 +595,168 @@ func (tx *ArbitrumRetryTx) Protected() bool {
 	panic("implement me")
 }
 
+func (tx *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
+	// Write the RLP list prefix.
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+
+	// ChainId (big.Int)
+	if err := rlp.EncodeBigInt(tx.ChainId, w, b); err != nil {
+		return err
+	}
+
+	// Nonce (uint64)
+	if tx.Nonce > 0 && tx.Nonce < 128 {
+		b[0] = byte(tx.Nonce)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		binary.BigEndian.PutUint64(b[1:], tx.Nonce)
+		b[8-nonceLen] = 128 + byte(nonceLen)
+		if _, err := w.Write(b[8-nonceLen : 9]); err != nil {
+			return err
+		}
+	}
+
+	// From (common.Address, 20 bytes)
+	b[0] = 128 + 20
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(tx.From[:]); err != nil {
+		return err
+	}
+
+	// GasFeeCap (big.Int)
+	if err := rlp.EncodeBigInt(tx.GasFeeCap, w, b); err != nil {
+		return err
+	}
+
+	// Gas (uint64)
+	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+		return err
+	}
+
+	// To (optional common.Address, 20 bytes if non-nil)
+	if tx.To == nil {
+		b[0] = 128
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + 20
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write((*tx.To)[:]); err != nil {
+			return err
+		}
+	}
+
+	// Value (big.Int)
+	if err := rlp.EncodeBigInt(tx.Value, w, b); err != nil {
+		return err
+	}
+
+	// Data ([]byte)
+	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+		return err
+	}
+
+	// TicketId (common.Hash, 32 bytes)
+	b[0] = 128 + 32
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(tx.TicketId[:]); err != nil {
+		return err
+	}
+
+	// RefundTo (common.Address, 20 bytes)
+	b[0] = 128 + 20
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(tx.RefundTo[:]); err != nil {
+		return err
+	}
+
+	// MaxRefund (big.Int)
+	if err := rlp.EncodeBigInt(tx.MaxRefund, w, b); err != nil {
+		return err
+	}
+
+	// SubmissionFeeRefund (big.Int)
+	if err := rlp.EncodeBigInt(tx.SubmissionFeeRefund, w, b); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (tx *ArbitrumRetryTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
+	// ChainId (big.Int)
+	payloadSize++ // header
+	payloadSize += rlp.BigIntLenExcludingHead(tx.ChainId)
+
+	// Nonce (uint64)
+	payloadSize++ // header
+	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
+	payloadSize += nonceLen
+
+	// From (common.Address, 20 bytes)
+	payloadSize++ // header
+	payloadSize += 20
+
+	// GasFeeCap (big.Int)
+	payloadSize++ // header
+	payloadSize += rlp.BigIntLenExcludingHead(tx.GasFeeCap)
+
+	// Gas (uint64)
+	payloadSize++ // header
+	gasLen = rlp.IntLenExcludingHead(tx.Gas)
+	payloadSize += gasLen
+
+	// To (optional common.Address, 20 bytes if non-nil)
+	payloadSize++ // header
+	if tx.To != nil {
+		payloadSize += 20
+	}
+
+	// Value (big.Int)
+	payloadSize++ // header
+	payloadSize += rlp.BigIntLenExcludingHead(tx.Value)
+
+	// Data ([]byte) — rlp.StringLen returns the full encoded length (header + data)
+	payloadSize += rlp.StringLen(tx.Data)
+
+	// TicketId (common.Hash, 32 bytes)
+	payloadSize++ // header
+	payloadSize += 32
+
+	// RefundTo (common.Address, 20 bytes)
+	payloadSize++ // header
+	payloadSize += 20
+
+	// MaxRefund (big.Int)
+	payloadSize++ // header
+	payloadSize += rlp.BigIntLenExcludingHead(tx.MaxRefund)
+
+	// SubmissionFeeRefund (big.Int)
+	payloadSize++ // header
+	payloadSize += rlp.BigIntLenExcludingHead(tx.SubmissionFeeRefund)
+
+	return payloadSize, nonceLen, gasLen
+}
+
 func (tx *ArbitrumRetryTx) EncodingSize() int {
 	//TODO implement me
 	panic("implement me")
 }
 
 func (tx *ArbitrumRetryTx) EncodeRLP(w io.Writer) error {
-	//TODO implement me
 	panic("implement me")
 }
 
@@ -611,8 +766,18 @@ func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (tx *ArbitrumRetryTx) MarshalBinary(w io.Writer) error {
-	//TODO implement me
-	panic("implement me")
+	payloadSize, nonceLen, gasLen := tx.payloadSize()
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// encode TxType
+	b[0] = ArbitrumRetryTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (tx *ArbitrumRetryTx) Sender(signer Signer) (common.Address, error) {
@@ -1309,6 +1474,38 @@ func (tx *ArbitrumInternalTx) EncodingSize() int {
 	panic("implement me")
 }
 
+func (tx *ArbitrumInternalTx) payloadSize() int {
+	size := 0
+
+	// ChainId: add 1 byte for header and the length of ChainId (excluding header)
+	size++
+	size += rlp.Uint256LenExcludingHead(tx.ChainId)
+
+	// Data: rlp.StringLen returns the full encoded length (header + payload)
+	size += rlp.StringLen(tx.Data)
+
+	return size
+}
+
+func (tx *ArbitrumInternalTx) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+	// Write the RLP list prefix
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+
+	// Encode ChainId
+	if err := rlp.EncodeUint256(tx.ChainId, w, b); err != nil {
+		return err
+	}
+
+	// Encode Data
+	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (tx *ArbitrumInternalTx) EncodeRLP(w io.Writer) error {
 	//TODO implement me
 	panic("implement me")
@@ -1320,8 +1517,18 @@ func (tx *ArbitrumInternalTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (tx *ArbitrumInternalTx) MarshalBinary(w io.Writer) error {
-	//TODO implement me
-	panic("implement me")
+	payloadSize := tx.payloadSize()
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// encode TxType
+	b[0] = ArbitrumInternalTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (tx *ArbitrumInternalTx) Sender(signer Signer) (common.Address, error) {

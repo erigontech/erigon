@@ -639,7 +639,10 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 	}
 
 	// Derive the TxHash from the decoded transactions.
-	block.TxHash = types.DeriveSha(txs)
+	txHash := types.DeriveSha(txs)
+	if verify && txHash != block.TxHash {
+		return nil, fmt.Errorf("tx hash mismatch, expected %s, got %s. num=%d", txHash, block.TxHash, blockNumber)
+	}
 	blk := types.NewBlockFromNetwork(&types.Header{
 		ParentHash:      block.ParentHash,
 		UncleHash:       block.UncleHash,
