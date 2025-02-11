@@ -22,18 +22,13 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	"google.golang.org/grpc"
-
-	"github.com/erigontech/erigon/turbo/rpchelper"
-
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"google.golang.org/grpc"
 )
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.

@@ -15,7 +15,7 @@ import (
 	reflect "reflect"
 
 	common "github.com/erigontech/erigon-lib/common"
-	hexutility "github.com/erigontech/erigon-lib/common/hexutil"
+	hexutil "github.com/erigontech/erigon-lib/common/hexutil"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	types "github.com/erigontech/erigon/core/types"
 	engine_types "github.com/erigontech/erigon/turbo/engineapi/engine_types"
