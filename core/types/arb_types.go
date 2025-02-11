@@ -1518,16 +1518,14 @@ func (tx *ArbitrumInternalTx) Sender(signer Signer) (common.Address, error) {
 }
 
 func (tx *ArbitrumInternalTx) cachedSender() (common.Address, bool) {
-	//TODO implement me
-	panic("implement me")
+	return ArbosAddress, true
 }
 
 func (tx *ArbitrumInternalTx) GetSender() (common.Address, bool) {
-	return common.Address{}, false
+	return ArbosAddress, true
 }
 
 func (tx *ArbitrumInternalTx) SetSender(address common.Address) {
-	//TODO implement me
 	panic("implement me")
 }
 
