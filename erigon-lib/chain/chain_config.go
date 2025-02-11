@@ -92,7 +92,8 @@ type Config struct {
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
 
-	ArbitrumChainParams ArbitrumChainParams `json:"arbitrum,omitempty"`
+	ArbitrumChainParams ArbitrumChainParams `json:"-"`
+	ArbJSON             json.RawMessage     `json:"arbitrum,omitempty"`
 
 	DAOForkSupport bool `json:"daoForkSupport,omitempty"` // Whether the nodes supports or opposes the DAO hard-fork
 
@@ -101,17 +102,6 @@ type Config struct {
 	EIP155Block *big.Int `json:"eip155Block,omitempty"` // EIP155 HF block
 	EIP158Block *big.Int `json:"eip158Block,omitempty"` // EIP158 HF block
 
-}
-
-type ArbitrumChainParams struct {
-	EnableArbOS               bool
-	AllowDebugPrecompiles     bool
-	DataAvailabilityCommittee bool
-	InitialArbOSVersion       uint64
-	InitialChainOwner         common.Address
-	GenesisBlockNum           uint64
-	MaxCodeSize               uint64 `json:"MaxCodeSize,omitempty"`     // Maximum bytecode to permit for a contract. 0 value implies params.DefaultMaxCodeSize
-	MaxInitCodeSize           uint64 `json:"MaxInitCodeSize,omitempty"` // Maximum initcode to permit in a creation transaction and create instructions. 0 value implies params.DefaultMaxInitCodeSize
 }
 
 type BlobConfig struct {
@@ -967,7 +957,7 @@ func DefaultCacheConfigWithScheme(scheme string) *CacheConfig {
 // defaultCacheConfig are the default caching values if none are specified by the
 // user (also used during testing).
 var defaultCacheConfig = &CacheConfig{
-	// Arbitrum Config Options
+	// Arbitrum Config Options  TODO remove
 	TriesInMemory:                      128,
 	TrieRetention:                      30 * time.Minute,
 	MaxNumberOfBlocksToSkipStateSaving: 0,
@@ -1005,4 +995,35 @@ type CacheConfig struct {
 
 	SnapshotNoBuild bool // Whether the background generation is allowed
 	SnapshotWait    bool // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
+}
+
+type ArbitrumChainParams struct {
+	ParentChainID         int    `json:"parent-chain-id"`
+	ParentChainIsArbitrum bool   `json:"parent-chain-is-arbitrum"`
+	ChainName             string `json:"chain-name"`
+	SequencerURL          string `json:"sequencer-url"`
+	FeedURL               string `json:"feed-url"`
+
+	EnableArbOS               bool           `json:"EnableArbOS"`
+	AllowDebugPrecompiles     bool           `json:"AllowDebugPrecompiles"`
+	DataAvailabilityCommittee bool           `json:"DataAvailabilityCommittee"`
+	InitialArbOSVersion       uint64         `json:"InitialArbOSVersion"`
+	InitialChainOwner         common.Address `json:"InitialChainOwner"`
+	GenesisBlockNum           uint64         `json:"GenesisBlockNum"`
+
+	MaxCodeSize     uint64 `json:"MaxCodeSize,omitempty"`     // Maximum bytecode to permit for a contract. 0 value implies params.DefaultMaxCodeSize
+	MaxInitCodeSize uint64 `json:"MaxInitCodeSize,omitempty"` // Maximum initcode to permit in a creation transaction and create instructions. 0 value implies params.DefaultMaxInitCodeSize
+
+	Rollup ArbRollupConfig `json:"rollup"`
+}
+
+type ArbRollupConfig struct {
+	Bridge                 string `json:"bridge"`
+	Inbox                  string `json:"inbox"`
+	SequencerInbox         string `json:"sequencer-inbox"`
+	Rollup                 string `json:"rollup"`
+	ValidatorUtils         string `json:"validator-utils"`
+	ValidatorWalletCreator string `json:"validator-wallet-creator"`
+	StakeToken             string `json:"stake-token"`
+	DeployedAt             int    `json:"deployed-at"`
 }

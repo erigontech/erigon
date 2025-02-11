@@ -392,7 +392,7 @@ func TestGenesisBlock() *types.Genesis {
 
 func ArbSepoliaRollupGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     nil,
+		Config:     params.ArbSepoliaChainConfig,
 		Nonce:      0x0000000000000001,
 		Timestamp:  0x0,
 		ExtraData:  libcommon.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000"),
@@ -400,11 +400,11 @@ func ArbSepoliaRollupGenesisBlock() *types.Genesis {
 		Difficulty: big.NewInt(1),   // "0x1"
 		Mixhash:    libcommon.HexToHash("0x00000000000000000000000000000000000000000000000a0000000000000000"),
 		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Alloc:      types.GenesisAlloc{}, // assume no preallocated state provided
-		Number:     0x0,                  // block number 0
+		Number:     0x0, // block number 0
 		GasUsed:    0x0,
 		ParentHash: libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		BaseFee:    big.NewInt(100000000),
+		Alloc:      types.GenesisAlloc{}, // assume no preallocated state provided
 		// Alloc:      readPrealloc("allocs/bor_devnet.json"),
 	}
 }
@@ -601,6 +601,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			return err
 		}
 		root = libcommon.BytesToHash(rh)
+		fmt.Printf("Genesis root: %s\n", root.String())
 		return nil
 	})
 
