@@ -25,14 +25,16 @@ type SnapshotCreationConfig struct {
 	// since blockchains reorg and so we don't freeze latest entities.
 	SafetyMargin uint64
 
-	// progressively merge smaller files into large ones maximum size (merge limit)
-	// is the last element of MergeStages
+	// progressively merge smaller files into large ones.
+	// maximum size (merge limit) is the last element of MergeStages
 	// decreasing order expected, each step is a multiple of the previous one
 	// e.g. [1000, 20000, 600000] --> first stage creates files of size 1000; then 20 of these merged to
 	// create size 10000; then 30 of these merged to create size 100000
+	// each must be divisible by `EntitiesPerStep`
 	MergeStages []uint64
 
 	// minimum snapshot size
+	// must be divisible by `EntitiesPerStep`
 	MinimumSize uint64
 
 	// preverified can have larger files than that indicated by `MergeSteps.last`.
@@ -137,10 +139,10 @@ func IdxName(id AppendableId, version snaptype.Version, from, to RootNum, idxNum
 // determine freezing ranges, given snapshot creation config
 func GetFreezingRange(rootFrom, rootTo RootNum, id AppendableId) (freezeFrom RootNum, freezeTo RootNum, canFreeze bool) {
 	/**
-	 1. `from`, `to` must be round off to minimum size (atleast) and then also mergeLimit
-	 2. mergeLimit is a function: (from, preverified files, some mergeLimit defaults) -> biggest file size at `from`
+	 1. `from`, `to` must be round off to minimum size (atleast)
+	 2. mergeLimit is a function: (from, preverified files, mergeLimit default) -> biggest file size starting `from`
 	 3. if mergeLimit size is not possible, then `freezeTo` should be next largest possible file size
-	    as allowed by the MergeSteps.
+	    as allowed by the MergeSteps or MinimumSize.
 	**/
 
 	cfg := id.SnapshotCreationConfig()
