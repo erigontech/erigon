@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math/big"
 
@@ -205,8 +206,75 @@ func (tx *ArbitrumUnsignedTx) EncodeRLP(w io.Writer) error {
 }
 
 func (tx *ArbitrumUnsignedTx) DecodeRLP(s *rlp.Stream) error {
-	//TODO implement me
-	panic("implement me")
+	// Begin decoding the RLP list.
+	if _, err := s.List(); err != nil {
+		return err
+	}
+
+	var b []byte
+	var err error
+
+	// Decode ChainId (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read ChainId: %w", err)
+	}
+	tx.ChainId = new(big.Int).SetBytes(b)
+
+	// Decode From (common.Address, 20 bytes)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read From: %w", err)
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for From: %d", len(b))
+	}
+	copy(tx.From[:], b)
+
+	// Decode Nonce (uint64)
+	if tx.Nonce, err = s.Uint(); err != nil {
+		return fmt.Errorf("read Nonce: %w", err)
+	}
+
+	// Decode GasFeeCap (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read GasFeeCap: %w", err)
+	}
+	tx.GasFeeCap = new(big.Int).SetBytes(b)
+
+	// Decode Gas (uint64)
+	if tx.Gas, err = s.Uint(); err != nil {
+		return fmt.Errorf("read Gas: %w", err)
+	}
+
+	// Decode To (*common.Address, 20 bytes if non-nil)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read To: %w", err)
+	}
+	if len(b) > 0 {
+		if len(b) != 20 {
+			return fmt.Errorf("wrong size for To: %d", len(b))
+		}
+		tx.To = new(common.Address)
+		copy(tx.To[:], b)
+	} else {
+		tx.To = nil
+	}
+
+	// Decode Value (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Value: %w", err)
+	}
+	tx.Value = new(big.Int).SetBytes(b)
+
+	// Decode Data ([]byte)
+	if tx.Data, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Data: %w", err)
+	}
+
+	// End the RLP list.
+	if err := s.ListEnd(); err != nil {
+		return fmt.Errorf("close ArbitrumUnsignedTx: %w", err)
+	}
+	return nil
 }
 
 func (tx *ArbitrumUnsignedTx) MarshalBinary(w io.Writer) error {
@@ -391,8 +459,79 @@ func (tx *ArbitrumContractTx) EncodeRLP(w io.Writer) error {
 }
 
 func (tx *ArbitrumContractTx) DecodeRLP(s *rlp.Stream) error {
-	//TODO implement me
-	panic("implement me")
+	// Begin decoding the RLP list.
+	if _, err := s.List(); err != nil {
+		return err
+	}
+
+	var b []byte
+	var err error
+
+	// Decode ChainId (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read ChainId: %w", err)
+	}
+	tx.ChainId = new(big.Int).SetBytes(b)
+
+	// Decode RequestId (common.Hash, 32 bytes)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read RequestId: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for RequestId: %d", len(b))
+	}
+	copy(tx.RequestId[:], b)
+
+	// Decode From (common.Address, 20 bytes)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read From: %w", err)
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for From: %d", len(b))
+	}
+	copy(tx.From[:], b)
+
+	// Decode GasFeeCap (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read GasFeeCap: %w", err)
+	}
+	tx.GasFeeCap = new(big.Int).SetBytes(b)
+
+	// Decode Gas (uint64)
+	if tx.Gas, err = s.Uint(); err != nil {
+		return fmt.Errorf("read Gas: %w", err)
+	}
+
+	// Decode To (*common.Address, 20 bytes if non-nil)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read To: %w", err)
+	}
+	if len(b) > 0 {
+		if len(b) != 20 {
+			return fmt.Errorf("wrong size for To: %d", len(b))
+		}
+		tx.To = new(common.Address)
+		copy(tx.To[:], b)
+	} else {
+		tx.To = nil
+	}
+
+	// Decode Value (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Value: %w", err)
+	}
+	tx.Value = new(big.Int).SetBytes(b)
+
+	// Decode Data ([]byte)
+	if tx.Data, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Data: %w", err)
+	}
+
+	// End the RLP list.
+	if err := s.ListEnd(); err != nil {
+		return fmt.Errorf("close ArbitrumContractTx: %w", err)
+	}
+	return nil
 }
 
 func (tx *ArbitrumContractTx) MarshalBinary(w io.Writer) error {
@@ -753,8 +892,103 @@ func (tx *ArbitrumRetryTx) EncodeRLP(w io.Writer) error {
 }
 
 func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
-	//TODO implement me
-	panic("implement me")
+	// Begin list decoding.
+	if _, err := s.List(); err != nil {
+		return err
+	}
+
+	var b []byte
+	var err error
+
+	// Decode ChainId (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read ChainId: %w", err)
+	}
+	tx.ChainId = new(big.Int).SetBytes(b)
+
+	// Decode Nonce (uint64)
+	if tx.Nonce, err = s.Uint(); err != nil {
+		return fmt.Errorf("read Nonce: %w", err)
+	}
+
+	// Decode From (common.Address, 20 bytes)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read From: %w", err)
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for From: %d", len(b))
+	}
+	copy(tx.From[:], b)
+
+	// Decode GasFeeCap (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read GasFeeCap: %w", err)
+	}
+	tx.GasFeeCap = new(big.Int).SetBytes(b)
+
+	// Decode Gas (uint64)
+	if tx.Gas, err = s.Uint(); err != nil {
+		return fmt.Errorf("read Gas: %w", err)
+	}
+
+	// Decode To (*common.Address, 20 bytes if non-nil)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read To: %w", err)
+	}
+	if len(b) > 0 {
+		if len(b) != 20 {
+			return fmt.Errorf("wrong size for To: %d", len(b))
+		}
+		tx.To = new(common.Address)
+		copy(tx.To[:], b)
+	}
+
+	// Decode Value (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Value: %w", err)
+	}
+	tx.Value = new(big.Int).SetBytes(b)
+
+	// Decode Data ([]byte)
+	if tx.Data, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Data: %w", err)
+	}
+
+	// Decode TicketId (common.Hash, 32 bytes)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read TicketId: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for TicketId: %d", len(b))
+	}
+	copy(tx.TicketId[:], b)
+
+	// Decode RefundTo (common.Address, 20 bytes)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read RefundTo: %w", err)
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for RefundTo: %d", len(b))
+	}
+	copy(tx.RefundTo[:], b)
+
+	// Decode MaxRefund (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read MaxRefund: %w", err)
+	}
+	tx.MaxRefund = new(big.Int).SetBytes(b)
+
+	// Decode SubmissionFeeRefund (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read SubmissionFeeRefund: %w", err)
+	}
+	tx.SubmissionFeeRefund = new(big.Int).SetBytes(b)
+
+	// End list decoding.
+	if err := s.ListEnd(); err != nil {
+		return fmt.Errorf("close ArbitrumRetryTx: %w", err)
+	}
+	return nil
 }
 
 func (tx *ArbitrumRetryTx) MarshalBinary(w io.Writer) error {
@@ -1141,8 +1375,115 @@ func (tx *ArbitrumSubmitRetryableTx) EncodeRLP(w io.Writer) error {
 }
 
 func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
-	//TODO implement me
-	panic("implement me")
+	// Begin decoding the RLP list.
+	if _, err := s.List(); err != nil {
+		return err
+	}
+
+	var b []byte
+	var err error
+
+	// Decode ChainId (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read ChainId: %w", err)
+	}
+	tx.ChainId = new(big.Int).SetBytes(b)
+
+	// Decode RequestId (common.Hash, 32 bytes)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read RequestId: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for RequestId: %d", len(b))
+	}
+	copy(tx.RequestId[:], b)
+
+	// Decode From (common.Address, 20 bytes)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read From: %w", err)
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for From: %d", len(b))
+	}
+	copy(tx.From[:], b)
+
+	// Decode L1BaseFee (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read L1BaseFee: %w", err)
+	}
+	tx.L1BaseFee = new(big.Int).SetBytes(b)
+
+	// Decode DepositValue (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read DepositValue: %w", err)
+	}
+	tx.DepositValue = new(big.Int).SetBytes(b)
+
+	// Decode GasFeeCap (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read GasFeeCap: %w", err)
+	}
+	tx.GasFeeCap = new(big.Int).SetBytes(b)
+
+	// Decode Gas (uint64)
+	if tx.Gas, err = s.Uint(); err != nil {
+		return fmt.Errorf("read Gas: %w", err)
+	}
+
+	// Decode RetryTo (*common.Address, 20 bytes if non-nil)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read RetryTo: %w", err)
+	}
+	if len(b) > 0 {
+		if len(b) != 20 {
+			return fmt.Errorf("wrong size for RetryTo: %d", len(b))
+		}
+		tx.RetryTo = new(common.Address)
+		copy(tx.RetryTo[:], b)
+	} else {
+		tx.RetryTo = nil
+	}
+
+	// Decode RetryValue (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read RetryValue: %w", err)
+	}
+	tx.RetryValue = new(big.Int).SetBytes(b)
+
+	// Decode Beneficiary (common.Address, 20 bytes)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Beneficiary: %w", err)
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for Beneficiary: %d", len(b))
+	}
+	copy(tx.Beneficiary[:], b)
+
+	// Decode MaxSubmissionFee (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read MaxSubmissionFee: %w", err)
+	}
+	tx.MaxSubmissionFee = new(big.Int).SetBytes(b)
+
+	// Decode FeeRefundAddr (common.Address, 20 bytes)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read FeeRefundAddr: %w", err)
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for FeeRefundAddr: %d", len(b))
+	}
+	copy(tx.FeeRefundAddr[:], b)
+
+	// Decode RetryData ([]byte)
+	if tx.RetryData, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read RetryData: %w", err)
+	}
+
+	// End the RLP list.
+	if err := s.ListEnd(); err != nil {
+		return fmt.Errorf("close ArbitrumSubmitRetryableTx: %w", err)
+	}
+	return nil
 }
 
 func (tx *ArbitrumSubmitRetryableTx) MarshalBinary(w io.Writer) error {
@@ -1318,9 +1659,59 @@ func (d *ArbitrumDepositTx) EncodeRLP(w io.Writer) error {
 	panic("implement me")
 }
 
-func (d *ArbitrumDepositTx) DecodeRLP(s *rlp.Stream) error {
-	//TODO implement me
-	panic("implement me")
+func (tx *ArbitrumDepositTx) DecodeRLP(s *rlp.Stream) error {
+	// Begin decoding the RLP list.
+	if _, err := s.List(); err != nil {
+		return err
+	}
+
+	var b []byte
+	var err error
+
+	// Decode ChainId (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read ChainId: %w", err)
+	}
+	tx.ChainId = new(big.Int).SetBytes(b)
+
+	// Decode L1RequestId (common.Hash, 32 bytes)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read L1RequestId: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for L1RequestId: %d", len(b))
+	}
+	copy(tx.L1RequestId[:], b)
+
+	// Decode From (common.Address, 20 bytes)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read From: %w", err)
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for From: %d", len(b))
+	}
+	copy(tx.From[:], b)
+
+	// Decode To (common.Address, 20 bytes)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read To: %w", err)
+	}
+	if len(b) != 20 {
+		return fmt.Errorf("wrong size for To: %d", len(b))
+	}
+	copy(tx.To[:], b)
+
+	// Decode Value (*big.Int)
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Value: %w", err)
+	}
+	tx.Value = new(big.Int).SetBytes(b)
+
+	// End the RLP list.
+	if err := s.ListEnd(); err != nil {
+		return fmt.Errorf("close ArbitrumDepositTx: %w", err)
+	}
+	return nil
 }
 
 func (d *ArbitrumDepositTx) MarshalBinary(w io.Writer) error {
@@ -1493,8 +1884,22 @@ func (tx *ArbitrumInternalTx) EncodeRLP(w io.Writer) error {
 }
 
 func (tx *ArbitrumInternalTx) DecodeRLP(s *rlp.Stream) error {
-	//TODO implement me
-	panic("implement me")
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	var b []byte
+	if b, err = s.Uint256Bytes(); err != nil {
+		return fmt.Errorf("read ChainId: %w", err)
+	}
+	tx.ChainId = new(uint256.Int).SetBytes(b)
+	if tx.Data, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Data: %w", err)
+	}
+	if err := s.ListEnd(); err != nil {
+		return fmt.Errorf("close ArbitrumInternalTx: %w", err)
+	}
+	return nil
 }
 
 func (tx *ArbitrumInternalTx) MarshalBinary(w io.Writer) error {
