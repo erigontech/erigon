@@ -404,8 +404,7 @@ func ArbSepoliaRollupGenesisBlock() *types.Genesis {
 		GasUsed:    0x0,
 		ParentHash: libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		BaseFee:    big.NewInt(100000000),
-		Alloc:      types.GenesisAlloc{}, // assume no preallocated state provided
-		// Alloc:      readPrealloc("allocs/bor_devnet.json"),
+		Alloc:      readPrealloc("allocs/arb_sepolia.json"),
 	}
 }
 

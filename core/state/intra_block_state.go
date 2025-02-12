@@ -118,6 +118,14 @@ func New(stateReader StateReader) *IntraBlockState {
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
 		txIndex:           0,
+		arbExtraData: &ArbitrumExtraData{
+			unexpectedBalanceDelta: libcommon.Num0,
+			userWasms:              UserWasms{},
+			openWasmPages:          0,
+			everWasmPages:          0,
+			activatedWasms:         make(map[libcommon.Hash]ActivatedWasm),
+			recentWasms:            RecentWasms{},
+		},
 		//trace:             true,
 	}
 }
@@ -1048,7 +1056,7 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // - Add authorities to access list (EIP-7702)
 // - Add delegated designation (if it exists for dst) to access list (EIP-7702)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
-	precompiles []libcommon.Address, list types.AccessList, authorities []libcommon.Address) error {
+		precompiles []libcommon.Address, list types.AccessList, authorities []libcommon.Address) error {
 	if sdb.trace {
 		fmt.Printf("ibs.Prepare %x, %x, %x, %x, %v, %v, %v\n", sender, coinbase, dst, precompiles, list, rules, authorities)
 	}

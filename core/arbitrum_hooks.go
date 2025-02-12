@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"math/big"
 	"time"
@@ -40,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 // Installs an Arbitrum TxProcessor, enabling ArbOS for this state transition (see vm/evm_arbitrum.go)
@@ -80,6 +80,8 @@ type NodeInterfaceBackendAPI interface {
 // Arbitrum widely uses BlockChain structure so better to wrap interface here
 type BlockChain interface {
 	services.FullBlockReader
+	//services.BlockAndTxnReader
+	//services.HeaderAndCanonicalReader
 	ChainReader() consensus.ChainHeaderReader // may be useful more than embedding of FullBlockReader itself
 	Engine() consensus.Engine
 
