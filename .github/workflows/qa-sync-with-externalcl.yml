@@ -6,7 +6,7 @@ on:
   workflow_dispatch:     # Run manually
 
 jobs:
-  sync-from-scratch-test:
+  sync-with-externalcl:
     runs-on: [self-hosted, linux, X64]
     timeout-minutes: 360 # 6 hours
     strategy:
