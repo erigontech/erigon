@@ -36,6 +36,15 @@ jobs:
         make erigon
       working-directory: ${{ github.workspace }}
 
+    - name: Install Prysm and generate JWT secret
+      run: |
+        mkdir -p /tmp/consensus
+        curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o /tmp/consensus/prysm.sh
+        chmod +x /tmp/consensus/prysm.sh
+
+        # Generate JWT secret
+        openssl rand -hex 32 > /tmp/consensus/jwt.hex
+
     - name: Pause the Erigon instance dedicated to db maintenance
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
