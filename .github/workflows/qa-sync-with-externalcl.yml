@@ -25,6 +25,15 @@ jobs:
           make clean
           rm -rf $ERIGON_DATA_DIR
 
+      - name: Install Prysm and generate JWT secret
+        run: |
+          mkdir -p /tmp/consensus
+          curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o /tmp/consensus/prysm.sh
+          chmod +x /tmp/consensus/prysm.sh
+
+          # Generate JWT secret
+          openssl rand -hex 32 > /tmp/consensus/jwt.hex
+
       - name: Build Erigon
         run: |
           make erigon
