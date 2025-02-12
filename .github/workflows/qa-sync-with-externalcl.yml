@@ -79,7 +79,7 @@ jobs:
             --repo erigon \
             --commit $(git rev-parse HEAD) \
             --branch ${{ github.ref_name }} \
-            --test_name sync-from-scratch-prysm-minimal-node \
+            --test_name sync-from-scratch-lighthouse-minimal-node \
             --chain $CHAIN \
             --runner ${{ runner.name }} \
             --outcome $TEST_RESULT \
