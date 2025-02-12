@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -62,7 +63,7 @@ The state transitioning model does all the necessary work to work out a valid ne
 6) Derive new state root
 */
 
-var ErrStateTransitionFailed = errors.New("state transitaion failed")
+var ErrStateTransitionFailed = errors.New("state transition failed")
 
 type StateTransition struct {
 	gp           *GasPool
@@ -103,6 +104,25 @@ type Message interface {
 	Authorizations() []types.Authorization
 
 	IsFree() bool
+}
+
+// IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
+// TODO: convert the input to a struct
+func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool, authorizationsLen uint64) (uint64, error) {
+	// Zero and non-zero bytes are priced differently
+	dataLen := uint64(len(data))
+	dataNonZeroLen := uint64(0)
+	for _, byt := range data {
+		if byt != 0 {
+			dataNonZeroLen++
+		}
+	}
+
+	gas, status := txpoolcfg.CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessList, isContractCreation, isHomestead, isEIP2028, isEIP3860)
+	if status != txpoolcfg.Success {
+		return 0, ErrGasUintOverflow
+	}
+	return gas, nil
 }
 
 // NewStateTransition initialises and returns a new state transition object.
@@ -361,13 +381,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		if contractCreation {
 			return nil, errors.New("contract creation not allowed with type4 txs")
 		}
-		var b [32]byte
+		var b [33]byte
 		data := bytes.NewBuffer(nil)
 		for i, auth := range auths {
 			data.Reset()
 
 			// 1. chainId check
-			if !auth.ChainID.IsZero() && rules.ChainID.String() != auth.ChainID.String() {
+			if auth.ChainID != 0 && (!rules.ChainID.IsUint64() || rules.ChainID.Uint64() != auth.ChainID) {
 				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
 				continue
 			}
@@ -440,12 +460,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, floorGas7623, overflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, uint64(len(auths)))
-	if overflow {
-		return nil, ErrGasUintOverflow
+	gas, err := IntrinsicGas(st.data, accessTuples, contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, uint64(len(auths)))
+	if err != nil {
+		return nil, err
 	}
-	if st.gasRemaining < gas || st.gasRemaining < floorGas7623 {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(gas, floorGas7623))
+	if st.gasRemaining < gas {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, gas)
 	}
 	st.gasRemaining -= gas
 
@@ -485,24 +505,15 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	} else {
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
-
 	if refunds && !gasBailout {
-		refundQuotient := params.RefundQuotient
 		if rules.IsLondon {
-			refundQuotient = params.RefundQuotientEIP3529
+			// After EIP-3529: refunds are capped to gasUsed / 5
+			st.refundGas(params.RefundQuotientEIP3529)
+		} else {
+			// Before EIP-3529: refunds were capped to gasUsed / 2
+			st.refundGas(params.RefundQuotient)
 		}
-		gasUsed := st.gasUsed()
-		refund := min(gasUsed/refundQuotient, st.state.GetRefund())
-		gasUsed = gasUsed - refund
-		if rules.IsPrague {
-			gasUsed = max(floorGas7623, gasUsed)
-		}
-		st.gasRemaining = st.initialGas - gasUsed
-		st.refundGas()
-	} else if rules.IsPrague {
-		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
 	}
-
 	effectiveTip := st.gasPrice
 	if rules.IsLondon {
 		if st.gasFeeCap.Gt(st.evm.Context.BaseFee) {
@@ -545,7 +556,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	return result, nil
 }
 
-func (st *StateTransition) refundGas() {
+func (st *StateTransition) refundGas(refundQuotient uint64) {
+	// Apply refund counter, capped to half of the used gas.
+	refund := st.gasUsed() / refundQuotient
+	if refund > st.state.GetRefund() {
+		refund = st.state.GetRefund()
+	}
+	st.gasRemaining += refund
+
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
