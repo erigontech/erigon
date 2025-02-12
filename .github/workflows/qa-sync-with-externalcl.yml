@@ -19,16 +19,19 @@ jobs:
           - chain: mainnet
             client: lighthouse
             runner: Erigon2
+            reference_data_dir: /opt/erigon-versions/reference-version/datadir
           - chain: mainnet
             client: prysm
             runner: Erigon2
+            reference_data_dir: /opt/erigon-versions/reference-version/datadir
           - chain: gnosis
             client: prysm
             runner: Gnosis
+            reference_data_dir: /opt/erigon-versions/reference-version-2/datadir
     runs-on: [ self-hosted, "${{ matrix.runner }}" ]
     timeout-minutes: 600
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_REFERENCE_DATA_DIR: ${{ matrix.reference_data_dir }}
       CL_DATA_DIR: ${{ github.workspace }}/consensus
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
