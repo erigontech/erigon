@@ -98,6 +98,7 @@ jobs:
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Cleanup consensus runner directory
+      if: always()
       run: |
         rm -rf /tmp/consensus
 
