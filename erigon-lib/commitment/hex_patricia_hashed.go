@@ -2949,11 +2949,9 @@ func (hph *HexPatriciaHashedReader) fold() (err error) {
 				hph.touchMap[row-1] |= uint16(1) << nibble
 			}
 		}
-		bitmap := hph.touchMap[row] & hph.afterMap[row]
 		if !hph.branchBefore[row] {
 			// There was no branch node before, so we need to touch even the singular child that existed
 			hph.touchMap[row] |= hph.afterMap[row]
-			bitmap |= hph.afterMap[row]
 		}
 
 		// Calculate total length of all hashes
