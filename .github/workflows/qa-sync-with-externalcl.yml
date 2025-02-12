@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 600
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      CL_DATA_DIR: ${{ github.workspace }}/consensus
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 14400 # 4 hours
@@ -38,12 +39,12 @@ jobs:
 
     - name: Install Prysm and generate JWT secret
       run: |
-        mkdir -p /tmp/consensus
-        curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o /tmp/consensus/prysm.sh
-        chmod +x /tmp/consensus/prysm.sh
+        mkdir -p $CL_DATA_DIR
+        curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o $CL_DATA_DIR/prysm.sh
+        chmod +x $CL_DATA_DIR/prysm.sh
 
         # Generate JWT secret
-        openssl rand -hex 32 > /tmp/consensus/jwt.hex
+        openssl rand -hex 32 > $CL_DATA_DIR/jwt.hex
 
     - name: Pause the Erigon instance dedicated to db maintenance
       run: |
@@ -109,7 +110,7 @@ jobs:
     - name: Cleanup consensus runner directory
       if: always()
       run: |
-        rm -rf /tmp/consensus
+        rm -rf $CL_DATA_DIR
 
     - name: Action for Success
       if: steps.test_step.outputs.TEST_RESULT == 'success'
