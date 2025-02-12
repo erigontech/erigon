@@ -114,6 +114,7 @@ different_files=(
     "BadHeaderNumber.txt"
     "CallToIndex.txt"
     "bad_tx_hashes_lookup.txt"
+    "DbInfo.txt"
 )
 
 is_in_array() {
@@ -178,6 +179,7 @@ dump_data "${secondStop}-sync-again" "after resyncing to second stop"
 second_comparison_expected_diffs=(
     "BadHeaderNumber.txt"
     "bad_tx_hashes_lookup.txt"
+    "DbInfo.txt"
 )
 
 # Compare second stop dumps
