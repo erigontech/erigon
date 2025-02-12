@@ -20,51 +20,70 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"slices"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	merkletree "github.com/erigontech/erigon/cl/merkle_tree"
 )
 
 var (
-	ErrTooManyIdentityPreimages = errors.New("too many identity preimages")
-	ErrIdentityPreimageTooBig   = errors.New("identity preimage too big")
+	ErrTooManyIdentityPreimages      = errors.New("too many identity preimages")
+	ErrIncorrectIdentityPreimageSize = errors.New("incorrect identity preimage size")
 )
 
-type IdentityPreimage []byte
+const (
+	identityPreimageSize   = 52
+	identityPreimagesLimit = 1024
+)
 
-func (ip IdentityPreimage) String() string {
-	return hexutility.Encode(ip)
+type IdentityPreimage [identityPreimageSize]byte
+
+func (ip *IdentityPreimage) EncodingSizeSSZ() int {
+	return identityPreimageSize
 }
 
-type IdentityPreimages []IdentityPreimage
+func (ip *IdentityPreimage) EncodeSSZ(dst []byte) ([]byte, error) {
+	return append(dst, ip[:]...), nil
+}
 
-func (ips IdentityPreimages) Validate() error {
-	if len(ips) > 1024 {
-		return ErrTooManyIdentityPreimages
+func (ip *IdentityPreimage) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf) != identityPreimageSize {
+		return fmt.Errorf("%w: len=%d", ErrIncorrectIdentityPreimageSize, len(ip))
 	}
 
-	for i, ip := range ips {
-		if len(ip) > 52 {
-			return fmt.Errorf("%w: ips=%d, len=%d", ErrIdentityPreimageTooBig, i, len(ip))
-		}
-	}
-
+	var newIp IdentityPreimage
+	copy(newIp[:], buf)
+	*ip = newIp
 	return nil
 }
 
-func (ips IdentityPreimages) HashSSZ() ([32]byte, error) {
-	if err := ips.Validate(); err != nil {
-		return [32]byte{}, err
-	}
+func (ip *IdentityPreimage) Clone() clonable.Clonable {
+	clone := IdentityPreimage(slices.Clone(ip[:]))
+	return &clone
+}
 
-	schema := make([]interface{}, len(ips))
-	for i, ip := range ips {
-		schema[i] = []byte(ip)
-	}
+func (ip *IdentityPreimage) HashSSZ() ([32]byte, error) {
+	return merkletree.BytesRoot(ip[:])
+}
 
-	return merkletree.HashTreeRoot(schema...)
+func (ip *IdentityPreimage) String() string {
+	return hexutility.Encode(ip[:])
+}
+
+func IdentityPreimageFromSSZ(b []byte) (*IdentityPreimage, error) {
+	ip := new(IdentityPreimage)
+	err := ip.DecodeSSZ(b, 0)
+	return ip, err
+}
+
+type IdentityPreimages []*IdentityPreimage
+
+func (ips IdentityPreimages) ToListSSZ() *solid.ListSSZ[*IdentityPreimage] {
+	return solid.NewStaticListSSZFromList(ips, identityPreimagesLimit, identityPreimageSize)
 }
 
 type DecryptionKeysSignatureData struct {
@@ -72,10 +91,14 @@ type DecryptionKeysSignatureData struct {
 	Eon               EonIndex
 	Slot              uint64
 	TxnPointer        uint64
-	IdentityPreimages IdentityPreimages
+	IdentityPreimages *solid.ListSSZ[*IdentityPreimage]
 }
 
 func (d DecryptionKeysSignatureData) HashSSZ() ([32]byte, error) {
+	if err := d.Validate(); err != nil {
+		return [32]byte{}, err
+	}
+
 	r, err := merkletree.HashTreeRoot(d.InstanceId, uint64(d.Eon), d.Slot, d.TxnPointer, d.IdentityPreimages)
 	if err != nil {
 		return [32]byte{}, fmt.Errorf("%w: slot=%d, eon=%d", err, d.Slot, d.Eon)
@@ -105,4 +128,12 @@ func (d DecryptionKeysSignatureData) Verify(signature []byte, address libcommon.
 	}
 
 	return crypto.PubkeyToAddress(*pubKey) == address, nil
+}
+
+func (d DecryptionKeysSignatureData) Validate() error {
+	if d.IdentityPreimages.Len() > identityPreimagesLimit {
+		return fmt.Errorf("%w: len=%d", ErrTooManyIdentityPreimages, d.IdentityPreimages.Len())
+	}
+
+	return nil
 }

@@ -47,13 +47,13 @@ func TestDecryptionKeysValidators(t *testing.T) {
 	eon := ekg.Eon()
 	slot := uint64(6336)
 	txnPointer := uint64(556)
-	ips := testhelpers.MockIdentityPreimagesWithSlotIp(slot, 2)
+	ips := testhelpers.MockIdentityPreimagesWithSlotIp(t, slot, 2)
 	sigData := shutter.DecryptionKeysSignatureData{
 		InstanceId:        instanceId,
 		Eon:               eonIndex,
 		Slot:              slot,
 		TxnPointer:        txnPointer,
-		IdentityPreimages: ips,
+		IdentityPreimages: ips.ToListSSZ(),
 	}
 	signerIndices := []uint64{1, 2}
 	signers := []testhelpers.Keyper{ekg.Keypers[signerIndices[0]], ekg.Keypers[signerIndices[1]]}
@@ -215,7 +215,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   eonIndex,
-					Keys:       ekg.DecryptionKeys(t, signers, testhelpers.MockIdentityPreimages(maxNumKeysPerMessage+1)),
+					Keys:       ekg.DecryptionKeys(t, signers, testhelpers.MockIdentityPreimages(t, maxNumKeysPerMessage+1)),
 				}),
 			),
 			slotCalculator: testhelpers.MockSlotCalculatorCreator(),

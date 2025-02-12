@@ -160,7 +160,12 @@ func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, e
 
 	identityPreimages := make(IdentityPreimages, len(msg.Keys))
 	for i, k := range msg.Keys {
-		identityPreimages[i] = k.IdentityPreimage
+		ip, err := IdentityPreimageFromSSZ(k.IdentityPreimage)
+		if err != nil {
+			return err
+		}
+
+		identityPreimages[i] = ip
 	}
 
 	for i, sig := range extraData.Signatures {
@@ -175,7 +180,7 @@ func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, e
 			Eon:               EonIndex(msg.Eon),
 			Slot:              extraData.Slot,
 			TxnPointer:        extraData.TxPointer,
-			IdentityPreimages: identityPreimages,
+			IdentityPreimages: identityPreimages.ToListSSZ(),
 		}
 
 		ok, err := signatureData.Verify(sig, signer)
@@ -213,10 +218,18 @@ func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys, eon Eon
 		if err != nil {
 			return err
 		}
-		if !ok {
-			ip := IdentityPreimage(key.IdentityPreimage)
-			return fmt.Errorf("verification of eon secret key failed: %w: ip=%s", ErrInvalidKey, ip)
+		if ok {
+			continue
 		}
+
+		// not valid
+		fullErr := fmt.Errorf("verification of eon secret key failed: %w", ErrInvalidKey)
+		ip, err := IdentityPreimageFromSSZ(key.IdentityPreimage)
+		if err != nil {
+			return fmt.Errorf("%w: %w", fullErr, err)
+		}
+
+		return fmt.Errorf("%w: ip=%s", fullErr, ip)
 	}
 
 	return nil
