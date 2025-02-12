@@ -97,6 +97,29 @@ type SyncProgressBackend interface {
 	FinalizedBlockNumber(ctx context.Context) (uint64, error)
 }
 
+func createRegisterAPIBackend(backend *Backend, filterConfig filters.Config, fallbackClientUrl string, fallbackClientTimeout time.Duration) (*filters.FilterSystem, error) {
+	fallbackClient, err := CreateFallbackClient(fallbackClientUrl, fallbackClientTimeout)
+	if err != nil {
+		return nil, err
+	}
+	// discard stylus-tag on any call made from api database
+	dbForAPICalls := backend.chainDb
+	//wasmStore, tag := backend.chainDb.WasmDataBase()
+	//if tag != 0 || len(backend.chainDb.WasmTargets()) > 1 {
+	//	dbForAPICalls = core.WrapDatabaseWithWasm(backend.chainDb, wasmStore, 0, []ethdb.WasmTarget{state.LocalTarget()})
+	//}
+	backend.apiBackend = &APIBackend{
+		Arb: backend,
+		//b:              backend,
+		dbForAPICalls:  dbForAPICalls,
+		fallbackClient: fallbackClient,
+	}
+	//filterSystem := filters.NewFilterSystem(backend.apiBackend, filterConfig)
+	//backend.stack.RegisterAPIs(backend.apiBackend.GetAPIs(filterSystem))
+	//return filterSystem, nil
+	return nil, nil
+}
+
 // func createRegisterAPIBackend(backend *eth.Ethereum, filterConfig filters.Config, fallbackClientUrl string, fallbackClientTimeout time.Duration) (*filters.FilterSystem, error) {
 // 	fallbackClient, err := CreateFallbackClient(fallbackClientUrl, fallbackClientTimeout)
 // 	if err != nil {
@@ -516,9 +539,9 @@ func StateAndHeaderFromHeader(
 		return func(header *types.Header) (state.IntraBlockStateArbitrum, StateReleaseFunc, error) {
 			//if header.Root != (common.Hash{}) {
 			//	// Try referencing the root, if it isn't in dirties cache then Reference will have no effect
-			//	db.TrieDB().Reference(header.Root, common.Hash{})
+			//	ibs.TrieDB().Reference(header.Root, common.Hash{})
 			//}
-			//statedb, err := state.New(header.Root, db, snapshots)
+			//statedb, err := state.New(header.Root, ibs, snapshots)
 			rd := state.NewReaderV3(db)
 			// TODO find txn as last txn in block header.Number
 			// rd.SetTxNum(txNum uint64)
@@ -528,7 +551,7 @@ func StateAndHeaderFromHeader(
 			// }
 			//if header.Root != (common.Hash{}) {
 			//	headerRoot := header.Root
-			//	return statedb, func() { db.TrieDB().Dereference(headerRoot) }, nil
+			//	return statedb, func() { ibs.TrieDB().Dereference(headerRoot) }, nil
 			//}
 			return statedb, NoopStateRelease, nil
 		}

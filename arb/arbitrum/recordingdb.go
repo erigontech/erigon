@@ -77,7 +77,7 @@ func (db *RecordingKV) Get(key []byte) ([]byte, error) {
 	if len(key) == 32 {
 		copy(hash[:], key)
 		res, err = db.diskDb.GetOne(db.bucket, key)
-		// res, err = db.inner.Node(hash)
+		// res, err = ibs.inner.Node(hash)
 	} else if len(key) == len(rawdb.CodePrefix)+32 && bytes.HasPrefix(key, rawdb.CodePrefix) {
 		// Retrieving code
 		copy(hash[:], key[len(rawdb.CodePrefix):])
@@ -107,24 +107,24 @@ func (db *RecordingKV) Delete(key []byte) error {
 }
 
 func (db *RecordingKV) NewBatch() ethdb.Batch {
-	// if db.enableBypass {
-	// 	return db.diskDb.NewBatch()
+	// if ibs.enableBypass {
+	// 	return ibs.diskDb.NewBatch()
 	// }
 	log.Error("recording KV: attempted to create batch when bypass not enabled")
 	return nil
 }
 
 func (db *RecordingKV) NewBatchWithSize(size int) ethdb.Batch {
-	// if db.enableBypass {
-	// 	return db.diskDb.NewBatchWithSize(size)
+	// if ibs.enableBypass {
+	// 	return ibs.diskDb.NewBatchWithSize(size)
 	// }
 	log.Error("recording KV: attempted to create batch when bypass not enabled")
 	return nil
 }
 
 func (db *RecordingKV) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
-	// if db.enableBypass {
-	// 	return db.diskDb.NewIterator(prefix, start)
+	// if ibs.enableBypass {
+	// 	return ibs.diskDb.NewIterator(prefix, start)
 	// }
 	log.Error("recording KV: attempted to create iterator when bypass not enabled")
 	return nil
@@ -209,12 +209,24 @@ type RecordingDatabaseConfig struct {
 
 type RecordingDatabase struct {
 	config     *RecordingDatabaseConfig
-	sd         *state2.SharedDomains
+	tdb        kv.TemporalRwDB
 	tx         kv.TemporalRwTx
-	db         *state.IntraBlockState
+	sd         *state2.SharedDomains
+	ibs        *state.IntraBlockState
 	bc         core.BlockChain
 	mutex      sync.Mutex // protects StateFor and Dereference
 	references int64
+}
+
+func NewRecordDB(config *RecordingDatabaseConfig, ethdb kv.TemporalRwDB, ethTx kv.TemporalRwTx, bc core.BlockChain, sd *state2.SharedDomains) *RecordingDatabase {
+	return &RecordingDatabase{
+		config: config,
+		sd:     sd,
+		tx:     ethTx,
+		tdb:    ethdb,
+		bc:     bc,
+	}
+
 }
 
 func NewRecordingDatabase(config *RecordingDatabaseConfig, ethdb kv.TemporalRwDB, blockchain core.BlockChain) *RecordingDatabase {
@@ -240,9 +252,9 @@ func NewRecordingDatabase(config *RecordingDatabaseConfig, ethdb kv.TemporalRwDB
 		config: config,
 		sd:     sd,
 		tx:     tx,
-		//db:     state.NewDatabaseWithConfig(ethdb, &trieConfig),
-		db: state.New(state.NewReaderV3(sd)),
-		bc: blockchain,
+		//ibs:     state.NewDatabaseWithConfig(ethdb, &trieConfig),
+		ibs: state.New(state.NewReaderV3(sd)),
+		bc:  blockchain,
 	}
 }
 
@@ -256,7 +268,7 @@ func (r *RecordingDatabase) StateFor(header *types.Header) (*state.IntraBlockSta
 
 	rd := state.NewReaderV3(r.sd)
 	sdb := state.New(rd)
-	//sdb, err := state.NewDeterministic(header.Root, r.db)
+	//sdb, err := state.NewDeterministic(header.Root, r.ibs)
 	//if err == nil {
 	//	r.referenceRootLockHeld(header.Root)
 	//}
@@ -274,7 +286,7 @@ func (r *RecordingDatabase) WriteStateToDatabase(header *types.Header) error {
 		return err
 	}
 	// if header != nil {
-	// 	return r.db.TrieDB().Commit(header.Root, true)
+	// 	return r.ibs.TrieDB().Commit(header.Root, true)
 	// }
 	return nil
 }
@@ -288,7 +300,7 @@ func (r *RecordingDatabase) referenceRootLockHeld(root common.Hash) {
 	// Reference adds a new reference from a parent node to a child node. This function
 	// is used to add reference between internal trie node and external node(e.g. storage
 	// trie root), all internal trie nodes are referenced together by database itself.
-	// r.db.TrieDB().Reference(root, common.Hash{})
+	// r.ibs.TrieDB().Reference(root, common.Hash{})
 }
 
 func (r *RecordingDatabase) dereferenceRoot(root common.Hash) {
@@ -300,7 +312,7 @@ func (r *RecordingDatabase) dereferenceRoot(root common.Hash) {
 	// todo we do not need at all
 	// Dereference removes an existing reference from a root node. It's only
 	// supported by hash-based database and will return an error for others.
-	// r.db.TrieDB().Dereference(root)
+	// r.ibs.TrieDB().Dereference(root)
 }
 
 func (r *RecordingDatabase) addStateVerify(statedb state.IntraBlockStateArbitrum, expected common.Hash, blockNumber uint64) (state.IntraBlockStateArbitrum, error) {
@@ -317,13 +329,13 @@ func (r *RecordingDatabase) addStateVerify(statedb state.IntraBlockStateArbitrum
 	}
 	r.referenceRootLockHeld(common.Hash(result))
 
-	// _, size, _ := r.db.TrieDB().Size()
+	// _, size, _ := r.ibs.TrieDB().Size()
 	// limit := common.StorageSize(r.config.TrieDirtyCache) * 1024 * 1024
 	// recordingDbSize.SetUint64(uint64(size))
 	// if size > limit {
 	// 	log.Info("Recording DB: flushing to disk", "size", size, "limit", limit)
-	// 	r.db.TrieDB().Cap(limit - ethdb.IdealBatchSize)
-	// 	_, size, _ = r.db.TrieDB().Size()
+	// 	r.ibs.TrieDB().Cap(limit - ethdb.IdealBatchSize)
+	// 	_, size, _ = r.ibs.TrieDB().Size()
 	// 	recordingDbSize.SetUint64(uint64(size))
 	// }
 	return statedb, nil
@@ -337,11 +349,11 @@ func (r *RecordingDatabase) PrepareRecording(ctx context.Context, lastBlockHeade
 	}
 	finalDereference := lastBlockHeader // dereference in case of error
 	defer func() { r.Dereference(finalDereference) }()
-	//recordingKeyValue := newRecordingKV(r.db.TrieDB(), r.db.DiskDB())
+	//recordingKeyValue := newRecordingKV(r.ibs.TrieDB(), r.ibs.DiskDB())
 	recordingKeyValue := NewRecordingKV(state.NewReaderV3(r.sd))
 	// state.WrapDatabaseWithWasm(wasm kv.RwDB, 0, targets []state.WasmTarget)
 
-	// recordingStateDatabase := state.NewDatabase(rawdb.WrapDatabaseWithWasm(rawdb.NewDatabase(recordingKeyValue), r.db.WasmStore(), 0, r.db.WasmTargets()))
+	// recordingStateDatabase := state.NewDatabase(rawdb.WrapDatabaseWithWasm(rawdb.NewDatabase(recordingKeyValue), r.ibs.WasmStore(), 0, r.ibs.WasmTargets()))
 	// var prevRoot common.Hash
 	// if lastBlockHeader != nil {
 	// 	prevRoot = lastBlockHeader.Root

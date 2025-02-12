@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"math/big"
-	"os"
 	"strconv"
 	"time"
 
@@ -15,6 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
@@ -227,7 +226,7 @@ func (c *CachingConfig) Validate() error {
 	return c.validateStateScheme()
 }
 
-func WriteOrTestGenblock(chainDb kv.TemporalRwTx, domains *state2.SharedDomains, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, accountsPerSync uint) error {
+func WriteOrTestGenblock(chainDb kv.TemporalRwTx, domains *state2.SharedDomains, dirs datadir.Dirs, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, accountsPerSync uint) error {
 
 	EmptyHash := common.Hash{}
 	prevHash := EmptyHash
@@ -268,38 +267,25 @@ func WriteOrTestGenblock(chainDb kv.TemporalRwTx, domains *state2.SharedDomains,
 	if err != nil {
 		return err
 	}
-	ibs, ok := ibsa.(*state.IntraBlockState)
-	if !ok {
-		panic("intra block state is not an intra block state")
-	}
-	rules := &chain.Rules{ArbOSVersion: chainConfig.ArbitrumChainParams.InitialArbOSVersion, ChainID: chainConfig.ChainID}
-	if err = ibs.MakeWriteSet(rules, writer); err != nil {
-		panic(err)
-	}
-	stateRoot2, err := domains.ComputeCommitment(context.Background(), true, chainConfig.ArbitrumChainParams.GenesisBlockNum, "")
-	if err != nil {
-		panic(err)
-	}
 
-	chainConfig.ChainName = "sepolia-rollup" // TODO must be parsed
 	_ = stateRoot
-	fmt.Printf("init arbos state root %x chain= %v\n", stateRoot2, chainConfig.ChainName)
+	chainConfig.ChainName = "sepolia-rollup" // TODO must be parsed
+	//fmt.Printf("\ninit arbos state root %x chain= %v\n", stateRoot2, chainConfig.ChainName)
 
 	gen := core.GenesisBlockByChainName(chainConfig.ChainName)
 	gen.Config.EIP155Block = big.NewInt(0)
 	gen.Config.SpuriousDragonBlock = big.NewInt(0)
 	gen.Config.PragueTime = big.NewInt(0)
 	gen.Config.TangerineWhistleBlock = big.NewInt(0)
-	gen.Config.HomesteadBlock = big.NewInt(0)
-	// gen.Config.DAOForkBlock = big.NewInt(0)
-	fmt.Printf("genesis block %v\n", gen)
+	gen.Config.HomesteadBlock = big.NewInt(0) // todo somewhy did not init with default json confg
+	//fmt.Printf("genesis block %v\n", gen)
 
 	if storedGenHash == EmptyHash {
 		// chainDb did not have genesis block. Initialize it.
-		// rawdb.WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis)
+		// rawdb.WriteGenesisIfNotExist(ibs kv.RwTx, g *types.Genesis)
 		var genBlock *types.Block
 		// fmt.Printf("155 %v Byz %v\n", chainConfig.EIP150Block, chainConfig.ByzantiumBlock)
-		chainConfig, genBlock, err = core.WriteGenesisBlock(chainDb, gen, chainConfig.PragueTime, datadir.New(os.TempDir()), log.New())
+		chainConfig, genBlock, err = core.WriteGenesisBlock(chainDb, gen, chainConfig.PragueTime, dirs, log.New())
 		// raw/* d */b.WriteHeadBlockHash(chainDb, blockHash)
 		// core.WriteHeadBlock(chainDb, genBlock, prevDifficulty)
 		if err != nil {
@@ -310,6 +296,18 @@ func WriteOrTestGenblock(chainDb kv.TemporalRwTx, domains *state2.SharedDomains,
 		// } else if storedGenHash != blockHash {
 		// 	return fmt.Errorf("database contains data inconsistent with initialization: database has genesis hash %v but we built genesis hash %v", storedGenHash, blockHash)
 	} else {
+		ibs, ok := ibsa.(*state.IntraBlockState)
+		if !ok {
+			panic("intra block state is not an intra block state")
+		}
+		rules := &chain.Rules{ArbOSVersion: chainConfig.ArbitrumChainParams.InitialArbOSVersion, ChainID: chainConfig.ChainID}
+		if err = ibs.MakeWriteSet(rules, writer); err != nil {
+			panic(err)
+		}
+		stateRoot2, err := domains.ComputeCommitment(context.Background(), false, chainConfig.ArbitrumChainParams.GenesisBlockNum, "")
+		if err != nil {
+			panic(err)
+		}
 		genBlock := arbosState.MakeGenesisBlock(prevHash, blockNumber, timestamp, common.CastToHash(stateRoot2), chainConfig)
 		blockHash := genBlock.Hash()
 		log.Info("recreated existing genesis block", "number", blockNumber, "hash", blockHash)
@@ -385,7 +383,7 @@ func GetBlockChainSD(chainTx kv.TemporalRwTx, sd *state2.SharedDomains, chainCon
 	return core.NewBlockChainSD(chainTx, sd, chainConfig, nil, engine, vmConfig, shouldPreserveFalse, &txLookupLimit)
 }
 
-func WriteOrTestBlockChain(chainDb kv.TemporalRwTx, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, txLookupLimit uint64, accountsPerSync uint, domains *state2.SharedDomains) (core.BlockChain, error) {
+func WriteOrTestBlockChain(chainDb kv.TemporalRwTx, dirs datadir.Dirs, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, txLookupLimit uint64, accountsPerSync uint, domains *state2.SharedDomains) (core.BlockChain, error) {
 	// emptyBlockChain := rawdb.ReadHeadHeader(chainDb) == nil
 	// if !emptyBlockChain && (cacheConfig.StateScheme == rawdb.PathScheme) {
 	// 	// When using path scheme, and the stored state trie is not empty,
@@ -394,7 +392,7 @@ func WriteOrTestBlockChain(chainDb kv.TemporalRwTx, initData statetransfer.InitD
 	// 	return GetBlockChain(chainDb, cacheConfig, chainConfig, txLookupLimit)
 	// }
 
-	err := WriteOrTestGenblock(chainDb, domains, initData, chainConfig, initMessage, accountsPerSync)
+	err := WriteOrTestGenblock(chainDb, domains, dirs, initData, chainConfig, initMessage, accountsPerSync)
 	if err != nil {
 		return nil, err
 	}

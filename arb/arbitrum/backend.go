@@ -2,6 +2,7 @@ package arbitrum
 
 import (
 	"context"
+	"github.com/erigontech/erigon/eth/filters"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/arb/arbitrum_types"
@@ -27,7 +28,7 @@ type Backend struct {
 
 	bloomRequests chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests
 
-	// filterSystem *filters.FilterSystem
+	filterSystem *filters.FilterSystem
 	// bloomIndexer  *core.ChainIndexer             // Bloom indexer operating during block imports
 	//shutdownTracker *shutdowncheck.ShutdownTracker
 
@@ -61,13 +62,16 @@ func NewBackend(stack *node.Node, config *Config, chainDb kv.TemporalRwDB, publi
 		//backend.stack.ApplyAPIFilter(rpcFilter)
 	}
 
-	// backend.bloomIndexer.Start(backend.arb.BlockChain())
-	// filtersystem, err := createRegisterAPIBackend(backend, filterConfig, config.ClassicRedirect, config.ClassicRedirectTimeout)
-	// if err != nil {
-	// 	return nil, nil, err
-	// }
-	// backend.filterSystem = filterSystem
-	// return backend, filterSystem, nil //
+	//backend.bloomIndexer.Start(backend.arb.BlockChain())
+	filterConfig := filters.Config{}
+	filterSystem, err := createRegisterAPIBackend(backend, filterConfig, config.ClassicRedirect, config.ClassicRedirectTimeout)
+	if err != nil {
+		return nil, err
+	}
+	//	return nil, nil, err
+	//}
+	backend.filterSystem = filterSystem
+	//return backend, filterSystem, nil //
 	return backend, nil
 }
 

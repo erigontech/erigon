@@ -39,7 +39,7 @@ func EstimateGas(
 	// 	args = *argsOrNil
 	// }
 
-	// dbtx, err := api.db.BeginTemporalRo(ctx)
+	// dbtx, err := api.ibs.BeginTemporalRo(ctx)
 	// if err != nil {
 	// 	return 0, err
 	// }
@@ -177,7 +177,7 @@ func EstimateGas(
 	// 	}
 	// }
 	// if block == nil {
-	// 	return 0, errors.New("could not find latest block in cache or db")
+	// 	return 0, errors.New("could not find latest block in cache or ibs")
 	// }
 
 	// txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
