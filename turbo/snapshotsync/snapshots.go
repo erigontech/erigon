@@ -569,6 +569,10 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	s.segmentsMin.Store(segmentsMin)
 	s.recalcVisibleFiles()
 
+	if cfg.NoDownloader {
+		s.DownloadComplete()
+	}
+
 	return s
 }
 
@@ -597,9 +601,11 @@ func (s *RoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
 }
 
 func (s *RoSnapshots) DownloadComplete() {
+	if !s.SegmentsReady() {
+		return
+	}
 	wasReady := s.downloadReady.Swap(true)
-
-	if !wasReady && s.SegmentsReady() {
+	if !wasReady {
 		s.ready.set()
 	}
 }

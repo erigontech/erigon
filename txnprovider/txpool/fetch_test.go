@@ -233,7 +233,7 @@ func TestOnNewBlock(t *testing.T) {
 	_, db := memdb.NewTestDB(t, kv.ChainDB), memdb.NewTestDB(t, kv.TxPoolDB)
 	ctrl := gomock.NewController(t)
 
-	stream := remote.NewMockKV_StateChangesClient(ctrl)
+	stream := remote.NewMockKV_StateChangesClient[*remote.StateChangeBatch](ctrl)
 	i := 0
 	stream.EXPECT().
 		Recv().

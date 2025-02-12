@@ -26,7 +26,6 @@ import (
 
 	"github.com/Giulio2002/bls"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -297,7 +296,7 @@ func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState,
 	subCommitteePubsKeys := make([][]byte, 0, len(subCommitteeKeys))
 	for i, key := range subCommitteeKeys {
 		if utils.IsBitOn(contribution.AggregationBits, i) {
-			subCommitteePubsKeys = append(subCommitteePubsKeys, common.Copy(key[:]))
+			subCommitteePubsKeys = append(subCommitteePubsKeys, libcommon.CopyBytes(key[:]))
 		}
 	}
 

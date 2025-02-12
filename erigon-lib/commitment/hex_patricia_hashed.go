@@ -1128,51 +1128,6 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 	fmt.Printf("\n")
 }
 
-// this function is only related to the witness
-func (hph *HexPatriciaHashed) createAccountNode(c *cell, row int, hashedKey []byte, codeReads map[libcommon.Hash]witnesstypes.CodeWithHash) (*trie.AccountNode, error) {
-	_, storageIsSet, storageRootHash, err := hph.computeCellHashWithStorage(c, hph.depths[row], nil)
-	if err != nil {
-		return nil, err
-	}
-	accountUpdate, err := hph.ctx.Account(c.accountAddr[:c.accountAddrLen])
-	if err != nil {
-		return nil, err
-	}
-	var account accounts.Account
-	account.Nonce = accountUpdate.Nonce
-	account.Balance = accountUpdate.Balance
-	account.Initialised = true
-	account.Root = accountUpdate.Storage
-	account.CodeHash = accountUpdate.CodeHash
-
-	addrHash, err := compactKey(hashedKey[:64])
-	if err != nil {
-		return nil, err
-	}
-
-	// get code
-	var code []byte
-	codeWithHash, hasCode := codeReads[[32]byte(addrHash)]
-	if !hasCode {
-		code = nil
-	} else {
-		code = codeWithHash.Code
-		// sanity check
-		if account.CodeHash != codeWithHash.CodeHash {
-			return nil, fmt.Errorf("account.CodeHash(%x)!=codeReads[%x].CodeHash(%x)", account.CodeHash, addrHash, codeWithHash.CodeHash)
-		}
-	}
-
-	var accountNode *trie.AccountNode
-	if !storageIsSet {
-		account.Root = trie.EmptyRoot
-		accountNode = &trie.AccountNode{Account: account, Storage: nil, RootCorrect: true, Code: code, CodeSize: -1}
-	} else {
-		accountNode = &trie.AccountNode{Account: account, Storage: trie.NewHashNode(storageRootHash), RootCorrect: true, Code: code, CodeSize: -1}
-	}
-	return accountNode, nil
-}
-
 func (hph *HexPatriciaHashed) nCellsInRow(row int) int { //nolint:unused
 	count := 0
 	for col := 0; col < 16; col++ {
@@ -1347,6 +1302,44 @@ type skipStat struct {
 
 const DepthWithoutNodeHashes = 35 //nolint
 
+const terminatorHexByte = 16 // max nibble value +1. Defines end of nibble line in the trie or splits address and storage space in trie.
+
+// updateKind is a type of update that is being applied to the trie structure.
+type updateKind uint8
+
+const (
+	// updateKindDelete means after we processed longest common prefix, row ended up empty.
+	updateKindDelete updateKind = 0b0
+
+	// updateKindPropagate is an update operation ended up with a single nibble which is leaf or extension node.
+	// We do not store keys with only one cell as a value in db, instead we copy them upwards to the parent branch.
+	//
+	// In case current prefix existed before and node is fused to upper level, this causes deletion for current prefix
+	// and update of branch value on upper level.
+	// 	e.g.: leaf was at prefix 0xbeef, but we fuse it in level above, so
+	//  - delete 0xbeef
+	//  - update 0xbee
+	updateKindPropagate updateKind = 0b01
+
+	// updateKindBranch is an update operation ended up as a branch of 2+ cells.
+	// That does not necessarily means that branch is NEW, it could be an existing branch that was updated.
+	updateKindBranch updateKind = 0b10
+)
+
+// Kind defines how exactly given update should be folded upwards to the parent branch or root.
+// It also returns number of nibbles that left in branch after the operation.
+func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesAfterUpdate int) {
+	nibblesAfterUpdate = bits.OnesCount16(afterMap)
+	switch nibblesAfterUpdate {
+	case 0:
+		return updateKindDelete, nibblesAfterUpdate
+	case 1:
+		return updateKindPropagate, nibblesAfterUpdate
+	default:
+		return updateKindBranch, nibblesAfterUpdate
+	}
+}
+
 func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row, depth int) func(nibble int, skip bool) (*cell, error) {
 	hashBefore := make([]byte, 32) // buffer re-used between calls
 	return func(nibble int, skip bool) (*cell, error) {
@@ -1411,44 +1404,6 @@ func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row, 
 		}
 
 		return cell, nil
-	}
-}
-
-const terminatorHexByte = 16 // max nibble value +1. Defines end of nibble line in the trie or splits address and storage space in trie.
-
-// updateKind is a type of update that is being applied to the trie structure.
-type updateKind uint8
-
-const (
-	// updateKindDelete means after we processed longest common prefix, row ended up empty.
-	updateKindDelete updateKind = 0b0
-
-	// updateKindPropagate is an update operation ended up with a single nibble which is leaf or extension node.
-	// We do not store keys with only one cell as a value in db, instead we copy them upwards to the parent branch.
-	//
-	// In case current prefix existed before and node is fused to upper level, this causes deletion for current prefix
-	// and update of branch value on upper level.
-	// 	e.g.: leaf was at prefix 0xbeef, but we fuse it in level above, so
-	//  - delete 0xbeef
-	//  - update 0xbee
-	updateKindPropagate updateKind = 0b01
-
-	// updateKindBranch is an update operation ended up as a branch of 2+ cells.
-	// That does not necessarily means that branch is NEW, it could be an existing branch that was updated.
-	updateKindBranch updateKind = 0b10
-)
-
-// Kind defines how exactly given update should be folded upwards to the parent branch or root.
-// It also returns number of nibbles that left in branch after the operation.
-func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesAfterUpdate int) {
-	nibblesAfterUpdate = bits.OnesCount16(afterMap)
-	switch nibblesAfterUpdate {
-	case 0:
-		return updateKindDelete, nibblesAfterUpdate
-	case 1:
-		return updateKindPropagate, nibblesAfterUpdate
-	default:
-		return updateKindBranch, nibblesAfterUpdate
 	}
 }
 
@@ -3110,32 +3065,6 @@ func (hph *HexPatriciaHashedReader) fold() (err error) {
 	return nil
 }
 
-func (hph *HexPatriciaHashedReader) computeCellHashLen(cell *cell, depth int) int {
-	if cell.storageAddrLen > 0 && depth >= 64 {
-		if cell.stateHashLen > 0 {
-			return cell.stateHashLen + 1
-		}
-
-		keyLen := 128 - depth + 1 // Length of hex key with terminator character
-		var kp, kl int
-		compactLen := (keyLen-1)/2 + 1
-		if compactLen > 1 {
-			kp = 1
-			kl = compactLen
-		} else {
-			kl = 1
-		}
-		val := rlp.RlpSerializableBytes(cell.Storage[:cell.StorageLen])
-		totalLen := kp + kl + val.DoubleRLPLen()
-		var lenPrefix [4]byte
-		pt := rlp.GenerateStructLen(lenPrefix[:], totalLen)
-		if totalLen+pt < length.Hash {
-			return totalLen + pt
-		}
-	}
-	return length.Hash + 1
-}
-
 func (hph *HexPatriciaHashedReader) deleteCell(hashedKey []byte) {
 	if hph.trace {
 		fmt.Printf("deleteCell, activeRows = %d\n", hph.activeRows)
@@ -3711,73 +3640,6 @@ func (hph *HexPatriciaHashedReader) computeCellHashWithStorage(cell *cell, depth
 		buf = append(buf, EmptyRootHash...)
 	}
 	return buf, storageRootHashIsSet, storageRootHash[:], nil
-}
-
-func (hph *HexPatriciaHashedReader) createCellGetter(b []byte, updateKey []byte, row, depth int) func(nibble int, skip bool) (*cell, error) {
-	hashBefore := make([]byte, 32) // buffer re-used between calls
-	return func(nibble int, skip bool) (*cell, error) {
-		if skip {
-			if _, err := hph.keccak2.Write(b); err != nil {
-				return nil, fmt.Errorf("failed to write empty nibble to hash: %w", err)
-			}
-			if hph.trace {
-				fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", nibble, row, nibble, depth)
-			}
-			return nil, nil
-		}
-		cell := &hph.grid[row][nibble]
-		if cell.accountAddrLen > 0 && cell.stateHashLen == 0 && !cell.loaded.account() && !cell.Deleted() {
-			//panic("account not loaded" + fmt.Sprintf("%x", cell.accountAddr[:cell.accountAddrLen]))
-			log.Warn("account not loaded", "pref", updateKey, "c", fmt.Sprintf("(%d, %x, depth=%d", row, nibble, depth), "cell", cell.String())
-		}
-		if cell.storageAddrLen > 0 && cell.stateHashLen == 0 && !cell.loaded.storage() && !cell.Deleted() {
-			//panic("storage not loaded" + fmt.Sprintf("%x", cell.storageAddr[:cell.storageAddrLen]))
-			log.Warn("storage not loaded", "pref", updateKey, "c", fmt.Sprintf("(%d, %x, depth=%d", row, nibble, depth), "cell", cell.String())
-		}
-
-		loadedBefore := cell.loaded
-		copy(hashBefore, cell.stateHash[:cell.stateHashLen])
-		hashBefore = hashBefore[:cell.stateHashLen]
-
-		cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
-		if err != nil {
-			return nil, err
-		}
-		if hph.trace {
-			fmt.Printf("  %x: computeCellHash(%d, %x, depth=%d)=[%x]\n", nibble, row, nibble, depth, cellHash)
-		}
-
-		if hashBefore != nil && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
-			counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
-			if !bytes.Equal(hashBefore, cell.stateHash[:cell.stateHashLen]) {
-				if cell.accountAddrLen > 0 {
-					counters.accReset++
-					counters.accLoaded++
-				}
-				if cell.storageAddrLen > 0 {
-					counters.storReset++
-					counters.storLoaded++
-				}
-			} else {
-				if cell.accountAddrLen > 0 && (!loadedBefore.account() && !cell.loaded.account()) {
-					counters.accSkipped++
-				}
-				if cell.storageAddrLen > 0 && (!loadedBefore.storage() && !cell.loaded.storage()) {
-					counters.storSkipped++
-				}
-			}
-			hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
-		}
-		//if len(updateKey) > DepthWithoutNodeHashes {
-		//	cell.hashLen = 0 // do not write hashes for storages in the branch node, should reset ext as well which can break unfolding.. -
-		//  cell.extLen = 0
-		//}
-		if _, err := hph.keccak2.Write(cellHash); err != nil {
-			return nil, err
-		}
-
-		return cell, nil
-	}
 }
 
 // Traverse the grid following `hashedKey` and produce the witness `trie.Trie` for that key

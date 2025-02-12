@@ -208,6 +208,7 @@ func (s *SingleAttestation) Static() bool {
 
 func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int) *Attestation {
 	committeeBits := NewBitVector(maxCommitteesPerSlot)
+	committeeBits.SetBitAt(int(s.CommitteeIndex), true)
 	aggregationBits := NewBitList(0, aggregationBitsSizeElectra)
 	aggregationBits.SetOnBit(maxValidatorsPerCommittee*int(s.CommitteeIndex) + memberIndexInCommittee)
 	return &Attestation{
@@ -216,4 +217,8 @@ func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int) *Attestati
 		Signature:       s.Signature,
 		CommitteeBits:   committeeBits,
 	}
+}
+
+func (s *SingleAttestation) AttestationData() *AttestationData {
+	return s.Data
 }

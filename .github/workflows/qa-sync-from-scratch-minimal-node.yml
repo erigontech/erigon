@@ -49,13 +49,6 @@ jobs:
           # Save the subsection reached status
           echo "::set-output name=test_executed::true"
           
-          # Clean up Erigon process if it's still running
-          if kill -0 $ERIGON_PID 2> /dev/null; then
-            echo "Terminating Erigon"
-            kill $ERIGON_PID
-            wait $ERIGON_PID
-          fi
-          
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
             echo "Tests completed successfully"

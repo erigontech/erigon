@@ -331,8 +331,8 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	return hexutil.Uint64(hi), nil
 }
 
-// GetProof is partially implemented; Proofs are available only with the `latest` block tag.
-func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+// GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
+func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []hexutility.Bytes, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	roTx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -355,7 +355,11 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, errors.New("proofs are available only for the 'latest' block")
 	}
 
-	return api.getProof(ctx, &roTx, address, storageKeys, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(latestBlock)), api.db, api.logger)
+	storageKeysConverted := make([]libcommon.Hash, len(storageKeys))
+	for i, s := range storageKeys {
+		storageKeysConverted[i].SetBytes(s)
+	}
+	return api.getProof(ctx, &roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(latestBlock)), api.db, api.logger)
 }
 
 func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
@@ -402,7 +406,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon
 	if acc == nil {
 		for i, k := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   k,
+				Key:   uint256.NewInt(0).SetBytes(k[:]).Hex(),
 				Value: new(hexutil.Big),
 				Proof: nil,
 			}
@@ -441,7 +445,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon
 
 	// get storage key proofs
 	for i, keyHash := range storageKeys {
-		proof.StorageProof[i].Key = keyHash
+		proof.StorageProof[i].Key = uint256.NewInt(0).SetBytes(keyHash[:]).Hex()
 
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(libcommon.BytesToHash(commitment.EmptyRootHash)) == 0 {
@@ -487,7 +491,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon
 	for _, storageProof := range proof.StorageProof {
 		err = trie.VerifyStorageProof(proof.StorageHash, storageProof)
 		if err != nil {
-			return nil, fmt.Errorf("internal error: failed to verify storage proof for key=%x , proof=%+v : %w", storageProof.Key.Bytes(), proof, err)
+			return nil, fmt.Errorf("internal error: failed to verify storage proof for key=%x , proof=%+v : %w", storageProof.Key, proof, err)
 		}
 	}
 

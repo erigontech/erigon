@@ -62,6 +62,13 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	if blockNum == 0 && chainConfig.Bor != nil {
 		if api.useBridgeReader {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
+			if ok {
+				txNumNextBlock, err := txNumsReader.Min(tx, blockNum+1)
+				if err != nil {
+					return nil, err
+				}
+				txNum = txNumNextBlock - 1
+			}
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
 		}
