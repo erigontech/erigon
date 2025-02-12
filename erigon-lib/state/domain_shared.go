@@ -1267,7 +1267,8 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
-	sdc.branches[prefixS] = cachedBranch{data: common.Copy(data), step: prevStep}
+	sdc.branches[prefixS] = cachedBranch{data: data, step: prevStep}
+
 	return sdc.sharedDomains.updateCommitmentData(prefixS, data, prevData, prevStep)
 }
 

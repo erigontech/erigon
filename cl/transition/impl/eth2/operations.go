@@ -1109,6 +1109,7 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 		if pendingBalanceToWithdraw == 0 {
 			return s.InitiateValidatorExit(vindex)
 		}
+		return nil
 	}
 
 	vbalance, err := s.ValidatorBalance(int(vindex))

@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,14 +14,22 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package wrap
+package crypto
 
 import (
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/state"
+	"bytes"
+	"encoding/gob"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-type TxContainer struct {
-	Tx   kv.RwTx
-	Doms *state.SharedDomains
+func EnsureGobable(t *testing.T, src, dst interface{}) {
+	t.Helper()
+	buff := bytes.Buffer{}
+	err := gob.NewEncoder(&buff).Encode(src)
+	assert.NoError(t, err)
+	err = gob.NewDecoder(&buff).Decode(dst)
+	assert.NoError(t, err)
+	assert.Equal(t, src, dst)
 }

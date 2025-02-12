@@ -12,7 +12,7 @@ replace (
 
 require (
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
-	github.com/erigontech/mdbx-go v0.38.4
+	github.com/erigontech/mdbx-go v0.38.6-0.20250205222432-e4dd01978d7f
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/erigontech/silkworm-go v0.18.0
 )
@@ -274,7 +274,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spf13/cast v1.5.0 // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
-	github.com/supranational/blst v0.3.13 // indirect
+	github.com/supranational/blst v0.3.13
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.opentelemetry.io/otel v1.31.0 // indirect

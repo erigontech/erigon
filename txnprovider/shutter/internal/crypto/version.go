@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,14 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package wrap
+package crypto
 
-import (
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/state"
-)
+const VersionIdentifier byte = 0x03
 
-type TxContainer struct {
-	Tx   kv.RwTx
-	Doms *state.SharedDomains
+// IdentifyVersion reads the version identifier byte from the given (marshaled) EncryptedMessage.
+func IdentifyVersion(d []byte) byte {
+	if len(d)%BlockSize == 0 {
+		return 0x00
+	}
+	return d[0]
 }

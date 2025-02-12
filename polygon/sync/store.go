@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 )
@@ -159,12 +161,11 @@ func (s *ExecutionClientStore) Run(ctx context.Context) error {
 func (s *ExecutionClientStore) insertBlocks(ctx context.Context, blocks []*types.Block) error {
 	defer s.tasksCount.Add(-1)
 	insertStartTime := time.Now()
-	err := s.executionStore.InsertBlocks(ctx, blocks)
-	if err != nil {
-		return err
-	}
 
-	err = s.bridgeStore.ProcessNewBlocks(ctx, blocks)
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return s.executionStore.InsertBlocks(ctx, blocks) })
+	eg.Go(func() error { return s.bridgeStore.ProcessNewBlocks(ctx, blocks) })
+	err := eg.Wait()
 	if err != nil {
 		return err
 	}
