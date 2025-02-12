@@ -303,9 +303,12 @@ const (
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
 
-	ArbOSUtilsBucket        = "arbosUtils"     // arbitrum os utils bucket
-	ArbWasmPrefixBucket     = "arbWasm"        // arbitrum wasm store prefix; wasm version
-	ArbWasmActivationBucket = "wasmActivation" // arbitrum bucket for wasm activations
+	ArbOSUtilsBucket        = "arbOSUtils" // arbitrum os utils bucket
+	ArbNodeBucket           = "arbNode"    // arbitrum node bucket
+	ArbNodeTxStreamBucket   = "arbNodeTXstream"
+	ArbWasmPrefixBucket     = "arbWasm"         // arbitrum wasm store prefix; wasm version
+	ArbWasmActivationBucket = "wasmActivation"  // arbitrum bucket for wasm activations
+	ArbInboxTrackerBucket   = "arbInboxTracker" // arbitrum bucket to keep inbox messages and meta
 )
 
 // Keys
@@ -464,7 +467,10 @@ var ChaindataTables = []string{
 	// arbiturm
 	ArbWasmPrefixBucket,
 	ArbOSUtilsBucket,
+	ArbNodeBucket,
+	ArbInboxTrackerBucket,
 	ArbWasmActivationBucket,
+	ArbNodeTxStreamBucket,
 }
 
 const (
@@ -589,7 +595,10 @@ var ChaindataTablesCfg = TableCfg{
 	TblTracesToIdx:           {Flags: DupSort},
 	ArbWasmPrefixBucket:      {},
 	ArbOSUtilsBucket:         {},
+	ArbNodeBucket:            {},
+	ArbNodeTxStreamBucket:    {},
 	ArbWasmActivationBucket:  {},
+	ArbInboxTrackerBucket:    {},
 }
 
 var AuRaTablesCfg = TableCfg{
@@ -628,6 +637,9 @@ var ArbitrumTablesCfg = TableCfg{
 	ArbWasmPrefixBucket:     {},
 	ArbOSUtilsBucket:        {},
 	ArbWasmActivationBucket: {},
+	ArbNodeBucket:           {},
+	ArbInboxTrackerBucket:   {},
+	ArbNodeTxStreamBucket:   {},
 }
 
 func TablesCfgByLabel(label Label) TableCfg {
