@@ -49,6 +49,10 @@ func (e Eon) PublicKey() (crypto.EonPublicKey, error) {
 	return eonPublicKey, err
 }
 
+func EonLess(a, b Eon) bool {
+	return a.Index < b.Index
+}
+
 type EonSecretKey = crypto.EpochSecretKey
 
 func EonSecretKeyFromBytes(b []byte) (*EonSecretKey, error) {

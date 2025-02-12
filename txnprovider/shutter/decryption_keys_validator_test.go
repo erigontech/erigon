@@ -595,8 +595,8 @@ type decryptionKeysValidationTestCase struct {
 	name                  string
 	config                shutter.Config
 	msg                   *pubsub.Message
-	slotCalculator        func(t *testing.T) shutter.SlotCalculator
-	eonTracker            func(t *testing.T) shutter.EonTracker
+	slotCalculator        func(t *testing.T) *testhelpers.MockSlotCalculator
+	eonTracker            func(t *testing.T) *testhelpers.MockEonTracker
 	wantErr               error
 	wantValidationResult  pubsub.ValidationResult
 	wantValidationLogMsgs []string

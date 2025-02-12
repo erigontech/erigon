@@ -20,14 +20,12 @@ import (
 	"testing"
 
 	"go.uber.org/mock/gomock"
-
-	"github.com/erigontech/erigon/txnprovider/shutter"
 )
 
 type MockSlotCalculatorCreatorOpt func(mock *MockSlotCalculator)
 
-func MockSlotCalculatorCreator(opts ...MockSlotCalculatorCreatorOpt) func(t *testing.T) shutter.SlotCalculator {
-	return func(t *testing.T) shutter.SlotCalculator {
+func MockSlotCalculatorCreator(opts ...MockSlotCalculatorCreatorOpt) func(t *testing.T) *MockSlotCalculator {
+	return func(t *testing.T) *MockSlotCalculator {
 		ctrl := gomock.NewController(t)
 		sc := NewMockSlotCalculator(ctrl)
 		for _, opt := range opts {

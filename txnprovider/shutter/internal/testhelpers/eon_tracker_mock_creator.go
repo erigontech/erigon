@@ -26,8 +26,8 @@ import (
 
 type MockEonTrackerCreatorOpt func(mock *MockEonTracker)
 
-func MockEonTrackerCreator(opts ...MockEonTrackerCreatorOpt) func(t *testing.T) shutter.EonTracker {
-	return func(t *testing.T) shutter.EonTracker {
+func MockEonTrackerCreator(opts ...MockEonTrackerCreatorOpt) func(t *testing.T) *MockEonTracker {
+	return func(t *testing.T) *MockEonTracker {
 		ctrl := gomock.NewController(t)
 		et := NewMockEonTracker(ctrl)
 		for _, opt := range opts {
