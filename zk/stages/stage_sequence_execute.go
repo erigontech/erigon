@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -341,6 +342,7 @@ func sequencingBatchStep(
 
 		innerBreak := false
 		emptyBlockOverflow := false
+		sendersToTriggerStatechanges := make(map[common.Address]struct{})
 
 	OuterLoopTransactions:
 		for {
@@ -505,6 +507,17 @@ func sequencingBatchStep(
 							"hash", txHash,
 							"to", transaction.GetTo(),
 						)
+						continue
+					}
+
+					if errors.Is(err, core.ErrNonceTooHigh) || errors.Is(err, core.ErrNonceTooLow) {
+						// here we have a case where some situation has caused a nonce issue to find its way into the pending pool
+						// we want to skip transactions for this sender in this batch for now and ask the pool to trigger a sender
+						// state change for this sender.  This will cause the pool to skip any transactions from this sender until
+						// the sender's nonce is corrected in the pending pool
+						log.Info(fmt.Sprintf("[%s] nonce issue detected for sender, skipping transactions for now", logPrefix), "sender", txSender.Hex(), "nonceIssue", err)
+						sendersToSkip[txSender] = struct{}{}
+						sendersToTriggerStatechanges[txSender] = struct{}{}
 						continue
 					}
 
@@ -703,6 +716,11 @@ func sequencingBatchStep(
 		// remove mined transactions from the pool
 		toRemove := append(batchState.blockState.builtBlockElements.txSlots, batchState.blockState.transactionsToDiscard...)
 		if err := cfg.txPool.RemoveMinedTransactions(ctx, sdb.tx, header.GasLimit, toRemove); err != nil {
+			return err
+		}
+
+		// now trigger sender state changes in the pool where we encountered nonce issues during execution
+		if err := cfg.txPool.TriggerSenderStateChanges(ctx, sdb.tx, header.GasLimit, sendersToTriggerStatechanges); err != nil {
 			return err
 		}
 
