@@ -192,17 +192,145 @@ func (tx *ArbitrumUnsignedTx) RawSignatureValues() (*uint256.Int, *uint256.Int, 
 	return uintZero, uintZero, uintZero
 }
 
+func (tx *ArbitrumUnsignedTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
+	// ChainId
+	payloadSize++
+	payloadSize += rlp.BigIntLenExcludingHead(tx.ChainId)
+
+	// Nonce
+	payloadSize++
+	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
+	payloadSize += nonceLen
+
+	// From (20 bytes)
+	payloadSize++
+	payloadSize += 20
+
+	// GasFeeCap
+	payloadSize++
+	payloadSize += rlp.BigIntLenExcludingHead(tx.GasFeeCap)
+
+	// Gas
+	payloadSize++
+	gasLen = rlp.IntLenExcludingHead(tx.Gas)
+	payloadSize += gasLen
+
+	// To (20 bytes if non-nil)
+	payloadSize++
+	if tx.To != nil {
+		payloadSize += 20
+	}
+
+	// Value
+	payloadSize++
+	payloadSize += rlp.BigIntLenExcludingHead(tx.Value)
+
+	// Data (includes its own header)
+	payloadSize += rlp.StringLen(tx.Data)
+
+	return payloadSize, nonceLen, gasLen
+}
+
+func (tx *ArbitrumUnsignedTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+
+	if err := rlp.EncodeBigInt(tx.ChainId, w, b); err != nil {
+		return err
+	}
+
+	if tx.Nonce > 0 && tx.Nonce < 128 {
+		b[0] = byte(tx.Nonce)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		binary.BigEndian.PutUint64(b[1:], tx.Nonce)
+		b[8-nonceLen] = 128 + byte(nonceLen)
+		if _, err := w.Write(b[8-nonceLen : 9]); err != nil {
+			return err
+		}
+	}
+
+	b[0] = 128 + 20
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(tx.From[:]); err != nil {
+		return err
+	}
+
+	if err := rlp.EncodeBigInt(tx.GasFeeCap, w, b); err != nil {
+		return err
+	}
+
+	if tx.Gas > 0 && tx.Gas < 128 {
+		b[0] = byte(tx.Gas)
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		binary.BigEndian.PutUint64(b[1:], tx.Gas)
+		b[8-gasLen] = 128 + byte(gasLen)
+		if _, err := w.Write(b[8-gasLen : 9]); err != nil {
+			return err
+		}
+	}
+
+	if tx.To == nil {
+		b[0] = 128
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + 20
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write((*tx.To)[:]); err != nil {
+			return err
+		}
+	}
+
+	if err := rlp.EncodeBigInt(tx.Value, w, b); err != nil {
+		return err
+	}
+
+	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (tx *ArbitrumUnsignedTx) EncodingSize() int {
-	//TODO implement me
-	panic("implement me")
+	payloadSize, _, _ := tx.payloadSize()
+	// Add envelope size and type size
+	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (tx *ArbitrumUnsignedTx) EncodeRLP(w io.Writer) error {
-	//rlp.encode
-	return tx.encode(w)
-	//rlp.Write(w, tx.encode(w))
-	//TODO implement me
-	panic("implement me")
+	payloadSize, nonceLen, gasLen := tx.payloadSize()
+
+	// size of struct prefix and TxType
+	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// envelope
+	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
+
+	// encode TxType
+	b[0] = ArbitrumUnsignedTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (tx *ArbitrumUnsignedTx) DecodeRLP(s *rlp.Stream) error {
@@ -278,8 +406,18 @@ func (tx *ArbitrumUnsignedTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (tx *ArbitrumUnsignedTx) MarshalBinary(w io.Writer) error {
-	//TODO implement me
-	panic("implement me")
+	payloadSize, nonceLen, gasLen := tx.payloadSize()
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// encode TxType
+	b[0] = ArbitrumUnsignedTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (tx *ArbitrumUnsignedTx) Sender(signer Signer) (common.Address, error) {
@@ -317,12 +455,6 @@ func (tx *ArbitrumUnsignedTx) Unwrap() Transaction {
 // func (tx *ArbitrumUnsignedTx) value() *big.Int     { return tx.Value }
 // func (tx *ArbitrumUnsignedTx) nonce() uint64       {  }
 // func (tx *ArbitrumUnsignedTx) to() *common.Address { return tx.To }
-func (tx *ArbitrumUnsignedTx) encode(b io.Writer) error {
-	return rlp.Encode(b, tx)
-}
-func (tx *ArbitrumUnsignedTx) decode(input []byte) error {
-	return rlp.DecodeBytes(input, tx)
-}
 
 func (tx *ArbitrumUnsignedTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 
@@ -1543,7 +1675,7 @@ func (tx *ArbitrumSubmitRetryableTx) MarshalBinary(w io.Writer) error {
 }
 
 func (tx *ArbitrumSubmitRetryableTx) Sender(signer Signer) (common.Address, error) {
-	panic("implement me")
+	panic("cannot sign ArbitrumSubmitRetryableTx")
 }
 
 func (tx *ArbitrumSubmitRetryableTx) cachedSender() (common.Address, bool) {
