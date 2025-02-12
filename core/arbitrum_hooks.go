@@ -176,18 +176,6 @@ func NewBlockChain(db kv.RwTx /*cacheConfig *CacheConfig, */, chainConfig *chain
 	}, nil
 }
 
-func NewBlockChainSD(db kv.RwTx, sd *state2.SharedDomains, chainConfig *chain.Config, genesis *types.Genesis /* overrides *types.ChainOverrides, */, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(header *types.Header) bool, txLookupLimit *uint64) (BlockChain, error) {
-	return &BlockChainArbitrum{
-		db:             db,
-		chainConfig:    chainConfig,
-		sd:             sd,
-		engine:         engine,
-		vmConfig:       vmConfig,
-		shouldPreserve: shouldPreserve,
-		txLookupLimit:  txLookupLimit,
-	}, nil
-}
-
 // NewBlockChain returns a fully initialised block chain using information
 // available in the database. It initialises the default Ethereum Validator
 // and Processor.
@@ -425,6 +413,18 @@ type BlockChainArbitrum struct {
 	shouldPreserve func(header *types.Header) bool
 	txLookupLimit  *uint64
 	//genesis *types.Genesis
+}
+
+func NewBlockChainSD(db kv.RwTx, sd *state2.SharedDomains, chainConfig *chain.Config, genesis *types.Genesis /* overrides *types.ChainOverrides, */, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(header *types.Header) bool, txLookupLimit *uint64) (BlockChain, error) {
+	return &BlockChainArbitrum{
+		db:             db,
+		chainConfig:    chainConfig,
+		sd:             sd,
+		engine:         engine,
+		vmConfig:       vmConfig,
+		shouldPreserve: shouldPreserve,
+		txLookupLimit:  txLookupLimit,
+	}, nil
 }
 
 func (b BlockChainArbitrum) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
@@ -672,8 +672,7 @@ func (b BlockChainArbitrum) Engine() consensus.Engine {
 }
 
 func (b BlockChainArbitrum) Config() *chain.Config {
-	//TODO implement me
-	panic("implement me")
+	return b.chainConfig
 }
 
 func (b BlockChainArbitrum) Genesis() *types.Block {
