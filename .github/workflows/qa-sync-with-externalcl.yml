@@ -13,14 +13,19 @@ on:
 
 jobs:
   sync-with-externalcl:
-    runs-on: [self-hosted, Erigon2]
     strategy:
       matrix:
-        client: [lighthouse, prysm]
-        chain: [mainnet, gnosis]
-        exclude:
-          - client: prysm
-            chain: gnosis
+        include:
+          - chain: mainnet
+            client: lighthouse
+            runner: Erigon2
+          - chain: mainnet
+            client: prysm
+            runner: Erigon2
+          - chain: gnosis
+            client: prysm
+            runner: Gnosis
+    runs-on: [ self-hosted, "${{ matrix.runner }}" ]
     timeout-minutes: 600
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
