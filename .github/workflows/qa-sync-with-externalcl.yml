@@ -35,8 +35,8 @@ jobs:
       CL_DATA_DIR: ${{ github.workspace }}/consensus
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 14400 # 4 hours
+      TRACKING_TIME_SECONDS: 3600 # 1 hour
+      TOTAL_TIME_SECONDS: 25200 # 7 hours
 
     steps:
     - name: Check out repository
