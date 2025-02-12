@@ -78,6 +78,7 @@ type EngineServer struct {
 }
 
 const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
+var printPectraBanner = true
 
 func NewEngineServer(logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
@@ -337,6 +338,11 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
+	}
+
+	if version == clparams.ElectraVersion && printPectraBanner && payloadStatus.Status == engine_types.ValidStatus {
+		printPectraBanner = false
+		log.Info(engine_helpers.PectraBanner)
 	}
 
 	return payloadStatus, nil
