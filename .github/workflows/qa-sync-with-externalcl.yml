@@ -87,6 +87,11 @@ jobs:
         run: |
           rm -rf $ERIGON_DATA_DIR
 
+      - name: Cleanup consensus runner directory
+        if: always()
+        run: |
+          rm -rf /tmp/consensus
+
       - name: Resume the Erigon instance dedicated to db maintenance
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
