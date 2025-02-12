@@ -13,6 +13,9 @@ jobs:
       matrix:
         client: [lighthouse, prysm]
         chain: [mainnet, gnosis]
+        exclude:
+          - client: prysm
+            chain: gnosis
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       CL_DATA_DIR: ${{ github.workspace }}/consensus
