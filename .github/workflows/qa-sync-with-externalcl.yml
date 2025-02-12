@@ -11,6 +11,7 @@ jobs:
     timeout-minutes: 360 # 6 hours
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
+      CL_DATA_DIR: ${{ github.workspace }}/consensus
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
       TOTAL_TIME_SECONDS: 18000 # 5 hours
@@ -27,12 +28,12 @@ jobs:
 
       - name: Install Prysm and generate JWT secret
         run: |
-          mkdir -p /tmp/consensus
-          curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o /tmp/consensus/prysm.sh
-          chmod +x /tmp/consensus/prysm.sh
+          mkdir -p $CL_DATA_DIR
+          curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o $CL_DATA_DIR/prysm.sh
+          chmod +x $CL_DATA_DIR/prysm.sh
 
           # Generate JWT secret
-          openssl rand -hex 32 > /tmp/consensus/jwt.hex
+          openssl rand -hex 32 > $CL_DATA_DIR/jwt.hex
 
       - name: Build Erigon
         run: |
@@ -50,7 +51,7 @@ jobs:
           
           # Run Erigon, wait sync and check ability to maintain sync
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-            ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN minimal_node no_statistics prysm
+            ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN minimal_node no_statistics prysm $CL_DATA_DIR
           
           # Capture monitoring script exit status
           test_exit_status=$?
@@ -99,7 +100,7 @@ jobs:
       - name: Cleanup consensus runner directory
         if: always()
         run: |
-          rm -rf /tmp/consensus
+          rm -rf $CL_DATA_DIR
 
       - name: Resume the Erigon instance dedicated to db maintenance
         run: |
