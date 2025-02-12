@@ -244,7 +244,7 @@ func (v DecryptionKeysValidator) validateEonIndex(msg *proto.DecryptionKeys) (Eo
 	currentEon, ok := v.eonTracker.CurrentEon()
 	if !ok {
 		// we're still syncing and are behind - ignore msg, without penalizing peer
-		return Eon{}, fmt.Errorf("%w: %w", ErrIgnoreMsg, ErrCurrentEonUnavailable)
+		return Eon{}, fmt.Errorf("%w: %w: likely still syncing to tip", ErrIgnoreMsg, ErrCurrentEonUnavailable)
 	}
 
 	eon, inRecent := v.eonTracker.RecentEon(msgEonIndex)
