@@ -11,12 +11,28 @@ type Id uint64
 // canonical sequence number of the root entity (or secondary key)
 type RootNum uint64
 
-type Bytes []byte
+type Bytes = []byte
 
 func (n Num) Step(a AppendableId) uint64 {
-	return uint64(n) / a.SnapshotConfig().EntitiesPerStep
+	return step(n, a)
 }
 
 func (n RootNum) Step(a AppendableId) uint64 {
-	return uint64(n) / a.SnapshotConfig().EntitiesPerStep
+	return step(n, a)
+}
+
+func (x Id) EncToBytes(x8Bytes bool) (out []byte) {
+	return EncToBytes(x, x8Bytes)
+}
+func (x Id) EncTo8Bytes() (out []byte) {
+	return EncToBytes(x, true)
+}
+func (x Num) EncToBytes(x8Bytes bool) (out []byte) {
+	return EncToBytes(x, x8Bytes)
+}
+func (x Num) EncTo8Bytes() (out []byte) {
+	return EncToBytes(x, true)
+}
+func (x RootNum) EncTo8Bytes() (out []byte) {
+	return EncToBytes(x, true)
 }

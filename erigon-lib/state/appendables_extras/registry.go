@@ -28,7 +28,7 @@ var curr uint16
 // dirs: directory where snapshots have to reside
 // salt: for creation of indexes.
 // pre: preverified files are snapshot file lists that gets downloaded initially.
-func RegisterAppendable(name string, dirs datadir.Dirs, salt uint32, pre snapcfg.Preverified, options ...AppendableIdOption) AppendableId {
+func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified, options ...AppendableIdOption) AppendableId {
 	h := &holder{
 		name: name,
 		dirs: dirs,

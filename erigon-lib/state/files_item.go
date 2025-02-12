@@ -50,7 +50,6 @@ type filesItem struct {
 	bindex               *BtIndex
 	existence            *ExistenceFilter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
-	firstEntityNum       int64
 
 	// Frozen: file of size StepsInFrozenFile. Completely immutable.
 	// Cold: file of size < StepsInFrozenFile. Immutable, but can be closed/removed after merge to bigger file.
@@ -71,7 +70,7 @@ func newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize uint64, stepsInF
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
 	frozen := endStep-startStep == stepsInFrozenFile
-	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen, firstEntityNum: -1}
+	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
 
 // isSubsetOf - when `j` covers `i` but not equal `i`
@@ -153,6 +152,10 @@ func (i *filesItem) closeFilesAndRemove() {
 		}
 		i.existence = nil
 	}
+}
+
+func (i *filesItem) FirstEntityNum() uint64 {
+	return i.startTxNum
 }
 
 func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*filesItem) {

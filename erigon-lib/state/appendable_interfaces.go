@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"errors"
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/kv"
@@ -13,6 +14,8 @@ import (
 type RootNum = ae.RootNum
 type Num = ae.Num
 type Id = ae.Id
+type AppendableId = ae.AppendableId
+type Bytes = ae.Bytes
 
 // Freezer takes hot data (e.g. from db) and transforms it
 // to snapshot cold data.

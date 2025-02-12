@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 	ae "github.com/erigontech/erigon-lib/state/appendables_extras"
 
-	"github.com/tidwall/btree"
 	btree2 "github.com/tidwall/btree"
 )
 
@@ -23,7 +22,7 @@ type ProtoAppendable struct {
 
 	a          ae.AppendableId
 	builders   []AccessorIndexBuilder
-	dirtyFiles *btree.BTreeG[*filesItem]
+	dirtyFiles *btree2.BTreeG[*filesItem]
 	_visible   visibleFiles
 
 	visibleLock   sync.RWMutex
@@ -55,13 +54,13 @@ func (a *ProtoAppendable) DirtyFilesMaxRootNum() ae.RootNum {
 	return ae.RootNum(latest.endTxNum)
 }
 
-func (a *ProtoAppendable) VisibleFilesMaxNum() RootNum {
+func (a *ProtoAppendable) VisibleFilesMaxNum() Num {
 	//latest := a._visible[len(a._visible)-1]
 	// need to store first entity num in snapshots for this
 	// TODO: just sending max root num now; so it won't work if rootnum!=num;
 	// maybe we should just test bodies and headers till then.
 
-	return a.VisibleFilesMaxRootNum()
+	return Num(a.VisibleFilesMaxRootNum())
 }
 
 func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) error {
@@ -134,4 +133,68 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 	}
 
 	return nil
+}
+
+// proto_appendable_rotx
+
+type ProtoAppendableTx struct {
+	id    AppendableId
+	files visibleFiles
+	a     *ProtoAppendable
+}
+
+func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableTx {
+	a.visibleLock.Lock()
+	defer a.visibleLock.RUnlock()
+	for i := 0; i < len(a._visible); i++ {
+		if a._visible[i].src.frozen {
+			a._visible[i].src.refcount.Add(1)
+		}
+	}
+
+	return &ProtoAppendableTx{
+		id:    a.a,
+		files: a._visible,
+		a:     a,
+	}
+}
+
+func (a *ProtoAppendableTx) Close() {
+	if a.files == nil {
+		return
+	}
+	files := a.files
+	a.files = nil
+	for i := range files {
+		src := files[i].src
+		if src == nil || src.frozen {
+			continue
+		}
+		refCnt := src.refcount.Add(-1)
+		if refCnt == 0 && src.canDelete.Load() {
+			src.closeFilesAndRemove()
+		}
+	}
+}
+
+func (a *ProtoAppendableTx) Garbage(merged *filesItem) (outs []*filesItem) {
+	if merged == nil {
+		return
+	}
+
+	a.a.dirtyFiles.Walk(func(item []*filesItem) bool {
+		for _, item := range item {
+			if item.frozen {
+				continue
+			}
+			if item.isSubsetOf(merged) {
+				outs = append(outs, item)
+			}
+			if item.isBefore(merged) && hasCoverVisibleFile(a.files, item) {
+				outs = append(outs, item)
+			}
+		}
+		return true
+	})
+	return outs
 }

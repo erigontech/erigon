@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -105,7 +107,12 @@ func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 	return s.args.enums
 }
 
-func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmpDir string, ps *background.ProgressSet, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
+func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmpDir string, ps *background.ProgressSet, lvl log.Lvl, logger log.Logger) (*recsplit.Index, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%s: at=%d-%d, %v, %s", s.id.IndexPrefix()[s.indexPos], from, to, rec, dbg.Stack())
+		}
+	}()
 	iidq := s.GetInputDataQuery(from, to)
 	idxFile := ae.IdxName(s.id, snaptype.Version(1), from, to, s.indexPos)
 
@@ -131,6 +138,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmp
 
 	for {
 		stream := iidq.GetStream(ctx)
+		defer stream.Close()
 		for stream.HasNext() {
 			word, index, offset, err := stream.Next()
 			if err != nil {
@@ -212,6 +220,9 @@ func (s *seg_stream) HasNext() bool {
 }
 
 func (s *seg_stream) Close() {
+	if s.g == nil {
+		return
+	}
 	s.g = nil
 }
 
