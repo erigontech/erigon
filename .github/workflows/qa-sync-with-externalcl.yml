@@ -97,6 +97,10 @@ jobs:
         name: test-results
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
+    - name: Cleanup consensus runner directory
+      run: |
+        rm -rf /tmp/consensus
+
     - name: Action for Success
       if: steps.test_step.outputs.TEST_RESULT == 'success'
       run: echo "::notice::Tests completed successfully"
