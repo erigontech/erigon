@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"path/filepath"
 	"runtime"
@@ -31,6 +30,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/trie"
@@ -1538,7 +1539,7 @@ func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // LatestCommitmentState searches for last encoded state for CommitmentContext.
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, txNum uint64, state []byte, err error) {
-	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
+	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie && sdc.patriciaTrie.Variant() != commitment.VariantParallelHexPatricia {
 		return 0, 0, nil, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 	state, _, err = sdc.Branch(keyCommitmentState)
