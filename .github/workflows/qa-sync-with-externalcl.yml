@@ -8,7 +8,7 @@ on:
 jobs:
   sync-with-externalcl:
     runs-on: [self-hosted, linux, X64]
-    timeout-minutes: 360 # 6 hours
+    timeout-minutes: 500 # 8+ hours
     strategy:
       matrix:
         client: [lighthouse, prysm]
@@ -20,8 +20,8 @@ jobs:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       CL_DATA_DIR: ${{ github.workspace }}/consensus
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 18000 # 5 hours
+      TRACKING_TIME_SECONDS: 3600 # 1 hour
+      TOTAL_TIME_SECONDS: 25200 # 7 hours
 
     steps:
       - name: Check out repository
