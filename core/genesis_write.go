@@ -403,7 +403,7 @@ func ArbSepoliaRollupGenesisBlock() *types.Genesis {
 		Number:     0x0, // block number 0
 		GasUsed:    0x0,
 		ParentHash: libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		BaseFee:    big.NewInt(100000000),
+		BaseFee:    big.NewInt(0x5f5e100),
 		Alloc:      readPrealloc("allocs/arb_sepolia.json"),
 	}
 }
@@ -440,6 +440,7 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
+// TODO can remove dirs since its tmp db for computing root
 func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"strconv"
 	"time"
 
@@ -226,7 +227,7 @@ func (c *CachingConfig) Validate() error {
 	return c.validateStateScheme()
 }
 
-func WriteOrTestGenblock(chainDb kv.TemporalRwTx, domains *state2.SharedDomains, dirs datadir.Dirs, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, accountsPerSync uint) error {
+func WriteOrTestGenblock(chainDb kv.TemporalRwTx, domains *state2.SharedDomains, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, accountsPerSync uint) error {
 
 	EmptyHash := common.Hash{}
 	prevHash := EmptyHash
@@ -258,12 +259,11 @@ func WriteOrTestGenblock(chainDb kv.TemporalRwTx, domains *state2.SharedDomains,
 	}
 
 	reader := state.NewReaderV3(domains)
-	writer := state.NewWriterV4(domains)
 	ss := state.New(reader)
 	ss.SetTrace(true)
 	ibsa := state.NewArbitrum(ss)
 
-	stateRoot, err := arbosState.InitializeArbosInDatabase(ibsa, initData, chainConfig, initMessage, timestamp, accountsPerSync)
+	stateRoot, err := arbosState.InitializeArbosInDatabase(ibsa, domains, initData, chainConfig, initMessage, timestamp, accountsPerSync)
 	if err != nil {
 		return err
 	}
@@ -285,9 +285,7 @@ func WriteOrTestGenblock(chainDb kv.TemporalRwTx, domains *state2.SharedDomains,
 		// rawdb.WriteGenesisIfNotExist(ibs kv.RwTx, g *types.Genesis)
 		var genBlock *types.Block
 		// fmt.Printf("155 %v Byz %v\n", chainConfig.EIP150Block, chainConfig.ByzantiumBlock)
-		chainConfig, genBlock, err = core.WriteGenesisBlock(chainDb, gen, chainConfig.PragueTime, dirs, log.New())
-		// raw/* d */b.WriteHeadBlockHash(chainDb, blockHash)
-		// core.WriteHeadBlock(chainDb, genBlock, prevDifficulty)
+		chainConfig, genBlock, err = core.WriteGenesisBlock(chainDb, gen, chainConfig.PragueTime, datadir.New(os.TempDir()), log.New())
 		if err != nil {
 			return fmt.Errorf("failed to write genesis block: %v", err)
 		}
@@ -296,24 +294,13 @@ func WriteOrTestGenblock(chainDb kv.TemporalRwTx, domains *state2.SharedDomains,
 		// } else if storedGenHash != blockHash {
 		// 	return fmt.Errorf("database contains data inconsistent with initialization: database has genesis hash %v but we built genesis hash %v", storedGenHash, blockHash)
 	} else {
-		ibs, ok := ibsa.(*state.IntraBlockState)
-		if !ok {
-			panic("intra block state is not an intra block state")
-		}
-		rules := &chain.Rules{ArbOSVersion: chainConfig.ArbitrumChainParams.InitialArbOSVersion, ChainID: chainConfig.ChainID}
-		if err = ibs.MakeWriteSet(rules, writer); err != nil {
-			panic(err)
-		}
-		stateRoot2, err := domains.ComputeCommitment(context.Background(), false, chainConfig.ArbitrumChainParams.GenesisBlockNum, "")
-		if err != nil {
-			panic(err)
-		}
-		genBlock := arbosState.MakeGenesisBlock(prevHash, blockNumber, timestamp, common.CastToHash(stateRoot2), chainConfig)
+		genBlock := arbosState.MakeGenesisBlock(prevHash, blockNumber, timestamp, stateRoot, chainConfig)
 		blockHash := genBlock.Hash()
 		log.Info("recreated existing genesis block", "number", blockNumber, "hash", blockHash)
 	}
 
 	return nil
+	//return chainDb.Commit()
 }
 
 func TryReadStoredChainConfig(chainDb kv.Tx) *chain.Config {
@@ -383,7 +370,20 @@ func GetBlockChainSD(chainTx kv.TemporalRwTx, sd *state2.SharedDomains, chainCon
 	return core.NewBlockChainSD(chainTx, sd, chainConfig, nil, engine, vmConfig, shouldPreserveFalse, &txLookupLimit)
 }
 
-func WriteOrTestBlockChain(chainDb kv.TemporalRwTx, dirs datadir.Dirs, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, txLookupLimit uint64, accountsPerSync uint, domains *state2.SharedDomains) (core.BlockChain, error) {
+func WriteOrTestGenesis(chainDB kv.TemporalRwTx, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, txLookupLimit uint64, accountsPerSync uint, domains *state2.SharedDomains) error {
+	err := WriteOrTestGenblock(chainDB, domains, initData, chainConfig, initMessage, accountsPerSync)
+	if err != nil {
+		return err
+	}
+	err = WriteOrTestChainConfig(chainDB, chainConfig)
+	if err != nil {
+		return err
+	}
+
+	return domains.Flush(context.Background(), chainDB)
+}
+
+func WriteOrTestBlockChain(chainDb kv.TemporalRwTx, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, txLookupLimit uint64, accountsPerSync uint, domains *state2.SharedDomains) (core.BlockChain, error) {
 	// emptyBlockChain := rawdb.ReadHeadHeader(chainDb) == nil
 	// if !emptyBlockChain && (cacheConfig.StateScheme == rawdb.PathScheme) {
 	// 	// When using path scheme, and the stored state trie is not empty,
@@ -392,7 +392,7 @@ func WriteOrTestBlockChain(chainDb kv.TemporalRwTx, dirs datadir.Dirs, initData 
 	// 	return GetBlockChain(chainDb, cacheConfig, chainConfig, txLookupLimit)
 	// }
 
-	err := WriteOrTestGenblock(chainDb, domains, dirs, initData, chainConfig, initMessage, accountsPerSync)
+	err := WriteOrTestGenblock(chainDb, domains, initData, chainConfig, initMessage, accountsPerSync)
 	if err != nil {
 		return nil, err
 	}
