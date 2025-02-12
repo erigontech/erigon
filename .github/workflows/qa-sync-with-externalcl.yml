@@ -101,6 +101,7 @@ jobs:
           path: |
             ${{ github.workspace }}/result-${{ matrix.chain }}.json
             ${{ github.workspace }}/erigon_data/logs/erigon.log
+            ${{ matrix.client == 'lighthouse' && '$CL_DATA_DIR/data/beacon/logs/beacon.log' || '' }}
 
       - name: Clean up Erigon data directory
         if: always()
