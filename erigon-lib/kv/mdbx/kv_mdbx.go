@@ -295,6 +295,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		if err = os.MkdirAll(opts.path, 0744); err != nil {
 			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 		}
+	} else {
+		if err = env.SetGeometry(-1, -1, -1, -1, -1, -1); err != nil {
+			return nil, err
+		}
 	}
 
 	// erigon using big transactions
