@@ -471,9 +471,6 @@ func newBlockExec(blockNum uint64, profile bool) *blockExecutor {
 	}
 }
 
-var checkAddress = libcommon.HexToAddress("f82b7aa1e5aa151e60367efd8919e1d8005f8a5e")
-var checkKey = libcommon.Hash{}
-
 func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg ExecuteBlockCfg, rs *state.StateV3Buffered,
 	accumulator *shards.Accumulator, in *exec.QueueWithRetry, applyTx kv.Tx, applyResults chan applyResult, logger log.Logger) (result *blockResult, err error) {
 
@@ -598,17 +595,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 		txIncarnation := be.txIncarnations[tx]
 
 		if traceTx(be.blockNum, txVersion.TxIndex) {
-			fmt.Println(fmt.Sprintf("%d (%d.%d) RD", be.blockNum, txVersion.TxIndex, txIncarnation), be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", len(be.blockIO.WriteSet(txVersion.TxIndex)))
-			be.blockIO.ReadSet(txVersion.TxIndex).Scan(func(vr *state.VersionedRead) bool {
-				if vr.Address == checkAddress && vr.Key == checkKey {
+			if dbg.TraceTransactionIO {
+				fmt.Println(fmt.Sprintf("%d (%d.%d) RD", be.blockNum, txVersion.TxIndex, txIncarnation), be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", len(be.blockIO.WriteSet(txVersion.TxIndex)))
+				be.blockIO.ReadSet(txVersion.TxIndex).Scan(func(vr *state.VersionedRead) bool {
 					fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "RD", vr.String())
+					return true
+				})
+				for _, vw := range be.blockIO.WriteSet(txVersion.TxIndex) {
+					fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "WRT", vw.String())
 				}
-				return true
-			})
-			for _, vw := range be.blockIO.WriteSet(txVersion.TxIndex) {
-				//if vw.Address == checkAddress && vw.Key == checkKey {
-				fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "WRT", vw.String())
-				//}
 			}
 		}
 
