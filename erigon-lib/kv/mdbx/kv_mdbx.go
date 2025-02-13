@@ -47,6 +47,10 @@ import (
 	"github.com/erigontech/erigon-lib/mmap"
 )
 
+func init() {
+	mdbx.MapFullErrorMessage += " You can try remove the database files (e.g., by running rm -rf /path/to/db)"
+}
+
 const NonExistingDBI kv.DBI = 999_999_999
 
 type TableCfgFunc func(defaultBuckets kv.TableCfg) kv.TableCfg
@@ -116,9 +120,10 @@ func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts       { opts.mergeTh
 func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts        { opts.bucketsCfg = f; return opts }
 
 // Flags
-func (opts MdbxOpts) HasFlag(flag uint) bool          { return opts.flags&flag != 0 }
-func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts    { opts.flags = opts.flags | flags; return opts }
-func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts { opts.flags = opts.flags &^ flags; return opts }
+func (opts MdbxOpts) HasFlag(flag uint) bool           { return opts.flags&flag != 0 }
+func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts { opts.flags = f(opts.flags); return opts }
+func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts     { opts.flags = opts.flags | flags; return opts }
+func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts  { opts.flags = opts.flags &^ flags; return opts }
 func (opts MdbxOpts) boolToFlag(enabled bool, flag uint) MdbxOpts {
 	if enabled {
 		return opts.AddFlags(flag)
@@ -1041,13 +1046,24 @@ func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error
 	return currentV, nil
 }
 
+func (tx *MdbxTx) ResetSequence(bucket string, newValue uint64) error {
+	c, err := tx.statelessCursor(kv.Sequence)
+	if err != nil {
+		return err
+	}
+	newVBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(newVBytes, newValue)
+
+	return c.Put([]byte(bucket), newVBytes)
+}
+
 func (tx *MdbxTx) ReadSequence(bucket string) (uint64, error) {
 	c, err := tx.statelessCursor(kv.Sequence)
 	if err != nil {
 		return 0, err
 	}
 	_, v, err := c.SeekExact([]byte(bucket))
-	if err != nil && !mdbx.IsNotFound(err) {
+	if err != nil {
 		return 0, err
 	}
 

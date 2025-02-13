@@ -35,7 +35,7 @@ import (
 * to analyze and manipulate the state of the blockchain.
  */
 type ForkGraph interface {
-	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation, shallowImport bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
+	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
 	GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool)
 	GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)

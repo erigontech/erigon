@@ -22,7 +22,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
@@ -535,19 +535,19 @@ func (b *BeaconBody) GetExecutionRequests() *ExecutionRequests {
 	return b.ExecutionRequests
 }
 
-func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
+func (b *BeaconBody) GetExecutionRequestsList() []hexutil.Bytes {
 	r := b.ExecutionRequests
 	if r == nil {
 		return nil
 	}
-	ret := []hexutility.Bytes{}
+	ret := []hexutil.Bytes{}
 	for _, r := range []struct {
 		typ      byte
 		requests ssz.EncodableSSZ
 	}{
-		{b.beaconCfg.DepositRequestType, r.Deposits},
-		{b.beaconCfg.WithdrawalRequestType, r.Withdrawals},
-		{b.beaconCfg.ConsolidationRequestType, r.Consolidations},
+		{byte(b.beaconCfg.DepositRequestType), r.Deposits},
+		{byte(b.beaconCfg.WithdrawalRequestType), r.Withdrawals},
+		{byte(b.beaconCfg.ConsolidationRequestType), r.Consolidations},
 	} {
 		ssz, err := r.requests.EncodeSSZ([]byte{})
 		if err != nil {
@@ -555,9 +555,9 @@ func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
 			return nil
 		}
 		// type + ssz
-		// ret = append(ret, append(hexutility.Bytes{requestType}, ssz...))
-		// in Mekong devnet-4, we don't need to add type
-		ret = append(ret, ssz)
+		if len(ssz) > 0 {
+			ret = append(ret, append(hexutil.Bytes{r.typ}, ssz...))
+		}
 	}
 	return ret
 }
@@ -569,7 +569,7 @@ type DenebBeaconBlock struct {
 }
 
 func NewDenebBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *DenebBeaconBlock {
-	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlock)
+	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlockByVersion(version))
 	b := &DenebBeaconBlock{
 		Block:     NewBeaconBlock(beaconCfg, version),
 		KZGProofs: solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
@@ -630,7 +630,7 @@ func NewDenebSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version cl
 		log.Warn("DenebSignedBeaconBlock: version is not after DenebVersion")
 		return nil
 	}
-	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlock)
+	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlockByVersion(version))
 	b := &DenebSignedBeaconBlock{
 		SignedBlock: NewSignedBeaconBlock(beaconCfg, version),
 		KZGProofs:   solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),

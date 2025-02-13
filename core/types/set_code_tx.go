@@ -97,6 +97,9 @@ func (tx *SetCodeTransaction) WithSignature(signer Signer, sig []byte) (Transact
 }
 
 func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
+	if tx.To == nil {
+		return ErrNilToFieldTx
+	}
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
@@ -201,6 +204,9 @@ func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 }
 
 func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
+	if tx.To == nil {
+		return ErrNilToFieldTx
+	}
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize()
 	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()

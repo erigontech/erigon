@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/types/accounts"
+
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -37,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 )
 
 func TestEvictionInUnexpectedOrder(t *testing.T) {
@@ -179,9 +180,17 @@ func TestAPI(t *testing.T) {
 	c := New(DefaultCoherentConfig)
 	k1, k2 := [20]byte{1}, [20]byte{2}
 	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	account1Enc := types.EncodeAccountBytesV3(1, uint256.NewInt(11), make([]byte, 32), 2)
-	account2Enc := types.EncodeAccountBytesV3(1, uint256.NewInt(11), make([]byte, 32), 3)
-	account4Enc := types.EncodeAccountBytesV3(1, uint256.NewInt(11), make([]byte, 32), 5)
+	acc := accounts.Account{
+		Nonce:       1,
+		Balance:     *uint256.NewInt(11),
+		CodeHash:    common.Hash{},
+		Incarnation: 2,
+	}
+	account1Enc := accounts.SerialiseV3(&acc)
+	acc.Incarnation = 3
+	account2Enc := accounts.SerialiseV3(&acc)
+	acc.Incarnation = 5
+	account4Enc := accounts.SerialiseV3(&acc)
 
 	get := func(key [20]byte, expectTxnID uint64) (res [1]chan []byte) {
 

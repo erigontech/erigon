@@ -26,8 +26,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
@@ -48,7 +48,7 @@ import (
 const API_LEVEL = 8
 
 type TransactionsWithReceipts struct {
-	Txs       []*RPCTransaction        `json:"txs"`
+	Txs       []*ethapi.RPCTransaction `json:"txs"`
 	Receipts  []map[string]interface{} `json:"receipts"`
 	FirstPage bool                     `json:"firstPage"`
 	LastPage  bool                     `json:"lastPage"`
@@ -64,7 +64,7 @@ type OtterscanAPI interface {
 	GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error)
 	HasCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error)
 	TraceTransaction(ctx context.Context, hash common.Hash) ([]*TraceEntry, error)
-	GetTransactionError(ctx context.Context, hash common.Hash) (hexutility.Bytes, error)
+	GetTransactionError(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 	GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error)
 	GetContractCreator(ctx context.Context, addr common.Address) (*ContractCreatorData, error)
 }

@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"math/bits"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/utils"
@@ -222,11 +222,11 @@ func (u *ParticipationBitList) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(hexutility.Bytes(enc))
+	return json.Marshal(hexutil.Bytes(enc))
 }
 
 func (u *ParticipationBitList) UnmarshalJSON(input []byte) error {
-	var hex hexutility.Bytes
+	var hex hexutil.Bytes
 	if err := json.Unmarshal(input, &hex); err != nil {
 		return err
 	}

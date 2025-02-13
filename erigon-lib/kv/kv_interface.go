@@ -218,6 +218,9 @@ type Putter interface {
 		// use id
 	*/
 	IncrementSequence(table string, amount uint64) (uint64, error)
+
+	// allow set arbitrary value to sequence (for example to decrement it to exact value)
+	ResetSequence(table string, newValue uint64) error
 	Append(table string, k, v []byte) error
 	AppendDup(table string, k, v []byte) error
 
@@ -507,7 +510,6 @@ type TemporalPutDel interface {
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
-	//   - if `val == nil` it will call DomainDel
 	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error
 
 	// DomainDel

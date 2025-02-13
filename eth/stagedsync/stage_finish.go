@@ -19,10 +19,9 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
-	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -132,14 +131,13 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 
 // [from,to)
 func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier ChainEventNotifier, tx kv.Tx, logger log.Logger) error {
-	t := time.Now()
 	if notifier == nil {
 		logger.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
 		return nil
 	}
 	// Notify all headers we have (either canonical or not) in a maximum range span of 1024
 	var headersRlp [][]byte
-	if err := tx.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(notifyFrom), func(k, hash []byte) (err error) {
+	if err := tx.ForEach(kv.HeaderCanonical, hexutil.EncodeTs(notifyFrom), func(k, hash []byte) (err error) {
 		if len(hash) == 0 {
 			return nil
 		}
@@ -159,8 +157,7 @@ func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier
 
 	if len(headersRlp) > 0 {
 		notifier.OnNewHeader(headersRlp)
-		headerTiming := time.Since(t)
-		logger.Debug("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "amount", len(headersRlp), "header sending", headerTiming)
+		logger.Debug("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "amount", len(headersRlp))
 	}
 	return nil
 }

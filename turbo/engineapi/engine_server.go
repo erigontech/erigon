@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
@@ -62,7 +62,9 @@ type EngineServer struct {
 	blockDownloader *engine_block_downloader.EngineBlockDownloader
 	config          *chain.Config
 	// Block proposing for proof-of-stake
-	proposing        bool
+	proposing bool
+	// Block consuming for proof-of-stake
+	consuming        atomic.Bool
 	test             bool
 	caplin           bool // we need to send errors for caplin.
 	executionService execution.ExecutionClient
@@ -78,9 +80,9 @@ const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 
 func NewEngineServer(logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
-	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing bool) *EngineServer {
+	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, consuming bool) *EngineServer {
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
-	return &EngineServer{
+	srv := &EngineServer{
 		logger:           logger,
 		config:           config,
 		executionService: executionService,
@@ -91,6 +93,10 @@ func NewEngineServer(logger log.Logger, config *chain.Config, executionService e
 		caplin:           caplin,
 		engineLogSpamer:  engine_logs_spammer.NewEngineLogsSpammer(logger, config),
 	}
+
+	srv.consuming.Store(consuming)
+
+	return srv
 }
 
 func (e *EngineServer) Start(
@@ -142,7 +148,7 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 	return nil
 }
 
-func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutility.Bytes) error {
+func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutil.Bytes) error {
 	if version < clparams.ElectraVersion {
 		if executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
@@ -153,8 +159,12 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutility.Bytes, version clparams.StateVersion,
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
+	if !s.consuming.Load() {
+		return nil, errors.New("engine payload consumption is not enabled")
+	}
+
 	if s.caplin {
 		s.logger.Crit(caplinEnabledLog)
 		return nil, errCaplinEnabled
@@ -209,11 +219,13 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	if version >= clparams.ElectraVersion {
 		requests = make(types.FlatRequests, 0)
+		lastReqType := -1
 		for i, r := range executionRequests {
-			if len(r) <= 1 {
+			if len(r) <= 1 || lastReqType >= 0 && int(r[0]) <= lastReqType {
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("Invalid Request at index %d", i)}
 			}
-			requests = append(requests, types.FlatRequest{Type: r[0], RequestData: r})
+			lastReqType = int(r[0])
+			requests = append(requests, types.FlatRequest{Type: r[0], RequestData: r[1:]})
 		}
 		rh := requests.Hash()
 		header.RequestsHash = rh
@@ -490,9 +502,9 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 
 	data := resp.Data
-	var executionRequests []hexutility.Bytes
+	var executionRequests []hexutil.Bytes
 	if version >= clparams.ElectraVersion {
-		executionRequests = make([]hexutility.Bytes, 0)
+		executionRequests = make([]hexutil.Bytes, 0)
 		for _, r := range data.Requests.Requests {
 			executionRequests = append(executionRequests, r)
 		}
@@ -517,6 +529,10 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
 func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
 ) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	if !s.consuming.Load() {
+		return nil, errors.New("engine payload consumption is not enabled")
+	}
+
 	if s.caplin {
 		s.logger.Crit("[NewPayload] caplin is enabled")
 		return nil, errCaplinEnabled
@@ -645,7 +661,7 @@ func extractPayloadBodyFromBody(body *types.RawBody) *engine_types.ExecutionPayl
 		return nil
 	}
 
-	bdTxs := make([]hexutility.Bytes, len(body.Transactions))
+	bdTxs := make([]hexutil.Bytes, len(body.Transactions))
 	for idx := range body.Transactions {
 		bdTxs[idx] = body.Transactions[idx]
 	}
@@ -861,6 +877,10 @@ func (e *EngineServer) HandlesForkChoice(
 		payloadStatus.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
 	}
 	return payloadStatus, nil
+}
+
+func (e *EngineServer) SetConsuming(consuming bool) {
+	e.consuming.Store(consuming)
 }
 
 func waitForStuff(waitCondnF func() (bool, error)) (bool, error) {

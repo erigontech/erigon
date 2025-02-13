@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/txnprovider/shutter/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 )
 
 const (
@@ -43,13 +43,15 @@ const (
 type DecryptionKeysListener struct {
 	logger    log.Logger
 	config    Config
+	validator pubsub.ValidatorEx
 	observers *event.Observers[*proto.DecryptionKeys]
 }
 
-func NewDecryptionKeysListener(logger log.Logger, config Config) DecryptionKeysListener {
+func NewDecryptionKeysListener(logger log.Logger, config Config, validator pubsub.ValidatorEx) DecryptionKeysListener {
 	return DecryptionKeysListener{
 		logger:    logger,
 		config:    config,
+		validator: validator,
 		observers: event.NewObservers[*proto.DecryptionKeys](),
 	}
 }
@@ -59,6 +61,7 @@ func (dkl DecryptionKeysListener) RegisterObserver(observer event.Observer[*prot
 }
 
 func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
+	defer dkl.logger.Info("decryption keys listener stopped")
 	dkl.logger.Info("running decryption keys listener")
 
 	p2pHost, err := dkl.initP2pHost()
@@ -207,8 +210,7 @@ func (dkl DecryptionKeysListener) connectBootstrapNodes(ctx context.Context, hos
 }
 
 func (dkl DecryptionKeysListener) listenLoop(ctx context.Context, pubSub *pubsub.PubSub) error {
-	topicValidator := NewDecryptionKeysP2pValidatorEx(dkl.logger, dkl.config)
-	err := pubSub.RegisterTopicValidator(DecryptionKeysTopic, topicValidator)
+	err := pubSub.RegisterTopicValidator(DecryptionKeysTopic, dkl.validator)
 	if err != nil {
 		return err
 	}

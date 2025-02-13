@@ -33,7 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -409,7 +409,7 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 	}
 	rlpBytes := libcommon.CopyBytes(writer.Bytes())
 	writer.Reset()
-	writer.WriteString(hexutility.Encode(rlpBytes))
+	writer.WriteString(hexutil.Encode(rlpBytes))
 
 	var rawBody RawBody
 	fromHex := libcommon.CopyBytes(libcommon.FromHex(writer.String()))
@@ -595,12 +595,16 @@ func TestCopyTxs(t *testing.T) {
 
 	populateBlobTxs()
 	for _, txn := range dummyBlobTxs {
-		txs = append(txs, txn)
+		if txn.To != nil { // BlobTx To field can not be nil
+			txs = append(txs, txn)
+		}
 	}
 
 	populateBlobWrapperTxs()
 	for _, txn := range dummyBlobWrapperTxs {
-		txs = append(txs, txn)
+		if txn.Tx.To != nil {
+			txs = append(txs, txn)
+		}
 	}
 
 	copies := CopyTxs(txs)

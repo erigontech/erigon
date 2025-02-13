@@ -132,7 +132,7 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		fromTxNum := item.endTxNum - span
 		if fromTxNum < item.startTxNum {
 			if !r.values.needMerge || fromTxNum < r.values.from {
-				r.values = MergeRange{true, fromTxNum, item.endTxNum}
+				r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
 			}
 		}
 	}
@@ -155,10 +155,10 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 
 		foundSuperSet := r.history.from == item.startTxNum && item.endTxNum >= r.history.to
 		if foundSuperSet {
-			r.history = MergeRange{false, startTxNum, item.endTxNum}
+			r.history = MergeRange{from: startTxNum, to: item.endTxNum}
 		} else if startTxNum < item.startTxNum {
 			if !r.history.needMerge || startTxNum < r.history.from {
-				r.history = MergeRange{true, startTxNum, item.endTxNum}
+				r.history = MergeRange{"", true, startTxNum, item.endTxNum}
 			}
 		}
 	}
@@ -211,7 +211,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 			}
 		}
 	}
-	return &MergeRange{minFound, startTxNum, endTxNum}
+	return &MergeRange{string(iit.name), minFound, startTxNum, endTxNum}
 }
 
 type HistoryRanges struct {
@@ -515,7 +515,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 	}
 
-	if dt.d.IndexList&AccessorBTree != 0 {
+	if dt.d.AccessorList&AccessorBTree != 0 {
 		btPath := dt.d.kvBtFilePath(fromStep, toStep)
 		btM := DefaultBtreeM
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
@@ -526,7 +526,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
-	if dt.d.IndexList&AccessorHashMap != 0 {
+	if dt.d.AccessorList&AccessorHashMap != 0 {
 		if err = dt.d.buildAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
@@ -535,7 +535,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
-	if dt.d.IndexList&AccessorExistence != 0 {
+	if dt.d.AccessorList&AccessorExistence != 0 {
 		bloomIndexPath := dt.d.kvExistenceIdxFilePath(fromStep, toStep)
 		exists, err := dir.FileExist(bloomIndexPath)
 		if err != nil {
@@ -1082,4 +1082,12 @@ func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
 }
 
 func (ac *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return ac.d[idx] }
-func (ac *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return ac.iis[idx] }
+func (ac *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return ac.searchII(idx) }
+func (ac *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
+	for _, iit := range ac.iis {
+		if iit.name == idx {
+			return iit
+		}
+	}
+	return nil
+}

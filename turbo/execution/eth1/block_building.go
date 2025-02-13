@@ -219,9 +219,8 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 	if blockWithReceipts.Requests != nil {
 		requestsBundle = &types2.RequestsBundle{}
 		requests := make([][]byte, 0)
-		for i, r := range blockWithReceipts.Requests {
-			requests[i] = make([]byte, 0)
-			requests[i] = append(requests[i], r.RequestData...)
+		for _, r := range blockWithReceipts.Requests {
+			requests = append(requests, r.Encode())
 		}
 		requestsBundle.Requests = requests
 	}

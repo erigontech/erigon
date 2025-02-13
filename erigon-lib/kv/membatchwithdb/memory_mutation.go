@@ -141,6 +141,10 @@ func (m *MemoryMutation) ReadSequence(bucket string) (uint64, error) {
 	return m.memTx.ReadSequence(bucket)
 }
 
+func (m *MemoryMutation) ResetSequence(bucket string, newValue uint64) error {
+	return m.memTx.ResetSequence(bucket, newValue)
+}
+
 func (m *MemoryMutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
 	if amount == 0 {
 		return nil

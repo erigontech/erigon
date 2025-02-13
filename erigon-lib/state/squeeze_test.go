@@ -2,6 +2,8 @@ package state
 
 import (
 	"context"
+	"github.com/erigontech/erigon-lib/common"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"testing"
 
@@ -9,7 +11,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -49,7 +50,13 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 		domains.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
-			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			acc := accounts3.Account{
+				Nonce:       uint64(i),
+				Balance:     *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts3.SerialiseV3(&acc)
 			prev, step, err := domains.GetLatest(kv.AccountsDomain, keys[j])
 			require.NoError(tb, err)
 

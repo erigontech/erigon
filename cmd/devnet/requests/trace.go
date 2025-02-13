@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -21,10 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
@@ -35,9 +33,9 @@ type TraceCall struct {
 }
 
 type TraceCallResult struct {
-	Output    hexutility.Bytes                         `json:"output"`
-	Trace     []CallTrace                              `json:"trace"`
-	StateDiff map[libcommon.Address]TraceCallStateDiff `json:"stateDiff"`
+	Output    hexutil.Bytes                         `json:"output"`
+	Trace     []CallTrace                           `json:"trace"`
+	StateDiff map[common.Address]TraceCallStateDiff `json:"stateDiff"`
 }
 
 type CallTrace struct {
@@ -51,35 +49,35 @@ type CallTrace struct {
 
 // TraceCallAction is superset of all possible action types
 type TraceCallAction struct {
-	From          libcommon.Address `json:"from"`
-	To            libcommon.Address `json:"to"`
-	Address       libcommon.Address `json:"address"`
-	RefundAddress libcommon.Address `json:"refundAddress"`
-	Gas           hexutil.Big       `json:"gas"`
-	Value         hexutil.Big       `json:"value"`
-	Balance       hexutil.Big       `json:"balance"`
-	Init          hexutility.Bytes  `json:"init"`
-	Input         hexutility.Bytes  `json:"input"`
-	CallType      string            `json:"callType"`
+	From          common.Address `json:"from"`
+	To            common.Address `json:"to"`
+	Address       common.Address `json:"address"`
+	RefundAddress common.Address `json:"refundAddress"`
+	Gas           hexutil.Big    `json:"gas"`
+	Value         hexutil.Big    `json:"value"`
+	Balance       hexutil.Big    `json:"balance"`
+	Init          hexutil.Bytes  `json:"init"`
+	Input         hexutil.Bytes  `json:"input"`
+	CallType      string         `json:"callType"`
 }
 
 type CallResult struct {
-	GasUsed hexutil.Big       `json:"gasUsed"`
-	Output  hexutility.Bytes  `json:"output"`
-	Address libcommon.Address `json:"address"`
-	Code    hexutility.Bytes  `json:"code"`
+	GasUsed hexutil.Big    `json:"gasUsed"`
+	Output  hexutil.Bytes  `json:"output"`
+	Address common.Address `json:"address"`
+	Code    hexutil.Bytes  `json:"code"`
 }
 
 type TraceCallStateDiff struct {
-	Balance interface{}                                             `json:"balance"`
-	Nonce   interface{}                                             `json:"nonce"`
-	Code    interface{}                                             `json:"code"`
-	Storage map[libcommon.Hash]map[string]TraceCallStateDiffStorage `json:"storage"`
+	Balance interface{}                                          `json:"balance"`
+	Nonce   interface{}                                          `json:"nonce"`
+	Code    interface{}                                          `json:"code"`
+	Storage map[common.Hash]map[string]TraceCallStateDiffStorage `json:"storage"`
 }
 
 type TraceCallStateDiffStorage struct {
-	From libcommon.Hash `json:"from"`
-	To   libcommon.Hash `json:"to"`
+	From common.Hash `json:"from"`
+	To   common.Hash `json:"to"`
 }
 
 type TransactionTrace struct {
@@ -87,9 +85,9 @@ type TransactionTrace struct {
 	Action              TraceCallAction `json:"action"`
 	Result              *CallResult     `json:"result"`
 	Error               string          `json:"error"`
-	BlockHash           libcommon.Hash  `json:"blockHash"`
+	BlockHash           common.Hash     `json:"blockHash"`
 	BlockNumber         uint64          `json:"blockNumber"`
-	TransactionHash     libcommon.Hash  `json:"transactionHash"`
+	TransactionHash     common.Hash     `json:"transactionHash"`
 	TransactionPosition uint64          `json:"transactionPosition"`
 	Subtraces           int             `json:"subtraces"`
 	TraceAddress        []int           `json:"traceAddress"`
@@ -111,7 +109,7 @@ func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args etha
 	var b TraceCall
 
 	if args.Data == nil {
-		args.Data = &hexutility.Bytes{}
+		args.Data = &hexutil.Bytes{}
 	}
 
 	argsVal, err := json.Marshal(args)
@@ -149,7 +147,7 @@ func (req *requestGenerator) traceCall(blockRef rpc.BlockReference, callArgs str
 	return Methods.TraceCall, fmt.Sprintf(template, Methods.TraceCall, callArgs, traceOpts, blockRef.String(), req.reqID)
 }
 
-func (reqGen *requestGenerator) TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error) {
+func (reqGen *requestGenerator) TraceTransaction(hash common.Hash) ([]TransactionTrace, error) {
 	var result []TransactionTrace
 
 	if err := reqGen.rpcCall(context.Background(), &result, Methods.TraceTransaction, hash); err != nil {

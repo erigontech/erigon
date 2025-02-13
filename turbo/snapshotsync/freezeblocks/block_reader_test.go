@@ -57,7 +57,7 @@ func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 
 	blockReader := &BlockReader{
 		borSn:         borRoSnapshots,
-		heimdallStore: heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dataDir, 1), borRoSnapshots)}
+		heimdallStore: heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)}
 	require.Equal(t, uint64(78), blockReader.LastFrozenSpanId())
 }
 
@@ -76,7 +76,7 @@ func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T) 
 
 	blockReader := &BlockReader{
 		borSn:         borRoSnapshots,
-		heimdallStore: heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dataDir, 1), borRoSnapshots)}
+		heimdallStore: heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)}
 	require.Equal(t, uint64(0), blockReader.LastFrozenSpanId())
 }
 
@@ -147,7 +147,7 @@ func TestBlockReaderLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 
 	blockReader := &BlockReader{
 		borSn:         borRoSnapshots,
-		heimdallStore: heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dataDir, 1), borRoSnapshots)}
+		heimdallStore: heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)}
 	require.Equal(t, uint64(156), blockReader.LastFrozenSpanId())
 }
 
@@ -182,7 +182,7 @@ func TestBlockReaderLastFrozenSpanIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *te
 
 	blockReader := &BlockReader{
 		borSn:         borRoSnapshots,
-		heimdallStore: heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dataDir, 1), borRoSnapshots)}
+		heimdallStore: heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)}
 	require.Equal(t, uint64(0), blockReader.LastFrozenSpanId())
 }
 

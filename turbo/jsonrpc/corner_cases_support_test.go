@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -36,7 +37,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	require := require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewEthAPI(newBaseApiForTest(m),
-		m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
+		m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 	ctx := context.Background()
 
 	a, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)
@@ -73,9 +74,5 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 
 	j, err := api.GetBlockTransactionCountByNumber(ctx, 10_000)
 	require.Nil(j)
-	require.Nil(err)
-
-	k, err := api.GetBadBlocks(ctx)
-	require.Nil(k)
 	require.Nil(err)
 }
