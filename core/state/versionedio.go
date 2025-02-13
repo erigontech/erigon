@@ -445,7 +445,7 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 	if !commited {
 		if vw, ok := s.versionedWrite(addr, path, key); ok {
 			if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
-				fmt.Printf("%d (%d.%d) RD %s", s.blockNum, s.txIndex, s.version, WriteSetRead)
+				fmt.Printf("%d (%d.%d) RD %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead)
 			}
 
 			val := vw.Val.(T)
@@ -470,7 +470,7 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 	case MVReadResultDone:
 
 		if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
-			fmt.Printf("%d (%d.%d) RD %s (%d.%d)", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation())
+			fmt.Printf("%d (%d.%d) RD %s (%d.%d)\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation())
 		}
 
 		if versionedReads := s.versionedReads; versionedReads != nil {
@@ -501,7 +501,7 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 		vr.Val = copyV(v)
 	case MVReadResultDependency:
 		if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
-			fmt.Printf("%d (%d.%d) DEP (%d.%d)", s.blockNum, s.txIndex, s.version, res.DepIdx(), res.Incarnation())
+			fmt.Printf("%d (%d.%d) DEP (%d.%d)\n", s.blockNum, s.txIndex, s.version, res.DepIdx(), res.Incarnation())
 		}
 
 		s.dep = res.DepIdx()
@@ -512,7 +512,7 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 				if pr.Version == vr.Version {
 					if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
-						fmt.Printf("%d (%d.%d) RD %s", s.blockNum, s.txIndex, s.version, ReadSetRead)
+						fmt.Printf("%d (%d.%d) RD %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead)
 					}
 
 					return pr.Val.(T), ReadSetRead, nil
@@ -536,7 +536,7 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 		}
 
 		if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
-			fmt.Printf("%d (%d.%d) RD %s", s.blockNum, s.txIndex, s.version, StorageRead)
+			fmt.Printf("%d (%d.%d) RD %s\n", s.blockNum, s.txIndex, s.version, StorageRead)
 		}
 
 		vr.Val = copyV(v)
