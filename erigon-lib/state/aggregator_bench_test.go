@@ -305,6 +305,8 @@ var parallel = flag.Int("bench.parallel", 1, "parallelism value") // runs 1 *max
 var loopv = flag.Int("bench.loopv", 100000, "loop value")
 
 func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
+	// RESULT: deteriorates after 2^21 goroutines
+
 	/**
 	for cpu in $(seq 0 20); do
 		cpus=$((1 << $cpu))  # Same as 2^cpu
@@ -315,7 +317,6 @@ func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
 	done
 	**/
 	// trying to find BeginFilesRo throughput
-	// result: deteriorates after 2^21 goroutines.
 	if !flag.Parsed() {
 		flag.Parse()
 	}
@@ -339,6 +340,8 @@ func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
 }
 
 func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
+	// RESULT: deteriorates after 2^21 goroutines.
+
 	/**
 	for cpu in $(seq 0 20); do
 	    cpus=$((1 << $cpu))  # Same as 2^cpu
@@ -350,7 +353,6 @@ func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
 	**/
 
 	// trying to find BeginFilesRo and Rollback throughput
-	// result: deteriorates after 2^21 goroutines.
 	if !flag.Parsed() {
 		flag.Parse()
 	}
@@ -362,16 +364,57 @@ func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
 
 	b.SetParallelism(*parallel) // p * maxprocs
 	b.RunParallel(func(pb *testing.PB) {
-		foo := 0
+		//foo := 0
 		for pb.Next() {
 			tx, err := db.BeginRo(ctx)
 			if err != nil {
 				b.Fatalf("%v", err)
 			}
-			for i := 0; i < *loopv; i++ {
-				foo *= 2
-				foo /= 2
+			millis := *loopv * 1000000
+			time.Sleep(time.Duration(int64(millis)))
+
+			// for i := 0; i < *loopv; i++ {
+			// 	foo *= 2
+			// 	foo /= 2
+			// }
+			tx.Rollback()
+		}
+	})
+}
+
+func BenchmarkDb_BeginFiles_Throughput_IO(b *testing.B) {
+	// RESULT: deteriorates after 2^17 goroutines i.e. 130k goroutines.
+	// time.Sleep to emulate page faults
+
+	/**
+	for cpu in $(seq 0 20); do
+	    cpus=$((1 << $cpu))  # Same as 2^cpu
+	    echo -n "($cpus, "
+	    echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkDb_BeginFiles_Throughput_IO$ github.com/erigontech/erigon-lib/state  \
+		-bench.parallel=$cpus | grep 'BenchmarkDb_BeginFiles_Throughput_IO' | cut -f3 | xargs|cut -d' ' -f1)
+	    echo -n "), "
+	done
+	**/
+
+	// trying to find BeginFilesRo and Rollback throughput
+	if !flag.Parsed() {
+		flag.Parse()
+	}
+	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *loopv, *parallel*runtime.GOMAXPROCS(0))
+
+	aggStep := uint64(100_00)
+	db, _ := testDbAndAggregatorBench(b, aggStep)
+	ctx := context.Background()
+
+	b.SetParallelism(*parallel) // p * maxprocs
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			tx, err := db.BeginRo(ctx)
+			if err != nil {
+				b.Fatalf("%v", err)
 			}
+			millis := 5 * time.Millisecond
+			time.Sleep(time.Duration(int64(millis)))
 			tx.Rollback()
 		}
 	})
