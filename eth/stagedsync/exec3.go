@@ -833,9 +833,9 @@ func ExecV3(ctx context.Context,
 
 					aggregatorRo := libstate.AggTx(executor.tx())
 
-					needCalcRoot := false && executor.readState().SizeEstimate() >= commitThreshold ||
-						havePartialBlock //|| // If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
-						//TEMP aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
+					needCalcRoot := false && (executor.readState().SizeEstimate() >= commitThreshold ||
+						havePartialBlock) //|| // If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
+					//TEMP aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
 
 					// this will only happen for the first executed block
 					havePartialBlock = false
