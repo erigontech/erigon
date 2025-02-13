@@ -136,7 +136,7 @@ func (a *RelationalAppendableTx) GetWithFlags(entityNum Num, tx kv.Tx, flag Quer
 				return word, nil
 			}
 
-			return nil, fmt.Errorf("entity get error: %s expected %s in snapshot %s but not found", ap.a.Name(), entityNum, visible.src.decompressor.FileName())
+			return nil, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, visible.src.decompressor.FileName())
 		}
 	}
 
@@ -191,7 +191,7 @@ func (a *RelationalAppendableTx) Prune(ctx context.Context, to RootNum, limit ui
 
 	eFrom := ap.encTs(uint64(fromId))
 	eTo := ap.encTs(uint64(toId) - 1)
-	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, int(limit), tx)
+	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 
 func (a *RelationalAppendableTx) Unwind(ctx context.Context, from RootNum, rwTx kv.RwTx) error {

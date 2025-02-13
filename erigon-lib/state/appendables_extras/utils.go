@@ -32,27 +32,24 @@ func Decode64FromBytes(buf []byte, x8Bytes bool) (x uint64) {
 }
 
 // toPrefix inclusive
-// bigendianess assumed (for key comparison)
-func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit int, rwTx kv.RwTx) error {
+func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, rwTx kv.RwTx) error {
 	c, err := rwTx.RwCursor(tbl) // TODO: no dupsort tbl assumed
 	if err != nil {
 		return err
 	}
 
 	defer c.Close()
-	for k, _, err := c.Seek(fromPrefix); k != nil && (toPrefix == nil || bytes.Compare(k, toPrefix) < 0); k, _, err = c.Next() {
+	// bigendianess assumed (for key comparison)
+	// imo this can be generalized if needed, by using key comparison functions, which mdbx provides.
+	for k, _, err := c.Seek(fromPrefix); k != nil && (toPrefix == nil || bytes.Compare(k, toPrefix) < 0) && limit > 0; k, _, err = c.Next() {
 		if err != nil {
 			return err
-		}
-
-		limit--
-		if limit < 0 {
-			break
 		}
 
 		if err := c.DeleteCurrent(); err != nil {
 			return err
 		}
+		limit--
 	}
 
 	return nil
