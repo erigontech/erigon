@@ -2854,6 +2854,7 @@ func (p *ParallelPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	p.root.ctx = ctx
 	for i := 0; i < len(p.mounts); i++ {
 		p.mounts[i].ResetContext(ctx)
+		p.ctx[i] = ctx
 	}
 }
 
