@@ -97,7 +97,7 @@ jobs:
         if: steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.client }}
+          name: test-results-${{ matrix.client }}-${{ matrix.chain }}
           path: |
             ${{ github.workspace }}/result-${{ matrix.chain }}.json
             ${{ github.workspace }}/erigon_data/logs/erigon.log
