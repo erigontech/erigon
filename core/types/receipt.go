@@ -511,6 +511,7 @@ func (rs Receipts) Copy() Receipts {
 // EncodeIndex encodes the i'th receipt to w.
 func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	r := rs[i]
+	fmt.Println(r)
 	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	switch r.Type {
 	case LegacyTxType:
