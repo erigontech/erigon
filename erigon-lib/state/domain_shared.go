@@ -1434,7 +1434,7 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expected
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
 	sdc.ResetBranchCache()
 	defer sdc.ResetBranchCache()
-
+	fmt.Println("shota 7")
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -1443,19 +1443,21 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	if sdc.sharedDomains.trace {
 		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
 	}
+	fmt.Println("shota 8")
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
 	}
-
+	fmt.Println("shota 9")
 	// data accessing functions should be set when domain is opened/shared context updated
 	sdc.patriciaTrie.SetTrace(sdc.sharedDomains.trace)
 	sdc.Reset()
-
+	fmt.Println("shota ss")
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("shota ee")
 	sdc.justRestored.Store(false)
 
 	if saveState {

@@ -2815,6 +2815,21 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 	} else {
 		fmt.Printf("\troot active rows %d\n", p.root.activeRows)
 	}
+
+	// print mounted children
+	for col := 0; col < 16; col++ {
+		currentCell := &p.root.grid[0][col]
+		if currentCell.IsEmpty() {
+			fmt.Println("child ", col, " nil")
+			continue
+		}
+		cellHash, _, _, err := p.root.computeCellHashWithStorage(currentCell, p.root.depths[0], nil)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Println("child ", col, " ", trie.NewHashNode(cellHash[1:]).String())
+	}
+
 	for p.root.activeRows > 0 {
 		if err = p.root.fold(); err != nil {
 			return nil, err

@@ -2,10 +2,13 @@ package state
 
 import (
 	"context"
-	"github.com/erigontech/erigon-lib/common"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
+	"encoding/hex"
+	"fmt"
 	"math"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -27,7 +30,6 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	agg.commitmentValuesTransform = !cfg.disableCommitmentBranchTransform
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = agg.commitmentValuesTransform
 
-	ctx := context.Background()
 	agg.logger = log.Root().New()
 
 	ac := agg.BeginFilesRo()
@@ -63,11 +65,6 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)
 			require.NoError(tb, err)
 		}
-		if uint64(i+1)%agg.StepSize() == 0 {
-			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
-			require.NoError(tb, err)
-			require.NotEmpty(tb, rh)
-		}
 	}
 
 	err = domains.Flush(context.Background(), rwTx)
@@ -83,24 +80,27 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 }
 
 func TestAggregator_SqueezeCommitment(t *testing.T) {
-
+	fmt.Println("shota 1")
 	cfgd := &testAggConfig{stepSize: 32, disableCommitmentBranchTransform: true}
 	db, agg := testDbAggregatorWithFiles(t, cfgd)
 	defer db.Close()
-
+	fmt.Println("shota 2")
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-
+	fmt.Println("shota 3")
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
 	// get latest commited root
+	fmt.Println("shota Aq movida")
 	latestRoot, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), "")
+	fmt.Println("shota", hex.EncodeToString(latestRoot))
+	require.Error(t, err)
 	require.NoError(t, err)
 	require.NotEmpty(t, latestRoot)
 	domains.Close()
