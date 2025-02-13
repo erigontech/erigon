@@ -7,6 +7,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
@@ -16,9 +17,27 @@ import (
 
 type ReadSource int
 
+func (s ReadSource) String() string {
+	switch s {
+	case MapRead:
+		return "version-map"
+	case StorageRead:
+		return "storage"
+	case WriteSetRead:
+		return "tx-writes"
+	case ReadSetRead:
+		return "tx-reads"
+	default:
+		return "unknown"
+	}
+}
+
 const (
-	MapRead     = 0
-	StorageRead = 1
+	UnknownSource ReadSource = iota
+	MapRead
+	StorageRead
+	WriteSetRead
+	ReadSetRead
 )
 
 type ReadSet map[libcommon.Address]map[AccountKey]*VersionedRead
@@ -411,21 +430,26 @@ func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObje
 	return stateObjects, nil
 }
 
-func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path AccountPath, key libcommon.Hash, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, error) {
+func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path AccountPath, key libcommon.Hash, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, error) {
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr)
 
 		if err != nil || readStorage == nil {
-			return defaultV, err
+			return defaultV, StorageRead, err
 		}
 
-		return readStorage(so)
+		val, err := readStorage(so)
+		return val, StorageRead, err
 	}
 
 	if !commited {
 		if vw, ok := s.versionedWrite(addr, path, key); ok {
+			if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
+				fmt.Printf("%d (%d.%d) RD %s", s.blockNum, s.txIndex, s.version, WriteSetRead)
+			}
+
 			val := vw.Val.(T)
-			return val, nil
+			return val, WriteSetRead, nil
 		}
 	}
 
@@ -444,10 +468,15 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 
 	switch res.Status() {
 	case MVReadResultDone:
+
+		if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
+			fmt.Printf("%d (%d.%d) RD %s (%d.%d)", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation())
+		}
+
 		if versionedReads := s.versionedReads; versionedReads != nil {
 			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 				if pr.Version == vr.Version {
-					return pr.Val.(T), nil
+					return pr.Val.(T), MapRead, nil
 				}
 
 				if pr.Version.Incarnation < vr.Version.Incarnation {
@@ -462,15 +491,19 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 		var ok bool
 		vr.Source = MapRead
 		if v, ok = res.Value().(T); !ok {
-			return defaultV, nil
+			return defaultV, MapRead, fmt.Errorf("unexpected type: %T", res.Value())
 		}
 
 		if copyV == nil {
-			return v, nil
+			return v, MapRead, nil
 		}
 
 		vr.Val = copyV(v)
 	case MVReadResultDependency:
+		if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
+			fmt.Printf("%d (%d.%d) DEP (%d.%d)", s.blockNum, s.txIndex, s.version, res.DepIdx(), res.Incarnation())
+		}
+
 		s.dep = res.DepIdx()
 		panic(ErrDependency)
 
@@ -478,30 +511,38 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 		if versionedReads := s.versionedReads; versionedReads != nil {
 			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 				if pr.Version == vr.Version {
-					return pr.Val.(T), nil
+					if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
+						fmt.Printf("%d (%d.%d) RD %s", s.blockNum, s.txIndex, s.version, ReadSetRead)
+					}
+
+					return pr.Val.(T), ReadSetRead, nil
 				}
 			}
 		}
 
 		if readStorage == nil {
-			return defaultV, nil
+			return defaultV, UnknownSource, nil
 		}
 
 		vr.Source = StorageRead
 		so, err := s.getStateObject(addr)
 
 		if err != nil {
-			return defaultV, nil
+			return defaultV, StorageRead, nil
 		}
 
 		if v, err = readStorage(so); err != nil {
-			return defaultV, nil
+			return defaultV, StorageRead, nil
+		}
+
+		if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
+			fmt.Printf("%d (%d.%d) RD %s", s.blockNum, s.txIndex, s.version, StorageRead)
 		}
 
 		vr.Val = copyV(v)
 
 	default:
-		return defaultV, nil
+		return defaultV, UnknownSource, nil
 	}
 
 	if s.versionedReads == nil {
@@ -510,7 +551,7 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 
 	s.versionedReads.Set(vr)
 
-	return v, nil
+	return v, vr.Source, nil
 }
 
 func ApplyVersionedWrites(chainRules *chain.Rules, writes VersionedWrites, stateWriter StateWriter) error {

@@ -224,7 +224,7 @@ func (so *stateObject) SetState(key libcommon.Hash, value uint256.Int) bool {
 	var commited bool
 
 	// we need to use versioned read here otherwise we will miss versionmap entries
-	prev, _ = versionedRead(so.db, so.address, StatePath, key, false, *u256.N0,
+	prev, _, _ = versionedRead(so.db, so.address, StatePath, key, false, *u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
 		},
