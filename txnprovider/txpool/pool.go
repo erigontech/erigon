@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/u256"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -2071,7 +2071,7 @@ func (p *TxPool) flush(ctx context.Context) (written uint64, err error) {
 			version = binary.BigEndian.Uint64(v)
 		}
 		version++
-		return tx.Put(kv.PoolInfo, PoolStateVersion, hexutility.EncodeTs(version))
+		return tx.Put(kv.PoolInfo, PoolStateVersion, hexutil.EncodeTs(version))
 	}); err != nil {
 		return 0, err
 	}

@@ -10,7 +10,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -64,7 +63,7 @@ type BlockJson struct {
 	GasLimit    hexutil.Uint64   `json:"gasLimit"         gencodec:"required"`
 	GasUsed     hexutil.Uint64   `json:"gasUsed"          gencodec:"required"`
 	Time        hexutil.Uint64   `json:"timestamp"        gencodec:"required"`
-	Extra       hexutility.Bytes `json:"extraData"        gencodec:"required"`
+	Extra       hexutil.Bytes    `json:"extraData"        gencodec:"required"`
 	MixDigest   common.Hash      `json:"mixHash"` // prevRandao after EIP-4399
 	Nonce       types.BlockNonce `json:"nonce"`
 

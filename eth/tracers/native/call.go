@@ -29,7 +29,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -45,7 +44,7 @@ type callLog struct {
 	Index   uint64            `json:"index"`
 	Address libcommon.Address `json:"address"`
 	Topics  []libcommon.Hash  `json:"topics"`
-	Data    hexutility.Bytes  `json:"data"`
+	Data    hexutil.Bytes     `json:"data"`
 }
 
 type callFrame struct {
@@ -100,8 +99,8 @@ type callFrameMarshaling struct {
 	Gas        hexutil.Uint64
 	GasUsed    hexutil.Uint64
 	Value      *hexutil.Big
-	Input      hexutility.Bytes
-	Output     hexutility.Bytes
+	Input      hexutil.Bytes
+	Output     hexutil.Bytes
 }
 
 type callTracer struct {
@@ -214,7 +213,7 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 		}
 
 		data := scope.Memory.GetCopy(int64(mStart.Uint64()), int64(mSize.Uint64()))
-		log := callLog{Address: scope.Contract.Address(), Topics: topics, Data: hexutility.Bytes(data), Index: t.logIndex}
+		log := callLog{Address: scope.Contract.Address(), Topics: topics, Data: hexutil.Bytes(data), Index: t.logIndex}
 		t.logIndex++
 		t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, log)
 	}
