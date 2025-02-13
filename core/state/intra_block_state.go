@@ -495,18 +495,18 @@ func (sdb *IntraBlockState) ReadVersion(addr libcommon.Address, path AccountPath
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
-	prev0, _ := sdb.GetBalance(addr)
+	if sdb.trace || traceAccount(addr) {
+		prev0, _ := sdb.GetBalance(addr)
 
-	defer func() {
-		bal, _ := sdb.GetBalance(addr)
-		expected := (&uint256.Int{}).Add(&prev0, amount)
-		if bal.Cmp(expected) != 0 {
-			panic(fmt.Sprintf("add failed: expected: %d got: %d", expected, &bal))
-		}
-		if sdb.trace || traceAccount(addr) {
+		defer func() {
+			bal, _ := sdb.GetBalance(addr)
+			expected := (&uint256.Int{}).Add(&prev0, amount)
+			if bal.Cmp(expected) != 0 {
+				panic(fmt.Sprintf("add failed: expected: %d got: %d", expected, &bal))
+			}
 			fmt.Printf("%d (%d.%d) AddBalance %x, %d+%d=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &prev0, amount, &bal)
-		}
-	}()
+		}()
+	}
 
 	if sdb.versionMap == nil {
 		// If this account has not been read, add to the balance increment map
@@ -546,19 +546,20 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 		return err
 	}
 
+	prev, err := sdb.GetBalance(addr)
+	if err != nil {
+		return err
+	}
+
 	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
 	if amount.IsZero() {
 		if stateObject.empty() {
+			sdb.versionWritten(addr, BalancePath, libcommon.Hash{}, prev)
 			stateObject.touch()
 		}
 
 		return nil
-	}
-
-	prev, err := sdb.GetBalance(addr)
-	if err != nil {
-		return err
 	}
 
 	update := new(uint256.Int).Add(&prev, amount)
@@ -991,6 +992,11 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 	}
 
 	account := newObj.data
+	// for newly created files these synthetic reads are used so that account
+	// creation clashes between trnascations get detected
+	sdb.versionRead(addr, AddressPath, libcommon.Hash{}, StorageRead, &account)
+	sdb.versionRead(addr, BalancePath, libcommon.Hash{}, StorageRead, newObj.Balance())
+
 	sdb.versionWritten(addr, AddressPath, libcommon.Hash{}, &account)
 	sdb.versionWritten(addr, BalancePath, libcommon.Hash{}, newObj.Balance())
 	return nil
@@ -1374,17 +1380,7 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 		// re-reads will return a complete account - note
 		// this is not used by the version map wich works
 		// at the level of individual account elements
-		if s.versionedReads == nil {
-			s.versionedReads = ReadSet{}
-		}
-
-		s.versionedReads.Set(VersionedRead{
-			Address: addr,
-			Path:    AddressPath,
-			Source:  StorageRead,
-			Version: s.Version(),
-			Val:     *account,
-		})
+		s.versionRead(addr, AddressPath, libcommon.Hash{}, StorageRead, *account)
 	}
 }
 
@@ -1394,10 +1390,33 @@ func (s *IntraBlockState) versionWritten(addr libcommon.Address, path AccountPat
 			s.versionedWrites = WriteSet{}
 		}
 
-		s.versionedWrites.Set(VersionedWrite{
+		vw := VersionedWrite{
 			Address: addr,
 			Path:    path,
 			Key:     key,
+			Version: s.Version(),
+			Val:     val,
+		}
+
+		//if s.trace {
+		//	fmt.Printf("%d (%d.%d) WRT %s\n", s.blockNum, s.txIndex, s.version, vw.String())
+		//}
+
+		s.versionedWrites.Set(vw)
+	}
+}
+
+func (s *IntraBlockState) versionRead(addr libcommon.Address, path AccountPath, key libcommon.Hash, source ReadSource, val any) {
+	if s.versionMap != nil {
+		if s.versionedReads == nil {
+			s.versionedReads = ReadSet{}
+		}
+
+		s.versionedReads.Set(VersionedRead{
+			Address: addr,
+			Path:    path,
+			Key:     key,
+			Source:  source,
 			Version: s.Version(),
 			Val:     val,
 		})
@@ -1449,7 +1468,6 @@ func (ibs *IntraBlockState) VersionedReads() ReadSet {
 // checkDirty - is mainly for testing, for block processing this is called
 // after the block execution is completed and non dirty writes (due to reversions)
 // will already have been cleaned in MakeWriteSet
-// (TODO the writes should probably be unset in revert - but this requires extended revert logic)
 func (ibs *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 	var writes VersionedWrites
 

@@ -370,7 +370,7 @@ func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum 
 var tracedBlocks map[uint64]struct{}
 var tracedTxIndexes map[int64]struct{}
 
-func traceTx(blockNum uint64, txIndex int) bool {
+func traceBlock(blockNum uint64) bool {
 	if tracedBlocks == nil {
 		tracedBlocks = map[uint64]struct{}{}
 		for _, blockNum := range dbg.TraceBlocks {
@@ -378,7 +378,12 @@ func traceTx(blockNum uint64, txIndex int) bool {
 		}
 	}
 
-	if _, ok := tracedBlocks[blockNum]; !ok {
+	_, ok := tracedBlocks[blockNum]
+	return ok
+}
+
+func traceTx(blockNum uint64, txIndex int) bool {
+	if !traceBlock(blockNum) {
 		return false
 	}
 
@@ -731,10 +736,6 @@ func ExecV3(ctx context.Context,
 					return err
 				}
 
-				if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
-					return fmt.Errorf("stopping: block %d complete", blockNum)
-				}
-
 				uncommittedGas = se.executedGas - se.committedGas
 				mxExecBlocks.Add(1)
 
@@ -742,11 +743,15 @@ func ExecV3(ctx context.Context,
 					return nil
 				}
 
-				if false /*shouldGenerateChangesets*/ {
+				if true /*shouldGenerateChangesets*/ {
 					aggTx := libstate.AggTx(executor.tx())
 					aggTx.RestrictSubsetFileDeletions(true)
 					start := time.Now()
+					if blockNum == 16816186 || blockNum == 16802148 {
+						se.doms.SetTrace(true)
+					}
 					rh, err := executor.domains().ComputeCommitment(ctx, executor.tx(), true, blockNum, execStage.LogPrefix())
+					se.doms.SetTrace(false)
 					if err != nil {
 						return err
 					}
@@ -764,6 +769,10 @@ func ExecV3(ctx context.Context,
 						}
 					}
 					executor.domains().SetChangesetAccumulator(nil)
+				}
+
+				if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
+					return fmt.Errorf("stopping: block %d complete", blockNum)
 				}
 			}
 
@@ -824,7 +833,7 @@ func ExecV3(ctx context.Context,
 
 					aggregatorRo := libstate.AggTx(executor.tx())
 
-					needCalcRoot := executor.readState().SizeEstimate() >= commitThreshold ||
+					needCalcRoot := false && executor.readState().SizeEstimate() >= commitThreshold ||
 						havePartialBlock //|| // If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
 						//TEMP aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
 

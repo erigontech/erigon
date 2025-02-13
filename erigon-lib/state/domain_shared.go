@@ -1113,6 +1113,7 @@ type SharedDomainsCommitmentContext struct {
 	justRestored  atomic.Bool
 
 	limitReadAsOfTxNum uint64
+	traceBranches      bool
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64) {
@@ -1159,7 +1160,7 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 	if err != nil {
 		return nil, 0, fmt.Errorf("branch failed: %w", err)
 	}
-	if sdc.sharedDomains.trace {
+	if sdc.traceBranches {
 		fmt.Printf("[SDC] Branch: %x: %x\n", pref, v)
 	}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
@@ -1174,7 +1175,7 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 
 func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
 	prefixS := toStringZeroCopy(prefix)
-	if sdc.sharedDomains.trace {
+	if sdc.traceBranches {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
 	sdc.branches[prefixS] = cachedBranch{data: data, step: prevStep}
@@ -1337,7 +1338,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	updateCount := sdc.updates.Size()
 	if sdc.sharedDomains.trace {
-		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
+		defer /*sdc.sharedDomains.logger.Trace*/ fmt.Println("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
 	}
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
@@ -1345,7 +1346,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	// data accessing functions should be set when domain is opened/shared context updated
-	sdc.patriciaTrie.SetTrace(blockNum == 14753281 || blockNum == 14796217) //sdc.sharedDomains.trace)
+	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.trace)
 	sdc.Reset()
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)

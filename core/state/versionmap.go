@@ -73,6 +73,10 @@ func NewVersionMap() *VersionMap {
 	}
 }
 
+func (vm *VersionMap) SetTrace(trace bool) {
+	vm.trace = trace
+}
+
 func (vm *VersionMap) getKeyCells(addr libcommon.Address, path AccountPath, key libcommon.Hash, fNoKey func(addr libcommon.Address, path AccountPath, key libcommon.Hash) *btree.Map[int, *WriteCell]) (cells *btree.Map[int, *WriteCell]) {
 	it, ok := vm.s[addr]
 
@@ -325,7 +329,7 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, che
 			}
 
 			if versionMap.trace {
-				fmt.Println("RD", vr.Path, txIdx, func() string {
+				fmt.Println("RD", vr.Address, AccountKey{vr.Path, vr.Key}.String(), txIdx, func() string {
 					switch rr.Status() {
 					case MVReadResultDone:
 						return "done"

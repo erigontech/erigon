@@ -569,7 +569,7 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 
 func (w *StateWriterV3) DeleteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash) error {
 	if w.trace {
-		fmt.Printf("storage delete: %x,%x,%x\n", address, key)
+		fmt.Printf("storage delete: %x,%x\n", address, key)
 	}
 	composite := append(address[:], key[:]...)
 	return w.rs.domains.DomainDel(kv.StorageDomain, w.tx, composite, nil, nil, 0)

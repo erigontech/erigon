@@ -111,6 +111,10 @@ type VersionedRead struct {
 	Val     interface{}
 }
 
+func (vr VersionedRead) String() string {
+	return fmt.Sprintf("%x %s: %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val))
+}
+
 type VersionedWrite struct {
 	Address libcommon.Address
 	Path    AccountPath
@@ -118,6 +122,31 @@ type VersionedWrite struct {
 	Version Version
 	Val     interface{}
 	Reason  tracing.BalanceChangeReason
+}
+
+func (vr VersionedWrite) String() string {
+	return fmt.Sprintf("%x %s: %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val))
+}
+
+func valueString(path AccountPath, value any) string {
+	switch path {
+	case BalancePath:
+		num := value.(uint256.Int)
+		return (&num).String()
+	case StatePath:
+		num := value.(uint256.Int)
+		return fmt.Sprintf("%x", &num)
+	case NoncePath:
+		return fmt.Sprintf("%d", value.(uint64))
+	case CodePath:
+		l := len(value.([]byte))
+		if l > 40 {
+			l = 40
+		}
+		return fmt.Sprintf("%x", value.([]byte)[0:l])
+	}
+
+	return fmt.Sprint(value)
 }
 
 var ErrDependency = errors.New("found dependency")

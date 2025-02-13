@@ -83,6 +83,7 @@ type HexPatriciaHashed struct {
 	rootTouched   bool
 	rootPresent   bool
 	trace         bool
+	traceDomain   bool
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
@@ -2009,12 +2010,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
 	defer logEvery.Stop()
-	//hph.trace = true
 
-	trace := hph.trace // temp
-	hph.trace = false  // temp
-	defer func() { hph.trace = trace }() //temp
-	
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
@@ -2025,9 +2021,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 		default:
 		}
-
-		trace := hph.trace // temp
-		hph.trace = false  // temp
 
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
@@ -2064,7 +2057,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			}
 		}
 
-		if trace /*hph.trace*/ {
+		if hph.trace || hph.traceDomain {
 			fmt.Printf("%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 
@@ -2131,7 +2124,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	return rootHash, nil
 }
 
-func (hph *HexPatriciaHashed) SetTrace(trace bool) { hph.trace = trace }
+func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
+func (hph *HexPatriciaHashed) SetTraceDomain(trace bool) { hph.traceDomain = trace }
 
 func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaTrie }
 

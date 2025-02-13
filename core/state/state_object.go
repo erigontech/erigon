@@ -28,6 +28,7 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/trie"
@@ -220,7 +221,21 @@ func (so *stateObject) SetState(key libcommon.Hash, value uint256.Int) bool {
 	}
 	// If the new value is the same as old, don't set
 	var prev uint256.Int
-	commited := so.GetState(key, &prev)
+	var commited bool
+
+	// we need to use versioned read here otherwise we will miss versionmap entries
+	prev, _ = versionedRead(so.db, so.address, StatePath, key, false, *u256.N0,
+		func(v uint256.Int) uint256.Int {
+			return v
+		},
+		func(s *stateObject) (uint256.Int, error) {
+			var value uint256.Int
+			if s != nil && !s.deleted {
+				commited = s.GetState(key, &value)
+			}
+			return value, nil
+		})
+
 	if prev == value {
 		return false
 	}

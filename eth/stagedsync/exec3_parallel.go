@@ -471,6 +471,9 @@ func newBlockExec(blockNum uint64, profile bool) *blockExecutor {
 	}
 }
 
+var checkAddress = libcommon.HexToAddress("f82b7aa1e5aa151e60367efd8919e1d8005f8a5e")
+var checkKey = libcommon.Hash{}
+
 func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg ExecuteBlockCfg, rs *state.StateV3Buffered,
 	accumulator *shards.Accumulator, in *exec.QueueWithRetry, applyTx kv.Tx, applyResults chan applyResult, logger log.Logger) (result *blockResult, err error) {
 
@@ -592,6 +595,22 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 		tx := toValidate[i]
 		txVersion := be.tasks[tx].Task.Version()
+		txIncarnation := be.txIncarnations[tx]
+
+		if traceTx(be.blockNum, txVersion.TxIndex) {
+			fmt.Println(fmt.Sprintf("%d (%d.%d) RD", be.blockNum, txVersion.TxIndex, txIncarnation), be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", len(be.blockIO.WriteSet(txVersion.TxIndex)))
+			be.blockIO.ReadSet(txVersion.TxIndex).Scan(func(vr *state.VersionedRead) bool {
+				if vr.Address == checkAddress && vr.Key == checkKey {
+					fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "RD", vr.String())
+				}
+				return true
+			})
+			for _, vw := range be.blockIO.WriteSet(txVersion.TxIndex) {
+				//if vw.Address == checkAddress && vw.Key == checkKey {
+				fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "WRT", vw.String())
+				//}
+			}
+		}
 
 		if be.skipCheck[tx] ||
 			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap,
@@ -866,11 +885,6 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 			}
 
 			if blockResult.complete {
-				//fmt.Println("Block Complete", blockResult.BlockNum)
-				if dbg.StopAfterBlock > 0 && blockResult.BlockNum == dbg.StopAfterBlock {
-					return fmt.Errorf("stopping: block %d complete", blockResult.BlockNum)
-				}
-
 				if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum]; ok {
 					pe.execCount.Add(int64(blockExecutor.cntExec))
 					pe.abortCount.Add(int64(blockExecutor.cntAbort))
@@ -1031,8 +1045,14 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) (err 
 						uncommittedGas += applyResult.GasUsed
 					}
 
-					if false {
+					if true {
+						var trace bool
+						if traceBlock(applyResult.BlockNum) {
+							trace = true
+						}
+						pe.doms.SetTrace(trace)
 						rh, err := pe.doms.ComputeCommitment(ctx, tx, true, applyResult.BlockNum, pe.execStage.LogPrefix())
+						pe.doms.SetTrace(false)
 						if err != nil {
 							return err
 						}
@@ -1044,6 +1064,11 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) (err 
 
 					if (applyResult.complete || applyResult.Err != nil) && pe.blockResults != nil {
 						pe.blockResults <- applyResult
+					}
+
+					//fmt.Println("Block Complete", blockResult.BlockNum)
+					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
+						return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
 					}
 
 				}

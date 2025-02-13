@@ -89,6 +89,8 @@ type Trie interface {
 
 	// Makes trie more verbose
 	SetTrace(bool)
+	// Trace domain writes only (no filding etc)
+	SetTraceDomain(bool)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant

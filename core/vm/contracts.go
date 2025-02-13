@@ -23,7 +23,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"math/big"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -217,9 +216,6 @@ func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uin
 	}
 	suppliedGas -= gasCost
 	output, err := p.Run(input)
-	if Trace && err != nil {
-		fmt.Println(err)
-	}
 	return output, suppliedGas, err
 }
 
@@ -252,10 +248,6 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	sig[64] = v
 	// v needs to be at the end for libsecp256k1
 	pubKey, err := crypto.Ecrecover(input[:32], sig)
-
-	if Trace {
-		fmt.Printf("ERecover %d, %d, %d (%x)\n", r, s, v, pubKey)
-	}
 
 	// make sure the public key is a valid one
 	if err != nil {
@@ -455,9 +447,6 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		mod  = new(big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
 		v    []byte
 	)
-	if Trace {
-		fmt.Printf("ModExp %d, %d, %d\n", base, exp, mod)
-	}
 	switch {
 	case mod.BitLen() == 0:
 		// Modulo 0 is undefined, return zero

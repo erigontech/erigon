@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
 
 	"github.com/erigontech/erigon/core/tracing"
@@ -178,8 +179,6 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	}
 }
 
-var Trace bool
-
 // Run loops and evaluates the contract's code with the given input data and returns
 // the return byte-slice and an error if one occurred.
 //
@@ -317,8 +316,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 			logged = true
 		}
-		// execute the operation
-		if Trace || in.evm.intraBlockState.Trace() {
+
+		// TODO - move this to a trace & set in the worker
+		if dbg.TraceInstructions && in.evm.intraBlockState.Trace() {
 			var str string
 			if operation.string != nil {
 				str = operation.string(*pc, callContext)
@@ -329,6 +329,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			fmt.Printf("(%d.%d) %5d %s\n", in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), _pc, str)
 		}
 
+		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
 
 		if err != nil {
