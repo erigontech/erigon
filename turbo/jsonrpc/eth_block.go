@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
@@ -261,11 +260,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		}
 	}
 
-	if chainConfig.Bor != nil {
-		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-		response["miner"], _ = ecrecover(b.Header(), borConfig)
-	}
-
 	return response, err
 }
 
@@ -330,11 +324,6 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
 		}
-	}
-
-	if chainConfig.Bor != nil {
-		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-		response["miner"], _ = ecrecover(block.Header(), borConfig)
 	}
 
 	return response, err
