@@ -39,6 +39,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 		if txTask.Error != nil {
 			return false, nil
 		}
+		fmt.Println("txTask.TxIndex", txTask.TxIndex, len(tasks))
 
 		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining)
 		if err := func() error {

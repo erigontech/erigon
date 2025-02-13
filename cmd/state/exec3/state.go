@@ -296,7 +296,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
-		fmt.Println("xq")
 		if err != nil {
 			txTask.Error = err
 		} else {
