@@ -440,13 +440,13 @@ func (b BlockChainArbitrum) BlockByHash(ctx context.Context, db kv.Tx, hash comm
 }
 
 func (b BlockChainArbitrum) CurrentBlock(db kv.Tx) (*types.Block, error) {
-	bn := rawdb.ReadCurrentBlockNumber(db)
-	if bn != nil {
-		fmt.Printf("current block number: %d\n", *bn)
+	hdr := rawdb.ReadCurrentHeader(db)
+	if hdr != nil {
+		fmt.Printf("current block %d\n", hdr.Number.Uint64())
+		block := rawdb.ReadBlock(db, hdr.Hash(), hdr.Number.Uint64())
+		return block, nil
 	}
-	return &types.Block{}, nil
-	////TODO implement me
-	//panic("implement me")
+	return nil, nil
 }
 
 func (b BlockChainArbitrum) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error) {

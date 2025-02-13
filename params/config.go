@@ -65,8 +65,6 @@ func readChainSpec(filename string) *chain.Config {
 			panic(fmt.Sprintf("Could not parse 'arbitrum' chainspec for %s: %v", filename, err))
 		}
 	}
-	fmt.Printf("Read chain spec for %s: %+v\n", filename, spec)
-
 	return spec
 }
 
@@ -286,6 +284,8 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 		return GnosisChainConfig
 	case genesisHash == ChiadoGenesisHash:
 		return ChiadoChainConfig
+	case genesisHash == ArbSepoliaGenesisHash:
+		return ArbSepoliaChainConfig
 	default:
 		return nil
 	}

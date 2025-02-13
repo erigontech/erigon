@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -228,12 +225,6 @@ func (c *CachingConfig) Validate() error {
 }
 
 func WriteOrTestGenblock(chainDb kv.TemporalRwTx, domains *state2.SharedDomains, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, accountsPerSync uint) error {
-
-	EmptyHash := common.Hash{}
-	prevHash := EmptyHash
-	prevDifficulty := big.NewInt(0)
-	_ = prevDifficulty
-
 	blockNumber, err := initData.GetNextBlockNumber()
 	if err != nil {
 		return err
@@ -242,7 +233,8 @@ func WriteOrTestGenblock(chainDb kv.TemporalRwTx, domains *state2.SharedDomains,
 	if err != nil {
 		return err
 	}
-	timestamp := uint64(0)
+
+	timestamp, prevHash := uint64(0), EmptyHash
 	if blockNumber > 0 {
 		prevHash, err = rawdb.ReadCanonicalHash(chainDb, blockNumber-1)
 		if err != nil {
@@ -268,44 +260,33 @@ func WriteOrTestGenblock(chainDb kv.TemporalRwTx, domains *state2.SharedDomains,
 		return err
 	}
 
-	_ = stateRoot
-	chainConfig.ChainName = "sepolia-rollup" // TODO must be parsed
-	//fmt.Printf("\ninit arbos state root %x chain= %v\n", stateRoot2, chainConfig.ChainName)
-
-	gen := core.GenesisBlockByChainName(chainConfig.ChainName)
-	gen.Config.EIP155Block = big.NewInt(0)
-	gen.Config.SpuriousDragonBlock = big.NewInt(0)
-	gen.Config.PragueTime = big.NewInt(0)
-	gen.Config.TangerineWhistleBlock = big.NewInt(0)
-	gen.Config.HomesteadBlock = big.NewInt(0) // todo somewhy did not init with default json confg
-	//fmt.Printf("genesis block %v\n", gen)
+	chainConfig.ChainName = "sepolia-rollup" // TODO must be parsed/obtained from config but has been rewritten on the way after parsing
 
 	if storedGenHash == EmptyHash {
 		// chainDb did not have genesis block. Initialize it.
-		// rawdb.WriteGenesisIfNotExist(ibs kv.RwTx, g *types.Genesis)
-		var genBlock *types.Block
-		// fmt.Printf("155 %v Byz %v\n", chainConfig.EIP150Block, chainConfig.ByzantiumBlock)
-		chainConfig, genBlock, err = core.WriteGenesisBlock(chainDb, gen, chainConfig.PragueTime, datadir.New(os.TempDir()), log.New())
+
+		gen := core.GenesisBlockByChainName(chainConfig.ChainName)
+		genBlock := arbosState.MakeGenesisBlock(prevHash, blockNumber, timestamp, stateRoot, chainConfig)
+		err = core.WriteCustomGenesisBlock(chainDb, gen, genBlock, gen.Difficulty, chainConfig.ArbitrumChainParams.GenesisBlockNum, chainConfig)
 		if err != nil {
 			return fmt.Errorf("failed to write genesis block: %v", err)
 		}
-		blockHash := genBlock.Hash()
-		log.Info("wrote genesis block", "number", blockNumber, "hash", blockHash, "err", err)
+		log.Info("wrote genesis block", "number", blockNumber, "hash", genBlock.Hash(), "stateRoot", genBlock.Root())
 		// } else if storedGenHash != blockHash {
 		// 	return fmt.Errorf("database contains data inconsistent with initialization: database has genesis hash %v but we built genesis hash %v", storedGenHash, blockHash)
 	} else {
-		genBlock := arbosState.MakeGenesisBlock(prevHash, blockNumber, timestamp, stateRoot, chainConfig)
-		blockHash := genBlock.Hash()
-		log.Info("recreated existing genesis block", "number", blockNumber, "hash", blockHash)
+		log.Crit("genesis block already exists", "number", blockNumber, "hash", storedGenHash)
+		// TODO this recreation must be just reading this genesis from db if its really needed.
+		// Otherwise its pointless genesis creation
+		//genBlock := arbosState.MakeGenesisBlock(prevHash, blockNumber, timestamp, stateRoot, chainConfig)
+		//blockHash := genBlock.Hash()
+		//log.Info("recreated existing genesis block", "number", blockNumber, "hash", blockHash)
 	}
 
 	return nil
-	//return chainDb.Commit()
 }
 
 func TryReadStoredChainConfig(chainDb kv.Tx) *chain.Config {
-	EmptyHash := common.Hash{}
-
 	block0Hash, err := rawdb.ReadCanonicalHash(chainDb, 0)
 	if err != nil || block0Hash == EmptyHash {
 		return nil
@@ -317,8 +298,9 @@ func TryReadStoredChainConfig(chainDb kv.Tx) *chain.Config {
 	return cfg
 }
 
+var EmptyHash common.Hash
+
 func WriteOrTestChainConfig(tx kv.TemporalRwTx, config *chain.Config) error {
-	EmptyHash := common.Hash{}
 
 	block0Hash, err := rawdb.ReadCanonicalHash(tx, 0)
 	if err != nil {
@@ -332,8 +314,7 @@ func WriteOrTestChainConfig(tx kv.TemporalRwTx, config *chain.Config) error {
 		return fmt.Errorf("error reading chain config: %v", err)
 	}
 	if storedConfig == nil {
-		rawdb.WriteChainConfig(tx, block0Hash, config)
-		return nil
+		return rawdb.WriteChainConfig(tx, block0Hash, config)
 	}
 	height := rawdb.ReadHeaderNumber(tx, rawdb.ReadHeadHeaderHash(tx))
 	if height == nil {
@@ -343,8 +324,7 @@ func WriteOrTestChainConfig(tx kv.TemporalRwTx, config *chain.Config) error {
 	if cerr != nil {
 		return fmt.Errorf("config compatibility check: %s", cerr.Error())
 	}
-	rawdb.WriteChainConfig(tx, block0Hash, config)
-	return nil
+	return rawdb.WriteChainConfig(tx, block0Hash, config)
 }
 
 func GetBlockChain(chainTx kv.TemporalRwTx, cacheConfig *CachingConfig, chainConfig *chain.Config, txLookupLimit uint64) (core.BlockChain, error) {
@@ -370,37 +350,42 @@ func GetBlockChainSD(chainTx kv.TemporalRwTx, sd *state2.SharedDomains, chainCon
 	return core.NewBlockChainSD(chainTx, sd, chainConfig, nil, engine, vmConfig, shouldPreserveFalse, &txLookupLimit)
 }
 
-func WriteOrTestGenesis(chainDB kv.TemporalRwTx, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, txLookupLimit uint64, accountsPerSync uint, domains *state2.SharedDomains) error {
-	err := WriteOrTestGenblock(chainDB, domains, initData, chainConfig, initMessage, accountsPerSync)
+// Commits rwtx in the case of success write
+func WriteOrTestGenesis(chainRwTx kv.TemporalRwTx, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, txLookupLimit uint64, accountsPerSync uint, domains *state2.SharedDomains) error {
+	err := WriteOrTestGenblock(chainRwTx, domains, initData, chainConfig, initMessage, accountsPerSync)
 	if err != nil {
 		return err
 	}
-	err = WriteOrTestChainConfig(chainDB, chainConfig)
+	err = WriteOrTestChainConfig(chainRwTx, chainConfig)
 	if err != nil {
 		return err
 	}
-
-	return domains.Flush(context.Background(), chainDB)
+	err = domains.Flush(context.Background(), chainRwTx)
+	if err != nil {
+		return err
+	}
+	domains.Close()
+	return chainRwTx.Commit()
 }
 
-func WriteOrTestBlockChain(chainDb kv.TemporalRwTx, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, txLookupLimit uint64, accountsPerSync uint, domains *state2.SharedDomains) (core.BlockChain, error) {
-	// emptyBlockChain := rawdb.ReadHeadHeader(chainDb) == nil
+func WriteOrTestBlockChain(chainRwTx kv.TemporalRwTx, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, txLookupLimit uint64, accountsPerSync uint, domains *state2.SharedDomains) (core.BlockChain, error) {
+	// emptyBlockChain := rawdb.ReadHeadHeader(chainRwTx) == nil
 	// if !emptyBlockChain && (cacheConfig.StateScheme == rawdb.PathScheme) {
 	// 	// When using path scheme, and the stored state trie is not empty,
 	// 	// WriteOrTestGenBlock is not able to recover EmptyRootHash state trie node.
 	// 	// In that case Nitro doesn't test genblock, but just returns the BlockChain.
-	// 	return GetBlockChain(chainDb, cacheConfig, chainConfig, txLookupLimit)
+	// 	return GetBlockChain(chainRwTx, cacheConfig, chainConfig, txLookupLimit)
 	// }
 
-	err := WriteOrTestGenblock(chainDb, domains, initData, chainConfig, initMessage, accountsPerSync)
+	err := WriteOrTestGenblock(chainRwTx, domains, initData, chainConfig, initMessage, accountsPerSync)
 	if err != nil {
 		return nil, err
 	}
-	err = WriteOrTestChainConfig(chainDb, chainConfig)
+	err = WriteOrTestChainConfig(chainRwTx, chainConfig)
 	if err != nil {
 		return nil, err
 	}
-	return GetBlockChainSD(chainDb, domains, chainConfig, txLookupLimit)
+	return GetBlockChainSD(chainRwTx, domains, chainConfig, txLookupLimit)
 }
 
 // Don't preserve reorg'd out blocks

@@ -264,6 +264,49 @@ func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 	return block, statedb, nil
 }
 
+// Writes custom genesis block to db. Allows to write genesis with block number > 0.
+func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block, difficulty *big.Int, genesisBlockNum uint64, cfg *chain.Config) error {
+	// This part already happens in InitializeArbosInDatabase
+	//var stateWriter state.StateWriter
+	//if block.Number().Sign() != 0 {
+	//	return nil, statedb, errors.New("can't commit genesis block with number > 0")
+	//}
+	//if err := statedb.CommitBlock(rules, stateWriter); err != nil {
+	//	return nil, statedb, fmt.Errorf("cannot write state: %w", err)
+	//}
+	newCfg := gen.ConfigOrDefault(block.Root())
+	if err := newCfg.CheckConfigForkOrder(); err != nil {
+		return err
+	}
+
+	if err := rawdb.WriteGenesisIfNotExist(tx, gen); err != nil {
+		return err
+	}
+	if err := rawdb.WriteBlock(tx, block); err != nil {
+		return err
+	}
+	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), difficulty); err != nil {
+		return err
+	}
+	if genesisBlockNum != block.NumberU64() {
+		panic("sadsfafsdf")
+	}
+	if err := rawdbv3.TxNums.Append(tx, genesisBlockNum, uint64(block.Transactions().Len()+1)); err != nil {
+		return err
+	}
+	if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
+		return err
+	}
+	rawdb.WriteHeadBlockHash(tx, block.Hash())
+	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
+		return err
+	}
+	if err := rawdb.WriteChainConfig(tx, block.Hash(), cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
 func GenesisBlockForTesting(db kv.RwDB, addr libcommon.Address, balance *big.Int, dirs datadir.Dirs, logger log.Logger) *types.Block {
 	g := types.Genesis{Alloc: types.GenesisAlloc{addr: {Balance: balance}}, Config: params.TestChainConfig}
@@ -510,6 +553,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		} else {
 			head.RequestsHash = &types.EmptyRequestsHash
 		}
+
 	}
 
 	var root libcommon.Hash
