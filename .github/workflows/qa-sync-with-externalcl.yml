@@ -123,7 +123,7 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: test-results
+        name: test-results-${{ matrix.chain }}-${{ matrix.client }}
         path: |
           ${{ github.workspace }}/result-${{ matrix.chain }}.json
           ${{ matrix.client == 'lighthouse' && '$CL_DATA_DIR/data/beacon/logs/beacon.log' || '' }}
