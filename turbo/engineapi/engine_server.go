@@ -75,25 +75,27 @@ type EngineServer struct {
 	logger  log.Logger
 
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
+	// TODO Remove this on next release
+	printPectraBanner bool
 }
 
 const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
-var printPectraBanner = true
 
 func NewEngineServer(logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
 	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, consuming bool) *EngineServer {
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
-		logger:           logger,
-		config:           config,
-		executionService: executionService,
-		blockDownloader:  blockDownloader,
-		chainRW:          chainRW,
-		proposing:        proposing,
-		hd:               hd,
-		caplin:           caplin,
-		engineLogSpamer:  engine_logs_spammer.NewEngineLogsSpammer(logger, config),
+		logger:            logger,
+		config:            config,
+		executionService:  executionService,
+		blockDownloader:   blockDownloader,
+		chainRW:           chainRW,
+		proposing:         proposing,
+		hd:                hd,
+		caplin:            caplin,
+		engineLogSpamer:   engine_logs_spammer.NewEngineLogsSpammer(logger, config),
+		printPectraBanner: true,
 	}
 
 	srv.consuming.Store(consuming)
@@ -340,8 +342,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, payloadStatus.CriticalError
 	}
 
-	if version == clparams.ElectraVersion && printPectraBanner && payloadStatus.Status == engine_types.ValidStatus {
-		printPectraBanner = false
+	if version == clparams.ElectraVersion && s.printPectraBanner && payloadStatus.Status == engine_types.ValidStatus {
+		s.printPectraBanner = false
 		log.Info(engine_helpers.PectraBanner)
 	}
 
