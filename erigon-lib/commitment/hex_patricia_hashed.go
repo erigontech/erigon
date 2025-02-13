@@ -2793,6 +2793,8 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 		//return nil
 		//})
 	}
+
+	clear(t.keys)
 	//return g.Wait()
 	return nil
 }
