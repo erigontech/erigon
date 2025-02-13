@@ -30,7 +30,7 @@ func (r *DatastreamClientRunner) StartRead(errorChan chan struct{}, diffBlock ui
 	} else {
 		r.dsClient.RenewEntryChannel()
 	}
-	r.dsClient.RenewEntryChannel()
+
 	if r.isReading.Load() {
 		return fmt.Errorf("tried starting datastream client runner thread while another is running")
 	}
