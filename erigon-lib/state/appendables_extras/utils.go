@@ -32,7 +32,7 @@ func Decode64FromBytes(buf []byte, x8Bytes bool) (x uint64) {
 }
 
 // toPrefix inclusive
-// bigendianess assumed for key comparison
+// bigendianess assumed (for key comparison)
 func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit int, rwTx kv.RwTx) error {
 	c, err := rwTx.RwCursor(tbl) // TODO: no dupsort tbl assumed
 	if err != nil {

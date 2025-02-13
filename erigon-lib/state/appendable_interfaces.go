@@ -2,7 +2,6 @@ package state
 
 import (
 	"context"
-	"errors"
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/kv"

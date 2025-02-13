@@ -15,7 +15,6 @@ import (
 
 type RootRelationI interface {
 	RootNum2Id(from RootNum, tx kv.Tx) (Id, error)
-	Num2Id(from Num, tx kv.Tx) (Id, error)
 }
 
 // this have 1:many or many:1 or 1:1 relation with root num
@@ -25,7 +24,7 @@ type RelationalAppendable struct {
 	rel       RootRelationI
 	valsTbl   string
 	noUnwind  bool // if true, don't delete on unwind; tsId keeps increasing
-	pruneFrom RootNum
+	pruneFrom Num
 }
 
 type RAOpts func(a *RelationalAppendable)
@@ -99,38 +98,53 @@ func (a *RelationalAppendable) BeginFilesRo() *RelationalAppendableTx {
 	}
 }
 
+type QueryFlags uint8
+
+const (
+	QueryFlags_DB   = QueryFlags(1)
+	QueryFlags_Snap = QueryFlags(2)
+)
+
+func (q QueryFlags) IsQueryDb() bool   { return q&QueryFlags_DB != 0 }
+func (q QueryFlags) IsQuerySnap() bool { return q&QueryFlags_Snap != 0 }
+
 func (a *RelationalAppendableTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
+	return a.GetWithFlags(entityNum, tx, QueryFlags_DB|QueryFlags_Snap)
+}
+
+func (a *RelationalAppendableTx) GetWithFlags(entityNum Num, tx kv.Tx, flag QueryFlags) (Bytes, error) {
 	ap := a.a
-	lastNum := ap.VisibleFilesMaxNum()
-	var word []byte
-	if entityNum <= lastNum {
-		index := sort.Search(len(ap._visible), func(i int) bool {
-			return ap._visible[i].src.FirstEntityNum() >= uint64(entityNum)
-		})
+	if flag.IsQuerySnap() {
+		lastNum := ap.VisibleFilesMaxNum()
+		var word []byte
+		if entityNum <= lastNum {
+			index := sort.Search(len(ap._visible), func(i int) bool {
+				return ap._visible[i].src.FirstEntityNum() >= uint64(entityNum)
+			})
 
-		if index == -1 {
-			return nil, fmt.Errorf("entity get error: snapshot expected but now found: (%s, %d)", ap.a.Name(), entityNum)
+			if index == -1 {
+				return nil, fmt.Errorf("entity get error: snapshot expected but now found: (%s, %d)", ap.a.Name(), entityNum)
+			}
+
+			visible := ap._visible[index]
+			g := visible.getter
+
+			offset := visible.reader.OrdinalLookup(uint64(entityNum)) // TODO: allowed values
+			g.Reset(offset)
+			if g.HasNext() {
+				word, _ = g.Next(word[:0])
+				return word, nil
+			}
+
+			return nil, fmt.Errorf("entity get error: %s expected %s in snapshot %s but not found", ap.a.Name(), entityNum, visible.src.decompressor.FileName())
 		}
-
-		visible := ap._visible[index]
-		g := visible.getter
-
-		offset := visible.reader.OrdinalLookup(uint64(entityNum)) // TODO: allowed values
-		g.Reset(offset)
-		if g.HasNext() {
-			word, _ = g.Next(word[:0])
-			return word, nil
-		}
-
-		return nil, fmt.Errorf("entity get error: %s expected %s in snapshot %s but not found", ap.a.Name(), entityNum, visible.src.decompressor.FileName())
 	}
 
 	// else the db
-	id, err := a.a.rel.Num2Id(entityNum, tx)
-	if err != nil {
-		return nil, err
+	if flag.IsQueryDb() {
+		return tx.GetOne(ap.valsTbl, entityNum.EncTo8Bytes())
 	}
-	return tx.GetOne(ap.valsTbl, id.EncToBytes(true))
+	return nil, fmt.Errorf("no source to query")
 }
 
 // GetNc queries non-canonical data (db only)
@@ -168,14 +182,12 @@ func (a *RelationalAppendableTx) ResetSequence(tx kv.RwTx, newValue Num) error {
 
 func (a *RelationalAppendableTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error {
 	ap := a.a
-	fromId, err := ap.rel.RootNum2Id(ap.pruneFrom, tx)
-	if err != nil {
-		return err
-	}
+	fromId := uint64(ap.pruneFrom)
 	toId, err := ap.rel.RootNum2Id(to, tx)
 	if err != nil {
 		return err
 	}
+	log.Info("pruning", "appendable", ap.a.Name(), "from", fromId, "to", toId)
 
 	eFrom := ap.encTs(uint64(fromId))
 	eTo := ap.encTs(uint64(toId) - 1)

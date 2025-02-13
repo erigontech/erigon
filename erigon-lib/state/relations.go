@@ -70,6 +70,14 @@ func (r *OneToManyRelation) Num2Id(num Num, tx kv.Tx) (Id, error) {
 	}
 
 	// TODO: else, it's case like txs and we need to binary search over the maxNumTbl
+	cursor, err := tx.Cursor(r.maxNumTbl)
+	if err != nil {
+		return 0, err
+	}
+	defer cursor.Close()
+
+	//curso
+
 	return 0, nil
 }
 

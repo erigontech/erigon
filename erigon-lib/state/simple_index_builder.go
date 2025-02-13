@@ -107,7 +107,7 @@ func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 	return s.args.enums
 }
 
-func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmpDir string, ps *background.ProgressSet, lvl log.Lvl, logger log.Logger) (*recsplit.Index, err error) {
+func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmpDir string, ps *background.ProgressSet, lvl log.Lvl, logger log.Logger) (i *recsplit.Index, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%s: at=%d-%d, %v, %s", s.id.IndexPrefix()[s.indexPos], from, to, rec, dbg.Stack())
