@@ -4,31 +4,34 @@ on:
   push:
     branches:
       - 'release/2.*'
-  pull_request:
-    branches:
-      - 'release/2.*'
-    types:
-      - ready_for_review
   workflow_dispatch:     # Run manually
 
 jobs:
   sync-with-externalcl:
-    runs-on: [self-hosted, linux, X64]
     strategy:
       matrix:
-        client: [lighthouse, prysm]
-        chain: [mainnet, gnosis]
-        exclude:
-          - client: prysm
-            chain: gnosis
+        include:
+          - chain: mainnet
+            client: lighthouse
+            runner: Erigon2
+            reference_data_dir: /opt/erigon-versions/reference-version/datadir
+          - chain: mainnet
+            client: prysm
+            runner: Erigon2
+            reference_data_dir: /opt/erigon-versions/reference-version/datadir
+          - chain: gnosis
+            client: prysm
+            runner: Gnosis
+            reference_data_dir: /opt/erigon-versions/reference-version-2/datadir
+    runs-on: [ self-hosted, "${{ matrix.runner }}" ]
     timeout-minutes: 600
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_REFERENCE_DATA_DIR: ${{ matrix.reference_data_dir }}
       CL_DATA_DIR: ${{ github.workspace }}/consensus
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TRACKING_TIME_SECONDS: 14400 # 4 hours
-      TOTAL_TIME_SECONDS: 28800 # 8 hours
+      TRACKING_TIME_SECONDS: 3600 # 1 hour
+      TOTAL_TIME_SECONDS: 25200 # 7 hours
 
     steps:
     - name: Check out repository
