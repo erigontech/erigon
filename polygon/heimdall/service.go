@@ -32,6 +32,10 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
+const (
+	isCatchingDelaySec = 600
+)
+
 type ServiceConfig struct {
 	Store     Store
 	BorConfig *borcfg.BorConfig
@@ -47,6 +51,7 @@ type Service struct {
 	milestoneScraper          *Scraper[*Milestone]
 	spanScraper               *Scraper[*Span]
 	spanBlockProducersTracker *spanBlockProducersTracker
+	client                    Client
 	ready                     ready
 }
 
@@ -100,6 +105,7 @@ func NewService(config ServiceConfig) *Service {
 		milestoneScraper:          milestoneScraper,
 		spanScraper:               spanScraper,
 		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
+		client:                    client,
 	}
 }
 
@@ -396,4 +402,26 @@ func (s *Service) replayUntrackedSpans(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (s *Service) IsCatchingUp(ctx context.Context) (bool, error) {
+	status, err := s.client.FetchStatus(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	if status.CatchingUp {
+		return true, nil
+	}
+
+	parsed, err := time.Parse(time.RFC3339, status.LatestBlockTime)
+	if err != nil {
+		return false, err
+	}
+
+	if parsed.Unix() < time.Now().Unix()-isCatchingDelaySec {
+		return true, nil
+	}
+
+	return false, nil
 }
