@@ -38,13 +38,13 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(tb, err)
 	defer rwTx.Rollback()
-
+	fmt.Println("shota N1")
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
 
 	txCount := int(cfg.stepSize) * 32 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
-
+	fmt.Println("shota N2")
 	keys, vals := generateInputData(tb, length.Addr, 16, txCount)
 	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
 
@@ -66,8 +66,9 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 			require.NoError(tb, err)
 		}
 	}
-
+	fmt.Println("shota N3")
 	err = domains.Flush(context.Background(), rwTx)
+	fmt.Println("shota N7")
 	require.NoError(tb, err)
 	domains.Close() // closes ac
 
@@ -75,6 +76,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 
 	// build files out of db
 	err = agg.BuildFiles(uint64(txCount))
+	fmt.Println("shota N4")
 	require.NoError(tb, err)
 	return db, agg
 }
