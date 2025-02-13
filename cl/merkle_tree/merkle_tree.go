@@ -205,7 +205,12 @@ func (m *MerkleTree) CopyInto(other *MerkleTree) {
 	// Copy primitive fields
 	other.computeLeaf = m.computeLeaf
 	other.leavesCount = m.leavesCount
-	other.limit = m.limit // Shallow copy
+	if m.limit != nil {
+		other.limit = new(uint64) // Shallow copy
+		*other.limit = *m.limit
+	} else {
+		other.limit = nil
+	}
 
 	// Ensure `other.layers` has enough capacity (with +50% buffer for future growth)
 	requiredLayersLen := len(m.layers)
