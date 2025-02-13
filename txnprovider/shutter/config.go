@@ -37,7 +37,7 @@ type Config struct {
 	KeyBroadcastContractAddress      string
 	KeyperSetManagerContractAddress  string
 	MaxNumKeysPerMessage             uint64
-	MaxRecentEons                    int
+	ReorgDepthAwareness              uint64
 }
 
 type P2pConfig struct {
@@ -87,7 +87,7 @@ var (
 		KeyBroadcastContractAddress:      "0x9D31865BEffcE842FBd36CDA587aDDA8bef804B7",
 		KeyperSetManagerContractAddress:  "0xC4DE9FAf4ec882b33dA0162CBE628B0D8205D0c0",
 		MaxNumKeysPerMessage:             defaultMaxNumKeysPerMessage,
-		MaxRecentEons:                    defaultMaxRecentEons,
+		ReorgDepthAwareness:              defaultReorgDepthAwarenessEpochs * clparams.BeaconConfigs[clparams.ChiadoNetwork].SlotsPerEpoch,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -107,7 +107,7 @@ var (
 		KeyBroadcastContractAddress:      "0x626dB87f9a9aC47070016A50e802dd5974341301",
 		KeyperSetManagerContractAddress:  "0x7C2337f9bFce19d8970661DA50dE8DD7d3D34abb",
 		MaxNumKeysPerMessage:             defaultMaxNumKeysPerMessage,
-		MaxRecentEons:                    defaultMaxRecentEons,
+		ReorgDepthAwareness:              defaultReorgDepthAwarenessEpochs * clparams.BeaconConfigs[clparams.GnosisNetwork].SlotsPerEpoch,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -119,7 +119,7 @@ var (
 )
 
 const (
-	defaultP2PListenPort        = 23_102
-	defaultMaxNumKeysPerMessage = 500
-	defaultMaxRecentEons        = 100
+	defaultP2PListenPort             = 23_102
+	defaultMaxNumKeysPerMessage      = 500
+	defaultReorgDepthAwarenessEpochs = 3
 )
