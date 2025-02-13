@@ -138,9 +138,13 @@ LOOP:
 	defer ticker.Stop()
 	processed := 0
 
-	tree, err := InitialiseL1InfoTree(hermezDb)
-	if err != nil {
-		return nil, fmt.Errorf("InitialiseL1InfoTree: %w", err)
+	var tree *L1InfoTree
+	if len(allLogs) > 0 {
+		log.Info(fmt.Sprintf("[%s] Checking for L1 info tree updates, logs count:%v", logPrefix, len(allLogs)))
+		tree, err = InitialiseL1InfoTree(hermezDb)
+		if err != nil {
+			return nil, fmt.Errorf("InitialiseL1InfoTree: %w", err)
+		}
 	}
 
 	// process the logs in chunks
