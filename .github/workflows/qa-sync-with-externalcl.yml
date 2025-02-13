@@ -4,11 +4,6 @@ on:
   push:
     branches:
       - 'release/2.*'
-  pull_request:
-    branches:
-      - 'release/2.*'
-    types:
-      - ready_for_review
   workflow_dispatch:     # Run manually
 
 jobs:
