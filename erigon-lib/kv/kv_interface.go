@@ -218,6 +218,9 @@ type Putter interface {
 		// use id
 	*/
 	IncrementSequence(table string, amount uint64) (uint64, error)
+
+	// allow set arbitrary value to sequence (for example to decrement it to exact value)
+	ResetSequence(table string, newValue uint64) error
 	Append(table string, k, v []byte) error
 	AppendDup(table string, k, v []byte) error
 

@@ -31,7 +31,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	math2 "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -72,7 +71,7 @@ type TraceCallParam struct {
 	MaxFeePerGas         *hexutil.Big       `json:"maxFeePerGas"`
 	MaxFeePerBlobGas     *hexutil.Big       `json:"maxFeePerBlobGas"`
 	Value                *hexutil.Big       `json:"value"`
-	Data                 hexutility.Bytes   `json:"data"`
+	Data                 hexutil.Bytes      `json:"data"`
 	AccessList           *types.AccessList  `json:"accessList"`
 	txHash               *libcommon.Hash
 	traceTypes           []string
@@ -81,7 +80,7 @@ type TraceCallParam struct {
 
 // TraceCallResult is the response to `trace_call` method
 type TraceCallResult struct {
-	Output          hexutility.Bytes                        `json:"output"`
+	Output          hexutil.Bytes                           `json:"output"`
 	StateDiff       map[libcommon.Address]*StateDiffAccount `json:"stateDiff"`
 	Trace           []*ParityTrace                          `json:"trace"`
 	VmTrace         *VmTrace                                `json:"vmTrace"`
@@ -102,8 +101,8 @@ type StateDiffBalance struct {
 }
 
 type StateDiffCode struct {
-	From hexutility.Bytes `json:"from"`
-	To   hexutility.Bytes `json:"to"`
+	From hexutil.Bytes `json:"from"`
+	To   hexutil.Bytes `json:"to"`
 }
 
 type StateDiffNonce struct {
@@ -118,8 +117,8 @@ type StateDiffStorage struct {
 
 // VmTrace is the part of `trace_call` response that is under "vmTrace" tag
 type VmTrace struct {
-	Code hexutility.Bytes `json:"code"`
-	Ops  []*VmTraceOp     `json:"ops"`
+	Code hexutil.Bytes `json:"code"`
+	Ops  []*VmTraceOp  `json:"ops"`
 }
 
 // VmTraceOp is one element of the vmTrace ops trace
@@ -746,7 +745,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					if err != nil {
 						return err
 					}
-					m := make(map[string]hexutility.Bytes)
+					m := make(map[string]hexutil.Bytes)
 					m["-"] = code
 					accountDiff.Code = m
 				}
@@ -775,7 +774,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 				if err != nil {
 					return err
 				}
-				m := make(map[string]hexutility.Bytes)
+				m := make(map[string]hexutil.Bytes)
 				m["+"] = code
 				accountDiff.Code = m
 			}
