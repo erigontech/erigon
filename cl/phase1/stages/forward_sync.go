@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
 )
 
@@ -99,7 +101,7 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 // processDownloadedBlockBatches processes a batch of downloaded blocks.
 // It takes the highest block processed, a flag to determine if insertion is needed, and a list of signed beacon blocks as input.
 // It returns the new highest block processed and an error if any.
-func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockProcessed uint64, shouldInsert bool, blocks []*cltypes.SignedBeaconBlock) (newHighestBlockProcessed uint64, err error) {
+func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *Cfg, highestBlockProcessed uint64, shouldInsert bool, blocks []*cltypes.SignedBeaconBlock) (newHighestBlockProcessed uint64, err error) {
 	// Pre-process the block batch to ensure that the blocks are sorted by slot in ascending order
 	sort.Slice(blocks, func(i, j int) bool {
 		return blocks[i].Block.Slot < blocks[j].Block.Slot
@@ -110,6 +112,13 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 		st        *state.CachingBeaconState
 	)
 	newHighestBlockProcessed = highestBlockProcessed
+	if shouldProcessBlobs(blocks, cfg) {
+		_, err = downloadAndProcessEip4844DA(ctx, logger, cfg, highestBlockProcessed, blocks)
+		if err != nil {
+			logger.Trace("[Caplin] Failed to process blobs", "err", err)
+			return highestBlockProcessed, nil
+		}
+	}
 	// Iterate over each block in the sorted list
 	for _, block := range blocks {
 		// Compute the hash of the current block
@@ -131,7 +140,12 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 		}
 
 		// Process the block
-		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, false); err != nil {
+		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, true); err != nil {
+			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) {
+				// Return an error if EIP-4844 data is not available
+				logger.Trace("[Caplin] forward sync EIP-4844 data not available", "blockSlot", block.Block.Slot)
+				return highestBlockProcessed, nil
+			}
 			// Return an error if block processing fails
 			err = fmt.Errorf("bad blocks segment received: %w", err)
 			return
@@ -193,27 +207,13 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 
 	// Set the function to process downloaded blocks
 	downloader.SetProcessFunction(func(initialHighestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, err error) {
-		highestSlotProcessed, err := processDownloadedBlockBatches(ctx, cfg, initialHighestSlotProcessed, shouldInsert, blocks)
+		highestSlotProcessed, err := processDownloadedBlockBatches(ctx, logger, cfg, initialHighestSlotProcessed, shouldInsert, blocks)
 		if err != nil {
 			logger.Warn("[Caplin] Failed to process block batch", "err", err)
 			return initialHighestSlotProcessed, err
 		}
-		// Exit if we are pre-EIP-4844
-		if !shouldProcessBlobs(blocks, cfg) {
-			currentSlot.Store(highestSlotProcessed)
-			return highestSlotProcessed, nil
-		}
-		// Process blobs for EIP-4844
-		highestBlobSlotProcessed, err := downloadAndProcessEip4844DA(ctx, logger, cfg, initialHighestSlotProcessed, blocks)
-		if err != nil {
-			logger.Warn("[Caplin] Failed to process blobs", "err", err)
-			return initialHighestSlotProcessed, err
-		}
-		if highestBlobSlotProcessed <= initialHighestSlotProcessed {
-			return initialHighestSlotProcessed, nil
-		}
-		currentSlot.Store(highestBlobSlotProcessed)
-		return highestBlobSlotProcessed, nil
+		currentSlot.Store(highestSlotProcessed)
+		return highestSlotProcessed, nil
 	})
 
 	// Get the current slot of the chain tip
