@@ -2666,7 +2666,7 @@ func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 
 func (p *ParallelPatriciaHashed) foldNibble(nib int) error {
 	// prevbyte - can we avoid it?
-	c, d, err := p.mounts[nib].foldMounted(int(nib))
+	c, d, err := p.mounts[nib].foldMounted(nib)
 	if err != nil {
 		return err
 	}
@@ -2772,7 +2772,6 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 	for n := 0; n < len(t.nibbles); n++ {
 		nib := t.nibbles[n]
 		phnib := pph.mounts[n]
-		n = n
 
 		//g.Go(func() error {
 		//n = n

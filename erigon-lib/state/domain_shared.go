@@ -1100,7 +1100,7 @@ func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 
 type ConcurrentSDCommitmentContext struct {
 	*SharedDomainsCommitmentContext
-	trie  *commitment.ParallelPatriciaHashed
+	// trie  *commitment.ParallelPatriciaHashed
 	accMu sync.Mutex // since code domain is queried during fetching account data, code is also behind this mutex
 	stoMu sync.Mutex
 	comMu sync.RWMutex
@@ -1151,43 +1151,43 @@ func (ctx *ConcurrentSDCommitmentContext) Storage(plainKey []byte) (u *commitmen
 
 func (ctx *ConcurrentSDCommitmentContext) ComputeCommitment(ct context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
 	panic("nope")
-	if dbg.DiscardCommitment() {
-		ctx.updates.Reset()
-		return nil, nil
-	}
-	ctx.ResetBranchCache()
-	defer ctx.ResetBranchCache()
+	// if dbg.DiscardCommitment() {
+	// 	ctx.updates.Reset()
+	// 	return nil, nil
+	// }
+	// ctx.ResetBranchCache()
+	// defer ctx.ResetBranchCache()
 
-	mxCommitmentRunning.Inc()
-	defer mxCommitmentRunning.Dec()
-	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
+	// mxCommitmentRunning.Inc()
+	// defer mxCommitmentRunning.Dec()
+	// defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
 
-	updateCount := ctx.updates.Size()
-	if ctx.sharedDomains.trace {
-		defer ctx.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", ctx.updates.Mode())
-	}
-	if updateCount == 0 {
-		rootHash, err = ctx.patriciaTrie.RootHash()
-		return rootHash, err
-	}
+	// updateCount := ctx.updates.Size()
+	// if ctx.sharedDomains.trace {
+	// 	defer ctx.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", ctx.updates.Mode())
+	// }
+	// if updateCount == 0 {
+	// 	rootHash, err = ctx.patriciaTrie.RootHash()
+	// 	return rootHash, err
+	// }
 
-	// data accessing functions should be set when domain is opened/shared context updated
-	ctx.trie.SetTrace(ctx.sharedDomains.trace)
-	ctx.Reset()
+	// // data accessing functions should be set when domain is opened/shared context updated
+	// ctx.trie.SetTrace(ctx.sharedDomains.trace)
+	// ctx.Reset()
 
-	rootHash, err = ctx.trie.Process(ct, ctx.updates, logPrefix)
-	if err != nil {
-		return nil, err
-	}
-	ctx.justRestored.Store(false)
+	// rootHash, err = ctx.trie.Process(ct, ctx.updates, logPrefix)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// ctx.justRestored.Store(false)
 
-	if saveState {
-		if err := ctx.storeCommitmentState(blockNum, rootHash); err != nil {
-			return nil, err
-		}
-	}
+	// if saveState {
+	// 	if err := ctx.storeCommitmentState(blockNum, rootHash); err != nil {
+	// 		return nil, err
+	// 	}
+	// }
 
-	return rootHash, err
+	// return rootHash, err
 }
 
 type SharedDomainsCommitmentContext struct {
