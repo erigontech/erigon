@@ -567,16 +567,6 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 	return
 }
 
-// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-func ResetSequence(tx kv.RwTx, bucket string, newValue uint64) error {
-	newVBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(newVBytes, newValue)
-	if err := tx.Put(kv.Sequence, []byte(bucket), newVBytes); err != nil {
-		return err
-	}
-	return nil
-}
-
 func ReadBodyForStorageByKey(db kv.Getter, k []byte) (*types.BodyForStorage, error) {
 	bodyRlp, err := db.GetOne(kv.BlockBody, k)
 	if err != nil {

@@ -108,9 +108,10 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 	); err != nil {
 		return err
 	}
-	if err := rawdb.ResetSequence(tx, kv.EthTx, 0); err != nil {
+	if err := tx.ResetSequence(kv.EthTx, 0); err != nil {
 		return err
 	}
+
 	return nil
 }
 
