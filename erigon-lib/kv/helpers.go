@@ -28,7 +28,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon-lib/common"
 )
@@ -255,5 +255,5 @@ func IncrementKey(tx RwTx, table string, k []byte) error {
 		version = binary.BigEndian.Uint64(v)
 	}
 	version++
-	return tx.Put(table, k, hexutility.EncodeTs(version))
+	return tx.Put(table, k, hexutil.EncodeTs(version))
 }

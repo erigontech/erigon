@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -140,11 +140,11 @@ func (b *BitVector) HashSSZ() ([32]byte, error) {
 }
 
 func (b *BitVector) MarshalJSON() ([]byte, error) {
-	return json.Marshal(hexutility.Bytes(b.container))
+	return json.Marshal(hexutil.Bytes(b.container))
 }
 
 func (b *BitVector) UnmarshalJSON(data []byte) error {
-	var hex hexutility.Bytes
+	var hex hexutil.Bytes
 	if err := json.Unmarshal(data, &hex); err != nil {
 		return err
 	}

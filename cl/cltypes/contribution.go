@@ -18,7 +18,7 @@ package cltypes
 
 import (
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -89,7 +89,7 @@ type Contribution struct {
 	Slot              uint64            `json:"slot,string"`
 	BeaconBlockRoot   libcommon.Hash    `json:"beacon_block_root"`
 	SubcommitteeIndex uint64            `json:"subcommittee_index,string"`
-	AggregationBits   hexutility.Bytes  `json:"aggregation_bits"`
+	AggregationBits   hexutil.Bytes     `json:"aggregation_bits"`
 	Signature         libcommon.Bytes96 `json:"signature"`
 }
 
