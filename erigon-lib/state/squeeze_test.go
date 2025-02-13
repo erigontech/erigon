@@ -42,7 +42,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
-
+	ctx := context.Background()
 	txCount := int(cfg.stepSize) * 32 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
 	fmt.Println("shota N2")
 	keys, vals := generateInputData(tb, length.Addr, 16, txCount)
@@ -64,6 +64,12 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 
 			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)
 			require.NoError(tb, err)
+
+		}
+		if uint64(i+1)%agg.StepSize() == 0 {
+			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+			require.NoError(tb, err)
+			require.NotEmpty(tb, rh)
 		}
 	}
 	fmt.Println("shota N3")
@@ -102,7 +108,6 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	fmt.Println("shota Aq movida")
 	latestRoot, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), "")
 	fmt.Println("shota", hex.EncodeToString(latestRoot))
-	require.Error(t, err)
 	require.NoError(t, err)
 	require.NotEmpty(t, latestRoot)
 	domains.Close()
