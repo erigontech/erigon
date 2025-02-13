@@ -208,6 +208,9 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 	if err != nil {
 		return nil, err
 	}
+
+	batchCounters.UpdateExecutionAndProcessingCountersCache(txCounters)
+
 	collected, err := batchCounters.CombineCollectors(l1InfoIndex != 0)
 	if err != nil {
 		return nil, err
