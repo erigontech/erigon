@@ -187,7 +187,6 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 		buf := new(bytes.Buffer)
 		buf.WriteByte(r.Type)
 		withNonceAndReceiptVersion := &depositReceiptRlp{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs, r.DepositNonce, r.DepositReceiptVersion}
-		fmt.Println(*r.DepositReceiptVersion)
 		if err := rlp.Encode(buf, withNonceAndReceiptVersion); err != nil {
 			return err
 		}
