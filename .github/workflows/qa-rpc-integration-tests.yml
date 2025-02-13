@@ -127,7 +127,26 @@ jobs:
           admin_peers/test_01.json,\
           eth_getWork/test_01.json,\
           eth_mining/test_01.json,\
-          eth_protocolVersion/test_1.json
+          eth_protocolVersion/test_1.json,\
+          eth_feeHistory,\
+          eth_getBlockByNumber/test_01.json,\
+          eth_getBlockByNumber/test_02.json,\
+          eth_getBlockByNumber/test_04.json,\
+          eth_getBlockByNumber/test_05.json,\
+          eth_getBlockByNumber/test_06.json,\
+          eth_getBlockByNumber/test_07.json,\
+          eth_getBlockByNumber/test_08.json,\
+          eth_getBlockByNumber/test_12.json,\
+          eth_getBlockByNumber/test_13.json,\
+          eth_getBlockByNumber/test_14.json,\
+          eth_getBlockByHash/test_01.json,\
+          eth_getBlockByHash/test_02.json,\
+          eth_getBlockByHash/test_05.json,\
+          eth_getBlockByHash/test_06.json,\
+          eth_getBlockByHash/test_07.json,\
+          eth_getBlockByHash/test_08.json,\
+          eth_getBlockByHash/test_09.json
+          
           
           # Capture test runner script exit status
           test_exit_status=$?
