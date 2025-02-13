@@ -51,6 +51,9 @@ type EngineServer struct {
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
 	lock    sync.Mutex
 	logger  log.Logger
+
+	// TODO Remove this on next release
+	printPectraBanner bool
 }
 
 const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
@@ -67,6 +70,7 @@ func NewEngineServer(logger log.Logger, config *chain.Config, executionService e
 		chainRW:          chainRW,
 		proposing:        proposing,
 		hd:               hd,
+		printPectraBanner: true,
 	}
 }
 
@@ -292,6 +296,11 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
+	}
+
+	if version == clparams.ElectraVersion && s.printPectraBanner && payloadStatus.Status == engine_types.ValidStatus {
+		s.printPectraBanner = false
+		log.Info(engine_helpers.PectraBanner)
 	}
 
 	return payloadStatus, nil
