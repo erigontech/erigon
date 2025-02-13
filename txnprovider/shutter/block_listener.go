@@ -48,6 +48,7 @@ func (bl BlockListener) RegisterObserver(o event.Observer[BlockEvent]) event.Unr
 }
 
 func (bl BlockListener) Run(ctx context.Context) error {
+	defer bl.logger.Info("block listener stopped")
 	bl.logger.Info("running block listener")
 
 	sub, err := bl.stateChangesClient.StateChanges(ctx, &remoteproto.StateChangeRequest{})
@@ -57,7 +58,7 @@ func (bl BlockListener) Run(ctx context.Context) error {
 
 	// note the changes stream is ctx-aware so Recv should terminate with err if ctx gets done
 	var batch *remoteproto.StateChangeBatch
-	for batch, err = sub.Recv(); err != nil; batch, err = sub.Recv() {
+	for batch, err = sub.Recv(); err == nil; batch, err = sub.Recv() {
 		if batch == nil || len(batch.ChangeBatch) == 0 {
 			continue
 		}

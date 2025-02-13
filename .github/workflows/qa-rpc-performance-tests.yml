@@ -1,6 +1,9 @@
 name: QA - RPC Performance Tests
 
 on:
+  push:
+    branches:
+      - 'release/3.*'
   workflow_dispatch:
   schedule:
     - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC

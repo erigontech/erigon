@@ -7,10 +7,8 @@ import (
 	"errors"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 var _ = (*receiptMarshaling)(nil)
@@ -19,15 +17,15 @@ var _ = (*receiptMarshaling)(nil)
 func (r Receipt) MarshalJSON() ([]byte, error) {
 	type Receipt struct {
 		Type                  hexutil.Uint64    `json:"type,omitempty"`
-		PostState             hexutility.Bytes  `json:"root"`
+		PostState             hexutil.Bytes  `json:"root"`
 		Status                hexutil.Uint64    `json:"status"`
 		CumulativeGasUsed     hexutil.Uint64    `json:"cumulativeGasUsed" gencodec:"required"`
 		Bloom                 Bloom             `json:"logsBloom"         gencodec:"required"`
 		Logs                  []*Log            `json:"logs"              gencodec:"required"`
-		TxHash                libcommon.Hash    `json:"transactionHash" gencodec:"required"`
-		ContractAddress       libcommon.Address `json:"contractAddress"`
+		TxHash                common.Hash    `json:"transactionHash" gencodec:"required"`
+		ContractAddress       common.Address `json:"contractAddress"`
 		GasUsed               hexutil.Uint64    `json:"gasUsed" gencodec:"required"`
-		BlockHash             libcommon.Hash    `json:"blockHash,omitempty"`
+		BlockHash             common.Hash    `json:"blockHash,omitempty"`
 		BlockNumber           *hexutil.Big      `json:"blockNumber,omitempty"`
 		TransactionIndex      hexutil.Uint      `json:"transactionIndex"`
 		L1GasPrice            *hexutil.Big      `json:"l1GasPrice,omitempty"`
@@ -58,20 +56,20 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 	enc.DepositReceiptVersion = (*hexutil.Uint64)(r.DepositReceiptVersion)
 	return json.Marshal(&enc)
 }
-
+ 
 // UnmarshalJSON unmarshals from JSON.
 func (r *Receipt) UnmarshalJSON(input []byte) error {
 	type Receipt struct {
 		Type                  *hexutil.Uint64    `json:"type,omitempty"`
-		PostState             *hexutility.Bytes  `json:"root"`
+		PostState             *hexutil.Bytes  `json:"root"`
 		Status                *hexutil.Uint64    `json:"status"`
 		CumulativeGasUsed     *hexutil.Uint64    `json:"cumulativeGasUsed" gencodec:"required"`
 		Bloom                 *Bloom             `json:"logsBloom"         gencodec:"required"`
 		Logs                  []*Log             `json:"logs"              gencodec:"required"`
-		TxHash                *libcommon.Hash    `json:"transactionHash" gencodec:"required"`
-		ContractAddress       *libcommon.Address `json:"contractAddress"`
+		TxHash                *common.Hash    `json:"transactionHash" gencodec:"required"`
+		ContractAddress       *common.Address `json:"contractAddress"`
 		GasUsed               *hexutil.Uint64    `json:"gasUsed" gencodec:"required"`
-		BlockHash             *libcommon.Hash    `json:"blockHash,omitempty"`
+		BlockHash             *common.Hash    `json:"blockHash,omitempty"`
 		BlockNumber           *hexutil.Big       `json:"blockNumber,omitempty"`
 		TransactionIndex      *hexutil.Uint      `json:"transactionIndex"`
 		L1GasPrice            *hexutil.Big       `json:"l1GasPrice,omitempty"`

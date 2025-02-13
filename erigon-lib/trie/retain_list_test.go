@@ -134,17 +134,17 @@ func TestProofRetainerConstruction(t *testing.T) {
 	require.Equal(t, validKeys[7], []byte(accProof.AccountProof[2]))
 
 	require.Len(t, accProof.StorageProof, 3)
-	require.Equal(t, accProof.StorageProof[0].Key, libcommon.Hash{1})
+	require.Equal(t, libcommon.HexToHash(accProof.StorageProof[0].Key), libcommon.Hash{1})
 	require.Len(t, accProof.StorageProof[0].Proof, 2)
 	require.Equal(t, validKeys[6], []byte(accProof.StorageProof[0].Proof[0]))
 	require.Equal(t, validKeys[5], []byte(accProof.StorageProof[0].Proof[1]))
 
-	require.Equal(t, accProof.StorageProof[1].Key, libcommon.Hash{2})
+	require.Equal(t, libcommon.HexToHash(accProof.StorageProof[1].Key), libcommon.Hash{2})
 	require.Len(t, accProof.StorageProof[1].Proof, 2)
 	require.Equal(t, validKeys[4], []byte(accProof.StorageProof[1].Proof[0]))
 	require.Equal(t, validKeys[3], []byte(accProof.StorageProof[1].Proof[1]))
 
-	require.Equal(t, accProof.StorageProof[2].Key, libcommon.Hash{3})
+	require.Equal(t, libcommon.HexToHash(accProof.StorageProof[2].Key), libcommon.Hash{3})
 	require.Len(t, accProof.StorageProof[2].Proof, 3)
 	require.Equal(t, validKeys[2], []byte(accProof.StorageProof[2].Proof[0]))
 	require.Equal(t, validKeys[1], []byte(accProof.StorageProof[2].Proof[1]))

@@ -29,7 +29,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi"
@@ -49,8 +48,8 @@ type CallArgs struct {
 	MaxFeePerBlobGas     *hexutil.Big       `json:"maxFeePerBlobGas"`
 	Value                *hexutil.Big       `json:"value"`
 	Nonce                *hexutil.Uint64    `json:"nonce"`
-	Data                 *hexutility.Bytes  `json:"data"`
-	Input                *hexutility.Bytes  `json:"input"`
+	Data                 *hexutil.Bytes     `json:"data"`
+	Input                *hexutil.Bytes     `json:"input"`
 	AccessList           *types.AccessList  `json:"accessList"`
 	ChainID              *hexutil.Big       `json:"chainId,omitempty"`
 }
@@ -172,7 +171,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 // message.
 type Account struct {
 	Nonce     *hexutil.Uint64                    `json:"nonce"`
-	Code      *hexutility.Bytes                  `json:"code"`
+	Code      *hexutil.Bytes                     `json:"code"`
 	Balance   **hexutil.Big                      `json:"balance"`
 	State     *map[libcommon.Hash]libcommon.Hash `json:"state"`
 	StateDiff *map[libcommon.Hash]libcommon.Hash `json:"stateDiff"`
@@ -186,7 +185,7 @@ func NewRevertError(result *evmtypes.ExecutionResult) *RevertError {
 	}
 	return &RevertError{
 		error:  err,
-		reason: hexutility.Encode(result.Revert()),
+		reason: hexutil.Encode(result.Revert()),
 	}
 }
 
@@ -282,7 +281,7 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 		"stateRoot":        head.Root,
 		"miner":            head.Coinbase,
 		"difficulty":       (*hexutil.Big)(head.Difficulty),
-		"extraData":        hexutility.Bytes(head.Extra),
+		"extraData":        hexutil.Bytes(head.Extra),
 		"size":             hexutil.Uint64(head.Size()),
 		"gasLimit":         hexutil.Uint64(head.GasLimit),
 		"gasUsed":          hexutil.Uint64(head.GasUsed),
@@ -382,7 +381,7 @@ type RPCTransaction struct {
 	Tip                 *hexutil.Big               `json:"maxPriorityFeePerGas,omitempty"`
 	FeeCap              *hexutil.Big               `json:"maxFeePerGas,omitempty"`
 	Hash                libcommon.Hash             `json:"hash"`
-	Input               hexutility.Bytes           `json:"input"`
+	Input               hexutil.Bytes              `json:"input"`
 	Nonce               hexutil.Uint64             `json:"nonce"`
 	To                  *libcommon.Address         `json:"to"`
 	TransactionIndex    *hexutil.Uint64            `json:"transactionIndex"`
@@ -419,7 +418,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 		Type:  hexutil.Uint64(txn.Type()),
 		Gas:   hexutil.Uint64(txn.GetGas()),
 		Hash:  txn.Hash(),
-		Input: hexutility.Bytes(txn.GetData()),
+		Input: hexutil.Bytes(txn.GetData()),
 		Nonce: hexutil.Uint64(txn.GetNonce()),
 		To:    txn.GetTo(),
 		Value: (*hexutil.Big)(txn.GetValue().ToBig()),
@@ -543,7 +542,7 @@ func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash libcommon.Hash, bl
 		GasPrice: (*hexutil.Big)(txn.GasPrice.ToBig()),
 		Gas:      hexutil.Uint64(txn.GetGas()),
 		Hash:     txHash,
-		Input:    hexutility.Bytes(txn.GetData()),
+		Input:    hexutil.Bytes(txn.GetData()),
 		Nonce:    hexutil.Uint64(txn.GetNonce()),
 		From:     libcommon.Address{},
 		To:       txn.GetTo(),

@@ -6,7 +6,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/params"
 
@@ -34,7 +33,7 @@ var ourCapabilities = []string{
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_getpayloadv1
-func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.Bytes) (*engine_types.ExecutionPayload, error) {
+func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutil.Bytes) (*engine_types.ExecutionPayload, error) {
 	if e.caplin {
 		e.logger.Crit(caplinEnabledLog)
 		return nil, errCaplinEnabled
@@ -54,7 +53,7 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.By
 
 // Same as [GetPayloadV1] with addition of blockValue
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2
-func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
+func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
 	return e.getPayload(ctx, decodedPayloadId, clparams.CapellaVersion)
@@ -62,7 +61,7 @@ func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutility.By
 
 // Same as [GetPayloadV2], with addition of blobsBundle containing valid blobs, commitments, proofs
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_getpayloadv3
-func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
+func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
 	return e.getPayload(ctx, decodedPayloadId, clparams.DenebVersion)
@@ -70,7 +69,7 @@ func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.By
 
 // Same as [GetPayloadV3], but returning ExecutionPayloadV4 (= ExecutionPayloadV3 + requests)
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadv4
-func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
+func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	e.logger.Info("Received GetPayloadV4", "payloadId", decodedPayloadId)
 	return e.getPayload(ctx, decodedPayloadId, clparams.ElectraVersion)
@@ -118,7 +117,7 @@ func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.E
 // NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4
 func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutility.Bytes) (*engine_types.PayloadStatus, error) {
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
 	// TODO(racytech): add proper version or refactor this part
 	// add all version ralated checks here so the newpayload doesn't have to deal with checks
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion)

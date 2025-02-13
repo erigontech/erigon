@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -76,11 +75,11 @@ func TestCallMany(t *testing.T) {
 	)
 
 	hexBytes, _ := hex.DecodeString(addr2BalanceCheck)
-	balanceCallAddr2 := hexutility.Bytes(hexBytes)
+	balanceCallAddr2 := hexutil.Bytes(hexBytes)
 	hexBytes, _ = hex.DecodeString(addr1BalanceCheck)
-	balanceCallAddr1 := hexutility.Bytes(hexBytes)
+	balanceCallAddr1 := hexutil.Bytes(hexBytes)
 	hexBytes, _ = hex.DecodeString(transferAddr2)
-	transferCallData := hexutility.Bytes(hexBytes)
+	transferCallData := hexutil.Bytes(hexBytes)
 
 	//submit 3 Transactions and commit the results
 	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, chainID)

@@ -25,7 +25,7 @@ import (
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -50,7 +50,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 	payload *cltypes.Eth1Block,
 	beaconParentRoot *libcommon.Hash,
 	versionedHashes []libcommon.Hash,
-	executionRequestsList []hexutility.Bytes,
+	executionRequestsList []hexutil.Bytes,
 ) (PayloadStatus, error) {
 	if payload == nil {
 		return PayloadStatusValidated, nil

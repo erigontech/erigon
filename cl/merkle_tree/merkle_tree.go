@@ -201,42 +201,46 @@ func (m *MerkleTree) CopyInto(other *MerkleTree) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	defer other.mu.Unlock()
-	//other.computeLeaf = m.computeLeaf
-	if len(other.layers) > len(m.layers) {
-		// reset the internal layers
-		for i := len(m.layers); i < len(other.layers); i++ {
-			other.layers[i] = other.layers[i][:0]
-		}
-		other.layers = other.layers[:len(m.layers)]
+
+	// Copy primitive fields
+	other.computeLeaf = m.computeLeaf
+	other.leavesCount = m.leavesCount
+	if m.limit != nil {
+		other.limit = new(uint64) // Shallow copy
+		*other.limit = *m.limit
+	} else {
+		other.limit = nil
 	}
 
-	if len(m.layers) > len(other.layers) {
-		for len(other.layers) != len(m.layers) {
-			idx := len(other.layers)
-			other.layers = append(other.layers, make([]byte, len(m.layers[idx]), (len(m.layers[idx])*3)/2))
-		}
+	// Ensure `other.layers` has enough capacity (with +50% buffer for future growth)
+	requiredLayersLen := len(m.layers)
+	if cap(other.layers) < requiredLayersLen {
+		other.layers = make([][]byte, requiredLayersLen, requiredLayersLen+(requiredLayersLen/2))
+	} else {
+		other.layers = other.layers[:requiredLayersLen]
 	}
 
-	for i := 0; i < len(m.layers); i++ {
-		// If the destination buffer is too short, extend it
-		if len(m.layers[i]) > cap(other.layers[i]) {
-			other.layers[i] = make([]byte, len(m.layers[i]), (len(m.layers[i])*3)/2)
+	// Copy layers while reusing memory, and allocate with +50% extra space if needed
+	for i := range m.layers {
+		requiredLayerLen := len(m.layers[i])
+		if cap(other.layers[i]) < requiredLayerLen {
+			other.layers[i] = make([]byte, requiredLayerLen, requiredLayerLen+(requiredLayerLen/2))
+		} else {
+			other.layers[i] = other.layers[i][:requiredLayerLen]
 		}
-		// Normalizr the destination length
-		other.layers[i] = other.layers[i][:len(m.layers[i])]
-
-		// Now that the 2 slices are of equal length we can do a simple memcopy
 		copy(other.layers[i], m.layers[i])
 	}
 
-	other.leavesCount = m.leavesCount
-	other.limit = m.limit
-	//other.dirtyLeaves = make([]atomic.Bool, len(m.dirtyLeaves))
+	// Ensure `other.dirtyLeaves` has enough capacity (with +50% buffer for future growth)
+	requiredLeavesLen := len(m.dirtyLeaves)
+	if cap(other.dirtyLeaves) < requiredLeavesLen {
+		other.dirtyLeaves = make([]atomic.Bool, requiredLeavesLen, requiredLeavesLen+(requiredLeavesLen/2))
+	} else {
+		other.dirtyLeaves = other.dirtyLeaves[:requiredLeavesLen]
+	}
 
-	for i := 0; i < len(m.dirtyLeaves); i++ {
-		if i >= len(other.dirtyLeaves) {
-			other.dirtyLeaves = append(other.dirtyLeaves, atomic.Bool{})
-		}
+	// Copy atomic dirty leaves state
+	for i := range m.dirtyLeaves {
 		other.dirtyLeaves[i].Store(m.dirtyLeaves[i].Load())
 	}
 }

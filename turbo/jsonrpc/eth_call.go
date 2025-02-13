@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/commitment"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
@@ -63,7 +62,7 @@ import (
 var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
-func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutility.Bytes, error) {
+func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -331,8 +330,8 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	return hexutil.Uint64(hi), nil
 }
 
-// GetProof is partially implemented; Proofs are available only with the `latest` block tag.
-func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+// GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
+func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	roTx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -355,7 +354,11 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, errors.New("proofs are available only for the 'latest' block")
 	}
 
-	return api.getProof(ctx, &roTx, address, storageKeys, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(latestBlock)), api.db, api.logger)
+	storageKeysConverted := make([]libcommon.Hash, len(storageKeys))
+	for i, s := range storageKeys {
+		storageKeysConverted[i].SetBytes(s)
+	}
+	return api.getProof(ctx, &roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(latestBlock)), api.db, api.logger)
 }
 
 func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
@@ -395,14 +398,14 @@ func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon
 	if err != nil {
 		return nil, err
 	}
-	proof.AccountProof = *(*[]hexutility.Bytes)(unsafe.Pointer(&accountProof))
+	proof.AccountProof = *(*[]hexutil.Bytes)(unsafe.Pointer(&accountProof))
 
 	// get account data from the trie
 	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address.Bytes()))
 	if acc == nil {
 		for i, k := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   k,
+				Key:   uint256.NewInt(0).SetBytes(k[:]).Hex(),
 				Value: new(hexutil.Big),
 				Proof: nil,
 			}
@@ -441,7 +444,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon
 
 	// get storage key proofs
 	for i, keyHash := range storageKeys {
-		proof.StorageProof[i].Key = keyHash
+		proof.StorageProof[i].Key = uint256.NewInt(0).SetBytes(keyHash[:]).Hex()
 
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(libcommon.BytesToHash(commitment.EmptyRootHash)) == 0 {
@@ -471,9 +474,9 @@ func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon
 		proof.StorageProof[i].Value = (*hexutil.Big)(n)
 
 		// 0x80 represents RLP encoding of an empty proof slice
-		proof.StorageProof[i].Proof = []hexutility.Bytes{[]byte{0x80}}
+		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
 		if len(storageProof) != 0 {
-			proof.StorageProof[i].Proof = *(*[]hexutility.Bytes)(unsafe.Pointer(&storageProof))
+			proof.StorageProof[i].Proof = *(*[]hexutil.Bytes)(unsafe.Pointer(&storageProof))
 		}
 	}
 
@@ -487,18 +490,18 @@ func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon
 	for _, storageProof := range proof.StorageProof {
 		err = trie.VerifyStorageProof(proof.StorageHash, storageProof)
 		if err != nil {
-			return nil, fmt.Errorf("internal error: failed to verify storage proof for key=%x , proof=%+v : %w", storageProof.Key.Bytes(), proof, err)
+			return nil, fmt.Errorf("internal error: failed to verify storage proof for key=%x , proof=%+v : %w", storageProof.Key, proof, err)
 		}
 	}
 
 	return proof, nil
 }
 
-func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
+func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
 	return api.getWitness(ctx, api.db, blockNrOrHash, 0, true, api.MaxGetProofRewindBlockCount, api.logger)
 }
 
-func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrHash, txIndex hexutil.Uint) (hexutility.Bytes, error) {
+func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrHash, txIndex hexutil.Uint) (hexutil.Bytes, error) {
 	return api.getWitness(ctx, api.db, blockNr, txIndex, false, api.MaxGetProofRewindBlockCount, api.logger)
 }
 
@@ -530,7 +533,7 @@ func verifyExecResult(execResult *core.EphemeralExecResult, block *types.Block) 
 	return nil
 }
 
-func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutility.Bytes, error) {
+func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
 		return nil, err

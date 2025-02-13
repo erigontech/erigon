@@ -31,7 +31,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 
 	"github.com/erigontech/erigon/core/types"
@@ -84,8 +84,8 @@ type structLogMarshaling struct {
 	Stack       []*math.HexOrDecimal256
 	Gas         math.HexOrDecimal64
 	GasCost     math.HexOrDecimal64
-	Memory      hexutility.Bytes
-	ReturnData  hexutility.Bytes
+	Memory      hexutil.Bytes
+	ReturnData  hexutil.Bytes
 	OpName      string `json:"opName"` // adds call to OpName() in MarshalJSON
 	ErrorString string `json:"error"`  // adds call to ErrorString() in MarshalJSON
 }

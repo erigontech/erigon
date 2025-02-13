@@ -23,7 +23,7 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
@@ -103,7 +103,7 @@ func (n NopRequestGenerator) DebugAccountAt(blockHash libcommon.Hash, txIndex ui
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutility.Bytes, error) {
+func (n NopRequestGenerator) GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error) {
 	return nil, ErrNotImplemented
 }
 

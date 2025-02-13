@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
@@ -91,7 +91,7 @@ func (e EventRangeExtractor) Extract(ctx context.Context, blockFrom, blockTo uin
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	from := hexutility.EncodeTs(blockFrom)
+	from := hexutil.EncodeTs(blockFrom)
 	startEventId := firstEventId(ctx)
 	var lastEventId uint64
 
@@ -481,7 +481,7 @@ func extractValueRange(ctx context.Context, table string, valueFrom, valueTo uin
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	if err := kv.BigChunks(db, table, hexutility.EncodeTs(valueFrom), func(tx kv.Tx, idBytes, valueBytes []byte) (bool, error) {
+	if err := kv.BigChunks(db, table, hexutil.EncodeTs(valueFrom), func(tx kv.Tx, idBytes, valueBytes []byte) (bool, error) {
 		id := binary.BigEndian.Uint64(idBytes)
 		if id >= valueTo {
 			return false, nil
