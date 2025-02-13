@@ -542,7 +542,7 @@ func makeArbitrumDepositTx(commonTx *types.CommonTx, rawTx map[string]interface{
 	}
 
 	// L1RequestId: expected as a hex string.
-	if l1RequestIdHex, ok := rawTx["l1RequestId"].(string); ok {
+	if l1RequestIdHex, ok := rawTx["requestId"].(string); ok {
 		tx.L1RequestId = common.HexToHash(l1RequestIdHex)
 	}
 
