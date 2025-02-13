@@ -23,7 +23,7 @@ import (
 	"slices"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -71,7 +71,7 @@ func (ip *IdentityPreimage) HashSSZ() ([32]byte, error) {
 }
 
 func (ip *IdentityPreimage) String() string {
-	return hexutility.Encode(ip[:])
+	return hexutil.Encode(ip[:])
 }
 
 func IdentityPreimageFromSSZ(b []byte) (*IdentityPreimage, error) {
