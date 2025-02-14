@@ -79,8 +79,9 @@ type DB struct {
 	kv     *mdbx.MdbxKV // Interface to the database itself
 	runner sync.Once    // Ensures we can start at most one expirer
 
-	ctx       context.Context
-	ctxCancel func()
+	ctx            context.Context
+	ctxCancel      func()
+	metricsEnabled bool // using a separate flag to avoid metrics clash with main MDBX instance
 }
 
 // OpenDB opens a node database for storing and retrieving infos about known peers in the
@@ -263,8 +264,7 @@ func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
 	return db.kv.Batch(func(tx kv.RwTx) error {
-		metricsEnabled := db.kv.MetricsEnabled()
-		if metricsEnabled {
+		if db.metricsEnabled {
 			db.CollectMetrics(tx)
 		}
 		return tx.Put(kv.Inodes, key, blob)
@@ -292,8 +292,7 @@ func (db *DB) fetchUint64(key []byte) uint64 {
 // storeUint64 stores an integer in the given key.
 func (db *DB) storeUint64(key []byte, n uint64) error {
 	return db.kv.Batch(func(tx kv.RwTx) error {
-		metricsEnabled := db.kv.MetricsEnabled()
-		if metricsEnabled {
+		if db.metricsEnabled {
 			db.CollectMetrics(tx)
 		}
 		return db._storeUint64(tx, key, n)
@@ -362,8 +361,7 @@ func (db *DB) UpdateNode(node *Node) error {
 	}
 
 	return db.kv.Batch(func(tx kv.RwTx) error {
-		metricsEnabled := db.kv.MetricsEnabled()
-		if metricsEnabled {
+		if db.metricsEnabled {
 			db.CollectMetrics(tx)
 		}
 		err = tx.Put(kv.NodeRecords, nodeKey(node.ID()), blob)
@@ -395,8 +393,7 @@ func (db *DB) DeleteNode(id ID) {
 
 func (db *DB) deleteRange(prefix []byte) {
 	if err := db.kv.Batch(func(tx kv.RwTx) error {
-		metricsEnabled := db.kv.MetricsEnabled()
-		if metricsEnabled {
+		if db.metricsEnabled {
 			db.CollectMetrics(tx)
 		}
 		for bucket := range bucketsConfig(nil) {
