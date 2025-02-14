@@ -109,7 +109,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	clversion := p.ethClock.StateVersionByEpoch(epoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) {
 		// merge aggregation bits
-		mergedBits, err := att.AggregationBits.Union(inAtt.AggregationBits)
+		mergedBits, err := att.AggregationBits.Merge(inAtt.AggregationBits)
 		if err != nil {
 			return err
 		}
@@ -122,7 +122,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	} else {
 		// Electra and after case
 		aggrBitSize := p.beaconConfig.MaxCommitteesPerSlot * p.beaconConfig.MaxValidatorsPerCommittee
-		mergedAggrBits, err := att.AggregationBits.Union(inAtt.AggregationBits)
+		mergedAggrBits, err := att.AggregationBits.Merge(inAtt.AggregationBits)
 		if err != nil {
 			return err
 		}
@@ -170,7 +170,7 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation) err
 	}
 
 	// merge aggregation bits and signature
-	mergedAggrBits, err := att.AggregationBits.Union(inAtt.AggregationBits)
+	mergedAggrBits, err := att.AggregationBits.Merge(inAtt.AggregationBits)
 	if err != nil {
 		return err
 	}
