@@ -96,7 +96,7 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		mergeThreshold:  2 * 8192,
 		shrinkThreshold: -1, // default
 		label:           label,
-		metrics:         label == kv.ChainDB,
+		metrics:         false,
 	}
 	if label == kv.ChainDB {
 		opts = opts.RemoveFlags(mdbx.NoReadahead) // enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (doesen GB)
@@ -118,6 +118,7 @@ func (opts MdbxOpts) DBVerbosity(v kv.DBVerbosityLvl) MdbxOpts    { opts.verbosi
 func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts       { opts.mapSize = sz; return opts }
 func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts       { opts.mergeThreshold = v; return opts }
 func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts        { opts.bucketsCfg = f; return opts }
+func (opts MdbxOpts) WithMetrics() MdbxOpts                       { opts.metrics = true; return opts }
 
 // Flags
 func (opts MdbxOpts) HasFlag(flag uint) bool           { return opts.flags&flag != 0 }
