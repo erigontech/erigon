@@ -103,7 +103,7 @@ Loop:
 				}
 				// leave a warning if we are stuck for more than 90 seconds
 				if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
-					log.Debug("Forward beacon downloader gets stuck", "time", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
+					log.Trace("Forward beacon downloader gets stuck", "time", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
 				}
 				// this is so we do not get stuck on a side-fork
 				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount)

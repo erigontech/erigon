@@ -25,6 +25,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
 	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -34,6 +35,7 @@ import (
 )
 
 type heimdallSynchronizer interface {
+	IsCatchingUp(ctx context.Context) (bool, error)
 	SynchronizeCheckpoints(ctx context.Context) (latest *heimdall.Checkpoint, err error)
 	SynchronizeMilestones(ctx context.Context) (latest *heimdall.Milestone, err error)
 	SynchronizeSpans(ctx context.Context, blockNum uint64) error
@@ -41,7 +43,6 @@ type heimdallSynchronizer interface {
 }
 
 type bridgeSynchronizer interface {
-	Synchronize(ctx context.Context, blockNum uint64) error
 	Unwind(ctx context.Context, blockNum uint64) error
 	ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error
 	Ready(ctx context.Context) <-chan error
@@ -122,12 +123,7 @@ func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finali
 	}
 
 	blockNum := newTip.Number.Uint64()
-
 	if err := s.heimdallSync.SynchronizeSpans(ctx, blockNum); err != nil {
-		return err
-	}
-
-	if err := s.bridgeSync.Synchronize(ctx, blockNum); err != nil {
 		return err
 	}
 
@@ -168,10 +164,6 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 
 	// wait for any possibly unprocessed previous block inserts to finish
 	if err := s.store.Flush(ctx); err != nil {
-		return err
-	}
-
-	if err := s.bridgeSync.Synchronize(ctx, tipNum); err != nil {
 		return err
 	}
 
@@ -527,10 +519,6 @@ func (s *Sync) handleBridgeOnForkChange(ctx context.Context, ccb *CanonicalChain
 		return err
 	}
 
-	if err := s.bridgeSync.Synchronize(ctx, oldTip.Number.Uint64()); err != nil {
-		return err
-	}
-
 	return s.reorganiseBridge(ctx, ccb, lca)
 }
 
@@ -568,11 +556,8 @@ func (s *Sync) reorganiseBridge(ctx context.Context, ccb *CanonicalChainBuilder,
 	for i, header := range canonicalHeaders {
 		canonicalBlocks[i] = types.NewBlockWithHeader(header)
 	}
-	if err := s.bridgeSync.ProcessNewBlocks(ctx, canonicalBlocks); err != nil {
-		return err
-	}
 
-	return s.bridgeSync.Synchronize(ctx, newTipNum)
+	return s.bridgeSync.ProcessNewBlocks(ctx, canonicalBlocks)
 }
 
 func (s *Sync) handleBridgeOnBlocksInsertAheadOfTip(ctx context.Context, tipNum, lastInsertedNum uint64) error {
@@ -588,11 +573,6 @@ func (s *Sync) handleBridgeOnBlocksInsertAheadOfTip(ctx context.Context, tipNum,
 
 	// wait for the insert blocks flush
 	if err := s.store.Flush(ctx); err != nil {
-		return err
-	}
-
-	// wait for the bridge processing
-	if err := s.bridgeSync.Synchronize(ctx, lastInsertedNum); err != nil {
 		return err
 	}
 
@@ -689,6 +669,26 @@ func (s *Sync) Run(ctx context.Context) error {
 	}
 
 	s.logger.Info(syncLogPrefix("running sync component"))
+
+	for {
+		// we have to check if the heimdall we are connected to is synchonised with the chain
+		// to prevent getting empty list of checkpoints/milestones during the sync
+
+		catchingUp, err := s.heimdallSync.IsCatchingUp(ctx)
+		if err != nil {
+			return err
+		}
+
+		if !catchingUp {
+			break
+		}
+
+		s.logger.Warn(syncLogPrefix("your heimdalld process is behind, please check its logs and <HEIMDALL_HOST>:1317/status api"))
+
+		if err := libcommon.Sleep(ctx, 30*time.Second); err != nil {
+			return err
+		}
+	}
 
 	result, err := s.syncToTip(ctx)
 	if err != nil {

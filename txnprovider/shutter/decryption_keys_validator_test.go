@@ -47,13 +47,13 @@ func TestDecryptionKeysValidators(t *testing.T) {
 	eon := ekg.Eon()
 	slot := uint64(6336)
 	txnPointer := uint64(556)
-	ips := testhelpers.MockIdentityPreimagesWithSlotIp(slot, 2)
+	ips := testhelpers.MockIdentityPreimagesWithSlotIp(t, slot, 2)
 	sigData := shutter.DecryptionKeysSignatureData{
 		InstanceId:        instanceId,
 		Eon:               eonIndex,
 		Slot:              slot,
 		TxnPointer:        txnPointer,
-		IdentityPreimages: ips,
+		IdentityPreimages: ips.ToListSSZ(),
 	}
 	signerIndices := []uint64{1, 2}
 	signers := []testhelpers.Keyper{ekg.Keypers[signerIndices[0]], ekg.Keypers[signerIndices[1]]}
@@ -163,6 +163,29 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			},
 		},
 		{
+			name:   "eon not in recent",
+			config: config,
+			msg: testhelpers.MockDecryptionKeysMsg(
+				shutter.DecryptionKeysTopic,
+				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+					Version:    shutterproto.EnvelopeVersion,
+					InstanceId: instanceId,
+					EonIndex:   eonIndex,
+				}),
+			),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: eon, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{}),
+			),
+			wantErr:              shutter.ErrEonNotInRecent,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to",
+				"eon not in recent: msgEonIndex=76, currentEonIndex=76",
+			},
+		},
+		{
 			name:   "empty keys",
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
@@ -192,7 +215,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   eonIndex,
-					Keys:       ekg.DecryptionKeys(t, signers, testhelpers.MockIdentityPreimages(maxNumKeysPerMessage+1)),
+					Keys:       ekg.DecryptionKeys(t, signers, testhelpers.MockIdentityPreimages(t, maxNumKeysPerMessage+1)),
 				}),
 			),
 			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
@@ -572,8 +595,8 @@ type decryptionKeysValidationTestCase struct {
 	name                  string
 	config                shutter.Config
 	msg                   *pubsub.Message
-	slotCalculator        func(t *testing.T) shutter.SlotCalculator
-	eonTracker            func(t *testing.T) shutter.EonTracker
+	slotCalculator        func(t *testing.T) *testhelpers.MockSlotCalculator
+	eonTracker            func(t *testing.T) *testhelpers.MockEonTracker
 	wantErr               error
 	wantValidationResult  pubsub.ValidationResult
 	wantValidationLogMsgs []string

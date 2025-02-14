@@ -1,4 +1,4 @@
-// Copyright 2021 The Erigon Authors
+// Copyright 2024 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,30 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package hexutility
+package heimdall
 
-import (
-	"testing"
-)
-
-type marshalTest struct {
-	input interface{}
-	want  string
+type Status struct {
+	LatestBlockHash   string `json:"latest_block_hash"`
+	LatestAppHash     string `json:"latest_app_hash"`
+	LatestBlockHeight string `json:"latest_block_height"`
+	LatestBlockTime   string `json:"latest_block_time"`
+	CatchingUp        bool   `json:"catching_up"`
 }
 
-var (
-	encodeBytesTests = []marshalTest{
-		{[]byte{}, "0x"},
-		{[]byte{0}, "0x00"},
-		{[]byte{0, 0, 1, 2}, "0x00000102"},
-	}
-)
-
-func TestEncode(t *testing.T) {
-	for _, test := range encodeBytesTests {
-		enc := Encode(test.input.([]byte))
-		if enc != test.want {
-			t.Errorf("input %x: wrong encoding %s", test.input, enc)
-		}
-	}
+type StatusResponse struct {
+	Height string `json:"height"`
+	Result Status `json:"result"`
 }

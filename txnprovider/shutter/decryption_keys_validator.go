@@ -43,6 +43,7 @@ var (
 	ErrCurrentEonUnavailable    = errors.New("current eon unavailable")
 	ErrEonInThePast             = errors.New("eon in the past")
 	ErrEonInTheFuture           = errors.New("eon in the future")
+	ErrEonNotInRecent           = errors.New("eon not in recent")
 	ErrEmptyKeys                = errors.New("empty keys")
 	ErrTooManyKeys              = errors.New("too many keys")
 	ErrIgnoreMsg                = errors.New("ignoring msg")
@@ -159,7 +160,12 @@ func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, e
 
 	identityPreimages := make(IdentityPreimages, len(msg.Keys))
 	for i, k := range msg.Keys {
-		identityPreimages[i] = k.IdentityPreimage
+		ip, err := IdentityPreimageFromSSZ(k.IdentityPreimage)
+		if err != nil {
+			return err
+		}
+
+		identityPreimages[i] = ip
 	}
 
 	for i, sig := range extraData.Signatures {
@@ -174,7 +180,7 @@ func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, e
 			Eon:               EonIndex(msg.Eon),
 			Slot:              extraData.Slot,
 			TxnPointer:        extraData.TxPointer,
-			IdentityPreimages: identityPreimages,
+			IdentityPreimages: identityPreimages.ToListSSZ(),
 		}
 
 		ok, err := signatureData.Verify(sig, signer)
@@ -212,10 +218,18 @@ func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys, eon Eon
 		if err != nil {
 			return err
 		}
-		if !ok {
-			ip := IdentityPreimage(key.IdentityPreimage)
-			return fmt.Errorf("verification of eon secret key failed: %w: ip=%s", ErrInvalidKey, ip)
+		if ok {
+			continue
 		}
+
+		// not valid
+		fullErr := fmt.Errorf("verification of eon secret key failed: %w", ErrInvalidKey)
+		ip, err := IdentityPreimageFromSSZ(key.IdentityPreimage)
+		if err != nil {
+			return fmt.Errorf("%w: %w", fullErr, err)
+		}
+
+		return fmt.Errorf("%w: ip=%s", fullErr, ip)
 	}
 
 	return nil
@@ -230,17 +244,20 @@ func (v DecryptionKeysValidator) validateEonIndex(msg *proto.DecryptionKeys) (Eo
 	currentEon, ok := v.eonTracker.CurrentEon()
 	if !ok {
 		// we're still syncing and are behind - ignore msg, without penalizing peer
-		return Eon{}, fmt.Errorf("%w: %w", ErrIgnoreMsg, ErrCurrentEonUnavailable)
+		return Eon{}, fmt.Errorf("%w: %w: likely still syncing to tip", ErrIgnoreMsg, ErrCurrentEonUnavailable)
 	}
 
 	eon, inRecent := v.eonTracker.RecentEon(msgEonIndex)
 	if msgEonIndex < currentEon.Index && !inRecent {
 		return Eon{}, fmt.Errorf("%w: msgEonIndex=%d, currentEonIndex=%d", ErrEonInThePast, msgEonIndex, currentEon.Index)
 	}
-
 	if msgEonIndex > currentEon.Index && !inRecent {
 		// we may be lagging behind - ignore msg, without penalizing peer
 		return Eon{}, fmt.Errorf("%w: %w: msgEonIndex=%d, currentEonIndex=%d", ErrIgnoreMsg, ErrEonInTheFuture, msgEonIndex, currentEon.Index)
+	}
+	if !inRecent {
+		// this should not ever happen because current eon should be always in recent, but guarding just in case of bugs
+		return Eon{}, fmt.Errorf("%w: msgEonIndex=%d, currentEonIndex=%d", ErrEonNotInRecent, msgEonIndex, currentEon.Index)
 	}
 
 	return eon, nil

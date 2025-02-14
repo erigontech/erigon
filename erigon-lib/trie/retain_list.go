@@ -31,7 +31,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 
 	"github.com/erigontech/erigon-lib/types/accounts"
@@ -205,7 +204,7 @@ func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) 
 
 	result.StorageProof = make([]accounts.StorProofResult, len(pr.storageKeys))
 	for i, sk := range pr.storageKeys {
-		result.StorageProof[i].Key = sk
+		result.StorageProof[i].Key = uint256.NewInt(0).SetBytes(sk[:]).Hex()
 		hexKey := pr.storageHexKeys[i]
 		if !pr.acc.Initialised || result.StorageHash == EmptyRoot {
 			// The yellow paper makes it clear that the EmptyRoot is a special case
@@ -217,7 +216,7 @@ func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) 
 			// provers will treat the EmptyRoot as a special case and ignore the proof
 			// bytes.
 			result.StorageProof[i].Value = (*hexutil.Big)(new(big.Int))
-			result.StorageProof[i].Proof = make([]hexutility.Bytes, 0)
+			result.StorageProof[i].Proof = make([]hexutil.Bytes, 0)
 			continue
 		}
 

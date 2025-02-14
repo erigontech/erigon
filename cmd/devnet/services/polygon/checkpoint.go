@@ -28,7 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
@@ -561,7 +561,7 @@ func (h *Heimdall) handleRootHeaderBlock(event *contracts.TestRootChainNewHeader
 		"start", event.Start,
 		"end", event.End,
 		"reward", event.Reward,
-		"root", hexutility.Bytes(event.Root[:]),
+		"root", hexutil.Bytes(event.Root[:]),
 		"proposer", event.Proposer.Hex(),
 		"checkpointNumber", checkpointNumber,
 		"txHash", event.Raw.TxHash,

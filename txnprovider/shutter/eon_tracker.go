@@ -22,13 +22,13 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"sync/atomic"
+	"sync"
 	"time"
 
+	"github.com/google/btree"
 	"golang.org/x/sync/errgroup"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/concurrent"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
@@ -38,6 +38,7 @@ type EonTracker interface {
 	Run(ctx context.Context) error
 	CurrentEon() (Eon, bool)
 	RecentEon(index EonIndex) (Eon, bool)
+	EonByBlockNum(blockNum uint64) (Eon, bool)
 }
 
 type KsmEonTracker struct {
@@ -46,55 +47,79 @@ type KsmEonTracker struct {
 	contractBackend      bind.ContractBackend
 	ksmContract          *contracts.KeyperSetManager
 	keyBroadcastContract *contracts.KeyBroadcastContract
-	currentEon           atomic.Pointer[Eon]
-	recentEons           *concurrent.SyncMap[EonIndex, Eon]
+	mu                   sync.RWMutex
+	currentEon           *Eon
+	recentEons           *btree.BTreeG[Eon]
 	cleanupThreshold     uint64
 	lastCleanupBlockNum  uint64
 }
 
-func NewKsmEonTracker(config Config, blockListener BlockListener, contractBackend bind.ContractBackend) *KsmEonTracker {
+func NewKsmEonTracker(logger log.Logger, config Config, bl BlockListener, cb bind.ContractBackend) *KsmEonTracker {
 	ksmContractAddr := libcommon.HexToAddress(config.KeyperSetManagerContractAddress)
-	ksmContract, err := contracts.NewKeyperSetManager(ksmContractAddr, contractBackend)
+	ksmContract, err := contracts.NewKeyperSetManager(ksmContractAddr, cb)
 	if err != nil {
 		panic(fmt.Errorf("failed to create KeyperSetManager: %w", err))
 	}
 
 	keyBroadcastContractAddr := libcommon.HexToAddress(config.KeyBroadcastContractAddress)
-	keyBroadcastContract, err := contracts.NewKeyBroadcastContract(keyBroadcastContractAddr, contractBackend)
+	keyBroadcastContract, err := contracts.NewKeyBroadcastContract(keyBroadcastContractAddr, cb)
 	if err != nil {
 		panic(fmt.Errorf("failed to create KeyBroadcastContract: %w", err))
 	}
 
 	return &KsmEonTracker{
-		blockListener:        blockListener,
-		contractBackend:      contractBackend,
+		logger:               logger,
+		blockListener:        bl,
+		contractBackend:      cb,
 		ksmContract:          ksmContract,
 		keyBroadcastContract: keyBroadcastContract,
 		cleanupThreshold:     config.ReorgDepthAwareness,
-		recentEons:           concurrent.NewSyncMap[EonIndex, Eon](),
+		recentEons:           btree.NewG[Eon](2, EonLess),
 	}
 }
 
 func (et *KsmEonTracker) Run(ctx context.Context) error {
+	defer et.logger.Info("eon tracker stopped")
 	et.logger.Info("running eon tracker")
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return et.trackCurrentEon(ctx) })
 	eg.Go(func() error { return et.trackFutureEons(ctx) })
-	return nil
+	return eg.Wait()
 }
 
 func (et *KsmEonTracker) CurrentEon() (Eon, bool) {
-	eon := et.currentEon.Load()
-	if eon == nil {
+	et.mu.RLock()
+	defer et.mu.RUnlock()
+
+	if et.currentEon == nil {
 		return Eon{}, false
 	}
 
-	return *eon, true
+	return *et.currentEon, true
 }
 
 func (et *KsmEonTracker) RecentEon(index EonIndex) (Eon, bool) {
-	return et.recentEons.Get(index)
+	et.mu.RLock()
+	defer et.mu.RUnlock()
+
+	return et.recentEons.Get(Eon{Index: index})
+}
+
+func (et *KsmEonTracker) EonByBlockNum(blockNum uint64) (Eon, bool) {
+	et.mu.RLock()
+	defer et.mu.RUnlock()
+
+	var eon Eon
+	var found bool
+	et.recentEons.Descend(func(e Eon) bool {
+		if blockNum >= e.ActivationBlock {
+			eon, found = e, true
+			return false // stop
+		}
+		return true // continue
+	})
+	return eon, found
 }
 
 func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
@@ -112,15 +137,28 @@ func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case blockEvent := <-blockEventC:
-			eon, err := et.readEonAtNewBlockEvent(blockEvent.BlockNum)
+			err := et.handleBlockEvent(blockEvent)
 			if err != nil {
 				return err
 			}
-
-			et.currentEon.Store(&eon)
-			et.maybeCleanup(blockEvent.BlockNum)
 		}
 	}
+}
+
+func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
+	et.mu.Lock()
+	defer et.mu.Unlock()
+
+	eon, err := et.readEonAtNewBlockEvent(blockEvent.BlockNum)
+	if err != nil {
+		return err
+	}
+
+	et.logger.Debug("current eon at block", "blockNum", blockEvent.BlockNum, "eonIndex", eon.Index)
+	et.currentEon = &eon
+	et.recentEons.ReplaceOrInsert(eon)
+	et.maybeCleanup(blockEvent.BlockNum)
+	return nil
 }
 
 func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, error) {
@@ -140,7 +178,7 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, error) {
 	if err != nil {
 		return Eon{}, err
 	}
-	if eon, ok := et.recentEons.Get(EonIndex(eonIndex)); ok {
+	if eon, ok := et.RecentEon(EonIndex(eonIndex)); ok {
 		cached = true
 		return eon, nil
 	}
@@ -174,8 +212,8 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, error) {
 	if err != nil {
 		return Eon{}, err
 	}
-	if activationBlock < blockNum {
-		return Eon{}, fmt.Errorf("unexpected invalid activation block: %d < %d", activationBlock, blockNum)
+	if activationBlock > blockNum {
+		return Eon{}, fmt.Errorf("unexpected invalid activation block: %d > %d", activationBlock, blockNum)
 	}
 
 	finalized, err := keyperSet.IsFinalized(callOpts)
@@ -183,7 +221,7 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, error) {
 		return Eon{}, err
 	}
 	if !finalized {
-		return Eon{}, fmt.Errorf("unexpected KeyperSet is not finalized: eon=%d, address=%s", eonIndex, keyperSetAddress)
+		return Eon{}, fmt.Errorf("unexpected keyper set is not finalized: eon=%d, address=%s", eonIndex, keyperSetAddress)
 	}
 
 	eon := Eon{
@@ -215,17 +253,14 @@ func (et *KsmEonTracker) maybeCleanup(blockNum uint64) {
 		return
 	}
 
-	currentEon := et.currentEon.Load()
-	var cleanedEons []EonIndex
-	err := et.recentEons.Range(func(k EonIndex, eon Eon) error {
-		if eon.Index < currentEon.Index && eon.ActivationBlock < cleanUpTo {
-			cleanedEons = append(cleanedEons, eon.Index)
+	var cleanedEons []Eon
+	et.recentEons.Ascend(func(eon Eon) bool {
+		if eon.Index < et.currentEon.Index && eon.ActivationBlock < cleanUpTo {
+			cleanedEons = append(cleanedEons, eon)
+			return true // continue
 		}
-		return nil
+		return false // stop
 	})
-	if err != nil { // should never happen since range f never returns err
-		panic("unexpected recentEons.Range error: " + err.Error())
-	}
 
 	for _, eon := range cleanedEons {
 		et.recentEons.Delete(eon)
@@ -237,7 +272,7 @@ func (et *KsmEonTracker) maybeCleanup(blockNum uint64) {
 			"cleaned", cleanedEons,
 			"cleanUpTo", cleanUpTo,
 			"lastCleanupBlockNum", et.lastCleanupBlockNum,
-			"currentEon", currentEon.Index,
+			"currentEon", et.currentEon.Index,
 		)
 	}
 
@@ -259,20 +294,32 @@ func (et *KsmEonTracker) trackFutureEons(ctx context.Context) error {
 		case err := <-keyperSetAddedEventSub.Err():
 			return err
 		case event := <-keyperSetAddedEventC:
-			eonIndex := EonIndex(event.Eon)
-			if event.Raw.Removed {
-				et.recentEons.Delete(eonIndex)
-				continue
-			}
-
-			eon, err := et.readEonAtKeyperSetAddedEvent(event)
+			err := et.handleKeyperSetAddedEvent(event)
 			if err != nil {
 				return err
 			}
-
-			et.recentEons.Put(eonIndex, eon)
 		}
 	}
+}
+
+func (et *KsmEonTracker) handleKeyperSetAddedEvent(event *contracts.KeyperSetManagerKeyperSetAdded) error {
+	et.mu.Lock()
+	defer et.mu.Unlock()
+
+	et.logger.Debug("keyper set added event", "eon", event.Eon, "removed", event.Raw.Removed)
+	eonIndex := EonIndex(event.Eon)
+	if event.Raw.Removed {
+		et.recentEons.Delete(Eon{Index: eonIndex})
+		return nil
+	}
+
+	eon, err := et.readEonAtKeyperSetAddedEvent(event)
+	if err != nil {
+		return err
+	}
+
+	et.recentEons.ReplaceOrInsert(eon)
+	return nil
 }
 
 func (et *KsmEonTracker) readEonAtKeyperSetAddedEvent(event *contracts.KeyperSetManagerKeyperSetAdded) (Eon, error) {

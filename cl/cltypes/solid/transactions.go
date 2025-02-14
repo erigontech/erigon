@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -32,7 +32,7 @@ type TransactionsSSZ struct {
 }
 
 func (t *TransactionsSSZ) UnmarshalJSON(buf []byte) error {
-	tmp := []hexutility.Bytes{}
+	tmp := []hexutil.Bytes{}
 	t.root = libcommon.Hash{}
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
@@ -45,7 +45,7 @@ func (t *TransactionsSSZ) UnmarshalJSON(buf []byte) error {
 }
 
 func (t TransactionsSSZ) MarshalJSON() ([]byte, error) {
-	tmp := []hexutility.Bytes{}
+	tmp := []hexutil.Bytes{}
 	for _, tx := range t.underlying {
 		tmp = append(tmp, tx)
 	}

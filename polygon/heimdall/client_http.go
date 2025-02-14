@@ -125,6 +125,8 @@ const (
 	fetchStateSyncEventsPath   = "clerk/event-record/list"
 	fetchStateSyncEvent        = "clerk/event-record/%s"
 
+	fetchStatus = "/status"
+
 	fetchCheckpoint                = "/checkpoints/%s"
 	fetchCheckpointCount           = "/checkpoints/count"
 	fetchCheckpointList            = "/checkpoints/list"
@@ -345,6 +347,22 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 	}
 
 	response.Result.Id = MilestoneId(number)
+
+	return &response.Result, nil
+}
+
+func (c *HttpClient) FetchStatus(ctx context.Context) (*Status, error) {
+	url, err := statusURL(c.urlString)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx = withRequestType(ctx, statusRequest)
+
+	response, err := FetchWithRetry[StatusResponse](ctx, c, url, c.logger)
+	if err != nil {
+		return nil, err
+	}
 
 	return &response.Result, nil
 }
@@ -585,6 +603,10 @@ func checkpointURL(urlString string, number int64) (*url.URL, error) {
 
 func checkpointCountURL(urlString string) (*url.URL, error) {
 	return makeURL(urlString, fetchCheckpointCount, "")
+}
+
+func statusURL(urlString string) (*url.URL, error) {
+	return makeURL(urlString, fetchStatus, "")
 }
 
 func checkpointListURL(urlString string, page uint64, limit uint64) (*url.URL, error) {

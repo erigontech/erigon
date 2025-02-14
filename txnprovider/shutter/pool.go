@@ -57,7 +57,7 @@ func NewPool(
 	logger = logger.New("component", "shutter")
 	slotCalculator := NewBeaconChainSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot)
 	blockListener := NewBlockListener(logger, stateChangesClient)
-	eonTracker := NewKsmEonTracker(config, blockListener, contractBackend)
+	eonTracker := NewKsmEonTracker(logger, config, blockListener, contractBackend)
 	decryptionKeysValidator := NewDecryptionKeysExtendedValidator(logger, config, slotCalculator, eonTracker)
 	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysValidator)
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
@@ -76,7 +76,7 @@ func NewPool(
 }
 
 func (p Pool) Run(ctx context.Context) error {
-	defer func() { p.logger.Info("pool stopped") }()
+	defer p.logger.Info("pool stopped")
 	p.logger.Info("running pool")
 
 	unregisterDkpObserver := p.decryptionKeysListener.RegisterObserver(func(msg *proto.DecryptionKeys) {

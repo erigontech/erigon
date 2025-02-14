@@ -334,15 +334,9 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 }
 
 func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
-	idBytes, err := tx.GetOne(kv.Sequence, kv.PlainStateVersion)
+	id, err := tx.ReadSequence(string(kv.PlainStateVersion))
 	if err != nil {
 		return nil, err
-	}
-	var id uint64
-	if len(idBytes) == 0 {
-		id = 0
-	} else {
-		id = binary.BigEndian.Uint64(idBytes)
 	}
 	r := c.selectOrCreateRoot(id)
 
@@ -524,11 +518,11 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.Tx) (*CacheVal
 	default:
 	}
 
-	idBytes, err := tx.GetOne(kv.Sequence, kv.PlainStateVersion)
+	stateID, err := tx.ReadSequence(string(kv.PlainStateVersion))
 	if err != nil {
 		return nil, err
 	}
-	stateID := binary.BigEndian.Uint64(idBytes)
+
 	result.LatestStateID = stateID
 
 	// if the latest view id in the cache is not the same as the tx or one below it

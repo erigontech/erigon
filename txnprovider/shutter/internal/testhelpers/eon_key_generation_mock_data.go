@@ -55,12 +55,12 @@ func (ekg EonKeyGeneration) Eon() shutter.Eon {
 	}
 }
 
-func (ekg EonKeyGeneration) DecryptionKeys(t *testing.T, signers []Keyper, ips []shutter.IdentityPreimage) []*proto.Key {
+func (ekg EonKeyGeneration) DecryptionKeys(t *testing.T, signers []Keyper, ips shutter.IdentityPreimages) []*proto.Key {
 	keys := make([]*proto.Key, len(ips))
 	for i, ip := range ips {
 		epochSecretKey := ekg.EpochSecretKey(t, signers, ip)
 		keys[i] = &proto.Key{
-			IdentityPreimage: ip,
+			IdentityPreimage: ip[:],
 			Key:              epochSecretKey.Marshal(),
 		}
 	}
@@ -68,7 +68,7 @@ func (ekg EonKeyGeneration) DecryptionKeys(t *testing.T, signers []Keyper, ips [
 	return keys
 }
 
-func (ekg EonKeyGeneration) EpochSecretKey(t *testing.T, signers []Keyper, ip shutter.IdentityPreimage) *shuttercrypto.EpochSecretKey {
+func (ekg EonKeyGeneration) EpochSecretKey(t *testing.T, signers []Keyper, ip *shutter.IdentityPreimage) *shuttercrypto.EpochSecretKey {
 	epochSecretKeyShares := make([]*shuttercrypto.EpochSecretKeyShare, len(signers))
 	keyperIndices := make([]int, len(signers))
 	for i, keyper := range signers {
@@ -96,8 +96,8 @@ func (k Keyper) Address() libcommon.Address {
 	return crypto.PubkeyToAddress(k.PublicKey())
 }
 
-func (k Keyper) EpochSecretKeyShare(ip shutter.IdentityPreimage) *shuttercrypto.EpochSecretKeyShare {
-	id := shuttercrypto.ComputeEpochID(ip)
+func (k Keyper) EpochSecretKeyShare(ip *shutter.IdentityPreimage) *shuttercrypto.EpochSecretKeyShare {
+	id := shuttercrypto.ComputeEpochID(ip[:])
 	return shuttercrypto.ComputeEpochSecretKeyShare(k.EonSecretKeyShare, id)
 }
 

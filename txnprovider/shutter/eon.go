@@ -17,13 +17,14 @@
 package shutter
 
 import (
+	"errors"
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 )
 
-var ErrInvalidKeyperIndex = fmt.Errorf("invalid keyper index")
+var ErrInvalidKeyperIndex = errors.New("invalid keyper index")
 
 type EonIndex uint64
 
@@ -47,6 +48,10 @@ func (e Eon) PublicKey() (crypto.EonPublicKey, error) {
 	eonPublicKey := crypto.EonPublicKey{}
 	err := eonPublicKey.Unmarshal(e.Key)
 	return eonPublicKey, err
+}
+
+func EonLess(a, b Eon) bool {
+	return a.Index < b.Index
 }
 
 type EonSecretKey = crypto.EpochSecretKey
