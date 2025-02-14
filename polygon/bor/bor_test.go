@@ -79,6 +79,10 @@ func (h *test_heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*he
 	return nil, nil
 }
 
+func (h *test_heimdall) FetchStatus(ctx context.Context) (*heimdall.Status, error) {
+	return nil, nil
+}
+
 func (h *test_heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 
 	if span, ok := h.spans[heimdall.SpanId(spanID)]; ok {
