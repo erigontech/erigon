@@ -189,6 +189,10 @@ func (s *SpanSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, err
 	return lastId, ok, err
 }
 
+func (s *SpanSnapshotStore) LastEntity(ctx context.Context) (*Span, bool, error) {
+	return snapshotStoreLastEntity(ctx, s)
+}
+
 func (s *SpanSnapshotStore) ValidateSnapshots(logger log.Logger, failFast bool) error {
 	return validateSnapshots(logger, failFast, s.snapshots, s.SnapType(), generics.New[Span])
 }
@@ -312,6 +316,10 @@ func (s *MilestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milest
 	return nil, false, fmt.Errorf("%w: %w", ErrMilestoneNotFound, err)
 }
 
+func (s *MilestoneSnapshotStore) LastEntity(ctx context.Context) (*Milestone, bool, error) {
+	return snapshotStoreLastEntity(ctx, s)
+}
+
 func (s *MilestoneSnapshotStore) ValidateSnapshots(logger log.Logger, failFast bool) error {
 	return validateSnapshots(logger, failFast, s.snapshots, s.SnapType(), generics.New[Milestone])
 }
@@ -425,6 +433,10 @@ func (s *CheckpointSnapshotStore) LastFrozenEntityId() uint64 {
 	return index.BaseDataID() + index.KeyCount() - 1
 }
 
+func (s *CheckpointSnapshotStore) LastEntity(ctx context.Context) (*Checkpoint, bool, error) {
+	return snapshotStoreLastEntity(ctx, s)
+}
+
 func (s *CheckpointSnapshotStore) ValidateSnapshots(logger log.Logger, failFast bool) error {
 	return validateSnapshots(logger, failFast, s.snapshots, s.SnapType(), generics.New[Checkpoint])
 }
@@ -481,4 +493,13 @@ func validateSnapshots[T Entity](logger log.Logger, failFast bool, snaps *RoSnap
 	}
 
 	return accumulatedErr
+}
+
+func snapshotStoreLastEntity[T Entity](ctx context.Context, store EntityStore[T]) (T, bool, error) {
+	entityId, ok, err := store.LastEntityId(ctx)
+	if err != nil || !ok {
+		return generics.Zero[T](), false, err
+	}
+
+	return store.Entity(ctx, entityId)
 }
