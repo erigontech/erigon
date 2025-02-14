@@ -493,7 +493,7 @@ func makeArbitrumContractTx(commonTx *types.CommonTx, rawTx map[string]interface
 }
 
 func makeArbitrumUnsignedTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumUnsignedTx{}
+	tx := &types.ArbitrumUnsignedTx{GasFeeCap: big.NewInt(0)}
 
 	// ChainId: expected as a hex string (e.g., "0x1")
 	if chainIdHex, ok := rawTx["chainId"].(string); ok {
