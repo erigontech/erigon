@@ -352,14 +352,14 @@ func (c *MockKVClientSnapshotsCall) DoAndReturn(f func(context.Context, *Snapsho
 }
 
 // StateChanges mocks base method.
-func (m *MockKVClient) StateChanges(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StateChangeBatch], error) {
+func (m *MockKVClient) StateChanges(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{ctx, in}
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "StateChanges", varargs...)
-	ret0, _ := ret[0].(grpc.ServerStreamingClient[StateChangeBatch])
+	ret0, _ := ret[0].(KV_StateChangesClient)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -378,32 +378,32 @@ type MockKVClientStateChangesCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockKVClientStateChangesCall) Return(arg0 grpc.ServerStreamingClient[StateChangeBatch], arg1 error) *MockKVClientStateChangesCall {
+func (c *MockKVClientStateChangesCall) Return(arg0 KV_StateChangesClient, arg1 error) *MockKVClientStateChangesCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockKVClientStateChangesCall) Do(f func(context.Context, *StateChangeRequest, ...grpc.CallOption) (grpc.ServerStreamingClient[StateChangeBatch], error)) *MockKVClientStateChangesCall {
+func (c *MockKVClientStateChangesCall) Do(f func(context.Context, *StateChangeRequest, ...grpc.CallOption) (KV_StateChangesClient, error)) *MockKVClientStateChangesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockKVClientStateChangesCall) DoAndReturn(f func(context.Context, *StateChangeRequest, ...grpc.CallOption) (grpc.ServerStreamingClient[StateChangeBatch], error)) *MockKVClientStateChangesCall {
+func (c *MockKVClientStateChangesCall) DoAndReturn(f func(context.Context, *StateChangeRequest, ...grpc.CallOption) (KV_StateChangesClient, error)) *MockKVClientStateChangesCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // Tx mocks base method.
-func (m *MockKVClient) Tx(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[Cursor, Pair], error) {
+func (m *MockKVClient) Tx(ctx context.Context, opts ...grpc.CallOption) (KV_TxClient, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{ctx}
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "Tx", varargs...)
-	ret0, _ := ret[0].(grpc.BidiStreamingClient[Cursor, Pair])
+	ret0, _ := ret[0].(KV_TxClient)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -422,19 +422,19 @@ type MockKVClientTxCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockKVClientTxCall) Return(arg0 grpc.BidiStreamingClient[Cursor, Pair], arg1 error) *MockKVClientTxCall {
+func (c *MockKVClientTxCall) Return(arg0 KV_TxClient, arg1 error) *MockKVClientTxCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockKVClientTxCall) Do(f func(context.Context, ...grpc.CallOption) (grpc.BidiStreamingClient[Cursor, Pair], error)) *MockKVClientTxCall {
+func (c *MockKVClientTxCall) Do(f func(context.Context, ...grpc.CallOption) (KV_TxClient, error)) *MockKVClientTxCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockKVClientTxCall) DoAndReturn(f func(context.Context, ...grpc.CallOption) (grpc.BidiStreamingClient[Cursor, Pair], error)) *MockKVClientTxCall {
+func (c *MockKVClientTxCall) DoAndReturn(f func(context.Context, ...grpc.CallOption) (KV_TxClient, error)) *MockKVClientTxCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

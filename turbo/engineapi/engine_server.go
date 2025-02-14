@@ -17,10 +17,12 @@
 package engineapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,8 +42,10 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
@@ -83,6 +87,10 @@ const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 func NewEngineServer(logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
 	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, consuming bool) *EngineServer {
+	fcuTimeout := uint64(fcuTimeout)
+	if config.IsOptimism() {
+		fcuTimeout = 10_000
+	}
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
 		logger:            logger,
@@ -478,6 +486,9 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		s.logger.Crit("[NewPayload] caplin is enabled")
 		return nil, errCaplinEnabled
 	}
+	// if s.config.IsOptimism() {
+	// 	return nil, &rpc.UnsupportedForkError{Message: "Optimism is unsupported on block building"}
+	// }
 	s.engineLogSpamer.RecordRequest()
 
 	if !s.proposing {
@@ -525,13 +536,20 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+	response := &engine_types.GetPayloadResponse{
+		ExecutionPayload: engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
+		BlockValue:       (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
+		BlobsBundle:      engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
+	}
+	if s.config.IsOptimism() && s.config.IsCancun(ts) && version >= clparams.DenebVersion {
+		if data.ParentBeaconBlockRoot == nil {
+			return nil, &rpc.UnsupportedForkError{Message: "missing ParentBeaconBlockRoot in Ecotone block"}
+		}
+		parentBeaconBlockRoot := libcommon.Hash(gointerfaces.ConvertH256ToHash(data.ParentBeaconBlockRoot))
+		response.ParentBeaconBlockRoot = &parentBeaconBlockRoot
+	}
 
-	return &engine_types.GetPayloadResponse{
-		ExecutionPayload:  engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
-		BlockValue:        (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
-		BlobsBundle:       engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
-		ExecutionRequests: executionRequests,
-	}, nil
+	return response, nil
 }
 
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
@@ -546,11 +564,17 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, errCaplinEnabled
 	}
 	s.engineLogSpamer.RecordRequest()
-
-	status, err := s.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, libcommon.Hash{}, forkchoiceState, false)
-	if err != nil {
-		return nil, err
+	var (
+		status *engine_types.PayloadStatus
+		err    error
+	)
+	if !s.config.IsOptimism() {
+		status, err = s.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, libcommon.Hash{}, forkchoiceState, false)
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -599,6 +623,9 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	if !s.proposing {
 		return nil, errors.New("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
+	// if s.config.IsOptimism() {
+	// 	return nil, &rpc.UnsupportedForkError{Message: "Optimism is unsupported for block building"}
+	// }
 
 	headHeader := s.chainRW.GetHeaderByHash(ctx, forkchoiceState.HeadHash)
 
@@ -612,13 +639,40 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 	}
+	if s.config.IsOptimism() {
+		req.Transactions = [][]byte{}
+		for _, transaction := range payloadAttributes.Transactions {
+			req.Transactions = append(req.Transactions, transaction)
+		}
+		req.NoTxPool = payloadAttributes.NoTxPool
+	}
 
 	if version >= clparams.CapellaVersion {
 		req.Withdrawals = engine_types.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
 	}
 
-	if version >= clparams.DenebVersion {
+	if payloadAttributes.ParentBeaconBlockRoot != nil && version >= clparams.DenebVersion {
 		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
+	}
+
+	if s.config.Optimism != nil {
+		if s.config.Optimism != nil {
+			if payloadAttributes.GasLimit == nil {
+				return nil, &engine_helpers.InvalidPayloadAttributesErr
+			}
+			if s.config.IsHolocene(payloadAttributes.Timestamp.Uint64()) {
+				if err := misc.ValidateHolocene1559Params(payloadAttributes.HoloceneEIP1559Params); err != nil {
+					return nil, err
+				}
+				req.Holocene_Eip1559Params = bytes.Clone(payloadAttributes.HoloceneEIP1559Params)
+			} else if len(payloadAttributes.HoloceneEIP1559Params) != 0 {
+				return nil, &engine_helpers.InvalidPayloadAttributesErr
+			}
+		}
+	}
+
+	if payloadAttributes.GasLimit != nil {
+		req.GasLimit = (*uint64)(payloadAttributes.GasLimit)
 	}
 
 	var resp *execution.AssembleBlockResponse
@@ -906,4 +960,49 @@ func waitForStuff(waitCondnF func() (bool, error)) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// HandleRequiredProtocolVersion handles the protocol version signal. This implements opt-in halting,
+// the protocol version data is already logged and metered when signaled through the Engine API.
+func (e *EngineServer) HandleRequiredProtocolVersion(required params.ProtocolVersion) error {
+	needLevel := 3
+	haveLevel := 0
+	switch params.OPStackSupport.Compare(required) {
+	case params.OutdatedMajor:
+		haveLevel = 3
+	case params.OutdatedMinor:
+		haveLevel = 2
+	case params.OutdatedPatch:
+		haveLevel = 1
+	}
+	if haveLevel >= needLevel { // halt if we opted in to do so at this granularity
+		log.Error("Opted to halt, unprepared for protocol change", "required", required, "local", params.OPStackSupport)
+		os.Exit(1) // halt
+	}
+	return nil
+}
+
+func LogProtocolVersionSupport(logger log.Logger, local, other params.ProtocolVersion, name string) {
+	switch local.Compare(other) {
+	case params.AheadMajor:
+		logger.Info(fmt.Sprintf("Ahead with major %s protocol version change", name))
+	case params.AheadMinor, params.AheadPatch, params.AheadPrerelease:
+		logger.Debug(fmt.Sprintf("Ahead with compatible %s protocol version change", name))
+	case params.Matching:
+		logger.Debug(fmt.Sprintf("Latest %s protocol version is supported", name))
+	case params.OutdatedMajor:
+		logger.Error(fmt.Sprintf("Outdated with major %s protocol change", name))
+	case params.OutdatedMinor:
+		logger.Warn(fmt.Sprintf("Outdated with minor backward-compatible %s protocol change", name))
+	case params.OutdatedPatch:
+		logger.Info(fmt.Sprintf("Outdated with support backward-compatible %s protocol change", name))
+	case params.OutdatedPrerelease:
+		logger.Debug(fmt.Sprintf("New %s protocol pre-release is available", name))
+	case params.DiffBuild:
+		logger.Debug(fmt.Sprintf("Ignoring %s protocolversion signal, local build is different", name))
+	case params.DiffVersionType:
+		logger.Warn(fmt.Sprintf("Failed to recognize %s protocol version signal version-type", name))
+	case params.EmptyVersion:
+		logger.Debug(fmt.Sprintf("No %s protocol version available to check", name))
+	}
 }

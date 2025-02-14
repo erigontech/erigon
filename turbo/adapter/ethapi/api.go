@@ -314,11 +314,11 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 // RPCMarshalBlock converts the given block to the RPC output which depends on fullTx. If inclTx is true transactions are
 // returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
 // transaction hashes.
-func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool) (map[string]interface{}, error) {
-	return RPCMarshalBlockExDeprecated(block, inclTx, fullTx, nil, libcommon.Hash{})
+func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool, receipts types.Receipts) (map[string]interface{}, error) {
+	return RPCMarshalBlockExDeprecated(block, inclTx, fullTx, nil, libcommon.Hash{}, receipts)
 }
 
-func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash libcommon.Hash) (map[string]interface{}, error) {
+func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash libcommon.Hash, receipts types.Receipts) (map[string]interface{}, error) {
 	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 	if _, ok := fields["transactions"]; !ok {
@@ -331,11 +331,15 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 		}
 		if fullTx {
 			formatTx = func(tx types.Transaction, index int) (interface{}, error) {
-				return newRPCTransactionFromBlockAndTxGivenIndex(block, tx, uint64(index)), nil
+				return newRPCTransactionFromBlockAndTxGivenIndex(block, tx, uint64(index), receipts[index]), nil
 			}
 		}
 		txs := block.Transactions()
 		transactions := make([]interface{}, len(txs), len(txs)+1)
+		if receipts == nil {
+			// ensure that receipts is always initialized for formatTx
+			receipts = make([]*types.Receipt, len(txs))
+		}
 		var err error
 		for i, txn := range txs {
 			if transactions[i], err = formatTx(txn, i); err != nil {
@@ -392,11 +396,19 @@ type RPCTransaction struct {
 	YParity             *hexutil.Big               `json:"yParity,omitempty"`
 	R                   *hexutil.Big               `json:"r"`
 	S                   *hexutil.Big               `json:"s"`
+
+	// Optimism
+	// deposit-tx only
+	SourceHash *libcommon.Hash `json:"sourceHash,omitempty"`
+	Mint       *hexutil.Big    `json:"mint,omitempty"`
+	IsSystemTx *bool           `json:"isSystemTx,omitempty"`
+	// deposit-tx post-Canyon only
+	DepositReceiptVersion *hexutil.Uint64 `json:"depositReceiptVersion,omitempty"`
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
+func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNumber uint64, index uint64, baseFee *big.Int, receipt *types.Receipt) *RPCTransaction {
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer is used
@@ -415,16 +427,55 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 		txn = &t.Tx
 	}
 
+	if t, ok := txn.(*types.OptimismDepositTx); ok {
+		if t.Mint != nil {
+			result.Mint = (*hexutil.Big)(t.Mint.ToBig())
+		}
+		result.ChainID = nil
+		result.SourceHash = &t.SourceHash
+		if t.IsSystemTransaction {
+			result.IsSystemTx = &t.IsSystemTransaction
+		}
+		if receipt != nil && receipt.DepositNonce != nil {
+			result.Nonce = hexutil.Uint64(*receipt.DepositNonce)
+			if receipt.DepositReceiptVersion != nil {
+				result.DepositReceiptVersion = new(hexutil.Uint64)
+				*result.DepositReceiptVersion = hexutil.Uint64(*receipt.DepositReceiptVersion)
+			}
+		}
+		result.GasPrice = (*hexutil.Big)(libcommon.Big0)
+		// must contain v, r, s values for backwards compatibility.
+		result.V = (*hexutil.Big)(libcommon.Big0)
+
+		result.R = (*hexutil.Big)(libcommon.Big0)
+		result.S = (*hexutil.Big)(libcommon.Big0)
+
+		signer := types.LatestSignerForChainID(chainId.ToBig())
+		var err error
+		result.From, err = txn.Sender(*signer)
+		if err != nil {
+			log.Warn("sender recovery", "err", err)
+		}
+		if blockHash != (libcommon.Hash{}) {
+			result.BlockHash = &blockHash
+			result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
+			result.TransactionIndex = (*hexutil.Uint64)(&index)
+		}
+		return result
+	}
+
 	v, r, s := txn.RawSignatureValues()
 	result.V = (*hexutil.Big)(v.ToBig())
 	result.R = (*hexutil.Big)(r.ToBig())
 	result.S = (*hexutil.Big)(s.ToBig())
-
 	if txn.Type() == types.LegacyTxType {
-		chainId = types.DeriveChainId(v)
-		// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
-		if !chainId.IsZero() {
-			result.ChainID = (*hexutil.Big)(chainId.ToBig())
+		// avoid overflow by not calling DeriveChainId. chain id not included when v = 0 (this can happen in optimism)
+		if !v.IsZero() {
+			chainId = types.DeriveChainId(v)
+			// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
+			if !chainId.IsZero() {
+				result.ChainID = (*hexutil.Big)(chainId.ToBig())
+			}
 		}
 		result.GasPrice = (*hexutil.Big)(txn.GetPrice().ToBig())
 	} else {
@@ -510,6 +561,6 @@ func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash libcommon.Hash, bl
 }
 
 // newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, txn types.Transaction, index uint64) *RPCTransaction {
-	return NewRPCTransaction(txn, b.Hash(), b.NumberU64(), index, b.BaseFee())
+func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, txn types.Transaction, index uint64, receipt *types.Receipt) *RPCTransaction {
+	return NewRPCTransaction(txn, b.Hash(), b.NumberU64(), index, b.BaseFee(), receipt)
 }

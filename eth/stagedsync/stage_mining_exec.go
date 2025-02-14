@@ -59,6 +59,7 @@ type MiningExecCfg struct {
 	interrupt   *int32
 	payloadId   uint64
 	txnProvider txnprovider.TxnProvider
+	noTxPool    bool
 }
 
 func StageMiningExecCfg(
@@ -73,6 +74,7 @@ func StageMiningExecCfg(
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
 	blockReader services.FullBlockReader,
+	noTxPool bool,
 ) MiningExecCfg {
 	return MiningExecCfg{
 		db:          db,
@@ -86,6 +88,7 @@ func StageMiningExecCfg(
 		interrupt:   interrupt,
 		payloadId:   payloadId,
 		txnProvider: txnProvider,
+		noTxPool:    noTxPool,
 	}
 }
 
@@ -121,8 +124,17 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 		return header
 	}
 
+	forceTxs := current.ForceTxs
+	if len(forceTxs) > 0 {
+		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, forceTxs, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger, true)
+		if err != nil {
+			return err
+		}
+		NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+	}
+
 	if len(preparedTxns) > 0 {
-		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger, false)
 		if err != nil {
 			return err
 		}
@@ -156,7 +168,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			}
 
 			if len(txns) > 0 {
-				logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+				logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger, true)
 				if err != nil {
 					return err
 				}
@@ -440,6 +452,7 @@ func addTransactionsToMiningBlock(
 	interrupt *int32,
 	payloadId uint64,
 	logger log.Logger,
+	force bool,
 ) (types.Logs, bool, error) {
 	header := current.Header
 	txnIdx := ibs.TxnIndex() + 1
@@ -470,18 +483,20 @@ func addTransactionsToMiningBlock(
 	}
 
 	var stopped *time.Ticker
-	defer func() {
-		if stopped != nil {
-			stopped.Stop()
-		}
-	}()
+	if !force {
+		defer func() {
+			if stopped != nil {
+				stopped.Stop()
+			}
+		}()
+	}
 
 	done := false
 
 LOOP:
 	for _, txn := range txns {
 		// see if we need to stop now
-		if stopped != nil {
+		if stopped != nil && !force {
 			select {
 			case <-stopped.C:
 				done = true
@@ -490,17 +505,17 @@ LOOP:
 			}
 		}
 
-		if err := libcommon.Stopped(ctx.Done()); err != nil {
+		if err := libcommon.Stopped(ctx.Done()); err != nil && !force {
 			return nil, true, err
 		}
 
-		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 && stopped == nil {
+		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 && stopped == nil && !force {
 			logger.Debug("Transaction adding was requested to stop", "payload", payloadId)
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
 		// If we don't have enough gas for any further transactions then we're done
-		if gasPool.Gas() < params.TxGas {
+		if gasPool.Gas() < params.TxGas && !force {
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
 			done = true
 			break
@@ -515,22 +530,26 @@ LOOP:
 
 		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
-		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) {
+		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) && !force {
 			logger.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
 			continue
 		}
 
+		logLvl := log.LvlDebug
+		if force {
+			logLvl = log.LvlWarn
+		}
 		// Start executing the transaction
 		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, ibs, current)
 		if errors.Is(err, core.ErrGasLimitReached) {
 			// Skip the env out-of-gas transaction
-			logger.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from)
+			logger.Log(logLvl, fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from)
 		} else if errors.Is(err, core.ErrNonceTooLow) {
 			// New head notification data race between the transaction pool and miner, skip
-			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "err", err)
+			logger.Log(logLvl, fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "err", err)
 		} else if errors.Is(err, core.ErrNonceTooHigh) {
 			// Reorg notification data race between the transaction pool and miner, skip
-			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with high nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce())
+			logger.Log(logLvl, fmt.Sprintf("[%s] Skipping transaction with high nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce())
 		} else if err == nil {
 			// Everything ok, collect the logs and proceed to the next transaction
 			logger.Trace(fmt.Sprintf("[%s] Added transaction", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "payload", payloadId)
@@ -539,7 +558,7 @@ LOOP:
 		} else {
 			// Strange error, discard the transaction and get the next in line (note, the
 			// nonce-too-high clause will prevent us from executing in vain).
-			logger.Debug(fmt.Sprintf("[%s] Skipping transaction", logPrefix), "hash", txn.Hash(), "sender", from, "err", err)
+			logger.Log(logLvl, fmt.Sprintf("[%s] Skipping transaction", logPrefix), "hash", txn.Hash(), "sender", from, "err", err)
 		}
 	}
 

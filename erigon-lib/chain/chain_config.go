@@ -91,6 +91,99 @@ type Config struct {
 
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
+
+	// Optimism configurations
+	Optimism *OptimismConfig `json:"optimism,omitempty"`
+
+	BedrockBlock *big.Int `json:"bedrockBlock,omitempty"` // Bedrock switch block (nil = no fork, 0 = already on optimism bedrock)
+	RegolithTime *big.Int `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
+	CanyonTime   *big.Int `json:"canyonTime,omitempty"`   // Canyon switch time (nil = no fork, 0 = already on optimism canyon)
+	EcotoneTime  *big.Int `json:"ecotoneTime,omitempty"`  // Ecotone switch time (nil = no fork, 0 = already on optimism ecotone)
+	FjordTime    *big.Int `json:"fjordTime,omitempty"`    // Fjord switch time (nil = no fork, 0 = already on optimism fjord)
+	GraniteTime  *big.Int `json:"graniteTime,omitempty"`  // Granite switch time (nil = no fork, 0 = already on optimism granite)
+	HoloceneTime *big.Int `json:"holoceneTime,omitempty"`
+}
+
+// OptimismConfig is the optimism config.
+type OptimismConfig struct {
+	EIP1559Elasticity        uint64 `json:"eip1559Elasticity"`
+	EIP1559Denominator       uint64 `json:"eip1559Denominator"`
+	EIP1559DenominatorCanyon uint64 `json:"eip1559DenominatorCanyon"`
+}
+
+// IsBedrock returns whether num is either equal to the Bedrock fork block or greater.
+func (c *Config) IsBedrock(num uint64) bool {
+	return isForked(c.BedrockBlock, num)
+}
+
+func (c *Config) IsRegolith(time uint64) bool {
+	return isForked(c.RegolithTime, time)
+}
+
+func (c *Config) IsCanyon(time uint64) bool {
+	return isForked(c.CanyonTime, time)
+}
+
+func (c *Config) IsEcotone(time uint64) bool {
+	return isForked(c.EcotoneTime, time)
+}
+
+func (c *Config) IsFjord(time uint64) bool {
+	return isForked(c.FjordTime, time)
+}
+
+// ElasticityMultiplier bounds the maximum gas limit an EIP-1559 block may have.
+func (c *Config) ElasticityMultiplier(defaultParam int) uint64 {
+	if c.IsOptimism() {
+		return c.Optimism.EIP1559Elasticity
+	}
+	return uint64(defaultParam)
+}
+
+func (c *Config) IsGranite(time uint64) bool {
+	return isForked(c.GraniteTime, time)
+}
+
+func (c *Config) IsHolocene(time uint64) bool {
+	return isForked(c.HoloceneTime, time)
+}
+
+func (c *Config) IsOptimism() bool {
+	return c.Optimism != nil
+}
+
+// IsOptimismBedrock returns true iff this is an optimism node & bedrock is active
+func (c *Config) IsOptimismBedrock(num uint64) bool {
+	return c.IsOptimism() && c.IsBedrock(num)
+}
+
+func (c *Config) IsOptimismRegolith(time uint64) bool {
+	return c.IsOptimism() && c.IsRegolith(time)
+}
+
+func (c *Config) IsOptimismCanyon(time uint64) bool {
+	return c.IsOptimism() && c.IsCanyon(time)
+}
+
+func (c *Config) IsOptimismEcotone(time uint64) bool {
+	return c.IsOptimism() && c.IsEcotone(time)
+}
+
+func (c *Config) IsOptimismFjord(time uint64) bool {
+	return c.IsOptimism() && c.IsFjord(time)
+}
+
+func (c *Config) IsOptimismGranite(time uint64) bool {
+	return c.IsOptimism() && c.IsGranite(time)
+}
+
+func (c *Config) IsOptimismHolocene(time uint64) bool {
+	return c.IsOptimism() && c.IsHolocene(time)
+}
+
+// IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active
+func (c *Config) IsOptimismPreBedrock(num uint64) bool {
+	return c.IsOptimism() && !c.IsBedrock(num)
 }
 
 type BlobConfig struct {
@@ -589,6 +682,10 @@ type Rules struct {
 	IsCancun, IsNapoli                                bool
 	IsPrague, IsOsaka                                 bool
 	IsAura                                            bool
+
+	IsOptimismBedrock, IsOptimismRegolith                bool
+	IsOptimismCanyon, IsOptimismEcotone, IsOptimismFjord bool
+	IsOptimismGranite, IsOptimismHolocene                bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -615,6 +712,14 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsPrague:           c.IsPrague(time),
 		IsOsaka:            c.IsOsaka(time),
 		IsAura:             c.Aura != nil,
+
+		IsOptimismBedrock:  c.IsOptimismBedrock(num),
+		IsOptimismRegolith: c.IsOptimismRegolith(time),
+		IsOptimismCanyon:   c.IsOptimismCanyon(time),
+		IsOptimismEcotone:  c.IsOptimismEcotone(time),
+		IsOptimismFjord:    c.IsOptimismFjord(time),
+		IsOptimismGranite:  c.IsOptimismGranite(time),
+		IsOptimismHolocene: c.IsOptimismHolocene(time),
 	}
 }
 
