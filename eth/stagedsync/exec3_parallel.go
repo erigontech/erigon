@@ -492,7 +492,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			}
 
 			if res.Version().Incarnation > len(be.tasks) {
-				return nil, fmt.Errorf("could not apply tx %d [%v]: %w: too many incarnations: %d", tx, task.TxHash(), execErr.OriginError, res.Version().Incarnation)
+				if execErr.OriginError != nil {
+					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w: too many incarnations: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation)
+				} else {
+					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: too many incarnations: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), res.Version().Incarnation)
+				}
 			}
 
 			addedDependencies := false
