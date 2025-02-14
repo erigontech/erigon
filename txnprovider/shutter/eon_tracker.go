@@ -103,7 +103,7 @@ func (et *KsmEonTracker) RecentEon(index EonIndex) (Eon, bool) {
 	et.mu.RLock()
 	defer et.mu.RUnlock()
 
-	return et.recentEons.Get(Eon{Index: index})
+	return et.recentEon(index)
 }
 
 func (et *KsmEonTracker) EonByBlockNum(blockNum uint64) (Eon, bool) {
@@ -120,6 +120,10 @@ func (et *KsmEonTracker) EonByBlockNum(blockNum uint64) (Eon, bool) {
 		return true // continue
 	})
 	return eon, found
+}
+
+func (et *KsmEonTracker) recentEon(index EonIndex) (Eon, bool) {
+	return et.recentEons.Get(Eon{Index: index})
 }
 
 func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
@@ -178,7 +182,8 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, error) {
 	if err != nil {
 		return Eon{}, err
 	}
-	if eon, ok := et.RecentEon(EonIndex(eonIndex)); ok {
+
+	if eon, ok := et.recentEon(EonIndex(eonIndex)); ok {
 		cached = true
 		return eon, nil
 	}
