@@ -94,9 +94,9 @@ func (v *ValidatorSet) Append(val Validator) {
 	if offset+validatorSize >= len(v.buffer) {
 		v.expandBuffer(v.l + 1)
 		v.phase0Data = append(v.phase0Data, Phase0Data{})
-		copy(v.buffer[offset:], val)
 	}
 
+	copy(v.buffer[offset:], val)
 	if v.MerkleTree != nil {
 		v.MerkleTree.AppendLeaf()
 	}
