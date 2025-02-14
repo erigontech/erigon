@@ -379,7 +379,7 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot libcommon.Hash, in *s
 		}
 
 		if prevHeadBlockRoot != blockRoot {
-			log.Warn("Not Using a cached beacon state", "blockRoot", blockRoot)
+			log.Debug("Not Using a cached beacon state", "blockRoot", blockRoot)
 			return nil
 		}
 		ok = true
