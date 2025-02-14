@@ -1217,11 +1217,6 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	s abstract.BeaconState,
 ) *solid.ListSSZ[*solid.Attestation] {
 	currentVersion := s.Version()
-	aggBitsSize := int(a.beaconChainCfg.MaxValidatorsPerCommittee)
-	if currentVersion.AfterOrEqual(clparams.ElectraVersion) {
-		aggBitsSize = int(a.beaconChainCfg.MaxValidatorsPerCommittee *
-			a.beaconChainCfg.MaxCommitteesPerSlot)
-	}
 	// Group attestations by their data root
 	hashToAtts := make(map[libcommon.Hash][]*solid.Attestation)
 	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
@@ -1262,9 +1257,10 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 					continue
 				}
 				// merge aggregation bits
-				mergedAggBits := solid.NewBitList(0, aggBitsSize)
-				for i := 0; i < len(currAggregationBitsBytes); i++ {
-					mergedAggBits.Append(currAggregationBitsBytes[i] | candidateAggregationBits[i])
+				mergedAggBits, err := curAtt.AggregationBits.Merge(candidate.AggregationBits)
+				if err != nil {
+					log.Warn("[Block Production] Cannot merge aggregation bits", "err", err)
+					continue
 				}
 				var buf [96]byte
 				copy(buf[:], mergeSig)

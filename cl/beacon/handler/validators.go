@@ -820,15 +820,12 @@ func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter
 	attDataRootHash := libcommon.HexToHash(attDataRoot)
 	att := a.aggregatePool.GetAggregatationByRootAndCommittee(attDataRootHash, committeeIndexNum)
 	if att == nil {
-		log.Debug("[GetEthV2ValidatorAggregateAttestation] attestation not found", "attestation_data_root", attDataRoot, "slot", slot, "committee_index", committeeIndex)
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))
 	}
 	if slotNum != att.Data.Slot {
-		log.Debug("[GetEthV2ValidatorAggregateAttestation] attestation slot does not match", "attestation_data_root", attDataRoot, "slot_inquire", slot)
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation slot mismatch"))
 	}
 
-	log.Debug("[GetEthV2ValidatorAggregateAttestation] attestation found", "attestation_data_root", attDataRoot, "slot", slot, "committee_index", committeeIndex, "attestation", att)
 	return newBeaconResponse(att), nil
 }
 

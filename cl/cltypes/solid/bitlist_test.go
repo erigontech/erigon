@@ -134,7 +134,7 @@ func TestBitlistUnion(t *testing.T) {
 	b1.Set(0, byte(0b11010000))
 	b2.Set(0, byte(0b00001101))
 
-	merged, err := b1.Union(b2)
+	merged, err := b1.Merge(b2)
 	require.NoError(err)
 
 	require.Equal(5, merged.Length(), "BitList Union did not return the expected length")

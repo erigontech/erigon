@@ -128,6 +128,7 @@ func (u *BitList) Set(index int, v byte) {
 	u.u[index] = v
 }
 
+// removeMsb removes the most significant bit from the list, but doesn't change the length l.
 func (u *BitList) removeMsb() {
 	for i := len(u.u) - 1; i >= 0; i-- {
 		if u.u[i] != 0 {
@@ -138,6 +139,7 @@ func (u *BitList) removeMsb() {
 	}
 }
 
+// addMsb adds a most significant bit to the list, but doesn't change the length l.
 func (u *BitList) addMsb() {
 	for i := len(u.u) - 1; i >= 0; i-- {
 		if u.u[i] != 0 {
@@ -249,7 +251,7 @@ func (u *BitList) UnmarshalJSON(input []byte) error {
 	return u.DecodeSSZ(hex, 0)
 }
 
-func (u *BitList) Union(other *BitList) (*BitList, error) {
+func (u *BitList) Merge(other *BitList) (*BitList, error) {
 	if u.c != other.c {
 		return nil, errors.New("bitlist union: different capacity")
 	}
@@ -263,8 +265,13 @@ func (u *BitList) Union(other *BitList) (*BitList, error) {
 		unionFrom = other
 	}
 	// union
+	unionFrom.removeMsb()
+	ret.removeMsb()
 	for i := 0; i < unionFrom.l; i++ {
 		ret.u[i] |= unionFrom.u[i]
 	}
+	ret.addMsb()
+	ret.l = len(ret.u)
+	unionFrom.addMsb()
 	return ret, nil
 }
