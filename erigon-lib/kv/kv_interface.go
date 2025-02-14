@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 //Variables Naming:
@@ -227,6 +228,8 @@ type Putter interface {
 	// CollectMetrics - does collect all DB-related and Tx-related metrics
 	// this method exists only in RwTx to avoid concurrency
 	CollectMetrics()
+	EnvInfo() (*mdbx.EnvInfo, error)
+	TxInfo() (*mdbx.TxInfo, error)
 }
 
 type Closer interface {

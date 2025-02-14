@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
 )
 
 type MemoryMutation struct {
@@ -749,4 +750,12 @@ func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc orde
 
 func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
 	return m.db.(kv.TemporalTx).HistoryStartFrom(name)
+}
+
+func (m *MemoryMutation) EnvInfo() (*mdbxgo.EnvInfo, error) {
+	panic("not implemented")
+}
+
+func (m *MemoryMutation) TxInfo() (*mdbxgo.TxInfo, error) {
+	panic("not implemented")
 }

@@ -329,6 +329,20 @@ func mustDecodeNode(id, data []byte) *Node {
 	return node
 }
 
+func (db *DB) CollectMetrics(tx kv.RwTx) {
+	info, err := tx.EnvInfo()
+	if err != nil {
+		return
+	}
+	txInfo, err := tx.TxInfo()
+	if err != nil {
+		return
+	}
+
+	NodeDbDbSize.SetUint64(info.Geo.Current)
+	NodeDbTxDirty.SetUint64(txInfo.SpaceDirty)
+}
+
 // UpdateNode inserts - potentially overwriting - a node into the peer database.
 func (db *DB) UpdateNode(node *Node) error {
 	if node.Seq() < db.NodeSeq(node.ID()) {
@@ -338,7 +352,12 @@ func (db *DB) UpdateNode(node *Node) error {
 	if err != nil {
 		return err
 	}
+
 	return db.kv.Batch(func(tx kv.RwTx) error {
+		metricsEnabled := db.kv.MetricsEnabled()
+		if metricsEnabled {
+			db.CollectMetrics(tx)
+		}
 		err = tx.Put(kv.NodeRecords, nodeKey(node.ID()), blob)
 		if err != nil {
 			return err

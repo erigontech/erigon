@@ -458,6 +458,8 @@ func (db *MdbxKV) Path() string                { return db.opts.path }
 func (db *MdbxKV) PageSize() datasize.ByteSize { return db.opts.pageSize }
 func (db *MdbxKV) ReadOnly() bool              { return db.opts.HasFlag(mdbx.Readonly) }
 func (db *MdbxKV) Accede() bool                { return db.opts.HasFlag(mdbx.Accede) }
+func (db *MdbxKV) Opts() MdbxOpts              { return db.opts }
+func (db *MdbxKV) MetricsEnabled() bool        { return db.opts.metrics }
 
 func (db *MdbxKV) CHandle() unsafe.Pointer {
 	return db.env.CHandle()
@@ -671,6 +673,14 @@ func (tx *MdbxTx) Count(bucket string) (uint64, error) {
 		return 0, err
 	}
 	return st.Entries, nil
+}
+
+func (tx *MdbxTx) EnvInfo() (*mdbx.EnvInfo, error) {
+	return tx.db.env.Info(tx.tx)
+}
+
+func (tx *MdbxTx) TxInfo() (*mdbx.TxInfo, error) {
+	return tx.tx.Info(true)
 }
 
 func (tx *MdbxTx) CollectMetrics() {
