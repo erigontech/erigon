@@ -228,6 +228,10 @@ func (h *HeimdallSimulator) FetchStateSyncEvent(ctx context.Context, id uint64) 
 	return nil, errors.New("method FetchStateSyncEvent not implemented")
 }
 
+func (h *HeimdallSimulator) FetchStatus(ctx context.Context) (*heimdall.Status, error) {
+	return nil, errors.New("method FetchStatus not implemented")
+}
+
 func (h *HeimdallSimulator) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
 	return nil, errors.New("method FetchCheckpoint not implemented")
 }
