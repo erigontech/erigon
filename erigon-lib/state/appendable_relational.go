@@ -10,11 +10,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	ae "github.com/erigontech/erigon-lib/state/appendables_extras"
-	"github.com/erigontech/erigon/core/rawdb"
 )
 
 type RootRelationI interface {
 	RootNum2Id(from RootNum, tx kv.Tx) (Id, error)
+	Num2Id(from Num, tx kv.Tx) (Id, error)
 }
 
 // this have 1:many or many:1 or 1:1 relation with root num
@@ -109,6 +109,9 @@ func (q QueryFlags) IsQueryDb() bool   { return q&QueryFlags_DB != 0 }
 func (q QueryFlags) IsQuerySnap() bool { return q&QueryFlags_Snap != 0 }
 
 func (a *RelationalAppendableTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
+	if a.a.noUnwind {
+		return a.GetWithFlags(entityNum, tx, QueryFlags_Snap)
+	}
 	return a.GetWithFlags(entityNum, tx, QueryFlags_DB|QueryFlags_Snap)
 }
 
@@ -176,8 +179,7 @@ func (a *RelationalAppendableTx) ReadSequence(tx kv.Tx) (uint64, error) {
 }
 
 func (a *RelationalAppendableTx) ResetSequence(tx kv.RwTx, newValue Num) error {
-	// TODO: https://github.com/erigontech/erigon/issues/13675
-	return rawdb.ResetSequence(tx, a.a.valsTbl, uint64(newValue))
+	return tx.ResetSequence(a.a.valsTbl, uint64(newValue))
 }
 
 func (a *RelationalAppendableTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error {

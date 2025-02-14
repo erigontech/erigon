@@ -7,6 +7,11 @@ import (
 
 //// relations
 
+var _ RootRelationI = (*PointRelation)(nil)
+var _ RootRelationI = (*ManyToOneRelation)(nil)
+var _ RootRelationI = (*OneToManyRelation)(nil)
+var _ RootRelationI = (*OneToManyPureRelation)(nil)
+
 // 1:1; RootNum = Num
 type PointRelation struct{}
 
@@ -54,12 +59,14 @@ type OneToManyRelation struct {
 	strictlyAppending bool // i.e. no delete on unwind
 }
 
+// returns 1st id present in the given inp RootNum
 func (r *OneToManyRelation) RootNum2Id(inp RootNum, tx kv.Tx) (Id, error) {
 	prevMaxNum, err := tx.GetOne(r.maxNumTbl, ae.EncToBytes(uint64(inp)-1, true))
 	if err != nil {
 		return 0, err
 	}
-
+	
+	// wrong: for txs this gives num; but i'm using id here
 	return Id(ae.Decode64FromBytes(prevMaxNum, true) + 1), nil
 }
 

@@ -26,9 +26,7 @@ marked appendable has two tables
 
     marked appendable Num is the same as the entity-set RootNum i.e.
     values of Num == values of RootNum
-    it is common for base appendables to be marked, as it provides
-    quick way to unwind.
-    headers are marked; and also bodies. caplin blockbodies too.
+    headers, bodies, caplin blockbodies are marked appendables.
 */
 type MarkedAppendable struct {
 	*ProtoAppendable
@@ -86,7 +84,7 @@ func NewMarkedAppendable(id AppendableId, canonicalTbl, valsTbl string, logger l
 
 	if m.builders == nil {
 		// mapping num -> offset (ordinal map)
-		salt, err := snaptype.GetIndexSalt(m.a.Dirs().Snap) // this is bad; ApEnum should know it;s own Dirs
+		salt, err := snaptype.GetIndexSalt(m.a.Dirs().Snap)
 		if err != nil {
 			return nil, err
 		}
