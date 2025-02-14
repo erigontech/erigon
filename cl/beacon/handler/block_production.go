@@ -651,7 +651,8 @@ func (a *ApiHandler) produceBeaconBody(
 			},
 		)
 		if err != nil {
-			log.Error("BlockProduction: Failed to get payload id", "err", err)
+			withdrawalsBytes, _ := json.Marshal(withdrawals)
+			log.Error("BlockProduction: Failed to get payload id", "err", err, "withdrawals", string(withdrawalsBytes))
 			return
 		}
 		// Keep requesting block until it's ready
