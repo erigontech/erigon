@@ -10,19 +10,52 @@ import (
 )
 
 func TestArbitrumInternalTx(t *testing.T) {
-	rawInitial := common.FromHex("6af88a83066eeeb8846bf6a42d000000000000000000000000000000000000000000000000000000005bd57bd900000000000000000000000000000000000000000000000000000000003f28db00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000064e4f6d4")
-	var tx ArbitrumInternalTx
-	if err := rlp.DecodeBytes(rawInitial[1:], &tx); err != nil {
-		t.Fatal(err)
+	rawInitial := [][]byte{
+		common.FromHex("6af88a83066eeeb8846bf6a42d000000000000000000000000000000000000000000000000000000005bd57bd900000000000000000000000000000000000000000000000000000000003f28db00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000064e4f6d4"),
+		common.FromHex("0x6af88a83066eeeb8846bf6a42d00000000000000000000000000000000000000000000000000000000064cb523000000000000000000000000000000000000000000000000000000000049996b00000000000000000000000000000000000000000000000000000000001f09350000000000000000000000000000000000000000000000000000000000000000"),
 	}
-	require.Equal(t, tx.Hash(), common.HexToHash("0x1ac8d67d5c4be184b3822f9ef97102789394f4bc75a0f528d5e14debef6e184c"))
 
-	var b bytes.Buffer
+	expectedHashes := []common.Hash{
+		common.HexToHash("0x1ac8d67d5c4be184b3822f9ef97102789394f4bc75a0f528d5e14debef6e184c"),
+		common.HexToHash("0x3d78fd6ddbac46955b91777c1fc698b011b7c4a2a84d07a0b0b1a11f34ccf817"),
+	}
 
-	// now encode and decode again
-	require.NoError(t, tx.MarshalBinary(&b))
+	for ri, raw := range rawInitial {
+		var tx ArbitrumInternalTx
+		if err := rlp.DecodeBytes(raw[1:], &tx); err != nil {
+			t.Fatal(err)
+		}
 
-	require.Equal(t, rawInitial, b.Bytes())
+		var b bytes.Buffer
+		require.Equal(t, tx.Hash(), expectedHashes[ri])
+		// now encode and decode again
+		require.NoError(t, tx.MarshalBinary(&b))
+		require.Equal(t, raw, b.Bytes())
+	}
+}
+
+func TestArbitrumUnsignedTx(t *testing.T) {
+	t.Skip()
+	rawInitial := [][]byte{
+		common.FromHex("0x25e1606300000000000000000000000051072981bf35cdf00dbecdb9bbc00be3313893cb"),
+	}
+
+	expectedHashes := []common.Hash{
+		common.HexToHash("0x8b7e4e0a2a31d2889200dc6c91c12833208d2f7847eabf0c21e9b15f86a8a8aa"),
+	}
+
+	for ri, raw := range rawInitial {
+		var tx ArbitrumUnsignedTx
+		if err := rlp.DecodeBytes(raw[1:], &tx); err != nil {
+			t.Fatal(err)
+		}
+
+		var b bytes.Buffer
+		require.Equal(t, tx.Hash(), expectedHashes[ri])
+		// now encode and decode again
+		require.NoError(t, tx.MarshalBinary(&b))
+		require.Equal(t, raw, b.Bytes())
+	}
 }
 
 func TestArbitrumSubmitRetryableTx(t *testing.T) {
