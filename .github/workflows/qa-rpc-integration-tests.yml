@@ -147,7 +147,6 @@ jobs:
           eth_getBlockByHash/test_08.json,\
           eth_getBlockByHash/test_09.json
           
-          
           # Capture test runner script exit status
           test_exit_status=$?
           
