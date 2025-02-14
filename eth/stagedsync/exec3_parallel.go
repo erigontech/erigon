@@ -1040,7 +1040,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) (err 
 						uncommittedGas += applyResult.GasUsed
 					}
 
-					if true {
+					if !dbg.DiscardCommitment() {
 						var trace bool
 						if traceBlock(applyResult.BlockNum) {
 							trace = true

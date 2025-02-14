@@ -747,7 +747,7 @@ func ExecV3(ctx context.Context,
 					aggTx := libstate.AggTx(executor.tx())
 					aggTx.RestrictSubsetFileDeletions(true)
 					start := time.Now()
-					if blockNum == 16816186 || blockNum == 16802148 {
+					if traceBlock(blockNum) {
 						se.doms.SetTrace(true)
 					}
 					rh, err := executor.domains().ComputeCommitment(ctx, executor.tx(), true, blockNum, execStage.LogPrefix())
