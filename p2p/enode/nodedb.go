@@ -263,6 +263,10 @@ func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
 	return db.kv.Batch(func(tx kv.RwTx) error {
+		metricsEnabled := db.kv.MetricsEnabled()
+		if metricsEnabled {
+			db.CollectMetrics(tx)
+		}
 		return tx.Put(kv.Inodes, key, blob)
 	})
 }
@@ -288,6 +292,10 @@ func (db *DB) fetchUint64(key []byte) uint64 {
 // storeUint64 stores an integer in the given key.
 func (db *DB) storeUint64(key []byte, n uint64) error {
 	return db.kv.Batch(func(tx kv.RwTx) error {
+		metricsEnabled := db.kv.MetricsEnabled()
+		if metricsEnabled {
+			db.CollectMetrics(tx)
+		}
 		return db._storeUint64(tx, key, n)
 	})
 }
@@ -387,6 +395,10 @@ func (db *DB) DeleteNode(id ID) {
 
 func (db *DB) deleteRange(prefix []byte) {
 	if err := db.kv.Batch(func(tx kv.RwTx) error {
+		metricsEnabled := db.kv.MetricsEnabled()
+		if metricsEnabled {
+			db.CollectMetrics(tx)
+		}
 		for bucket := range bucketsConfig(nil) {
 			if err := deleteRangeInBucket(tx, prefix, bucket); err != nil {
 				return err
