@@ -94,13 +94,14 @@ func (v *ValidatorSet) Append(val Validator) {
 	if offset+validatorSize >= len(v.buffer) {
 		v.expandBuffer(v.l + 1)
 		v.phase0Data = append(v.phase0Data, Phase0Data{})
-
-		if v.MerkleTree != nil {
-			v.MerkleTree.AppendLeaf()
-		}
-		v.zeroTreeHash(v.l)
 		copy(v.buffer[offset:], val)
 	}
+
+	if v.MerkleTree != nil {
+		v.MerkleTree.AppendLeaf()
+	}
+	v.zeroTreeHash(v.l)
+
 	if v.l >= len(v.phase0Data) {
 		for i := len(v.phase0Data); i < v.l+1; i++ {
 			v.phase0Data = append(v.phase0Data, Phase0Data{})
@@ -171,6 +172,7 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 	t.phase0Data = make([]Phase0Data, v.l)
 	copy(t.buffer, v.buffer)
 	copy(t.attesterBits, v.attesterBits)
+	t.buffer = t.buffer[:v.l*validatorSize]
 	t.attesterBits = t.attesterBits[:v.l]
 }
 
