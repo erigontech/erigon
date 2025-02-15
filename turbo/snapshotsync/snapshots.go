@@ -532,11 +532,11 @@ type RoSnapshots struct {
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
 
-	// allows for pruning segments - this is the min availible segment
+	// allows for pruning segments - this is the min available segment
 	segmentsMin atomic.Uint64
 	ready       ready
 	operators   map[snaptype.Enum]*retireOperators
-	alignMin    bool // do we want to align all visible segments to min availible
+	alignMin    bool // do we want to align all visible segments to min available
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
