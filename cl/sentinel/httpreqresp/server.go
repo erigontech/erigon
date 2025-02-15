@@ -52,7 +52,7 @@ func Do(handler http.Handler, r *http.Request) (*http.Response, error) {
 	go func() {
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, r)
-		// linter does not know we are passing the resposne through channel.
+		// linter does not know we are passing the response through channel.
 		// nolint: bodyclose
 		resp := res.Result()
 		ans <- resp
