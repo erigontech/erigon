@@ -210,7 +210,7 @@ func StartServe(
 	// Create a gRPC server
 	gRPCserver := grpc.NewServer(grpc.Creds(creds))
 	go server.ListenToGossip()
-	// Regiser our server as a gRPC server
+	// Register our server as a gRPC server
 	sentinelrpc.RegisterSentinelServer(gRPCserver, server)
 	if err := gRPCserver.Serve(lis); err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
