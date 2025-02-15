@@ -144,7 +144,10 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) {
 				// Return an error if EIP-4844 data is not available
 				logger.Trace("[Caplin] forward sync EIP-4844 data not available", "blockSlot", block.Block.Slot)
-				return highestBlockProcessed, nil
+				if newHighestBlockProcessed == 0 {
+					return 0, nil
+				}
+				return newHighestBlockProcessed - 1, nil
 			}
 			// Return an error if block processing fails
 			err = fmt.Errorf("bad blocks segment received: %w", err)
