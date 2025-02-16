@@ -136,7 +136,7 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 // Cases:
 //  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 //  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *state2.SharedDomains, maxBlockNum uint64) (
+func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms state2.JointDomains, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
@@ -250,12 +250,18 @@ func ExecV3(ctx context.Context,
 	}
 
 	var err error
-	var doms *state2.SharedDomains
+	var doms state2.JointDomains
 	if inMemExec {
 		doms = txc.Doms
 	} else {
 		var err error
-		doms, err = state2.NewSharedDomains(applyTx, log.New())
+
+		// fmt.Println("JG NewSharedDomains exec3")
+		// doms, err = state2.NewSharedDomains(applyTx, log.New())
+
+		fmt.Println("JG NewDirectAccessDomains exec3")
+		doms, err = state2.NewDirectAccessDomains(applyTx, log.New())
+
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, state2.ErrBehindCommitment) {
@@ -291,10 +297,8 @@ func ExecV3(ctx context.Context,
 		shouldGenerateChangesets = false
 	}
 
-	if maxBlockNum > blockNum+16 {
-		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
-	}
+	log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
+		"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "txNumInDB", txNumInDB, "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
@@ -425,10 +429,8 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	if maxBlockNum > blockNum+16 {
-		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", executor.domains().TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
-	}
+	log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
+		"from", blockNum, "to", maxBlockNum, "fromTxNum", executor.domains().TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
@@ -449,6 +451,8 @@ func ExecV3(ctx context.Context,
 
 	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
+
+	fmt.Println("JG ExecV3 Loop start", blockNum, "to", maxBlockNum)
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -481,6 +485,7 @@ Loop:
 		executor.domains().SetBlockNum(blockNum)
 
 		b, err = blockWithSenders(ctx, cfg.db, executor.tx(), blockReader, blockNum)
+		fmt.Println("JG block received", blockNum, b.Hash())
 		if err != nil {
 			return err
 		}
@@ -676,11 +681,13 @@ Loop:
 					t1, t3 time.Duration
 				)
 
+				fmt.Printf("[dbg] commit block %d\n", blockNum)
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
 					break Loop
 				}
+				fmt.Print("[dbg] commit done\n")
 
 				t1 = time.Since(tt) + ts
 
@@ -733,6 +740,7 @@ Loop:
 	//dumpPlainStateDebug(executor.tx(), executor.domains())
 
 	if !useExternalTx && executor.tx() != nil {
+		fmt.Println("[dbg] commit applyTx")
 		if err = executor.tx().Commit(); err != nil {
 			return err
 		}
@@ -835,14 +843,17 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg Exe
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms state2.JointDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
 
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
 	if !parallel {
+		fmt.Println("[dbg] update stage")
 		if err := e.Update(applyTx, maxBlockNum); err != nil {
 			return false, err
 		}
+		fmt.Println("[dbg] increament state version")
+
 		if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
 			return false, fmt.Errorf("writing plain state version: %w", err)
 		}
@@ -859,10 +870,13 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
+	fmt.Println("[dbg] compute commitment")
+
 	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), e.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
+	header.Root = common.BytesToHash(computedRootHash) //JG
 	if cfg.blockProduction {
 		header.Root = common.BytesToHash(computedRootHash)
 		return true, nil

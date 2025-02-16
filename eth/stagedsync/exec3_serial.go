@@ -7,6 +7,7 @@ import (
 	"time"
 
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
+	"github.com/erigontech/erigon/turbo/silkworm"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -40,7 +41,12 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			return false, nil
 		}
 
-		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining)
+		if se.cfg.silkworm != nil {
+			txTask.Error = silkworm.ExecuteTx(se.cfg.silkworm, se.applyTx, txTask)
+		} else {
+			se.applyWorker.RunTxTaskNoLock(txTask, se.isMining)
+		}
+
 		if err := func() error {
 			if errors.Is(txTask.Error, context.Canceled) {
 				return txTask.Error
@@ -143,6 +149,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 
 	if !useExternalTx {
 		tt := time.Now()
+		fmt.Println("[dbg] commit applyTx via serialExecutor")
 		if err = se.applyTx.Commit(); err != nil {
 			return 0, err
 		}
@@ -155,7 +162,9 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 			return t2, err
 		}
 	}
+	fmt.Println("JG NewSharedDomains exec3_serial")
 	se.doms, err = state2.NewSharedDomains(se.applyTx, se.logger)
+	defer fmt.Println("exec3 serial closing", se.doms.ObjectInfo())
 	if err != nil {
 		return t2, err
 	}
