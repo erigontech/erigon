@@ -476,34 +476,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	var (
 		ret   []byte
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
-		// gasLeft   int64
-		// gasRefund int64
-	)
-	fmt.Println("----------------> Start Transition")
-	fmt.Println("----------------> Start Gasss: ", st.gasRemaining)
-	fmt.Println("Refunds: ", refunds)
 
-	// host := evmonego.NewEvmOneHost(st, bailout) // TODO: may be we shouldn't recreate it and destroy it every time we do transition?
-	// err = host.SetOption("validate_eof", "true")
-	// fmt.Println("Setoption err asdas: ", err)
-	// if contractCreation {
-	// 	ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Create, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to(), nil)
-	// 	st.gasRemaining = uint64(gasLeft)
-	// } else {
-	// 	// Increment the nonce for the next transaction
-	// 	// st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
-	// 	ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Call, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to(), nil)
-	// 	st.gasRemaining = uint64(gasLeft)
-	// }
-	// host.DestroyVM() // TODO: should we destroy it everytime?
-	// fmt.Println("GAS REFUNDqq", gasRefund)
+	)
 
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		fmt.Println("CALLING CREATE")
 		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout, rules.IsOsaka)
 		nonce, vmerr := st.state.GetNonce(sender.Address())
 		if errors.Is(vmerr, vm.ErrInvalidEOFInitcode) {
@@ -511,7 +491,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		}
 	} else {
 		// Increment the nonce for the next transaction
-		fmt.Println("CALLING CALL")
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 
@@ -571,19 +550,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		CoinbaseInitBalance: coinbaseInitBalance,
 		FeeTipped:           amount,
 	}
-	fmt.Println("result.UsedGas:             ", result.UsedGas)
-	fmt.Println("result.Err:                 ", result.Err)
-	fmt.Println("result.Reverted:            ", result.Reverted)
-	fmt.Println("SenderInitBalance:          ", result.SenderInitBalance)
-	fmt.Println("result.CoinbaseInitBalance: ", result.CoinbaseInitBalance)
-	fmt.Println("result.FeeTipped:           ", result.FeeTipped)
-	fmt.Println("result.ReturnData:          ", result.ReturnData)
-
 	if st.evm.Context.PostApplyMessage != nil {
-		fmt.Println("Hittin this")
 		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
 	}
-	fmt.Println("----------------> End Transition")
 	return result, nil
 }
 

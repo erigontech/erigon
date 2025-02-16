@@ -103,7 +103,6 @@ var (
 )
 
 func gasSStore(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	fmt.Println("CALLING gasSStore")
 	value, x := stack.Back(1), stack.Back(0)
 	key := libcommon.Hash(x.Bytes32())
 	var current uint256.Int
@@ -187,7 +186,6 @@ func gasSStore(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, me
 //     2.2.2.1. If original value is 0, add SSTORE_SET_GAS - SLOAD_GAS to refund counter.
 //     2.2.2.2. Otherwise, add SSTORE_RESET_GAS - SLOAD_GAS gas to refund counter.
 func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	fmt.Println("CALLING gasSStoreEIP2200")
 	// If we fail the minimum gas availability invariant, fail (0)
 	if contract.Gas <= params.SstoreSentryGasEIP2200 {
 		return 0, errors.New("not enough gas for reentrancy sentry")
@@ -561,7 +559,6 @@ func gasExtCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, m
 		}
 		gas += params.CallValueTransferGas
 	}
-	fmt.Println("GAS 1:", gas)
 	memoryGas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -570,24 +567,7 @@ func gasExtCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, m
 	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	// fmt.Println("GAS 2:", gas)
-	// tempGas := contract.Gas - gas
-	// _max := max(tempGas/64, 5000)
-	// if _max > tempGas {
-	// 	fmt.Println("tempGAS: ", tempGas)
-	// 	evm.SetCallGasTemp(0)
-	// 	return contract.Gas, nil // charge everything
-	// }
-	// callGasTemp := tempGas - _max
-	// fmt.Println("CALL GASTMP: ", callGasTemp)
-	// evm.SetCallGasTemp(callGasTemp)
 
-	// if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
-	// 	fmt.Println("RETURNING FROM HERE")
-	// 	return 0, ErrGasUintOverflow
-	// }
-	// fmt.Println("GAS USED: ", gas)
-	// return gas, nil
 	evm.callGasTemp, err = extCallGas(contract.Gas, gas)
 	if err != nil {
 		return 0, err

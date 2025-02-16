@@ -154,7 +154,6 @@ func (c *Container) MarshalBinary() []byte {
 // UnmarshalBinary decodes an EOF container.
 func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
 	// TODO(racytech): make sure this one is correct!
-	fmt.Println("len(b) = ", len(b))
 	if !hasEOFMagic(b) {
 		return fmt.Errorf("%w: want %x", ErrInvalidMagic, eofMagic)
 	}
