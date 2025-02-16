@@ -1708,50 +1708,43 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	}
 
 	var v []byte
-	var found bool
 	var foundStep uint64
 
-	err := roTx.Apply(func(tx kv.Tx) (err error) {
-		v, foundStep, found, err = func() ([]byte, uint64, bool, error) {
+	valsC, err := dt.valsCursor(roTx)
 
-			valsC, err := dt.valsCursor(tx)
-			if err != nil {
-				return nil, 0, false, err
-			}
+	if err != nil {
+		return nil, 0, false, err
+	}
 
-			if dt.d.largeValues {
-				fullkey, v, err := valsC.Seek(key)
-				if err != nil {
-					return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
-				}
-				if len(fullkey) == 0 {
-					return nil, 0, false, nil // This key is not in DB
-				}
-				if !bytes.Equal(fullkey[:len(fullkey)-8], key) {
-					return nil, 0, false, nil // This key is not in DB
-				}
-
-				return v, ^binary.BigEndian.Uint64(fullkey[len(fullkey)-8:]), true, nil
-			} else {
-				_, stepWithVal, err := valsC.SeekExact(key)
-				if err != nil {
-					return nil, 0, false, fmt.Errorf("valsCursor.SeekExact: %w", err)
-				}
-				if len(stepWithVal) == 0 {
-					return nil, 0, false, nil
-				}
-
-				return stepWithVal[8:], ^binary.BigEndian.Uint64(stepWithVal[:8]), true, nil
-			}
-		}()
-
-		return err
-	})
-
-	if found {
-		if lastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.files.EndTxNum() {
-			return v, foundStep, true, nil
+	if dt.d.largeValues {
+		fullkey, val, err := valsC.Seek(key)
+		if err != nil {
+			return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
 		}
+		if len(fullkey) == 0 {
+			return nil, 0, false, nil // This key is not in DB
+		}
+		if !bytes.Equal(fullkey[:len(fullkey)-8], key) {
+			return nil, 0, false, nil // This key is not in DB
+		}
+
+		v = val
+		foundStep = ^binary.BigEndian.Uint64(fullkey[len(fullkey)-8:])
+	} else {
+		_, stepWithVal, err := valsC.SeekExact(key)
+		if err != nil {
+			return nil, 0, false, fmt.Errorf("valsCursor.SeekExact: %w", err)
+		}
+		if len(stepWithVal) == 0 {
+			return nil, 0, false, nil
+		}
+
+		v = stepWithVal[8:]
+		foundStep = ^binary.BigEndian.Uint64(stepWithVal[:8])
+	}
+
+	if lastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.files.EndTxNum() {
+		return v, foundStep, true, nil
 	}
 
 	return nil, 0, false, err

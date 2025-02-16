@@ -11,6 +11,7 @@ import (
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus"
@@ -31,16 +32,16 @@ type serialExecutor struct {
 	lastBlockResult *blockResult
 }
 
-func (se *serialExecutor) LogExecuted() {
-	se.progress.LogExecuted(se.rs.StateV3, se)
+func (se *serialExecutor) LogExecuted(tx kv.Tx) {
+	se.progress.LogExecuted(tx, se.rs.StateV3, se)
 }
 
-func (se *serialExecutor) LogCommitted(commitStart time.Time) {
-	se.progress.LogCommitted(commitStart, se.rs.StateV3, se)
+func (se *serialExecutor) LogCommitted(tx kv.Tx, commitStart time.Time) {
+	se.progress.LogCommitted(tx, commitStart, se.rs.StateV3, se)
 }
 
-func (se *serialExecutor) LogComplete() {
-	se.progress.LogComplete(se.rs.StateV3, se)
+func (se *serialExecutor) LogComplete(tx kv.Tx) {
+	se.progress.LogComplete(tx, se.rs.StateV3, se)
 }
 
 func (se *serialExecutor) wait(ctx context.Context) error {
@@ -53,7 +54,7 @@ func (se *serialExecutor) processEvents(ctx context.Context, wait bool) *blockRe
 	return result
 }
 
-func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profile bool) (cont bool, err error) {
+func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInitialCycle bool, profile bool) (cont bool, err error) {
 	blockReceipts := make([]*types.Receipt, 0, len(tasks))
 	var startTxIndex int
 
@@ -92,7 +93,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 			if txTask.IsBlockEnd() {
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
-				ibs := state.New(state.NewReaderParallelV3(se.rs.Domains(), se.tx()))
+				ibs := state.New(state.NewReaderParallelV3(se.rs.Domains(), se.applyTx))
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 					return core.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */)
@@ -110,7 +111,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 						blockReceipts, txTask.Withdrawals, chainReader, syscall, se.logger)
 				}
 
-				if !se.isMining && !se.inMemExec && startTxIndex == 0 && !se.execStage.CurrentSyncCycle.IsInitialCycle {
+				if !se.isMining && !se.inMemExec && startTxIndex == 0 && !isInitialCycle {
 					// note this assumes the bloach reciepts is a fixed array shared by
 					// all tasks - if that changes this will need to change - robably need to
 					// add this to the executor
@@ -143,8 +144,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 				blockReceipts = append(blockReceipts, receipt)
 			}
 
-			if se.cfg.syncCfg.ChaosMonkey {
-				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, se.cfg.badBlockHalt, result.Err)
+			if se.cfg.syncCfg.ChaosMonkey && se.enableChaosMonkey {
+				chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txTask.TxIndex, se.cfg.badBlockHalt, result.Err)
 				if chaosErr != nil {
 					log.Warn("Monkey in a consensus")
 					return chaosErr
@@ -155,7 +156,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 			if errors.Is(err, context.Canceled) {
 				return false, err
 			}
-			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.execStage.LogPrefix()),
+			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.logPrefix),
 				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "hash", txTask.Header.Hash().String(), "err", err, "inMem", se.inMemExec)
 			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
@@ -215,31 +216,44 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 	return true, nil
 }
 
-func (se *serialExecutor) commit(ctx context.Context, txNum uint64, useExternalTx bool) (t2 time.Duration, err error) {
+func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, txNum uint64, useExternalTx bool) (kv.RwTx, time.Duration, error) {
 	se.doms.Close()
-	if err = se.execStage.Update(se.applyTx, se.lastBlockResult.lastTxNum); err != nil {
-		return 0, err
+	err := execStage.Update(tx, se.lastBlockResult.lastTxNum)
+
+	if err != nil {
+		return tx, 0, err
 	}
 
-	se.applyTx.CollectMetrics()
+	tx.CollectMetrics()
+
+	var t2 time.Duration
 
 	if !useExternalTx {
 		tt := time.Now()
-		if err = se.applyTx.Commit(); err != nil {
-			return 0, err
+		if err = tx.Commit(); err != nil {
+			return nil, 0, err
 		}
 
 		t2 = time.Since(tt)
 		se.agg.BuildFilesInBackground(se.lastBlockResult.lastTxNum)
 
-		se.applyTx, err = se.cfg.db.BeginRw(context.Background()) //nolint
+		se.applyTx.Rollback()
+
+		tx, err = se.cfg.db.BeginRw(context.Background()) //nolint
 		if err != nil {
-			return t2, err
+			return nil, t2, err
+		}
+
+		se.applyTx, err = se.cfg.db.BeginRo(context.Background()) //nolint
+		if err != nil {
+			tx.Rollback()
+			return nil, t2, err
 		}
 
 		se.doms, err = state2.NewSharedDomains(se.applyTx, se.logger)
 		if err != nil {
-			return t2, err
+			tx.Rollback()
+			return nil, t2, err
 		}
 		se.doms.SetTxNum(txNum)
 		se.rs = state.NewStateV3Buffered(state.NewStateV3(se.doms, se.logger))
@@ -248,5 +262,5 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, useExternalT
 		se.applyWorker.ResetState(se.rs, nil, nil, se.accumulator)
 	}
 
-	return t2, nil
+	return tx, t2, nil
 }

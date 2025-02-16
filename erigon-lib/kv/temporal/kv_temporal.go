@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/state"
@@ -245,6 +246,35 @@ func (tx *RwTx) Rollback() {
 	rb := tx.RwTx
 	tx.RwTx = nil
 	rb.Rollback()
+}
+
+type asyncClone struct {
+	RwTx
+}
+
+// this is needed to create a clone that can be passed
+// to external go rooutines - they are intended as slaves
+// so should never commit or rollback the master transaction
+func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
+	return &asyncClone{
+		RwTx{
+			RwTx: asyncTx,
+			tx: tx{
+				db:               rwtx.db,
+				filesTx:          rwtx.filesTx,
+				resourcesToClose: nil,
+				ctx:              rwtx.ctx,
+			}}}
+}
+
+func (tx *asyncClone) ApplyChan() mdbx.TxApplyChan {
+	return tx.RwTx.RwTx.(mdbx.TxApplySource).ApplyChan()
+}
+
+func (tx *asyncClone) Commit() error {
+	return fmt.Errorf("can't commit cloned tx")
+}
+func (tx *asyncClone) Rollback() {
 }
 
 func (tx *tx) autoClose() {

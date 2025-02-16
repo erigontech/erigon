@@ -508,7 +508,10 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorCancel := pe.run(context.Background())
+	executorContext, executorCancel := pe.run(context.Background())
+
+	assert.NoError(t, executorContext.Err(), "error occur during parallel init")
+
 	defer executorCancel()
 
 	start := time.Now()
@@ -554,15 +557,20 @@ func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.T
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	_, err = pe.execute(ctx, tasks, profile)
+	applyResults := make(chan applyResult, 1000)
 
-	if err != nil {
-		return
-	}
+	pe.execRequests <- &execRequest{tasks, applyResults, profile}
 
 	defer pe.wait(ctx)
 
-	blockResult := pe.processEvents(ctx, true)
+	// TODO get results back
+
+	for applyResult := range applyResults {
+		var ok bool
+		if result, ok = applyResult.(*blockResult); ok {
+			break
+		}
+	}
 
 	if check != nil {
 		err = check(pe)
@@ -570,7 +578,7 @@ func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.T
 
 	cancel()
 
-	return blockResult, err
+	return result, err
 }
 
 func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
@@ -613,7 +621,8 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorCancel := pe.run(context.Background())
+	_, executorCancel := pe.run(context.Background())
+
 	defer executorCancel()
 
 	res, err := executeParallelWithCheck(t, pe, tasks, true, validation, false)
