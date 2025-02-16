@@ -150,8 +150,9 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.config = vmConfig
 	evm.chainRules = chainRules
 
-	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
-
+	interpreter := NewEVMInterpreter(evm, vmConfig)
+	evm.interpreter = interpreter
+	evm.config.JumpTableEOF = interpreter.cfg.JumpTableEOF
 	// ensure the evm is reset to be used again
 	atomic.StoreInt32(&evm.abort, 0)
 }
@@ -306,7 +307,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		if typ == STATICCALL {
 			readOnly = true
 		}
-
+		// state_transition.go:138
 		ret, err = run(evm, contract, input, readOnly)
 		gas = contract.Gas
 	}

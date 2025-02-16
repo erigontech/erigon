@@ -539,33 +539,6 @@ func opRjumpv(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	return nil, nil
 }
 
-// inline code_iterator callf(StackTop stack, ExecutionState& state, code_iterator pos) noexcept
-// {
-//     const auto index = read_uint16_be(&pos[1]);
-//     const auto& header = state.analysis.baseline->eof_header;
-//     const auto stack_size = &stack.top() - state.stack_space.bottom();
-
-//     const auto callee_required_stack_size =
-//         header.types[index].max_stack_height - header.types[index].inputs;
-//     if (stack_size + callee_required_stack_size > StackSpace::limit)
-//     {
-//         state.status = EVMC_STACK_OVERFLOW;
-//         return nullptr;
-//     }
-
-//     if (state.call_stack.size() >= StackSpace::limit)
-//     {
-//         // TODO: Add different error code.
-//         state.status = EVMC_STACK_OVERFLOW;
-//         return nullptr;
-//     }
-//     state.call_stack.push_back(pos + 3);
-
-//     const auto offset = header.code_offsets[index] - header.code_offsets[0];
-//     auto code = state.analysis.baseline->executable_code;
-//     return code.data() + offset;
-// }
-
 // opCallf implements the CALLF opcode
 func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	code := scope.Contract.CodeAt(scope.CodeSection)
@@ -911,7 +884,6 @@ func validAddr(addr *uint256.Int) bool {
 }
 
 func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-
 	var (
 		dst256    = scope.Stack.Pop()
 		offset256 = scope.Stack.Pop()

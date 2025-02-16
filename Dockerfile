@@ -12,11 +12,6 @@ ADD erigon-lib/go.sum erigon-lib/go.sum
 RUN go mod download
 ADD . .
 
-RUN cmake -S . -B build -DEVMONE_TESTING=OFF
-RUN cmake --build build --parallel
-RUN mkdir -p ./core/evmone-go/lib
-RUN cp ./build/lib/libevmon* ./core/evmone-go/lib
-
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \
     --mount=type=cache,target=/go/pkg/mod \
@@ -84,32 +79,30 @@ COPY --from=builder /app/build/bin/state /usr/local/bin/state
 COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
 COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
 COPY --from=builder /app/build/bin/caplin /usr/local/bin/caplin
-COPY --from=builder /app/build/lib/* /usr/local/lib
-
 
 EXPOSE 8545 \
-       8551 \
-       8546 \
-       30303 \
-       30303/udp \
-       42069 \
-       42069/udp \
-       8080 \
-       9090 \
-       6060
+    8551 \
+    8546 \
+    30303 \
+    30303/udp \
+    42069 \
+    42069/udp \
+    8080 \
+    9090 \
+    6060
 
 # https://github.com/opencontainers/image-spec/blob/main/annotations.md
 ARG BUILD_DATE
 ARG VCS_REF
 ARG VERSION
 LABEL org.label-schema.build-date=$BUILD_DATE \
-      org.label-schema.description="Erigon Ethereum Client" \
-      org.label-schema.name="Erigon" \
-      org.label-schema.schema-version="1.0" \
-      org.label-schema.url="https://torquem.ch" \
-      org.label-schema.vcs-ref=$VCS_REF \
-      org.label-schema.vcs-url="https://github.com/erigontech/erigon.git" \
-      org.label-schema.vendor="Torquem" \
-      org.label-schema.version=$VERSION
+    org.label-schema.description="Erigon Ethereum Client" \
+    org.label-schema.name="Erigon" \
+    org.label-schema.schema-version="1.0" \
+    org.label-schema.url="https://torquem.ch" \
+    org.label-schema.vcs-ref=$VCS_REF \
+    org.label-schema.vcs-url="https://github.com/erigontech/erigon.git" \
+    org.label-schema.vendor="Torquem" \
+    org.label-schema.version=$VERSION
 
 ENTRYPOINT ["erigon"]
