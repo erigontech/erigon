@@ -206,7 +206,6 @@ jobs:
     name: test on ${{ matrix.id }}
     runs-on: [ self-hosted, Release, "${{ matrix.runner-arch }}" ]
     timeout-minutes: 7200  # 5 days
-    if: ${{ inputs.skip_tests == 'false' }}
     needs: [ build-release ]
     strategy:
       matrix:
@@ -219,6 +218,12 @@ jobs:
             artifact: linux_arm64
 
     steps:
+
+      - name: The job will be considered successful upon fulfillment of input parameter skip_tests=true .
+        if: ${{ inputs.skip_tests == 'false' }}
+        run: |
+          echo "The test was skipped according to the input parameter."
+          exit 0
 
       - name: Cleanup working directory
         run: rm -drfv *
