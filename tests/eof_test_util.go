@@ -168,7 +168,7 @@ func (e *EOFTest) Run(t *testing.T) error {
 	fmt.Println("result: ", result)
 	fmt.Println("exception: ", exception)
 	fmt.Println("eof code size: ", len(code))
-	eofJt := vm.NewPragueEOFInstructionSet()
+	eofJt := vm.NewEOFInstructionSet()
 	var c vm.Container
 	arr := strings.Split(exception, "|")
 	fmt.Println(arr)

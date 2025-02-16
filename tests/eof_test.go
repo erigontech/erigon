@@ -52,7 +52,7 @@ func TestEOFStateTest(t *testing.T) {
 
 	st := new(testMatcher)
 
-	dir := filepath.Join(".", "state_tests/osaka/eip7692_eof_v1")
+	dir := filepath.Join(".", "state_tests/osaka/eip7692_eof_v1/eip7620_eof_create")
 
 	dirs := datadir.New(t.TempDir())
 	db, _ := temporaltest.NewTestDB(t, dirs)
@@ -79,32 +79,3 @@ func TestEOFStateTest(t *testing.T) {
 		}
 	})
 }
-
-// func withTrace_(t *testing.T, test func(vm.Config) error) {
-// 	// Use config from command line arguments.
-// 	config := vm.Config{}
-// 	err := test(config)
-// 	if err == nil {
-// 		return
-// 	}
-
-// 	// Test failed, re-run with tracing enabled.
-// 	t.Error(err)
-// 	buf := new(bytes.Buffer)
-// 	w := bufio.NewWriter(buf)
-// 	tracer := logger.NewJSONLogger(&logger.LogConfig{DisableMemory: true}, w)
-// 	config.Debug, config.Tracer = true, tracer
-// 	err2 := test(config)
-// 	if !reflect.DeepEqual(err, err2) {
-// 		t.Errorf("different error for second run: %v", err2)
-// 	}
-// 	w.Flush()
-// 	if buf.Len() == 0 {
-// 		t.Log("no EVM operation logs generated")
-// 		//} else {
-// 		//enable it if need extensive logging
-// 		//t.Log("EVM operation log:\n" + buf.String())
-// 	}
-// 	//t.Logf("EVM output: 0x%x", tracer.Output())
-// 	//t.Logf("EVM error: %v", tracer.Error())
-// }

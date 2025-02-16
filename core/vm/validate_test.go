@@ -242,7 +242,7 @@ func TestValidateCode(t *testing.T) {
 			metadata: []*FunctionMetadata{{Inputs: 0, Outputs: 0, MaxStackHeight: 2}, {Inputs: 2, Outputs: 1, MaxStackHeight: 2}},
 		},
 	} {
-		err := validateCode(test.code, test.section, test.metadata, &pragueEOFInstructionSet, 0, 0)
+		err := validateCode(test.code, test.section, test.metadata, &eofInstructionSet, 0, 0)
 		if !errors.Is(err, test.err) {
 			t.Errorf("test %d (%s): unexpected error (want: %v, got: %v)", i, common.Bytes2Hex(test.code), test.err, err)
 		}

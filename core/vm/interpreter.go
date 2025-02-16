@@ -149,11 +149,13 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	fmt.Println("CALLING NewEVMInterpreter")
 	var jt, eofJt *JumpTable
+	fmt.Println(evm.ChainRules())
 	switch {
+	case evm.ChainRules().IsOsaka:
+		jt = &pragueInstructionSet
+		eofJt = &eofInstructionSet
 	case evm.ChainRules().IsPrague:
 		jt = &pragueInstructionSet
-		eofJt = &pragueEOFInstructionSet
-		fmt.Println("Hit PRAGUE")
 	case evm.ChainRules().IsCancun:
 		jt = &cancunInstructionSet
 	case evm.ChainRules().IsNapoli:
@@ -243,7 +245,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	)
 
 	mem.Reset()
-
+	fmt.Println("contract.IsEOF", contract.IsEOF())
 	contract.Input = input
 	var initcode []byte // TODO(racytech): temp solution, condsider a better way, this will not work with JUMPF
 	if contract.IsEOF() {
@@ -253,6 +255,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		jt = in.cfg.JumpTable
 		initcode = contract.Code
 	}
+	fmt.Printf("initcode: 0x%x\n", initcode)
 	// fmt.Printf("initcode: 0x%x\n", initcode)
 	// fmt.Println("contract.Gas: ", contract.Gas)
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
@@ -279,16 +282,17 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			in.readOnly = false
 		}
 		in.depth--
-		fmt.Printf("depth after: %v: ", in.depth)
+		// fmt.Printf("depth after: %v: ", in.depth)
 	}()
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
-	fmt.Printf("\ngas: %v, depth before: %v: ", contract.Gas, in.depth)
+	// fmt.Printf("\ngas: %v, depth before: %v: ", contract.Gas, in.depth)
 	steps := 0
 	for {
-		if contract.IsEOF() { // TODO(racytech): re-do this, find a better way, creates extra if check
+		// required by CALLF to set the initcode to appropirate code section
+		if contract.IsEOF() { // TODO(racytech): re-do this, find a better way
 			initcode = contract.Container.Code[callContext.CodeSection]
 		}
 
@@ -302,17 +306,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
-		// op = contract.GetOp(_pc)
-		// if contract.IsEOF() {
-		// 	op = contract.GetOp(_pc)
-		// }
 		if len(initcode) > int(_pc) {
 			op = OpCode(initcode[_pc])
 		} else {
 			op = STOP
 		}
 
-		fmt.Printf("%v ", op)
+		fmt.Printf("OPCODE: %v, GAS: %v\n", op, contract.Gas)
 
 		operation := jt[op]
 		cost = operation.constantGas // For tracing
@@ -323,6 +323,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
 		if !contract.UseGas(cost, tracing.GasChangeIgnored) {
+			fmt.Println("RETURNING FROM HERE")
 			return nil, ErrOutOfGas
 		}
 		if operation.dynamicGas != nil {
@@ -351,7 +352,11 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if err != nil {
 				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
 			}
+			if op == EXTCALL || op == SSTORE {
+				fmt.Println("COST: ", cost)
+			}
 			if !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
+				fmt.Println("RETURNING HERE")
 				return nil, ErrOutOfGas
 			}
 			// Do tracing before memory expansion
@@ -375,9 +380,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		_pc++
 	}
 
-	fmt.Println("\n")
-
 	if err == errStopToken {
+		fmt.Println("ret: ", res)
 		err = nil // clear stop token error
 	}
 

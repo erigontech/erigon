@@ -44,6 +44,8 @@ func NewEvmOneHost(env ExecEnv, bailout bool) *HostImpl {
 	rules := env.GetEnvEVM().ChainRules()
 	var rev Revision
 	switch {
+	case rules.IsOsaka:
+		rev = Osaka
 	case rules.IsPrague:
 		rev = Prague
 	case rules.IsCancun:
@@ -113,7 +115,7 @@ func (h *HostImpl) SetStorage(addr common.Address, key common.Hash, value common
 	restored := original.Eq(&_value)
 	currentIsZero := current.IsZero()
 	valueIsZero := _value.IsZero()
-	fmt.Printf("address: 0x%x, key: 0x%x, value: 0x%x\n", addr, key, value)
+	fmt.Printf("address: 0x%x, key: 0x%x, value: 0x%x, current: 0x%x\n", addr, key, value, current.Bytes32())
 	if !dirty && !restored {
 		if currentIsZero {
 			status = StorageAdded
@@ -280,7 +282,7 @@ func (h *HostImpl) handleCall(kind CallKind,
 		}
 	}
 	// fmt.Printf("code: 0x%x\n", code)
-	// // fmt.Println("isPrecompile: ", isPrecompile)
+	fmt.Println("isPrecompile: ", isPrecompile)
 	snapshot := h.ibs.Snapshot()
 
 	if kind == Call {
@@ -297,7 +299,6 @@ func (h *HostImpl) handleCall(kind CallKind,
 		}
 		h.evm.Context.Transfer(h.ibs, sender, recipient, value, h.bailout)
 	}
-
 	var evr Result
 	var gLeft uint64
 	// It is allowed to call precompiles, even via delegatecall
@@ -309,13 +310,15 @@ func (h *HostImpl) handleCall(kind CallKind,
 		// The depth-check is already done, and precompiles handled above
 		output, err = nil, nil // gas is unchanged
 	} else {
-		// // fmt.Println("calling Execute")
+		fmt.Println("calling Execute asdas")
+		fmt.Printf("code: 0x%x\n", code)
 		evr, err = h.Execute(kind, static, depth, int64(gas), recipient, sender, input, value.Bytes32(), code)
 		output = evr.Output
 		gasLeft = evr.GasLeft
 		gasRefund = evr.GasRefund
-		// // // fmt.Println("GAS LEFT: ", gasLeft)
-		// // // fmt.Println("GAS REFUND: ", gasRefund)
+		// fmt.Println("GAS LEFT: ", gasLeft)
+		// fmt.Println("GAS REFUND: ", gasRefund)
+		// fmt.Println("OUTPUT: ", output)
 	}
 
 	// When an error was returned by the EVM or when setting the creation code
@@ -415,11 +418,11 @@ func (h *HostImpl) handleCreate(kind CallKind,
 	// // fmt.Println("GAS BEFORE EXECUTE: ", gas)
 	var evr Result
 	evr, err = h.Execute(kind, static, depth, int64(gas), recipient, sender, input, value.Bytes32(), code)
-	// output = evr.Output
-	// gasLeft = evr.GasLeft
-	// gasRefund = evr.GasRefund
-	// // // fmt.Println("GAS LEFT: ", gasLeft)
-	// // // fmt.Println("evr.StatusCode", evr.StatusCode)
+	// output := evr.Output
+	// gasLeft := evr.GasLeft
+	// gasRefund := evr.GasRefund
+	// fmt.Println("GAS LEFT: ", gasLeft)
+	// fmt.Println("evr.StatusCode", evr.StatusCode)
 	// fmt.Printf("RESULT_OUTPUT: 0x%x\n", evr.Output)
 
 	// EIP-170: Contract code size limit
@@ -461,7 +464,7 @@ func (h *HostImpl) handleCreate(kind CallKind,
 		}
 	}
 	createAddr = recipient
-	// fmt.Printf("RET: %v, ADDR: %v, GAS: %v, ERR: %v\n", evr.Output, createAddr, evr.GasLeft, err)
+	fmt.Printf("RET: %v, ADDR: %v, GAS: %v, ERR: %v\n", evr.Output, createAddr, evr.GasLeft, err)
 	return evr.Output, evr.GasLeft, evr.GasRefund, createAddr, err
 }
 
@@ -478,18 +481,18 @@ func (h *HostImpl) Call(kind CallKind,
 	createAddr common.Address, err error) {
 	// fmt.Println("calling 12")
 
-	// fmt.Println("--")
-	// fmt.Println("kind: ", kind)
-	// fmt.Printf("recipient: 0x%x\n", recipient)
-	// fmt.Printf("sender: 0x%x\n", sender)
-	// fmt.Printf("value: 0x%x\n", value)
-	// fmt.Printf("input: 0x%x\n", input)
-	// fmt.Println("gas: ", gas)
-	// fmt.Println("depth: ", depth)
-	// // fmt.Println("static: ", static)
-	// fmt.Printf("salt: 0x%x\n", salt)
-	// fmt.Printf("codeAddress: 0x%x\n", codeAddress)
-	// fmt.Printf("code: 0x%0x\n", code)
+	fmt.Println("--")
+	fmt.Println("kind: ", kind)
+	fmt.Printf("recipient: 0x%x\n", recipient)
+	fmt.Printf("sender: 0x%x\n", sender)
+	fmt.Printf("value: 0x%x\n", value)
+	fmt.Printf("input: 0x%x\n", input)
+	fmt.Println("gas: ", gas)
+	fmt.Println("depth: ", depth)
+	// fmt.Println("static: ", static)
+	fmt.Printf("salt: 0x%x\n", salt)
+	fmt.Printf("codeAddress: 0x%x\n", codeAddress)
+	fmt.Printf("code: 0x%0x\n", code)
 
 	_value := new(uint256.Int).SetBytes32(value[:])
 
@@ -512,10 +515,10 @@ func (h *HostImpl) AccessStorage(addr common.Address, key common.Hash) AccessSta
 	// fmt.Println("calling 14")
 	_, slotMod := h.ibs.AddSlotToAccessList(addr, key)
 	if slotMod {
-		// fmt.Println("AccessStorage: ColdAccess")
+		fmt.Println("AccessStorage: ColdAccess")
 		return ColdAccess
 	}
-	// fmt.Println("AccessStorage: WarmAccess")
+	fmt.Println("AccessStorage: WarmAccess")
 	return WarmAccess
 }
 func (h *HostImpl) GetTransientStorage(addr common.Address, key common.Hash) common.Hash {

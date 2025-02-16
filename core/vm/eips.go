@@ -27,6 +27,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon/core/tracing"
@@ -567,11 +568,24 @@ func opRjumpv(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 
 // opCallf implements the CALLF opcode
 func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	var (
-		code = scope.Contract.CodeAt(scope.CodeSection)
-		idx  = binary.BigEndian.Uint16(code[*pc+1:])
-		typ  = scope.Contract.Container.Types[idx]
-	)
+	fmt.Println(scope.CodeSection)
+	code := scope.Contract.CodeAt(scope.CodeSection)
+	fmt.Printf("code: 0x%x\n", code)
+	fmt.Println("PC: ", *pc)
+	idx := binary.BigEndian.Uint16(code[*pc+1:])
+	fmt.Println("IDX: ", idx)
+	fmt.Println(code[*pc+1:])
+	var a uint64 = 0xFFFFFFFF_FFFFFFFF
+	fmt.Println(a + 1)
+	typ := scope.Contract.Container.Types[idx]
+	// fmt.Println("CODE SECTION", scope.CodeSection)
+	// fmt.Println(scope.Contract.CodeAt(scope.CodeSection))
+	// fmt.Println(scope.Contract.CodeAt(scope.CodeSection)[*pc+1:])
+	// var (
+	// 	code = scope.Contract.CodeAt(scope.CodeSection)
+	// 	idx  = binary.BigEndian.Uint16(code[*pc+1:])
+	// 	typ  = scope.Contract.Container.Types[idx]
+	// )
 
 	// fmt.Printf("StackLen: %v, typ.MaxStackHeight: %v, typ.Inputs: %v\n", scope.Stack.Len(), typ.MaxStackHeight, typ.Inputs)
 	if scope.Stack.Len()+int(typ.MaxStackHeight)-int(typ.Inputs) > 1024 {
@@ -630,7 +644,7 @@ func opDupN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 		idx  = int(code[*pc+1])
 	)
 	scope.Stack.DupN(idx)
-	*pc += 1
+	*pc += 1 // we do one more pc++ in the interpeter loop
 	return nil, nil
 }
 
@@ -736,7 +750,7 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 
 	// if (state.in_static_mode())
 	// return {EVMC_STATIC_MODE_VIOLATION, gas_left};
-	if interpreter.readOnly == true { // STATICCALL
+	if interpreter.readOnly { // STATICCALL
 		return nil, ErrStaticModeViolation
 	}
 
@@ -917,6 +931,7 @@ func opReturnDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 			b[i] = interpreter.returnData[start+i]
 		}
 		index256.SetBytes32(b[:])
+		fmt.Println("RETURNDATALOAD: ", b)
 	}
 	return nil, nil
 }
@@ -937,6 +952,7 @@ func validAddr(addr *uint256.Int) bool {
 }
 
 func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+
 	var (
 		dst256    = scope.Stack.Pop()
 		offset256 = scope.Stack.Pop()
@@ -949,17 +965,33 @@ func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 
 		gas = interpreter.evm.CallGasTemp()
 	)
+
+	if interpreter.readOnly && !value.IsZero() {
+		return nil, ErrWriteProtection
+	}
+
 	if !validAddr(&dst256) {
 		return nil, fmt.Errorf("argument out of range")
 	}
 	args := scope.Memory.GetPtr(offset, size)
+	fmt.Println("BEFORE: ")
+	var (
+		ret       []byte
+		returnGas uint64
+		err       error
+	)
+	fmt.Println("GAS: ", gas)
+	if gas == 0 {
+		// zero temp call gas indicates a min retained gas error
+		ret, returnGas, err = nil, 0, ErrExecutionReverted
+	} else {
+		ret, returnGas, err = interpreter.evm.ExtCall(scope.Contract, toAddr, args, gas, &value)
+	}
 
-	ret, returnGas, err := interpreter.evm.ExtCall(scope.Contract, toAddr, args, gas, &value)
 	fmt.Println("ERR: ", err)
-	if err == ErrExecutionReverted || err == ErrDepth {
+	if err == ErrExecutionReverted || err == ErrDepth || err == ErrInsufficientBalance {
 		dst256.SetOne()
 	} else if err != nil {
-		fmt.Println("SETTING 2")
 		dst256.SetUint64(2)
 	} else {
 		dst256.Clear()
@@ -969,10 +1001,11 @@ func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	// 	ret = libcommon.CopyBytes(ret)
 	// 	scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
 	// }
+	fmt.Println("REFUND GAS: ", returnGas)
 	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 	interpreter.returnData = ret
 
-	return nil, nil
+	return ret, nil
 }
 func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
@@ -980,12 +1013,19 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 		offset256 = scope.Stack.Pop()
 		size256   = scope.Stack.Pop()
 
-		toAddr = addr256.Bytes20()
+		toAddr = common.Address(addr256.Bytes20())
 		offset = int64(offset256.Uint64())
 		size   = int64(size256.Uint64())
 
 		gas = interpreter.evm.CallGasTemp()
 	)
+	if gas == 0 {
+		addr256.SetOne()
+		scope.Stack.Push(&addr256)
+		scope.Contract.RefundGas(gas, tracing.GasChangeCallLeftOverRefunded)
+		interpreter.returnData = nil
+		return nil, nil
+	}
 	if !validAddr(&addr256) {
 		return nil, fmt.Errorf("argument out of range")
 	}
@@ -997,15 +1037,18 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 	// https://github.com/ethereum/EIPs/pull/7131
 	code, err := interpreter.evm.intraBlockState.GetCode(toAddr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 	if !hasEOFMagic(code) { // TODO(racytech): see if this part is correct and can be done better
+		fmt.Println("DOES NOT HAVE EOF MAGIC")
 		addr256.SetOne()
 		scope.Stack.Push(&addr256)
 		scope.Contract.RefundGas(gas, tracing.GasChangeCallLeftOverRefunded)
+		interpreter.returnData = nil
 		return nil, nil
 	}
-
+	fmt.Printf("ADDR BEFORE: 0x%x\n", addr256.Bytes32())
+	fmt.Printf("scope.Contract.Value(): 0x%x\n", scope.Contract.Value().Bytes32())
 	ret, returnGas, err := interpreter.evm.ExtDelegateCall(scope.Contract, toAddr, args, gas)
 	if err == ErrExecutionReverted || err == ErrDepth {
 		addr256.SetOne()
@@ -1014,16 +1057,13 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 	} else {
 		addr256.Clear()
 	}
+	fmt.Printf("ADDR: 0x%x\n", addr256.Bytes32())
 	scope.Stack.Push(&addr256)
-	// if err == nil || err == ErrExecutionReverted {
-	// 	ret = libcommon.CopyBytes(ret)
-	// 	scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
-	// }
 
 	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 
 	interpreter.returnData = ret
-	return nil, nil
+	return ret, nil
 }
 func opExtStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
@@ -1037,6 +1077,15 @@ func opExtStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContex
 
 		gas = interpreter.evm.CallGasTemp()
 	)
+
+	if gas == 0 {
+		addr256.SetOne()
+		scope.Stack.Push(&addr256)
+		scope.Contract.RefundGas(gas, tracing.GasChangeCallLeftOverRefunded)
+		interpreter.returnData = nil
+		return nil, nil
+	}
+
 	if !validAddr(&addr256) {
 		return nil, fmt.Errorf("argument out of range")
 	}
@@ -1052,13 +1101,9 @@ func opExtStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContex
 		addr256.Clear()
 	}
 	scope.Stack.Push(&addr256)
-	// if err == nil || err == ErrExecutionReverted {
-	// 	ret = libcommon.CopyBytes(ret)
-	// 	scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
-	// }
 
 	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 
 	interpreter.returnData = ret
-	return nil, nil
+	return ret, nil
 }
