@@ -206,7 +206,7 @@ jobs:
     name: test on ${{ matrix.id }}
     runs-on: [ self-hosted, Release, "${{ matrix.runner-arch }}" ]
     timeout-minutes: 7200  # 5 days
-    if: ${{ inputs.skip_tests == 'true' }}
+    if: ${{ inputs.skip_tests == 'false' }}
     needs: [ build-release ]
     strategy:
       matrix:
