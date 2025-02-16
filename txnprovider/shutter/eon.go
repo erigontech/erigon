@@ -44,8 +44,8 @@ func (e Eon) KeyperAt(index uint64) (libcommon.Address, error) {
 	return e.Members[index], nil
 }
 
-func (e Eon) PublicKey() (crypto.EonPublicKey, error) {
-	eonPublicKey := crypto.EonPublicKey{}
+func (e Eon) PublicKey() (*crypto.EonPublicKey, error) {
+	eonPublicKey := new(crypto.EonPublicKey)
 	err := eonPublicKey.Unmarshal(e.Key)
 	return eonPublicKey, err
 }
@@ -54,13 +54,8 @@ func EonLess(a, b Eon) bool {
 	return a.Index < b.Index
 }
 
-type EonSecretKey = crypto.EpochSecretKey
-
-func EonSecretKeyFromBytes(b []byte) (*EonSecretKey, error) {
-	epochSecretKey := new(EonSecretKey)
-	if err := epochSecretKey.Unmarshal(b); err != nil {
-		return nil, err
-	}
-
-	return epochSecretKey, nil
+func EpochSecretKeyFromBytes(b []byte) (*crypto.EpochSecretKey, error) {
+	epochSecretKey := new(crypto.EpochSecretKey)
+	err := epochSecretKey.Unmarshal(b)
+	return epochSecretKey, err
 }
