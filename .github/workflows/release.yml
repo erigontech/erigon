@@ -1,5 +1,5 @@
 name: Release
-run-name: Build release ${{ inputs.release_version}} from branch ${{ inputs.checkout_ref }} by @${{ github.actor }}
+run-name: Build release ${{ inputs.release_version}} from branch ${{ inputs.checkout_ref }}, tests=${{ inputs.skip_tests }} by @${{ github.actor }}
 
 env:
   APPLICATION: "erigon"
@@ -37,6 +37,11 @@ on:
         type: boolean
         default: false
         description: 'publish_latest_tag: when set then docker image with tag :latest will be also published'
+      skip_tests:
+        required: false
+        type: boolean
+        default: false
+        description: 'Skip tests during release build (not recommended)'
 
 jobs:
 
@@ -201,6 +206,7 @@ jobs:
     name: test on ${{ matrix.id }}
     runs-on: [ self-hosted, Release, "${{ matrix.runner-arch }}" ]
     timeout-minutes: 7200  # 5 days
+    if: ${{ inputs.skip_tests == 'true' }}
     needs: [ build-release ]
     strategy:
       matrix:
