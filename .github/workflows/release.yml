@@ -1,5 +1,5 @@
 name: Release
-run-name: Build release ${{ inputs.release_version}} from branch ${{ inputs.checkout_ref }}, tests=${{ inputs.skip_tests }} by @${{ github.actor }}
+run-name: Build release ${{ inputs.release_version}} from branch ${{ inputs.checkout_ref }}, Skip tests=${{ inputs.skip_tests }}
 
 env:
   APPLICATION: "erigon"
