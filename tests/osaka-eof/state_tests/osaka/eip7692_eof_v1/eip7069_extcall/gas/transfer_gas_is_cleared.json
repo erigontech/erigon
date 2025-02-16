@@ -1,0 +1,536 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_transfer_gas_is_cleared[fork_Osaka-state_test-value_0-opcode_EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000b0400000000800004600060006000611000f800",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a040000000080000460005f5f73000000000000000000000000000000000000110000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b040000000080000460005f5f730000000000000000000000000000000000001100f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001400": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611300315061120031505a600060006000600060006112005af1505a90035a600060006000600060006113005af1505a90035a600060006000600060006113005af1505a9003829003610001558190036100005500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001400",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x97a74df0ad33c2496ebdf640ebdfd6b6db8561c5135f1100b9ee87707be0fee0",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001400808026a0e50672e6e0101f4f153802eae88f051a1415a7b3a8a99be1992a949c39d6c52fa0575149870c0482045199b69a3bb74c9a32dceff6f1630f2cf958fc1f55cb2adf",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xa7aabb8fa6229c27b69f69a2c18a31ee28ede15fa122ba6d3f70969f08dec76d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test that EXT*CALL call doesn't charge for value transfer, even if the outer call\n    transfered value.\n\n    NOTE: This is particularly possible for EXTDELEGATECALL, which carries over the value sent\n    in the outer call, however, we extend the test to all 3 EXT*CALL opcodes for good measure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L146",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_transfer_gas_is_cleared[fork_Osaka-state_test-value_0-opcode_EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010009040000000080000360006000611000f900",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a040000000080000460005f5f73000000000000000000000000000000000000110000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b040000000080000460005f5f730000000000000000000000000000000000001100f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001400": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611300315061120031505a600060006000600060006112005af1505a90035a600060006000600060006113005af1505a90035a600060006000600060006113005af1505a9003829003610001558190036100005500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001400",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xa1e66b21144af6eff433e6f7dbfd5a5fba2305ba3350d5f2e138beb4bbd700ed",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001400808026a0e50672e6e0101f4f153802eae88f051a1415a7b3a8a99be1992a949c39d6c52fa0575149870c0482045199b69a3bb74c9a32dceff6f1630f2cf958fc1f55cb2adf",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xcd63f656ef972ddf454615feaef5075d40a6a13ed2990caf85a685c98bb32909",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test that EXT*CALL call doesn't charge for value transfer, even if the outer call\n    transfered value.\n\n    NOTE: This is particularly possible for EXTDELEGATECALL, which carries over the value sent\n    in the outer call, however, we extend the test to all 3 EXT*CALL opcodes for good measure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L146",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_transfer_gas_is_cleared[fork_Osaka-state_test-value_0-opcode_EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010009040000000080000360006000611000fb00",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a040000000080000460005f5f73000000000000000000000000000000000000110000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001b040000000080000460005f5f730000000000000000000000000000000000001100f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001400": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611300315061120031505a600060006000600060006112005af1505a90035a600060006000600060006113005af1505a90035a600060006000600060006113005af1505a9003829003610001558190036100005500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001400",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xb4782a79c5a3ee402a032d58d4c2ed1e840fdfd3e163379b4c32d395f0e28615",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001400808026a0e50672e6e0101f4f153802eae88f051a1415a7b3a8a99be1992a949c39d6c52fa0575149870c0482045199b69a3bb74c9a32dceff6f1630f2cf958fc1f55cb2adf",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x164c4934ea4c99bb6b7134e0e0c9b9fd806f0037c6bbd75f786b19f64b975109",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test that EXT*CALL call doesn't charge for value transfer, even if the outer call\n    transfered value.\n\n    NOTE: This is particularly possible for EXTDELEGATECALL, which carries over the value sent\n    in the outer call, however, we extend the test to all 3 EXT*CALL opcodes for good measure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L146",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_transfer_gas_is_cleared[fork_Osaka-state_test-value_1-opcode_EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000b0400000000800004600060006000611000f800",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a040000000080000460015f5f73000000000000000000000000000000000000110000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x05",
+                "code": "0xef0001010004020001001b040000000080000460015f5f730000000000000000000000000000000000001100f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001400": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611300315061120031505a600060006000600060006112005af1505a90035a600060006000600060006113005af1505a90035a600060006000600060006113005af1505a9003829003610001558190036100005500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001400",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x8d89a8523d92c6107629cf32a350d6244f6521f910d681fc9419b78b72ed397b",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001400808026a0e50672e6e0101f4f153802eae88f051a1415a7b3a8a99be1992a949c39d6c52fa0575149870c0482045199b69a3bb74c9a32dceff6f1630f2cf958fc1f55cb2adf",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x098c780342192eca833d6775f5683f2cb54c986cca02efcfe9e4c1d2be0dd6a6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test that EXT*CALL call doesn't charge for value transfer, even if the outer call\n    transfered value.\n\n    NOTE: This is particularly possible for EXTDELEGATECALL, which carries over the value sent\n    in the outer call, however, we extend the test to all 3 EXT*CALL opcodes for good measure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L146",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_transfer_gas_is_cleared[fork_Osaka-state_test-value_1-opcode_EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010009040000000080000360006000611000f900",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a040000000080000460015f5f73000000000000000000000000000000000000110000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x05",
+                "code": "0xef0001010004020001001b040000000080000460015f5f730000000000000000000000000000000000001100f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001400": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611300315061120031505a600060006000600060006112005af1505a90035a600060006000600060006113005af1505a90035a600060006000600060006113005af1505a9003829003610001558190036100005500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001400",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xc56430020a968579da696ffddc6dfd2b3c9198c66766cbf0ce94643677d77844",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001400808026a0e50672e6e0101f4f153802eae88f051a1415a7b3a8a99be1992a949c39d6c52fa0575149870c0482045199b69a3bb74c9a32dceff6f1630f2cf958fc1f55cb2adf",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x1d7e7997d74cbfb9ac0a3c4525f6432bd3bcec341c842fae0e676b249344e1fa",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test that EXT*CALL call doesn't charge for value transfer, even if the outer call\n    transfered value.\n\n    NOTE: This is particularly possible for EXTDELEGATECALL, which carries over the value sent\n    in the outer call, however, we extend the test to all 3 EXT*CALL opcodes for good measure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L146",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py::test_transfer_gas_is_cleared[fork_Osaka-state_test-value_1-opcode_EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010001040000000080000000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010009040000000080000360006000611000fb00",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001200": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001001a040000000080000460015f5f73000000000000000000000000000000000000110000",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001300": {
+                "nonce": "0x01",
+                "balance": "0x05",
+                "code": "0xef0001010004020001001b040000000080000460015f5f730000000000000000000000000000000000001100f800",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001400": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x611300315061120031505a600060006000600060006112005af1505a90035a600060006000600060006113005af1505a90035a600060006000600060006113005af1505a9003829003610001558190036100005500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x016345785d8a0000"
+            ],
+            "to": "0x0000000000000000000000000000000000001400",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x944521bff1d9267b6101b920cf5e4098ebb733597130618dfeef21c428ede247",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf865800a88016345785d8a0000940000000000000000000000000000000000001400808026a0e50672e6e0101f4f153802eae88f051a1415a7b3a8a99be1992a949c39d6c52fa0575149870c0482045199b69a3bb74c9a32dceff6f1630f2cf958fc1f55cb2adf",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x15bd6a9d908fe11fa68fca9c550c329538ea8623e5bead4f7ba8b1f125ff6336",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test that EXT*CALL call doesn't charge for value transfer, even if the outer call\n    transfered value.\n\n    NOTE: This is particularly possible for EXTDELEGATECALL, which carries over the value sent\n    in the outer call, however, we extend the test to all 3 EXT*CALL opcodes for good measure.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip7069_extcall/test_gas.py#L146",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    }
+}

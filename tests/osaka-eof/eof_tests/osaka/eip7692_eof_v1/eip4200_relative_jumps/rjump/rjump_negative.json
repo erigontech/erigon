@@ -1,0 +1,23 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjump.py::test_rjump_negative[fork_Osaka-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001504000000008000026001e1000760005160015500612015600052e0fff0",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7cbac7119f33d54bea27e8da5d155f6e7ee511212ccafab2825c7429c95c8786",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\nTest for a forward RJUMPI and backward RJUMP",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip4200_relative_jumps/test_rjump.py#L23",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    }
+}

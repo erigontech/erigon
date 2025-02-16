@@ -1,0 +1,262 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py::test_callf_fibonacci[fork_Osaka-state_test-n_0-result_1]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010008020002000a001d040000000080000201010004600035e300016000550060028111e10004506001e460028103e3000160018203e30001019050e4",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0xe4e1c0"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000000"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x85269edc206a43a01417a5e9db3bd9b96065379d9a36a06467094d49837b0011",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a83e4e1c094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000000025a00e6572b2072a0e5520236d010be6303bdf2710888d0eb9cd9683e8ea4901bb09a066c88e5a64b02d353e2246af5ee2dadbb847a522bbff10a081b0d946d7b544c3",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x4825d30461cc34b7a1fd9e0c91627e5f956ff0834edfba5f5c6580e75980b1bb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\nTest fibonacci sequence implementation with recursive CALLF instructions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py#L69",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py::test_callf_fibonacci[fork_Osaka-state_test-n_1-result_1]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010008020002000a001d040000000080000201010004600035e300016000550060028111e10004506001e460028103e3000160018203e30001019050e4",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0xe4e1c0"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x0000000000000000000000000000000000000000000000000000000000000001"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xb1ac876545ad93a2e031e21ffd402d1e657ab4133255dc4ad9febb3cbbf52e7a",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a83e4e1c094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000000125a0be90d5eceb26ebba4195b46e0d0511f1787532f6f52c110d509bed9e7d097858a06f9665143b445eca318a0b49957dcbd60dcae6b9dbb39dccca1ffa00b025fc04",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xf8561a2e6cf69864a05e3e940f72114f37b52921b37f7e03cabf6a8ee3b83646",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\nTest fibonacci sequence implementation with recursive CALLF instructions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py#L69",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py::test_callf_fibonacci[fork_Osaka-state_test-n_13-result_233]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010008020002000a001d040000000080000201010004600035e300016000550060028111e10004506001e460028103e3000160018203e30001019050e4",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0xe4e1c0"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x000000000000000000000000000000000000000000000000000000000000000d"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x0ce2f6ff341e4c95ed7f2ca9b1c9685d9f0dbcb2198a4be9945cd9eae93bde71",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a83e4e1c094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000000d25a06344121d4f5c98865c8184bc321f7c4fce952e7d48656be13a99f2f14a38e083a03f8958cbc2295c0c68ff66b044e44ff0a0e47bb193273dc09cb2c37390d13323",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x3dae2af9da392aa10417b8faf71a2ba97e95dc20bbb503dab80361581416765c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\nTest fibonacci sequence implementation with recursive CALLF instructions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py#L69",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py::test_callf_fibonacci[fork_Osaka-state_test-n_27-result_196418]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010008020002000a001d040000000080000201010004600035e300016000550060028111e10004506001e460028103e3000160018203e30001019050e4",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0xe4e1c0"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x000000000000000000000000000000000000000000000000000000000000001b"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0xf10cb4aa3cc0584e5c5ccacc41efce15c99744f549b7d56176dc4eeac3a07062",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf880800a83e4e1c094000000000000000000000000000000000000100080a0000000000000000000000000000000000000000000000000000000000000001b25a09380c3053e7080b9edbcc35df7f2447726d62b2f13570fdbda44a566194d23f7a00bef7dbc00d4caa90eea5d521f29547deedecf3af4eae15d4e44d14284b4964c",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xd009b7771c8773fb58beff8edaaf18ec2105abcd15983831e7b115a3f1e8fd59",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\nTest fibonacci sequence implementation with recursive CALLF instructions",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py#L69",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    }
+}

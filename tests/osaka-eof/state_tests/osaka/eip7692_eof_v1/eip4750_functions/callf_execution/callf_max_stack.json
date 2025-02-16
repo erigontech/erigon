@@ -1,0 +1,203 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py::test_callf_max_stack[fork_Osaka-state_test-no_max_stack]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef000101000c020003001500120001040000000080000701010002000000005f5f5f5f6103fae3000161201560015560006000f36001900380e3000215e1000580e3000150e4e4",
+                "storage": {
+                    "0x01": "0x2009"
+                }
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x0186a0"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x38ced90823342f716d16b9cead9bb2243cced5c2b0b210eb4701a650a016a20f",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a830186a0940000000000000000000000000000000000001000808025a09069fab60fe5c8a970860130c49d2295646da4fff858330a1fd5d260cd01e562a07a31960780931801bb34d06f89f19a529357f833c6cfda63135440a743949717",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x1d392d27f51ffeb9656d2cb5605e556cee920d8d6e5ff48957aad40c4a6e408c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    CALLF where a normal execution would not overflow, but EIP-4750 CALLF rule #4 triggers.\n\n    Code Section 0 - calls #1 with the configured height, but we load some operands so the\n                     return stack does not overflow\n    Code Section 1 - expands stack, calls #2, THEN recursively calls itself until input is zero,\n                     and returns.\n    Code Section 2 - Just returns, zero inputs, zero outputs\n\n    This will catch  CALLF execution rule #3: always fail if the operand stack is full. Not\n    checking rule 3 results in a call to section 2 and not overfilling the stack (as it is just\n    RETF).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py#L525",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py::test_callf_max_stack[fork_Osaka-state_test-with_max_stack]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef000101000c020003001500120001040000000080000701010002000000005f5f5f5f6103fbe3000161201560015560006000f36001900380e3000215e1000580e3000150e4e4",
+                "storage": {
+                    "0x01": "0x2009"
+                }
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x0186a0"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x46e85632c889530098c78853def40e80d25c6c561d5aa44c9e3127f50c1e232f",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a830186a0940000000000000000000000000000000000001000808025a09069fab60fe5c8a970860130c49d2295646da4fff858330a1fd5d260cd01e562a07a31960780931801bb34d06f89f19a529357f833c6cfda63135440a743949717",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x4cf38945e2dddae568db539f5653fc7e5611a064f1902033a52738748eb90f09",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    CALLF where a normal execution would not overflow, but EIP-4750 CALLF rule #4 triggers.\n\n    Code Section 0 - calls #1 with the configured height, but we load some operands so the\n                     return stack does not overflow\n    Code Section 1 - expands stack, calls #2, THEN recursively calls itself until input is zero,\n                     and returns.\n    Code Section 2 - Just returns, zero inputs, zero outputs\n\n    This will catch  CALLF execution rule #3: always fail if the operand stack is full. Not\n    checking rule 3 results in a call to section 2 and not overfilling the stack (as it is just\n    RETF).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py#L525",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py::test_callf_max_stack[fork_Osaka-state_test-over_max_stack]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x3635c9adc5dea00000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef000101000c020003001500120001040000000080000701010002000000005f5f5f5f6103fce3000161201560015560006000f36001900380e3000215e1000580e3000150e4e4",
+                "storage": {
+                    "0x01": "0x2019"
+                }
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x0186a0"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x2d609397f4f8819082d1d3dd968695ae7f5df1e19a10895180e63f6d259f5301",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a830186a0940000000000000000000000000000000000001000808025a09069fab60fe5c8a970860130c49d2295646da4fff858330a1fd5d260cd01e562a07a31960780931801bb34d06f89f19a529357f833c6cfda63135440a743949717",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xaa01892a506f8a656b8673163c054e940ce4084b614e2d4f325d5e6b38e14fc5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    CALLF where a normal execution would not overflow, but EIP-4750 CALLF rule #4 triggers.\n\n    Code Section 0 - calls #1 with the configured height, but we load some operands so the\n                     return stack does not overflow\n    Code Section 1 - expands stack, calls #2, THEN recursively calls itself until input is zero,\n                     and returns.\n    Code Section 2 - Just returns, zero inputs, zero outputs\n\n    This will catch  CALLF execution rule #3: always fail if the operand stack is full. Not\n    checking rule 3 results in a call to section 2 and not overfilling the stack (as it is just\n    RETF).",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip4750_functions/test_callf_execution.py#L525",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
+            "reference-spec-version": "14400434e1199c57d912082127b1d22643788d11"
+        }
+    }
+}

@@ -1,0 +1,2226 @@
+{
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_EMPTY_RJUMP-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300060003000104000000008000000080000000800000e00000e50001e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa9749dd9a5c760d514abfdaaaf925277d7cc1b9e2a712a22f404bdcfc7871daa",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_EMPTY_RJUMP-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300060004000204000000008000000080000101800001e00000e500015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa93eefe04b61d099efb6e653bfb8ae7d7d94c3466b7ca16d4dc28ccc21b825ba",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_EMPTY_RJUMP-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300070004000104000000008000010180000100800000e000005fe5000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe35b10db4bdbd8d041d19b4c61eb3fc4fdc73ca417e7e537e335acab47d7ca63",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_EMPTY_RJUMP-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300070003000204000000008000010180000101800001e000005fe50001e500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa6bc89246c3fcd34334204eab9233e16bc1b6aab917d641adfb9fe66ec459483",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_EMPTY_RJUMPI-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000800030001040000000080000100800000008000006000e10000e50001e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x077d7885b05a251dc564159e6dd41985147cec14e78f7d051928345b7e4c9d04",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_EMPTY_RJUMPI-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000800040002040000000080000100800001018000016000e10000e500015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe30b9fb1e8c7e91d714a7d375a3100c17bdf009193bbaa93217c2979200fa438",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_EMPTY_RJUMPI-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900040001040000000080000101800001008000006000e100005fe5000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3c950b01701ee08ad326b0b408c6d043f42ed8e5f87d097cdecd6c17658a809f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_EMPTY_RJUMPI-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900030002040000000080000101800001018000016000e100005fe50001e500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x110554f853f726bdd5fbca58b16d3ecffee3f7f4fe2b177a17d12153b4b20062",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_PUSH-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900030001040000000080000100800000008000006000e100015fe50001e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x81017e17f422dc110f1882f093176a736d705749bb318e564c5902f8a509b9e3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_PUSH-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900040002040000000080000100800001018000016000e100015fe500015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x900d24d71c271e9e0f217234704e1fe89c4571865da0bf433bc69076ce45f83e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_PUSH-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a00040001040000000080000201800001008000006000e100015f5fe5000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf3f0f83ee7a6db284294640add32c35f203da041b25fa672c6663c3f8c452a0b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_PUSH-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a00030002040000000080000201800001018000016000e100015f5fe50001e500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8c6f8448133a073a3fbb81ead728603c51c94ecaaedbbca6a226f827036d1bc4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_NOOP-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900030001040000000080000100800000008000006000e100015be50001e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3edd5dc0b358ad1f3ad8886a28f7d14d21d342a4f69c229723e06c2da6bf16ea",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_NOOP-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900040002040000000080000100800001018000016000e100015be500015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x34ebca37ecbe39c26203071ecbd3d5b0a268d3da5419ee45b1e6a48007f807ca",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_NOOP-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a00040001040000000080000101800001008000006000e100015b5fe5000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xaa93df906712c7ea395cf9515f195635120a0e66ad01b39228cef858757cc984",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_NOOP-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a00030002040000000080000101800001018000016000e100015b5fe50001e500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x731ee233e08991f483fe805a107a1b1987eb4f6add63f9e0e3b5cc7b6b899bdc",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_STOP-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900030001040000000080000100800000008000006000e1000100e50001e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd0ec71205553f20cad8228159bf74cb4b0e6db4eb5f5c432c5e5c32b16ea0e0a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_STOP-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900040002040000000080000100800001018000016000e1000100e500015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfb4e7fee1aa9aa0f5898783e9dab8b363b633d00c169005a572f25ca86367235",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_STOP-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a00040001040000000080000101800001008000006000e10001005fe5000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5d1a5a4cf7f3ca68e58000032eedc6863a599cb58f948026173924c8dc237050",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_STOP-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a00030002040000000080000101800001018000016000e10001005fe50001e500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3cdd1739365691a7697b19009391d2116ae7aee5039a63bc89c11ae0c397aec0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_PUSH_POP-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a00030001040000000080000100800000008000006000e100025f50e50001e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8a009ac440192d230ae73a0ea6512af68f56365bb6c8364d8c69041be7e2b798",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_PUSH_POP-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a00040002040000000080000100800001018000016000e100025f50e500015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc106d2311e586ed4b34dcb53bcaceba43c2f00bc3fd13d96e26f84baf43f04d1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_PUSH_POP-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000b00040001040000000080000101800001008000006000e100025f505fe5000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7514737e3334331e27fd416e63157e6bef512a1e6e7a4a850bdff92e074b9d0d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_PUSH_POP-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000b00030002040000000080000101800001018000016000e100025f505fe50001e500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2db4ef0e488ca4a57e0892e0d3d6a05ac02f2ffc84b796f8baa602bbef280654",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_POP-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900030001040000000080000200800000008000006000e1000150e50001e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xced32aedbe321ae1dc7b9aac49cc9bf663d30a5d5dfc419525be02ff6ad14cf2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_POP-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900040002040000000080000200800001018000016000e1000150e500015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x667ea5ce9298fece63099abf361bbb6202f59519e025698ac0749e52ae2f224b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_POP-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a00040001040000000080000201800001008000006000e10001505fe5000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x565b0dc29bbb6ee74a328ef8fb15cd0ab06f79aad9cd2189890080668194cbc0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_POP-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a00030002040000000080000201800001018000016000e10001505fe50001e500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc70cd859cc0846b887670e2b41e4dd7c96a8ff052bf693293c8d1bcf8e3c85fe",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_NEXT-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000800030001040000000080000100800000008000006000e10003e50001e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x63a862e93759c1143bc63c8c48930f68e3fadbced08dcd57489ef779b747e9e3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_NEXT-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000800040002040000000080000100800001018000016000e10003e500015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3cee0a055304a6d2610c8276e62f84c4a3f3f30660f70e231381bc03c9de2381",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_NEXT-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900040001040000000080000101800001008000006000e100045fe5000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1915bc403e13a99777db77a67e8ac7723f2337ca978c77cdc38916373dbe2117",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_NEXT-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900030002040000000080000101800001018000016000e100045fe50001e500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2788d91cdc3b6515610fd56e73b099727ae3c2d6dbcf5659191bc92636def015",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_NEXT_NESTED-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000d00030001040000000080000100800000008000006000e100056000e10003e50001e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb93fea917807328bd5ee80350d850fbba5828e9b277af7f70d641964c0c19738",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_NEXT_NESTED-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000d00040002040000000080000100800001018000016000e100056000e10003e500015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4498cc29639ab912e27c13cd6613b7b2503d972999530292dcc1be8c56e18d33",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_NEXT_NESTED-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000e00040001040000000080000101800001008000006000e100056000e100045fe5000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x39d1c3c98be243a2b8e52629e05f05a961bb414c71222e735f5ca3bcfe5037df",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_NEXT_NESTED-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000e00030002040000000080000101800001018000016000e100056000e100045fe50001e500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3a65a2cd9583c221777d1bb2b2809b3ab8e78016e295252c373aaff2ddaa44df",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_TO_START-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000800030001040000000080000100800000008000006000e1fffbe50001e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1275fca2d7b8245fc86f406ee5c48753078dc36fd2527f4e84b298970726ab49",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_TO_START-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000800040002040000000080000100800001018000016000e1fffbe500015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x73a17957d9a24e03b4dd2063c4ca1dfcdb770a0ff3f16b2f15ac8935ce8979a9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_TO_START-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900040001040000000080000101800001008000006000e1fffb5fe5000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf05bf24eedf74fa189dbae75d597ad1073281940ac88521a8e5fd010f281ae4d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_TO_START-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900030002040000000080000101800001018000016000e1fffb5fe50001e500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa060c09e1f7e0470866e63beb443ca5520d113ca9aa20e4bc34ff44f49b29135",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPV_EMPTY_AND_OVER_NEXT-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000b00030001040000000080000100800000008000006000e20100000003e50001e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9b8443625b50d062d7be9feacc08db778d48e80731155798b9ac3a17364744db",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPV_EMPTY_AND_OVER_NEXT-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000b00040002040000000080000100800001018000016000e20100000003e500015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0005bacfc649045b72621a1f1e51b0ff1edfee9d82f9d91e84d927946386e793",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPV_EMPTY_AND_OVER_NEXT-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000c00040001040000000080000101800001008000006000e201000000045fe5000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x46e2a879b58289b0e9606c10e7cce480f7c6d2feb28c386d1873ff61630e2196",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPV_EMPTY_AND_OVER_NEXT-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000c00030002040000000080000101800001018000016000e201000000045fe50001e500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xec17606692f4dc632c3f0f7541eb60cc617db8b934bc03862a322d3e238c5b52",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPV_OVER_PUSH_AND_TO_START-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000c00030001040000000080000100800000008000006000e2010001fff85fe50001e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa61b577515a68ecaf615242dfa2e795c7bdae9a3c8d871940bf7d2f81ac31d35",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPV_OVER_PUSH_AND_TO_START-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000c00040002040000000080000100800001018000016000e2010001fff85fe500015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfa64979c0ea7a7d51711d196f1c40a9a3e9d579d92e519dad3ae2117f4f860ad",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPV_OVER_PUSH_AND_TO_START-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000d00040001040000000080000201800001008000006000e2010001fff85f5fe5000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb737d88a8facf8bf29ff7c628dd5b8fdeac5043d56534f5851d3318860fe87f8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPV_OVER_PUSH_AND_TO_START-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000d00030002040000000080000201800001018000016000e2010001fff85f5fe50001e500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc87ecb351fb10489182953094ba2457d2b503fbc07d2558fcb14f91cee4ef590",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_RETF-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900030001040000000080000100800000008000006000e10001e4e50001e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_NON_RETURNING_FLAG",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6a02cee04ea1183f2ee08d3ed8996e8f7cf00200c61db8b5f2a62fa45d42ceb9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_RETF-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000900040002040000000080000100800001018000016000e10001e4e500015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_NON_RETURNING_FLAG",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xefc6cef3c74376c67df3b910dafc0a2d64401a13b95851710aa878524bbad052",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_RETF-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a00040001040000000080000101800001008000006000e10001e45fe5000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_NON_RETURNING_FLAG",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa53bc7a48638897dfb614cef3cf96526f4ebadb4dc3bbedffbcf60757b966754",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_0-rjump_kind_RJUMPI_OVER_RETF-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a00030002040000000080000101800001018000016000e10001e45fe50001e500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_NON_RETURNING_FLAG",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd7a5689c84e1b824a71174449c179f2e4744924c8460351e00d1f300fb2413b6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_EMPTY_RJUMP-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030006000104000000008000000080000000800000e50001e00000e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf46aaea8969e9e7a7c0351a8b8ad29aa06e3a596163a1a4aa976e29c958567ec",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_EMPTY_RJUMP-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030007000204000000008000000080000101800001e50001e000005fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd00ba217c46c6bc58cc6f94db1bf06dd7304d987a9179afbf34b5d725126c721",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_EMPTY_RJUMP-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000400070001040000000080000101800001008000005fe50001e0000050e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd3383ca6443bf05d46513507d35de8c4d656e1d3e6f8c5b543a3eeb864861895",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_EMPTY_RJUMP-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000400060002040000000080000101800001018000015fe50001e00000e500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x14eef4aee43b0e56640a15fb1b138381cf32291a396028197b07015f296955e7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_EMPTY_RJUMPI-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030008000104000000008000000080000100800000e500016000e10000e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xed41a933596b618775ef2e106b4e5fdfb4f57c527377c0ed08d543553f90330c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_EMPTY_RJUMPI-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030009000204000000008000000080000101800001e500016000e100005fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc80deb789d1ed3c1007e625b06121922234d24debed35e0bbafc5e74def870f5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_EMPTY_RJUMPI-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000400090001040000000080000101800002008000005fe500016000e1000050e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xef9a6ceb08b1d251b721d203403168a304fd2e98ef1616e3c7acc36778b2a102",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_EMPTY_RJUMPI-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000400080002040000000080000101800002018000015fe500016000e10000e500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x700b53ee1c7b74ac6e08363f7a82aa4b0d305a34e765d64167d71694ae01cfed",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_PUSH-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030009000104000000008000000080000100800000e500016000e100015fe5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2708a24d19f3fa08d8483e056788d9d47e9b70633ba28d9497099e2f423c2ca7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_PUSH-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030003000a000204000000008000000080000201800001e500016000e100015f5fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xeec7a94695a3a5353a71cf41e67d6d4b80b1e4d96865770dcc7c8373fee135ed",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_PUSH-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000a0001040000000080000101800002008000005fe500016000e100015f50e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x81c5b8ffa131e010ba882f5a3b58a99bda629e00816b79ee97b827be2d31b87c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_PUSH-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000400090002040000000080000101800002018000015fe500016000e100015fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x53cb384f5dd205ad77802c389c476eed2040a5fa15e24fe475b2132c9cd05871",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_NOOP-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030009000104000000008000000080000100800000e500016000e100015be5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4656627d36df5e6d2b2a74d3804f58038ac730517329b4dcbb8a08e4e52f8bf6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_NOOP-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030003000a000204000000008000000080000101800001e500016000e100015b5fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xbd8726b9154dd6a93ba872adfabe2f81c2b4ec635561768ba62cc080c5ab4bda",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_NOOP-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000a0001040000000080000101800002008000005fe500016000e100015b50e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0bd2e4953a2933bb2695f45d5e8da8b8850ac2f404ea860e838ec8119df53ad6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_NOOP-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000400090002040000000080000101800002018000015fe500016000e100015be500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1e58dde21e874f83d269fa556482a5d947533221fc4b47560dc46ab48a42fc7e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_STOP-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030009000104000000008000000080000100800000e500016000e1000100e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa6d1770fbc4eb796daf9755ee717aad8a184e587117e3c4635be64f280211e3d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_STOP-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030003000a000204000000008000000080000101800001e500016000e10001005fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf59a2e354a9abe5740ac16643e74ca5647d9157eaf3398746a52e3ccb87b3a16",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_STOP-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000a0001040000000080000101800002008000005fe500016000e100010050e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x198a871c068b75886a7072722160b93c09598541446f878be496cf6a5bf09e7c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_STOP-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000400090002040000000080000101800002018000015fe500016000e1000100e500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3bccac400ea506d0da0b72fbf467950f0941b0f3d74bcb037fd6d033fedf6f98",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_PUSH_POP-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030003000a000104000000008000000080000100800000e500016000e100025f50e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x52c201cbbc3ea67399da38d0b33a444b3fd15fd14ddb161864342d3b2e665236",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_PUSH_POP-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030003000b000204000000008000000080000101800001e500016000e100025f505fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd1c3586ea6f7744b71920f701d2896034734200317da9f07184ffae5ca74ed6b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_PUSH_POP-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000b0001040000000080000101800002008000005fe500016000e100025f5050e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x70276a2c83df1d0b0d4aedefcc8f704ba9bea6d53f886b27b47274d14395c7b9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_PUSH_POP-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000a0002040000000080000101800002018000015fe500016000e100025f50e500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2c7a16e07417496aefd04316203562b3efc8480524da7fb57327920adc80a7cf",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_POP-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030009000104000000008000000080000200800000e500016000e1000150e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc3f5124199401224f288bc979d1bc28192279ea567be412f9b65dcaa9af10ee2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_POP-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030003000a000204000000008000000080000201800001e500016000e10001505fe500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc44e344875d7cff541857d4f66c68ad801f935f23eec566c5df46095629df143",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_POP-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000a0001040000000080000101800003008000005fe500016000e100015050e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8bc9049994a35d630c255689987079d358850cfc64604d92071bac0e630bea51",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_POP-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000400090002040000000080000101800003018000015fe500016000e1000150e500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3b2816a6a2af5ecb8ecf02c66c8b9584e2c3b0aacce971cf87b23bd974daf514",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_NEXT-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030008000104000000008000000080000100800000e500016000e10003e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd904e0a7198d28698996ab444dd8dec85a57ef4f76ad80eed88b86f2a854affb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_NEXT-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030009000204000000008000000080000101800001e500016000e100045fe500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3be61660a183b2806eba3b978568740874bd6c0bf04197bf66bd7ef71a2a87a4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_NEXT-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000400090001040000000080000101800002008000005fe500016000e1000450e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd71649dd7ddcee00404902f648135d87cd2878d8e0b2aa301800c8539e2c23ea",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_NEXT-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000400080002040000000080000101800002018000015fe500016000e10003e500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xea7f0d0d092c4cbb9241ecd64844d74b915a1e81351b9b32d24f5ef1f3bd29c9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_NEXT_NESTED-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030003000d000104000000008000000080000100800000e500016000e100056000e10003e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x66bf05dc8316b5154233a0ad8aecf0bc618ea9a516f4549cadf99e16193df094",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_NEXT_NESTED-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030003000e000204000000008000000080000101800001e500016000e100056000e100045fe500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x04edcb6ef58ea8cb7fc8bc7651b6fb2f14362d18cf21cfe1866555148a1e0389",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_NEXT_NESTED-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000e0001040000000080000101800002008000005fe500016000e100056000e1000450e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb21d78621c2055a4805cf2f4a41bdae636b060040d2f83b66c0d7cbbadb89ee1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_NEXT_NESTED-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000d0002040000000080000101800002018000015fe500016000e100056000e10003e500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2b030e799b8330c93a603fd7b0d4769bf4e2e36a2815cf54d1ee9fbc61ff486c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_TO_START-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030008000104000000008000000080000100800000e500016000e1fffbe5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x76c2e8b7b8b3bc1eaf4966c254df17c3210d72d854b4a7a0a9a77eca4cb77513",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_TO_START-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030009000204000000008000000080000101800001e500016000e1fffb5fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7194c8505242491b4592adf4fda1dfee4a4eadc0b1fc82c81a7e1a94decafe4e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_TO_START-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000400090001040000000080000101800002008000005fe500016000e1fffb50e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xde6eee9c8d81e41ac494c164cc8c40c3e95e659a17901118877d28bee0452762",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_TO_START-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000400080002040000000080000101800002018000015fe500016000e1fffbe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa89851a96689048a4e61e2586dd7c30bf47ea0c4772d9aa6985ed760a7bc988e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPV_EMPTY_AND_OVER_NEXT-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030003000b000104000000008000000080000100800000e500016000e20100000003e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x76266aff79afa6725789d6443bf2f521c05c0d59b79fdfd89964edf771473ace",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPV_EMPTY_AND_OVER_NEXT-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030003000c000204000000008000000080000101800001e500016000e201000000045fe500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb6b0e2df24e892f69e42dd9db406cce7d1ef3cf77e3b194996bad059c8db6869",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPV_EMPTY_AND_OVER_NEXT-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000c0001040000000080000101800002008000005fe500016000e2010000000450e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x467443e0bedb7c07c498702ccc36b22cc51fba27ede37f3b1d08364aa55c28a0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPV_EMPTY_AND_OVER_NEXT-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000b0002040000000080000101800002018000015fe500016000e20100000003e500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x63ed7c74b14a97c571f681b66fbc22bc54a6e33f1f94b24cf6fa1b59bcb74c9f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPV_OVER_PUSH_AND_TO_START-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030003000c000104000000008000000080000100800000e500016000e2010001fff85fe5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5b386508c4699b5279003d68ab7a98c8e6682bf9b0f2b9f04d4c1efa3ef1ac0b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPV_OVER_PUSH_AND_TO_START-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030003000d000204000000008000000080000201800001e500016000e2010001fff85f5fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x71e0ae8d72a7cca63ff94e4cb3c34a445e6da71157f0b0936319d3ebb8425400",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPV_OVER_PUSH_AND_TO_START-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000d0001040000000080000101800002008000005fe500016000e2010001fff85f50e5000200",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x89e054d67062bcb855757fb048dafed3ae7726c91fc43fbf4a9f49cc13fc19ab",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPV_OVER_PUSH_AND_TO_START-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000c0002040000000080000101800002018000015fe500016000e2010001fff85fe500025000",
+                "results": {
+                    "Osaka": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7fc6fdd43eec41d857264eeba4b7cff0e8fafcddf2ad5a2f403f0d2dff0b0ed5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_RETF-inputs_(0, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c02000300030009000104000000008000000080000100800000e500016000e10001e4e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_NON_RETURNING_FLAG",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x07d8d57c1fe29cabff6843402aeef4585ffafdd5191cc2350aa13bcf86e3dac0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_RETF-inputs_(0, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030003000a000204000000008000000080000101800001e500016000e10001e45fe500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_NON_RETURNING_FLAG",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfe30cf9b5dfd8f3682a8beb80c6f954df3ff607eaf74ac34f1b339ce18a00700",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_RETF-inputs_(1, 0)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c0200030004000a0001040000000080000101800002008000005fe500016000e10001e450e5000200",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_NON_RETURNING_FLAG",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8486f90e063eb11eb2a275474226c011660883510fabff55e1c05baf3e3b85cd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    },
+    "tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py::test_rjumps_jumpf_nonreturning[fork_Osaka-eof_test-rjump_spot_BEGINNING-rjump_section_idx_1-rjump_kind_RJUMPI_OVER_RETF-inputs_(1, 1)]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000400090002040000000080000101800002018000015fe500016000e10001e4e500025000",
+                "results": {
+                    "Osaka": {
+                        "exception": "EOFException.INVALID_NON_RETURNING_FLAG",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf604a05a349af44eddab230ec8a2dc60b31d22b3ec14f45a3d828bec25a8a331",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.13.0+commit.2f79e0dc",
+            "description": "Test function documentation:\n\n    Test EOF container validaiton for EIP-4200 vs EIP-6206 interactions on non-returning\n    functions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v2.1.0/tests/osaka/eip7692_eof_v1/eip5450_stack/test_code_validation.py#L356",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5450.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    }
+}
