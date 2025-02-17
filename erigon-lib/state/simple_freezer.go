@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 )
 
@@ -17,17 +17,17 @@ type SimpleRelationalFreezer struct {
 }
 
 func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to RootNum, tx kv.Tx) error {
-	_entityIdFrom, err := sf.rel.RootNum2Id(from, tx)
+	_entityIdFrom, err := sf.rel.RootNum2Num(from, tx)
 	if err != nil {
 		return err
 	}
-	entityIdFrom := hexutility.EncodeTs(uint64(_entityIdFrom))
+	entityIdFrom := hexutil.EncodeTs(uint64(_entityIdFrom))
 
-	_entityIdTo, err := sf.rel.RootNum2Id(to, tx)
+	_entityIdTo, err := sf.rel.RootNum2Num(to, tx)
 	if err != nil {
 		return err
 	}
-	entityIdTo := hexutility.EncodeTs(uint64(_entityIdTo))
+	entityIdTo := hexutil.EncodeTs(uint64(_entityIdTo))
 
 	cursor, err := tx.Cursor(sf.valsTbl)
 	if err != nil {

@@ -28,7 +28,7 @@ marked appendable has two tables
     values of Num == values of RootNum
     headers, bodies, caplin blockbodies are marked appendables.
 */
-type MarkedAppendable struct {
+type MarkerAppendable struct {
 	*ProtoAppendable
 
 	canonicalTbl string
@@ -41,34 +41,34 @@ type MarkedAppendable struct {
 	pruneFrom Num
 }
 
-type MAOpts func(*MarkedAppendable)
+type MAOpts func(*MarkerAppendable)
 
 func (r *MAOpts) WithFreezer(freezer Freezer) MAOpts {
-	return func(a *MarkedAppendable) {
+	return func(a *MarkerAppendable) {
 		a.freezer = freezer
 	}
 }
 
 func (r *MAOpts) WithIndexBuilders(builders ...AccessorIndexBuilder) MAOpts {
-	return func(a *MarkedAppendable) {
+	return func(a *MarkerAppendable) {
 		a.builders = builders
 	}
 }
 
 func (r *MAOpts) WithTs8Bytes(ts8Bytes bool) MAOpts {
-	return func(a *MarkedAppendable) {
+	return func(a *MarkerAppendable) {
 		a.ts8Bytes = ts8Bytes
 	}
 }
 
 func (r *MAOpts) WithPruneFrom(pruneFrom Num) MAOpts {
-	return func(a *MarkedAppendable) {
+	return func(a *MarkerAppendable) {
 		a.pruneFrom = pruneFrom
 	}
 }
 
-func NewMarkedAppendable(id AppendableId, canonicalTbl, valsTbl string, logger log.Logger, options ...MAOpts) (*MarkedAppendable, error) {
-	m := &MarkedAppendable{
+func NewMarkedAppendable(id AppendableId, canonicalTbl, valsTbl string, logger log.Logger, options ...MAOpts) (*MarkerAppendable, error) {
+	m := &MarkerAppendable{
 		ProtoAppendable: NewProto(id, nil, nil, logger),
 		canonicalTbl:    canonicalTbl,
 		valsTbl:         valsTbl,
@@ -95,11 +95,11 @@ func NewMarkedAppendable(id AppendableId, canonicalTbl, valsTbl string, logger l
 	return m, nil
 }
 
-func (a *MarkedAppendable) encTs(ts Num) []byte {
+func (a *MarkerAppendable) encTs(ts Num) []byte {
 	return ts.EncToBytes(a.ts8Bytes)
 }
 
-func (a *MarkedAppendable) combK(ts Num, hash []byte) []byte {
+func (a *MarkerAppendable) combK(ts Num, hash []byte) []byte {
 	// assuming hash is common.Hash which is 32 butes
 	const HashBytes = 32
 	k := make([]byte, 8+HashBytes)
@@ -108,7 +108,7 @@ func (a *MarkedAppendable) combK(ts Num, hash []byte) []byte {
 	return k
 }
 
-func (a *MarkedAppendable) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
+func (a *MarkerAppendable) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
 	if hash == nil {
 		// find canonical hash
 		canHash, err := tx.GetOne(a.canonicalTbl, a.encTs(num))
@@ -123,11 +123,11 @@ func (a *MarkedAppendable) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) 
 // rotx
 type MarkedAppendableTx struct {
 	*ProtoAppendableTx
-	a  *MarkedAppendable
+	a  *MarkerAppendable
 	id AppendableId
 }
 
-func (m *MarkedAppendable) BeginFilesRo() *MarkedAppendableTx {
+func (m *MarkerAppendable) BeginFilesRo() *MarkedAppendableTx {
 	return &MarkedAppendableTx{
 		ProtoAppendableTx: m.ProtoAppendable.BeginFilesRo(),
 		a:                 m,
@@ -200,13 +200,5 @@ func (r *MarkedAppendableTx) Prune(ctx context.Context, to RootNum, limit uint64
 func (r *MarkedAppendableTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 	a := r.a
 	fromKey := a.encTs(Num(from))
-	if err := ae.DeleteRangeFromTbl(a.canonicalTbl, fromKey, nil, MaxUint64, tx); err != nil {
-		return err
-	}
-
-	if err := ae.DeleteRangeFromTbl(a.valsTbl, fromKey, nil, MaxUint64, tx); err != nil {
-		return err
-	}
-
-	return nil
+	return ae.DeleteRangeFromTbl(a.canonicalTbl, fromKey, nil, MaxUint64, tx)
 }

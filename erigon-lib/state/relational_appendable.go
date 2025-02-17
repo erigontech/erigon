@@ -13,7 +13,7 @@ import (
 )
 
 type RootRelationI interface {
-	RootNum2Id(from RootNum, tx kv.Tx) (Id, error)
+	RootNum2Num(from RootNum, tx kv.Tx) (Num, error)
 }
 
 // this have 1:many or many:1 or 1:1 relation with root num
@@ -22,7 +22,6 @@ type RelationalAppendable struct {
 
 	rel       RootRelationI
 	valsTbl   string
-	noUnwind  bool // if true, don't delete on unwind; tsId keeps increasing
 	pruneFrom Num
 }
 
@@ -42,17 +41,10 @@ func (r *RAOpts) WithIndexBuilders(builders ...AccessorIndexBuilder) RAOpts {
 	}
 }
 
-func (r *RAOpts) WithNoUnwind() RAOpts {
-	return func(a *RelationalAppendable) {
-		a.noUnwind = true
-	}
-}
-
 func NewRelationalAppendable(id AppendableId, relation RootRelationI, valsTbl string, logger log.Logger, options ...RAOpts) (*RelationalAppendable, error) {
 	a := &RelationalAppendable{
 		ProtoAppendable: NewProto(id, nil, nil, logger),
 		rel:             relation,
-		noUnwind:        false,
 	}
 	a.sameKeyAsRoot = false
 
@@ -97,26 +89,10 @@ func (a *RelationalAppendable) BeginFilesRo() *RelationalAppendableTx {
 	}
 }
 
-type QueryFlags uint8
-
-const (
-	QueryFlags_DB   = QueryFlags(1)
-	QueryFlags_Snap = QueryFlags(2)
-)
-
-func (q QueryFlags) IsQueryDb() bool   { return q&QueryFlags_DB != 0 }
-func (q QueryFlags) IsQuerySnap() bool { return q&QueryFlags_Snap != 0 }
-
-func (a *RelationalAppendableTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
-	if a.a.noUnwind {
-		return a.GetWithFlags(entityNum, tx, QueryFlags_Snap)
-	}
-	return a.GetWithFlags(entityNum, tx, QueryFlags_DB|QueryFlags_Snap)
-}
-
-func (a *RelationalAppendableTx) GetWithFlags(entityNum Num, tx kv.Tx, flag QueryFlags) (Bytes, error) {
+func (a *RelationalAppendableTx) GetWithFlags(entityNum Num, tx kv.Tx) (Bytes, error) {
 	ap := a.a
-	if flag.IsQuerySnap() {
+	lastNum := ap.VisibleFilesMaxNum()
+	if entityNum <= lastNum {
 		lastNum := ap.VisibleFilesMaxNum()
 		var word []byte
 		if entityNum <= lastNum {
@@ -143,48 +119,38 @@ func (a *RelationalAppendableTx) GetWithFlags(entityNum Num, tx kv.Tx, flag Quer
 	}
 
 	// else the db
-	if flag.IsQueryDb() {
-		return tx.GetOne(ap.valsTbl, entityNum.EncTo8Bytes())
-	}
-	return nil, fmt.Errorf("no source to query")
+	return tx.GetOne(ap.valsTbl, entityNum.EncTo8Bytes())
 }
 
-// GetNc queries non-canonical data (db only)
-// if db doesn't store non-canonical data, you might not need to use this API
-func (a *RelationalAppendableTx) GetNc(id Id, tx kv.Tx) (Bytes, error) {
-	// only db
-	return tx.GetOne(a.a.valsTbl, a.a.encTs(uint64(id)))
-}
-
-func (a *RelationalAppendableTx) Append(id Id, value Bytes, tx kv.RwTx) error {
-	return tx.Append(a.a.valsTbl, a.a.encTs(uint64(id)), value)
+func (a *RelationalAppendableTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
+	return tx.Append(a.a.valsTbl, a.a.encTs(uint64(entityNum)), value)
 }
 
 // IncrementSequence some entity ids are not generated or provided by consensus (eg. txns)
 // These are generated as db ids. In such case, when we get a new entity, we need to find which
 // entity id is next (to use with the Append operation). This is the purpose of this function.
 // this returns the "base id" from which `amount` is reserved for the collections of txns
-func (a *RelationalAppendableTx) IncrementSequence(amount uint64, tx kv.RwTx) (uint64, error) {
-	baseId, err := tx.IncrementSequence(a.a.valsTbl, amount)
-	if err != nil {
-		return 0, err
-	}
+// func (a *RelationalAppendableTx) IncrementSequence(amount uint64, tx kv.RwTx) (uint64, error) {
+// 	baseId, err := tx.IncrementSequence(a.a.valsTbl, amount)
+// 	if err != nil {
+// 		return 0, err
+// 	}
 
-	return baseId, nil
-}
+// 	return baseId, nil
+// }
 
-func (a *RelationalAppendableTx) ReadSequence(tx kv.Tx) (uint64, error) {
-	return tx.ReadSequence(a.a.valsTbl)
-}
+// func (a *RelationalAppendableTx) ReadSequence(tx kv.Tx) (uint64, error) {
+// 	return tx.ReadSequence(a.a.valsTbl)
+// }
 
-func (a *RelationalAppendableTx) ResetSequence(tx kv.RwTx, newValue Num) error {
-	return tx.ResetSequence(a.a.valsTbl, uint64(newValue))
-}
+// func (a *RelationalAppendableTx) ResetSequence(tx kv.RwTx, newValue Num) error {
+// 	return tx.ResetSequence(a.a.valsTbl, uint64(newValue))
+// }
 
 func (a *RelationalAppendableTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error {
 	ap := a.a
 	fromId := uint64(ap.pruneFrom)
-	toId, err := ap.rel.RootNum2Id(to, tx)
+	toId, err := ap.rel.RootNum2Num(to, tx)
 	if err != nil {
 		return err
 	}
@@ -197,19 +163,16 @@ func (a *RelationalAppendableTx) Prune(ctx context.Context, to RootNum, limit ui
 
 func (a *RelationalAppendableTx) Unwind(ctx context.Context, from RootNum, rwTx kv.RwTx) error {
 	ap := a.a
-	if ap.noUnwind {
-		return nil
-	}
-
-	fromId, err := ap.rel.RootNum2Id(from, rwTx)
+	fromId, err := ap.rel.RootNum2Num(from, rwTx)
 	if err != nil {
 		return err
 	}
 	return ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(uint64(fromId)), nil, 0, rwTx)
-
 }
 
 func (a *RelationalAppendableTx) NewWriter() *RelationalAppendableWriter {
+	// TODO: caplin uses some pool for sortable buffer
+	// probably can have a global pool here for this...
 	return &RelationalAppendableWriter{
 		values: etl.NewCollector(a.id.Name()+".rappendable.flush",
 			a.id.Dirs().Tmp, etl.NewSortableBuffer(WALCollectorRAM), a.a.logger).LogLvl(log.LvlTrace),

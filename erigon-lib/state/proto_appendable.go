@@ -77,6 +77,7 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 		log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
 		path := ae.SegName(a.a, snaptype.Version(1), calcFrom, calcTo)
 		sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, a.logger)
+		defer sn.Close()
 		if err != nil {
 			return err
 		}
@@ -130,6 +131,7 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 
 		calcFrom = calcTo
 		calcTo = to
+		sn.Close()
 	}
 
 	return nil

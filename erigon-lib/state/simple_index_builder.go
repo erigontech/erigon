@@ -227,6 +227,7 @@ func (s *seg_stream) Close() {
 }
 
 // index key factory "manufacturing" index keys only
+// TODO: this is not concurrent safe
 var simpleIndexKeyFactoryInstance = &SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
 
 type SimpleIndexKeyFactory struct {
