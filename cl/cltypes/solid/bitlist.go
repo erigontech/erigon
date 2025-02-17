@@ -275,3 +275,29 @@ func (u *BitList) Merge(other *BitList) (*BitList, error) {
 	unionFrom.addMsb()
 	return ret, nil
 }
+
+type BitSlice struct {
+	container []byte
+	length    int
+}
+
+func NewBitSlice() *BitSlice {
+	return &BitSlice{
+		container: make([]byte, 0),
+		length:    0,
+	}
+}
+
+func (b *BitSlice) AppendBit(bit bool) {
+	if b.length%8 == 0 {
+		b.container = append(b.container, 0)
+	}
+	if bit {
+		b.container[b.length/8] |= 1 << uint(b.length%8)
+	}
+	b.length++
+}
+
+func (b *BitSlice) Bytes() []byte {
+	return b.container
+}
