@@ -829,8 +829,13 @@ var (
 		Usage: "Purge the witness cache on startup. Default false.",
 		Value: false,
 	}
-	WitnessCacheBatchOffset = cli.UintFlag{
-		Name:  "zkevm.witness-cache-batch-offset",
+	WitnessCacheBatchAheadOffset = cli.UintFlag{
+		Name:  "zkevm.witness-cache-batch-ahead-offset",
+		Usage: "How many batches ahead of the highest verified batch to cache. Default 0.",
+		Value: 0,
+	}
+	WitnessCacheBatchBehindOffset = cli.UintFlag{
+		Name:  "zkevm.witness-cache-batch-behind-offset",
 		Usage: "How many batches behind the highest verified batch to cache. Default 5.",
 		Value: 5,
 	}
