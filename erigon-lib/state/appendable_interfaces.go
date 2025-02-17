@@ -35,3 +35,21 @@ type AccessorIndexBuilder interface {
 	Build(ctx context.Context, from, to RootNum, tmpDir string, p *background.ProgressSet, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error)
 	AllowsOrdinalLookupByNum() bool
 }
+
+type CommonAppendableTxI[T any] interface {
+	Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error
+	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
+	BeginFilesRo() T
+	Close()
+}
+
+type MarkedAppendableTxI interface {
+	CommonAppendableTxI[MarkedAppendableTxI]
+	Get(ctx context.Context, num Num) (Bytes, error)
+	GetNc(num Num, hash []byte, tx kv.Tx) (Bytes, error)
+	Put(num Num, hash []byte, value Bytes, tx kv.RwTx)
+}
+
+type RelationalAppendableTxI interface {
+	CommonAppendableTxI[RelationalAppendableTxI]
+}
