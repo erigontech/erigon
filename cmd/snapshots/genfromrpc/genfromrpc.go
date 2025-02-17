@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -729,8 +730,20 @@ func genFromRPc(cliCtx *cli.Context) error {
 					if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
 						return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
 					}
-					if err = rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
-						return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+					// if err = rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
+					// 	return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+					// }
+					if err := rawdbv3.TxNums.Append(tx, blockNum, uint64(blk.Transactions().Len()+1)); err != nil {
+						return err
+					}
+
+					if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+						return err
+					}
+
+					rawdb.WriteHeadBlockHash(tx, blk.Hash())
+					if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
+						return err
 					}
 				}
 
