@@ -35,9 +35,8 @@ func TestArbitrumInternalTx(t *testing.T) {
 }
 
 func TestArbitrumUnsignedTx(t *testing.T) {
-	t.Skip()
 	rawInitial := [][]byte{
-		common.FromHex("0x25e1606300000000000000000000000051072981bf35cdf00dbecdb9bbc00be3313893cb"),
+		common.FromHex("0x65f85e83066eee9462182981bf35cdf00dbecdb9bbc00be33138a4dc0184a0eebb008301bdd494000000000000000000000000000000000000006401a425e1606300000000000000000000000051072981bf35cdf00dbecdb9bbc00be3313893cb"),
 	}
 
 	expectedHashes := []common.Hash{

@@ -511,6 +511,8 @@ func makeArbitrumUnsignedTx(commonTx *types.CommonTx, rawTx map[string]interface
 	// GasFeeCap: expected as a hex string.
 	if gasFeeCapHex, ok := rawTx["maxFeePerGas"].(string); ok {
 		tx.GasFeeCap = convertHexToBigInt(gasFeeCapHex)
+	} else if gasFeeCapHex, ok := rawTx["gasPrice"].(string); ok {
+		tx.GasFeeCap = convertHexToBigInt(gasFeeCapHex)
 	}
 
 	// Gas: taken directly from commonTx.
@@ -529,7 +531,6 @@ func makeArbitrumUnsignedTx(commonTx *types.CommonTx, rawTx map[string]interface
 
 	// Data: taken directly from commonTx.
 	tx.Data = commonTx.Data
-
 	return tx
 }
 

@@ -240,6 +240,14 @@ func (tx *ArbitrumUnsignedTx) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 
+	b[0] = 128 + 20
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(tx.From[:]); err != nil {
+		return err
+	}
+
 	if tx.Nonce > 0 && tx.Nonce < 128 {
 		b[0] = byte(tx.Nonce)
 		if _, err := w.Write(b[:1]); err != nil {
@@ -251,14 +259,6 @@ func (tx *ArbitrumUnsignedTx) encodePayload(w io.Writer, b []byte, payloadSize, 
 		if _, err := w.Write(b[8-nonceLen : 9]); err != nil {
 			return err
 		}
-	}
-
-	b[0] = 128 + 20
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if _, err := w.Write(tx.From[:]); err != nil {
-		return err
 	}
 
 	if err := rlp.EncodeBigInt(tx.GasFeeCap, w, b); err != nil {
