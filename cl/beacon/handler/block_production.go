@@ -1272,7 +1272,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 			}
 			if stateVersion >= clparams.ElectraVersion {
 				// merge in electra way
-				mergedAggrBits, ok := tryMergeAggregationBits(curAtt, candidate)
+				mergedAggrBits, ok := a.tryMergeAggregationBits(s, curAtt, candidate)
 				if !ok {
 					continue
 				}
@@ -1342,39 +1342,65 @@ func (a *ApiHandler) tryMergeAggregationBits(state abstract.BeaconState, att1, a
 	slot := att1.Data.Slot
 	committees1 := att1.CommitteeBits.GetOnIndices()
 	committees2 := att2.CommitteeBits.GetOnIndices()
-	//mergedAggregationBits := solid.NewBitList(0, int(a.beaconChainCfg.MaxCommitteesPerSlot)*int(a.beaconChainCfg.MaxValidatorsPerCommittee))
 	bitSlice := solid.NewBitSlice()
 	index1, index2 := 0, 0
 	committeeOffset1, committeeOffset2 := 0, 0
+
+	appendBits := func(bitSlice *solid.BitSlice, committeeIndex int, att *solid.Attestation, offset int) (*solid.BitSlice, int) {
+		members, err := state.GetBeaconCommitee(slot, uint64(committeeIndex))
+		if err != nil {
+			log.Warn("[Block Production] Cannot get committee members", "err", err)
+			return nil, 0
+		}
+		for i := range members {
+			bitSlice.AppendBit(att.AggregationBits.GetBitAt(offset + i))
+		}
+		return bitSlice, offset + len(members)
+	}
+
 	// similar to merge sort
 	for index1 < len(committees1) || index2 < len(committees2) {
 		if index1 < len(committees1) && index2 < len(committees2) {
 			if committees1[index1] < committees2[index2] {
-				mergedAggregationBits.Set(uint64(committees1[index1]))
+				bitSlice, committeeOffset1 = appendBits(bitSlice, committees1[index1], att1, committeeOffset1)
 				index1++
 			} else if committees1[index1] > committees2[index2] {
-				mergedAggregationBits.Set(uint64(committees2[index2]))
+				bitSlice, committeeOffset2 = appendBits(bitSlice, committees2[index2], att2, committeeOffset2)
 				index2++
 			} else {
-				mergedAggregationBits.Set(uint64(committees1[index1]))
+				// check overlapping when the committee is the same
+				members, err := state.GetBeaconCommitee(slot, uint64(committees1[index1]))
+				if err != nil {
+					log.Warn("[Block Production] Cannot get committee members", "err", err)
+					return nil, false
+				}
+				bits1 := att1.AggregationBits
+				bits2 := att2.AggregationBits
+				for i := range members {
+					if bits1.GetBitAt(committeeOffset1+i) && bits2.GetBitAt(committeeOffset2+i) {
+						// overlapping
+						return nil, false
+					} else {
+						bitSlice.AppendBit(bits1.GetBitAt(committeeOffset1+i) || bits2.GetBitAt(committeeOffset2+i))
+					}
+				}
+				committeeOffset1 += len(members)
+				committeeOffset2 += len(members)
 				index1++
 				index2++
 			}
 		} else if index1 < len(committees1) {
-			members, err := state.GetBeaconCommitee(slot, uint64(committees1[index1]))
-			if err != nil {
-				log.Debug("[Block Production] Cannot get committee members", "err", err)
-				return nil, false
-			}
-			for i := range members {
-				bitSlice.AppendBit(att1.AggregationBits.GetBitAt(committeeOffset1 + i))
-			}
+			bitSlice, committeeOffset1 = appendBits(bitSlice, committees1[index1], att1, committeeOffset1)
 			index1++
 		} else {
-			mergedAggregationBits.Set(uint64(committees2[index2]))
+			bitSlice, committeeOffset2 = appendBits(bitSlice, committees2[index2], att2, committeeOffset2)
 			index2++
 		}
 	}
+
+	bitSlice.AppendBit(true) // mark the end of the bitlist
+	mergedAggregationBits := solid.BitlistFromBytes(bitSlice.Bytes(), int(a.beaconChainCfg.MaxCommitteesPerSlot)*int(a.beaconChainCfg.MaxValidatorsPerCommittee))
+	return mergedAggregationBits, true
 }
 
 // computeAttestationReward computes the reward for a specific attestation.
