@@ -40,6 +40,7 @@ type EncryptedTxnsPool struct {
 	blockListener     BlockListener
 	mu                sync.RWMutex
 	submissions       *btree.BTreeG[EncryptedTxnSubmission]
+	initialLoadDone   chan struct{}
 }
 
 func NewEncryptedTxnsPool(logger log.Logger, config Config, cb bind.ContractBackend, bl BlockListener) *EncryptedTxnsPool {
@@ -55,6 +56,7 @@ func NewEncryptedTxnsPool(logger log.Logger, config Config, cb bind.ContractBack
 		sequencerContract: sequencerContract,
 		blockListener:     bl,
 		submissions:       btree.NewG[EncryptedTxnSubmission](32, EncryptedTxnSubmissionLess),
+		initialLoadDone:   make(chan struct{}),
 	}
 }
 
@@ -127,6 +129,13 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 }
 
 func (etp *EncryptedTxnsPool) watchSubmissions(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-etp.initialLoadDone:
+		// continue
+	}
+
 	submissionEventC := make(chan *contracts.SequencerTransactionSubmitted)
 	submissionEventSub, err := etp.sequencerContract.WatchTransactionSubmitted(&bind.WatchOpts{}, submissionEventC)
 	if err != nil {
@@ -166,15 +175,33 @@ func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(event *contracts
 		return nil
 	}
 
-	//
-	// TODO fill gaps
-	//
-	etp.submissions.ReplaceOrInsert(encryptedTxnSubmission)
-	if etp.submissions.Len() > etp.config.MaxPooledEncryptedTxns {
-		etp.submissions.DeleteMin()
+	etp.addSubmission(encryptedTxnSubmission)
+
+	lastEncryptedTxnSubmission, ok := etp.submissions.Max()
+	if ok && !EncryptedTxnSubmissionsAreConsecutive(lastEncryptedTxnSubmission, encryptedTxnSubmission) {
+		return etp.fillSubmissionGap(lastEncryptedTxnSubmission, encryptedTxnSubmission)
 	}
 
 	return nil
+}
+
+func (etp *EncryptedTxnsPool) fillSubmissionGap(last, new EncryptedTxnSubmission) error {
+	fromTxnIndex := last.TxnIndex + 1
+	startBlockNum := last.BlockNum + 1
+	endBlockNum := new.BlockNum
+	if endBlockNum > 0 {
+		endBlockNum--
+	}
+
+	etp.logger.Info(
+		"filling submission gap",
+		"startBlockNum", startBlockNum,
+		"endBlockNum", endBlockNum,
+		"fromTxnIndex", fromTxnIndex,
+		"toTxnIndex", new.TxnIndex,
+	)
+
+	return etp.loadSubmissions(startBlockNum, endBlockNum, stopAtTxnIndexSubmissionsContinuer(fromTxnIndex))
 }
 
 func (etp *EncryptedTxnsPool) loadSubmissionsOnInit(ctx context.Context) error {
@@ -216,6 +243,7 @@ func (etp *EncryptedTxnsPool) loadSubmissionsOnInit(ctx context.Context) error {
 				return fmt.Errorf("failed to load submissions on init: %w", err)
 			}
 
+			close(etp.initialLoadDone)
 			return nil // we are done
 		}
 	}
@@ -249,10 +277,17 @@ func (etp *EncryptedTxnsPool) loadSubmissions(start, end uint64, cont submission
 		}
 
 		encryptedTxnSubmission := EncryptedTxnSubmissionFromLogEvent(submissionsIter.Event)
-		etp.submissions.ReplaceOrInsert(encryptedTxnSubmission)
+		etp.addSubmission(encryptedTxnSubmission)
 	}
 
 	return nil
+}
+
+func (etp *EncryptedTxnsPool) addSubmission(submission EncryptedTxnSubmission) {
+	etp.submissions.ReplaceOrInsert(submission)
+	if etp.submissions.Len() > etp.config.MaxPooledEncryptedTxns {
+		etp.submissions.DeleteMin()
+	}
 }
 
 type submissionsContinuer func(*contracts.SequencerTransactionSubmitted) bool
@@ -261,8 +296,8 @@ func alwaysContinueSubmissionsContinuer(*contracts.SequencerTransactionSubmitted
 	return true
 }
 
-func stopAtTxnIndexSubmissionsContinuer(txnIndex uint64) submissionsContinuer {
+func stopAtTxnIndexSubmissionsContinuer(txnIndex TxnIndex) submissionsContinuer {
 	return func(event *contracts.SequencerTransactionSubmitted) bool {
-		return event.TxIndex >= txnIndex
+		return TxnIndex(event.TxIndex) >= txnIndex
 	}
 }

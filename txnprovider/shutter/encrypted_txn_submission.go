@@ -68,3 +68,8 @@ func EncryptedTxnSubmissionLess(a, b EncryptedTxnSubmission) bool {
 
 	return false
 }
+
+func EncryptedTxnSubmissionsAreConsecutive(a, b EncryptedTxnSubmission) bool {
+	return (a.EonIndex == b.EonIndex && a.TxnIndex+1 == b.TxnIndex) ||
+		(a.EonIndex+1 == b.EonIndex && b.TxnIndex == 0)
+}
