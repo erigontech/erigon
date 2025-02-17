@@ -731,17 +731,17 @@ func genFromRPc(cliCtx *cli.Context) error {
 					if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
 						return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
 					}
-					// if err = rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
-					// 	return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
-					// }
-					if err := rawdbv3.TxNums.Append(tx, blockNum, uint64(blk.Transactions().Len()+1)); err != nil {
-						return err
+					if err = rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
+						return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
 					}
 					rawdb.WriteHeadBlockHash(tx, blk.Hash())
 					if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
 						return err
 					}
 					if err := stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
+						return err
+					}
+					if err := stages.SaveStageProgress(tx, stages.BlockHashes, blockNum); err != nil {
 						return err
 					}
 					if err := stages.SaveStageProgress(tx, stages.Bodies, blockNum); err != nil {
