@@ -690,34 +690,35 @@ func (tx *MdbxTx) CollectMetrics() {
 		}
 	}
 
-	kv.DbSize.SetUint64(info.Geo.Current)
-	kv.DbPgopsNewly.SetUint64(info.PageOps.Newly)
-	kv.DbPgopsCow.SetUint64(info.PageOps.Cow)
-	kv.DbPgopsClone.SetUint64(info.PageOps.Clone)
-	kv.DbPgopsSplit.SetUint64(info.PageOps.Split)
-	kv.DbPgopsMerge.SetUint64(info.PageOps.Merge)
-	kv.DbPgopsSpill.SetUint64(info.PageOps.Spill)
-	kv.DbPgopsUnspill.SetUint64(info.PageOps.Unspill)
-	kv.DbPgopsWops.SetUint64(info.PageOps.Wops)
+	var dbLabel = string(tx.db.opts.label)
+	kv.DbSize.WithLabelValues(dbLabel).SetUint64(info.Geo.Current)
+	kv.DbPgopsNewly.WithLabelValues(dbLabel).SetUint64(info.PageOps.Newly)
+	kv.DbPgopsCow.WithLabelValues(dbLabel).SetUint64(info.PageOps.Cow)
+	kv.DbPgopsClone.WithLabelValues(dbLabel).SetUint64(info.PageOps.Clone)
+	kv.DbPgopsSplit.WithLabelValues(dbLabel).SetUint64(info.PageOps.Split)
+	kv.DbPgopsMerge.WithLabelValues(dbLabel).SetUint64(info.PageOps.Merge)
+	kv.DbPgopsSpill.WithLabelValues(dbLabel).SetUint64(info.PageOps.Spill)
+	kv.DbPgopsUnspill.WithLabelValues(dbLabel).SetUint64(info.PageOps.Unspill)
+	kv.DbPgopsWops.WithLabelValues(dbLabel).SetUint64(info.PageOps.Wops)
 
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
 		return
 	}
 
-	kv.TxDirty.SetUint64(txInfo.SpaceDirty)
-	kv.TxRetired.SetUint64(txInfo.SpaceRetired)
-	kv.TxLimit.SetUint64(tx.db.txSize)
-	kv.TxSpill.SetUint64(txInfo.Spill)
-	kv.TxUnspill.SetUint64(txInfo.Unspill)
+	kv.TxDirty.WithLabelValues(dbLabel).SetUint64(txInfo.SpaceDirty)
+	kv.TxRetired.WithLabelValues(dbLabel).SetUint64(txInfo.SpaceRetired)
+	kv.TxLimit.WithLabelValues(dbLabel).SetUint64(tx.db.txSize)
+	kv.TxSpill.WithLabelValues(dbLabel).SetUint64(txInfo.Spill)
+	kv.TxUnspill.WithLabelValues(dbLabel).SetUint64(txInfo.Unspill)
 
 	gc, err := tx.BucketStat("gc")
 	if err != nil {
 		return
 	}
-	kv.GcLeafMetric.SetUint64(gc.LeafPages)
-	kv.GcOverflowMetric.SetUint64(gc.OverflowPages)
-	kv.GcPagesMetric.SetUint64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize.Bytes() / 8)
+	kv.GcLeafMetric.WithLabelValues(dbLabel).SetUint64(gc.LeafPages)
+	kv.GcOverflowMetric.WithLabelValues(dbLabel).SetUint64(gc.OverflowPages)
+	kv.GcPagesMetric.WithLabelValues(dbLabel).SetUint64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize.Bytes() / 8)
 }
 
 func (tx *MdbxTx) WarmupDB(force bool) error {
@@ -898,13 +899,15 @@ func (tx *MdbxTx) Commit() error {
 		return fmt.Errorf("label: %s, %w", tx.db.opts.label, err)
 	}
 
+	dbName := string(tx.db.opts.label)
+
 	if tx.db.opts.metrics {
-		kv.DbCommitPreparation.Observe(latency.Preparation.Seconds())
+		kv.DbCommitPreparation(dbName).Observe(latency.Preparation.Seconds())
 		//kv.DbCommitAudit.Update(latency.Audit.Seconds())
-		kv.DbCommitWrite.Observe(latency.Write.Seconds())
-		kv.DbCommitSync.Observe(latency.Sync.Seconds())
-		kv.DbCommitEnding.Observe(latency.Ending.Seconds())
-		kv.DbCommitTotal.Observe(latency.Whole.Seconds())
+		kv.DbCommitWrite(dbName).Observe(latency.Write.Seconds())
+		kv.DbCommitSync(dbName).Observe(latency.Sync.Seconds())
+		kv.DbCommitEnding(dbName).Observe(latency.Ending.Seconds())
+		kv.DbCommitTotal(dbName).Observe(latency.Whole.Seconds())
 
 		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
 		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))

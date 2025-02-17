@@ -76,34 +76,45 @@ import (
 //      1. Application - rely on TemporalDB (Ex: ExecutionLayer) or just DB (Ex: TxPool, Sentry, Downloader).
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
+const dbLabelName = "db"
 
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
 
-	DbSize    = metrics.GetOrCreateGauge(`db_size`)    //nolint
-	TxLimit   = metrics.GetOrCreateGauge(`tx_limit`)   //nolint
-	TxSpill   = metrics.GetOrCreateGauge(`tx_spill`)   //nolint
-	TxUnspill = metrics.GetOrCreateGauge(`tx_unspill`) //nolint
-	TxDirty   = metrics.GetOrCreateGauge(`tx_dirty`)   //nolint
-	TxRetired = metrics.GetOrCreateGauge(`tx_retired`) //nolint
+	DbSize    = metrics.GetOrCreateGaugeVec(`db_size`, []string{dbLabelName})    //nolint
+	TxLimit   = metrics.GetOrCreateGaugeVec(`tx_limit`, []string{dbLabelName})   //nolint
+	TxSpill   = metrics.GetOrCreateGaugeVec(`tx_spill`, []string{dbLabelName})   //nolint
+	TxUnspill = metrics.GetOrCreateGaugeVec(`tx_unspill`, []string{dbLabelName}) //nolint
+	TxDirty   = metrics.GetOrCreateGaugeVec(`tx_dirty`, []string{dbLabelName})   //nolint
+	TxRetired = metrics.GetOrCreateGaugeVec(`tx_retired`, []string{dbLabelName}) //nolint
 
-	DbCommitPreparation = metrics.GetOrCreateSummary(`db_commit_seconds{phase="preparation"}`) //nolint
+	DbCommitPreparation = func(dbName string) metrics.Summary {
+		return metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "preparation"})
+	}
 	//DbGCWallClock       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_wall_clock"}`) //nolint
 	//DbGCCpuTime         = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_cpu_time"}`)   //nolint
 	//DbCommitAudit       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="audit"}`)         //nolint
-	DbCommitWrite  = metrics.GetOrCreateSummary(`db_commit_seconds{phase="write"}`)  //nolint
-	DbCommitSync   = metrics.GetOrCreateSummary(`db_commit_seconds{phase="sync"}`)   //nolint
-	DbCommitEnding = metrics.GetOrCreateSummary(`db_commit_seconds{phase="ending"}`) //nolint
-	DbCommitTotal  = metrics.GetOrCreateSummary(`db_commit_seconds{phase="total"}`)  //nolint
+	DbCommitWrite = func(dbName string) metrics.Summary {
+		return metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "write"})
+	} //nolint
+	DbCommitSync = func(dbName string) metrics.Summary {
+		return metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "sync"})
+	}
 
-	DbPgopsNewly   = metrics.GetOrCreateGauge(`db_pgops{phase="newly"}`)   //nolint
-	DbPgopsCow     = metrics.GetOrCreateGauge(`db_pgops{phase="cow"}`)     //nolint
-	DbPgopsClone   = metrics.GetOrCreateGauge(`db_pgops{phase="clone"}`)   //nolint
-	DbPgopsSplit   = metrics.GetOrCreateGauge(`db_pgops{phase="split"}`)   //nolint
-	DbPgopsMerge   = metrics.GetOrCreateGauge(`db_pgops{phase="merge"}`)   //nolint
-	DbPgopsSpill   = metrics.GetOrCreateGauge(`db_pgops{phase="spill"}`)   //nolint
-	DbPgopsUnspill = metrics.GetOrCreateGauge(`db_pgops{phase="unspill"}`) //nolint
-	DbPgopsWops    = metrics.GetOrCreateGauge(`db_pgops{phase="wops"}`)    //nolint
+	DbCommitEnding = func(dbName string) metrics.Summary {
+		return metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "ending"})
+	}
+	DbCommitTotal = func(dbName string) metrics.Summary {
+		return metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "total"})
+	}
+	DbPgopsNewly   = metrics.GetOrCreateGaugeVec(`db_pgops{phase="newly"}`, []string{dbLabelName})   //nolint
+	DbPgopsCow     = metrics.GetOrCreateGaugeVec(`db_pgops{phase="cow"}`, []string{dbLabelName})     //nolint
+	DbPgopsClone   = metrics.GetOrCreateGaugeVec(`db_pgops{phase="clone"}`, []string{dbLabelName})   //nolint
+	DbPgopsSplit   = metrics.GetOrCreateGaugeVec(`db_pgops{phase="split"}`, []string{dbLabelName})   //nolint
+	DbPgopsMerge   = metrics.GetOrCreateGaugeVec(`db_pgops{phase="merge"}`, []string{dbLabelName})   //nolint
+	DbPgopsSpill   = metrics.GetOrCreateGaugeVec(`db_pgops{phase="spill"}`, []string{dbLabelName})   //nolint
+	DbPgopsUnspill = metrics.GetOrCreateGaugeVec(`db_pgops{phase="unspill"}`, []string{dbLabelName}) //nolint
+	DbPgopsWops    = metrics.GetOrCreateGaugeVec(`db_pgops{phase="wops"}`, []string{dbLabelName})    //nolint
 	/*
 		DbPgopsPrefault = metrics.NewCounter(`db_pgops{phase="prefault"}`) //nolint
 		DbPgopsMinicore = metrics.NewCounter(`db_pgops{phase="minicore"}`) //nolint
@@ -137,9 +148,9 @@ var (
 	//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
 	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
 
-	GcLeafMetric     = metrics.GetOrCreateGauge(`db_gc_leaf`)     //nolint
-	GcOverflowMetric = metrics.GetOrCreateGauge(`db_gc_overflow`) //nolint
-	GcPagesMetric    = metrics.GetOrCreateGauge(`db_gc_pages`)    //nolint
+	GcLeafMetric     = metrics.GetOrCreateGaugeVec(`db_gc_leaf`, []string{dbLabelName})     //nolint
+	GcOverflowMetric = metrics.GetOrCreateGaugeVec(`db_gc_overflow`, []string{dbLabelName}) //nolint
+	GcPagesMetric    = metrics.GetOrCreateGaugeVec(`db_gc_pages`, []string{dbLabelName})    //nolint
 
 )
 
@@ -149,6 +160,7 @@ type Label string
 const (
 	Unknown         = "unknown"
 	ChainDB         = "chaindata"
+	NodeDB          = "nodedb"
 	TxPoolDB        = "txpool"
 	SentryDB        = "sentry"
 	ConsensusDB     = "consensus"
