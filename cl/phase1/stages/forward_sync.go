@@ -136,6 +136,9 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 
 	// Filter out blocks that are already in the FCU or have a signed header in the DB
 	blocks = filterUnneededBlocks(ctx, blocks, cfg)
+	if len(blocks) == 0 {
+		return highestBlockProcessed, nil
+	}
 
 	var (
 		blockRoot common.Hash
