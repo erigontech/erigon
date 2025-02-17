@@ -160,7 +160,6 @@ type Label string
 const (
 	Unknown         = "unknown"
 	ChainDB         = "chaindata"
-	NodeDB          = "nodedb"
 	TxPoolDB        = "txpool"
 	SentryDB        = "sentry"
 	ConsensusDB     = "consensus"
