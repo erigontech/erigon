@@ -20,7 +20,7 @@ jobs:
             runner: Erigon2
             reference_data_dir: /opt/erigon-versions/reference-version/datadir
           - chain: gnosis
-            client: prysm
+            client: lighthouse
             runner: Gnosis
             reference_data_dir: /opt/erigon-versions/reference-version-2/datadir
     runs-on: [ self-hosted, "${{ matrix.runner }}" ]
