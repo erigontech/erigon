@@ -353,7 +353,7 @@ func (s *CheckpointSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Checkpoint] {
 	return &CheckpointSnapshotStore{txEntityStore[*Checkpoint]{s.EntityStore.(*mdbxEntityStore[*Checkpoint]), tx}, s.snapshots}
 }
 
-func (s *CheckpointSnapshotStore) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+func (s *CheckpointSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
 	lastId, ok, err := s.EntityStore.LastEntityId(ctx)
 
 	snapshotLastCheckpointId := s.LastFrozenEntityId()
