@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -132,7 +133,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 			},
 		},
 	}
-	sf, err := ac.staticFilesInRange(rng)
+	sf, err := ac.StaticFilesInRange(rng)
 	if err != nil {
 		return err
 	}
@@ -331,7 +332,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			},
 		},
 	}
-	sf, err := acRo.staticFilesInRange(rng)
+	sf, err := acRo.StaticFilesInRange(rng)
 	if err != nil {
 		return nil, err
 	}
