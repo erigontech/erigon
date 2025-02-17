@@ -108,6 +108,18 @@ func (a *MarkedAppendable) combK(ts Num, hash []byte) []byte {
 	return k
 }
 
+func (a *MarkedAppendable) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
+	if hash == nil {
+		// find canonical hash
+		canHash, err := tx.GetOne(a.canonicalTbl, a.encTs(num))
+		if err != nil {
+			return nil, err
+		}
+		hash = canHash
+	}
+	return tx.GetOne(a.valsTbl, a.combK(num, hash))
+}
+
 // rotx
 type MarkedAppendableTx struct {
 	*ProtoAppendableTx
@@ -149,15 +161,7 @@ func (r *MarkedAppendableTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
 		return nil, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", r.id.Name(), entityNum, visible.src.decompressor.FileName())
 	}
 
-	// then db
-	canHash, err := tx.GetOne(ap.canonicalTbl, ap.encTs(entityNum))
-	if err != nil {
-		return nil, err
-	}
-	// if canHash == nil....
-
-	key := ap.combK(entityNum, canHash)
-	return tx.GetOne(ap.valsTbl, key)
+	return ap.GetDb(entityNum, nil, tx)
 }
 
 func (r *MarkedAppendableTx) GetNc(num Num, hash []byte, tx kv.Tx) (Bytes, error) {

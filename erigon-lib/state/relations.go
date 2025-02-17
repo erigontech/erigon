@@ -3,6 +3,7 @@ package state
 import (
 	"github.com/erigontech/erigon-lib/kv"
 	ae "github.com/erigontech/erigon-lib/state/appendables_extras"
+	"github.com/erigontech/erigon/core/types"
 )
 
 //// relations
@@ -53,7 +54,8 @@ func (r *ManyToOneRelation) Num2Id(num Num, tx kv.Tx) (Id, error) {
 //////////////////////////////////////////////
 
 // 1:many; with MaxNumTbl
-// e.g. txs, borevents
+// e.g. borevents
+// also id == num here (only canonical data)
 type OneToManyRelation struct {
 	maxNumTbl         string
 	strictlyAppending bool // i.e. no delete on unwind
@@ -65,8 +67,7 @@ func (r *OneToManyRelation) RootNum2Id(inp RootNum, tx kv.Tx) (Id, error) {
 	if err != nil {
 		return 0, err
 	}
-	
-	// wrong: for txs this gives num; but i'm using id here
+
 	return Id(ae.Decode64FromBytes(prevMaxNum, true) + 1), nil
 }
 
@@ -76,17 +77,36 @@ func (r *OneToManyRelation) Num2Id(num Num, tx kv.Tx) (Id, error) {
 		return Id(num), nil
 	}
 
-	// TODO: else, it's case like txs and we need to binary search over the maxNumTbl
-	cursor, err := tx.Cursor(r.maxNumTbl)
+	panic("must be implemented for strictly appending")
+}
+
+// 1:many; with MaxNumTbl
+// also id != num here (only canonical data)
+// e.g. txs
+type BlockToTxnRelation struct {
+	r       *OneToManyRelation
+	block   *MarkedAppendable
+	decoder func(inp []byte, body *types.BodyForStorage) error
+}
+
+func (r *BlockToTxnRelation) RootNum2Id(inp RootNum, tx kv.Tx) (Id, error) {
+	blockBytes, err := r.block.GetDb(Num(inp), nil, tx)
 	if err != nil {
 		return 0, err
 	}
-	defer cursor.Close()
+	b := &types.BodyForStorage{}
+	if err := r.decoder(blockBytes, b); err != nil {
+		return 0, err
+	}
 
-	//curso
-
-	return 0, nil
+	// not sure to return system tx or not
+	return Id(b.BaseTxnID.First()), nil
 }
+
+func (r *BlockToTxnRelation) Num2Id(num Num, tx kv.Tx) (Id, error) {
+	
+}
+	
 
 // 1: many; pure function
 // e.g: spans

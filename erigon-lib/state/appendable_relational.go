@@ -14,7 +14,6 @@ import (
 
 type RootRelationI interface {
 	RootNum2Id(from RootNum, tx kv.Tx) (Id, error)
-	Num2Id(from Num, tx kv.Tx) (Id, error)
 }
 
 // this have 1:many or many:1 or 1:1 relation with root num
