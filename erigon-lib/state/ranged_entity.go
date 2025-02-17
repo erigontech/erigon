@@ -9,7 +9,7 @@ import (
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	ae "github.com/erigontech/erigon-lib/state/appendables_extras"
+	ae "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 type RootRelationI interface {
@@ -17,34 +17,34 @@ type RootRelationI interface {
 }
 
 // this have 1:many or many:1 or 1:1 relation with root num
-type RelationalAppendable struct {
-	*ProtoAppendable
+type RangedEntity struct {
+	*ProtoEntity
 
 	rel       RootRelationI
 	valsTbl   string
 	pruneFrom Num
 }
 
-type RAOpts func(a *RelationalAppendable)
+type RAOpts func(a *RangedEntity)
 
 // making this a method on RelationalAppendableOption to allow namespacing; since MarkedAppendableOptions
 // have same functions.
 func (r *RAOpts) WithFreezer(freezer Freezer) RAOpts {
-	return func(a *RelationalAppendable) {
+	return func(a *RangedEntity) {
 		a.freezer = freezer
 	}
 }
 
 func (r *RAOpts) WithIndexBuilders(builders ...AccessorIndexBuilder) RAOpts {
-	return func(a *RelationalAppendable) {
+	return func(a *RangedEntity) {
 		a.builders = builders
 	}
 }
 
-func NewRelationalAppendable(id AppendableId, relation RootRelationI, valsTbl string, logger log.Logger, options ...RAOpts) (*RelationalAppendable, error) {
-	a := &RelationalAppendable{
-		ProtoAppendable: NewProto(id, nil, nil, logger),
-		rel:             relation,
+func NewRangedEntity(id EntityId, relation RootRelationI, valsTbl string, logger log.Logger, options ...RAOpts) (*RangedEntity, error) {
+	a := &RangedEntity{
+		ProtoEntity: NewProto(id, nil, nil, logger),
+		rel:         relation,
 	}
 	a.sameKeyAsRoot = false
 
@@ -71,25 +71,25 @@ func NewRelationalAppendable(id AppendableId, relation RootRelationI, valsTbl st
 	return a, nil
 }
 
-func (a *RelationalAppendable) encTs(ts uint64) []byte {
+func (a *RangedEntity) encTs(ts uint64) []byte {
 	return ae.EncToBytes(ts, true)
 }
 
-type RelationalAppendableTx struct {
-	*ProtoAppendableTx
-	a  *RelationalAppendable
-	id AppendableId
+type RangedEntityTx struct {
+	*ProtoEntityTx
+	a  *RangedEntity
+	id EntityId
 }
 
-func (a *RelationalAppendable) BeginFilesRo() *RelationalAppendableTx {
-	return &RelationalAppendableTx{
-		ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
-		a:                 a,
-		id:                a.a,
+func (a *RangedEntity) BeginFilesRo() *RangedEntityTx {
+	return &RangedEntityTx{
+		ProtoEntityTx: a.ProtoEntity.BeginFilesRo(),
+		a:             a,
+		id:            a.a,
 	}
 }
 
-func (a *RelationalAppendableTx) GetWithFlags(entityNum Num, tx kv.Tx) (Bytes, error) {
+func (a *RangedEntityTx) GetWithFlags(entityNum Num, tx kv.Tx) (Bytes, error) {
 	ap := a.a
 	lastNum := ap.VisibleFilesMaxNum()
 	if entityNum <= lastNum {
@@ -122,7 +122,7 @@ func (a *RelationalAppendableTx) GetWithFlags(entityNum Num, tx kv.Tx) (Bytes, e
 	return tx.GetOne(ap.valsTbl, entityNum.EncTo8Bytes())
 }
 
-func (a *RelationalAppendableTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
+func (a *RangedEntityTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
 	return tx.Append(a.a.valsTbl, a.a.encTs(uint64(entityNum)), value)
 }
 
@@ -147,7 +147,7 @@ func (a *RelationalAppendableTx) Append(entityNum Num, value Bytes, tx kv.RwTx) 
 // 	return tx.ResetSequence(a.a.valsTbl, uint64(newValue))
 // }
 
-func (a *RelationalAppendableTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error {
+func (a *RangedEntityTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error {
 	ap := a.a
 	fromId := uint64(ap.pruneFrom)
 	toId, err := ap.rel.RootNum2Num(to, tx)
@@ -161,7 +161,7 @@ func (a *RelationalAppendableTx) Prune(ctx context.Context, to RootNum, limit ui
 	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 
-func (a *RelationalAppendableTx) Unwind(ctx context.Context, from RootNum, rwTx kv.RwTx) error {
+func (a *RangedEntityTx) Unwind(ctx context.Context, from RootNum, rwTx kv.RwTx) error {
 	ap := a.a
 	fromId, err := ap.rel.RootNum2Num(from, rwTx)
 	if err != nil {
@@ -170,7 +170,7 @@ func (a *RelationalAppendableTx) Unwind(ctx context.Context, from RootNum, rwTx 
 	return ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(uint64(fromId)), nil, 0, rwTx)
 }
 
-func (a *RelationalAppendableTx) NewWriter() *RelationalAppendableWriter {
+func (a *RangedEntityTx) NewWriter() *RelationalAppendableWriter {
 	// TODO: caplin uses some pool for sortable buffer
 	// probably can have a global pool here for this...
 	return &RelationalAppendableWriter{
@@ -181,12 +181,12 @@ func (a *RelationalAppendableTx) NewWriter() *RelationalAppendableWriter {
 	}
 }
 
-func (a *RelationalAppendableTx) Close() {
+func (a *RangedEntityTx) Close() {
 	if a.files == nil {
 		return
 	}
 
-	a.ProtoAppendableTx.Close()
+	a.ProtoEntityTx.Close()
 }
 
 // buffered writer
@@ -199,7 +199,7 @@ type RelationalAppendableWriter struct {
 	encFn     func(ts uint64) []byte
 }
 
-func NewRelationalAppendableWriter(r *RelationalAppendable, valsTable string, values *etl.Collector) *RelationalAppendableWriter {
+func NewRelationalAppendableWriter(r *RangedEntity, valsTable string, values *etl.Collector) *RelationalAppendableWriter {
 	return &RelationalAppendableWriter{
 		values:    values,
 		valsTable: valsTable,

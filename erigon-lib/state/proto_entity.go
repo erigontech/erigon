@@ -10,17 +10,17 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ae "github.com/erigontech/erigon-lib/state/appendables_extras"
+	ae "github.com/erigontech/erigon-lib/state/entity_extras"
 
 	btree2 "github.com/tidwall/btree"
 )
 
-// appendable struct with basic functionality it's not intended to be used directly.
-// Can be embedded in other concrete appendable structs
-type ProtoAppendable struct {
+// ProtoEntity with basic functionality it's not intended to be used directly.
+// Can be embedded in other marker/relational/appendable entities
+type ProtoEntity struct {
 	freezer Freezer
 
-	a          ae.AppendableId
+	a          ae.EntityId
 	builders   []AccessorIndexBuilder
 	dirtyFiles *btree2.BTreeG[*filesItem]
 	_visible   visibleFiles
@@ -31,8 +31,8 @@ type ProtoAppendable struct {
 	logger log.Logger
 }
 
-func NewProto(a ae.AppendableId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoAppendable {
-	return &ProtoAppendable{
+func NewProto(a ae.EntityId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoEntity {
+	return &ProtoEntity{
 		a:          a,
 		builders:   builders,
 		freezer:    freezer,
@@ -41,12 +41,12 @@ func NewProto(a ae.AppendableId, builders []AccessorIndexBuilder, freezer Freeze
 	}
 }
 
-func (a *ProtoAppendable) VisibleFilesMaxRootNum() ae.RootNum {
+func (a *ProtoEntity) VisibleFilesMaxRootNum() ae.RootNum {
 	latest := a._visible[len(a._visible)-1]
 	return ae.RootNum(latest.src.endTxNum)
 }
 
-func (a *ProtoAppendable) DirtyFilesMaxRootNum() ae.RootNum {
+func (a *ProtoEntity) DirtyFilesMaxRootNum() ae.RootNum {
 	latest, found := a.dirtyFiles.Max()
 	if latest == nil || !found {
 		return 0
@@ -54,7 +54,7 @@ func (a *ProtoAppendable) DirtyFilesMaxRootNum() ae.RootNum {
 	return ae.RootNum(latest.endTxNum)
 }
 
-func (a *ProtoAppendable) VisibleFilesMaxNum() Num {
+func (a *ProtoEntity) VisibleFilesMaxNum() Num {
 	//latest := a._visible[len(a._visible)-1]
 	// need to store first entity num in snapshots for this
 	// TODO: just sending max root num now; so it won't work if rootnum!=num;
@@ -63,7 +63,7 @@ func (a *ProtoAppendable) VisibleFilesMaxNum() Num {
 	return Num(a.VisibleFilesMaxRootNum())
 }
 
-func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) error {
+func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) error {
 	log.Debug("freezing %s from %d to %d", a.a.Name(), from, to)
 	calcFrom, calcTo := from, to
 	var canFreeze bool
@@ -139,13 +139,13 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 
 // proto_appendable_rotx
 
-type ProtoAppendableTx struct {
-	id    AppendableId
+type ProtoEntityTx struct {
+	id    EntityId
 	files visibleFiles
-	a     *ProtoAppendable
+	a     *ProtoEntity
 }
 
-func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableTx {
+func (a *ProtoEntity) BeginFilesRo() *ProtoEntityTx {
 	a.visibleLock.Lock()
 	defer a.visibleLock.RUnlock()
 	for i := 0; i < len(a._visible); i++ {
@@ -154,14 +154,14 @@ func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableTx {
 		}
 	}
 
-	return &ProtoAppendableTx{
+	return &ProtoEntityTx{
 		id:    a.a,
 		files: a._visible,
 		a:     a,
 	}
 }
 
-func (a *ProtoAppendableTx) Close() {
+func (a *ProtoEntityTx) Close() {
 	if a.files == nil {
 		return
 	}
@@ -179,7 +179,7 @@ func (a *ProtoAppendableTx) Close() {
 	}
 }
 
-func (a *ProtoAppendableTx) Garbage(merged *filesItem) (outs []*filesItem) {
+func (a *ProtoEntityTx) Garbage(merged *filesItem) (outs []*filesItem) {
 	if merged == nil {
 		return
 	}

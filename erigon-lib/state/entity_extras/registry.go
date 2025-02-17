@@ -1,14 +1,14 @@
-package appendables_extras
+package entity_extras
 
 import (
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 )
 
-// AppendableId id as a uint64, returned by `RegisterAppendable`. It is dependent on
+// EntityId id as a uint64, returned by `RegisterAppendable`. It is dependent on
 // the order of registration counting on it being constant across reboots might be tricky
 // and is not recommended.
-type AppendableId uint16
+type EntityId uint16
 
 type holder struct {
 	name                   string
@@ -18,17 +18,17 @@ type holder struct {
 	snapshotCreationConfig *SnapshotConfig
 }
 
-var appendableRegistry []holder
+var entityRegistry []holder
 var curr uint16
 
-// RegisterAppendable
+// RegisterEntity
 // not making appendableRegistry/curr thread safe for now, since it's only expected to be setup once
 // at the start and then read.
 // name: just user-defined name for identification
 // dirs: directory where snapshots have to reside
 // salt: for creation of indexes.
 // pre: preverified files are snapshot file lists that gets downloaded initially.
-func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified, options ...AppendableIdOption) AppendableId {
+func RegisterEntity(name string, dirs datadir.Dirs, pre snapcfg.Preverified, options ...EntityIdOption) EntityId {
 	h := &holder{
 		name: name,
 		dirs: dirs,
@@ -49,8 +49,8 @@ func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified,
 	if h.snapshotCreationConfig == nil {
 		panic("snapshotCreationConfig is required")
 	}
-	appendableRegistry = append(appendableRegistry, *h)
-	id := AppendableId(curr)
+	entityRegistry = append(entityRegistry, *h)
+	id := EntityId(curr)
 
 	h.snapshotCreationConfig.SetupConfig(id, dirs, pre)
 
@@ -59,50 +59,50 @@ func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified,
 	return id
 }
 
-type AppendableIdOption func(*holder)
+type EntityIdOption func(*holder)
 
-func WithSnapshotPrefix(prefix string) AppendableIdOption {
+func WithSnapshotPrefix(prefix string) EntityIdOption {
 	return func(a *holder) {
 		a.snapshotNameBase = prefix
 	}
 }
 
-func WithIndexFileType(indexFileType []string) AppendableIdOption {
+func WithIndexFileType(indexFileType []string) EntityIdOption {
 	return func(a *holder) {
 		a.indexNameBases = indexFileType
 	}
 }
 
-func WithSnapshotCreationConfig(cfg *SnapshotConfig) AppendableIdOption {
+func WithSnapshotCreationConfig(cfg *SnapshotConfig) EntityIdOption {
 	return func(a *holder) {
 		a.snapshotCreationConfig = cfg
 	}
 }
 
-func (a AppendableId) Id() uint64 {
+func (a EntityId) Id() uint64 {
 	return uint64(a)
 }
 
-func (a AppendableId) Name() string {
-	return appendableRegistry[a].name
+func (a EntityId) Name() string {
+	return entityRegistry[a].name
 }
 
-func (a AppendableId) SnapshotPrefix() string {
-	return appendableRegistry[a].snapshotNameBase
+func (a EntityId) SnapshotPrefix() string {
+	return entityRegistry[a].snapshotNameBase
 }
 
-func (a AppendableId) IndexPrefix() []string {
-	return appendableRegistry[a].indexNameBases
+func (a EntityId) IndexPrefix() []string {
+	return entityRegistry[a].indexNameBases
 }
 
-func (a AppendableId) String() string {
-	return appendableRegistry[a].name
+func (a EntityId) String() string {
+	return entityRegistry[a].name
 }
 
-func (a AppendableId) Dirs() datadir.Dirs {
-	return appendableRegistry[a].dirs
+func (a EntityId) Dirs() datadir.Dirs {
+	return entityRegistry[a].dirs
 }
 
-func (a AppendableId) SnapshotConfig() *SnapshotConfig {
-	return appendableRegistry[a].snapshotCreationConfig
+func (a EntityId) SnapshotConfig() *SnapshotConfig {
+	return entityRegistry[a].snapshotCreationConfig
 }

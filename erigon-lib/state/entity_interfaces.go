@@ -7,13 +7,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	ae "github.com/erigontech/erigon-lib/state/appendables_extras"
+	ae "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 type RootNum = ae.RootNum
 type Num = ae.Num
 type Id = ae.Id
-type AppendableId = ae.AppendableId
+type EntityId = ae.EntityId
 type Bytes = ae.Bytes
 
 // Freezer takes hot data (e.g. from db) and transforms it
@@ -36,20 +36,20 @@ type AccessorIndexBuilder interface {
 	AllowsOrdinalLookupByNum() bool
 }
 
-type CommonAppendableTxI[T any] interface {
+type EntityTxI[T any] interface {
 	Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error
 	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
 	BeginFilesRo() T
 	Close()
 }
 
-type MarkedAppendableTxI interface {
-	CommonAppendableTxI[MarkedAppendableTxI]
+type MarkerTxI interface {
+	EntityTxI[MarkerTxI]
 	Get(ctx context.Context, num Num) (Bytes, error)
 	GetNc(num Num, hash []byte, tx kv.Tx) (Bytes, error)
 	Put(num Num, hash []byte, value Bytes, tx kv.RwTx)
 }
 
-type RelationalAppendableTxI interface {
-	CommonAppendableTxI[RelationalAppendableTxI]
+type RangerTxI interface {
+	EntityTxI[RangerTxI]
 }
