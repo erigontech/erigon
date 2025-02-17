@@ -234,6 +234,8 @@ func ChainConfigByChainName(chain string) *chain.Config {
 		return ChiadoChainConfig
 	case networkname.Test:
 		return TestChainConfig
+	case networkname.ArbiturmSepolia:
+		return ArbSepoliaChainConfig
 	default:
 		return nil
 	}

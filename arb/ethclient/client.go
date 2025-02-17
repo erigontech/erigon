@@ -181,7 +181,7 @@ func (ec *Client) getBlock(ctx context.Context, method string, args ...interface
 	for i, tx := range body.Transactions {
 		if tx.From != nil {
 			tx.tx.SetSender(*tx.From)
-			// setSenderFromServer(tx.tx, *tx.From, body.Hash)
+			//setSenderFromServer(tx.tx, *tx.From, body.Hash)
 		}
 		txs[i] = tx.tx
 	}
@@ -214,7 +214,7 @@ func (ec *Client) HeaderByNumber(ctx context.Context, number *big.Int) (*types.H
 }
 
 type rpcTransaction struct {
-	tx types.Transaction
+	tx *types.DynamicFeeTransaction
 	txExtraInfo
 }
 
@@ -233,20 +233,24 @@ func (tx *rpcTransaction) UnmarshalJSON(msg []byte) error {
 
 // TransactionByHash returns the transaction with the given hash.
 func (ec *Client) TransactionByHash(ctx context.Context, hash common.Hash) (tx types.Transaction, isPending bool, err error) {
-	var json *rpcTransaction
-	err = ec.c.CallContext(ctx, &json, "eth_getTransactionByHash", hash)
+	dst := &rpcTransaction{
+		tx: new(types.DynamicFeeTransaction),
+	}
+	err = ec.c.CallContext(ctx, &dst, "eth_getTransactionByHash", hash)
 	if err != nil {
 		return nil, false, err
-	} else if json == nil {
+	} else if dst == nil {
 		return nil, false, ethereum.NotFound
-	} else if _, r, _ := json.tx.RawSignatureValues(); r == nil {
+	} else if _, r, _ := dst.tx.RawSignatureValues(); r == nil {
 		return nil, false, errors.New("server returned transaction without signature")
 	}
-	if json.From != nil && json.BlockHash != nil {
-		json.tx.SetSender(*json.From)
-		// setSenderFromServer(json.tx, *json.From, *json.BlockHash)
+	if dst.From != nil && dst.BlockHash != nil {
+		dst.tx.SetSender(*dst.From)
+		// setSenderFromServer(dst.tx, *dst.From, *dst.BlockHash)
 	}
-	return json.tx, json.BlockNumber == nil, nil
+
+	return nil, dst.BlockNumber == nil, nil
+	//return dst.tx, dst.BlockNumber == nil, nil
 }
 
 // FeeHistory provides recent fee market data that consumers can use to determine
@@ -300,21 +304,24 @@ func (ec *Client) TransactionCount(ctx context.Context, blockHash common.Hash) (
 
 // TransactionInBlock returns a single transaction at index in the given block.
 func (ec *Client) TransactionInBlock(ctx context.Context, blockHash common.Hash, index uint) (types.Transaction, error) {
-	var json *rpcTransaction
-	err := ec.c.CallContext(ctx, &json, "eth_getTransactionByBlockHashAndIndex", blockHash, hexutil.Uint64(index))
+	dst := &rpcTransaction{
+		tx: new(types.DynamicFeeTransaction),
+	}
+	err := ec.c.CallContext(ctx, &dst, "eth_getTransactionByBlockHashAndIndex", blockHash, hexutil.Uint64(index))
 	if err != nil {
 		return nil, err
 	}
-	if json == nil {
+	if dst == nil {
 		return nil, ethereum.NotFound
-	} else if _, r, _ := json.tx.RawSignatureValues(); r == nil {
+	} else if _, r, _ := dst.tx.RawSignatureValues(); r == nil {
 		return nil, errors.New("server returned transaction without signature")
 	}
-	if json.From != nil && json.BlockHash != nil {
-		json.tx.SetSender(*json.From)
-		// setSenderFromServer(json.tx, *json.From, *json.BlockHash)
+	if dst.From != nil && dst.BlockHash != nil {
+		dst.tx.SetSender(*dst.From)
+		// setSenderFromServer(dst.tx, *dst.From, *dst.BlockHash)
 	}
-	return json.tx, err
+	//return nil, nil
+	return dst.tx, err
 }
 
 // TransactionReceipt returns the receipt of a transaction by transaction hash.

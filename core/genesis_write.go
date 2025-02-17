@@ -645,7 +645,6 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			return err
 		}
 		root = libcommon.BytesToHash(rh)
-		fmt.Printf("Genesis root: %s\n", root.String())
 		return nil
 	})
 
