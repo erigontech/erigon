@@ -988,7 +988,7 @@ func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 		ret, returnGas, err = interpreter.evm.ExtCall(scope.Contract, toAddr, args, gas, &value)
 	}
 
-	fmt.Println("ERR: ", err)
+	fmt.Println("opExtCall ERR: ", err)
 	if err == ErrExecutionReverted || err == ErrDepth || err == ErrInsufficientBalance {
 		dst256.SetOne()
 	} else if err != nil {
@@ -997,11 +997,7 @@ func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 		dst256.Clear()
 	}
 	scope.Stack.Push(&dst256)
-	// if err == nil || err == ErrExecutionReverted {
-	// 	ret = libcommon.CopyBytes(ret)
-	// 	scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
-	// }
-	fmt.Println("REFUND GAS: ", returnGas)
+
 	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 	interpreter.returnData = ret
 

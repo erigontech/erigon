@@ -314,6 +314,9 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		ret, err = run(evm, contract, input, readOnly)
 		gas = contract.Gas
 	}
+
+	fmt.Println("CALL ERR: ", err)
+
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
@@ -326,7 +329,6 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		//} else {
 		//	evm.StateDB.DiscardSnapshot(snapshot)
 	}
-	fmt.Println("ERROR: ", err)
 	return ret, gas, err
 }
 
@@ -442,6 +444,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
 	isInitcodeEOF := hasEOFMagic(codeAndHash.code)
+	// placing this after  nonce != 0 || (contractHash != (libcommon.Hash{}) && contractHash != trie.EmptyCodeHash) check
+	// fixes JUMPF tests but brakes EOFCREATE tests
 	if isInitcodeEOF {
 		if allowEOF { // TODO(racytech): Handle Legacy calling EOF better
 			var c Container
@@ -454,7 +458,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 			contract.Container = &c
 		} else {
 			// Don't allow EOF contract to execute legacy initcode.
-			return nil, libcommon.Address{}, gasRemaining, ErrLegacyCode
+			fmt.Println("HITTING THIS Legacy creating EOF")
+			return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("attmept to create EOF from legacy call (CREATE, CREATE2)")
 		}
 	}
 
@@ -485,6 +490,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		return nil, libcommon.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 	if nonce != 0 || (contractHash != (libcommon.Hash{}) && contractHash != trie.EmptyCodeHash) {
+		fmt.Println("Hitting this error")
 		err = ErrContractAddressCollision
 		return nil, libcommon.Address{}, 0, err
 	}
@@ -502,6 +508,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		return nil, address, gasRemaining, nil
 	}
 	ret, err = run(evm, contract, input, false)
+	fmt.Println("DONE RUN")
 	// fmt.Printf("RETURN_DATA: 0x%x\n", ret)
 	// EIP-170: Contract code size limit
 	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {
@@ -519,21 +526,23 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 
 	// Reject legacy contract deployment from EOF.
 	if err == nil && isInitcodeEOF && len(ret) > 0 && !hasEOFMagic(ret) {
-		fmt.Println("Hitting this 1 ")
+		fmt.Println("CHECK 1 FAIL")
 		err = ErrLegacyCode
 	}
-
-	// Reject legacy contract deployment from EOF.
-	if isInitcodeEOF && !hasEOFMagic(ret) {
-		err = fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, ErrLegacyCode)
-	}
+	// // Reject legacy contract deployment from EOF.
+	// if isInitcodeEOF && !hasEOFMagic(ret) {
+	// 	fmt.Println("CHECK 2 FAIL")
+	// 	err = fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, ErrLegacyCode)
+	// }
 	// Reject EOF deployment from legacy.
 	if !isInitcodeEOF && hasEOFMagic(ret) {
+		fmt.Println("CHECK 3 FAIL")
 		err = ErrLegacyCode
 	}
 
 	// Reject code starting with 0xEF if EIP-3541 is enabled.
 	if err == nil && len(ret) >= 1 && HasEOFByte(ret) {
+		fmt.Println("CHECK 4 FAIL")
 		if evm.chainRules.IsShanghai {
 			// Don't reject EOF contracts after Shanghai
 		} else if evm.chainRules.IsLondon {
@@ -555,7 +564,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// 		err = ErrInvalidCode
 	// 	}
 	// }
-	fmt.Println("ERROR", err)
+	fmt.Println("EVM ERROR", err)
 	// if the contract creation ran successfully and no errors were returned
 	// calculate the gas required to store the code. If the code could not
 	// be stored due to not enough gas set an error and let it be handled

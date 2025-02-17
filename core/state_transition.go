@@ -496,7 +496,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	// 	st.gasRemaining = uint64(gasLeft)
 	// }
 	// host.DestroyVM() // TODO: should we destroy it everytime?
-	// fmt.Println("GAS REFUNDqq", gasRefund)
+	// fmt.Println("GAS REFUNDaaa", gasRefund)
 
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
@@ -580,7 +580,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	fmt.Println("result.ReturnData:          ", result.ReturnData)
 
 	if st.evm.Context.PostApplyMessage != nil {
-		fmt.Println("Hittin this")
 		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
 	}
 	fmt.Println("----------------> End Transition")
