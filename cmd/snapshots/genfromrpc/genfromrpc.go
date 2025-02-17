@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
@@ -736,15 +737,17 @@ func genFromRPc(cliCtx *cli.Context) error {
 					if err := rawdbv3.TxNums.Append(tx, blockNum, uint64(blk.Transactions().Len()+1)); err != nil {
 						return err
 					}
-
-					if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
-						return err
-					}
-
 					rawdb.WriteHeadBlockHash(tx, blk.Hash())
 					if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
 						return err
 					}
+					if err := stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
+						return err
+					}
+					if err := stages.SaveStageProgress(tx, stages.Bodies, blockNum); err != nil {
+						return err
+					}
+
 				}
 
 				// Update the progress counter.
