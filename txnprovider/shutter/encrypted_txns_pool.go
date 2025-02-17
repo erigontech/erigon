@@ -226,18 +226,12 @@ func (etp *EncryptedTxnsPool) loadSubmissionsOnInit(ctx context.Context) error {
 			}
 
 			var start uint64
-			if blockEvent.LatestBlockNum > etp.config.EncryptedTxnsLookBackLimit {
-				start = blockEvent.LatestBlockNum - etp.config.EncryptedTxnsLookBackLimit
+			end := blockEvent.LatestBlockNum
+			if end > etp.config.EncryptedTxnsLookBackDistance {
+				start = end - etp.config.EncryptedTxnsLookBackDistance
 			}
 
-			var end uint64
-			if blockEvent.LatestBlockNum > blockEvent.BlocksBatchLen {
-				// shift the end back, logs for blocks in the batch would have been delivered
-				// via log events, so there is no need to fetch those
-				end = blockEvent.LatestBlockNum - blockEvent.BlocksBatchLen
-			}
-
-			etp.logger.Debug("loading submissions on init", "start", start, "end", end)
+			etp.logger.Info("loading submissions on init", "start", start, "end", end)
 			err := etp.loadSubmissions(start, end, alwaysContinueSubmissionsContinuer)
 			if err != nil {
 				return fmt.Errorf("failed to load submissions on init: %w", err)
