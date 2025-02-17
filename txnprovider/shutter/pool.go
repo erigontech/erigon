@@ -38,7 +38,7 @@ type Pool struct {
 	eonTracker              EonTracker
 	decryptionKeysListener  DecryptionKeysListener
 	decryptionKeysProcessor DecryptionKeysProcessor
-	encryptedTxnsPool       EncryptedTxnsPool
+	encryptedTxnsPool       *EncryptedTxnsPool
 	decryptedTxnsPool       DecryptedTxnsPool
 }
 
@@ -55,7 +55,7 @@ func NewPool(
 	eonTracker := NewKsmEonTracker(logger, config, blockListener, contractBackend)
 	decryptionKeysValidator := NewDecryptionKeysExtendedValidator(logger, config, slotCalculator, eonTracker)
 	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysValidator)
-	encryptedTxnsPool := NewEncryptedTxnsPool(logger, config, contractBackend)
+	encryptedTxnsPool := NewEncryptedTxnsPool(logger, config, contractBackend, blockListener)
 	decryptedTxnsPool := DecryptedTxnsPool{}
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger, config, encryptedTxnsPool, decryptedTxnsPool)
 	return &Pool{

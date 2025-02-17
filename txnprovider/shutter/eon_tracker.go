@@ -153,15 +153,15 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 	et.mu.Lock()
 	defer et.mu.Unlock()
 
-	eon, err := et.readEonAtNewBlockEvent(blockEvent.BlockNum)
+	eon, err := et.readEonAtNewBlockEvent(blockEvent.LatestBlockNum)
 	if err != nil {
 		return err
 	}
 
-	et.logger.Debug("current eon at block", "blockNum", blockEvent.BlockNum, "eonIndex", eon.Index)
+	et.logger.Debug("current eon at block", "blockNum", blockEvent.LatestBlockNum, "eonIndex", eon.Index)
 	et.currentEon = &eon
 	et.recentEons.ReplaceOrInsert(eon)
-	et.maybeCleanup(blockEvent.BlockNum)
+	et.maybeCleanup(blockEvent.LatestBlockNum)
 	return nil
 }
 

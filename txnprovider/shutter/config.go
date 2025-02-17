@@ -41,8 +41,9 @@ type Config struct {
 	KeyperSetManagerContractAddress  string
 	MaxNumKeysPerMessage             uint64
 	ReorgDepthAwareness              uint64
-	MaxPooledEncryptedTxns           uint64
+	MaxPooledEncryptedTxns           int
 	EncryptedGasLimit                uint64
+	EncryptedTxnsLookBackLimit       uint64
 }
 
 type P2pConfig struct {
@@ -96,6 +97,7 @@ var (
 		ReorgDepthAwareness:              defaultReorgDepthAwarenessEpochs * clparams.BeaconConfigs[clparams.ChiadoNetwork].SlotsPerEpoch,
 		MaxPooledEncryptedTxns:           defaultMaxPooledEncryptedTxns,
 		EncryptedGasLimit:                defaultEncryptedGasLimit,
+		EncryptedTxnsLookBackLimit:       defaultEncryptedTxnsLookBackLimit,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -119,6 +121,7 @@ var (
 		ReorgDepthAwareness:              defaultReorgDepthAwarenessEpochs * clparams.BeaconConfigs[clparams.GnosisNetwork].SlotsPerEpoch,
 		MaxPooledEncryptedTxns:           defaultMaxPooledEncryptedTxns,
 		EncryptedGasLimit:                defaultEncryptedGasLimit,
+		EncryptedTxnsLookBackLimit:       defaultEncryptedTxnsLookBackLimit,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -130,9 +133,10 @@ var (
 )
 
 const (
-	defaultP2PListenPort             = 23_102
-	defaultMaxNumKeysPerMessage      = 500
-	defaultReorgDepthAwarenessEpochs = 3
-	defaultMaxPooledEncryptedTxns    = 10_000
-	defaultEncryptedGasLimit         = 10_000_000
+	defaultP2PListenPort              = 23_102
+	defaultMaxNumKeysPerMessage       = 500
+	defaultReorgDepthAwarenessEpochs  = 3
+	defaultMaxPooledEncryptedTxns     = 10_000
+	defaultEncryptedGasLimit          = 10_000_000
+	defaultEncryptedTxnsLookBackLimit = 128
 )

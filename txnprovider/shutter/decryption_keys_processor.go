@@ -22,9 +22,12 @@ import (
 	"errors"
 	"fmt"
 
+	"golang.org/x/sync/errgroup"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	shuttercrypto "github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 	"github.com/erigontech/erigon/txnprovider/txpool"
@@ -33,7 +36,7 @@ import (
 type DecryptionKeysProcessor struct {
 	logger            log.Logger
 	config            Config
-	encryptedTxnsPool EncryptedTxnsPool
+	encryptedTxnsPool *EncryptedTxnsPool
 	decryptedTxnsPool DecryptedTxnsPool
 	txnParseCtx       *txpool.TxnParseContext
 	queue             chan *proto.DecryptionKeys
@@ -42,7 +45,7 @@ type DecryptionKeysProcessor struct {
 func NewDecryptionKeysProcessor(
 	logger log.Logger,
 	config Config,
-	encryptedTxnsPool EncryptedTxnsPool,
+	encryptedTxnsPool *EncryptedTxnsPool,
 	decryptedTxnsPool DecryptedTxnsPool,
 ) DecryptionKeysProcessor {
 	return DecryptionKeysProcessor{
@@ -79,7 +82,7 @@ func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case msg := <-dkp.queue:
-			err := dkp.process(msg)
+			err := dkp.process(ctx, msg)
 			if err != nil {
 				return err
 			}
@@ -87,7 +90,7 @@ func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
 	}
 }
 
-func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
+func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.DecryptionKeys) error {
 	dkp.logger.Debug(
 		"processing decryption keys message",
 		"instanceId", msg.InstanceId,
@@ -97,30 +100,50 @@ func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 		"keys", len(msg.Keys),
 	)
 
+	keys := msg.Keys[1:] // skip placeholder (we can safely do this because msg has already been validated)
 	eonIndex := EonIndex(msg.Eon)
 	from := TxnIndex(msg.GetGnosis().TxPointer)
-	to := from + TxnIndex(len(msg.Keys))
+	to := from + TxnIndex(len(keys)) // [from,to)
 	encryptedTxns, err := dkp.encryptedTxnsPool.Txns(eonIndex, from, to, dkp.config.EncryptedGasLimit)
 	if err != nil {
 		return err
 	}
 
-	txns := make([]types.Transaction, len(msg.Keys))
+	txnIndexToKey := make(map[TxnIndex]*proto.Key, len(keys))
+	for i, key := range keys {
+		txnIndexToKey[from+TxnIndex(i)] = key
+	}
+
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(estimate.AlmostAllCPUs())
+	txns := make([]types.Transaction, 0, len(encryptedTxns))
 	for i, encryptedTxn := range encryptedTxns {
-		txn, err := dkp.decryptTxn(msg.Keys[i], encryptedTxn)
-		if err != nil {
-			dkp.logger.Warn(
-				"failed to decrypt transaction - skipping",
-				"slot", msg.GetGnosis().Slot,
-				"eon", msg.Eon,
-				"idx", from+TxnIndex(i),
-				"err", err,
-			)
+		eg.Go(func() error {
+			key, ok := txnIndexToKey[encryptedTxn.TxnIndex]
+			if !ok {
+				return fmt.Errorf("key not found for txn index %d", encryptedTxn.TxnIndex)
+			}
 
-			continue
-		}
+			txn, err := dkp.decryptTxn(key, encryptedTxn)
+			if err != nil {
+				dkp.logger.Warn(
+					"failed to decrypt transaction - skipping",
+					"slot", msg.GetGnosis().Slot,
+					"eonIndex", msg.Eon,
+					"txnIndex", encryptedTxn.TxnIndex,
+					"err", err,
+				)
+				return nil
+			}
 
-		txns[i] = txn
+			txns[i] = txn
+			return nil
+		})
+	}
+
+	err = eg.Wait()
+	if err != nil {
+		return err
 	}
 
 	decryptionMark := DecryptionMark{
