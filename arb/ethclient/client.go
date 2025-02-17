@@ -248,9 +248,7 @@ func (ec *Client) TransactionByHash(ctx context.Context, hash common.Hash) (tx t
 		dst.tx.SetSender(*dst.From)
 		// setSenderFromServer(dst.tx, *dst.From, *dst.BlockHash)
 	}
-
-	return nil, dst.BlockNumber == nil, nil
-	//return dst.tx, dst.BlockNumber == nil, nil
+	return dst.tx, dst.BlockNumber == nil, nil
 }
 
 // FeeHistory provides recent fee market data that consumers can use to determine
@@ -320,7 +318,6 @@ func (ec *Client) TransactionInBlock(ctx context.Context, blockHash common.Hash,
 		dst.tx.SetSender(*dst.From)
 		// setSenderFromServer(dst.tx, *dst.From, *dst.BlockHash)
 	}
-	//return nil, nil
 	return dst.tx, err
 }
 

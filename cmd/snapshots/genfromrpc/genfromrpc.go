@@ -729,6 +729,9 @@ func genFromRPc(cliCtx *cli.Context) error {
 					if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
 						return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
 					}
+					if err = rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
+						return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+					}
 				}
 
 				// Update the progress counter.
