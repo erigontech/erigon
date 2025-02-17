@@ -19,7 +19,6 @@ package aggregation
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -78,35 +77,35 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	if err != nil {
 		return err
 	}
-	p.aggregatesLock.Lock()
-	defer p.aggregatesLock.Unlock()
-	att, ok := p.aggregates[hashRoot]
-	if !ok {
-		p.aggregates[hashRoot] = inAtt.Copy()
-		return nil
-	}
 
-	if utils.IsOverlappingSSZBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
-		// the on bit is already set, so ignore
-		return ErrIsSuperset
-	}
-
-	// merge signature
-	baseSig := att.Signature
-	inSig := inAtt.Signature
-	merged, err := blsAggregate([][]byte{baseSig[:], inSig[:]})
-	if err != nil {
-		return err
-	}
-	if len(merged) != 96 {
-		return errors.New("merged signature is too long")
-	}
-	var mergedSig [96]byte
-	copy(mergedSig[:], merged)
-
-	epoch := p.ethClock.GetEpochAtSlot(att.Data.Slot)
+	epoch := p.ethClock.GetEpochAtSlot(inAtt.Data.Slot)
 	clversion := p.ethClock.StateVersionByEpoch(epoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) {
+		p.aggregatesLock.Lock()
+		defer p.aggregatesLock.Unlock()
+		att, ok := p.aggregates[hashRoot]
+		if !ok {
+			p.aggregates[hashRoot] = inAtt.Copy()
+			return nil
+		}
+
+		if utils.IsOverlappingSSZBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
+			// the on bit is already set, so ignore
+			return ErrIsSuperset
+		}
+		// merge signature
+		baseSig := att.Signature
+		inSig := inAtt.Signature
+		merged, err := blsAggregate([][]byte{baseSig[:], inSig[:]})
+		if err != nil {
+			return err
+		}
+		if len(merged) != 96 {
+			return errors.New("merged signature is too long")
+		}
+		var mergedSig [96]byte
+		copy(mergedSig[:], merged)
+
 		// merge aggregation bits
 		mergedBits, err := att.AggregationBits.Merge(inAtt.AggregationBits)
 		if err != nil {
@@ -119,27 +118,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 			Signature:       mergedSig,
 		}
 	} else {
-		// Electra and after case
-		aggrBitSize := p.beaconConfig.MaxCommitteesPerSlot * p.beaconConfig.MaxValidatorsPerCommittee
-		mergedAggrBits, err := att.AggregationBits.Merge(inAtt.AggregationBits)
-		if err != nil {
-			return err
-		}
-		if mergedAggrBits.Cap() != int(aggrBitSize) {
-			return fmt.Errorf("incorrect aggregation bits size: %d", mergedAggrBits.Cap())
-		}
-		mergedCommitteeBits, err := att.CommitteeBits.Union(inAtt.CommitteeBits)
-		if err != nil {
-			return err
-		}
-		p.aggregates[hashRoot] = &solid.Attestation{
-			AggregationBits: mergedAggrBits,
-			CommitteeBits:   mergedCommitteeBits,
-			Data:            att.Data,
-			Signature:       mergedSig,
-		}
-
-		// aggregate by committee
+		// Electra and after case, aggregate by committee
 		p.aggregateByCommittee(inAtt)
 	}
 	return nil
@@ -166,7 +145,12 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation) err
 		return nil
 	}
 
-	// merge aggregation bits and signature
+	if utils.IsOverlappingSSZBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
+		// the on bit is already set, so ignore
+		return ErrIsSuperset
+	}
+
+	// It's fine to directly merge aggregation bits here, because the attestation is from the same committee
 	mergedAggrBits, err := att.AggregationBits.Merge(inAtt.AggregationBits)
 	if err != nil {
 		return err

@@ -1340,6 +1340,8 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 }
 
 func (a *ApiHandler) tryMergeAggregationBits(state abstract.BeaconState, att1, att2 *solid.Attestation) (*solid.BitList, bool) {
+	// after electra fork, aggregation_bits contains only the attester bit map of those committee appearing in committee_bits
+	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/electra/validator.md#attestations
 	slot := att1.Data.Slot
 	committees1 := att1.CommitteeBits.GetOnIndices()
 	committees2 := att2.CommitteeBits.GetOnIndices()
