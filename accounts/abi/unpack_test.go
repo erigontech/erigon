@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 //
 //nolint:scopelint
 package abi
@@ -27,10 +30,9 @@ import (
 	"strings"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 // TestUnpack tests the general pack/unpack tests in packing_test.go
@@ -317,7 +319,7 @@ func methodMultiReturn(require *require.Assertions) (ABI, []byte, methodMultiOut
 	buff.Write(libcommon.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000001"))
 	buff.Write(libcommon.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000040"))
 	buff.Write(libcommon.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000005"))
-	buff.Write(common.RightPadBytes([]byte(expected.String), 32))
+	buff.Write(libcommon.RightPadBytes([]byte(expected.String), 32))
 	return abi, buff.Bytes(), expected
 }
 
@@ -587,7 +589,7 @@ func TestUnmarshal(t *testing.T) {
 	buff.Reset()
 	buff.Write(libcommon.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000020"))
 	buff.Write(libcommon.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000020"))
-	bytesOut := common.RightPadBytes([]byte("hello"), 32)
+	bytesOut := libcommon.RightPadBytes([]byte("hello"), 32)
 	buff.Write(bytesOut)
 
 	var Bytes []byte
@@ -604,7 +606,7 @@ func TestUnmarshal(t *testing.T) {
 	buff.Reset()
 	buff.Write(libcommon.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000020"))
 	buff.Write(libcommon.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000040"))
-	bytesOut = common.RightPadBytes([]byte("hello"), 64)
+	bytesOut = libcommon.RightPadBytes([]byte("hello"), 64)
 	buff.Write(bytesOut)
 
 	err = abi.UnpackIntoInterface(&Bytes, "bytes", buff.Bytes())
@@ -620,7 +622,7 @@ func TestUnmarshal(t *testing.T) {
 	buff.Reset()
 	buff.Write(libcommon.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000020"))
 	buff.Write(libcommon.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000003f"))
-	bytesOut = common.RightPadBytes([]byte("hello"), 64)
+	bytesOut = libcommon.RightPadBytes([]byte("hello"), 64)
 	buff.Write(bytesOut)
 
 	err = abi.UnpackIntoInterface(&Bytes, "bytes", buff.Bytes())
@@ -642,7 +644,7 @@ func TestUnmarshal(t *testing.T) {
 	buff.Reset()
 	buff.Write(libcommon.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000020"))
 	buff.Write(libcommon.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000005"))
-	buff.Write(common.RightPadBytes([]byte("hello"), 32))
+	buff.Write(libcommon.RightPadBytes([]byte("hello"), 32))
 
 	err = abi.UnpackIntoInterface(&Bytes, "bytes", buff.Bytes())
 	if err != nil {
@@ -655,7 +657,7 @@ func TestUnmarshal(t *testing.T) {
 
 	// marshal dynamic bytes length 5
 	buff.Reset()
-	buff.Write(common.RightPadBytes([]byte("hello"), 32))
+	buff.Write(libcommon.RightPadBytes([]byte("hello"), 32))
 
 	var hash libcommon.Hash
 	err = abi.UnpackIntoInterface(&hash, "fixed", buff.Bytes())
@@ -663,7 +665,7 @@ func TestUnmarshal(t *testing.T) {
 		t.Error(err)
 	}
 
-	helloHash := libcommon.BytesToHash(common.RightPadBytes([]byte("hello"), 32))
+	helloHash := libcommon.BytesToHash(libcommon.RightPadBytes([]byte("hello"), 32))
 	if hash != helloHash {
 		t.Errorf("Expected %x to equal %x", hash, helloHash)
 	}
@@ -928,7 +930,7 @@ func TestOOMMaliciousInput(t *testing.T) {
 		}
 		encb, err := hex.DecodeString(test.enc)
 		if err != nil {
-			t.Fatalf("invalid hex: %s" + test.enc)
+			t.Fatalf("invalid hex: %s", test.enc)
 		}
 		_, err = abi.Methods["method"].Outputs.UnpackValues(encb)
 		if err == nil {

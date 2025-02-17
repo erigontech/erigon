@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -13,22 +29,20 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
-	"github.com/ledgerwatch/erigon/cmd/pics/contracts"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/erigon/visual"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/accounts/abi/bind/backends"
+	"github.com/erigontech/erigon/cmd/pics/contracts"
+	"github.com/erigontech/erigon/cmd/pics/visual"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 /*func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
@@ -71,28 +85,23 @@ import (
 }*/
 
 var bucketLabels = map[string]string{
-	kv.Receipts:          "Receipts",
-	kv.Log:               "Event Logs",
-	kv.E2AccountsHistory: "History Of Accounts",
-	kv.E2StorageHistory:  "History Of Storage",
-	kv.Headers:           "Headers",
-	kv.HeaderCanonical:   "Canonical headers",
-	kv.HeaderTD:          "Headers TD",
-	kv.BlockBody:         "Block Bodies",
-	kv.HeaderNumber:      "Header Numbers",
-	kv.TxLookup:          "Transaction Index",
-	kv.Code:              "Code Of Contracts",
-	kv.SyncStageProgress: "Sync Progress",
-	kv.PlainState:        "Plain State",
-	kv.HashedAccounts:    "Hashed Accounts",
-	kv.HashedStorage:     "Hashed Storage",
-	kv.TrieOfAccounts:    "Intermediate Hashes Of Accounts",
-	kv.TrieOfStorage:     "Intermediate Hashes Of Storage",
-	kv.AccountChangeSet:  "Account Changes",
-	kv.StorageChangeSet:  "Storage Changes",
-	kv.IncarnationMap:    "Incarnations",
-	kv.Senders:           "Transaction Senders",
-	kv.ContractTEVMCode:  "Contract TEVM code",
+	kv.Receipts:                 "Receipts",
+	kv.Log:                      "Event Logs",
+	kv.Headers:                  "Headers",
+	kv.HeaderCanonical:          "Canonical headers",
+	kv.HeaderTD:                 "Headers TD",
+	kv.BlockBody:                "Block Bodies",
+	kv.HeaderNumber:             "Header Numbers",
+	kv.TxLookup:                 "Transaction Index",
+	kv.Code:                     "Code Of Contracts",
+	kv.SyncStageProgress:        "Sync Progress",
+	kv.PlainState:               "Plain State",
+	kv.HashedAccountsDeprecated: "Hashed Accounts",
+	kv.HashedStorageDeprecated:  "Hashed Storage",
+	kv.TrieOfAccounts:           "Intermediate Hashes Of Accounts",
+	kv.TrieOfStorage:            "Intermediate Hashes Of Storage",
+	kv.IncarnationMap:           "Incarnations",
+	kv.Senders:                  "Transaction Senders",
 }
 
 /*dbutils.PlainContractCode,
@@ -108,7 +117,7 @@ func hexPalette() error {
 		return err
 	}
 	visual.StartGraph(f, true)
-	p := common.FromHex("0x000102030405060708090a0b0c0d0e0f")
+	p := libcommon.FromHex("0x000102030405060708090a0b0c0d0e0f")
 	visual.Horizontal(f, p, len(p), "p", visual.HexIndexColors, visual.HexFontColors, 0)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
@@ -289,7 +298,7 @@ func initialState1() error {
 	m := mock.MockWithGenesis(nil, gspec, key, false)
 	defer m.DB.Close()
 
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	contractBackend := backends.NewSimulatedBackendWithConfig(nil, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	if err != nil {
@@ -422,7 +431,7 @@ func initialState1() error {
 		return err
 	}
 
-	emptyKv := memdb.New("")
+	emptyKv := memdb.New("", kv.ChainDB)
 	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}

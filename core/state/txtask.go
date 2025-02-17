@@ -1,19 +1,41 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
@@ -29,7 +51,7 @@ type TxTask struct {
 	Coinbase        libcommon.Address
 	Withdrawals     types.Withdrawals
 	BlockHash       libcommon.Hash
-	Sender          *libcommon.Address
+	sender          *libcommon.Address
 	SkipAnalysis    bool
 	TxIndex         int // -1 for block initialisation
 	Final           bool
@@ -39,7 +61,7 @@ type TxTask struct {
 	TxAsMessage     types.Message
 	EvmBlockContext evmtypes.BlockContext
 
-	HistoryExecution bool // use history reader for that tx instead of state reader
+	HistoryExecution bool // use history reader for that txn instead of state reader
 
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
 	ReadLists          map[string]*state.KvList
@@ -62,27 +84,88 @@ type TxTask struct {
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
 
-	Requests types.Requests
+	Config *chain.Config
 }
 
-func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
+func (t *TxTask) Sender() *libcommon.Address {
+	if t.sender != nil {
+		return t.sender
+	}
+	if sender, ok := t.Tx.GetSender(); ok {
+		t.sender = &sender
+		return t.sender
+	}
+	signer := *types.MakeSigner(t.Config, t.BlockNum, t.Header.Time)
+	sender, err := signer.Sender(t.Tx)
+	if err != nil {
+		panic(err)
+	}
+	t.sender = &sender
+	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNum, "txIdx", t.TxIndex)
+	return t.sender
+}
+
+func (t *TxTask) CreateReceipt(tx kv.Tx) {
+	if t.TxIndex < 0 || t.Final {
+		return
+	}
+
+	var cumulativeGasUsed uint64
+	var firstLogIndex uint32
+	if t.TxIndex > 0 {
+		prevR := t.BlockReceipts[t.TxIndex-1]
+		if prevR != nil {
+			cumulativeGasUsed = prevR.CumulativeGasUsed
+			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
+		} else {
+			var err error
+			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), t.TxNum)
+			if err != nil {
+				panic(err)
+			}
+		}
+	}
+
+	cumulativeGasUsed += t.UsedGas
+	if t.UsedGas == 0 {
+		msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
+		panic(msg)
+	}
+
+	r := t.createReceipt(cumulativeGasUsed)
+	r.FirstLogIndexWithinBlock = firstLogIndex
+	t.BlockReceipts[t.TxIndex] = r
+}
+
+func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	receipt := &types.Receipt{
 		BlockNumber:       t.Header.Number,
 		BlockHash:         t.BlockHash,
 		TransactionIndex:  uint(t.TxIndex),
 		Type:              t.Tx.Type(),
+		GasUsed:           t.UsedGas,
 		CumulativeGasUsed: cumulativeGasUsed,
 		TxHash:            t.Tx.Hash(),
 		Logs:              t.Logs,
+	}
+	blockNum := t.Header.Number.Uint64()
+	for _, l := range receipt.Logs {
+		l.TxHash = receipt.TxHash
+		l.BlockNumber = blockNum
+		l.BlockHash = receipt.BlockHash
 	}
 	if t.Failed {
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful
 	}
+	// if the transaction created a contract, store the creation address in the receipt.
+	//if msg.To() == nil {
+	//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
+	//}
 	return receipt
 }
-func (t *TxTask) Reset() {
+func (t *TxTask) Reset() *TxTask {
 	t.BalanceIncreaseSet = nil
 	returnReadList(t.ReadLists)
 	t.ReadLists = nil
@@ -91,6 +174,9 @@ func (t *TxTask) Reset() {
 	t.Logs = nil
 	t.TraceFroms = nil
 	t.TraceTos = nil
+	t.Error = nil
+	t.Failed = false
+	return t
 }
 
 // TxTaskQueue non-thread-safe priority-queue
@@ -264,15 +350,15 @@ type ResultsQueue struct {
 	//tick
 	ticker *time.Ticker
 
-	sync.Mutex
+	m       sync.Mutex
 	results *TxTaskQueue
 }
 
-func NewResultsQueue(newTasksLimit, queueLimit int) *ResultsQueue {
+func NewResultsQueue(resultChannelLimit, heapLimit int) *ResultsQueue {
 	r := &ResultsQueue{
 		results:  &TxTaskQueue{},
-		limit:    queueLimit,
-		resultCh: make(chan *TxTask, newTasksLimit),
+		limit:    heapLimit,
+		resultCh: make(chan *TxTask, resultChannelLimit),
 		ticker:   time.NewTicker(2 * time.Second),
 	}
 	heap.Init(r.results)
@@ -289,31 +375,37 @@ func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	}
 	return nil
 }
-func (q *ResultsQueue) drainNoBlock(task *TxTask) {
-	q.Lock()
-	defer q.Unlock()
+func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) (err error) {
+	q.m.Lock()
+	defer q.m.Unlock()
 	if task != nil {
 		heap.Push(q.results, task)
 	}
 
 	for {
 		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case txTask, ok := <-q.resultCh:
 			if !ok {
-				return
+				//log.Warn("[dbg] closed1")
+				return nil
 			}
-			if txTask != nil {
-				heap.Push(q.results, txTask)
-				q.results.Len()
+			if txTask == nil {
+				continue
+			}
+			heap.Push(q.results, txTask)
+			if q.results.Len() > q.limit {
+				return nil
 			}
 		default: // we are inside mutex section, can't block here
-			return
+			return nil
 		}
 	}
 }
 
 func (q *ResultsQueue) Iter() *ResultsQueueIter {
-	q.Lock()
+	q.m.Lock()
 	return q.iter
 }
 
@@ -323,7 +415,7 @@ type ResultsQueueIter struct {
 }
 
 func (q *ResultsQueueIter) Close() {
-	q.q.Unlock()
+	q.q.m.Unlock()
 }
 func (q *ResultsQueueIter) HasNext(outputTxNum uint64) bool {
 	return len(*q.results) > 0 && (*q.results)[0].TxNum == outputTxNum
@@ -340,7 +432,9 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 		if !ok {
 			return nil
 		}
-		q.drainNoBlock(txTask)
+		if err := q.drainNoBlock(ctx, txTask); err != nil {
+			return err
+		}
 	case <-q.ticker.C:
 		// Corner case: workers processed all new tasks (no more q.resultCh events) when we are inside Drain() func
 		// it means - naive-wait for new q.resultCh events will not work here (will cause dead-lock)
@@ -354,14 +448,19 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 	return nil
 }
 
-func (q *ResultsQueue) DrainNonBlocking() { q.drainNoBlock(nil) }
+// DrainNonBlocking - does drain batch of results to heap. Immediately stops at `q.limit` or if nothing to drain
+func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) (err error) {
+	return q.drainNoBlock(ctx, nil)
+}
 
-func (q *ResultsQueue) DropResults(f func(t *TxTask)) {
-	q.Lock()
-	defer q.Unlock()
+func (q *ResultsQueue) DropResults(ctx context.Context, f func(t *TxTask)) {
+	q.m.Lock()
+	defer q.m.Unlock()
 Loop:
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case txTask, ok := <-q.resultCh:
 			if !ok {
 				break Loop
@@ -379,6 +478,8 @@ Loop:
 }
 
 func (q *ResultsQueue) Close() {
+	q.m.Lock()
+	defer q.m.Unlock()
 	if q.closed {
 		return
 	}
@@ -390,9 +491,9 @@ func (q *ResultsQueue) ResultChLen() int { return len(q.resultCh) }
 func (q *ResultsQueue) ResultChCap() int { return cap(q.resultCh) }
 func (q *ResultsQueue) Limit() int       { return q.limit }
 func (q *ResultsQueue) Len() (l int) {
-	q.Lock()
+	q.m.Lock()
 	l = q.results.Len()
-	q.Unlock()
+	q.m.Unlock()
 	return l
 }
 func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].TxNum }
@@ -400,9 +501,9 @@ func (q *ResultsQueue) LenLocked() (l int)       { return q.results.Len() }
 func (q *ResultsQueue) HasLocked() bool          { return len(*q.results) > 0 }
 func (q *ResultsQueue) PushLocked(t *TxTask)     { heap.Push(q.results, t) }
 func (q *ResultsQueue) Push(t *TxTask) {
-	q.Lock()
+	q.m.Lock()
 	heap.Push(q.results, t)
-	q.Unlock()
+	q.m.Unlock()
 }
 func (q *ResultsQueue) PopLocked() (t *TxTask) {
 	return heap.Pop(q.results).(*TxTask)

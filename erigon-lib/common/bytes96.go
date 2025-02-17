@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package common
 
 import (
@@ -8,8 +24,8 @@ import (
 	"math/rand"
 	"reflect"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/length"
 )
 
 var (
@@ -19,16 +35,16 @@ var (
 type Bytes96 [length.Bytes96]byte
 
 // Hex converts a hash to a hex string.
-func (b Bytes96) Hex() string { return hexutility.Encode(b[:]) }
+func (b Bytes96) Hex() string { return hexutil.Encode(b[:]) }
 
 // UnmarshalJSON parses a hash in hex syntax.
 func (b *Bytes96) UnmarshalJSON(input []byte) error {
-	return hexutility.UnmarshalFixedJSON(blsSignatureT, input, b[:])
+	return hexutil.UnmarshalFixedJSON(blsSignatureT, input, b[:])
 }
 
 // UnmarshalText parses a hash in hex syntax.
 func (b *Bytes96) UnmarshalText(input []byte) error {
-	return hexutility.UnmarshalFixedText("BLSSignature", input, b[:])
+	return hexutil.UnmarshalFixedText("BLSSignature", input, b[:])
 }
 
 // MarshalText returns the hex representation of a.

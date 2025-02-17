@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package verkletrie
 
 import (
@@ -9,13 +25,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 func RegeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter) error {
@@ -78,7 +93,7 @@ func RegeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workers uint64, ver
 			}
 			select {
 			case <-logEvery.C:
-				log.Info("[Pedersen Account Hashing] Current progress in Collection Phase", "address", "0x"+common.Bytes2Hex(k))
+				log.Info("[Pedersen Account Hashing] Current progress in Collection Phase", "address", "0x"+libcommon.Bytes2Hex(k))
 			default:
 			}
 		}
@@ -149,7 +164,7 @@ func RegeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, workers uint64, verk
 			}
 			select {
 			case <-logInterval.C:
-				log.Info("[Pedersen Storage Hashing] Current progress in Collection Phase", "address", "0x"+common.Bytes2Hex(k[:20]))
+				log.Info("[Pedersen Storage Hashing] Current progress in Collection Phase", "address", "0x"+libcommon.Bytes2Hex(k[:20]))
 			default:
 			}
 		} else if len(k) == 20 {
@@ -239,7 +254,7 @@ func RegeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workers uint64, verkleW
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("[Pedersen Code Hashing] Current progress in Collection Phase", "address", "0x"+common.Bytes2Hex(k))
+			log.Info("[Pedersen Code Hashing] Current progress in Collection Phase", "address", "0x"+libcommon.Bytes2Hex(k))
 		default:
 		}
 	}

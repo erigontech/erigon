@@ -1,14 +1,29 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
-	"bytes"
 	_ "embed"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,17 +52,4 @@ func TestBeaconStatePhase0EncodingDecoding(t *testing.T) {
 	root, err := state.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash(root), libcommon.HexToHash("0xf23b6266af40567516afeee250c1f8c06e9800f34a990a210604c380b506e053"))
-	// Lets test the caches too
-	var w bytes.Buffer
-	require.NoError(t, state.EncodeCaches(&w))
-	values1 := state.activeValidatorsCache.Values()
-	keys1 := state.activeValidatorsCache.Keys()
-	values2 := state.shuffledSetsCache.Values()
-	keys2 := state.shuffledSetsCache.Keys()
-
-	require.NoError(t, state.DecodeCaches(&w))
-	require.Equal(t, values1, state.activeValidatorsCache.Values())
-	require.Equal(t, keys1, state.activeValidatorsCache.Keys())
-	require.Equal(t, values2, state.shuffledSetsCache.Values())
-	require.Equal(t, keys2, state.shuffledSetsCache.Keys())
 }

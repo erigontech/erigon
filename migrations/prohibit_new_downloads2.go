@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package migrations
 
 import (
@@ -7,14 +23,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
-	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	coresnaptype "github.com/erigontech/erigon/core/snaptype"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 // Switch to the second version of download.lock.
@@ -27,7 +43,11 @@ var ProhibitNewDownloadsLock2 = Migration{
 		}
 		defer tx.Rollback()
 		fPath := filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName)
-		if !dir.FileExist(fPath) {
+		exists, err := dir.FileExist(fPath)
+		if err != nil {
+			return err
+		}
+		if !exists {
 			if err := BeforeCommit(tx, nil, true); err != nil {
 				return err
 			}
@@ -45,7 +65,11 @@ var ProhibitNewDownloadsLock2 = Migration{
 				locked = append(locked, t.Name())
 			}
 
-			for _, t := range borsnaptype.BorSnapshotTypes() {
+			for _, t := range coresnaptype.E3StateTypes {
+				locked = append(locked, t.Name())
+			}
+
+			for _, t := range heimdall.SnapshotTypes() {
 				locked = append(locked, t.Name())
 			}
 

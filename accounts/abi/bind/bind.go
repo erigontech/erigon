@@ -1,23 +1,26 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package bind generates Ethereum contract Go bindings.
 //
 // Detailed usage document and tutorial available on the go-ethereum Wiki page:
-// https://github.com/ledgerwatch/erigon/wiki/Native-DApps:-Go-bindings-to-Ethereum-contracts
+// https://github.com/erigontech/erigon/wiki/Native-DApps:-Go-bindings-to-Ethereum-contracts
 package bind
 
 import (
@@ -30,9 +33,9 @@ import (
 	"text/template"
 	"unicode"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/accounts/abi"
+	"github.com/erigontech/erigon/accounts/abi"
 )
 
 // Lang is a target programming language selector to generate bindings for.
@@ -52,6 +55,43 @@ const (
 	typeByteArrayJava string = "byte[]"
 	typeString        string = "String"
 )
+
+func isKeyWord(arg string) bool {
+	switch arg {
+	case "break":
+	case "case":
+	case "chan":
+	case "const":
+	case "continue":
+	case "default":
+	case "defer":
+	case "else":
+	case "fallthrough":
+	case "for":
+	case "func":
+	case "go":
+	case "goto":
+	case "if":
+	case "import":
+	case "interface":
+	case "iota":
+	case "map":
+	case "make":
+	case "new":
+	case "package":
+	case "range":
+	case "return":
+	case "select":
+	case "struct":
+	case "switch":
+	case "type":
+	case "var":
+	default:
+		return false
+	}
+
+	return true
+}
 
 // Bind generates a Go wrapper around a contract ABI. This wrapper isn't meant
 // to be used as is in client code, but rather as an intermediate struct which
@@ -115,7 +155,7 @@ func Bind(types []string, abis []string, bytecodes []string, fsigs []map[string]
 			normalized.Inputs = make([]abi.Argument, len(original.Inputs))
 			copy(normalized.Inputs, original.Inputs)
 			for j, input := range normalized.Inputs {
-				if input.Name == "" {
+				if input.Name == "" || isKeyWord(input.Name) {
 					normalized.Inputs[j].Name = fmt.Sprintf("arg%d", j)
 				}
 				if hasStruct(input.Type) {
@@ -158,7 +198,7 @@ func Bind(types []string, abis []string, bytecodes []string, fsigs []map[string]
 			normalized.Inputs = make([]abi.Argument, len(original.Inputs))
 			copy(normalized.Inputs, original.Inputs)
 			for j, input := range normalized.Inputs {
-				if input.Name == "" {
+				if input.Name == "" || isKeyWord(input.Name) {
 					normalized.Inputs[j].Name = fmt.Sprintf("arg%d", j)
 				}
 				if hasStruct(input.Type) {
@@ -256,13 +296,15 @@ var bindType = map[Lang]func(kind abi.Type, structs map[string]*tmplStruct) stri
 	LangJava: bindTypeJava,
 }
 
+var intTypeRegexp = regexp.MustCompile(`(u)?int([0-9]*)`)
+
 // bindBasicTypeGo converts basic solidity types(except array, slice and tuple) to Go ones.
 func bindBasicTypeGo(kind abi.Type) string {
 	switch kind.T {
 	case abi.AddressTy:
 		return "libcommon.Address"
 	case abi.IntTy, abi.UintTy:
-		parts := regexp.MustCompile(`(u)?int([0-9]*)`).FindStringSubmatch(kind.String())
+		parts := intTypeRegexp.FindStringSubmatch(kind.String())
 		switch parts[2] {
 		case "8", "16", "32", "64":
 			return fmt.Sprintf("%sint%s", parts[1], parts[2])

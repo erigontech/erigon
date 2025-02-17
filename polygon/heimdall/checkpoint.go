@@ -1,13 +1,28 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
-	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 type CheckpointId uint64
@@ -110,17 +125,17 @@ func (c *Checkpoint) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type Checkpoints []*Checkpoint
+type checkpoints []*Checkpoint
 
-func (cs Checkpoints) Len() int {
+func (cs checkpoints) Len() int {
 	return len(cs)
 }
 
-func (cs Checkpoints) Less(i, j int) bool {
+func (cs checkpoints) Less(i, j int) bool {
 	return cs[i].StartBlock().Uint64() < cs[j].StartBlock().Uint64()
 }
 
-func (cs Checkpoints) Swap(i, j int) {
+func (cs checkpoints) Swap(i, j int) {
 	cs[i], cs[j] = cs[j], cs[i]
 }
 
@@ -140,34 +155,7 @@ type CheckpointCountResponse struct {
 
 type CheckpointListResponse struct {
 	Height string      `json:"height"`
-	Result Checkpoints `json:"result"`
+	Result checkpoints `json:"result"`
 }
 
-var ErrCheckpointNotFound = fmt.Errorf("checkpoint not found")
-
-func CheckpointIdAt(tx kv.Tx, block uint64) (CheckpointId, error) {
-	var id uint64
-
-	c, err := tx.Cursor(kv.BorCheckpointEnds)
-
-	if err != nil {
-		return 0, err
-	}
-
-	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], block)
-
-	k, v, err := c.Seek(blockNumBuf[:])
-
-	if err != nil {
-		return 0, err
-	}
-
-	if k == nil {
-		return 0, fmt.Errorf("%d: %w", block, ErrCheckpointNotFound)
-	}
-
-	id = binary.BigEndian.Uint64(v)
-
-	return CheckpointId(id), err
-}
+var ErrCheckpointNotFound = errors.New("checkpoint not found")

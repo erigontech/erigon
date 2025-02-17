@@ -1,34 +1,39 @@
 // Copyright 2021 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package misc
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844
-func CalcExcessBlobGas(config *chain.Config, parent *types.Header) uint64 {
+// Updated for EIP-7691: currentHeaderTime is used to determine the fork, and hence params
+func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeaderTime uint64) uint64 {
 	var excessBlobGas, blobGasUsed uint64
 	if parent.ExcessBlobGas != nil {
 		excessBlobGas = *parent.ExcessBlobGas
@@ -37,10 +42,10 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header) uint64 {
 		blobGasUsed = *parent.BlobGasUsed
 	}
 
-	if excessBlobGas+blobGasUsed < config.GetTargetBlobGasPerBlock() {
+	if excessBlobGas+blobGasUsed < config.GetTargetBlobGasPerBlock(currentHeaderTime) {
 		return 0
 	}
-	return excessBlobGas + blobGasUsed - config.GetTargetBlobGasPerBlock()
+	return excessBlobGas + blobGasUsed - config.GetTargetBlobGasPerBlock(currentHeaderTime)
 }
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
@@ -74,13 +79,13 @@ func FakeExponential(factor, denom *uint256.Int, excessBlobGas uint64) (*uint256
 // VerifyPresenceOfCancunHeaderFields checks that the fields introduced in Cancun (EIP-4844, EIP-4788) are present.
 func VerifyPresenceOfCancunHeaderFields(header *types.Header) error {
 	if header.BlobGasUsed == nil {
-		return fmt.Errorf("header is missing blobGasUsed")
+		return errors.New("header is missing blobGasUsed")
 	}
 	if header.ExcessBlobGas == nil {
-		return fmt.Errorf("header is missing excessBlobGas")
+		return errors.New("header is missing excessBlobGas")
 	}
 	if header.ParentBeaconBlockRoot == nil {
-		return fmt.Errorf("header is missing parentBeaconBlockRoot")
+		return errors.New("header is missing parentBeaconBlockRoot")
 	}
 	return nil
 }
@@ -99,8 +104,8 @@ func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
 	return nil
 }
 
-func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64) (*uint256.Int, error) {
-	return FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction()), excessBlobGas)
+func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint64) (*uint256.Int, error) {
+	return FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction(headerTime)), excessBlobGas)
 }
 
 func GetBlobGasUsed(numBlobs int) uint64 {

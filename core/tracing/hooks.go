@@ -1,28 +1,31 @@
 // Copyright 2024 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package tracing
 
 import (
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon/core/types"
 
 	"github.com/holiman/uint256"
 )
@@ -56,7 +59,7 @@ type VMContext struct {
 	BlockNumber uint64
 	Time        uint64
 	Random      *libcommon.Hash
-	// Effective tx gas price
+	// Effective txn gas price
 	GasPrice        *uint256.Int
 	ChainConfig     *chain.Config
 	IntraBlockState IntraBlockState
@@ -81,7 +84,7 @@ type (
 	// TxStartHook is called before the execution of a transaction starts.
 	// Call simulations don't come with a valid signature. `from` field
 	// to be used for address of the caller.
-	TxStartHook = func(vm *VMContext, tx types.Transaction, from libcommon.Address)
+	TxStartHook = func(vm *VMContext, txn types.Transaction, from libcommon.Address)
 
 	// TxEndHook is called after the execution of a transaction ends.
 	TxEndHook = func(receipt *types.Receipt, err error)
@@ -229,7 +232,7 @@ const (
 	// BalanceDecreaseSelfdestruct is deducted from a contract due to self-destruct.
 	BalanceDecreaseSelfdestruct BalanceChangeReason = 13
 	// BalanceDecreaseSelfdestructBurn is ether that is sent to an already self-destructed
-	// account within the same tx (captured at end of tx).
+	// account within the same txn (captured at end of tx).
 	// Note it doesn't account for a self-destruct which appoints itself as recipient.
 	BalanceDecreaseSelfdestructBurn BalanceChangeReason = 14
 )
@@ -255,7 +258,7 @@ const (
 	// GasChangeTxIntrinsicGas is the amount of gas that will be charged for the intrinsic cost of the transaction, there is
 	// always exactly one of those per transaction.
 	GasChangeTxIntrinsicGas GasChangeReason = 2
-	// GasChangeTxRefunds is the sum of all refunds which happened during the tx execution (e.g. storage slot being cleared)
+	// GasChangeTxRefunds is the sum of all refunds which happened during the txn execution (e.g. storage slot being cleared)
 	// this generates an increase in gas. There is at most one of such gas change per transaction.
 	GasChangeTxRefunds GasChangeReason = 3
 	// GasChangeTxLeftOverReturned is the amount of gas left over at the end of transaction's execution that will be returned
@@ -290,6 +293,8 @@ const (
 	GasChangeCallStorageColdAccess GasChangeReason = 13
 	// GasChangeCallFailedExecution is the burning of the remaining gas when the execution failed without a revert.
 	GasChangeCallFailedExecution GasChangeReason = 14
+	// GasChangeDelegatedDesignation is the amount of gas that will be charged for resolution of delegated designation.
+	GasChangeDelegatedDesignation GasChangeReason = 15
 
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.

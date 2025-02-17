@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -22,9 +25,9 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/crypto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 )
 
 func TestBloom(t *testing.T) {
@@ -160,4 +163,23 @@ func BenchmarkCreateBloom(b *testing.B) {
 			b.Errorf("Got %x, exp %x", got, exp)
 		}
 	})
+}
+
+func TestIsEmpty(t *testing.T) {
+	t.Parallel()
+	var b Bloom
+	if !b.IsEmpty() {
+		t.Error("expected empty")
+	}
+
+	b[0] = 1
+	if b.IsEmpty() {
+		t.Error("expected not empty")
+	}
+
+	b = Bloom{}
+	b[len(b)-1] = 1
+	if b.IsEmpty() {
+		t.Error("expected not empty")
+	}
 }

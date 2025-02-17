@@ -1,12 +1,29 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 // NetAPI the interface for the net_ RPC commands
@@ -29,8 +46,12 @@ func NewNetAPIImpl(eth rpchelper.ApiBackend) *NetAPIImpl {
 }
 
 // Listening implements net_listening. Returns true if client is actively listening for network connections.
-// TODO: Remove hard coded value
-func (api *NetAPIImpl) Listening(_ context.Context) (bool, error) {
+// If we can get peers info, it means the network interface is up and listening
+func (api *NetAPIImpl) Listening(ctx context.Context) (bool, error) {
+	_, err := api.ethBackend.Peers(ctx)
+	if err != nil {
+		return false, nil
+	}
 	return true, nil
 }
 

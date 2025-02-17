@@ -1,10 +1,27 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package ssz2
 
 import (
 	"encoding/binary"
 	"fmt"
+	"runtime/debug"
 
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon-lib/types/ssz"
 )
 
 type Sized interface {
@@ -54,6 +71,7 @@ It handles both static (fixed size) and dynamic (variable size) objects, includi
 func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 	defer func() {
 		if err2 := recover(); err2 != nil {
+			debug.PrintStack()
 			err = fmt.Errorf("panic while encoding: %v", err2)
 		}
 	}()
@@ -83,9 +101,11 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 			startSize := len(dst)
 			if obj.Static() {
 				// If the object is static (fixed size), encode it using SSZ and update the dst
-				if dst, err = obj.EncodeSSZ(dst); err != nil {
+				encodedBytes, err := obj.EncodeSSZ(nil)
+				if err != nil {
 					return nil, err
 				}
+				dst = append(dst, encodedBytes...)
 			} else {
 				// If the object is dynamic (variable size), store the start offset and the object in separate slices
 				offsetsStarts = append(offsetsStarts, startSize)

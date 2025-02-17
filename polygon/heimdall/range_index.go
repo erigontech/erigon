@@ -1,38 +1,71 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 
-	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
-type RangeIndex struct {
-	db kv.RwDB
+type RangeIndex interface {
+	Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error)
 }
 
-const rangeIndexTableName = "Index"
-
-func NewRangeIndex(ctx context.Context, tmpDir string, logger log.Logger) (*RangeIndex, error) {
-	db, err := mdbx.NewMDBX(logger).
-		InMem(tmpDir).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{rangeIndexTableName: {}} }).
-		MapSize(1 * datasize.GB).
-		Open(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return &RangeIndex{db}, nil
+type TransactionalRangeIndex interface {
+	RangeIndex
+	WithTx(tx kv.Tx) RangeIndex
 }
 
-func (i *RangeIndex) Close() {
-	i.db.Close()
+type RangeIndexFunc func(ctx context.Context, blockNum uint64) (uint64, bool, error)
+
+func (f RangeIndexFunc) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	return f(ctx, blockNum)
+}
+
+type RangeIndexer interface {
+	RangeIndex
+	Put(ctx context.Context, r ClosedRange, id uint64) error
+}
+
+type dbRangeIndex struct {
+	db    *polygoncommon.Database
+	table string
+}
+
+type txRangeIndex struct {
+	*dbRangeIndex
+	tx kv.Tx
+}
+
+func NewRangeIndex(db *polygoncommon.Database, table string) RangeIndex {
+	return &dbRangeIndex{db, table}
+}
+
+func NewTxRangeIndex(db kv.RoDB, table string, tx kv.Tx) RangeIndex {
+	return txRangeIndex{&dbRangeIndex{polygoncommon.AsDatabase(db.(kv.RwDB)), table}, tx}
+}
+
+func (i *dbRangeIndex) WithTx(tx kv.Tx) RangeIndex {
+	return txRangeIndex{i, tx}
 }
 
 func rangeIndexKey(blockNum uint64) [8]byte {
@@ -52,43 +85,62 @@ func rangeIndexValueParse(value []byte) uint64 {
 }
 
 // Put a mapping from a range to an id.
-func (i *RangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
+func (i *dbRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
 	tx, err := i.db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	key := rangeIndexKey(r.End)
-	value := rangeIndexValue(id)
-	if err = tx.Put(rangeIndexTableName, key[:], value[:]); err != nil {
+	if err := i.WithTx(tx).(RangeIndexer).Put(ctx, r, id); err != nil {
 		return err
 	}
+
 	return tx.Commit()
 }
 
+func (i txRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
+	key := rangeIndexKey(r.End)
+	value := rangeIndexValue(id)
+	tx, ok := i.tx.(kv.RwTx)
+
+	if !ok {
+		return errors.New("tx not writable")
+	}
+
+	return tx.Put(i.table, key[:], value[:])
+}
+
 // Lookup an id of a range by a blockNum within that range.
-func (i *RangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, error) {
+func (i *dbRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
 	var id uint64
+	var ok bool
+
 	err := i.db.View(ctx, func(tx kv.Tx) error {
-		cursor, err := tx.Cursor(rangeIndexTableName)
-		if err != nil {
-			return err
-		}
-		defer cursor.Close()
-
-		key := rangeIndexKey(blockNum)
-		_, value, err := cursor.Seek(key[:])
-		if err != nil {
-			return err
-		}
-		// not found
-		if value == nil {
-			return nil
-		}
-
-		id = rangeIndexValueParse(value)
-		return nil
+		var err error
+		id, ok, err = i.WithTx(tx).Lookup(ctx, blockNum)
+		return err
 	})
-	return id, err
+	return id, ok, err
+}
+
+func (i txRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	cursor, err := i.tx.Cursor(i.table)
+	if err != nil {
+		return 0, false, err
+	}
+	defer cursor.Close()
+
+	key := rangeIndexKey(blockNum)
+	_, value, err := cursor.Seek(key[:])
+	if err != nil {
+		return 0, false, err
+	}
+	// not found
+	if value == nil {
+		return 0, false, nil
+	}
+
+	id := rangeIndexValueParse(value)
+	return id, true, err
 }

@@ -7,14 +7,13 @@ import (
 	"math/big"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/event"
+	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/event"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -41,7 +40,7 @@ func DeploySubscription(auth *bind.TransactOpts, backend bind.ContractBackend) (
 		return libcommon.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(SubscriptionBin), backend)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(SubscriptionBin), backend)
 	if err != nil {
 		return libcommon.Address{}, nil, nil, err
 	}

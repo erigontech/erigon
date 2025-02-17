@@ -1,7 +1,24 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -9,13 +26,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gballet/go-verkle"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/rlp"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
-const RUNS = 100 // for local tests increase this number
+const RUNS = 10000 // for local tests increase this number
 
 type TRand struct {
 	rnd *rand.Rand
@@ -27,13 +45,18 @@ func NewTRand() *TRand {
 	return &TRand{rnd: rand.New(src)}
 }
 
-func (tr *TRand) RandIntInRange(min, max int) int {
-	return (tr.rnd.Intn(max-min) + min)
+func (tr *TRand) RandIntInRange(_min, _max int) int {
+	return (tr.rnd.Intn(_max-_min) + _min)
 }
 
 func (tr *TRand) RandUint64() *uint64 {
 	a := tr.rnd.Uint64()
 	return &a
+}
+
+func (tr *TRand) RandUint256() *uint256.Int {
+	a := new(uint256.Int).SetBytes(tr.RandBytes(tr.RandIntInRange(1, 32)))
+	return a
 }
 
 func (tr *TRand) RandBig() *big.Int {
@@ -56,8 +79,27 @@ func (tr *TRand) RandHash() libcommon.Hash {
 	return libcommon.Hash(tr.RandBytes(32))
 }
 
+func (tr *TRand) RandBoolean() bool {
+	return tr.rnd.Intn(2) == 0
+}
+
 func (tr *TRand) RandBloom() Bloom {
 	return Bloom(tr.RandBytes(BloomByteLength))
+}
+
+func (tr *TRand) RandVerkleKeyValuePairs(count int) []verkle.KeyValuePair {
+	res := make([]verkle.KeyValuePair, count)
+	for i := 0; i < count; i++ {
+		res[i] = tr.RandVerkleKeyValuePair()
+	}
+	return res
+}
+
+func (tr *TRand) RandVerkleKeyValuePair() verkle.KeyValuePair {
+	return verkle.KeyValuePair{
+		Key:   tr.RandBytes(tr.RandIntInRange(1, 32)),
+		Value: tr.RandBytes(tr.RandIntInRange(1, 32)),
+	}
 }
 
 func (tr *TRand) RandWithdrawal() *Withdrawal {
@@ -66,33 +108,6 @@ func (tr *TRand) RandWithdrawal() *Withdrawal {
 		Validator: tr.rnd.Uint64(),
 		Address:   tr.RandAddress(),
 		Amount:    tr.rnd.Uint64(),
-	}
-}
-
-func (tr *TRand) RandWithdrawalRequest() *WithdrawalRequest {
-	return &WithdrawalRequest{
-		SourceAddress:   [20]byte(tr.RandBytes(20)),
-		ValidatorPubkey: [48]byte(tr.RandBytes(48)),
-		Amount:          *tr.RandUint64(),
-	}
-}
-
-func (tr *TRand) RandDeposit() *DepositRequest {
-	return &DepositRequest{
-		Pubkey:                [48]byte(tr.RandBytes(48)),
-		WithdrawalCredentials: tr.RandHash(),
-		Amount:                *tr.RandUint64(),
-		Signature:             [96]byte(tr.RandBytes(96)),
-		Index:                 *tr.RandUint64(),
-	}
-}
-
-func (tr *TRand) RandRequest() Request {
-	switch tr.rnd.Intn(2) {
-	case 1:
-		return tr.RandWithdrawalRequest()
-	default:
-		return tr.RandDeposit()
 	}
 }
 
@@ -123,49 +138,129 @@ func (tr *TRand) RandHeader() *Header {
 	}
 }
 
-func (tr *TRand) RandAccessTuple() types2.AccessTuple {
+func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
+	skipSet := make(map[string]struct{}, len(skipFields))
+	for _, field := range skipFields {
+		skipSet[field] = struct{}{}
+	}
+
+	emptyUint64 := uint64(0)
+	h := &Header{}
+	// note unexported fields are skipped in reflection auto-assign as they are not assignable
+	h.mutable = tr.RandBoolean()
+	headerValue := reflect.ValueOf(h)
+	headerElem := headerValue.Elem()
+	numField := headerElem.Type().NumField()
+	for i := 0; i < numField; i++ {
+		field := headerElem.Field(i)
+		if !field.CanSet() {
+			continue
+		}
+
+		if _, skip := skipSet[headerElem.Type().Field(i).Name]; skip {
+			continue
+		}
+
+		switch field.Type() {
+		case reflect.TypeOf(libcommon.Hash{}):
+			field.Set(reflect.ValueOf(tr.RandHash()))
+		case reflect.TypeOf(&libcommon.Hash{}):
+			randHash := tr.RandHash()
+			field.Set(reflect.ValueOf(&randHash))
+		case reflect.TypeOf(libcommon.Address{}):
+			field.Set(reflect.ValueOf(tr.RandAddress()))
+		case reflect.TypeOf(Bloom{}):
+			field.Set(reflect.ValueOf(tr.RandBloom()))
+		case reflect.TypeOf(BlockNonce{}):
+			field.Set(reflect.ValueOf(BlockNonce(tr.RandBytes(8))))
+		case reflect.TypeOf(&big.Int{}):
+			field.Set(reflect.ValueOf(tr.RandBig()))
+		case reflect.TypeOf(uint64(0)):
+			field.Set(reflect.ValueOf(*tr.RandUint64()))
+		case reflect.TypeOf(&emptyUint64):
+			field.Set(reflect.ValueOf(tr.RandUint64()))
+		case reflect.TypeOf([]byte{}):
+			field.Set(reflect.ValueOf(tr.RandBytes(tr.RandIntInRange(128, 1024))))
+		case reflect.TypeOf(false):
+			field.Set(reflect.ValueOf(tr.RandBoolean()))
+		case reflect.TypeOf([]verkle.KeyValuePair{}):
+			field.Set(reflect.ValueOf(tr.RandVerkleKeyValuePairs(tr.RandIntInRange(1, 3))))
+		default:
+			panic(fmt.Sprintf("don't know how to generate rand value for Header field type %v - please add handler", field.Type()))
+		}
+	}
+	return h
+}
+
+func (tr *TRand) RandAccessTuple() AccessTuple {
 	n := tr.RandIntInRange(1, 5)
 	sk := make([]libcommon.Hash, n)
 	for i := 0; i < n; i++ {
 		sk[i] = tr.RandHash()
 	}
-	return types2.AccessTuple{
+	return AccessTuple{
 		Address:     tr.RandAddress(),
 		StorageKeys: sk,
 	}
 }
 
-func (tr *TRand) RandAccessList(size int) types2.AccessList {
-	al := make([]types2.AccessTuple, size)
+func (tr *TRand) RandAccessList(size int) AccessList {
+	al := make([]AccessTuple, size)
 	for i := 0; i < size; i++ {
 		al[i] = tr.RandAccessTuple()
 	}
 	return al
 }
 
-func (tr *TRand) RandTransaction() Transaction {
-	txType := tr.RandIntInRange(0, 4) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType
-	to := tr.RandAddress()
+func (tr *TRand) RandAuthorizations(size int) []Authorization {
+	auths := make([]Authorization, size)
+	for i := 0; i < size; i++ {
+		auths[i] = Authorization{
+			ChainID: *tr.RandUint256(),
+			Address: tr.RandAddress(),
+			Nonce:   *tr.RandUint64(),
+			YParity: uint8(*tr.RandUint64()),
+			R:       *tr.RandUint256(),
+			S:       *tr.RandUint256(),
+		}
+	}
+	return auths
+}
+
+func (tr *TRand) RandTransaction(_type int) Transaction {
+	var txType int
+	if _type == -1 {
+		txType = tr.RandIntInRange(0, 5) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType
+	} else {
+		txType = _type
+	}
+	var to *libcommon.Address
+	if tr.RandIntInRange(0, 10)%2 == 0 {
+		_to := tr.RandAddress()
+		to = &_to
+	} else {
+		to = nil
+	}
 	commonTx := CommonTx{
 		Nonce: *tr.RandUint64(),
 		Gas:   *tr.RandUint64(),
-		To:    &to,
+		To:    to,
 		Value: uint256.NewInt(*tr.RandUint64()), // wei amount
 		Data:  tr.RandBytes(tr.RandIntInRange(128, 1024)),
-		V:     *uint256.NewInt(*tr.RandUint64()),
-		R:     *uint256.NewInt(*tr.RandUint64()),
-		S:     *uint256.NewInt(*tr.RandUint64()),
+		V:     *tr.RandUint256(),
+		R:     *tr.RandUint256(),
+		S:     *tr.RandUint256(),
 	}
 	switch txType {
 	case LegacyTxType:
 		return &LegacyTx{
-			CommonTx: commonTx,
+			CommonTx: commonTx, //nolint
 			GasPrice: uint256.NewInt(*tr.RandUint64()),
 		}
 	case AccessListTxType:
 		return &AccessListTx{
 			LegacyTx: LegacyTx{
-				CommonTx: commonTx,
+				CommonTx: commonTx, //nolint
 				GasPrice: uint256.NewInt(*tr.RandUint64()),
 			},
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
@@ -173,7 +268,7 @@ func (tr *TRand) RandTransaction() Transaction {
 		}
 	case DynamicFeeTxType:
 		return &DynamicFeeTransaction{
-			CommonTx:   commonTx,
+			CommonTx:   commonTx, //nolint
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
 			Tip:        uint256.NewInt(*tr.RandUint64()),
 			FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -183,7 +278,7 @@ func (tr *TRand) RandTransaction() Transaction {
 		r := *tr.RandUint64()
 		return &BlobTx{
 			DynamicFeeTransaction: DynamicFeeTransaction{
-				CommonTx:   commonTx,
+				CommonTx:   commonTx, //nolint
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
 				Tip:        uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -191,6 +286,17 @@ func (tr *TRand) RandTransaction() Transaction {
 			},
 			MaxFeePerBlobGas:    uint256.NewInt(r),
 			BlobVersionedHashes: tr.RandHashes(tr.RandIntInRange(1, 2)),
+		}
+	case SetCodeTxType:
+		return &SetCodeTransaction{
+			DynamicFeeTransaction: DynamicFeeTransaction{
+				CommonTx:   commonTx, //nolint
+				ChainID:    uint256.NewInt(*tr.RandUint64()),
+				Tip:        uint256.NewInt(*tr.RandUint64()),
+				FeeCap:     uint256.NewInt(*tr.RandUint64()),
+				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
+			},
+			Authorizations: tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
 		}
 	default:
 		fmt.Printf("unexpected txType %v", txType)
@@ -209,7 +315,7 @@ func (tr *TRand) RandHashes(size int) []libcommon.Hash {
 func (tr *TRand) RandTransactions(size int) []Transaction {
 	txns := make([]Transaction, size)
 	for i := 0; i < size; i++ {
-		txns[i] = tr.RandTransaction()
+		txns[i] = tr.RandTransaction(-1)
 	}
 	return txns
 }
@@ -217,7 +323,18 @@ func (tr *TRand) RandTransactions(size int) []Transaction {
 func (tr *TRand) RandRawTransactions(size int) [][]byte {
 	txns := make([][]byte, size)
 	for i := 0; i < size; i++ {
-		txns[i] = tr.RandBytes(tr.RandIntInRange(1, 1023))
+		txns[i] = tr.RandBytes(tr.RandIntInRange(1, 512))
+	}
+	return txns
+}
+
+func (tr *TRand) RandRLPTransactions(size int) [][]byte {
+	txns := make([][]byte, size)
+	for i := 0; i < size; i++ {
+		txn := make([]byte, 512)
+		txSize := tr.RandIntInRange(1, 500)
+		encodedSize := rlp.EncodeString2(tr.RandBytes(txSize), txn)
+		txns[i] = txn[:encodedSize]
 	}
 	return txns
 }
@@ -238,20 +355,11 @@ func (tr *TRand) RandWithdrawals(size int) []*Withdrawal {
 	return withdrawals
 }
 
-func (tr *TRand) RandRequests(size int) []Request {
-	requests := make([]Request, size)
-	for i := 0; i < size; i++ {
-		requests[i] = tr.RandRequest()
-	}
-	return requests
-}
-
 func (tr *TRand) RandRawBody() *RawBody {
 	return &RawBody{
-		Transactions: tr.RandRawTransactions(tr.RandIntInRange(1, 6)),
+		Transactions: tr.RandRLPTransactions(tr.RandIntInRange(1, 6)),
 		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
 		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
-		Requests:     tr.RandRequests(tr.RandIntInRange(1, 6)),
 	}
 }
 
@@ -278,7 +386,6 @@ func (tr *TRand) RandBody() *Body {
 		Transactions: tr.RandTransactions(tr.RandIntInRange(1, 6)),
 		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
 		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
-		Requests:     tr.RandRequests(tr.RandIntInRange(1, 6)),
 	}
 }
 
@@ -349,47 +456,6 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 	check(t, "Tx.S", s1, s2)
 }
 
-func compareDeposits(t *testing.T, a, b *DepositRequest) {
-	check(t, "Deposit.Pubkey", a.Pubkey, b.Pubkey)
-	check(t, "Deposit.WithdrawalCredentials", a.WithdrawalCredentials, b.WithdrawalCredentials)
-	check(t, "Deposit.Amount", a.Amount, b.Amount)
-	check(t, "Deposit.Signature", a.Signature, b.Signature)
-	check(t, "Deposit.Index", a.Index, b.Index)
-}
-
-func compareWithdrawalRequests(t *testing.T, a, b *WithdrawalRequest) {
-	check(t, "Deposit.SourceAddress", a.SourceAddress, b.SourceAddress)
-	check(t, "WithdrawalRequest.ValidatorPubkey", a.ValidatorPubkey, b.ValidatorPubkey)
-	check(t, "Deposit.Amount", a.Amount, b.Amount)
-}
-
-func checkRequests(t *testing.T, a, b Request) {
-	if a.RequestType() != b.RequestType() {
-		t.Errorf("request type mismatch: request-a: %v, request-b: %v", a.RequestType(), b.RequestType())
-	}
-
-	switch a.RequestType() {
-	case DepositRequestType:
-		a, aok := a.(*DepositRequest)
-		b, bok := b.(*DepositRequest)
-		if aok && bok {
-			compareDeposits(t, a, b)
-		} else {
-			t.Errorf("type assertion failed: %v %v %v %v", a.RequestType(), aok, b.RequestType(), bok)
-		}
-	case WithdrawalRequestType:
-		a, aok := a.(*WithdrawalRequest)
-		b, bok := b.(*WithdrawalRequest)
-		if aok && bok {
-			compareWithdrawalRequests(t, a, b)
-		} else {
-			t.Errorf("type assertion failed: %v %v %v %v", a.RequestType(), aok, b.RequestType(), bok)
-		}
-	default:
-		t.Errorf("unknown request type: %v", a.RequestType())
-	}
-}
-
 func compareHeaders(t *testing.T, a, b []*Header) error {
 	auLen, buLen := len(a), len(b)
 	if auLen != buLen {
@@ -414,18 +480,6 @@ func compareWithdrawals(t *testing.T, a, b []*Withdrawal) error {
 	return nil
 }
 
-func compareRequests(t *testing.T, a, b Requests) error {
-	arLen, brLen := len(a), len(b)
-	if arLen != brLen {
-		return fmt.Errorf("requests len mismatch: expected: %v, got: %v", arLen, brLen)
-	}
-
-	for i := 0; i < arLen; i++ {
-		checkRequests(t, a[i], b[i])
-	}
-	return nil
-}
-
 func compareRawBodies(t *testing.T, a, b *RawBody) error {
 
 	atLen, btLen := len(a.Transactions), len(b.Transactions)
@@ -441,8 +495,6 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 
 	compareHeaders(t, a.Uncles, b.Uncles)
 	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
-	compareRequests(t, a.Requests, b.Requests)
-
 	return nil
 }
 
@@ -459,34 +511,78 @@ func compareBodies(t *testing.T, a, b *Body) error {
 
 	compareHeaders(t, a.Uncles, b.Uncles)
 	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
-	compareRequests(t, a.Requests, b.Requests)
 
 	return nil
 }
 
-// func TestRawBodyEncodeDecodeRLP(t *testing.T) {
-// 	tr := NewTRand()
-// 	var buf bytes.Buffer
-// 	for i := 0; i < RUNS; i++ {
-// 		enc := tr.RandRawBody()
-// 		buf.Reset()
-// 		if err := enc.EncodeRLP(&buf); err != nil {
-// 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
-// 		}
+func TestTransactionEncodeDecodeRLP(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		enc := tr.RandTransaction(-1)
+		buf.Reset()
+		if err := enc.EncodeRLP(&buf); err != nil {
+			if enc.Type() >= BlobTxType && errors.Is(err, ErrNilToFieldTx) {
+				continue
+			}
+			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
+		}
 
-// 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
 
-// 		dec := &RawBody{}
-// 		if err := dec.DecodeRLP(s); err != nil {
-// 			t.Errorf("error: RawBody.DecodeRLP(): %v", err)
-// 			panic(err)
-// 		}
+		dec, err := DecodeRLPTransaction(s, false)
+		if err != nil {
+			t.Errorf("error: DecodeRLPTransaction: %v", err)
+		}
+		compareTransactions(t, enc, dec)
+	}
+}
 
-// 		if err := compareRawBodies(t, enc, dec); err != nil {
-// 			t.Errorf("error: compareRawBodies: %v", err)
-// 		}
-// 	}
-// }
+func TestHeaderEncodeDecodeRLP(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		enc := tr.RandHeader()
+		buf.Reset()
+		if err := enc.EncodeRLP(&buf); err != nil {
+			t.Errorf("error: Header.EncodeRLP(): %v", err)
+		}
+
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+
+		dec := &Header{}
+		if err := dec.DecodeRLP(s); err != nil {
+			t.Errorf("error: Header.DecodeRLP(): %v", err)
+			panic(err)
+		}
+
+		checkHeaders(t, enc, dec)
+	}
+}
+
+func TestRawBodyEncodeDecodeRLP(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		enc := tr.RandRawBody()
+		buf.Reset()
+		if err := enc.EncodeRLP(&buf); err != nil {
+			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
+		}
+
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+
+		dec := &RawBody{}
+		if err := dec.DecodeRLP(s); err != nil {
+			t.Errorf("error: RawBody.DecodeRLP(): %v", err)
+			panic(err)
+		}
+
+		if err := compareRawBodies(t, enc, dec); err != nil {
+			t.Errorf("error: compareRawBodies: %v", err)
+		}
+	}
+}
 
 func TestBodyEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
@@ -495,6 +591,9 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 		enc := tr.RandBody()
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
+			if errors.Is(err, ErrNilToFieldTx) {
+				continue
+			}
 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
 		}
 
@@ -511,76 +610,104 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 	}
 }
 
-func TestDepositEncodeDecode(t *testing.T) {
+func TestWithdrawalEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
 	for i := 0; i < RUNS; i++ {
-		a := tr.RandDeposit()
+		enc := tr.RandWithdrawal()
 		buf.Reset()
-		if err := a.EncodeRLP(&buf); err != nil {
-			t.Errorf("error: deposit.EncodeRLP(): %v", err)
+		if err := enc.EncodeRLP(&buf); err != nil {
+			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
 		}
-		b := new(DepositRequest)
-		if err := b.DecodeRLP(buf.Bytes()); err != nil {
-			t.Errorf("error: Deposit.DecodeRLP(): %v", err)
+
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+		dec := &Withdrawal{}
+		if err := dec.DecodeRLP(s); err != nil {
+			t.Errorf("error: RawBody.DecodeRLP(): %v", err)
+			panic(err)
 		}
-		compareDeposits(t, a, b)
+
+		checkWithdrawals(t, enc, dec)
 	}
 }
 
-func TestWithdrawalReqsEncodeDecode(t *testing.T) {
-	wx1 := WithdrawalRequest{
-		SourceAddress:   libcommon.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
-		ValidatorPubkey: [48]byte{},
-		Amount:          0,
+/*
+	Benchmarks
+*/
+
+func BenchmarkHeaderRLP(b *testing.B) {
+	tr := NewTRand()
+	header := tr.RandHeader()
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		header.EncodeRLP(&buf)
 	}
-	wx1.ValidatorPubkey[47] = 0x01
-	wx2 := WithdrawalRequest{
-		SourceAddress:   libcommon.HexToAddress("0x8a0a19589531694250d570040a0c4b74576919b8"),
-		ValidatorPubkey: [48]byte{},
-		Amount:          0xfffffffffffffffe,
+}
+
+func BenchmarkLegacyTxRLP(b *testing.B) {
+	tr := NewTRand()
+	txn := tr.RandTransaction(LegacyTxType)
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		txn.EncodeRLP(&buf)
 	}
-	wx2.ValidatorPubkey[47] = 0x02
-	wxs := append(Requests{}, &wx1, &wx2)
+}
 
-	root := DeriveSha(wxs)
-	if root.String() != "0x143e24a803c0dc2ae5381184ad5fe9e45ac2c82c671bc3eafdc090642fc16501" {
-		t.Errorf("Root mismatch %s", root.String())
+func BenchmarkAccessListTxRLP(b *testing.B) {
+	tr := NewTRand()
+	txn := tr.RandTransaction(AccessListTxType)
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		txn.EncodeRLP(&buf)
 	}
+}
 
-	var wx3, wx4 WithdrawalRequest
-	var buf1, buf2 bytes.Buffer
-	wx1.EncodeRLP(&buf1)
-	wx2.EncodeRLP(&buf2)
-	wx3.DecodeRLP(buf1.Bytes())
-	wx4.DecodeRLP(buf2.Bytes())
-	wxs = Requests{}
-	wxs = append(wxs, &wx3, &wx4)
-	root = DeriveSha(wxs)
-	if root.String() != "0x143e24a803c0dc2ae5381184ad5fe9e45ac2c82c671bc3eafdc090642fc16501" {
-		t.Errorf("Root mismatch %s", root.String())
+func BenchmarkDynamicFeeTxRLP(b *testing.B) {
+	tr := NewTRand()
+	txn := tr.RandTransaction(DynamicFeeTxType)
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		txn.EncodeRLP(&buf)
 	}
+}
 
-	/*
-		// Breakdown of block encoding with withdrawal requests - expected
-		c0c0f8a0
+func BenchmarkBlobTxRLP(b *testing.B) {
+	tr := NewTRand()
+	txn := tr.RandTransaction(BlobTxType)
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		txn.EncodeRLP(&buf)
+	}
+}
 
-		b84a
-		01
-		f84794
-		a94f5374fce5edbc8e2a8697c15331677e6ebf0b
-		b0
-		000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001
-		80
+func BenchmarkSetCodeTxRLP(b *testing.B) {
+	tr := NewTRand()
+	txn := tr.RandTransaction(SetCodeTxType)
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		txn.EncodeRLP(&buf)
+	}
+}
 
-		b852
-		01
-		f84f94
-		8a0a19589531694250d570040a0c4b74576919b8
-		b0
-		000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002
-		88
-		fffffffffffffffe
-	*/
-
+func BenchmarkWithdrawalRLP(b *testing.B) {
+	tr := NewTRand()
+	w := tr.RandWithdrawal()
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		w.EncodeRLP(&buf)
+	}
 }

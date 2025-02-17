@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package downloader
 
 import (
@@ -28,10 +44,10 @@ import (
 	"github.com/spaolacci/murmur3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type rcloneInfo struct {
@@ -94,7 +110,7 @@ func (c *RCloneClient) start(logger log.Logger) error {
 	rclone, _ := exec.LookPath("rclone")
 
 	if len(rclone) == 0 {
-		return fmt.Errorf("rclone not found in PATH")
+		return errors.New("rclone not found in PATH")
 	}
 
 	logger.Info("[downloader] rclone found in PATH: enhanced upload/download enabled")
@@ -671,7 +687,7 @@ var ErrAccessDenied = errors.New("access denied")
 
 func (c *RCloneSession) ReadRemoteDir(ctx context.Context, refresh bool) ([]fs.DirEntry, error) {
 	if len(c.remoteFs) == 0 {
-		return nil, fmt.Errorf("remote fs undefined")
+		return nil, errors.New("remote fs undefined")
 	}
 
 	c.oplock.Lock()
@@ -855,7 +871,7 @@ func (c *RCloneSession) syncFiles(ctx context.Context) {
 		if syncQueue != nil {
 			syncQueue <- request
 		} else {
-			request.cerr <- fmt.Errorf("no sync queue available")
+			request.cerr <- errors.New("no sync queue available")
 		}
 	}
 

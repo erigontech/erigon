@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 //go:build integration
 
@@ -23,7 +26,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"math"
 	"math/big"
 	"math/rand"
@@ -34,17 +36,16 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	stateLib "github.com/erigontech/erigon-lib/state"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	stateLib "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types"
-
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
 )
 
 func TestSnapshotRandom(t *testing.T) {
@@ -240,8 +241,7 @@ func (test *snapshotTest) run() bool {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	cr := rawdb.NewCanonicalReader()
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, cr, log.New())
+	agg, err := stateLib.NewAggregator2(context.Background(), datadir.New(""), 16, db, log.New())
 	if err != nil {
 		test.err = err
 		return false
@@ -276,7 +276,7 @@ func (test *snapshotTest) run() bool {
 		return false
 	}
 	var (
-		state        = New(NewReaderV4(domains))
+		state        = New(NewReaderV3(domains))
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
 	)
@@ -290,7 +290,7 @@ func (test *snapshotTest) run() bool {
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkstate := New(NewReaderV4(domains))
+		checkstate := New(NewReaderV3(domains))
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
 		}
@@ -323,17 +323,77 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			return true
 		}
 		// Check basic accessor methods.
-		if !checkeq("Exist", state.Exist(addr), checkstate.Exist(addr)) {
+		se, err := state.Exist(addr)
+		if err != nil {
 			return err
 		}
-		checkeq("HasSelfdestructed", state.HasSelfdestructed(addr), checkstate.HasSelfdestructed(addr))
-		checkeqBigInt("GetBalance", state.GetBalance(addr).ToBig(), checkstate.GetBalance(addr).ToBig())
-		checkeq("GetNonce", state.GetNonce(addr), checkstate.GetNonce(addr))
-		checkeq("GetCode", state.GetCode(addr), checkstate.GetCode(addr))
-		checkeq("GetCodeHash", state.GetCodeHash(addr), checkstate.GetCodeHash(addr))
-		checkeq("GetCodeSize", state.GetCodeSize(addr), checkstate.GetCodeSize(addr))
+		ce, err := checkstate.Exist(addr)
+		if err != nil {
+			return err
+		}
+		if !checkeq("Exist", se, ce) {
+			return err
+		}
+		ssd, err := state.HasSelfdestructed(addr)
+		if err != nil {
+			return err
+		}
+		csd, err := checkstate.HasSelfdestructed(addr)
+		if err != nil {
+			return err
+		}
+		checkeq("HasSelfdestructed", ssd, csd)
+		sb, err := state.GetBalance(addr)
+		if err != nil {
+			return err
+		}
+		cb, err := checkstate.GetBalance(addr)
+		if err != nil {
+			return err
+		}
+		checkeqBigInt("GetBalance", sb.ToBig(), cb.ToBig())
+		sn, err := state.GetNonce(addr)
+		if err != nil {
+			return err
+		}
+		cn, err := checkstate.GetNonce(addr)
+		if err != nil {
+			return err
+		}
+		checkeq("GetNonce", sn, cn)
+		sc, err := state.GetCode(addr)
+		if err != nil {
+			return err
+		}
+		cc, err := checkstate.GetCode(addr)
+		if err != nil {
+			return err
+		}
+		checkeq("GetCode", sc, cc)
+		sch, err := state.GetCodeHash(addr)
+		if err != nil {
+			return err
+		}
+		cch, err := checkstate.GetCodeHash(addr)
+		if err != nil {
+			return err
+		}
+		checkeq("GetCodeHash", sch, cch)
+		scs, err := state.GetCodeSize(addr)
+		if err != nil {
+			return err
+		}
+		ccs, err := checkstate.GetCodeSize(addr)
+		if err != nil {
+			return err
+		}
+		checkeq("GetCodeSize", scs, ccs)
 		// Check storage.
-		if obj := state.getStateObject(addr); obj != nil {
+		obj, err := state.getStateObject(addr)
+		if err != nil {
+			return err
+		}
+		if obj != nil {
 			for key, value := range obj.dirtyStorage {
 				var out uint256.Int
 				checkstate.GetState(addr, &key, &out)
@@ -342,7 +402,11 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 				}
 			}
 		}
-		if obj := checkstate.getStateObject(addr); obj != nil {
+		obj, err = checkstate.getStateObject(addr)
+		if err != nil {
+			return err
+		}
+		if obj != nil {
 			for key, value := range obj.dirtyStorage {
 				var out uint256.Int
 				state.GetState(addr, &key, &out)
@@ -357,9 +421,9 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		return fmt.Errorf("got GetRefund() == %d, want GetRefund() == %d",
 			state.GetRefund(), checkstate.GetRefund())
 	}
-	if !reflect.DeepEqual(state.GetLogs(libcommon.Hash{}), checkstate.GetLogs(libcommon.Hash{})) {
-		return fmt.Errorf("got GetLogs(libcommon.Hash{}) == %v, want GetLogs(libcommon.Hash{}) == %v",
-			state.GetLogs(libcommon.Hash{}), checkstate.GetLogs(libcommon.Hash{}))
+	if !reflect.DeepEqual(state.GetRawLogs(0), checkstate.GetRawLogs(0)) {
+		return fmt.Errorf("got GetRawLogs(libcommon.Hash{}) == %v, want GetRawLogs(libcommon.Hash{}) == %v",
+			state.GetRawLogs(0), checkstate.GetRawLogs(0))
 	}
 	return nil
 }

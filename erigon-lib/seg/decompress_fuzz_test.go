@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package seg
 
 import (
@@ -8,7 +24,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func FuzzDecompressMatch(f *testing.F) {
@@ -35,7 +51,10 @@ func FuzzDecompressMatch(f *testing.F) {
 		ctx := context.Background()
 		tmpDir := t.TempDir()
 		file := filepath.Join(tmpDir, fmt.Sprintf("compressed-%d", rand.Int31()))
-		c, err := NewCompressor(ctx, t.Name(), file, tmpDir, 2, int(workers), log.LvlDebug, logger)
+		cfg := DefaultCfg
+		cfg.MinPatternScore = 2
+		cfg.Workers = int(workers)
+		c, err := NewCompressor(ctx, t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -67,7 +86,7 @@ func FuzzDecompressMatch(f *testing.F) {
 				t.Fatalf("MatchCmp: expected match: %v\n", expected)
 			}
 			g.Reset(savePos)
-			ok := g.Match(expected)
+			ok := g.MatchCmp(expected)
 			pos2 := g.dataP
 			if ok != 0 {
 				t.Fatalf("MatchBool: expected match: %v\n", expected)

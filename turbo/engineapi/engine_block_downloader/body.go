@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package engine_block_downloader
 
 import (
@@ -6,15 +22,15 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/dataflow"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/dataflow"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/stages/bodydownload"
 )
 
 // downloadBodies executes bodies download.
@@ -34,7 +50,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	timeout := e.timeout
 
 	// This will update bd.maxProgress
-	if _, _, _, _, err = e.bd.UpdateFromDb(tx); err != nil {
+	if err = e.bd.UpdateFromDb(tx); err != nil {
 		return
 	}
 	defer e.bd.ClearBodyCache()
@@ -64,6 +80,9 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	prevProgress := bodyProgress
 	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
+	blockBatchSize := 500
+	// We divide them in batches
+	blocksBatch := []*types.Block{}
 
 	loopBody := func() (bool, error) {
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
@@ -130,14 +149,20 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 				return false, fmt.Errorf("[%s] Header block unexpected when matching body, got %v, expected %v", logPrefix, blockHeight, nextBlock)
 			}
 
+			if len(blocksBatch) == blockBatchSize {
+				if err := e.chainRW.InsertBlocksAndWait(ctx, blocksBatch); err != nil {
+					return false, fmt.Errorf("InsertBlock: %w", err)
+				}
+				blocksBatch = blocksBatch[:0]
+			}
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-			ok, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
+			rawBlock := types.RawBlock{Header: header, Body: rawBody}
+			block, err := rawBlock.AsBlock()
 			if err != nil {
-				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
+				return false, fmt.Errorf("Could not construct block: %w", err)
 			}
-			if ok {
-				dataflow.BlockBodyDownloadStates.AddChange(blockHeight, dataflow.BlockBodyCleared)
-			}
+			blocksBatch = append(blocksBatch, block)
+			dataflow.BlockBodyDownloadStates.AddChange(blockHeight, dataflow.BlockBodyCleared)
 
 			if blockHeight > bodyProgress {
 				bodyProgress = blockHeight
@@ -185,6 +210,12 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 		if shouldBreak, err = loopBody(); err != nil {
 			return err
 		}
+	}
+	if len(blocksBatch) > 0 {
+		if err := e.chainRW.InsertBlocksAndWait(ctx, blocksBatch); err != nil {
+			return fmt.Errorf("InsertBlock: %w", err)
+		}
+		blocksBatch = blocksBatch[:0]
 	}
 
 	if stopped {

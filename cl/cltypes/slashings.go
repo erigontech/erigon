@@ -1,8 +1,25 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cltypes
 
 import (
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 type ProposerSlashing struct {
@@ -33,11 +50,16 @@ type AttesterSlashing struct {
 	Attestation_2 *IndexedAttestation `json:"attestation_2"`
 }
 
-func NewAttesterSlashing() *AttesterSlashing {
+func NewAttesterSlashing(version clparams.StateVersion) *AttesterSlashing {
 	return &AttesterSlashing{
-		Attestation_1: NewIndexedAttestation(),
-		Attestation_2: NewIndexedAttestation(),
+		Attestation_1: NewIndexedAttestation(version),
+		Attestation_2: NewIndexedAttestation(version),
 	}
+}
+
+func (a *AttesterSlashing) SetVersion(v clparams.StateVersion) {
+	a.Attestation_1.SetVersion(v)
+	a.Attestation_2.SetVersion(v)
 }
 
 func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -45,8 +67,8 @@ func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (a *AttesterSlashing) DecodeSSZ(buf []byte, version int) error {
-	a.Attestation_1 = new(IndexedAttestation)
-	a.Attestation_2 = new(IndexedAttestation)
+	a.Attestation_1 = NewIndexedAttestation(clparams.StateVersion(version))
+	a.Attestation_2 = NewIndexedAttestation(clparams.StateVersion(version))
 	return ssz2.UnmarshalSSZ(buf, version, a.Attestation_1, a.Attestation_2)
 }
 

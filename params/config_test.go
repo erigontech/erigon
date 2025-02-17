@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package params
 
@@ -24,8 +27,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func TestCheckCompatible(t *testing.T) {
@@ -116,25 +119,61 @@ func TestGetBurntContract(t *testing.T) {
 	require.NotNil(t, addr)
 	assert.Equal(t, common.HexToAddress("0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"), *addr)
 
-	// Mumbai
-	addr = MumbaiChainConfig.GetBurntContract(22640000)
+	// Bor Mainnet
+	addr = BorMainnetChainConfig.GetBurntContract(23850000)
 	require.NotNil(t, addr)
 	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
-	addr = MumbaiChainConfig.GetBurntContract(22640000 + 1)
+	addr = BorMainnetChainConfig.GetBurntContract(23850000 + 1)
 	require.NotNil(t, addr)
 	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
-	addr = MumbaiChainConfig.GetBurntContract(41874000 - 1)
+	addr = BorMainnetChainConfig.GetBurntContract(50523000 - 1)
 	require.NotNil(t, addr)
 	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
-	addr = MumbaiChainConfig.GetBurntContract(41874000)
+	addr = BorMainnetChainConfig.GetBurntContract(50523000)
 	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x617b94CCCC2511808A3C9478ebb96f455CF167aA"), *addr)
-	addr = MumbaiChainConfig.GetBurntContract(41874000 + 1)
+	assert.Equal(t, common.HexToAddress("0x7A8ed27F4C30512326878652d20fC85727401854"), *addr)
+	addr = BorMainnetChainConfig.GetBurntContract(50523000 + 1)
 	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x617b94CCCC2511808A3C9478ebb96f455CF167aA"), *addr)
+	assert.Equal(t, common.HexToAddress("0x7A8ed27F4C30512326878652d20fC85727401854"), *addr)
 
 	// Amoy
 	addr = AmoyChainConfig.GetBurntContract(0)
 	require.NotNil(t, addr)
 	assert.Equal(t, common.HexToAddress("0x000000000000000000000000000000000000dead"), *addr)
+}
+
+func TestMainnetBlobSchedule(t *testing.T) {
+	// Original EIP-4844 values
+	assert.Equal(t, uint64(6), MainnetChainConfig.GetMaxBlobsPerBlock(0))
+	assert.Equal(t, uint64(786432), MainnetChainConfig.GetMaxBlobGasPerBlock(0))
+	assert.Equal(t, uint64(393216), MainnetChainConfig.GetTargetBlobGasPerBlock(0))
+	assert.Equal(t, uint64(3338477), MainnetChainConfig.GetBlobGasPriceUpdateFraction(0))
+
+	b := MainnetChainConfig.BlobSchedule
+	isPrague := false
+	assert.Equal(t, uint64(3), b.TargetBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(6), b.MaxBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(3338477), b.BaseFeeUpdateFraction(isPrague))
+
+	// EIP-7691: Blob throughput increase
+	isPrague = true
+	assert.Equal(t, uint64(6), b.TargetBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(9), b.MaxBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(5007716), b.BaseFeeUpdateFraction(isPrague))
+}
+
+func TestGnosisBlobSchedule(t *testing.T) {
+	b := GnosisChainConfig.BlobSchedule
+
+	// Cancun values
+	isPrague := false
+	assert.Equal(t, uint64(1), b.TargetBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(2), b.MaxBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(1112826), b.BaseFeeUpdateFraction(isPrague))
+
+	// should remain the same in Pectra for Gnosis
+	isPrague = true
+	assert.Equal(t, uint64(1), b.TargetBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(2), b.MaxBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(1112826), b.BaseFeeUpdateFraction(isPrague))
 }

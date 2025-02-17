@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package requests
 
 import (
@@ -5,12 +21,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
-	ethereum "github.com/ledgerwatch/erigon"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/core/types"
+	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/core/types"
 )
 
 func Compare(expected types.Log, actual types.Log) ([]error, bool) {
@@ -34,7 +48,7 @@ func Compare(expected types.Log, actual types.Log) ([]error, bool) {
 	return errs, len(errs) == 0
 }
 
-func NewLog(hash libcommon.Hash, blockNum uint64, address libcommon.Address, topics []libcommon.Hash, data hexutility.Bytes, txIndex uint, blockHash libcommon.Hash, index hexutil.Uint, removed bool) types.Log {
+func NewLog(hash common.Hash, blockNum uint64, address common.Address, topics []common.Hash, data hexutil.Bytes, txIndex uint, blockHash common.Hash, index hexutil.Uint, removed bool) types.Log {
 	return types.Log{
 		Address:     address,
 		Topics:      topics,
@@ -72,7 +86,7 @@ func parseResponse(resp interface{}) (string, error) {
 	return string(result), nil
 }
 
-func hashSlicesAreEqual(s1, s2 []libcommon.Hash) bool {
+func hashSlicesAreEqual(s1, s2 []common.Hash) bool {
 	if len(s1) != len(s2) {
 		return false
 	}

@@ -1,28 +1,32 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package abi
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"reflect"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 var (
@@ -95,7 +99,7 @@ func readBool(word []byte) (bool, error) {
 // readFunctionType enforces that standard by always presenting it as a 24-array (address + sig = 24 bytes)
 func readFunctionType(t Type, word []byte) (funcTy [24]byte, err error) {
 	if t.T != FunctionTy {
-		return [24]byte{}, fmt.Errorf("abi: invalid type in call to make function type byte array")
+		return [24]byte{}, errors.New("abi: invalid type in call to make function type byte array")
 	}
 	if garbage := binary.BigEndian.Uint64(word[24:32]); garbage != 0 {
 		err = fmt.Errorf("abi: got improperly encoded function type, got %v", word)
@@ -108,7 +112,7 @@ func readFunctionType(t Type, word []byte) (funcTy [24]byte, err error) {
 // ReadFixedBytes uses reflection to create a fixed array to be read from.
 func ReadFixedBytes(t Type, word []byte) (interface{}, error) {
 	if t.T != FixedBytesTy {
-		return nil, fmt.Errorf("abi: invalid type in call to make fixed byte array")
+		return nil, errors.New("abi: invalid type in call to make fixed byte array")
 	}
 	// convert
 	array := reflect.New(t.GetType()).Elem()
@@ -137,7 +141,7 @@ func forEachUnpack(t Type, output []byte, start, size int) (interface{}, error) 
 		// declare our array
 		refSlice = reflect.New(t.GetType()).Elem()
 	} else {
-		return nil, fmt.Errorf("abi: invalid type in array/slice unpacking stage")
+		return nil, errors.New("abi: invalid type in array/slice unpacking stage")
 	}
 
 	// Arrays have packed elements, resulting in longer unpack steps.

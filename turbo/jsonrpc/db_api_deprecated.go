@@ -1,18 +1,34 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 )
 
 // DBAPI the interface for the db_ RPC commands (deprecated)
 type DBAPI interface {
 	GetString(_ context.Context, _ string, _ string) (string, error)
 	PutString(_ context.Context, _ string, _ string, _ string) (bool, error)
-	GetHex(_ context.Context, _ string, _ string) (hexutility.Bytes, error)
-	PutHex(_ context.Context, _ string, _ string, _ hexutility.Bytes) (bool, error)
+	GetHex(_ context.Context, _ string, _ string) (hexutil.Bytes, error)
+	PutHex(_ context.Context, _ string, _ string, _ hexutil.Bytes) (bool, error)
 }
 
 // DBAPIImpl data structure to store things needed for db_ commands
@@ -41,12 +57,12 @@ func (api *DBAPIImpl) PutString(_ context.Context, _ string, _ string, _ string)
 
 // GetHex implements db_getHex. Returns binary data from the local database.
 // Deprecated: This function will be removed in the future.
-func (api *DBAPIImpl) GetHex(_ context.Context, _ string, _ string) (hexutility.Bytes, error) {
-	return hexutility.Bytes(""), fmt.Errorf(NotAvailableDeprecated, "db_getHex")
+func (api *DBAPIImpl) GetHex(_ context.Context, _ string, _ string) (hexutil.Bytes, error) {
+	return hexutil.Bytes(""), fmt.Errorf(NotAvailableDeprecated, "db_getHex")
 }
 
 // PutHex implements db_putHex. Stores binary data in the local database.
 // Deprecated: This function will be removed in the future.
-func (api *DBAPIImpl) PutHex(_ context.Context, _ string, _ string, _ hexutility.Bytes) (bool, error) {
+func (api *DBAPIImpl) PutHex(_ context.Context, _ string, _ string, _ hexutil.Bytes) (bool, error) {
 	return false, fmt.Errorf(NotAvailableDeprecated, "db_putHex")
 }

@@ -1,18 +1,18 @@
-/*
-Copyright 2021 Erigon contributors
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-	http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package kvcache
 
@@ -31,11 +31,11 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 type CacheValidationResult struct {
@@ -334,15 +334,9 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 }
 
 func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
-	idBytes, err := tx.GetOne(kv.Sequence, kv.PlainStateVersion)
+	id, err := tx.ReadSequence(string(kv.PlainStateVersion))
 	if err != nil {
 		return nil, err
-	}
-	var id uint64
-	if len(idBytes) == 0 {
-		id = 0
-	} else {
-		id = binary.BigEndian.Uint64(idBytes)
 	}
 	r := c.selectOrCreateRoot(id)
 
@@ -408,9 +402,9 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 
 	if c.cfg.StateV3 {
 		if len(k) == 20 {
-			v, _, err = tx.(kv.TemporalTx).DomainGet(kv.AccountsDomain, k, nil)
+			v, _, err = tx.(kv.TemporalTx).GetLatest(kv.AccountsDomain, k)
 		} else {
-			v, _, err = tx.(kv.TemporalTx).DomainGet(kv.StorageDomain, k, nil)
+			v, _, err = tx.(kv.TemporalTx).GetLatest(kv.StorageDomain, k)
 		}
 	} else {
 		v, err = tx.GetOne(kv.PlainState, k)
@@ -443,7 +437,7 @@ func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) (v []byte, err error) 
 	c.codeMiss.Inc()
 
 	if c.cfg.StateV3 {
-		v, _, err = tx.(kv.TemporalTx).DomainGet(kv.CodeDomain, k, nil)
+		v, _, err = tx.(kv.TemporalTx).GetLatest(kv.CodeDomain, k)
 	} else {
 		v, err = tx.GetOne(kv.Code, k)
 	}
@@ -524,11 +518,11 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.Tx) (*CacheVal
 	default:
 	}
 
-	idBytes, err := tx.GetOne(kv.Sequence, kv.PlainStateVersion)
+	stateID, err := tx.ReadSequence(string(kv.PlainStateVersion))
 	if err != nil {
 		return nil, err
 	}
-	stateID := binary.BigEndian.Uint64(idBytes)
+
 	result.LatestStateID = stateID
 
 	// if the latest view id in the cache is not the same as the tx or one below it

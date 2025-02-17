@@ -1,13 +1,28 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package whitelist
 
 import (
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/rawdb"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bor/finality/flags"
+	"github.com/erigontech/erigon/polygon/bor/finality/rawdb"
 )
 
 type milestone struct {
@@ -105,7 +120,7 @@ func (m *milestone) Process(block uint64, hash common.Hash) {
 
 	whitelistedMilestoneMeter.SetUint64(block)
 
-	m.UnlockSprint(block)
+	m.unlockSprint(block)
 }
 
 // LockMutex This function will Lock the mutex at the time of voting
@@ -130,7 +145,7 @@ func (m *milestone) UnlockMutex(doLock bool, milestoneId string, endBlockNum uin
 	m.Locked = m.Locked || doLock
 
 	if doLock {
-		m.UnlockSprint(m.LockedMilestoneNumber)
+		m.unlockSprint(m.LockedMilestoneNumber)
 		m.Locked = true
 		m.LockedMilestoneHash = endBlockHash
 		m.LockedMilestoneNumber = endBlockNum
@@ -153,11 +168,23 @@ func (m *milestone) UnlockSprint(endBlockNum uint64) {
 		return
 	}
 
+	m.finality.Lock()
+	defer m.finality.Unlock()
+
+	m.unlockSprint(endBlockNum)
+}
+
+// UnlockSprint This function will unlock the locked sprint
+func (m *milestone) unlockSprint(endBlockNum uint64) {
+	if endBlockNum < m.LockedMilestoneNumber {
+		return
+	}
+
 	m.Locked = false
 
 	m.purgeMilestoneIDsList()
-
-	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
+	purgedMilestoneIDs := map[string]struct{}{}
+	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, purgedMilestoneIDs)
 
 	if err != nil {
 		log.Error("[bor] Error in writing lock data of milestone to db", "err", err)
@@ -214,12 +241,6 @@ func (m *milestone) GetMilestoneIDsList() []string {
 
 // This is remove the milestoneIDs stored in the list.
 func (m *milestone) purgeMilestoneIDsList() {
-	// try is used here as the finality lock is preserved over calls - so the lock state
-	// is not clearly defined in the local code - this likely needs to be revised
-	if m.finality.TryLock() {
-		defer m.finality.Unlock()
-	}
-
 	m.LockedMilestoneIDs = make(map[string]struct{})
 }
 
@@ -248,6 +269,9 @@ func (m *milestone) IsFutureMilestoneCompatible(chain []*types.Header) bool {
 }
 
 func (m *milestone) ProcessFutureMilestone(num uint64, hash common.Hash) {
+	m.finality.Lock()
+	defer m.finality.Unlock()
+
 	if len(m.FutureMilestoneOrder) < m.MaxCapacity {
 		m.enqueueFutureMilestone(num, hash)
 	}
@@ -258,8 +282,8 @@ func (m *milestone) ProcessFutureMilestone(num uint64, hash common.Hash) {
 
 	m.Locked = false
 	m.purgeMilestoneIDsList()
-
-	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
+	purgedMilestoneIDs := map[string]struct{}{}
+	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, purgedMilestoneIDs)
 
 	if err != nil {
 		log.Error("[bor] Error in writing lock data of milestone to db", "err", err)

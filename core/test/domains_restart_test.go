@@ -1,10 +1,25 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package test
 
 import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"io/fs"
 	"math/big"
 	"math/rand"
@@ -17,25 +32,23 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/erigon-lib/state"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/core"
-	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
-	state2 "github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/core"
+	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
+	state2 "github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 // if fpath is empty, tempDir is used, otherwise fpath is reused
@@ -49,13 +62,10 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	dirs := datadir.New(path)
 
 	logger := log.New()
-	db := mdbx.NewMDBX(logger).Path(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.ChaindataTablesCfg
-	}).MustOpen()
+	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	cr := rawdb.NewCanonicalReader()
-	agg, err := state.NewAggregator(context.Background(), dirs, aggStep, db, cr, logger)
+	agg, err := state.NewAggregator2(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()
@@ -185,7 +195,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domains.Close()
 	agg.Close()
 	db.Close()
-	db = nil
 
 	// ======== delete DB, reset domains ========
 	ffs := os.DirFS(datadir)
@@ -231,7 +240,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, networkname.Test, "", log.New())
+	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
@@ -376,7 +385,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domains.Close()
 	agg.Close()
 	db.Close()
-	db = nil
 
 	// ======== delete datadir and restart domains ========
 	err = os.RemoveAll(datadir)
@@ -402,7 +410,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, networkname.Test, "", log.New())
+	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
@@ -482,7 +490,13 @@ func TestCommit(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	buf := types2.EncodeAccountBytesV3(0, uint256.NewInt(7), nil, 1)
+	acc := accounts.Account{
+		Nonce:       0,
+		Balance:     *uint256.NewInt(7),
+		CodeHash:    libcommon.Hash{},
+		Incarnation: 1,
+	}
+	buf := accounts.SerialiseV3(&acc)
 
 	addr := libcommon.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
 	loc := libcommon.Hex2Bytes("24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")

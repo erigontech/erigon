@@ -1,23 +1,36 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
 	"context"
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 var (
@@ -29,14 +42,15 @@ func FetchSpanZeroForMiningIfNeeded(
 	ctx context.Context,
 	db kv.RwDB,
 	blockReader services.FullBlockReader,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
+	heimdallStore heimdall.Store,
 	logger log.Logger,
 ) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		_, err := blockReader.Span(ctx, tx, 0)
+		_, _, err := blockReader.Span(ctx, tx, 0)
 		if err != nil {
-			if errors.Is(err, freezeblocks.ErrSpanNotFound) {
-				_, err = fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, "FetchSpanZeroForMiningIfNeeded", logger)
+			if errors.Is(err, heimdall.ErrSpanNotFound) {
+				_, err = fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, heimdallStore, "FetchSpanZeroForMiningIfNeeded", logger)
 				return err
 			}
 
@@ -80,7 +94,7 @@ func fetchRequiredHeimdallSpansIfNeeded(
 
 	logger.Info(fmt.Sprintf("[%s] Processing spans...", logPrefix), "from", from, "to", requiredSpanID)
 	for spanID := from; spanID <= requiredSpanID; spanID++ {
-		if _, err = fetchAndWriteHeimdallSpan(ctx, uint64(spanID), tx, cfg.heimdallClient, logPrefix, logger); err != nil {
+		if _, err = fetchAndWriteHeimdallSpan(ctx, uint64(spanID), tx, cfg.heimdallClient, cfg.heimdallStore, logPrefix, logger); err != nil {
 			return 0, err
 		}
 	}
@@ -92,7 +106,8 @@ func fetchAndWriteHeimdallSpan(
 	ctx context.Context,
 	spanID uint64,
 	tx kv.RwTx,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
+	heimdallStore heimdall.Store,
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, error) {
@@ -101,14 +116,9 @@ func fetchAndWriteHeimdallSpan(
 		return 0, err
 	}
 
-	spanBytes, err := json.Marshal(response)
-	if err != nil {
-		return 0, err
-	}
-
-	var spanIDBytes [8]byte
-	binary.BigEndian.PutUint64(spanIDBytes[:], spanID)
-	if err = tx.Put(kv.BorSpans, spanIDBytes[:], spanBytes); err != nil {
+	if err = heimdallStore.Spans().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
+	}).WithTx(tx).PutEntity(ctx, spanID, response); err != nil {
 		return 0, err
 	}
 
@@ -136,19 +146,13 @@ func fetchAndWriteHeimdallCheckpointsIfNeeded(
 	var lastCheckpoint *heimdall.Checkpoint
 
 	if exists {
-		data, err := cfg.blockReader.Checkpoint(ctx, tx, lastId)
+		checkpoint, _, err := cfg.blockReader.Checkpoint(ctx, tx, lastId)
 
 		if err != nil {
 			return 0, err
 		}
 
-		var checkpoint heimdall.Checkpoint
-
-		if err := json.Unmarshal(data, &checkpoint); err != nil {
-			return 0, err
-		}
-
-		lastCheckpoint = &checkpoint
+		lastCheckpoint = checkpoint
 	}
 
 	logTimer := time.NewTicker(logInterval)
@@ -165,7 +169,7 @@ func fetchAndWriteHeimdallCheckpointsIfNeeded(
 	var lastBlockNum uint64
 
 	for checkpointId := lastId + 1; checkpointId <= uint64(count) && (lastCheckpoint == nil || lastCheckpoint.EndBlock().Uint64() < toBlockNum); checkpointId++ {
-		if _, lastCheckpoint, err = fetchAndWriteHeimdallCheckpoint(ctx, checkpointId, tx, cfg.heimdallClient, logPrefix, logger); err != nil {
+		if _, lastCheckpoint, err = fetchAndWriteHeimdallCheckpoint(ctx, checkpointId, tx, cfg.heimdallClient, cfg.heimdallStore, logPrefix, logger); err != nil {
 			if !errors.Is(err, heimdall.ErrNotInCheckpointList) {
 				return 0, err
 			}
@@ -197,7 +201,8 @@ func fetchAndWriteHeimdallCheckpoint(
 	ctx context.Context,
 	checkpointId uint64,
 	tx kv.RwTx,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
+	heimdallStore heimdall.Store,
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, *heimdall.Checkpoint, error) {
@@ -206,20 +211,9 @@ func fetchAndWriteHeimdallCheckpoint(
 		return 0, nil, err
 	}
 
-	bytes, err := json.Marshal(response)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	var idBytes [8]byte
-	binary.BigEndian.PutUint64(idBytes[:], checkpointId)
-	if err = tx.Put(kv.BorCheckpoints, idBytes[:], bytes); err != nil {
-		return 0, nil, err
-	}
-
-	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], response.EndBlock().Uint64())
-	if err = tx.Put(kv.BorCheckpointEnds, blockNumBuf[:], idBytes[:]); err != nil {
+	if err = heimdallStore.Checkpoints().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
+	}).WithTx(tx).PutEntity(ctx, checkpointId, response); err != nil {
 		return 0, nil, err
 	}
 
@@ -245,21 +239,13 @@ func fetchAndWriteHeimdallMilestonesIfNeeded(
 	var lastMilestone *heimdall.Milestone
 
 	if exists {
-		data, err := cfg.blockReader.Milestone(ctx, tx, lastId)
+		milestone, _, err := cfg.blockReader.Milestone(ctx, tx, lastId)
 
 		if err != nil {
 			return 0, err
 		}
 
-		if len(data) > 0 {
-			var milestone heimdall.Milestone
-
-			if err := json.Unmarshal(data, &milestone); err != nil {
-				return 0, err
-			}
-
-			lastMilestone = &milestone
-		}
+		lastMilestone = milestone
 	}
 
 	logger.Info(fmt.Sprintf("[%s] Processing milestones...", logPrefix), "from", lastId+1, "to", toBlockNum)
@@ -299,7 +285,7 @@ func fetchAndWriteHeimdallMilestonesIfNeeded(
 	}
 
 	for milestoneId := lastId + 1; milestoneId <= uint64(count) && (lastMilestone == nil || lastMilestone.EndBlock().Uint64() < toBlockNum); milestoneId++ {
-		if _, lastMilestone, err = fetchAndWriteHeimdallMilestone(ctx, milestoneId, tx, cfg.heimdallClient, logPrefix, logger); err != nil {
+		if _, lastMilestone, err = fetchAndWriteHeimdallMilestone(ctx, milestoneId, tx, cfg.heimdallClient, cfg.heimdallStore, logPrefix, logger); err != nil {
 			if !errors.Is(err, heimdall.ErrNotInMilestoneList) {
 				return 0, err
 			}
@@ -319,7 +305,8 @@ func fetchAndWriteHeimdallMilestone(
 	ctx context.Context,
 	milestoneId uint64,
 	tx kv.RwTx,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
+	heimdallStore heimdall.Store,
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, *heimdall.Milestone, error) {
@@ -329,21 +316,9 @@ func fetchAndWriteHeimdallMilestone(
 		return 0, nil, err
 	}
 
-	bytes, err := json.Marshal(response)
-
-	if err != nil {
-		return 0, nil, err
-	}
-
-	var idBytes [8]byte
-	binary.BigEndian.PutUint64(idBytes[:], milestoneId)
-	if err = tx.Put(kv.BorMilestones, idBytes[:], bytes); err != nil {
-		return 0, nil, err
-	}
-
-	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], response.EndBlock().Uint64())
-	if err = tx.Put(kv.BorMilestoneEnds, blockNumBuf[:], idBytes[:]); err != nil {
+	if err = heimdallStore.Milestones().(interface {
+		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
+	}).WithTx(tx).PutEntity(ctx, milestoneId, response); err != nil {
 		return 0, nil, err
 	}
 
@@ -357,30 +332,32 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 	tx kv.RwTx,
 	borConfig *borcfg.BorConfig,
 	blockReader services.FullBlockReader,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
+	bridgeStore bridge.Store,
 	chainID string,
-	stateReceiverABI abi.ABI,
 	logPrefix string,
 	logger log.Logger,
 	lastStateSyncEventID uint64,
-) (uint64, int, time.Duration, error) {
+	skipCount int,
+) (uint64, int, int, time.Duration, error) {
 
 	headerNum := header.Number.Uint64()
-	if headerNum%borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
-		// we fetch events only at beginning of each sprint
-		return lastStateSyncEventID, 0, 0, nil
+	if headerNum == 0 || !borConfig.IsSprintStart(headerNum) {
+		// we fetch events only at beginning of each sprint with blockNum > 0
+		return lastStateSyncEventID, 0, skipCount, 0, nil
 	}
 
 	return fetchAndWriteHeimdallStateSyncEvents(
 		ctx,
 		header,
 		lastStateSyncEventID,
+		skipCount,
 		tx,
 		borConfig,
 		blockReader,
 		heimdallClient,
+		bridgeStore,
 		chainID,
-		stateReceiverABI,
 		logPrefix,
 		logger,
 	)
@@ -390,33 +367,30 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	ctx context.Context,
 	header *types.Header,
 	lastStateSyncEventID uint64,
+	skipCount int,
 	tx kv.RwTx,
 	config *borcfg.BorConfig,
 	blockReader services.FullBlockReader,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
+	bridgeStore bridge.Store,
 	chainID string,
-	stateReceiverABI abi.ABI,
 	logPrefix string,
-	logger log.Logger,
-) (uint64, int, time.Duration, error) {
+	logger log.Logger) (uint64, int, int, time.Duration, error) {
 	fetchStart := time.Now()
 	// Find out the latest eventId
-	var (
-		from uint64
-		to   time.Time
-	)
+	var fromId uint64
 
 	blockNum := header.Number.Uint64()
 
-	if config.IsIndore(blockNum) {
-		stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
-		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
-	} else {
-		pHeader, err := blockReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(blockNum))
-		if err != nil {
-			return lastStateSyncEventID, 0, time.Since(fetchStart), err
-		}
-		to = time.Unix(int64(pHeader.Time), 0)
+	if blockNum == 0 || !config.IsSprintStart(blockNum) {
+		// we fetch events only at beginning of each sprint with blockNum > 0
+		return lastStateSyncEventID, 0, skipCount, 0, nil
+	}
+
+	from, to, err := heimdall.CalculateEventWindow(ctx, config, header, tx, blockReader)
+
+	if err != nil {
+		return lastStateSyncEventID, 0, skipCount, time.Since(fetchStart), err
 	}
 
 	fetchTo := to
@@ -438,73 +412,89 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	}
 	*/
 
-	from = lastStateSyncEventID + 1
+	fromId = lastStateSyncEventID + 1
 
 	logger.Trace(
 		fmt.Sprintf("[%s] Fetching state updates from Heimdall", logPrefix),
-		"fromID", from,
+		"fromId", fromId,
 		"to", to.Format(time.RFC3339),
 	)
 
-	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, from, fetchTo, fetchLimit)
-
+	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, fromId, fetchTo, fetchLimit)
 	if err != nil {
-		return lastStateSyncEventID, 0, time.Since(fetchStart), err
+		return lastStateSyncEventID, 0, skipCount, time.Since(fetchStart), err
 	}
+
+	var overrideCount int
 
 	if config.OverrideStateSyncRecords != nil {
 		if val, ok := config.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
+			overrideCount = len(eventRecords) - val //nolint
 			eventRecords = eventRecords[0:val]
 		}
 	}
 
-	if len(eventRecords) > 0 {
-		var key, val [8]byte
-		binary.BigEndian.PutUint64(key[:], blockNum)
-		binary.BigEndian.PutUint64(val[:], lastStateSyncEventID+1)
-	}
+	var initialRecordTime *time.Time
+	var lastEventRecord *heimdall.EventRecordWithTime
 
-	wroteIndex := false
 	for i, eventRecord := range eventRecords {
 		if eventRecord.ID <= lastStateSyncEventID {
 			continue
 		}
 
-		if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID || !eventRecord.Time.Before(to) {
-			return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(
-				"invalid event record received %s, %s, %s, %s",
-				fmt.Sprintf("blockNum=%d", blockNum),
-				fmt.Sprintf("eventId=%d (exp %d)", eventRecord.ID, lastStateSyncEventID+1),
-				fmt.Sprintf("chainId=%s (exp %s)", eventRecord.ChainID, chainID),
-				fmt.Sprintf("time=%s (exp to %s)", eventRecord.Time, to),
-			)
-		}
-
-		data, err := eventRecord.Pack(stateReceiverABI)
-		if err != nil {
-			logger.Error(fmt.Sprintf("[%s] Unable to pack txn for commitState", logPrefix), "err", err)
-			return lastStateSyncEventID, i, time.Since(fetchStart), err
-		}
-
-		var eventIdBuf [8]byte
-		binary.BigEndian.PutUint64(eventIdBuf[:], eventRecord.ID)
-		if err = tx.Put(kv.BorEvents, eventIdBuf[:], data); err != nil {
-			return lastStateSyncEventID, i, time.Since(fetchStart), err
-		}
-
-		if !wroteIndex {
-			var blockNumBuf [8]byte
-			binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
-			binary.BigEndian.PutUint64(eventIdBuf[:], eventRecord.ID)
-			if err = tx.Put(kv.BorEventNums, blockNumBuf[:], eventIdBuf[:]); err != nil {
-				return lastStateSyncEventID, i, time.Since(fetchStart), err
+		// Note: this check is only valid for events with eventRecord.ID > lastStateSyncEventID
+		var afterCheck = func(limitTime time.Time, eventTime time.Time, initialTime *time.Time) bool {
+			if initialTime == nil {
+				return eventTime.After(from)
 			}
 
-			wroteIndex = true
+			return initialTime.After(from)
+		}
+
+		// don't apply this for devnets we may have looser state event constraints
+		// (TODO these probably needs fixing)
+		if skipCount > 0 {
+			skipCount--
+		} else if !(chainID == "1337") {
+			if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID ||
+				!(afterCheck(from, eventRecord.Time, initialRecordTime) && eventRecord.Time.Before(to)) {
+				return lastStateSyncEventID, i, overrideCount, time.Since(fetchStart), fmt.Errorf(
+					"invalid event record received %s, %s, %s, %s",
+					fmt.Sprintf("blockNum=%d", blockNum),
+					fmt.Sprintf("eventId=%d (exp %d)", eventRecord.ID, lastStateSyncEventID+1),
+					fmt.Sprintf("chainId=%s (exp %s)", eventRecord.ChainID, chainID),
+					fmt.Sprintf("time=%s (exp from %s, to %s)", eventRecord.Time, from, to),
+				)
+			}
+		}
+
+		if initialRecordTime == nil {
+			eventTime := eventRecord.Time
+			initialRecordTime = &eventTime
 		}
 
 		lastStateSyncEventID++
+		lastEventRecord = eventRecord
 	}
 
-	return lastStateSyncEventID, len(eventRecords), time.Since(fetchStart), nil
+	skipCount += overrideCount
+
+	if len(eventRecords) > 0 {
+		store := bridgeStore.(interface {
+			WithTx(kv.Tx) bridge.Store
+		}).WithTx(tx)
+
+		if err := store.PutEvents(ctx, eventRecords); err != nil {
+			return lastStateSyncEventID, 0, 0, time.Since(fetchStart), err
+		}
+
+		if lastEventRecord != nil {
+			logger.Debug("putting state sync events", "blockNum", blockNum, "lastID", lastEventRecord.ID)
+			if err = store.PutBlockNumToEventId(ctx, map[uint64]uint64{blockNum: lastEventRecord.ID}); err != nil {
+				return lastStateSyncEventID, len(eventRecords), skipCount, time.Since(fetchStart), err
+			}
+		}
+	}
+
+	return lastStateSyncEventID, len(eventRecords), skipCount, time.Since(fetchStart), nil
 }

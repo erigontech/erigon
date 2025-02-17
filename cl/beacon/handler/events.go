@@ -1,67 +1,120 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync"
+	"time"
 
-	"github.com/gfx-labs/sse"
-
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/erigontech/erigon-lib/log/v3"
+	event "github.com/erigontech/erigon/cl/beacon/beaconevents"
 )
 
-var validTopics = map[string]struct{}{
-	"head":                           {},
-	"block":                          {},
-	"attestation":                    {},
-	"voluntary_exit":                 {},
-	"bls_to_execution_change":        {},
-	"finalized_checkpoint":           {},
-	"chain_reorg":                    {},
-	"contribution_and_proof":         {},
-	"light_client_finality_update":   {},
-	"light_client_optimistic_update": {},
-	"payload_attributes":             {},
-	"*":                              {},
+var validTopics = map[event.EventTopic]struct{}{
+	// operation events
+	event.OpAttestation:       {},
+	event.OpAttesterSlashing:  {},
+	event.OpBlobSidecar:       {},
+	event.OpBlsToExecution:    {},
+	event.OpContributionProof: {},
+	event.OpProposerSlashing:  {},
+	event.OpVoluntaryExit:     {},
+	// state events
+	event.StateBlock:                       {},
+	event.StateBlockGossip:                 {},
+	event.StateChainReorg:                  {},
+	event.StateLightClientFinalityUpdate:   {},
+	event.StateFinalizedCheckpoint:         {},
+	event.StateHead:                        {},
+	event.StateLightClientOptimisticUpdate: {},
+	event.StatePayloadAttributes:           {},
 }
 
 func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {
-	sink, err := sse.DefaultUpgrader.Upgrade(w, r)
-	if err != nil {
-		http.Error(w, "failed to upgrade", http.StatusInternalServerError)
-	}
-	topics := r.URL.Query()["topics"]
-	for _, v := range topics {
-		if _, ok := validTopics[v]; !ok {
-			http.Error(w, fmt.Sprintf("invalid Topic: %s", v), http.StatusBadRequest)
-		}
-	}
-	var mu sync.Mutex
-	closer, err := a.emitters.Subscribe(topics, func(topic string, item any) {
-		buf := &bytes.Buffer{}
-		err := json.NewEncoder(buf).Encode(item)
-		if err != nil {
-			// return early
-			return
-		}
-		mu.Lock()
-		err = sink.Encode(&sse.Event{
-			Event: []byte(topic),
-			Data:  buf,
-		})
-		mu.Unlock()
-		if err != nil {
-			log.Error("failed to encode data", "topic", topic, "err", err)
-		}
-		// OK to ignore this error. maybe should log it later?
-	})
-	if err != nil {
-		http.Error(w, "failed to subscribe", http.StatusInternalServerError)
+	if _, ok := w.(http.Flusher); !ok {
+		http.Error(w, "streaming unsupported", http.StatusBadRequest)
 		return
 	}
-	defer closer()
-	<-r.Context().Done()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
 
+	topics := r.URL.Query()["topics"]
+	subscribeTopics := mapset.NewSet[event.EventTopic]()
+	for _, v := range topics {
+		topic := event.EventTopic(v)
+		if _, ok := validTopics[topic]; !ok {
+			http.Error(w, "invalid Topic: "+v, http.StatusBadRequest)
+			return
+		}
+		subscribeTopics.Add(topic)
+	}
+	log.Info("Subscribed to event stream topics", "topics", subscribeTopics)
+
+	eventCh := make(chan *event.EventStream, 128)
+	opSub := a.emitters.Operation().Subscribe(eventCh)
+	stateSub := a.emitters.State().Subscribe(eventCh)
+	defer opSub.Unsubscribe()
+	defer stateSub.Unsubscribe()
+
+	ticker := time.NewTicker(time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case e := <-eventCh:
+			if !subscribeTopics.Contains(e.Event) {
+				continue
+			}
+			if e.Data == nil {
+				log.Warn("event data is nil", "event", e)
+				continue
+			}
+			// marshal and send
+			buf, err := json.Marshal(e.Data)
+			if err != nil {
+				log.Warn("failed to encode data", "err", err, "topic", e.Event)
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.Event, string(buf)); err != nil {
+				log.Warn("failed to write event", "err", err)
+				continue
+			}
+			w.(http.Flusher).Flush()
+		case <-ticker.C:
+			// keep connection alive
+			if _, err := w.Write([]byte(":\n\n")); err != nil {
+				log.Warn("failed to write keep alive", "err", err)
+				continue
+			}
+			w.(http.Flusher).Flush()
+		case err := <-stateSub.Err():
+			log.Warn("event error", "err", err)
+			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
+		case err := <-opSub.Err():
+			log.Warn("event error", "err", err)
+			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
+			return
+		case <-r.Context().Done():
+			log.Info("Client disconnected from event stream")
+			return
+		}
+	}
 }

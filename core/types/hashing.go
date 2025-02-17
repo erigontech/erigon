@@ -1,18 +1,21 @@
-// Copyniright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// Copyright 2014 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -20,16 +23,22 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/protolambda/ztyp/codec"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/cryptopool"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/rlphacks"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto/cryptopool"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/rlphacks"
+	"github.com/erigontech/erigon-lib/trie"
 )
+
+// encodeBufferPool holds temporary encoder buffers for DeriveSha and TX encoding.
+var encodeBufferPool = sync.Pool{
+	New: func() interface{} { return new(bytes.Buffer) },
+}
 
 type DerivableList interface {
 	Len() int

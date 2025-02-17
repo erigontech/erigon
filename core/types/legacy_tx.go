@@ -1,18 +1,21 @@
 // Copyright 2020 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -23,13 +26,10 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 type CommonTx struct {
@@ -69,13 +69,13 @@ func (ct *CommonTx) GetData() []byte {
 
 func (ct *CommonTx) GetSender() (libcommon.Address, bool) {
 	if sc := ct.from.Load(); sc != nil {
-		return sc.(libcommon.Address), true
+		return *sc, true
 	}
 	return libcommon.Address{}, false
 }
 
 func (ct *CommonTx) SetSender(addr libcommon.Address) {
-	ct.from.Store(addr)
+	ct.from.Store(&addr)
 }
 
 func (ct *CommonTx) Protected() bool {
@@ -117,8 +117,8 @@ func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	}
 }
 
-func (tx *LegacyTx) GetAccessList() types2.AccessList {
-	return types2.AccessList{}
+func (tx *LegacyTx) GetAccessList() AccessList {
+	return AccessList{}
 }
 
 func (tx *LegacyTx) Protected() bool {
@@ -205,7 +205,7 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
 	// size of Data
-	payloadSize += rlp2.StringLen(tx.Data)
+	payloadSize += rlp.StringLen(tx.Data)
 	// size of V
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
@@ -218,7 +218,8 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 
 func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
-	var b [33]byte
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
 		return err
 	}
@@ -227,7 +228,7 @@ func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 
 func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	if tx.Nonce > 0 && tx.Nonce < 128 {
@@ -242,7 +243,7 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 			return err
 		}
 	}
-	if err := tx.GasPrice.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(tx.GasPrice, w, b); err != nil {
 		return err
 	}
 	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
@@ -257,23 +258,23 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 		return err
 	}
 	if tx.To != nil {
-		if _, err := w.Write(tx.To.Bytes()); err != nil {
+		if _, err := w.Write(tx.To[:]); err != nil {
 			return err
 		}
 	}
-	if err := tx.Value.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
 		return err
 	}
 	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
-	if err := tx.V.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(&tx.V, w, b); err != nil {
 		return err
 	}
-	if err := tx.R.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(&tx.R, w, b); err != nil {
 		return err
 	}
-	if err := tx.S.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
 		return err
 	}
 	return nil
@@ -282,7 +283,8 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
-	var b [33]byte
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
 		return err
 	}
@@ -372,19 +374,10 @@ func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error
 	return cpy, nil
 }
 
-func (tx *LegacyTx) FakeSign(address libcommon.Address) (Transaction, error) {
-	cpy := tx.copy()
-	cpy.R.Set(u256.Num1)
-	cpy.S.Set(u256.Num1)
-	cpy.V.Set(u256.Num4)
-	cpy.from.Store(address)
-	return cpy, nil
-}
-
 // Hash computes the hash (but not for signatures!)
 func (tx *LegacyTx) Hash() libcommon.Hash {
 	if hash := tx.hash.Load(); hash != nil {
-		return *hash.(*libcommon.Hash)
+		return *hash
 	}
 	hash := rlpHash([]interface{}{
 		tx.Nonce,
@@ -431,21 +424,24 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
-func (tx *LegacyTx) cashedSender() (sender libcommon.Address, ok bool) {
+func (tx *LegacyTx) cachedSender() (sender libcommon.Address, ok bool) {
 	s := tx.from.Load()
 	if s == nil {
 		return sender, false
 	}
-	return s.(libcommon.Address), true
+	return *s, true
 }
 func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := tx.from.Load(); sc != nil {
-		return sc.(libcommon.Address), nil
+	if from := tx.from.Load(); from != nil {
+		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return *from, nil
+		}
 	}
+
 	addr, err := signer.Sender(tx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	tx.from.Store(addr)
+	tx.from.Store(&addr)
 	return addr, nil
 }

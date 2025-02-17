@@ -1,18 +1,21 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package v5wire
 
@@ -28,10 +31,11 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/ledgerwatch/erigon/common/mclock"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/mclock"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 // TODO concurrent WHOAREYOU tie-breaker
@@ -196,7 +200,7 @@ func (c *Codec) Encode(id enode.ID, addr string, packet Packet, challenge *Whoar
 
 	// Store sent WHOAREYOU challenges.
 	if challenge, ok := packet.(*Whoareyou); ok {
-		challenge.ChallengeData = bytesCopy(&c.buf)
+		challenge.ChallengeData = libcommon.CopyBytes(c.buf.Bytes())
 		c.sc.storeSentHandshake(id, addr, challenge)
 	} else if msgData == nil {
 		headerData := c.buf.Bytes()
@@ -290,7 +294,7 @@ func (c *Codec) encodeWhoareyou(toID enode.ID, packet *Whoareyou) (Header, error
 
 	// Create header.
 	head := c.makeHeader(toID, flagWhoareyou, 0)
-	head.AuthData = bytesCopy(&c.buf)
+	head.AuthData = libcommon.CopyBytes(c.buf.Bytes())
 	head.Nonce = packet.Nonce
 
 	// Encode auth data.
@@ -352,11 +356,11 @@ func (c *Codec) makeHandshakeAuth(toID enode.ID, addr string, challenge *Whoarey
 	// key is part of the ID nonce signature.
 	var remotePubkey = new(ecdsa.PublicKey)
 	if err := challenge.Node.Load((*enode.Secp256k1)(remotePubkey)); err != nil {
-		return nil, nil, fmt.Errorf("can't find secp256k1 key for recipient")
+		return nil, nil, errors.New("can't find secp256k1 key for recipient")
 	}
 	ephkey, err := c.sc.ephemeralKeyGen()
 	if err != nil {
-		return nil, nil, fmt.Errorf("can't generate ephemeral key")
+		return nil, nil, errors.New("can't generate ephemeral key")
 	}
 	ephpubkey := EncodePubkey(&ephkey.PublicKey)
 	auth.pubkey = ephpubkey
@@ -380,7 +384,7 @@ func (c *Codec) makeHandshakeAuth(toID enode.ID, addr string, challenge *Whoarey
 	// Create session keys.
 	sec := deriveKeys(sha256.New, ephkey, remotePubkey, c.localnode.ID(), challenge.Node.ID(), cdata)
 	if sec == nil {
-		return nil, nil, fmt.Errorf("key derivation failed")
+		return nil, nil, errors.New("key derivation failed")
 	}
 	return auth, sec, err
 }
@@ -397,7 +401,7 @@ func (c *Codec) encodeMessageHeader(toID enode.ID, s *session) (Header, error) {
 	auth := messageAuthData{SrcID: c.localnode.ID()}
 	c.buf.Reset()
 	binary.Write(&c.buf, binary.BigEndian, &auth) //nolint:errcheck
-	head.AuthData = bytesCopy(&c.buf)
+	head.AuthData = libcommon.CopyBytes(c.buf.Bytes())
 	head.Nonce = nonce
 	return head, err
 }
@@ -645,10 +649,4 @@ func (h *Header) mask(destID enode.ID) cipher.Stream {
 		panic("can't create cipher")
 	}
 	return cipher.NewCTR(block, h.IV[:])
-}
-
-func bytesCopy(r *bytes.Buffer) []byte {
-	b := make([]byte, r.Len())
-	copy(b, r.Bytes())
-	return b
 }

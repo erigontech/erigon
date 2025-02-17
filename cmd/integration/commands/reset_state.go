@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commands
 
 import (
@@ -8,22 +24,23 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
-	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
-	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
+	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 var cmdResetState = &cobra.Command{
@@ -38,7 +55,12 @@ var cmdResetState = &cobra.Command{
 		}
 		ctx, _ := common.RootContext()
 		defer db.Close()
-		sn, borSn, agg := allSnapshots(ctx, db, logger)
+		sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
+		if err != nil {
+			logger.Error("Opening snapshots", "error", err)
+			return
+		}
+
 		defer sn.Close()
 		defer borSn.Close()
 		defer agg.Close()
@@ -50,7 +72,7 @@ var cmdResetState = &cobra.Command{
 			return
 		}
 
-		if err = reset2.ResetState(db, ctx, chain, "", log.Root()); err != nil {
+		if err = reset2.ResetState(db, agg, ctx, chain, "", log.Root()); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -97,7 +119,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
-func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *freezeblocks.BorRoSnapshots, agg *state.Aggregator) error {
+func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots, agg *state.Aggregator) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -121,12 +143,28 @@ func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *freezeblo
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
-	fmt.Fprintf(w, "blocks.v2: %t, segments=%d, indices=%d\n", snapshots.Cfg().Enabled, snapshots.SegmentsMax(), snapshots.IndicesMax())
-	fmt.Fprintf(w, "blocks.bor.v2: segments=%d, indices=%d\n\n", borSn.SegmentsMax(), borSn.IndicesMax())
+	if snapshots != nil {
+		fmt.Fprintf(w, "blocks: segments=%d, indices=%d\n", snapshots.SegmentsMax(), snapshots.IndicesMax())
+	} else {
+		fmt.Fprintf(w, "blocks: segments=0, indices=0; failed to open snapshots\n")
+	}
+	if borSn != nil {
+		fmt.Fprintf(w, "blocks.bor: segments=%d, indices=%d\n", borSn.SegmentsMax(), borSn.IndicesMax())
+	} else {
+		fmt.Fprintf(w, "blocks.bor: segments=0, indices=0; failed to open bor snapshots\n")
+	}
 
-	_, lastBlockInHistSnap, _ := rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
-	fmt.Fprintf(w, "state.history: idx steps: %.02f, lastBlockInSnap=%d, TxNums_Index(%d,%d), filesAmount: %d\n\n", rawdbhelpers.IdxStepsCountV3(tx), lastBlockInHistSnap, _lb, _lt, agg.FilesAmount())
+
+	var filesAmount []int
+	var aggIsNotOkMessage string
+	if agg != nil {
+		filesAmount = agg.FilesAmount()
+	} else {
+		aggIsNotOkMessage = "failed to open aggregator snapshots"
+	}
+
+	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d), filesAmount: %d%s\n\n", rawdbhelpers.IdxStepsCountV3(tx), _lb, _lt, filesAmount, aggIsNotOkMessage)
 	ethTxSequence, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err

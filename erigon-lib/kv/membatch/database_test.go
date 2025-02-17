@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 //go:build !js
 
@@ -27,12 +30,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 )
 
-var testBucket = kv.HashedAccounts
+var testBucket = kv.HashedAccountsDeprecated
 var testValues = []string{"a", "1251", "\x00123\x00"}
 
 func TestPutGet(t *testing.T) {
@@ -96,7 +99,7 @@ func TestPutGet(t *testing.T) {
 }
 
 func TestNoPanicAfterDbClosed(t *testing.T) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -133,7 +136,7 @@ func TestNoPanicAfterDbClosed(t *testing.T) {
 }
 
 func TestParallelPutGet(t *testing.T) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 
 	const n = 8
 	var pending sync.WaitGroup

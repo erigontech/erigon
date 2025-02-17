@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package abi
 
@@ -22,16 +25,15 @@ import (
 	"math/big"
 	"reflect"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
 )
 
 // packBytesSlice packs the given bytes as [L, V] as the canonical representation
 // bytes slice.
 func packBytesSlice(bytes []byte, l int) []byte {
 	packedLen := packNum(reflect.ValueOf(l))
-	return append(packedLen, common.RightPadBytes(bytes, (l+31)/32*32)...)
+	return append(packedLen, libcommon.RightPadBytes(bytes, (l+31)/32*32)...)
 }
 
 // packElement packs the given reflect value according to the abi specification in
@@ -47,12 +49,12 @@ func packElement(t Type, reflectValue reflect.Value) ([]byte, error) {
 			reflectValue = mustArrayToByteSlice(reflectValue)
 		}
 
-		return common.LeftPadBytes(reflectValue.Bytes(), 32), nil
+		return libcommon.LeftPadBytes(reflectValue.Bytes(), 32), nil
 	case BoolTy:
 		if reflectValue.Bool() {
-			return math.PaddedBigBytes(common2.Big1, 32), nil
+			return math.PaddedBigBytes(libcommon.Big1, 32), nil
 		}
-		return math.PaddedBigBytes(common2.Big0, 32), nil
+		return math.PaddedBigBytes(libcommon.Big0, 32), nil
 	case BytesTy:
 		if reflectValue.Kind() == reflect.Array {
 			reflectValue = mustArrayToByteSlice(reflectValue)
@@ -65,7 +67,7 @@ func packElement(t Type, reflectValue reflect.Value) ([]byte, error) {
 		if reflectValue.Kind() == reflect.Array {
 			reflectValue = mustArrayToByteSlice(reflectValue)
 		}
-		return common.RightPadBytes(reflectValue.Bytes(), 32), nil
+		return libcommon.RightPadBytes(reflectValue.Bytes(), 32), nil
 	default:
 		return []byte{}, fmt.Errorf("could not pack element, unknown type: %v", t.T)
 	}

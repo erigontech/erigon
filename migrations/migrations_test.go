@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package migrations
 
 import (
@@ -7,15 +23,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
 func TestApplyWithInit(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			"one",
@@ -52,7 +68,7 @@ func TestApplyWithInit(t *testing.T) {
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err := migrator.Apply(db, "", logger)
+	err := migrator.Apply(db, "", "", logger)
 	require.NoError(err)
 	var applied map[string][]byte
 	err = db.View(context.Background(), func(tx kv.Tx) error {
@@ -68,7 +84,7 @@ func TestApplyWithInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "", logger)
+	err = migrator.Apply(db, "", "", logger)
 	require.NoError(err)
 	err = db.View(context.Background(), func(tx kv.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -80,7 +96,7 @@ func TestApplyWithInit(t *testing.T) {
 }
 
 func TestApplyWithoutInit(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			"one",
@@ -113,7 +129,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err = migrator.Apply(db, "", logger)
+	err = migrator.Apply(db, "", "", logger)
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -131,7 +147,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "", logger)
+	err = migrator.Apply(db, "", "", logger)
 	require.NoError(err)
 
 	err = db.View(context.Background(), func(tx kv.Tx) error {
@@ -145,7 +161,7 @@ func TestApplyWithoutInit(t *testing.T) {
 }
 
 func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			"one",
@@ -178,7 +194,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err = migrator.Apply(db, "", logger)
+	err = migrator.Apply(db, "", "", logger)
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -196,7 +212,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "", logger)
+	err = migrator.Apply(db, "", "", logger)
 	require.NoError(err)
 	err = db.View(context.Background(), func(tx kv.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -227,7 +243,7 @@ func TestMarshalStages(t *testing.T) {
 }
 
 func TestValidation(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			Name: "repeated_name",
@@ -263,7 +279,7 @@ func TestValidation(t *testing.T) {
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err := migrator.Apply(db, "", logger)
+	err := migrator.Apply(db, "", "", logger)
 	require.True(errors.Is(err, ErrMigrationNonUniqueName))
 
 	var applied map[string][]byte
@@ -277,7 +293,7 @@ func TestValidation(t *testing.T) {
 }
 
 func TestCommitCallRequired(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			Name: "one",
@@ -290,7 +306,7 @@ func TestCommitCallRequired(t *testing.T) {
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err := migrator.Apply(db, "", logger)
+	err := migrator.Apply(db, "", "", logger)
 	require.True(errors.Is(err, ErrMigrationCommitNotCalled))
 
 	var applied map[string][]byte

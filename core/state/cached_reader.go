@@ -1,12 +1,26 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
-	"bytes"
+	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/turbo/shards"
 )
 
 // CachedReader is a wrapper for an instance of type StateReader
@@ -39,6 +53,11 @@ func (cr *CachedReader) ReadAccountData(address common.Address) (*accounts.Accou
 	return a, nil
 }
 
+// ReadAccountDataForDebug is called when an account needs to be fetched from the state
+func (cr *CachedReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	return cr.ReadAccountData(address)
+}
+
 // ReadAccountStorage is called when a storage item needs to be fetched from the state
 func (cr *CachedReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	addrBytes := address.Bytes()
@@ -59,14 +78,11 @@ func (cr *CachedReader) ReadAccountStorage(address common.Address, incarnation u
 
 // ReadAccountCode is called when code of an account needs to be fetched from the state
 // Usually, one of (address;incarnation) or codeHash is enough to uniquely identify the code
-func (cr *CachedReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	if bytes.Equal(codeHash[:], emptyCodeHash) {
-		return nil, nil
-	}
+func (cr *CachedReader) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
 	if c, ok := cr.cache.GetCode(address.Bytes(), incarnation); ok {
 		return c, nil
 	}
-	c, err := cr.r.ReadAccountCode(address, incarnation, codeHash)
+	c, err := cr.r.ReadAccountCode(address, incarnation)
 	if err != nil {
 		return nil, err
 	}
@@ -76,8 +92,8 @@ func (cr *CachedReader) ReadAccountCode(address common.Address, incarnation uint
 	return c, nil
 }
 
-func (cr *CachedReader) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	c, err := cr.ReadAccountCode(address, incarnation, codeHash)
+func (cr *CachedReader) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+	c, err := cr.ReadAccountCode(address, incarnation)
 	return len(c), err
 }
 

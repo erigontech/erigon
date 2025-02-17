@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package vm
 
@@ -24,9 +27,7 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -59,10 +60,8 @@ var allPrecompiles = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{8}):          &bn256PairingIstanbul{},
 	libcommon.BytesToAddress([]byte{9}):          &blake2F{},
 	libcommon.BytesToAddress([]byte{10}):         &bls12381G1Add{},
-	libcommon.BytesToAddress([]byte{11}):         &bls12381G1Mul{},
 	libcommon.BytesToAddress([]byte{12}):         &bls12381G1MultiExp{},
 	libcommon.BytesToAddress([]byte{13}):         &bls12381G2Add{},
-	libcommon.BytesToAddress([]byte{14}):         &bls12381G2Mul{},
 	libcommon.BytesToAddress([]byte{15}):         &bls12381G2MultiExp{},
 	libcommon.BytesToAddress([]byte{16}):         &bls12381Pairing{},
 	libcommon.BytesToAddress([]byte{17}):         &bls12381MapFpToG1{},
@@ -103,8 +102,8 @@ func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
 		t.Parallel()
 		if res, _, err := RunPrecompiledContract(p, in, gas); err != nil {
 			t.Error(err)
-		} else if common.Bytes2Hex(res) != test.Expected {
-			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
+		} else if libcommon.Bytes2Hex(res) != test.Expected {
+			t.Errorf("Expected %v, got %v", test.Expected, libcommon.Bytes2Hex(res))
 		}
 		if expGas := test.Gas; expGas != gas {
 			t.Errorf("%v: gas wrong, expected %d, got %d", test.Name, expGas, gas)
@@ -191,8 +190,8 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 			bench.Error(err)
 			return
 		}
-		if common.Bytes2Hex(res) != test.Expected {
-			bench.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
+		if libcommon.Bytes2Hex(res) != test.Expected {
+			bench.Errorf("Expected %v, got %v", test.Expected, libcommon.Bytes2Hex(res))
 			return
 		}
 	})
@@ -312,10 +311,8 @@ func benchJson(name, addr string, b *testing.B) {
 }
 
 func TestPrecompiledBLS12381G1Add(t *testing.T)      { testJson("blsG1Add", "0a", t) }
-func TestPrecompiledBLS12381G1Mul(t *testing.T)      { testJson("blsG1Mul", "0b", t) }
 func TestPrecompiledBLS12381G1MultiExp(t *testing.T) { testJson("blsG1MultiExp", "0c", t) }
 func TestPrecompiledBLS12381G2Add(t *testing.T)      { testJson("blsG2Add", "0d", t) }
-func TestPrecompiledBLS12381G2Mul(t *testing.T)      { testJson("blsG2Mul", "0e", t) }
 func TestPrecompiledBLS12381G2MultiExp(t *testing.T) { testJson("blsG2MultiExp", "0f", t) }
 func TestPrecompiledBLS12381Pairing(t *testing.T)    { testJson("blsPairing", "10", t) }
 func TestPrecompiledBLS12381MapG1(t *testing.T)      { testJson("blsMapG1", "11", t) }
@@ -326,7 +323,6 @@ func BenchmarkPrecompiledBLS12381G1Add(b *testing.B)      { benchJson("blsG1Add"
 func BenchmarkPrecompiledBLS12381G1Mul(b *testing.B)      { benchJson("blsG1Mul", "0b", b) }
 func BenchmarkPrecompiledBLS12381G1MultiExp(b *testing.B) { benchJson("blsG1MultiExp", "0c", b) }
 func BenchmarkPrecompiledBLS12381G2Add(b *testing.B)      { benchJson("blsG2Add", "0d", b) }
-func BenchmarkPrecompiledBLS12381G2Mul(b *testing.B)      { benchJson("blsG2Mul", "0e", b) }
 func BenchmarkPrecompiledBLS12381G2MultiExp(b *testing.B) { benchJson("blsG2MultiExp", "0f", b) }
 func BenchmarkPrecompiledBLS12381Pairing(b *testing.B)    { benchJson("blsPairing", "10", b) }
 func BenchmarkPrecompiledBLS12381MapG1(b *testing.B)      { benchJson("blsMapG1", "11", b) }
@@ -334,39 +330,12 @@ func BenchmarkPrecompiledBLS12381MapG2(b *testing.B)      { benchJson("blsMapG2"
 
 // Failure tests
 func TestPrecompiledBLS12381G1AddFail(t *testing.T)      { testJsonFail("blsG1Add", "0a", t) }
-func TestPrecompiledBLS12381G1MulFail(t *testing.T)      { testJsonFail("blsG1Mul", "0b", t) }
 func TestPrecompiledBLS12381G1MultiExpFail(t *testing.T) { testJsonFail("blsG1MultiExp", "0c", t) }
 func TestPrecompiledBLS12381G2AddFail(t *testing.T)      { testJsonFail("blsG2Add", "0d", t) }
-func TestPrecompiledBLS12381G2MulFail(t *testing.T)      { testJsonFail("blsG2Mul", "0e", t) }
 func TestPrecompiledBLS12381G2MultiExpFail(t *testing.T) { testJsonFail("blsG2MultiExp", "0f", t) }
 func TestPrecompiledBLS12381PairingFail(t *testing.T)    { testJsonFail("blsPairing", "10", t) }
 func TestPrecompiledBLS12381MapG1Fail(t *testing.T)      { testJsonFail("blsMapG1", "11", t) }
 func TestPrecompiledBLS12381MapG2Fail(t *testing.T)      { testJsonFail("blsMapG2", "12", t) }
-
-// Tests from https://github.com/ethereum/EIPs/tree/master/assets/eip-2537
-func TestPrecompiledBLS12381G1AddEip(t *testing.T)      { testJson("blsG1Add-eip", "0a", t) }
-func TestPrecompiledBLS12381G1MulEip(t *testing.T)      { testJson("blsG1Mul-eip", "0b", t) }
-func TestPrecompiledBLS12381G1MultiExpEip(t *testing.T) { testJson("blsG1MultiExp-eip", "0c", t) }
-func TestPrecompiledBLS12381G2AddEip(t *testing.T)      { testJson("blsG2Add-eip", "0d", t) }
-func TestPrecompiledBLS12381G2MulEip(t *testing.T)      { testJson("blsG2Mul-eip", "0e", t) }
-func TestPrecompiledBLS12381G2MultiExpEip(t *testing.T) { testJson("blsG2MultiExp-eip", "0f", t) }
-func TestPrecompiledBLS12381PairingEip(t *testing.T)    { testJson("blsPairing-eip", "10", t) }
-func TestPrecompiledBLS12381MapG1Eip(t *testing.T)      { testJson("blsMapG1-eip", "11", t) }
-func TestPrecompiledBLS12381MapG2Eip(t *testing.T)      { testJson("blsMapG2-eip", "12", t) }
-
-func TestPrecompiledBLS12381G1AddFailEip(t *testing.T) { testJsonFail("blsG1Add-eip", "0a", t) }
-func TestPrecompiledBLS12381G1MulFailEip(t *testing.T) { testJsonFail("blsG1Mul-eip", "0b", t) }
-func TestPrecompiledBLS12381G1MultiExpFailEip(t *testing.T) {
-	testJsonFail("blsG1MultiExp-eip", "0c", t)
-}
-func TestPrecompiledBLS12381G2AddFailEip(t *testing.T) { testJsonFail("blsG2Add-eip", "0d", t) }
-func TestPrecompiledBLS12381G2MulFailEip(t *testing.T) { testJsonFail("blsG2Mul-eip", "0e", t) }
-func TestPrecompiledBLS12381G2MultiExpFailEip(t *testing.T) {
-	testJsonFail("blsG2MultiExp-eip", "0f", t)
-}
-func TestPrecompiledBLS12381PairingFailEip(t *testing.T) { testJsonFail("blsPairing-eip", "10", t) }
-func TestPrecompiledBLS12381MapG1FailEip(t *testing.T)   { testJsonFail("blsMapG1-eip", "11", t) }
-func TestPrecompiledBLS12381MapG2FailEip(t *testing.T)   { testJsonFail("blsMapG2-eip", "12", t) }
 
 func loadJson(name string) ([]precompiledTest, error) {
 	data, err := os.ReadFile(fmt.Sprintf("testdata/precompiles/%v.json", name))
@@ -439,6 +408,5 @@ func BenchmarkPrecompiledP256Verify(b *testing.B) {
 
 func TestPrecompiledP256Verify(t *testing.T) {
 	t.Parallel()
-
 	testJson("p256Verify", "100", t)
 }

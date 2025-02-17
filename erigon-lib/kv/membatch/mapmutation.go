@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package membatch
 
 import (
@@ -9,11 +25,13 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type Mapmutation struct {
@@ -26,6 +44,10 @@ type Mapmutation struct {
 	count  uint64
 	tmpdir string
 	logger log.Logger
+}
+
+func (m *Mapmutation) Count(bucket string) (uint64, error) {
+	panic("not implemented")
 }
 
 func (m *Mapmutation) BucketSize(table string) (uint64, error) {
@@ -58,27 +80,22 @@ func (m *Mapmutation) DBSize() (uint64, error) {
 	panic("implement me")
 }
 
-func (m *Mapmutation) Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
+func (m *Mapmutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *Mapmutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (m *Mapmutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *Mapmutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (m *Mapmutation) Prefix(table string, prefix []byte) (stream.KV, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *Mapmutation) Prefix(table string, prefix []byte) (iter.KV, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (m *Mapmutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
+func (m *Mapmutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -273,11 +290,6 @@ func (m *Mapmutation) ForEach(bucket string, fromPrefix []byte, walker func(k, v
 	return m.db.ForEach(bucket, fromPrefix, walker)
 }
 
-func (m *Mapmutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
-	m.panicOnEmptyDB()
-	return m.db.ForPrefix(bucket, prefix, walker)
-}
-
 func (m *Mapmutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
 	m.panicOnEmptyDB()
 	return m.db.ForAmount(bucket, prefix, amount, walker)
@@ -290,8 +302,8 @@ func (m *Mapmutation) Delete(table string, k []byte) error {
 func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	count := 0
-	total := float64(m.count)
+
+	keyCount, total := 0, m.count
 	for table, bucket := range m.puts {
 		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), m.logger)
 		defer collector.Close()
@@ -300,11 +312,11 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 			if err := collector.Collect([]byte(key), value); err != nil {
 				return err
 			}
-			count++
+			keyCount++
 			select {
 			default:
 			case <-logEvery.C:
-				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
+				progress := fmt.Sprintf("%s/%s", common.PrettyCounter(keyCount), common.PrettyCounter(total))
 				m.logger.Info("Write to db", "progress", progress, "current table", table)
 				tx.CollectMetrics()
 			}

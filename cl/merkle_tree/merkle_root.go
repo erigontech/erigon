@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package merkle_tree
 
 import (
@@ -7,10 +23,10 @@ import (
 	"reflect"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/prysmaticlabs/gohashtree"
 )
 
@@ -91,7 +107,7 @@ func HashByteSlice(out, in []byte) error {
 }
 
 func convertHeader(xs []byte) [][32]byte {
-	// i wont pretend to understand, but my solution for the problem is as so
+	// i won't pretend to understand, but my solution for the problem is as so
 
 	// first i grab the slice header of the input
 	header := (*reflect.SliceHeader)(unsafe.Pointer(&xs))
@@ -112,6 +128,18 @@ func MerkleRootFromFlatLeaves(leaves []byte, out []byte) (err error) {
 		return
 	}
 	return globalHasher.merkleizeTrieLeavesFlat(leaves, out, NextPowerOfTwo(uint64((len(leaves)+31)/32)))
+}
+
+func MerkleRootFromFlatFromIntermediateLevel(nodes []byte, out []byte, leavesLen, intermediateLevel int) (err error) {
+	if len(nodes) <= 32 {
+		copy(out, nodes)
+		return
+	}
+	return globalHasher.merkleizeTrieLeavesFlatWithStart(nodes, out, NextPowerOfTwo(uint64((leavesLen+31)/32)), uint64(intermediateLevel))
+}
+
+func MerkleRootFromFlatFromIntermediateLevelWithLimit(nodes []byte, out []byte, limit, intermediateLevel int) (err error) {
+	return globalHasher.merkleizeTrieLeavesFlatWithStart(nodes, out, uint64(limit), uint64(intermediateLevel))
 }
 
 func MerkleRootFromFlatLeavesWithLimit(leaves []byte, out []byte, limit uint64) (err error) {

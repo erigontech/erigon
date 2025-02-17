@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package abi
 
@@ -24,7 +27,7 @@ import (
 	"strconv"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 // Type enumerator
@@ -62,13 +65,15 @@ type Type struct {
 var (
 	// typeRegex parses the abi sub types
 	typeRegex = regexp.MustCompile("([a-zA-Z]+)(([0-9]+)(x([0-9]+))?)?")
+	// sliceSizeRegex grabs the slice size with regexp
+	sliceSizeRegex = regexp.MustCompile("[0-9]+")
 )
 
 // NewType creates a new reflection type of abi type given in t.
 func NewType(t string, internalType string, components []ArgumentMarshaling) (typ Type, err error) {
 	// check that array brackets are equal if they exist
 	if strings.Count(t, "[") != strings.Count(t, "]") {
-		return Type{}, fmt.Errorf("invalid arg type in abi")
+		return Type{}, errors.New("invalid arg type in abi")
 	}
 	typ.stringKind = t
 
@@ -88,9 +93,8 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 		}
 		// grab the last cell and create a type from there
 		sliced := t[i:]
-		// grab the slice size with regexp
-		re := regexp.MustCompile("[0-9]+")
-		intz := re.FindAllString(sliced, -1)
+
+		intz := sliceSizeRegex.FindAllString(sliced, -1)
 
 		if len(intz) == 0 {
 			// is a slice
@@ -107,7 +111,7 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 			}
 			typ.stringKind = embeddedType.stringKind + sliced
 		} else {
-			return Type{}, fmt.Errorf("invalid formatting of array type")
+			return Type{}, errors.New("invalid formatting of array type")
 		}
 		return typ, err
 	}

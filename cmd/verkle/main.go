@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -8,21 +24,20 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils"
 
 	"github.com/c2h5oh/datasize"
 	"go.uber.org/zap/buffer"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cmd/verkle/verkletrie"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/cmd/verkle/verkletrie"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
 type optionsCfg struct {
@@ -181,7 +196,7 @@ func GenerateVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) 
 		return err
 	}
 
-	logger.Info("Verkle Tree Generation completed", "elapsed", time.Since(start), "root", common.Bytes2Hex(root[:]))
+	logger.Info("Verkle Tree Generation completed", "elapsed", time.Since(start), "root", libcommon.Bytes2Hex(root[:]))
 
 	var progress uint64
 	if progress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
@@ -244,6 +259,7 @@ func dump(ctx context.Context, cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
+	defer verkleCursor.Close()
 	for k, v, err := verkleCursor.First(); k != nil; k, v, err = verkleCursor.Next() {
 		if err != nil {
 			return err
@@ -279,7 +295,7 @@ func dump(ctx context.Context, cfg optionsCfg) error {
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("Dumping verkle tree to plain text", "key", common.Bytes2Hex(k))
+			log.Info("Dumping verkle tree to plain text", "key", libcommon.Bytes2Hex(k))
 		default:
 		}
 	}
@@ -309,6 +325,7 @@ func dump_acc_preimages(ctx context.Context, cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
+	defer stateCursor.Close()
 	num, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err
@@ -333,7 +350,7 @@ func dump_acc_preimages(ctx context.Context, cfg optionsCfg) error {
 
 		select {
 		case <-logInterval.C:
-			log.Info("Dumping preimages to plain text", "key", common.Bytes2Hex(k))
+			log.Info("Dumping preimages to plain text", "key", libcommon.Bytes2Hex(k))
 		default:
 		}
 	}
@@ -365,6 +382,7 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 	if err != nil {
 		return err
 	}
+	defer stateCursor.Close()
 	num, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err
@@ -407,7 +425,7 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 
 		select {
 		case <-logInterval.C:
-			logger.Info("Computing preimages to plain text", "key", common.Bytes2Hex(k))
+			logger.Info("Computing preimages to plain text", "key", libcommon.Bytes2Hex(k))
 		default:
 		}
 	}
@@ -479,16 +497,5 @@ func main() {
 }
 
 func openDB(ctx context.Context, path string, logger log.Logger, accede bool) (kv.RwDB, error) {
-	var db kv.RwDB
-	var err error
-	opts := mdbx.NewMDBX(logger).Path(path)
-	if accede {
-		opts = opts.Accede()
-	}
-	db, err = opts.Open(ctx)
-
-	if err != nil {
-		return nil, err
-	}
-	return db, nil
+	return mdbx.New(kv.ChainDB, logger).Path(path).Accede(accede).Open(ctx)
 }

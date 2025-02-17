@@ -1,7 +1,24 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,17 +27,17 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 func TestGetStateFork(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -75,10 +92,15 @@ func TestGetStateFork(t *testing.T) {
 	}
 }
 
+func stringRPCErr(r io.Reader) string {
+	b, _ := io.ReadAll(r)
+	return string(b)
+}
+
 func TestGetStateRoot(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -88,7 +110,7 @@ func TestGetStateRoot(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -136,8 +158,9 @@ func TestGetStateRoot(t *testing.T) {
 func TestGetStateFullHistorical(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
+	fmt.Println("AX")
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 
@@ -146,7 +169,7 @@ func TestGetStateFullHistorical(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -192,7 +215,32 @@ func TestGetStateFullHistorical(t *testing.T) {
 			require.NoError(t, err)
 			other := state.New(&clparams.MainnetBeaconConfig)
 			require.NoError(t, other.DecodeSSZ(out, int(clparams.Phase0Version)))
-
+			for i := 0; i < other.ValidatorLength(); i++ {
+				if other.ValidatorSet().Get(i).PublicKey() != postState.ValidatorSet().Get(i).PublicKey() {
+					fmt.Println("difference in validator", i, other.ValidatorSet().Get(i).PublicKey(), postState.ValidatorSet().Get(i).PublicKey())
+				}
+				if other.ValidatorSet().Get(i).WithdrawalCredentials() != postState.ValidatorSet().Get(i).WithdrawalCredentials() {
+					fmt.Println("difference in withdrawal", i, other.ValidatorSet().Get(i).WithdrawalCredentials(), postState.ValidatorSet().Get(i).WithdrawalCredentials())
+				}
+				if other.ValidatorSet().Get(i).EffectiveBalance() != postState.ValidatorSet().Get(i).EffectiveBalance() {
+					fmt.Println("difference in effective", i, other.ValidatorSet().Get(i).EffectiveBalance(), postState.ValidatorSet().Get(i).EffectiveBalance())
+				}
+				if other.ValidatorSet().Get(i).Slashed() != postState.ValidatorSet().Get(i).Slashed() {
+					fmt.Println("difference in slashed", i, other.ValidatorSet().Get(i).Slashed(), postState.ValidatorSet().Get(i).Slashed())
+				}
+				if other.ValidatorSet().Get(i).ActivationEligibilityEpoch() != postState.ValidatorSet().Get(i).ActivationEligibilityEpoch() {
+					fmt.Println("difference in activation", i, other.ValidatorSet().Get(i).ActivationEligibilityEpoch(), postState.ValidatorSet().Get(i).ActivationEligibilityEpoch())
+				}
+				if other.ValidatorSet().Get(i).ActivationEpoch() != postState.ValidatorSet().Get(i).ActivationEpoch() {
+					fmt.Println("difference in activation", i, other.ValidatorSet().Get(i).ActivationEpoch(), postState.ValidatorSet().Get(i).ActivationEpoch())
+				}
+				if other.ValidatorSet().Get(i).ExitEpoch() != postState.ValidatorSet().Get(i).ExitEpoch() {
+					fmt.Println("difference in exit", i, other.ValidatorSet().Get(i).ExitEpoch(), postState.ValidatorSet().Get(i).ExitEpoch())
+				}
+				if other.ValidatorSet().Get(i).WithdrawableEpoch() != postState.ValidatorSet().Get(i).WithdrawableEpoch() {
+					fmt.Println("difference in withdrawable", i, other.ValidatorSet().Get(i).WithdrawableEpoch(), postState.ValidatorSet().Get(i).WithdrawableEpoch())
+				}
+			}
 			otherRoot, err := other.HashSSZ()
 			require.NoError(t, err)
 			require.Equal(t, postRoot, otherRoot)
@@ -203,7 +251,7 @@ func TestGetStateFullHistorical(t *testing.T) {
 func TestGetStateFullForkchoice(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -213,7 +261,7 @@ func TestGetStateFullForkchoice(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	fcu.StateAtBlockRootVal[fcu.HeadVal] = postState
 
@@ -272,7 +320,7 @@ func TestGetStateFullForkchoice(t *testing.T) {
 func TestGetStateSyncCommittees(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root())
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -290,7 +338,7 @@ func TestGetStateSyncCommittees(t *testing.T) {
 		nSyncCommittee,
 	}
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -337,7 +385,7 @@ func TestGetStateSyncCommittees(t *testing.T) {
 func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root())
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -347,7 +395,8 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	//fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -394,7 +443,7 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 func TestGetStateFinalityCheckpoints(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root())
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -404,7 +453,8 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	//fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 
 	cases := []struct {
 		blockID string
@@ -427,7 +477,7 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 			code:    http.StatusOK,
 		},
 	}
-	expected := `{"data":{"finalized":{"epoch":"1","root":"0xde46b0f2ed5e72f0cec20246403b14c963ec995d7c2825f3532b0460c09d5693"},"current_justified":{"epoch":"3","root":"0xa6e47f164b1a3ca30ea3b2144bd14711de442f51e5b634750a12a1734e24c987"},"previous_justified":{"epoch":"2","root":"0x4c3ee7969e485696669498a88c17f70e6999c40603e2f4338869004392069063"}},"execution_optimistic":false,"finalized":false,"version":"bellatrix"}` + "\n"
+	expected := `{"data":{"finalized":{"epoch":"1","root":"0xde46b0f2ed5e72f0cec20246403b14c963ec995d7c2825f3532b0460c09d5693"},"current_justified":{"epoch":"3","root":"0xa6e47f164b1a3ca30ea3b2144bd14711de442f51e5b634750a12a1734e24c987"},"previous_justified":{"epoch":"2","root":"0x4c3ee7969e485696669498a88c17f70e6999c40603e2f4338869004392069063"}},"execution_optimistic":false,"finalized":false}` + "\n"
 	for _, c := range cases {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
@@ -451,7 +501,7 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 func TestGetRandao(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root())
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -461,8 +511,8 @@ func TestGetRandao(t *testing.T) {
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
-
+	//fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 	cases := []struct {
 		blockID string
 		code    int

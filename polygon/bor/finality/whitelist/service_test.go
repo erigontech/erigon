@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package whitelist
 
 import (
@@ -8,12 +24,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/rawdb"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bor/finality/rawdb"
 	"github.com/stretchr/testify/require"
 
 	"pgregory.net/rapid"
@@ -49,7 +65,7 @@ func NewMockService(db kv.RwDB) *Service {
 func TestWhitelistedCheckpoint(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 
 	//Creating the service for the whitelisting the checkpoints
 	s := NewMockService(db)
@@ -100,7 +116,7 @@ func TestWhitelistedCheckpoint(t *testing.T) {
 func TestMilestone(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 
 	s := NewMockService(db)
 
@@ -249,7 +265,7 @@ func TestMilestone(t *testing.T) {
 func TestIsValidChain(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 
 	s := NewMockService(db)
 	chainA := createMockChain(1, 20) // A1->A2...A19->A20
@@ -462,7 +478,7 @@ func TestIsValidChain(t *testing.T) {
 }
 
 func TestPropertyBasedTestingMilestone(t *testing.T) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 
 	rapid.Check(t, func(t *rapid.T) {
 
@@ -910,7 +926,7 @@ func createMockChain(start, end uint64) []*types.Header {
 
 	for i = start; i <= end; i++ {
 		header := &types.Header{
-			Number: big.NewInt(int64(i)),
+			Number: new(big.Int).SetUint64(i),
 			Time:   uint64(time.Now().UnixMicro()) + i,
 		}
 		chain[idx] = header

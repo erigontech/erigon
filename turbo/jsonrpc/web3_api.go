@@ -1,18 +1,34 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/crypto"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 // Web3API provides interfaces for the web3_ RPC commands
 type Web3API interface {
 	ClientVersion(_ context.Context) (string, error)
-	Sha3(_ context.Context, input hexutility.Bytes) hexutility.Bytes
+	Sha3(_ context.Context, input hexutil.Bytes) hexutil.Bytes
 }
 
 type Web3APIImpl struct {
@@ -34,6 +50,6 @@ func (api *Web3APIImpl) ClientVersion(ctx context.Context) (string, error) {
 }
 
 // Sha3 implements web3_sha3. Returns Keccak-256 (not the standardized SHA3-256) of the given data.
-func (api *Web3APIImpl) Sha3(_ context.Context, input hexutility.Bytes) hexutility.Bytes {
+func (api *Web3APIImpl) Sha3(_ context.Context, input hexutil.Bytes) hexutil.Bytes {
 	return crypto.Keccak256(input)
 }

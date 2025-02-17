@@ -1,18 +1,21 @@
 // Copyright 2018 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package enode
 
@@ -29,12 +32,12 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 // Keys in the node database.
@@ -98,9 +101,8 @@ func bucketsConfig(_ kv.TableCfg) kv.TableCfg {
 
 // newMemoryDB creates a new in-memory node database without a persistent backend.
 func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, error) {
-	db, err := mdbx.NewMDBX(logger).
+	db, err := mdbx.New(kv.SentryDB, logger).
 		InMem(tmpDir).
-		Label(kv.SentryDB).
 		WithTableCfg(bucketsConfig).
 		MapSize(1 * datasize.GB).
 		Open(ctx)
@@ -117,12 +119,13 @@ func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, er
 // newPersistentDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, error) {
-	db, err := mdbx.NewMDBX(logger).
+	db, err := mdbx.New(kv.SentryDB, logger).
 		Path(path).
-		Label(kv.SentryDB).
 		WithTableCfg(bucketsConfig).
 		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
+		Flags(func(f uint) uint { return f ^ mdbx1.Durable | mdbx1.SafeNoSync }).
+		SyncPeriod(2 * time.Second).
 		DirtySpace(uint64(64 * datasize.MB)).
 		Open(ctx)
 	if err != nil {
@@ -140,6 +143,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		_, v, errGet := c.SeekExact([]byte(dbVersionKey))
 		if errGet != nil {
 			return errGet
@@ -380,6 +384,7 @@ func deleteRangeInBucket(tx kv.RwTx, prefix []byte, bucket string) error {
 	if err != nil {
 		return err
 	}
+	defer c.Close()
 	var k []byte
 	for k, _, err = c.Seek(prefix); (err == nil) && (k != nil) && bytes.HasPrefix(k, prefix); k, _, err = c.Next() {
 		if err = c.DeleteCurrent(); err != nil {
@@ -430,6 +435,7 @@ func (db *DB) expireNodes() {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		p := []byte(dbNodePrefix)
 		var prevId ID
 		var empty = true
@@ -563,6 +569,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 	seek:
 		for seeks := 0; len(nodes) < n && seeks < n*5; seeks++ {
 			// seekInFiles to a random entry. The first byte is incremented by a

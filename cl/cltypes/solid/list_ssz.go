@@ -1,20 +1,36 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package solid
 
 import (
 	"encoding/json"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 
-type encodableHashableSSZ interface {
+type EncodableHashableSSZ interface {
 	ssz.EncodableSSZ
 	ssz.HashableSSZ
 }
 
-type ListSSZ[T encodableHashableSSZ] struct {
+type ListSSZ[T EncodableHashableSSZ] struct {
 	list []T
 
 	limit int
@@ -29,14 +45,14 @@ type ListSSZ[T encodableHashableSSZ] struct {
 	root libcommon.Hash
 }
 
-func NewDynamicListSSZ[T encodableHashableSSZ](limit int) *ListSSZ[T] {
+func NewDynamicListSSZ[T EncodableHashableSSZ](limit int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:  make([]T, 0),
 		limit: limit,
 	}
 }
 
-func NewStaticListSSZ[T encodableHashableSSZ](limit int, bytesPerElement int) *ListSSZ[T] {
+func NewStaticListSSZ[T EncodableHashableSSZ](limit int, bytesPerElement int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:            make([]T, 0),
 		limit:           limit,
@@ -53,23 +69,14 @@ func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &l.list)
 }
 
-func NewDynamicListSSZFromList[T encodableHashableSSZ](list []T, limit int) *ListSSZ[T] {
+func NewDynamicListSSZFromList[T EncodableHashableSSZ](list []T, limit int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:  list,
 		limit: limit,
 	}
 }
 
-func NewStatucListSSZFromList[T encodableHashableSSZ](list []T, limit int, bytesPerElement int) *ListSSZ[T] {
-	return &ListSSZ[T]{
-		list:            list,
-		limit:           limit,
-		static:          true,
-		bytesPerElement: bytesPerElement,
-	}
-}
-
-func NewStaticListSSZFromList[T encodableHashableSSZ](list []T, limit int, bytesPerElement int) *ListSSZ[T] {
+func NewStaticListSSZFromList[T EncodableHashableSSZ](list []T, limit int, bytesPerElement int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:            list,
 		limit:           limit,
@@ -165,6 +172,15 @@ func (l *ListSSZ[T]) Truncate(length int) {
 	l.root = libcommon.Hash{}
 }
 
+func (l *ListSSZ[T]) Cut(length int) {
+	if length >= len(l.list) {
+		l.list = make([]T, 0)
+	} else {
+		l.list = l.list[length:]
+	}
+	l.root = libcommon.Hash{}
+}
+
 func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
 	leaves := make([]interface{}, l.limit)
 	for i := range leaves {
@@ -183,4 +199,16 @@ func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
 		panic(err)
 	}
 	return append(branch, merkle_tree.Uint64Root(uint64(len(l.list))))
+}
+
+func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
+	cpy := &ListSSZ[T]{
+		list:            make([]T, len(l.list), cap(l.list)),
+		limit:           l.limit,
+		static:          l.static,
+		bytesPerElement: l.bytesPerElement,
+		root:            libcommon.Hash(libcommon.CopyBytes(l.root[:])),
+	}
+	copy(cpy.list, l.list)
+	return cpy
 }

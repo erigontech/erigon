@@ -1,23 +1,36 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commands
 
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/erigontech/erigon-lib/common/paths"
 )
 
 var (
-	datadirCli      string
-	chaindata       string
-	statsfile       string
-	block           uint64
-	changeSetBucket string
-	indexBucket     string
-	snapshotsCli    bool
-	chain           string
-	logdir          string
+	datadirCli  string
+	chaindata   string
+	statsfile   string
+	block       uint64
+	indexBucket string
+	chain       string
 )
 
 func must(err error) {
@@ -43,14 +56,6 @@ func withStatsfile(cmd *cobra.Command) {
 	must(cmd.MarkFlagFilename("statsfile", "csv"))
 }
 
-func withCSBucket(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&changeSetBucket, "changeset-bucket", kv.AccountChangeSet, kv.AccountChangeSet+" for account and "+kv.StorageChangeSet+" for storage")
-}
-
 func withIndexBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&indexBucket, "index-bucket", kv.E2AccountsHistory, kv.E2AccountsHistory+" for account and "+kv.E2StorageHistory+" for storage")
-}
-
-func withChain(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, sepolia, etc.)")
 }

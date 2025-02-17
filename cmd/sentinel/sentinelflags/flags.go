@@ -1,7 +1,23 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sentinelflags
 
 import (
-	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/urfave/cli/v2"
 )
 
@@ -15,8 +31,6 @@ var CliFlags = []cli.Flag{
 	&SentinelTcpPort,
 	&NoDiscovery,
 	&BootnodesFlag,
-	&BeaconConfigFlag,
-	&GenesisSSZFlag,
 	&SentinelStaticPeersFlag,
 }
 
@@ -61,16 +75,7 @@ var (
 		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
 		Value: "",
 	}
-	BeaconConfigFlag = cli.StringFlag{
-		Name:  "beacon-config",
-		Usage: "Path to beacon config",
-		Value: "",
-	}
-	GenesisSSZFlag = cli.StringFlag{
-		Name:  "genesis-ssz",
-		Usage: "Path to genesis ssz",
-		Value: "",
-	}
+
 	SentinelStaticPeersFlag = cli.StringFlag{
 		Name:  "sentinel.staticpeers",
 		Usage: "connect to comma-separated Consensus static peers",

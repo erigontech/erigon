@@ -1,23 +1,42 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package aura_test
 
 import (
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+
 	"math/big"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv/memdb"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/consensus/aura"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/consensus/aura"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // Check that the first block of Gnosis Chain, which doesn't have any transactions,
@@ -25,13 +44,13 @@ import (
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
 	genesis := core.GnosisGenesisBlock()
-	genesisBlock, _, err := core.GenesisToBlock(genesis, "", log.Root())
+	genesisBlock, _, err := core.GenesisToBlock(genesis, datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 
 	genesis.Config.TerminalTotalDifficultyPassed = false
 
 	chainConfig := genesis.Config
-	auraDB := memdb.NewTestDB(t)
+	auraDB := memdb.NewTestDB(t, kv.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
 	checkStateRoot := true
@@ -70,7 +89,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	genesis.Config.Aura.BlockGasLimitContractTransitions = map[uint64]libcommon.Address{0: libcommon.HexToAddress("0x4000000000000000000000000000000000000001")}
 
 	chainConfig := genesis.Config
-	auraDB := memdb.NewTestDB(t)
+	auraDB := memdb.NewTestDB(t, kv.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
 	checkStateRoot := true
@@ -106,18 +125,18 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 		return fakeVal, err
 	}
 	require.NotPanics(func() {
-		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, validPreMergeHeader, nil, syscallCustom, nil)
+		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, validPreMergeHeader, nil, syscallCustom, nil, nil)
 	})
 
 	invalidPreMergeHeader := validPreMergeHeader
 	invalidPreMergeHeader.GasLimit = 12_123456 //a different, wrong gasLimit
 	require.Panics(func() {
-		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPreMergeHeader, nil, syscallCustom, nil)
+		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPreMergeHeader, nil, syscallCustom, nil, nil)
 	})
 
 	invalidPostMergeHeader := invalidPreMergeHeader
 	invalidPostMergeHeader.Difficulty = big.NewInt(0) //zero difficulty detected as PoS
 	require.NotPanics(func() {
-		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil)
+		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil, nil)
 	})
 }

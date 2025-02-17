@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rpc
 
@@ -34,10 +37,10 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 )
 
 const (
@@ -58,9 +61,16 @@ type httpConn struct {
 	headers   http.Header
 }
 
-// httpConn is treated specially by Client.
+// httpConn implements ServerCodec, but it is treated specially by Client
+// and some methods don't work. The panic() stubs here exist to ensure
+// this special treatment is correct.
+
 func (hc *httpConn) WriteJSON(context.Context, interface{}) error {
 	panic("writeJSON called on httpConn")
+}
+
+func (hc *httpConn) peerInfo() PeerInfo {
+	panic("peerInfo called on httpConn")
 }
 
 func (hc *httpConn) remoteAddr() string {
@@ -236,10 +246,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), code)
 		return
 	}
+
+	// Create request-scoped context.
+	connInfo := PeerInfo{Transport: "http", RemoteAddr: r.RemoteAddr}
+	connInfo.HTTP.Version = r.Proto
+	connInfo.HTTP.Host = r.Host
+	connInfo.HTTP.Origin = r.Header.Get("Origin")
+	connInfo.HTTP.UserAgent = r.Header.Get("User-Agent")
+	ctx := r.Context()
+	ctx = context.WithValue(ctx, peerInfoContextKey{}, connInfo)
+
 	// All checks passed, create a codec that reads directly from the request body
 	// until EOF, writes the response to w, and orders the server to process a
 	// single request.
-	ctx := r.Context()
 
 	// The context might be cancelled if the client's connection was closed while waiting for ServeHTTP.
 	if libcommon.FastContextErr(ctx) != nil {
@@ -249,15 +268,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx = context.WithValue(ctx, "remote", r.RemoteAddr)
-	ctx = context.WithValue(ctx, "scheme", r.Proto)
-	ctx = context.WithValue(ctx, "local", r.Host)
-	if ua := r.Header.Get("User-Agent"); ua != "" {
-		ctx = context.WithValue(ctx, "User-Agent", ua)
-	}
-	if origin := r.Header.Get("Origin"); origin != "" {
-		ctx = context.WithValue(ctx, "Origin", origin)
-	}
 	if s.debugSingleRequest {
 		if v := r.Header.Get(dbg.HTTPHeader); v == "true" {
 			ctx = dbg.ContextWithDebug(ctx, true)

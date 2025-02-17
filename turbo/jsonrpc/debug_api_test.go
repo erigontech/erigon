@@ -1,8 +1,26 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"math/big"
 	"reflect"
 	"testing"
 
@@ -10,20 +28,25 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/core/types"
-	tracersConfig "github.com/ledgerwatch/erigon/eth/tracers/config"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
 var dumper = spew.ConfigState{Indent: "    "}
@@ -52,10 +75,9 @@ var debugTraceTransactionNoRefundTests = []struct {
 
 func TestTraceBlockByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
-	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
+	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
@@ -63,6 +85,12 @@ func TestTraceBlockByNumber(t *testing.T) {
 		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
+		}
+		if tx == nil {
+			t.Errorf("nil tx")
+		}
+		if tx.BlockHash == nil {
+			t.Errorf("nil block hash")
 		}
 		txcount, err := ethApi.GetBlockTransactionCountByHash(m.Ctx, *tx.BlockHash)
 		if err != nil {
@@ -100,7 +128,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 
 func TestTraceBlockByHash(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	ethApi := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
+	ethApi := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
@@ -328,7 +356,7 @@ func TestAccountRange(t *testing.T) {
 		n = rpc.BlockNumber(7)
 		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
 		require.NoError(t, err)
-		require.Equal(t, 0, len(result.Accounts[addr].Storage))
+		require.Equal(t, 35, len(result.Accounts[addr].Storage))
 
 		n = rpc.BlockNumber(10)
 		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
@@ -395,7 +423,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 	}
 
 	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
-	checkIter := func(t *testing.T, expectTxNums iter.U64, txNumsIter *rawdbv3.MapTxNum2BlockNumIter) {
+	checkIter := func(t *testing.T, expectTxNums stream.U64, txNumsIter *rawdbv3.MapTxNum2BlockNumIter) {
 		for expectTxNums.HasNext() {
 			require.True(t, txNumsIter.HasNext())
 			expectTxNum, _ := expectTxNums.Next()
@@ -404,40 +432,37 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		}
 	}
 	t.Run("descend", func(t *testing.T) {
-		dbtx, err := m.DB.BeginRo(m.Ctx)
+		tx, err := m.DB.BeginTemporalRo(m.Ctx)
 		require.NoError(t, err)
-		defer dbtx.Rollback()
-		tx := dbtx.(kv.TemporalTx)
+		defer tx.Rollback()
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 1024, -1, order.Desc, kv.Unlim)
 		require.NoError(t, err)
-		txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc)
+		txNumsIter := rawdbv3.TxNums2BlockNums(tx, rawdbv3.TxNums, txNums, order.Desc)
 		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 1024, -1, order.Desc, kv.Unlim)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
 	})
 	t.Run("ascend", func(t *testing.T) {
-		dbtx, err := m.DB.BeginRo(m.Ctx)
+		tx, err := m.DB.BeginTemporalRo(m.Ctx)
 		require.NoError(t, err)
-		defer dbtx.Rollback()
-		tx := dbtx.(kv.TemporalTx)
+		defer tx.Rollback()
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, kv.Unlim)
 		require.NoError(t, err)
-		txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc)
+		txNumsIter := rawdbv3.TxNums2BlockNums(tx, rawdbv3.TxNums, txNums, order.Desc)
 		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, kv.Unlim)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
 	})
 	t.Run("ascend limit", func(t *testing.T) {
-		dbtx, err := m.DB.BeginRo(m.Ctx)
+		tx, err := m.DB.BeginTemporalRo(m.Ctx)
 		require.NoError(t, err)
-		defer dbtx.Rollback()
-		tx := dbtx.(kv.TemporalTx)
+		defer tx.Rollback()
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
 		require.NoError(t, err)
-		txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc)
+		txNumsIter := rawdbv3.TxNums2BlockNums(tx, rawdbv3.TxNums, txNums, order.Desc)
 		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
@@ -450,11 +475,11 @@ func TestAccountAt(t *testing.T) {
 
 	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash12 common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		blockHash0, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
-		blockHash1, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
-		blockHash3, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
-		blockHash10, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
-		blockHash12, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 12)
+		blockHash0, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
+		blockHash1, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
+		blockHash3, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
+		blockHash10, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
+		blockHash12, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 12)
 		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHash12
 		return nil
 	})
@@ -505,4 +530,109 @@ func TestAccountAt(t *testing.T) {
 		require.NoError(err)
 		require.Equal(0, int(results.Nonce))
 	})
+}
+
+func TestGetBadBlocks(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 5000000)
+	ctx := context.Background()
+
+	require := require.New(t)
+	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+
+	mustSign := func(tx types.Transaction, s types.Signer) types.Transaction {
+		r, err := types.SignTx(tx, s, testKey)
+		require.NoError(err)
+		return r
+	}
+
+	tx, err := m.DB.BeginRw(ctx)
+	if err != nil {
+		t.Errorf("could not begin read write transaction: %s", err)
+	}
+
+	putBlock := func(number uint64) common.Hash {
+		// prepare db so it works with our test
+		signer1 := types.MakeSigner(params.MainnetChainConfig, number, number-1)
+		body := &types.Body{
+			Transactions: []types.Transaction{
+				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number+1, testAddr, u256.Num1, 2, u256.Num1, nil), *signer1),
+			},
+			Uncles: []*types.Header{{Extra: []byte("test header")}},
+		}
+
+		header := &types.Header{Number: big.NewInt(int64(number))}
+		require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), number))
+		require.NoError(rawdb.WriteHeader(tx, header))
+		require.NoError(rawdb.WriteBody(tx, header.Hash(), number, body))
+
+		return header.Hash()
+	}
+
+	number := *rawdb.ReadCurrentBlockNumber(tx)
+
+	// put some blocks
+	i := number
+	for i <= number+6 {
+		putBlock(i)
+		i++
+	}
+	hash1 := putBlock(i)
+	hash2 := putBlock(i + 1)
+	hash3 := putBlock(i + 2)
+	hash4 := putBlock(i + 3)
+	require.NoError(rawdb.TruncateCanonicalHash(tx, i, true)) // trim since i
+
+	tx.Commit()
+
+	data, err := api.GetBadBlocks(ctx)
+	require.NoError(err)
+
+	require.Len(data, 4)
+	require.Equal(data[0]["hash"], hash4)
+	require.Equal(data[1]["hash"], hash3)
+	require.Equal(data[2]["hash"], hash2)
+	require.Equal(data[3]["hash"], hash1)
+}
+
+func TestGetRawTransaction(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 5000000)
+	ctx := context.Background()
+
+	require := require.New(t)
+	tx, err := m.DB.BeginRw(ctx)
+	if err != nil {
+		t.Errorf("could not begin read transaction: %s", err)
+	}
+	number := *rawdb.ReadCurrentBlockNumber(tx)
+	tx.Commit()
+
+	if number < 1 {
+		t.Error("TestSentry doesn't have enough blocks for this test")
+	}
+	var testedOnce = false
+	for i := uint64(0); i < number; i++ {
+		tx, err := m.DB.BeginRo(ctx)
+		require.NoError(err)
+		block, err := api._blockReader.BlockByNumber(ctx, tx, i)
+		require.NoError(err)
+		tx.Rollback()
+		txns := block.Transactions()
+
+		for _, txn := range txns {
+			// Get the first txn
+			txnBinary := bytes.Buffer{}
+			err = txn.MarshalBinary(&txnBinary)
+			require.NoError(err)
+			data, err := api.GetRawTransaction(ctx, txn.Hash())
+			require.NoError(err)
+			require.NotEmpty(data)
+			require.Equal([]byte(data), txnBinary.Bytes())
+			testedOnce = true
+		}
+	}
+	require.True(testedOnce, "Test flow didn't touch the target flow")
 }

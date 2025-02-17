@@ -1,36 +1,38 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
 import (
-	"bytes"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/core/tracing"
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
@@ -53,12 +55,7 @@ func (s Storage) String() (str string) {
 }
 
 func (s Storage) Copy() Storage {
-	cpy := make(Storage)
-	for key, value := range s {
-		cpy[key] = value
-	}
-
-	return cpy
+	return maps.Clone(s)
 }
 
 // stateObject represents an Ethereum account which is being modified.
@@ -96,7 +93,7 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (so *stateObject) empty() bool {
-	return so.data.Nonce == 0 && so.data.Balance.IsZero() && bytes.Equal(so.data.CodeHash[:], emptyCodeHash)
+	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == emptyCodeHashH)
 }
 
 // newObject creates a state object.
@@ -120,7 +117,6 @@ func newObject(db *IntraBlockState, address libcommon.Address, data, original *a
 		so.data.Root = trie.EmptyRoot
 	}
 	so.original.Copy(original)
-
 	return &so
 }
 
@@ -226,6 +222,9 @@ func (so *stateObject) SetState(key *libcommon.Hash, value uint256.Int) {
 		key:      *key,
 		prevalue: prev,
 	})
+	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
+		so.db.tracingHooks.OnStorageChange(so.address, key, prev, value)
+	}
 	so.setState(key, value)
 }
 
@@ -254,7 +253,6 @@ func (so *stateObject) setState(key *libcommon.Hash, value uint256.Int) {
 // updateTrie writes cached storage modifications into the object's storage trie.
 func (so *stateObject) updateTrie(stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {
-		value := value
 		original := so.blockOriginStorage[key]
 		so.originStorage[key] = value
 		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), &key, &original, &value); err != nil {
@@ -299,6 +297,9 @@ func (so *stateObject) SetBalance(amount *uint256.Int, reason tracing.BalanceCha
 		account: &so.address,
 		prev:    so.data.Balance,
 	})
+	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
+		so.db.tracingHooks.OnBalanceChange(so.address, so.Balance(), amount, reason)
+	}
 	so.setBalance(amount)
 }
 
@@ -328,12 +329,12 @@ func (so *stateObject) Code() []byte {
 	if so.code != nil {
 		return so.code
 	}
-	if bytes.Equal(so.CodeHash(), emptyCodeHash) {
+	if so.data.CodeHash == emptyCodeHashH {
 		return nil
 	}
-	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation, libcommon.BytesToHash(so.CodeHash()))
+	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation)
 	if err != nil {
-		so.setError(fmt.Errorf("can't load code hash %x: %w", so.CodeHash(), err))
+		so.setError(fmt.Errorf("can't load code hash %x: %w", so.data.CodeHash, err))
 	}
 	so.code = code
 	return code
@@ -346,6 +347,9 @@ func (so *stateObject) SetCode(codeHash libcommon.Hash, code []byte) {
 		prevhash: so.data.CodeHash,
 		prevcode: prevcode,
 	})
+	if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChange != nil {
+		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prevcode, codeHash, code)
+	}
 	so.setCode(codeHash, code)
 }
 
@@ -360,15 +364,14 @@ func (so *stateObject) SetNonce(nonce uint64) {
 		account: &so.address,
 		prev:    so.data.Nonce,
 	})
+	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {
+		so.db.tracingHooks.OnNonceChange(so.address, so.data.Nonce, nonce)
+	}
 	so.setNonce(nonce)
 }
 
 func (so *stateObject) setNonce(nonce uint64) {
 	so.data.Nonce = nonce
-}
-
-func (so *stateObject) CodeHash() []byte {
-	return so.data.CodeHash[:]
 }
 
 func (so *stateObject) Balance() *uint256.Int {

@@ -1,18 +1,21 @@
 // Copyright 2022 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package js
 
@@ -24,16 +27,15 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/tracers"
-	jsassets "github.com/ledgerwatch/erigon/eth/tracers/js/internal/tracers"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/core/vm/stack"
+	"github.com/erigontech/erigon/eth/tracers"
+	jsassets "github.com/erigontech/erigon/eth/tracers/js/internal/tracers"
 )
 
 const (
@@ -72,7 +74,7 @@ func fromBuf(vm *goja.Runtime, bufType goja.Value, buf goja.Value, allowString b
 		if !allowString {
 			break
 		}
-		return common.FromHex(obj.String()), nil
+		return libcommon.FromHex(obj.String()), nil
 
 	case "Array":
 		var b []byte
@@ -88,7 +90,7 @@ func fromBuf(vm *goja.Runtime, bufType goja.Value, buf goja.Value, allowString b
 		b := obj.Get("buffer").Export().(goja.ArrayBuffer).Bytes()
 		return b, nil
 	}
-	return nil, fmt.Errorf("invalid buffer type")
+	return nil, errors.New("invalid buffer type")
 }
 
 // jsTracer is an implementation of the Tracer interface which evaluates
@@ -245,6 +247,12 @@ func (t *jsTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommo
 	}
 	t.ctx["value"] = valueBig
 	t.ctx["block"] = t.vm.ToValue(env.Context.BlockNumber)
+	coinbase, err := t.toBuf(t.vm, env.Context.Coinbase.Bytes())
+	if err != nil {
+		t.err = err
+		return
+	}
+	t.ctx["coinbase"] = t.vm.ToValue(coinbase)
 	// Update list of precompiles based on current block
 	rules := env.ChainRules()
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
@@ -379,7 +387,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return ""
 		}
-		return hexutility.Encode(b)
+		return hexutil.Encode(b)
 	})
 	vm.Set("toWord", func(v goja.Value) goja.Value {
 		// TODO: add test with []byte len < 32 or > 32
@@ -528,7 +536,7 @@ func (o *opObj) ToString() string {
 }
 
 func (o *opObj) IsPush() bool {
-	return o.op.IsPush()
+	return o.op == vm.PUSH0 || o.op.IsPushWithImmediateArgs()
 }
 
 func (o *opObj) setupObject() *goja.Object {
@@ -667,8 +675,12 @@ func (do *dbObj) GetBalance(addrSlice goja.Value) goja.Value {
 		return nil
 	}
 	addr := libcommon.BytesToAddress(a)
-	value := do.ibs.GetBalance(addr).ToBig()
-	res, err := do.toBig(do.vm, value.String())
+	value, err := do.ibs.GetBalance(addr)
+	if err != nil {
+		do.vm.Interrupt(err)
+		return nil
+	}
+	res, err := do.toBig(do.vm, value.ToBig().String())
 	if err != nil {
 		do.vm.Interrupt(err)
 		return nil
@@ -683,7 +695,12 @@ func (do *dbObj) GetNonce(addrSlice goja.Value) uint64 {
 		return 0
 	}
 	addr := libcommon.BytesToAddress(a)
-	return do.ibs.GetNonce(addr)
+	nonce, err := do.ibs.GetNonce(addr)
+	if err != nil {
+		do.vm.Interrupt(err)
+		return 0
+	}
+	return nonce
 }
 
 func (do *dbObj) GetCode(addrSlice goja.Value) goja.Value {
@@ -693,7 +710,11 @@ func (do *dbObj) GetCode(addrSlice goja.Value) goja.Value {
 		return nil
 	}
 	addr := libcommon.BytesToAddress(a)
-	code := do.ibs.GetCode(addr)
+	code, err := do.ibs.GetCode(addr)
+	if err != nil {
+		do.vm.Interrupt(err)
+		return nil
+	}
 	res, err := do.toBuf(do.vm, code)
 	if err != nil {
 		do.vm.Interrupt(err)
@@ -732,7 +753,12 @@ func (do *dbObj) Exists(addrSlice goja.Value) bool {
 		return false
 	}
 	addr := libcommon.BytesToAddress(a)
-	return do.ibs.Exist(addr)
+	exists, err := do.ibs.Exist(addr)
+	if err != nil {
+		do.vm.Interrupt(err)
+		return false
+	}
+	return exists
 }
 
 func (do *dbObj) setupObject() *goja.Object {

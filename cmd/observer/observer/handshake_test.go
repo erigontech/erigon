@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package observer
 
 import (
@@ -7,11 +23,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/direct"
-
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/params"
 )
 
 func TestHandshake(t *testing.T) {
@@ -33,6 +48,6 @@ func TestHandshake(t *testing.T) {
 	assert.Contains(t, hello.ClientID, "erigon")
 
 	require.NotNil(t, status)
-	assert.Equal(t, uint32(direct.ETH66), status.ProtocolVersion)
+	assert.Equal(t, uint32(direct.ETH67), status.ProtocolVersion)
 	assert.Equal(t, uint64(1), status.NetworkID)
 }

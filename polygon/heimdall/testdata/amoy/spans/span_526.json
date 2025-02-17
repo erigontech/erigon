@@ -1,0 +1,78 @@
+{
+  "span_id": 526,
+  "start_block": 3360256,
+  "end_block": 3366655,
+  "validator_set": {
+    "validators": [
+      {
+        "ID": 6,
+        "signer": "0x09207a6efee346cb3e4a54ac18523e3715d38b3f",
+        "power": 55000,
+        "accum": 65498
+      },
+      {
+        "ID": 4,
+        "signer": "0x4ad84f7014b7b44f723f284a85b1662337971439",
+        "power": 35000,
+        "accum": 72263
+      },
+      {
+        "ID": 1,
+        "signer": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6",
+        "power": 25000,
+        "accum": -91939
+      },
+      {
+        "ID": 5,
+        "signer": "0x6dc2dd54f24979ec26212794c71afefed722280c",
+        "power": 25350,
+        "accum": -7227
+      },
+      {
+        "ID": 7,
+        "signer": "0x915a2284d28bd93de7d6f31173b981204bb666e6",
+        "power": 25227,
+        "accum": -38594
+      }
+    ],
+    "proposer": {
+      "ID": 1,
+      "signer": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6",
+      "power": 25000,
+      "accum": -91939
+    }
+  },
+  "selected_producers": [
+    {
+      "ID": 6,
+      "signer": "0x09207a6efee346cb3e4a54ac18523e3715d38b3f",
+      "power": 55000,
+      "accum": 0
+    },
+    {
+      "ID": 4,
+      "signer": "0x4ad84f7014b7b44f723f284a85b1662337971439",
+      "power": 35000,
+      "accum": 0
+    },
+    {
+      "ID": 1,
+      "signer": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6",
+      "power": 25000,
+      "accum": 0
+    },
+    {
+      "ID": 5,
+      "signer": "0x6dc2dd54f24979ec26212794c71afefed722280c",
+      "power": 25350,
+      "accum": 0
+    },
+    {
+      "ID": 7,
+      "signer": "0x915a2284d28bd93de7d6f31173b981204bb666e6",
+      "power": 25227,
+      "accum": 0
+    }
+  ],
+  "bor_chain_id": "80002"
+}

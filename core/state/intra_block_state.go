@@ -1,37 +1,41 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package state provides a caching layer atop the Ethereum state trie.
 package state
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
@@ -43,6 +47,8 @@ type revision struct {
 
 // SystemAddress - sender address for internal state updates.
 var SystemAddress = libcommon.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
+
+var EmptyAddress = libcommon.Address{}
 
 // BalanceIncrease represents the increase of balance of an account that did not require
 // reading the account first
@@ -74,10 +80,9 @@ type IntraBlockState struct {
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
-	thash, bhash libcommon.Hash
-	txIndex      int
-	logs         map[libcommon.Hash][]*types.Log
-	logSize      uint
+	txIndex int
+	logs    []types.Logs
+	logSize uint
 
 	// Per-transaction access list
 	accessList *accessList
@@ -91,6 +96,7 @@ type IntraBlockState struct {
 	validRevisions []revision
 	nextRevisionID int
 	trace          bool
+	tracingHooks   *tracing.Hooks
 	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 }
 
@@ -101,13 +107,18 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjects:      map[libcommon.Address]*stateObject{},
 		stateObjectsDirty: map[libcommon.Address]struct{}{},
 		nilAccounts:       map[libcommon.Address]struct{}{},
-		logs:              map[libcommon.Hash][]*types.Log{},
+		logs:              []types.Logs{},
 		journal:           newJournal(),
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
+		txIndex:           0,
 		//trace:             true,
 	}
+}
+
+func (sdb *IntraBlockState) SetHooks(hooks *tracing.Hooks) {
+	sdb.tracingHooks = hooks
 }
 
 func (sdb *IntraBlockState) SetTrace(trace bool) {
@@ -115,12 +126,14 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 }
 
 // setErrorUnsafe sets error but should be called in medhods that already have locks
+// Deprecated: The IBS api now returns errors directly
 func (sdb *IntraBlockState) setErrorUnsafe(err error) {
 	if sdb.savedErr == nil {
 		sdb.savedErr = err
 	}
 }
 
+// Deprecated: The IBS api now returns errors directly
 func (sdb *IntraBlockState) Error() error {
 	return sdb.savedErr
 }
@@ -149,31 +162,52 @@ func (sdb *IntraBlockState) Reset() {
 	//clear(sdb.stateObjects)
 	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
 	//clear(sdb.stateObjectsDirty)
-	sdb.logs = make(map[libcommon.Hash][]*types.Log)
+	clear(sdb.logs) // free pointers
+	sdb.logs = sdb.logs[:0]
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	//clear(sdb.balanceInc)
-	sdb.thash = libcommon.Hash{}
-	sdb.bhash = libcommon.Hash{}
 	sdb.txIndex = 0
 	sdb.logSize = 0
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
-	sdb.journal.append(addLogChange{txhash: sdb.thash})
-	log2.TxHash = sdb.thash
-	log2.BlockHash = sdb.bhash
+	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
 	log2.TxIndex = uint(sdb.txIndex)
 	log2.Index = sdb.logSize
-	sdb.logs[sdb.thash] = append(sdb.logs[sdb.thash], log2)
+	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
+		sdb.tracingHooks.OnLog(log2)
+	}
 	sdb.logSize++
+	for len(sdb.logs) <= sdb.txIndex {
+		sdb.logs = append(sdb.logs, nil)
+	}
+	sdb.logs[sdb.txIndex] = append(sdb.logs[sdb.txIndex], log2)
 }
 
-func (sdb *IntraBlockState) GetLogs(hash libcommon.Hash) []*types.Log {
-	return sdb.logs[hash]
+func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash libcommon.Hash, blockNumber uint64, blockHash libcommon.Hash) types.Logs {
+	if txIndex >= len(sdb.logs) {
+		return nil
+	}
+	logs := sdb.logs[txIndex]
+	for _, l := range logs {
+		l.TxHash = txnHash
+		l.BlockNumber = blockNumber
+		l.BlockHash = blockHash
+	}
+	return logs
 }
 
-func (sdb *IntraBlockState) Logs() []*types.Log {
-	var logs []*types.Log
+// GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
+// Example: if you need filter logs and only then set `txn.Hash()` for filtered logs - then no reason to calc for all transactions.
+func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
+	if txIndex >= len(sdb.logs) {
+		return nil
+	}
+	return sdb.logs[txIndex]
+}
+
+func (sdb *IntraBlockState) Logs() types.Logs {
+	var logs types.Logs
 	for _, lgs := range sdb.logs {
 		logs = append(logs, lgs...)
 	}
@@ -191,124 +225,198 @@ func (sdb *IntraBlockState) AddRefund(gas uint64) {
 func (sdb *IntraBlockState) SubRefund(gas uint64) {
 	sdb.journal.append(refundChange{prev: sdb.refund})
 	if gas > sdb.refund {
-		sdb.setErrorUnsafe(fmt.Errorf("refund counter below zero"))
+		sdb.setErrorUnsafe(errors.New("refund counter below zero"))
 	}
 	sdb.refund -= gas
 }
 
 // Exist reports whether the given account address exists in the state.
 // Notably this also returns true for suicided accounts.
-func (sdb *IntraBlockState) Exist(addr libcommon.Address) bool {
-	s := sdb.getStateObject(addr)
-	return s != nil && !s.deleted
+func (sdb *IntraBlockState) Exist(addr libcommon.Address) (bool, error) {
+	s, err := sdb.getStateObject(addr)
+	if err != nil {
+		return false, err
+	}
+	return s != nil && !s.deleted, err
 }
 
 // Empty returns whether the state object is either non-existent
 // or empty according to the EIP161 specification (balance = nonce = code = 0)
-func (sdb *IntraBlockState) Empty(addr libcommon.Address) bool {
-	so := sdb.getStateObject(addr)
-	return so == nil || so.deleted || so.empty()
+func (sdb *IntraBlockState) Empty(addr libcommon.Address) (bool, error) {
+	so, err := sdb.getStateObject(addr)
+	if err != nil {
+		return false, err
+	}
+	return so == nil || so.deleted || so.empty(), nil
 }
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetBalance(addr libcommon.Address) *uint256.Int {
-	stateObject := sdb.getStateObject(addr)
-	if stateObject != nil && !stateObject.deleted {
-		return stateObject.Balance()
+func (sdb *IntraBlockState) GetBalance(addr libcommon.Address) (*uint256.Int, error) {
+	stateObject, err := sdb.getStateObject(addr)
+	if err != nil {
+		return nil, err
 	}
-	return u256.Num0
+	if stateObject != nil && !stateObject.deleted {
+		return stateObject.Balance(), nil
+	}
+	return u256.Num0, nil
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetNonce(addr libcommon.Address) uint64 {
-	stateObject := sdb.getStateObject(addr)
-	if stateObject != nil && !stateObject.deleted {
-		return stateObject.Nonce()
+func (sdb *IntraBlockState) GetNonce(addr libcommon.Address) (uint64, error) {
+	stateObject, err := sdb.getStateObject(addr)
+	if err != nil {
+		return 0, err
 	}
-
-	return 0
+	if stateObject != nil && !stateObject.deleted {
+		return stateObject.Nonce(), nil
+	}
+	return 0, nil
 }
 
 // TxIndex returns the current transaction index set by Prepare.
-func (sdb *IntraBlockState) TxIndex() int {
+func (sdb *IntraBlockState) TxnIndex() int {
 	return sdb.txIndex
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetCode(addr libcommon.Address) []byte {
-	stateObject := sdb.getStateObject(addr)
+func (sdb *IntraBlockState) GetCode(addr libcommon.Address) ([]byte, error) {
+	stateObject, err := sdb.getStateObject(addr)
+	if err != nil {
+		return nil, err
+	}
 	if stateObject != nil && !stateObject.deleted {
 		if sdb.trace {
 			fmt.Printf("GetCode %x, returned %d\n", addr, len(stateObject.Code()))
 		}
-		return stateObject.Code()
+		return stateObject.Code(), nil
 	}
 	if sdb.trace {
 		fmt.Printf("GetCode %x, returned nil\n", addr)
 	}
-	return nil
+	return nil, nil
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) int {
-	stateObject := sdb.getStateObject(addr)
+func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) (int, error) {
+	stateObject, err := sdb.getStateObject(addr)
+	if err != nil {
+		return 0, err
+	}
 	if stateObject == nil || stateObject.deleted {
-		return 0
+		return 0, nil
 	}
 	if stateObject.code != nil {
-		return len(stateObject.code)
+		return len(stateObject.code), nil
 	}
-	l, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation, stateObject.data.CodeHash)
+	if stateObject.data.CodeHash == emptyCodeHashH {
+		return 0, nil
+	}
+	l, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation)
 	if err != nil {
 		sdb.setErrorUnsafe(err)
+		return l, err
 	}
-	return l
+	return l, err
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) libcommon.Hash {
-	stateObject := sdb.getStateObject(addr)
-	if stateObject == nil || stateObject.deleted {
-		return libcommon.Hash{}
+func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) (libcommon.Hash, error) {
+	stateObject, err := sdb.getStateObject(addr)
+	if err != nil {
+		return libcommon.Hash{}, err
 	}
-	return libcommon.BytesToHash(stateObject.CodeHash())
+	if stateObject == nil || stateObject.deleted {
+		return libcommon.Hash{}, nil
+	}
+	return stateObject.data.CodeHash, nil
+}
+
+func (sdb *IntraBlockState) ResolveCodeHash(addr libcommon.Address) (libcommon.Hash, error) {
+	// eip-7702
+	dd, ok, err := sdb.GetDelegatedDesignation(addr)
+
+	if ok {
+		return sdb.GetCodeHash(dd)
+	}
+
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+
+	return sdb.GetCodeHash(addr)
+}
+
+func (sdb *IntraBlockState) ResolveCode(addr libcommon.Address) ([]byte, error) {
+	// eip-7702
+	dd, ok, err := sdb.GetDelegatedDesignation(addr)
+	if ok {
+		return sdb.GetCode(dd)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return sdb.GetCode(addr)
+}
+
+func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (libcommon.Address, bool, error) {
+	// eip-7702
+	code, err := sdb.GetCode(addr)
+	if err != nil {
+		return EmptyAddress, false, err
+	}
+	if delegation, ok := types.ParseDelegation(code); ok {
+		return delegation, true, nil
+	}
+	return EmptyAddress, false, nil
 }
 
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) {
-	stateObject := sdb.getStateObject(addr)
+func (sdb *IntraBlockState) GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) error {
+	stateObject, err := sdb.getStateObject(addr)
+	if err != nil {
+		return err
+	}
 	if stateObject != nil && !stateObject.deleted {
 		stateObject.GetState(key, value)
 	} else {
 		value.Clear()
 	}
+	return nil
 }
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetCommittedState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) {
-	stateObject := sdb.getStateObject(addr)
+func (sdb *IntraBlockState) GetCommittedState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) error {
+	stateObject, err := sdb.getStateObject(addr)
+	if err != nil {
+		return err
+	}
 	if stateObject != nil && !stateObject.deleted {
 		stateObject.GetCommittedState(key, value)
 	} else {
 		value.Clear()
 	}
+	return nil
 }
 
-func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) bool {
-	stateObject := sdb.getStateObject(addr)
+func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) (bool, error) {
+	stateObject, err := sdb.getStateObject(addr)
+	if err != nil {
+		return false, err
+	}
 	if stateObject == nil {
-		return false
+		return false, nil
 	}
 	if stateObject.deleted {
-		return false
+		return false, nil
 	}
 	if stateObject.createdContract {
-		return false
+		return false, nil
 	}
-	return stateObject.selfdestructed
+	return stateObject.selfdestructed, nil
 }
 
 /*
@@ -317,10 +425,11 @@ func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) bool {
 
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) {
+func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
+
 	// If this account has not been read, add to the balance increment map
 	_, needAccount := sdb.stateObjects[addr]
 	if !needAccount && addr == ripemd && amount.IsZero() {
@@ -331,89 +440,139 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 			account:  &addr,
 			increase: *amount,
 		})
+
 		bi, ok := sdb.balanceInc[addr]
 		if !ok {
 			bi = &BalanceIncrease{}
 			sdb.balanceInc[addr] = bi
 		}
+
+		if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
+			// TODO: discuss if we should ignore error
+			prev := new(uint256.Int)
+			account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)
+			if account != nil {
+				prev.Add(&account.Balance, &bi.increase)
+			} else {
+				prev.Add(prev, &bi.increase)
+			}
+
+			sdb.tracingHooks.OnBalanceChange(addr, prev, new(uint256.Int).Add(prev, amount), reason)
+		}
+
 		bi.increase.Add(&bi.increase, amount)
 		bi.count++
-		return
+		return nil
 	}
 
-	stateObject := sdb.GetOrNewStateObject(addr)
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
 	stateObject.AddBalance(amount, reason)
+	return nil
 }
 
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) {
+func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
 	if sdb.trace {
 		fmt.Printf("SubBalance %x, %d\n", addr, amount)
 	}
 
-	stateObject := sdb.GetOrNewStateObject(addr)
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
 	if stateObject != nil {
 		stateObject.SubBalance(amount, reason)
 	}
+	return nil
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) {
-	stateObject := sdb.GetOrNewStateObject(addr)
+func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
 	if stateObject != nil {
 		stateObject.SetBalance(amount, reason)
 	}
+	return nil
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetNonce(addr libcommon.Address, nonce uint64) {
-	stateObject := sdb.GetOrNewStateObject(addr)
+func (sdb *IntraBlockState) SetNonce(addr libcommon.Address, nonce uint64) error {
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
 	if stateObject != nil {
 		stateObject.SetNonce(nonce)
 	}
+	return nil
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) {
-	stateObject := sdb.GetOrNewStateObject(addr)
+func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
 	if stateObject != nil {
 		stateObject.SetCode(crypto.Keccak256Hash(code), code)
 	}
+	return nil
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetState(addr libcommon.Address, key *libcommon.Hash, value uint256.Int) {
-	stateObject := sdb.GetOrNewStateObject(addr)
+func (sdb *IntraBlockState) SetState(addr libcommon.Address, key *libcommon.Hash, value uint256.Int) error {
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
 	if stateObject != nil {
 		stateObject.SetState(key, value)
 	}
+	return nil
 }
 
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
-func (sdb *IntraBlockState) SetStorage(addr libcommon.Address, storage Storage) {
-	stateObject := sdb.GetOrNewStateObject(addr)
+func (sdb *IntraBlockState) SetStorage(addr libcommon.Address, storage Storage) error {
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
 	if stateObject != nil {
 		stateObject.SetStorage(storage)
 	}
+	return nil
 }
 
 // SetIncarnation sets incarnation for account if account exists
-func (sdb *IntraBlockState) SetIncarnation(addr libcommon.Address, incarnation uint64) {
-	stateObject := sdb.GetOrNewStateObject(addr)
+func (sdb *IntraBlockState) SetIncarnation(addr libcommon.Address, incarnation uint64) error {
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
 	if stateObject != nil {
 		stateObject.setIncarnation(incarnation)
 	}
+	return nil
 }
 
-func (sdb *IntraBlockState) GetIncarnation(addr libcommon.Address) uint64 {
-	stateObject := sdb.getStateObject(addr)
-	if stateObject != nil {
-		return stateObject.data.Incarnation
+func (sdb *IntraBlockState) GetIncarnation(addr libcommon.Address) (uint64, error) {
+	stateObject, err := sdb.getStateObject(addr)
+	if err != nil {
+		return 0, err
 	}
-	return 0
+	if stateObject != nil {
+		return stateObject.data.Incarnation, nil
+	}
+	return 0, nil
 }
 
 // Selfdestruct marks the given account as suicided.
@@ -421,32 +580,51 @@ func (sdb *IntraBlockState) GetIncarnation(addr libcommon.Address) uint64 {
 //
 // The account's state object is still available until the state is committed,
 // getStateObject will return a non-nil account after Suicide.
-func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) bool {
-	stateObject := sdb.getStateObject(addr)
-	if stateObject == nil || stateObject.deleted {
-		return false
+func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) (bool, error) {
+	stateObject, err := sdb.getStateObject(addr)
+	if err != nil {
+		return false, err
 	}
+	if stateObject == nil || stateObject.deleted {
+		return false, nil
+	}
+
+	prevBalance := *stateObject.Balance()
 	sdb.journal.append(selfdestructChange{
 		account:     &addr,
 		prev:        stateObject.selfdestructed,
-		prevbalance: *stateObject.Balance(),
+		prevbalance: prevBalance,
 	})
+
+	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
+		sdb.tracingHooks.OnBalanceChange(addr, &prevBalance, uint256.NewInt(0), tracing.BalanceDecreaseSelfdestruct)
+	}
+
 	stateObject.markSelfdestructed()
 	stateObject.createdContract = false
 	stateObject.data.Balance.Clear()
 
-	return true
+	return true, nil
 }
 
-func (sdb *IntraBlockState) Selfdestruct6780(addr libcommon.Address) {
-	stateObject := sdb.getStateObject(addr)
+func (sdb *IntraBlockState) Selfdestruct6780(addr libcommon.Address) error {
+	stateObject, err := sdb.getStateObject(addr)
+	if err != nil {
+		return err
+	}
 	if stateObject == nil {
-		return
+		return nil
 	}
-
 	if stateObject.newlyCreated {
-		sdb.Selfdestruct(addr)
+		code, err := sdb.GetCode(addr)
+		if err != nil {
+			return err
+		}
+		if _, ok := types.ParseDelegation(code); !ok {
+			sdb.Selfdestruct(addr)
+		}
 	}
+	return nil
 }
 
 // SetTransientState sets transient storage for a given account. It
@@ -478,36 +656,36 @@ func (sdb *IntraBlockState) GetTransientState(addr libcommon.Address, key libcom
 	return sdb.transientStorage.Get(addr, key)
 }
 
-func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject *stateObject) {
+func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject *stateObject, err error) {
 	// Prefer 'live' objects.
 	if obj := sdb.stateObjects[addr]; obj != nil {
-		return obj
+		return obj, nil
 	}
 
 	// Load the object from the database.
 	if _, ok := sdb.nilAccounts[addr]; ok {
 		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
-			return sdb.createObject(addr, nil)
+			return sdb.createObject(addr, nil), nil
 		}
-		return nil
+		return nil, nil
 	}
 	account, err := sdb.stateReader.ReadAccountData(addr)
 	if err != nil {
 		sdb.setErrorUnsafe(err)
-		return nil
+		return nil, err
 	}
 	if account == nil {
 		sdb.nilAccounts[addr] = struct{}{}
 		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
-			return sdb.createObject(addr, nil)
+			return sdb.createObject(addr, nil), nil
 		}
-		return nil
+		return nil, nil
 	}
 
 	// Insert into the live set.
 	obj := newObject(sdb, addr, account, account)
 	sdb.setStateObject(addr, obj)
-	return obj
+	return obj, nil
 }
 
 func (sdb *IntraBlockState) setStateObject(addr libcommon.Address, object *stateObject) {
@@ -520,12 +698,15 @@ func (sdb *IntraBlockState) setStateObject(addr libcommon.Address, object *state
 }
 
 // Retrieve a state object or create a new state object if nil.
-func (sdb *IntraBlockState) GetOrNewStateObject(addr libcommon.Address) *stateObject {
-	stateObject := sdb.getStateObject(addr)
+func (sdb *IntraBlockState) GetOrNewStateObject(addr libcommon.Address) (*stateObject, error) {
+	stateObject, err := sdb.getStateObject(addr)
+	if err != nil {
+		return nil, err
+	}
 	if stateObject == nil || stateObject.deleted {
 		stateObject = sdb.createObject(addr, stateObject /* previous */)
 	}
-	return stateObject
+	return stateObject, nil
 }
 
 // createObject creates a new state object. If there is an existing account with
@@ -561,9 +742,12 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 //  2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
-func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreation bool) {
+func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreation bool) error {
 	var prevInc uint64
-	previous := sdb.getStateObject(addr)
+	previous, err := sdb.getStateObject(addr)
+	if err != nil {
+		return err
+	}
 	if previous != nil && previous.selfdestructed {
 		prevInc = previous.data.Incarnation
 	} else {
@@ -571,6 +755,7 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 			prevInc = inc
 		} else {
 			sdb.savedErr = err
+			return err
 		}
 	}
 	if previous != nil && prevInc < previous.data.PrevIncarnation {
@@ -590,6 +775,7 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 	} else {
 		newObj.selfdestructed = false
 	}
+	return nil
 }
 
 // Snapshot returns an identifier for the current revision of the state.
@@ -621,9 +807,12 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr libcommon.Address, stateObject *stateObject, isDirty bool) error {
+func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr libcommon.Address, stateObject *stateObject, isDirty bool, tracingHooks *tracing.Hooks) error {
 	emptyRemoval := EIP161Enabled && stateObject.empty() && (!isAura || addr != SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
+		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !stateObject.Balance().IsZero() && stateObject.selfdestructed {
+			tracingHooks.OnBalanceChange(stateObject.address, stateObject.Balance(), uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)
+		}
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 			return err
 		}
@@ -660,7 +849,7 @@ func printAccount(EIP161Enabled bool, addr libcommon.Address, stateObject *state
 	if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
 		// Write any contract code associated with the state object
 		if stateObject.code != nil && stateObject.dirtyCode {
-			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.CodeHash())
+			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.data.CodeHash)
 		}
 		if stateObject.createdContract {
 			fmt.Printf("CreateContract: %x\n", addr)
@@ -685,8 +874,8 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 	for addr := range sdb.journal.dirties {
 		so, exist := sdb.stateObjects[addr]
 		if !exist {
-			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
-			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
+			// ripeMD is 'touched' at block 1714175, in txn 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
+			// That txn goes out of gas, and although the notion of 'touched' does not exist there, the
 			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
 			// it will persist in the journal even though the journal is reverted. In this special circumstance,
 			// it may exist in `sdb.journal.dirties` but not in `sdb.stateObjects`.
@@ -695,7 +884,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 		}
 
 		//fmt.Printf("FinalizeTx: %x, balance=%d %T\n", addr, so.data.Balance.Uint64(), stateWriter)
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.tracingHooks); err != nil {
 			return err
 		}
 		so.newlyCreated = false
@@ -710,8 +899,8 @@ func (sdb *IntraBlockState) SoftFinalise() {
 	for addr := range sdb.journal.dirties {
 		_, exist := sdb.stateObjects[addr]
 		if !exist {
-			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
-			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
+			// ripeMD is 'touched' at block 1714175, in txn 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
+			// That txn goes out of gas, and although the notion of 'touched' does not exist there, the
 			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
 			// it will persist in the journal even though the journal is reverted. In this special circumstance,
 			// it may exist in `sdb.journal.dirties` but not in `sdb.stateObjects`.
@@ -751,7 +940,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.tracingHooks); err != nil {
 			return err
 		}
 	}
@@ -769,12 +958,18 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules) {
 	}
 }
 
-// SetTxContext sets the current transaction hash and index and block hash which are
+// SetTxContext sets the current transaction index which
 // used when the EVM emits new state logs. It should be invoked before
 // transaction execution.
-func (sdb *IntraBlockState) SetTxContext(thash, bhash libcommon.Hash, ti int) {
-	sdb.thash = thash
-	sdb.bhash = bhash
+func (sdb *IntraBlockState) SetTxContext(ti int) {
+	if len(sdb.logs) > 0 && ti == 0 {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs)=%d, ti=%d", len(sdb.logs), ti)
+		panic(err)
+	}
+	if sdb.txIndex >= 0 && sdb.txIndex > ti {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. sdb.txIndex=%d, ti=%d", sdb.txIndex, ti)
+		panic(err)
+	}
 	sdb.txIndex = ti
 }
 
@@ -792,18 +987,21 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // - Add sender to access list (EIP-2929)
 // - Add destination to access list (EIP-2929)
 // - Add precompiles to access list (EIP-2929)
-// - Add the contents of the optional tx access list (EIP-2930)
+// - Add the contents of the optional txn access list (EIP-2930)
 //
 // Shanghai fork:
 // - Add coinbase to access list (EIP-3651)
 //
 // Cancun fork:
 // - Reset transient storage (EIP-1153)
+//
+// Prague fork:
+// - Add authorities to access list (EIP-7702)
+// - Add delegated designation (if it exists for dst) to access list (EIP-7702)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
-	precompiles []libcommon.Address, list types2.AccessList,
-) {
+	precompiles []libcommon.Address, list types.AccessList, authorities []libcommon.Address) error {
 	if sdb.trace {
-		fmt.Printf("ibs.Prepare %x, %x, %x, %x, %v, %v\n", sender, coinbase, dst, precompiles, list, rules)
+		fmt.Printf("ibs.Prepare %x, %x, %x, %x, %v, %v, %v\n", sender, coinbase, dst, precompiles, list, rules, authorities)
 	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
@@ -830,8 +1028,24 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 			al.AddAddress(coinbase)
 		}
 	}
+	if rules.IsPrague {
+		for _, addr := range authorities {
+			sdb.AddAddressToAccessList(addr)
+		}
+
+		if dst != nil {
+			dd, ok, err := sdb.GetDelegatedDesignation(*dst)
+			if err != nil {
+				return err
+			}
+			if ok {
+				sdb.AddAddressToAccessList(dd)
+			}
+		}
+	}
 	// Reset transient storage at the beginning of transaction execution
 	sdb.transientStorage = newTransientStorage()
+	return nil
 }
 
 // AddAddressToAccessList adds the given address to the access list

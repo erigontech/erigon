@@ -1,18 +1,21 @@
 // Copyright 2020 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package difficulty
 
@@ -23,10 +26,10 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/core/types"
 )
 
 type fuzzer struct {
@@ -42,11 +45,11 @@ func (f *fuzzer) read(size int) []byte {
 	return out
 }
 
-func (f *fuzzer) readSlice(min, max int) []byte {
+func (f *fuzzer) readSlice(_min, _max int) []byte {
 	var a uint16
 	//nolint:errcheck
 	binary.Read(f.input, binary.LittleEndian, &a)
-	size := min + int(a)%(max-min)
+	size := _min + int(a)%(_max-_min)
 	out := make([]byte, size)
 	if _, err := f.input.Read(out); err != nil {
 		f.exhausted = true
@@ -54,15 +57,15 @@ func (f *fuzzer) readSlice(min, max int) []byte {
 	return out
 }
 
-func (f *fuzzer) readUint64(min, max uint64) uint64 {
-	if min == max {
-		return min
+func (f *fuzzer) readUint64(_min, _max uint64) uint64 {
+	if _min == _max {
+		return _min
 	}
 	var a uint64
 	if err := binary.Read(f.input, binary.LittleEndian, &a); err != nil {
 		f.exhausted = true
 	}
-	a = min + a%(max-min)
+	a = _min + a%(_max-_min)
 	return a
 }
 func (f *fuzzer) readBool() bool {

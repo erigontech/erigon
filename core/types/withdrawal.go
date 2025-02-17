@@ -1,18 +1,21 @@
 // Copyright 2022 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -20,13 +23,26 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types/clonable"
 )
+
+type encodingBuf [32]byte
+
+var pooledBuf = sync.Pool{
+	New: func() interface{} { return new(encodingBuf) },
+}
+
+func newEncodingBuf() *encodingBuf {
+	b := pooledBuf.Get().(*encodingBuf)
+	*b = encodingBuf([32]byte{}) // reset, do we need to?
+	return b
+}
 
 //go:generate gencodec -type Withdrawal -field-override withdrawalMarshaling -out gen_withdrawal_json.go
 
@@ -51,10 +67,13 @@ func (obj *Withdrawal) EncodingSize() int {
 }
 
 func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
+
 	encodingSize := obj.EncodingSize()
 
-	var b [33]byte
-	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+
+	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 
@@ -69,7 +88,7 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(obj.Address.Bytes()); err != nil {
+	if _, err := w.Write(obj.Address[:]); err != nil {
 		return err
 	}
 

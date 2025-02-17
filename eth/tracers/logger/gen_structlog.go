@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/core/vm"
 )
 
 var _ = (*structLogMarshaling)(nil)
@@ -21,10 +21,10 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 		Op            vm.OpCode                   `json:"op"`
 		Gas           math.HexOrDecimal64         `json:"gas"`
 		GasCost       math.HexOrDecimal64         `json:"gasCost"`
-		Memory        hexutility.Bytes            `json:"memory"`
+		Memory        hexutil.Bytes               `json:"memory"`
 		MemorySize    int                         `json:"memSize"`
 		Stack         []*math.HexOrDecimal256     `json:"stack"`
-		ReturnData    hexutility.Bytes            `json:"returnData"`
+		ReturnData    hexutil.Bytes               `json:"returnData"`
 		Storage       map[common.Hash]common.Hash `json:"-"`
 		Depth         int                         `json:"depth"`
 		RefundCounter uint64                      `json:"refund"`
@@ -62,10 +62,10 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 		Op            *vm.OpCode                  `json:"op"`
 		Gas           *math.HexOrDecimal64        `json:"gas"`
 		GasCost       *math.HexOrDecimal64        `json:"gasCost"`
-		Memory        *hexutility.Bytes           `json:"memory"`
+		Memory        *hexutil.Bytes              `json:"memory"`
 		MemorySize    *int                        `json:"memSize"`
 		Stack         []*math.HexOrDecimal256     `json:"stack"`
-		ReturnData    *hexutility.Bytes           `json:"returnData"`
+		ReturnData    *hexutil.Bytes              `json:"returnData"`
 		Storage       map[common.Hash]common.Hash `json:"-"`
 		Depth         *int                        `json:"depth"`
 		RefundCounter *uint64                     `json:"refund"`

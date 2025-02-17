@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -6,35 +22,40 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/rand"
 	"os"
 	"path"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+
+	"github.com/erigontech/erigon-lib/commitment"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
-
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/erigon-lib/types"
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
-	db, agg := testDbAndAggregatorv3(t, 1000)
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -42,13 +63,14 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			rwTx.Rollback()
 		}
 	}()
+
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := uint64(100000)
+	txs := uint64(1000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	var (
@@ -71,8 +93,13 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
 		require.EqualValues(t, length.Hash, n)
-
-		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(0), nil, 0)
+		acc := accounts.Account{
+			Nonce:       1,
+			Balance:     *uint256.NewInt(0),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
 		require.NoError(t, err)
 
@@ -82,14 +109,14 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		var v [8]byte
 		binary.BigEndian.PutUint64(v[:], txNum)
 		if txNum%135 == 0 {
-			pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey2, nil, rwTx)
+			pv, step, err := domains.GetLatest(kv.CommitmentDomain, commKey2)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.CommitmentDomain, commKey2, nil, v[:], pv, step)
 			require.NoError(t, err)
 			otherMaxWrite = txNum
 		} else {
-			pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey1, nil, rwTx)
+			pv, step, err := domains.GetLatest(kv.CommitmentDomain, commKey1)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.CommitmentDomain, commKey1, nil, v[:], pv, step)
@@ -134,13 +161,13 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	dc := agg.BeginFilesRo()
 
-	v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, commKey1, nil, roTx)
+	v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, commKey1, roTx)
 	require.NoError(t, err)
 	require.Truef(t, ex, "key %x not found", commKey1)
 
 	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 
-	v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, nil, roTx)
+	v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, roTx)
 	require.NoError(t, err)
 	require.Truef(t, ex, "key %x not found", commKey2)
 	dc.Close()
@@ -149,7 +176,8 @@ func TestAggregatorV3_Merge(t *testing.T) {
 }
 
 func TestAggregatorV3_MergeValTransform(t *testing.T) {
-	db, agg := testDbAndAggregatorv3(t, 1000)
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -163,7 +191,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := uint64(100000)
+	txs := uint64(1000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	agg.commitmentValuesTransform = true
@@ -185,8 +213,13 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
 		require.EqualValues(t, length.Hash, n)
-
-		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(txNum*1e6), nil, 0)
+		acc := accounts.Account{
+			Nonce:       1,
+			Balance:     *uint256.NewInt(txNum * 1e6),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
 		require.NoError(t, err)
 
@@ -238,6 +271,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 }
 
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
+	t.Parallel()
 	//t.Skip()
 	t.Run("BPlus", func(t *testing.T) {
 		rc := runCfg{
@@ -273,10 +307,6 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	logger := log.New()
 	aggStep := rc.aggStep
 	db, agg := testDbAndAggregatorv3(t, aggStep)
-	//if rc.useBplus {
-	//	UseBpsTree = true
-	//	defer func() { UseBpsTree = false }()
-	//}
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -293,7 +323,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	defer domains.Close()
 
 	var latestCommitTxNum uint64
-	rnd := rand.New(rand.NewSource(time.Now().Unix()))
+	rnd := newRnd(0)
 
 	someKey := []byte("somekey")
 	txs := (aggStep / 2) * 19
@@ -315,8 +345,13 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		require.NoError(t, err)
 		require.EqualValues(t, length.Hash, n)
 		//keys[txNum-1] = append(addr, loc...)
-
-		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(rnd.Uint64()), nil, 0)
+		acc := accounts.Account{
+			Nonce:       1,
+			Balance:     *uint256.NewInt(rnd.Uint64()),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
 		require.NoError(t, err)
 
@@ -341,15 +376,8 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 
 	agg.Close()
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	canonicalsReader := NewMockCanonicalsReader(ctrl)
-	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(iter.EmptyU64, nil).
-		AnyTimes()
-
 	// Start another aggregator on same datadir
-	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, canonicalsReader, logger)
+	anotherAgg, err := NewAggregator2(context.Background(), agg.dirs, aggStep, db, logger)
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 
@@ -387,7 +415,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	defer roTx.Rollback()
 
 	dc := anotherAgg.BeginFilesRo()
-	v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, someKey, nil, roTx)
+	v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, someKey, roTx)
 	require.NoError(t, err)
 	require.True(t, ex)
 	dc.Close()
@@ -395,7 +423,30 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
+func TestNewBtIndex(t *testing.T) {
+	t.Parallel()
+	keyCount := 10000
+	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), seg.CompressNone)
+
+	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, seg.CompressNone, false)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+	require.NotNil(t, kv)
+	require.NotNil(t, bt)
+	require.True(t, len(bt.bplus.mx) >= keyCount/int(DefaultBtreeM))
+
+	for i := 1; i < len(bt.bplus.mx); i++ {
+		require.NotZero(t, bt.bplus.mx[i].di)
+		require.NotZero(t, bt.bplus.mx[i].off)
+		require.NotEmpty(t, bt.bplus.mx[i].key)
+	}
+}
+
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
+	t.Parallel()
 	aggStep := uint64(10)
 	db, agg := testDbAndAggregatorv3(t, aggStep)
 
@@ -417,7 +468,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	maxTx := aggStep * 5
 	t.Logf("step=%d tx_count=%d\n", aggStep, maxTx)
 
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 
 	generateSharedDomainsUpdates(t, domains, maxTx, rnd, 20, 10, aggStep/2)
 
@@ -436,15 +487,15 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	)
 	maxInt := math.MaxInt
 	{
-		it, err := ac.DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, maxInt)
+		it, err := ac.RangeLatest(tx, kv.AccountsDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		accountsRange = extractKVErrIterator(t, it)
 
-		it, err = ac.DomainRangeLatest(tx, kv.StorageDomain, nil, nil, maxInt)
+		it, err = ac.RangeLatest(tx, kv.StorageDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		storageRange = extractKVErrIterator(t, it)
 
-		it, err = ac.DomainRangeLatest(tx, kv.CodeDomain, nil, nil, maxInt)
+		it, err = ac.RangeLatest(tx, kv.CodeDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		codeRange = extractKVErrIterator(t, it)
 
@@ -462,6 +513,9 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
+	err = agg.BuildFiles(maxTx)
+	require.NoError(t, err)
+
 	buildTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -469,10 +523,6 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 			buildTx.Rollback()
 		}
 	}()
-
-	err = agg.BuildFiles(maxTx)
-	require.NoError(t, err)
-
 	ac = agg.BeginFilesRo()
 	for i := 0; i < 10; i++ {
 		_, err = ac.PruneSmallBatches(context.Background(), time.Second*3, buildTx)
@@ -500,25 +550,25 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	)
 
 	{
-		it, err := ac.DomainRangeLatest(afterTx, kv.AccountsDomain, nil, nil, maxInt)
+		it, err := ac.RangeLatest(afterTx, kv.AccountsDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		accountsRangeAfter = extractKVErrIterator(t, it)
 
-		it, err = ac.DomainRangeLatest(afterTx, kv.StorageDomain, nil, nil, maxInt)
+		it, err = ac.RangeLatest(afterTx, kv.StorageDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		storageRangeAfter = extractKVErrIterator(t, it)
 
-		it, err = ac.DomainRangeLatest(afterTx, kv.CodeDomain, nil, nil, maxInt)
+		it, err = ac.RangeLatest(afterTx, kv.CodeDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		codeRangeAfter = extractKVErrIterator(t, it)
 
-		its, err := ac.d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		its, err := ac.d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
 		accountHistRangeAfter = extractKVSErrIterator(t, its)
-		its, err = ac.d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		its, err = ac.d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
 		codeHistRangeAfter = extractKVSErrIterator(t, its)
-		its, err = ac.d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		its, err = ac.d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
 		storageHistRangeAfter = extractKVSErrIterator(t, its)
 	}
@@ -563,7 +613,7 @@ type vs struct {
 	s uint64
 }
 
-func extractKVSErrIterator(t *testing.T, it iter.KVS) map[string]vs {
+func extractKVSErrIterator(t *testing.T, it stream.KVS) map[string]vs {
 	t.Helper()
 
 	accounts := make(map[string]vs)
@@ -576,7 +626,7 @@ func extractKVSErrIterator(t *testing.T, it iter.KVS) map[string]vs {
 	return accounts
 }
 
-func extractKVErrIterator(t *testing.T, it iter.KV) map[string][]byte {
+func extractKVErrIterator(t *testing.T, it stream.KV) map[string][]byte {
 	t.Helper()
 
 	accounts := make(map[string][]byte)
@@ -598,7 +648,7 @@ func fillRawdbTxNumsIndexForSharedDomains(t *testing.T, rwTx kv.RwTx, maxTx, com
 	}
 }
 
-func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum uint64, rnd *rand.Rand, keyMaxLen, keysCount, commitEvery uint64) map[string]struct{} {
+func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum uint64, rnd *rndGen, keyMaxLen, keysCount, commitEvery uint64) map[string]struct{} {
 	t.Helper()
 	usedKeys := make(map[string]struct{}, keysCount*maxTxNum)
 	for txNum := uint64(1); txNum <= maxTxNum; txNum++ {
@@ -614,14 +664,14 @@ func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum
 	return usedKeys
 }
 
-func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txNum uint64, rnd *rand.Rand, prevKeys map[string]struct{}, keyMaxLen, keysCount uint64) map[string]struct{} {
+func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txNum uint64, rnd *rndGen, prevKeys map[string]struct{}, keyMaxLen, keysCount uint64) map[string]struct{} {
 	t.Helper()
 	domains.SetTxNum(txNum)
 
 	getKey := func() ([]byte, bool) {
-		r := rnd.Intn(100)
+		r := rnd.IntN(100)
 		if r < 50 && len(prevKeys) > 0 {
-			ri := rnd.Intn(len(prevKeys))
+			ri := rnd.IntN(len(prevKeys))
 			for k := range prevKeys {
 				if ri == 0 {
 					return []byte(k), true
@@ -640,11 +690,17 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 	for j := uint64(0); j < keysCount; j++ {
 		key, existed := getKey()
 
-		r := rnd.Intn(101)
+		r := rnd.IntN(101)
 		switch {
 		case r <= 33:
-			buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(txNum*100_000), nil, 0)
-			prev, step, err := domains.DomainGet(kv.AccountsDomain, key, nil)
+			acc := accounts.Account{
+				Nonce:       txNum,
+				Balance:     *uint256.NewInt(txNum * 100_000),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			prev, step, err := domains.GetLatest(kv.AccountsDomain, key)
 			require.NoError(t, err)
 
 			usedKeys[string(key)] = struct{}{}
@@ -653,7 +709,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 			require.NoError(t, err)
 
 		case r > 33 && r <= 66:
-			codeUpd := make([]byte, rnd.Intn(24576))
+			codeUpd := make([]byte, rnd.IntN(24576))
 			_, err := rnd.Read(codeUpd)
 			require.NoError(t, err)
 			for limit := 1000; len(key) > length.Addr && limit > 0; limit-- {
@@ -664,7 +720,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 			}
 			usedKeys[string(key)] = struct{}{}
 
-			prev, step, err := domains.DomainGet(kv.CodeDomain, key, nil)
+			prev, step, err := domains.GetLatest(kv.CodeDomain, key)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.CodeDomain, key, nil, codeUpd, prev, step)
@@ -684,11 +740,17 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 				key = key[:length.Addr]
 			}
 
-			prev, step, err := domains.DomainGet(kv.AccountsDomain, key, nil)
+			prev, step, err := domains.GetLatest(kv.AccountsDomain, key)
 			require.NoError(t, err)
 			if prev == nil {
 				usedKeys[string(key)] = struct{}{}
-				buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(txNum*100_000), nil, 0)
+				acc := accounts.Account{
+					Nonce:       txNum,
+					Balance:     *uint256.NewInt(txNum * 100_000),
+					CodeHash:    common.Hash{},
+					Incarnation: 0,
+				}
+				buf := accounts.SerialiseV3(&acc)
 				err = domains.DomainPut(kv.AccountsDomain, key, nil, buf, prev, step)
 				require.NoError(t, err)
 			}
@@ -701,7 +763,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 				copy(sk[length.Addr:], loc)
 				usedKeys[string(sk)] = struct{}{}
 
-				prev, step, err := domains.DomainGet(kv.StorageDomain, sk[:length.Addr], sk[length.Addr:])
+				prev, step, err := domains.GetLatest(kv.StorageDomain, sk[:length.Addr])
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.StorageDomain, sk[:length.Addr], sk[length.Addr:], uint256.NewInt(txNum).Bytes(), prev, step)
@@ -714,6 +776,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 }
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
+	t.Parallel()
 
 	logger := log.New()
 	aggStep := uint64(100)
@@ -737,7 +800,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	txs := aggStep * 5
 	t.Logf("step=%d tx_count=%d\n", aggStep, txs)
 
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 	keys := make([][]byte, txs)
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -752,7 +815,13 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, length.Hash, n)
 
-		buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(1000000000000), nil, 0)
+		acc := accounts.Account{
+			Nonce:       txNum,
+			Balance:     *uint256.NewInt(1000000000000),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf[:], nil, 0)
 		require.NoError(t, err)
 
@@ -766,7 +835,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	err = domains.Flush(context.Background(), tx)
 	require.NoError(t, err)
 
-	latestStepInDB := agg.d[kv.AccountsDomain].LastStepInDB(tx)
+	latestStepInDB := agg.d[kv.AccountsDomain].maxStepInDB(tx)
 	require.Equal(t, 5, int(latestStepInDB))
 
 	err = tx.Commit()
@@ -783,23 +852,10 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, os.RemoveAll(dirs.Chaindata))
 
 	// open new db and aggregator instances
-	newDb := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.ChaindataTablesCfg
-	}).MustOpen()
+	newDb := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	canonicalsReader := NewMockCanonicalsReader(ctrl)
-	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (iter.U64, error) {
-			currentStep := uint64(txFrom) / aggStep
-			canonicalBlockTxNum := aggStep*currentStep + 1
-			it := iter.Array[uint64]([]uint64{canonicalBlockTxNum})
-			return it, nil
-		}).
-		AnyTimes()
-	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, canonicalsReader, logger)
+	newAgg, err := NewAggregator2(context.Background(), agg.dirs, aggStep, newDb, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
 
@@ -823,20 +879,23 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		if uint64(i+1) >= txs-aggStep {
 			continue // finishtx always stores last agg step in db which we deleted, so missing  values which were not aggregated is expected
 		}
-		stored, _, _, err := ac.GetLatest(kv.AccountsDomain, key[:length.Addr], nil, newTx)
+		stored, _, _, err := ac.GetLatest(kv.AccountsDomain, key[:length.Addr], newTx)
 		require.NoError(t, err)
 		if len(stored) == 0 {
 			miss++
 			//fmt.Printf("%x [%d/%d]", key, miss, i+1) // txnum starts from 1
 			continue
 		}
-		nonce, _, _ := types.DecodeAccountBytesV3(stored)
+		acc := accounts.Account{}
+		err = accounts.DeserialiseV3(&acc, stored)
+		require.NoError(t, err)
 
-		require.EqualValues(t, i+1, int(nonce))
+		require.EqualValues(t, i+1, int(acc.Nonce))
 
-		storedV, _, found, err := ac.GetLatest(kv.StorageDomain, key[:length.Addr], key[length.Addr:], newTx)
+		storedV, _, found, err := ac.GetLatest(kv.StorageDomain, key, newTx)
 		require.NoError(t, err)
 		require.True(t, found)
+		require.NotEmpty(t, storedV)
 		_ = key[0]
 		_ = storedV[0]
 		require.EqualValues(t, key[0], storedV[0])
@@ -848,6 +907,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 }
 
 func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	aggStep := uint64(500)
 
@@ -883,10 +943,10 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		return nil
 	}
 
-	txs := (aggStep) * StepsInColdFile
+	txs := (aggStep) * config3.StepsInFrozenFile
 	t.Logf("step=%d tx_count=%d", aggStep, txs)
 
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 	keys := make([][]byte, txs/2)
 
 	var prev1, prev2 []byte
@@ -904,7 +964,13 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		require.EqualValues(t, length.Hash, n)
 		keys[txNum-1] = append(addr, loc...)
 
-		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(0), nil, 0)
+		acc := accounts.Account{
+			Nonce:       1,
+			Balance:     *uint256.NewInt(0),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
 
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, prev1, 0)
 		require.NoError(t, err)
@@ -923,7 +989,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
-		prev, step, _, err := ac.d[kv.StorageDomain].GetLatest(addr, loc, tx)
+		prev, step, _, err := ac.d[kv.StorageDomain].GetLatest(keys[txNum-1-half], tx)
 		require.NoError(t, err)
 		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, prev, step)
 		require.NoError(t, err)
@@ -940,7 +1006,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	defer aggCtx2.Close()
 
 	for i, key := range keys {
-		storedV, _, found, err := aggCtx2.d[kv.StorageDomain].GetLatest(key[:length.Addr], key[length.Addr:], tx)
+		storedV, _, found, err := aggCtx2.d[kv.StorageDomain].GetLatest(key, tx)
 		require.Truef(t, found, "key %x not found %d", key, i)
 		require.NoError(t, err)
 		require.EqualValues(t, key[0], storedV[0])
@@ -950,6 +1016,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 }
 
 func Test_EncodeCommitmentState(t *testing.T) {
+	t.Parallel()
 	cs := commitmentState{
 		txNum:     rand.Uint64(),
 		trieState: make([]byte, 1024),
@@ -969,6 +1036,7 @@ func Test_EncodeCommitmentState(t *testing.T) {
 	require.EqualValues(t, cs.trieState, dec.trieState)
 }
 
+// takes first 100k keys from file
 func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 	decomp, err := seg.NewDecompressor(dataPath)
 	if err != nil {
@@ -995,24 +1063,14 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 	return listing, nil
 }
 
-func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags FileCompression) string {
+func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags seg.FileCompression) string {
 	tb.Helper()
 
-	args := BtIndexWriterArgs{
-		IndexFile: path.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000)),
-		TmpDir:    tmp,
-		KeyCount:  12,
-	}
-
-	iw, err := NewBtIndexWriter(args, logger)
-	require.NoError(tb, err)
-
-	defer iw.Close()
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 	values := make([]byte, valueSize)
 
 	dataPath := path.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
-	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.MinPatternScore, 1, log.LvlDebug, logger)
+	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
 	bufSize := 8 * datasize.KB
@@ -1028,14 +1086,14 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 		binary.BigEndian.PutUint64(key[keySize-8:], uint64(i))
 		require.NoError(tb, err)
 
-		n, err = rnd.Read(values[:rnd.Intn(valueSize)+1])
+		n, err = rnd.Read(values[:rnd.IntN(valueSize)+1])
 		require.NoError(tb, err)
 
 		err = collector.Collect(key, values[:n])
 		require.NoError(tb, err)
 	}
 
-	writer := NewArchiveWriter(comp, compressFlags)
+	writer := seg.NewWriter(comp, compressFlags)
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		err = writer.AddWord(k)
@@ -1056,51 +1114,27 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	decomp, err := seg.NewDecompressor(dataPath)
 	require.NoError(tb, err)
+	defer decomp.Close()
+	compPath := decomp.FilePath()
+	ps := background.NewProgressSet()
 
-	getter := NewArchiveGetter(decomp.MakeGetter(), compressFlags)
-	getter.Reset(0)
+	IndexFile := path.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
+	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true)
+	require.NoError(tb, err)
 
-	var pos uint64
-	key := make([]byte, keySize)
-	for i := 0; i < keyCount; i++ {
-		if !getter.HasNext() {
-			tb.Fatalf("not enough values at %d", i)
-		}
-
-		keys, _ := getter.Next(key[:0])
-		err = iw.AddKey(keys[:], pos)
-
-		pos, _ = getter.Skip()
-		require.NoError(tb, err)
-	}
-	decomp.Close()
-
-	require.NoError(tb, iw.Build())
-	iw.Close()
-
-	return decomp.FilePath()
+	return compPath
 }
 
-func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) {
-	t.Helper()
-	require := require.New(t)
-	dirs := datadir.New(t.TempDir())
-	logger := log.New()
-	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.ChaindataTablesCfg
-	}).MustOpen()
-	t.Cleanup(db.Close)
+func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *Aggregator) {
+	tb.Helper()
+	require, logger := require.New(tb), log.New()
+	dirs := datadir.New(tb.TempDir())
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	tb.Cleanup(db.Close)
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	canonicalsReader := NewMockCanonicalsReader(ctrl)
-	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(iter.EmptyU64, nil).
-		AnyTimes()
-
-	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, canonicalsReader, logger)
+	agg, err := NewAggregator2(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(err)
-	t.Cleanup(agg.Close)
+	tb.Cleanup(agg.Close)
 	err = agg.OpenFolder()
 	require.NoError(err)
 	agg.DisableFsync()
@@ -1111,7 +1145,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byte, [][]byte) {
 	tb.Helper()
 
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 	values := make([][]byte, keyCount)
 	keys := make([][]byte, keyCount)
 
@@ -1122,7 +1156,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 		require.NoError(tb, err)
 		keys[i] = common.Copy(bk[:n])
 
-		n, err = rnd.Read(bv[:rnd.Intn(valueSize)+1])
+		n, err = rnd.Read(bv[:rnd.IntN(valueSize)+1])
 		require.NoError(tb, err)
 
 		values[i] = common.Copy(bv[:n])
@@ -1131,6 +1165,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 }
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {
+	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 20)
 	ctx := context.Background()
 
@@ -1167,8 +1202,14 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		}
 
 		for j := 0; j < len(keys); j++ {
-			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
-			prev, step, err := domains.DomainGet(kv.AccountsDomain, keys[j], nil)
+			acc := accounts.Account{
+				Nonce:       uint64(i),
+				Balance:     *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			prev, step, err := domains.GetLatest(kv.AccountsDomain, keys[j])
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)
@@ -1202,8 +1243,14 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		domains.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
-			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
-			prev, step, _, err := mc.GetLatest(kv.AccountsDomain, keys[j], nil, rwTx)
+			acc := accounts.Account{
+				Nonce:       uint64(i),
+				Balance:     *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			prev, step, _, err := mc.GetLatest(kv.AccountsDomain, keys[j], rwTx)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)
@@ -1239,8 +1286,14 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		domains.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
-			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
-			prev, step, _, err := mc.GetLatest(kv.AccountsDomain, keys[j], nil, rwTx)
+			acc := accounts.Account{
+				Nonce:       uint64(i),
+				Balance:     *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			prev, step, _, err := mc.GetLatest(kv.AccountsDomain, keys[j], rwTx)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)
@@ -1258,9 +1311,90 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 // also useful to decode given input into v3 account
 func Test_helper_decodeAccountv3Bytes(t *testing.T) {
+	t.Parallel()
 	input, err := hex.DecodeString("000114000101")
 	require.NoError(t, err)
 
-	n, b, ch := types.DecodeAccountBytesV3(input)
-	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, n, b.Uint64(), ch)
+	acc := accounts.Account{}
+	_ = accounts.DeserialiseV3(&acc, input)
+	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash.Bytes())
+}
+
+func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
+		stepSize:                         20,
+		disableCommitmentBranchTransform: false,
+	})
+
+	ac := agg.BeginFilesRo()
+	roots := make([]common.Hash, 0)
+
+	// collect latest root from each available file
+	compression := ac.d[kv.CommitmentDomain].d.Compression
+	fnames := []string{}
+	for _, f := range ac.d[kv.CommitmentDomain].files {
+		var k, stateVal []byte
+		if ac.d[kv.CommitmentDomain].d.AccessorList&AccessorHashMap != 0 {
+			idx := f.src.index.GetReaderFromPool()
+			r := seg.NewReader(f.src.decompressor.MakeGetter(), compression)
+
+			offset, ok := idx.TwoLayerLookup(keyCommitmentState)
+			require.True(t, ok)
+			r.Reset(offset)
+			k, _ = r.Next(nil)
+			stateVal, _ = r.Next(nil)
+		} else {
+			var found bool
+			var err error
+			k, stateVal, _, found, err = f.src.bindex.Get(keyCommitmentState, seg.NewReader(f.src.decompressor.MakeGetter(), compression))
+			require.NoError(t, err)
+			require.True(t, found)
+			require.EqualValues(t, keyCommitmentState, k)
+		}
+		require.EqualValues(t, keyCommitmentState, k)
+		rh, err := commitment.HexTrieExtractStateRoot(stateVal)
+		require.NoError(t, err)
+
+		roots = append(roots, common.BytesToHash(rh))
+		fmt.Printf("file %s root %x\n", filepath.Base(f.src.decompressor.FilePath()), rh)
+		fnames = append(fnames, f.src.decompressor.FilePath())
+	}
+	ac.Close()
+	agg.d[kv.CommitmentDomain].closeFilesAfterStep(0) // close commitment files to remove
+
+	// now clean all commitment files along with related db buckets
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	buckets, err := rwTx.ListBuckets()
+	require.NoError(t, err)
+	for i, b := range buckets {
+		if strings.Contains(strings.ToLower(b), "commitment") {
+			size, err := rwTx.BucketSize(b)
+			require.NoError(t, err)
+			t.Logf("cleaned table #%d %s: %d keys", i, b, size)
+
+			err = rwTx.ClearBucket(b)
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, rwTx.Commit())
+
+	for _, fn := range fnames {
+		if strings.Contains(fn, "v1-commitment") {
+			require.NoError(t, os.Remove(fn))
+			t.Logf("removed file %s", filepath.Base(fn))
+		}
+	}
+	err = agg.OpenFolder()
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	finalRoot, err := agg.RebuildCommitmentFiles(ctx, nil, &rawdbv3.TxNums)
+	require.NoError(t, err)
+	require.NotEmpty(t, finalRoot)
+	require.NotEqualValues(t, commitment.EmptyRootHash, finalRoot)
+
+	require.EqualValues(t, roots[len(roots)-1][:], finalRoot[:])
 }

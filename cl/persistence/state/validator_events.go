@@ -1,11 +1,28 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state_accessors
 
 import (
 	"encoding/binary"
 	"errors"
+	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 // THIS IS EXPERMIENTAL, IT MAY CHANGE
@@ -26,49 +43,68 @@ const (
 
 type StateEvents struct {
 	buf []byte
+	mu  sync.Mutex
 }
 
 func NewStateEvents() *StateEvents {
 	return &StateEvents{}
 }
 
+func NewStateEventsFromBytes(buf []byte) *StateEvents {
+	return &StateEvents{buf: libcommon.Copy(buf)}
+}
+
 func (se *StateEvents) AddValidator(validatorIndex uint64, validator solid.Validator) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(addValidator))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = append(se.buf, validator...)
 }
 
 func (se *StateEvents) ChangeExitEpoch(validatorIndex uint64, exitEpoch uint64) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(changeExitEpoch))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = binary.BigEndian.AppendUint64(se.buf, exitEpoch)
 }
 
 func (se *StateEvents) ChangeWithdrawableEpoch(validatorIndex uint64, withdrawableEpoch uint64) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(changeWithdrawableEpoch))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = binary.BigEndian.AppendUint64(se.buf, withdrawableEpoch)
 }
 
 func (se *StateEvents) ChangeWithdrawalCredentials(validatorIndex uint64, withdrawalCredentials libcommon.Hash) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(changeWithdrawalCredentials))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = append(se.buf, withdrawalCredentials[:]...)
 }
 
 func (se *StateEvents) ChangeActivationEpoch(validatorIndex uint64, activationEpoch uint64) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(changeActivationEpoch))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = binary.BigEndian.AppendUint64(se.buf, activationEpoch)
 }
 
 func (se *StateEvents) ChangeActivationEligibilityEpoch(validatorIndex uint64, activationEligibilityEpoch uint64) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(changeActivationEligibilityEpoch))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = binary.BigEndian.AppendUint64(se.buf, activationEligibilityEpoch)
 }
 
 func (se *StateEvents) ChangeSlashed(validatorIndex uint64, slashed bool) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(changeSlashed))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = append(se.buf, byte(0))
@@ -78,10 +114,14 @@ func (se *StateEvents) ChangeSlashed(validatorIndex uint64, slashed bool) {
 }
 
 func (se *StateEvents) CopyBytes() []byte {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	return libcommon.Copy(se.buf)
 }
 
 func (se *StateEvents) Reset() {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = se.buf[:0]
 }
 
@@ -94,6 +134,8 @@ func ReplayEvents(onAddValidator func(validatorIndex uint64, validator solid.Val
 	onChangeActivationEligibilityEpoch func(validatorIndex uint64, activationEligibilityEpoch uint64) error,
 	onChangeSlashed func(validatorIndex uint64, slashed bool) error,
 	e *StateEvents) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	buf := e.buf
 	for len(buf) > 0 {
 		event := stateEvent(buf[0])

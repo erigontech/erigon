@@ -1,18 +1,36 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon/rpc"
 )
 
 var latestTag = libcommon.BytesToHash([]byte("latest"))
@@ -21,17 +39,17 @@ var ErrWrongTag = fmt.Errorf("listStorageKeys wrong block tag or number: must be
 
 // ParityAPI the interface for the parity_ RPC commands
 type ParityAPI interface {
-	ListStorageKeys(ctx context.Context, account libcommon.Address, quantity int, offset *hexutility.Bytes, blockNumber rpc.BlockNumberOrHash) ([]hexutility.Bytes, error)
+	ListStorageKeys(ctx context.Context, account libcommon.Address, quantity int, offset *hexutil.Bytes, blockNumber rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
 }
 
 // ParityAPIImpl data structure to store things needed for parity_ commands
 type ParityAPIImpl struct {
 	*BaseAPI
-	db kv.RoDB
+	db kv.TemporalRoDB
 }
 
 // NewParityAPIImpl returns ParityAPIImpl instance
-func NewParityAPIImpl(base *BaseAPI, db kv.RoDB) *ParityAPIImpl {
+func NewParityAPIImpl(base *BaseAPI, db kv.TemporalRoDB) *ParityAPIImpl {
 	return &ParityAPIImpl{
 		BaseAPI: base,
 		db:      db,
@@ -39,13 +57,13 @@ func NewParityAPIImpl(base *BaseAPI, db kv.RoDB) *ParityAPIImpl {
 }
 
 // ListStorageKeys implements parity_listStorageKeys. Returns all storage keys of the given address
-func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon.Address, quantity int, offset *hexutility.Bytes, blockNumberOrTag rpc.BlockNumberOrHash) ([]hexutility.Bytes, error) {
+func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon.Address, quantity int, offset *hexutil.Bytes, blockNumberOrTag rpc.BlockNumberOrHash) ([]hexutil.Bytes, error) {
 	if err := api.checkBlockNumber(blockNumberOrTag); err != nil {
 		return nil, err
 	}
-	keys := make([]hexutility.Bytes, 0)
+	keys := make([]hexutil.Bytes, 0)
 
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
 	}
@@ -54,11 +72,12 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 	if err != nil {
 		return nil, err
 	} else if a == nil {
-		return nil, fmt.Errorf("acc not found")
+		return nil, errors.New("acc not found")
 	}
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
 	bn := rawdb.ReadCurrentBlockNumber(tx)
-	minTxNum, err := rawdbv3.TxNums.Min(tx, *bn)
+	minTxNum, err := txNumsReader.Min(tx, *bn)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +87,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		from = append(from, *offset...)
 	}
 	to, _ := kv.NextSubtree(account[:])
-	r, err := tx.(kv.TemporalTx).DomainRange(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
+	r, err := tx.RangeAsOf(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
 	if err != nil {
 		return nil, err
 	}

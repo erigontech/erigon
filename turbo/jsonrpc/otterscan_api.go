@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
@@ -8,30 +24,31 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/eth/ethutils"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 // API_LEVEL Must be incremented every time new additions are made
 const API_LEVEL = 8
 
 type TransactionsWithReceipts struct {
-	Txs       []*RPCTransaction        `json:"txs"`
+	Txs       []*ethapi.RPCTransaction `json:"txs"`
 	Receipts  []map[string]interface{} `json:"receipts"`
 	FirstPage bool                     `json:"firstPage"`
 	LastPage  bool                     `json:"lastPage"`
@@ -47,18 +64,18 @@ type OtterscanAPI interface {
 	GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error)
 	HasCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error)
 	TraceTransaction(ctx context.Context, hash common.Hash) ([]*TraceEntry, error)
-	GetTransactionError(ctx context.Context, hash common.Hash) (hexutility.Bytes, error)
+	GetTransactionError(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 	GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error)
 	GetContractCreator(ctx context.Context, addr common.Address) (*ContractCreatorData, error)
 }
 
 type OtterscanAPIImpl struct {
 	*BaseAPI
-	db          kv.RoDB
+	db          kv.TemporalRoDB
 	maxPageSize uint64
 }
 
-func NewOtterscanAPI(base *BaseAPI, db kv.RoDB, maxPageSize uint64) *OtterscanAPIImpl {
+func NewOtterscanAPI(base *BaseAPI, db kv.TemporalRoDB, maxPageSize uint64) *OtterscanAPIImpl {
 	return &OtterscanAPIImpl{
 		BaseAPI:     base,
 		db:          db,
@@ -73,7 +90,7 @@ func (api *OtterscanAPIImpl) GetApiLevel() uint8 {
 // TODO: dedup from eth_txs.go#GetTransactionByHash
 func (api *OtterscanAPIImpl) getTransactionByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (types.Transaction, *types.Block, common.Hash, uint64, uint64, error) {
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
-	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		return nil, nil, common.Hash{}, 0, 0, err
 	}
@@ -112,7 +129,7 @@ func (api *OtterscanAPIImpl) getTransactionByHash(ctx context.Context, tx kv.Tx,
 	return txn, block, blockHash, blockNum, txnIndex, nil
 }
 
-func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash common.Hash, tracer vm.EVMLogger) (*evmtypes.ExecutionResult, error) {
+func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, hash common.Hash, tracer vm.EVMLogger) (*evmtypes.ExecutionResult, error) {
 	txn, block, _, _, txIndex, err := api.getTransactionByHash(ctx, tx, hash)
 	if err != nil {
 		return nil, err
@@ -127,7 +144,13 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash commo
 	}
 	engine := api.engine()
 
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, int(txIndex))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, txNumsReader, tx, int(txIndex))
+	if err != nil {
+		return nil, err
+	}
+
+	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, int(txIndex))
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +172,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash commo
 }
 
 func (api *OtterscanAPIImpl) GetInternalOperations(ctx context.Context, hash common.Hash) ([]*InternalOperation, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -176,13 +199,13 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 		return nil, fmt.Errorf("max allowed page size: %v", api.maxPageSize)
 	}
 
-	dbtx, err := api.db.BeginRo(ctx)
+	dbtx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer dbtx.Rollback()
 
-	return api.searchTransactionsBeforeV3(dbtx.(kv.TemporalTx), ctx, addr, blockNum, pageSize)
+	return api.searchTransactionsBeforeV3(dbtx, ctx, addr, blockNum, pageSize)
 }
 
 // Search transactions that touch a certain address.
@@ -198,13 +221,13 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 		return nil, fmt.Errorf("max allowed page size: %v", api.maxPageSize)
 	}
 
-	dbtx, err := api.db.BeginRo(ctx)
+	dbtx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer dbtx.Rollback()
 
-	return api.searchTransactionsAfterV3(dbtx.(kv.TemporalTx), ctx, addr, blockNum, pageSize)
+	return api.searchTransactionsAfterV3(dbtx, ctx, addr, blockNum, pageSize)
 }
 
 func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Address, chainConfig *chain.Config, pageSize, resultCount uint16, callFromToProvider BlockProvider) ([]*TransactionsWithReceipts, bool, error) {
@@ -250,16 +273,11 @@ func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Addres
 }
 
 func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
-	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
-	if err != nil {
-		return nil, err
-	}
 	additionalFields := make(map[string]interface{})
 	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
 	if !inclTx {
-		delete(response, "transactions") // workaround for https://github.com/ledgerwatch/erigon/issues/4989#issuecomment-1218415666
+		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
-	response["totalDifficulty"] = (*hexutil2.Big)(td)
 	response["transactionCount"] = b.Transactions().Len()
 
 	if err == nil && number == rpc.PendingBlockNumber {
@@ -317,7 +335,7 @@ func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, sender
 	totalFees := big.NewInt(0)
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		effectiveGasPrice := uint64(0)
+		var effectiveGasPrice uint64
 		if !chainConfig.IsLondon(block.NumberU64()) {
 			effectiveGasPrice = txn.GetPrice().Uint64()
 		} else {
@@ -341,7 +359,7 @@ func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc
 		return api.pendingBlock(), nil, nil
 	}
 
-	n, hash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	n, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -357,13 +375,13 @@ func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc
 }
 
 func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	b, senders, err := api.getBlockWithSenders(ctx, number, tx)
+	b, _, err := api.getBlockWithSenders(ctx, number, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +400,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	}
 
 	// Receipts
-	receipts, err := api.getReceipts(ctx, tx, b, senders)
+	receipts, err := api.getReceipts(ctx, tx, b)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
@@ -402,7 +420,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		prunedBlock[k] = getBlockRes[k]
 	}
 
-	// Crop tx input to 4bytes
+	// Crop txn input to 4bytes
 	var txs = getBlockRes["transactions"].([]interface{})
 	for _, rawTx := range txs {
 		rpcTx := rawTx.(*ethapi.RPCTransaction)

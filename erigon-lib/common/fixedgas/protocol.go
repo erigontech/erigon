@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 The Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package fixedgas
 
@@ -24,6 +24,7 @@ const (
 	TxDataNonZeroGasEIP2028   uint64 = 16    // Per byte of non zero data attached to a transaction after EIP 2028 (part in Istanbul)
 	TxAccessListAddressGas    uint64 = 2400  // Per address specified in EIP 2930 access list
 	TxAccessListStorageKeyGas uint64 = 1900  // Per storage key specified in EIP 2930 access list
+	TxTotalCostFloorPerToken  uint64 = 10    // Per token of calldata in a transaction, as a minimum the txn must pay (EIP-7623)
 
 	MaxCodeSize = 24576 // Maximum bytecode to permit for a contract
 
@@ -32,8 +33,11 @@ const (
 	InitCodeWordGas = 2
 
 	// EIP-4844: Shard Blob Transactions
-	FieldElementsPerBlob           = 4096 // each field element is 32 bytes
-	BlobSize                       = FieldElementsPerBlob * 32
-	BlobGasPerBlob          uint64 = 0x20000
-	DefaultMaxBlobsPerBlock uint64 = 6 // lower for Gnosis
+	FieldElementsPerBlob        = 4096 // each field element is 32 bytes
+	BlobSize                    = FieldElementsPerBlob * 32
+	BlobGasPerBlob       uint64 = 0x20000
+
+	// EIP-7702: set code tx
+	PerEmptyAccountCost = 25000
+	PerAuthBaseCost     = 12500
 )

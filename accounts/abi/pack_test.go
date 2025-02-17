@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 //
 //nolint:scopelint
 package abi
@@ -28,9 +31,7 @@ import (
 	"strings"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 // TestPack tests the general pack/unpack tests in packing_test.go
@@ -66,8 +67,8 @@ func TestMethodPack(t *testing.T) {
 	}
 
 	sig := abi.Methods["slice"].ID
-	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{1}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{2}, 32)...)
 
 	packed, err := abi.Pack("slice", []uint32{1, 2})
 	if err != nil {
@@ -80,10 +81,10 @@ func TestMethodPack(t *testing.T) {
 
 	var addrA, addrB = libcommon.Address{1}, libcommon.Address{2}
 	sig = abi.Methods["sliceAddress"].ID
-	sig = append(sig, common.LeftPadBytes([]byte{32}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
-	sig = append(sig, common.LeftPadBytes(addrA[:], 32)...)
-	sig = append(sig, common.LeftPadBytes(addrB[:], 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{32}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{2}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes(addrA[:], 32)...)
+	sig = append(sig, libcommon.LeftPadBytes(addrB[:], 32)...)
 
 	packed, err = abi.Pack("sliceAddress", []libcommon.Address{addrA, addrB})
 	if err != nil {
@@ -95,14 +96,14 @@ func TestMethodPack(t *testing.T) {
 
 	var addrC, addrD = libcommon.Address{3}, libcommon.Address{4}
 	sig = abi.Methods["sliceMultiAddress"].ID
-	sig = append(sig, common.LeftPadBytes([]byte{64}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{160}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
-	sig = append(sig, common.LeftPadBytes(addrA[:], 32)...)
-	sig = append(sig, common.LeftPadBytes(addrB[:], 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
-	sig = append(sig, common.LeftPadBytes(addrC[:], 32)...)
-	sig = append(sig, common.LeftPadBytes(addrD[:], 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{64}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{160}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{2}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes(addrA[:], 32)...)
+	sig = append(sig, libcommon.LeftPadBytes(addrB[:], 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{2}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes(addrC[:], 32)...)
+	sig = append(sig, libcommon.LeftPadBytes(addrD[:], 32)...)
 
 	packed, err = abi.Pack("sliceMultiAddress", []libcommon.Address{addrA, addrB}, []libcommon.Address{addrC, addrD})
 	if err != nil {
@@ -113,8 +114,8 @@ func TestMethodPack(t *testing.T) {
 	}
 
 	sig = abi.Methods["slice256"].ID
-	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{1}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{2}, 32)...)
 
 	packed, err = abi.Pack("slice256", []*big.Int{big.NewInt(1), big.NewInt(2)})
 	if err != nil {
@@ -127,14 +128,14 @@ func TestMethodPack(t *testing.T) {
 
 	a := [2][2]*big.Int{{big.NewInt(1), big.NewInt(1)}, {big.NewInt(2), big.NewInt(0)}}
 	sig = abi.Methods["nestedArray"].ID
-	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{0}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{0xa0}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
-	sig = append(sig, common.LeftPadBytes(addrC[:], 32)...)
-	sig = append(sig, common.LeftPadBytes(addrD[:], 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{1}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{1}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{2}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{0}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{0xa0}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{2}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes(addrC[:], 32)...)
+	sig = append(sig, libcommon.LeftPadBytes(addrD[:], 32)...)
 	packed, err = abi.Pack("nestedArray", a, []libcommon.Address{addrC, addrD})
 	if err != nil {
 		t.Fatal(err)
@@ -144,13 +145,13 @@ func TestMethodPack(t *testing.T) {
 	}
 
 	sig = abi.Methods["nestedArray2"].ID
-	sig = append(sig, common.LeftPadBytes([]byte{0x20}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{0x40}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{0x80}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{0x20}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{0x40}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{0x80}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{1}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{1}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{1}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{1}, 32)...)
 	packed, err = abi.Pack("nestedArray2", [2][]uint8{{1}, {1}})
 	if err != nil {
 		t.Fatal(err)
@@ -160,16 +161,16 @@ func TestMethodPack(t *testing.T) {
 	}
 
 	sig = abi.Methods["nestedSlice"].ID
-	sig = append(sig, common.LeftPadBytes([]byte{0x20}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{0x02}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{0x40}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{0xa0}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
-	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{0x20}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{0x02}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{0x40}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{0xa0}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{2}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{1}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{2}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{2}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{1}, 32)...)
+	sig = append(sig, libcommon.LeftPadBytes([]byte{2}, 32)...)
 	packed, err = abi.Pack("nestedSlice", [][]uint8{{1, 2}, {1, 2}})
 	if err != nil {
 		t.Fatal(err)

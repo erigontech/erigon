@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commands
 
 import (
@@ -11,8 +27,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 func init() {
@@ -56,21 +71,21 @@ var catSnapshot = &cobra.Command{
 
 		fmt.Printf("File %s modtime %s (%s ago) size %v pairs %d \n", fpath, d.ModTime(), time.Since(d.ModTime()), (datasize.B * datasize.ByteSize(d.Size())).HR(), d.Count()/2)
 
-		compFlags := state.CompressNone
+		compFlags := seg.CompressNone
 		switch strings.ToLower(compressed) {
 		case "k":
-			compFlags = state.CompressKeys
+			compFlags = seg.CompressKeys
 		case "v":
-			compFlags = state.CompressVals
+			compFlags = seg.CompressVals
 		case "kv":
-			compFlags = state.CompressKeys | state.CompressVals
+			compFlags = seg.CompressKeys | seg.CompressVals
 		case "":
 			break
 		default:
 			return fmt.Errorf("unknown compression flags %s", compressed)
 		}
 
-		rd := state.NewArchiveGetter(d.MakeGetter(), compFlags)
+		rd := seg.NewReader(d.MakeGetter(), compFlags)
 
 		pbytes := []byte{}
 		if pick != "" {

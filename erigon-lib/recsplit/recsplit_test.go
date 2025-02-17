@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package recsplit
 
@@ -22,9 +22,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func TestRecSplit2(t *testing.T) {
@@ -149,8 +148,9 @@ func TestTwoLayerIndex(t *testing.T) {
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
 	salt := uint32(1)
+	N := 2571
 	rs, err := NewRecSplit(RecSplitArgs{
-		KeyCount:           100,
+		KeyCount:           N,
 		BucketSize:         10,
 		Salt:               &salt,
 		TmpDir:             tmpDir,
@@ -162,7 +162,7 @@ func TestTwoLayerIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < N; i++ {
 		if err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17)); err != nil {
 			t.Fatal(err)
 		}
@@ -173,7 +173,7 @@ func TestTwoLayerIndex(t *testing.T) {
 
 	idx := MustOpen(indexFile)
 	defer idx.Close()
-	for i := 0; i < 100; i++ {
+	for i := 0; i < N; i++ {
 		reader := NewIndexReader(idx)
 		e, _ := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
 		if e != uint64(i) {

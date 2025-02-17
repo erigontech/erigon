@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commands
 
 import (
@@ -10,16 +26,14 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/kv"
-	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/migrations"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon-lib/kv"
+	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/migrations"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 func expandHomeDir(dirpath string) string {
@@ -60,11 +74,11 @@ func RootCommand() *cobra.Command {
 func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	const ThreadsLimit = 9_000
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
-	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB)
-
-	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
-	// to read all options from DB, instead of overriding them
-	opts = opts.Accede()
+	opts := kv2.New(label, log.New()).
+		Path(path).
+		RoTxsLimiter(limiterB).
+		WriteMap(dbWriteMap).
+		Accede(true) // integration tool: must not create db. must open db without stoping erigon.
 
 	if databaseVerbosity != -1 {
 		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
@@ -72,34 +86,32 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
-	db := opts.MustOpen()
+func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
+	if opts.GetLabel() != kv.ChainDB {
+		panic(opts.GetLabel())
+	}
+	rawDB := opts.MustOpen()
 	if applyMigrations {
 		migrator := migrations.NewMigrator(opts.GetLabel())
-		has, err := migrator.HasPendingMigrations(db)
+		has, err := migrator.HasPendingMigrations(rawDB)
 		if err != nil {
 			return nil, err
 		}
 		if has {
 			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
-			db.Close()
-			db = opts.Exclusive().MustOpen()
-			if err := migrator.Apply(db, datadirCli, logger); err != nil {
+			rawDB.Close()
+			rawDB = opts.Exclusive(true).MustOpen()
+			if err := migrator.Apply(rawDB, datadirCli, "", logger); err != nil {
 				return nil, err
 			}
-			db.Close()
-			db = opts.MustOpen()
+			rawDB.Close()
+			rawDB = opts.MustOpen()
 		}
 	}
 
-	if opts.GetLabel() == kv.ChainDB {
-		_, _, agg := allSnapshots(context.Background(), db, logger)
-		tdb, err := temporal.New(db, agg)
-		if err != nil {
-			return nil, err
-		}
-		db = tdb
+	_, _, agg, _, _, _, err := allSnapshots(context.Background(), rawDB, logger)
+	if err != nil {
+		return nil, err
 	}
-
-	return db, nil
+	return temporal.New(rawDB, agg)
 }

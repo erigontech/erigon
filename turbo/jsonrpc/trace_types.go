@@ -1,14 +1,27 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // TODO:(tjayrush)
@@ -58,34 +71,34 @@ type ParityTraces []ParityTrace
 // TraceAction A parity formatted trace action
 type TraceAction struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Author         string           `json:"author,omitempty"`
-	RewardType     string           `json:"rewardType,omitempty"`
-	SelfDestructed string           `json:"address,omitempty"`
-	Balance        string           `json:"balance,omitempty"`
-	CallType       string           `json:"callType,omitempty"`
-	From           common.Address   `json:"from"`
-	Gas            hexutil.Big      `json:"gas"`
-	Init           hexutility.Bytes `json:"init,omitempty"`
-	Input          hexutility.Bytes `json:"input,omitempty"`
-	RefundAddress  string           `json:"refundAddress,omitempty"`
-	To             string           `json:"to,omitempty"`
-	Value          string           `json:"value,omitempty"`
+	Author         string         `json:"author,omitempty"`
+	RewardType     string         `json:"rewardType,omitempty"`
+	SelfDestructed string         `json:"address,omitempty"`
+	Balance        string         `json:"balance,omitempty"`
+	CallType       string         `json:"callType,omitempty"`
+	From           common.Address `json:"from"`
+	Gas            hexutil.Big    `json:"gas"`
+	Init           hexutil.Bytes  `json:"init,omitempty"`
+	Input          hexutil.Bytes  `json:"input,omitempty"`
+	RefundAddress  string         `json:"refundAddress,omitempty"`
+	To             string         `json:"to,omitempty"`
+	Value          string         `json:"value,omitempty"`
 }
 
 type CallTraceAction struct {
-	From     common.Address   `json:"from"`
-	CallType string           `json:"callType"`
-	Gas      hexutil.Big      `json:"gas"`
-	Input    hexutility.Bytes `json:"input"`
-	To       common.Address   `json:"to"`
-	Value    hexutil.Big      `json:"value"`
+	From     common.Address `json:"from"`
+	CallType string         `json:"callType"`
+	Gas      hexutil.Big    `json:"gas"`
+	Input    hexutil.Bytes  `json:"input"`
+	To       common.Address `json:"to"`
+	Value    hexutil.Big    `json:"value"`
 }
 
 type CreateTraceAction struct {
-	From  common.Address   `json:"from"`
-	Gas   hexutil.Big      `json:"gas"`
-	Init  hexutility.Bytes `json:"init"`
-	Value hexutil.Big      `json:"value"`
+	From  common.Address `json:"from"`
+	Gas   hexutil.Big    `json:"gas"`
+	Init  hexutil.Bytes  `json:"init"`
+	Value hexutil.Big    `json:"value"`
 }
 
 type SuicideTraceAction struct {
@@ -102,16 +115,16 @@ type RewardTraceAction struct {
 
 type CreateTraceResult struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Address *common.Address  `json:"address,omitempty"`
-	Code    hexutility.Bytes `json:"code"`
-	GasUsed *hexutil.Big     `json:"gasUsed"`
+	Address *common.Address `json:"address,omitempty"`
+	Code    hexutil.Bytes   `json:"code"`
+	GasUsed *hexutil.Big    `json:"gasUsed"`
 }
 
 // TraceResult A parity formatted trace result
 type TraceResult struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	GasUsed *hexutil.Big     `json:"gasUsed"`
-	Output  hexutility.Bytes `json:"output"`
+	GasUsed *hexutil.Big  `json:"gasUsed"`
+	Output  hexutil.Bytes `json:"output"`
 }
 
 // Allows for easy printing of a geth trace for debugging
@@ -157,7 +170,7 @@ func (t ParityTrace) String() string {
 
 // Takes a hierarchical Geth trace with fields of different meaning stored in the same named fields depending on 'type'. Parity traces
 // are flattened depth first and each field is put in its proper place
-func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash common.Hash, blockNumber uint64, tx types.Transaction, txIndex uint64, depth []int) ParityTraces { //nolint: unused
+func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash common.Hash, blockNumber uint64, txn types.Transaction, txIndex uint64, depth []int) ParityTraces { //nolint: unused
 	var traces ParityTraces // nolint prealloc
 	return traces
 }

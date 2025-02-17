@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package valset
 
 import (
@@ -9,7 +25,7 @@ import (
 	"sort"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 // Validator represets Volatile state for each Validator
@@ -75,8 +91,9 @@ func (v *Validator) String() string {
 		return "nil-Validator"
 	}
 
-	return fmt.Sprintf("Validator{%v Power:%v Priority:%v}",
+	return fmt.Sprintf("Validator{%v ID: %v Power:%v Priority:%v}",
 		v.Address.Hex(),
+		v.ID,
 		v.VotingPower,
 		v.ProposerPriority)
 }
@@ -145,7 +162,7 @@ func ParseValidators(validatorsBytes []byte) ([]*Validator, error) {
 // Used to send validator information to bor validator contract
 type MinimalVal struct {
 	ID          uint64            `json:"ID"`
-	VotingPower uint64            `json:"power"` // TODO add 10^-18 here so that we dont overflow easily
+	VotingPower uint64            `json:"power"` // TODO add 10^-18 here so that we don't overflow easily
 	Signer      libcommon.Address `json:"signer"`
 }
 

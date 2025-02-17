@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package devnetutils
 
 import (
@@ -11,11 +27,10 @@ import (
 	"strconv"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/crypto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var ErrInvalidEnodeString = errors.New("invalid enode string")
@@ -102,21 +117,21 @@ func UniqueIDFromEnode(enode string) (string, error) {
 	return enode[:i], nil
 }
 
-func RandomInt(max int) int {
-	if max == 0 {
+func RandomInt(_max int) int {
+	if _max == 0 {
 		return 0
 	}
 
 	var n uint16
 	binary.Read(rand.Reader, binary.LittleEndian, &n)
-	return int(n) % (max + 1)
+	return int(n) % (_max + 1)
 }
 
 // NamespaceAndSubMethodFromMethod splits a parent method into namespace and the actual method
 func NamespaceAndSubMethodFromMethod(method string) (string, string, error) {
 	parts := strings.SplitN(method, "_", 2)
 	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid string to split")
+		return "", "", errors.New("invalid string to split")
 	}
 	return parts[0], parts[1], nil
 }
@@ -127,10 +142,10 @@ func GenerateTopic(signature string) []libcommon.Hash {
 }
 
 // RandomNumberInRange returns a random number between min and max NOT inclusive
-func RandomNumberInRange(min, max uint64) (uint64, error) {
-	if max <= min {
-		return 0, fmt.Errorf("Invalid range: upper bound %d less or equal than lower bound %d", max, min)
+func RandomNumberInRange(_min, _max uint64) (uint64, error) {
+	if _max <= _min {
+		return 0, fmt.Errorf("Invalid range: upper bound %d less or equal than lower bound %d", _max, _min)
 	}
 
-	return uint64(RandomInt(int(max-min)) + int(min)), nil
+	return uint64(RandomInt(int(_max-_min)) + int(_min)), nil
 }

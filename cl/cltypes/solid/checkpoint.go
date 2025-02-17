@@ -1,147 +1,73 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package solid
 
 import (
 	"bytes"
-	"encoding/binary"
-	"encoding/json"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
-// Constants to represent the size and layout of a Checkpoint
-const CheckpointSize = 32 + 8 // BlockRoot(32 bytes) + Epoch(8 bytes)
+const CheckpointSizeSSZ = 40
 
-type Checkpoint []byte // Define Checkpoint as a byte slice
-
-// NewCheckpointFromParameters returns a new Checkpoint constructed from the given blockRoot and epoch
-func NewCheckpointFromParameters(
-	blockRoot libcommon.Hash, // A hash representing the block root
-	epoch uint64, // An unsigned 64-bit integer representing the epoch
-) Checkpoint {
-	var c Checkpoint = make([]byte, CheckpointSize)
-	c.SetBlockRoot(blockRoot)
-	c.SetEpoch(epoch)
-	return c
-}
-
-// NewCheckpoint returns a new Checkpoint with the underlying byte slice initialized to zeros
-func NewCheckpoint() Checkpoint {
-	return make([]byte, CheckpointSize)
-}
-
-func (c Checkpoint) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		Epoch uint64         `json:"epoch,string"`
-		Root  libcommon.Hash `json:"root"`
-	}{Epoch: c.Epoch(), Root: c.BlockRoot()})
-}
-
-func (c *Checkpoint) UnmarshalJSON(buf []byte) error {
-	var tmp struct {
-		Epoch uint64         `json:"epoch,string"`
-		Root  libcommon.Hash `json:"root"`
-	}
-	if err := json.Unmarshal(buf, &tmp); err != nil {
-		return err
-	}
-	c.SetEpoch(tmp.Epoch)
-	c.SetBlockRoot(tmp.Root)
-	return nil
-}
-
-func (c Checkpoint) SetRawEpoch(b []byte) {
-	copy(c[:8], b[:8])
-}
-
-func (c Checkpoint) SetRawBlockRoot(b []byte) {
-	copy(c[8:40], b[:32])
-}
-
-func (c Checkpoint) RawEpoch() []byte {
-	return c[:8]
-}
-
-func (c Checkpoint) RawBlockRoot() []byte {
-	return c[8:40]
-}
-
-// SetBlockRoot copies the given blockRoot into the correct location within the Checkpoint
-func (c Checkpoint) SetBlockRoot(blockRoot libcommon.Hash) {
-	copy(c[8:], blockRoot[:]) // copy the blockRoot into the Checkpoint starting at index 8
-}
-
-// SetEpoch encodes the given epoch into the correct location within the Checkpoint
-func (c Checkpoint) SetEpoch(epoch uint64) {
-	binary.LittleEndian.PutUint64(c[:8], epoch) // encode the epoch into the first 8 bytes of the Checkpoint
-}
-
-// Epoch returns the epoch encoded within the Checkpoint
-func (c Checkpoint) Epoch() uint64 {
-	return binary.LittleEndian.Uint64(c[:8]) // decode and return the epoch from the first 8 bytes of the Checkpoint
-}
-
-// BlockRoot returns the block root encoded within the Checkpoint
-func (c Checkpoint) BlockRoot() (o libcommon.Hash) {
-	copy(o[:], c[8:]) // copy and return the block root from the Checkpoint starting at index 8
-	return
+type Checkpoint struct {
+	Epoch uint64         `json:"epoch,string"`
+	Root  libcommon.Hash `json:"root"`
 }
 
 // EncodingSizeSSZ returns the size of the Checkpoint object when encoded as SSZ.
-func (Checkpoint) EncodingSizeSSZ() int {
-	return CheckpointSize
+func (*Checkpoint) EncodingSizeSSZ() int {
+	return CheckpointSizeSSZ
 }
 
 // DecodeSSZ decodes the Checkpoint object from SSZ-encoded data.
-func (c Checkpoint) DecodeSSZ(buf []byte, _ int) error {
-	if len(buf) < c.EncodingSizeSSZ() {
-		// If the buffer size is smaller than the required size of the Checkpoint, return an error.
-		return ssz.ErrLowBufferSize
-	}
-	copy(c[:], buf)
-	return nil
+func (c *Checkpoint) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, &c.Epoch, c.Root[:])
 }
 
 // EncodeSSZ encodes the Checkpoint object into SSZ format.
-func (c Checkpoint) EncodeSSZ(dst []byte) ([]byte, error) {
-	return append(dst, c[:]...), nil
+func (c *Checkpoint) EncodeSSZ(dst []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(dst, c.Epoch, c.Root[:])
 }
 
 // Clone returns a new Checkpoint object that is a copy of the current object.
-func (c Checkpoint) Clone() clonable.Clonable {
-	return NewCheckpoint()
+func (c *Checkpoint) Clone() clonable.Clonable {
+	return &Checkpoint{}
 }
 
 // Equal checks if the Checkpoint object is equal to another Checkpoint object.
-func (c Checkpoint) Equal(other Checkpoint) bool {
-	return bytes.Equal(c, other)
-}
-
-// CopyHashBufferTo copies the hash of the Checkpoint to the buffer 'o'.
-func (c Checkpoint) CopyHashBufferTo(o []byte) error {
-	copy(o[:32], c[:8])
-	copy(o[32:], c[8:])
-	return nil
+func (c *Checkpoint) Equal(other Checkpoint) bool {
+	return c.Epoch == other.Epoch && bytes.Equal(c.Root[:], other.Root[:])
 }
 
 // Copy returns a copy of the Checkpoint object.
-func (c Checkpoint) Copy() Checkpoint {
-	o := NewCheckpoint()
-	copy(o, c)
-	return o
+func (c *Checkpoint) Copy() *Checkpoint {
+	return &Checkpoint{
+		Epoch: c.Epoch,
+		Root:  c.Root,
+	}
 }
 
 // HashSSZ returns the hash of the Checkpoint object when encoded as SSZ.
 func (c Checkpoint) HashSSZ() (o [32]byte, err error) {
-	leaves := make([]byte, 2*length.Hash)
-	if err = c.CopyHashBufferTo(leaves); err != nil {
-		return
-	}
-	err = merkle_tree.MerkleRootFromFlatLeaves(leaves, o[:])
-	return
+	return merkle_tree.HashTreeRoot(c.Epoch, c.Root[:])
 }
 
 // Static always returns true, indicating that the Checkpoint object is static.

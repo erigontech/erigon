@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package snapshot_format_test
 
 import (
@@ -5,10 +21,10 @@ import (
 	_ "embed"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,27 +43,25 @@ var capellaBlockSSZSnappy []byte
 //go:embed test_data/deneb.ssz_snappy
 var denebBlockSSZSnappy []byte
 
-var emptyBlock = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+var emptyBlock = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 
 // obtain the test blocks
 func getTestBlocks(t *testing.T) []*cltypes.SignedBeaconBlock {
-	var emptyBlockCapella = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
-	emptyBlockCapella.Block.Slot = clparams.MainnetBeaconConfig.CapellaForkEpoch * 32
 
 	emptyBlock.EncodingSizeSSZ()
-	emptyBlockCapella.EncodingSizeSSZ()
-	denebBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
-	capellaBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
-	bellatrixBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
-	altairBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
-	phase0Block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+
+	denebBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	capellaBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.CapellaVersion)
+	bellatrixBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.BellatrixVersion)
+	altairBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.AltairVersion)
+	phase0Block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 
 	require.NoError(t, utils.DecodeSSZSnappy(denebBlock, denebBlockSSZSnappy, int(clparams.DenebVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(capellaBlock, capellaBlockSSZSnappy, int(clparams.CapellaVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(bellatrixBlock, bellatrixBlockSSZSnappy, int(clparams.BellatrixVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(altairBlock, altairBlockSSZSnappy, int(clparams.AltairVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(phase0Block, phase0BlockSSZSnappy, int(clparams.Phase0Version)))
-	return []*cltypes.SignedBeaconBlock{phase0Block, altairBlock, bellatrixBlock, capellaBlock, denebBlock, emptyBlock, emptyBlockCapella}
+	return []*cltypes.SignedBeaconBlock{phase0Block, altairBlock, bellatrixBlock, capellaBlock, denebBlock, emptyBlock}
 }
 
 func TestBlockSnapshotEncoding(t *testing.T) {

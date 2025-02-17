@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package vm
 
 import (
@@ -90,7 +106,7 @@ func toProgram(code []byte) *Program {
 		stmt.ends = stmt.operation == nil
 		//fmt.Printf("%v %v %v", pc, stmt.opcode, stmt.operation.valid)
 
-		if op.IsPush() {
+		if op.IsPushWithImmediateArgs() {
 			pushByteSize := stmt.operation.opNum
 			startMin := pc + 1
 			if startMin >= codeLen {
@@ -318,7 +334,7 @@ func post(cfg *Cfg, st0 *astate, edge edge, maxStackLen int) (*astate, error) {
 
 		stack1 := stack0.Copy()
 
-		if stmt.opcode.IsPush() {
+		if stmt.opcode.IsPushWithImmediateArgs() {
 			if cfg.Program.isJumpDest(&stmt.value) || isFF(&stmt.value) {
 				stack1.Push(AbsValueConcrete(stmt.value))
 			} else {
@@ -514,7 +530,7 @@ func (cfg *Cfg) PrintAnlyState() {
 		}
 
 		var valueStr string
-		if stmt.opcode.IsPush() {
+		if stmt.opcode.IsPushWithImmediateArgs() {
 			valueStr = fmt.Sprintf("%v %v", stmt.opcode, stmt.value.Hex())
 		} else {
 			valueStr = fmt.Sprintf("%v", stmt.opcode)

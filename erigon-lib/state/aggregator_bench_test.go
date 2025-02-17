@@ -1,38 +1,52 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
 	"bytes"
 	"context"
+	"flag"
 	"fmt"
-	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregator) {
 	b.Helper()
 	logger := log.New()
 	dirs := datadir.New(b.TempDir())
-	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.ChaindataTablesCfg
-	}).MustOpen()
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	b.Cleanup(db.Close)
-	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, nil, logger)
+	agg, err := NewAggregator2(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)
 	return db, agg
@@ -44,7 +58,7 @@ type txWithCtx struct {
 }
 
 func WrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *txWithCtx { return &txWithCtx{Tx: tx, ac: ctx} }
-func (tx *txWithCtx) AggTx() interface{}                     { return tx.ac }
+func (tx *txWithCtx) AggTx() any                             { return tx.ac }
 
 func BenchmarkAggregator_Processing(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -93,7 +107,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 }
 
 func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
-	rnd := rand.New(rand.NewSource(int64(seed)))
+	rnd := newRnd(seed)
 	keys := make(chan []byte, 1)
 	go func() {
 		for {
@@ -111,10 +125,10 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 }
 
 func Benchmark_BtreeIndex_Allocation(b *testing.B) {
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(uint64(time.Now().UnixNano()))
 	for i := 0; i < b.N; i++ {
 		now := time.Now()
-		count := rnd.Intn(1000000000)
+		count := rnd.IntN(1000000000)
 		bt := newBtAlloc(uint64(count), uint64(1<<12), true, nil, nil)
 		bt.traverseDfs()
 		fmt.Printf("alloc %v\n", time.Since(now))
@@ -123,13 +137,13 @@ func Benchmark_BtreeIndex_Allocation(b *testing.B) {
 
 func Benchmark_BtreeIndex_Search(b *testing.B) {
 	logger := log.New()
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
 	defer os.RemoveAll(tmp)
 	dataPath := "../../data/storage.256-288.kv"
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	comp := CompressKeys | CompressVals
+	comp := seg.CompressKeys | seg.CompressVals
 	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
 	M := 1024
@@ -140,18 +154,19 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(b, err)
-	getter := NewArchiveGetter(kv.MakeGetter(), comp)
+	getter := seg.NewReader(kv.MakeGetter(), comp)
 
 	for i := 0; i < b.N; i++ {
-		p := rnd.Intn(len(keys))
+		p := rnd.IntN(len(keys))
 		cur, err := bt.Seek(getter, keys[p])
 		require.NoErrorf(b, err, "i=%d", i)
 		require.EqualValues(b, keys[p], cur.Key())
 		require.NotEmptyf(b, cur.Value(), "i=%d", i)
+		cur.Close()
 	}
 }
 
-func benchInitBtreeIndex(b *testing.B, M uint64, compression FileCompression) (*seg.Decompressor, *BtIndex, [][]byte, string) {
+func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression) (*seg.Decompressor, *BtIndex, [][]byte, string) {
 	b.Helper()
 
 	logger := log.New()
@@ -175,25 +190,26 @@ func benchInitBtreeIndex(b *testing.B, M uint64, compression FileCompression) (*
 
 func Benchmark_BTree_Seek(b *testing.B) {
 	M := uint64(1024)
-	compress := CompressNone
+	compress := seg.CompressNone
 	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
-	getter := NewArchiveGetter(kv.MakeGetter(), compress)
+	rnd := newRnd(uint64(time.Now().UnixNano()))
+	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	b.Run("seek_only", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			p := rnd.Intn(len(keys))
+			p := rnd.IntN(len(keys))
 
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
 			require.EqualValues(b, keys[p], cur.key)
+			cur.Close()
 		}
 	})
 
 	b.Run("seek_then_next", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			p := rnd.Intn(len(keys))
+			p := rnd.IntN(len(keys))
 
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
@@ -220,7 +236,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			if i%1000 == 0 {
 				fmt.Printf("next_access_last[of %d keys] %v\n", nextKeys, ntimer/time.Duration(nextKeys))
 			}
-
+			cur.Close()
 		}
 	})
 }
@@ -233,7 +249,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 		b.Skip("requires existing KV index file at ../../data/storage.kv")
 	}
 
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
 
 	defer os.RemoveAll(tmp)
@@ -253,7 +269,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	require.NoError(b, err)
 
 	for i := 0; i < b.N; i++ {
-		p := rnd.Intn(len(keys))
+		p := rnd.IntN(len(keys))
 
 		offset, _ := idxr.Lookup(keys[p])
 		getter.Reset(offset)
@@ -271,4 +287,135 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 		require.NoErrorf(b, err, "i=%d", i)
 		require.EqualValues(b, keys[p], key)
 	}
+}
+
+func BenchmarkAggregator_BeginFilesRo_Latency(b *testing.B) {
+	//BenchmarkAggregator_BeginFilesRo/begin_files_ro-16  1737404  737.3 ns/op  3216 B/op  21 allocs/op
+	aggStep := uint64(100_00)
+	_, agg := testDbAndAggregatorBench(b, aggStep)
+
+	b.Run("begin_files_ro", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			agg.BeginFilesRo()
+		}
+	})
+}
+
+var parallel = flag.Int("bench.parallel", 1, "parallelism value") // runs 1 *maxprocs
+var loopv = flag.Int("bench.loopv", 100000, "loop value")
+
+func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
+	// RESULT: deteriorates after 2^21 goroutines
+
+	/**
+	for cpu in $(seq 0 20); do
+		cpus=$((1 << $cpu))  # Same as 2^cpu
+		echo -n "($cpus, "
+		echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkAggregator_BeginFilesRo_Throughput$ github.com/erigontech/erigon-lib/state  \
+		-bench.parallel=$cpus -bench.loopv=1000 | grep 'BenchmarkAggregator_BeginFilesRo_Throughput' | cut -f3 | xargs|cut -d' ' -f1)
+		echo -n "), "
+	done
+	**/
+	// trying to find BeginFilesRo throughput
+	if !flag.Parsed() {
+		flag.Parse()
+	}
+	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *loopv, *parallel*runtime.GOMAXPROCS(0))
+
+	aggStep := uint64(100_00)
+	_, agg := testDbAndAggregatorBench(b, aggStep)
+
+	b.SetParallelism(*parallel) // p * maxprocs
+	b.RunParallel(func(b *testing.PB) {
+		foo := 0
+		for b.Next() {
+			tx := agg.BeginFilesRo()
+			for i := 0; i < *loopv; i++ {
+				foo *= 2
+				foo /= 2
+			}
+			tx.Close()
+		}
+	})
+}
+
+func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
+	// RESULT: deteriorates after 2^21 goroutines.
+
+	/**
+	for cpu in $(seq 0 20); do
+	    cpus=$((1 << $cpu))  # Same as 2^cpu
+	    echo -n "($cpus, "
+	    echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkDb_BeginFiles_Throughput$ github.com/erigontech/erigon-lib/state  \
+		-bench.parallel=$cpus -bench.loopv=1000 | grep 'BenchmarkDb_BeginFiles_Throughput' | cut -f3 | xargs|cut -d' ' -f1)
+	    echo -n "), "
+	done
+	**/
+
+	// trying to find BeginFilesRo and Rollback throughput
+	if !flag.Parsed() {
+		flag.Parse()
+	}
+	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *loopv, *parallel*runtime.GOMAXPROCS(0))
+
+	aggStep := uint64(100_00)
+	db, _ := testDbAndAggregatorBench(b, aggStep)
+	ctx := context.Background()
+
+	b.SetParallelism(*parallel) // p * maxprocs
+	b.RunParallel(func(pb *testing.PB) {
+		//foo := 0
+		for pb.Next() {
+			tx, err := db.BeginRo(ctx)
+			if err != nil {
+				b.Fatalf("%v", err)
+			}
+			millis := *loopv * 1000000
+			time.Sleep(time.Duration(int64(millis)))
+
+			// for i := 0; i < *loopv; i++ {
+			// 	foo *= 2
+			// 	foo /= 2
+			// }
+			tx.Rollback()
+		}
+	})
+}
+
+func BenchmarkDb_BeginFiles_Throughput_IO(b *testing.B) {
+	// RESULT: deteriorates after 2^17 goroutines i.e. 130k goroutines.
+	// time.Sleep to emulate page faults
+
+	/**
+	for cpu in $(seq 0 20); do
+	    cpus=$((1 << $cpu))  # Same as 2^cpu
+	    echo -n "($cpus, "
+	    echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkDb_BeginFiles_Throughput_IO$ github.com/erigontech/erigon-lib/state  \
+		-bench.parallel=$cpus | grep 'BenchmarkDb_BeginFiles_Throughput_IO' | cut -f3 | xargs|cut -d' ' -f1)
+	    echo -n "), "
+	done
+	**/
+
+	// trying to find BeginFilesRo and Rollback throughput
+	if !flag.Parsed() {
+		flag.Parse()
+	}
+	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *loopv, *parallel*runtime.GOMAXPROCS(0))
+
+	aggStep := uint64(100_00)
+	db, _ := testDbAndAggregatorBench(b, aggStep)
+	ctx := context.Background()
+
+	b.SetParallelism(*parallel) // p * maxprocs
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			tx, err := db.BeginRo(ctx)
+			if err != nil {
+				b.Fatalf("%v", err)
+			}
+			millis := 5 * time.Millisecond
+			time.Sleep(time.Duration(int64(millis)))
+			tx.Rollback()
+		}
+	})
 }

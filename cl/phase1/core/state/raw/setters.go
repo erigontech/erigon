@@ -1,10 +1,26 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package raw
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 func (b *BeaconState) SetVersion(version clparams.StateVersion) {
@@ -287,7 +303,7 @@ func (b *BeaconState) ResetEpochParticipation() {
 	if b.events.OnResetParticipation != nil {
 		b.events.OnResetParticipation(b.previousEpochParticipation)
 	}
-	b.currentEpochParticipation = solid.NewBitList(b.validators.Length(), int(b.beaconConfig.ValidatorRegistryLimit))
+	b.currentEpochParticipation = solid.NewParticipationBitList(b.validators.Length(), int(b.beaconConfig.ValidatorRegistryLimit))
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 }
@@ -382,6 +398,8 @@ func (b *BeaconState) AddInactivityScore(score uint64) {
 }
 
 func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if index >= b.inactivityScores.Length() {
 		return ErrInvalidValidatorIndex
 	}
@@ -448,12 +466,12 @@ func (b *BeaconState) SetPreviousEpochAttestations(attestations *solid.ListSSZ[*
 	b.previousEpochAttestations = attestations
 }
 
-func (b *BeaconState) SetCurrentEpochParticipation(participation *solid.BitList) {
+func (b *BeaconState) SetCurrentEpochParticipation(participation *solid.ParticipationBitList) {
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
 	b.currentEpochParticipation = participation
 }
 
-func (b *BeaconState) SetPreviousEpochParticipation(participation *solid.BitList) {
+func (b *BeaconState) SetPreviousEpochParticipation(participation *solid.ParticipationBitList) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochParticipation = participation
 }
@@ -496,4 +514,63 @@ func (b *BeaconState) SetBalances(balances solid.Uint64VectorSSZ) {
 func (b *BeaconState) SetSlashings(slashings solid.Uint64VectorSSZ) {
 	b.markLeaf(SlashingsLeafIndex)
 	b.slashings = slashings
+}
+
+func (b *BeaconState) SetEarliestExitEpoch(epoch uint64) {
+	b.earliestExitEpoch = epoch
+	b.markLeaf(EarliestExitEpochLeafIndex)
+}
+
+func (b *BeaconState) SetExitBalanceToConsume(balance uint64) {
+	b.exitBalanceToConsume = balance
+	b.markLeaf(ExitBalanceToConsumeLeafIndex)
+}
+
+func (b *BeaconState) SetPendingPartialWithdrawals(pendingWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) {
+	b.pendingPartialWithdrawals = pendingWithdrawals
+	b.markLeaf(PendingPartialWithdrawalsLeafIndex)
+}
+
+func (b *BeaconState) AppendPendingDeposit(deposit *solid.PendingDeposit) {
+	b.pendingDeposits.Append(deposit)
+	b.markLeaf(PendingDepositsLeafIndex)
+}
+
+func (b *BeaconState) AppendPendingPartialWithdrawal(withdrawal *solid.PendingPartialWithdrawal) {
+	b.pendingPartialWithdrawals.Append(withdrawal)
+	b.markLeaf(PendingPartialWithdrawalsLeafIndex)
+}
+
+func (b *BeaconState) AppendPendingConsolidation(consolidation *solid.PendingConsolidation) {
+	b.pendingConsolidations.Append(consolidation)
+	b.markLeaf(PendingConsolidationsLeafIndex)
+}
+
+func (b *BeaconState) SetPendingDeposits(deposits *solid.ListSSZ[*solid.PendingDeposit]) {
+	b.pendingDeposits = deposits
+	b.markLeaf(PendingDepositsLeafIndex)
+}
+
+func (b *BeaconState) SetPendingConsolidations(consolidations *solid.ListSSZ[*solid.PendingConsolidation]) {
+	b.pendingConsolidations = consolidations
+	b.markLeaf(PendingConsolidationsLeafIndex)
+}
+
+func (b *BeaconState) SetDepositBalanceToConsume(balance uint64) {
+	b.depositBalanceToConsume = balance
+	b.markLeaf(DepositBalanceToConsumeLeafIndex)
+}
+
+func (b *BeaconState) SetDepositRequestsStartIndex(index uint64) {
+	b.depositRequestsStartIndex = index
+	b.markLeaf(DepositRequestsStartIndexLeafIndex)
+}
+
+func (b *BeaconState) SetConsolidationBalanceToConsume(balance uint64) {
+	b.consolidationBalanceToConsume = balance
+	b.markLeaf(ConsolidationBalanceToConsumeLeafIndex)
+}
+func (b *BeaconState) SetEarlistConsolidationEpoch(epoch uint64) {
+	b.earliestConsolidationEpoch = epoch
+	b.markLeaf(EarliestConsolidationEpochLeafIndex)
 }

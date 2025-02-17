@@ -1,27 +1,31 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 //nolint:scopelint
 package state
 
 import (
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 const (
@@ -33,9 +37,10 @@ const (
 
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
+	ReadAccountDataForDebug(address common.Address) (*accounts.Account, error)
 	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
-	ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error)
-	ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error)
+	ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error)
+	ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error)
 	ReadAccountIncarnation(address common.Address) (uint64, error)
 }
 

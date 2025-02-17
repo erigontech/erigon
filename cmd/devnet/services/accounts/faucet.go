@@ -1,19 +1,36 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package accounts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
 	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/rpc"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/cmd/devnet/blocks"
+	"github.com/erigontech/erigon/cmd/devnet/contracts"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/rpc"
 )
 
 type Faucet struct {
@@ -157,7 +174,7 @@ func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth fl
 	}
 
 	if f.transactOpts == nil {
-		return nil, libcommon.Hash{}, fmt.Errorf("faucet not initialized")
+		return nil, libcommon.Hash{}, errors.New("faucet not initialized")
 	}
 
 	node := devnet.SelectNode(ctx)

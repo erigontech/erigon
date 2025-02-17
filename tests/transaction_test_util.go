@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package tests
 
@@ -23,19 +26,19 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // TransactionTest checks RLP decoding and sender derivation of transactions.
 type TransactionTest struct {
-	RLP   hexutility.Bytes `json:"txbytes"`
-	Forks ttForks          `json:"result"`
+	RLP   hexutil.Bytes `json:"txbytes"`
+	Forks ttForks       `json:"result"`
 }
 
 type ttForks struct {
@@ -59,7 +62,7 @@ type ttFork struct {
 }
 
 func (tt *TransactionTest) Run(chainID *big.Int) error {
-	validateTx := func(rlpData hexutility.Bytes, signer types.Signer, rules *chain.Rules) (*libcommon.Address, *libcommon.Hash, uint64, error) {
+	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, rules *chain.Rules) (*libcommon.Address, *libcommon.Hash, uint64, error) {
 		tx, err := types.DecodeTransaction(rlpData)
 		if err != nil {
 			return nil, nil, 0, err
@@ -71,9 +74,16 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 		sender := msg.From()
 
 		// Intrinsic gas
-		requiredGas, err := core.IntrinsicGas(msg.Data(), msg.AccessList(), msg.To() == nil, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
-		if err != nil {
-			return nil, nil, 0, err
+		authorizationsLen := uint64(0)
+		if stx, ok := tx.(*types.SetCodeTransaction); ok {
+			authorizationsLen = uint64(len(stx.GetAuthorizations()))
+		}
+		requiredGas, floorGas, overflow := fixedgas.IntrinsicGas(msg.Data(), uint64(len(msg.AccessList())), uint64(msg.AccessList().StorageKeys()), msg.To() == nil, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai, rules.IsPrague, authorizationsLen)
+		if rules.IsPrague && floorGas > requiredGas {
+			requiredGas = floorGas
+		}
+		if overflow {
+			return nil, nil, 0, core.ErrGasUintOverflow
 		}
 		if requiredGas > msg.Gas() {
 			return nil, nil, requiredGas, fmt.Errorf("insufficient gas ( %d < %d )", msg.Gas(), requiredGas)

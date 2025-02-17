@@ -1,6 +1,23 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -9,13 +26,11 @@ import (
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 const (
@@ -60,7 +75,7 @@ func (li BlobKzgs) payloadSize() int {
 
 func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 
@@ -110,7 +125,7 @@ func (li KZGProofs) payloadSize() int {
 
 func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 
@@ -164,7 +179,7 @@ func (blobs Blobs) payloadSize() int {
 
 func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 
@@ -208,13 +223,13 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	versionedHashes = make([]libcommon.Hash, len(blobs))
 
 	kzgCtx := libkzg.Ctx()
-	for i, blob := range blobs {
-		commitment, err := kzgCtx.BlobToKZGCommitment(gokzg4844.Blob(blob), 1 /*numGoRoutines*/)
+	for i := 0; i < len(blobs); i++ {
+		commitment, err := kzgCtx.BlobToKZGCommitment(blobs[i][:], 1 /*numGoRoutines*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %v", err)
 		}
 
-		proof, err := kzgCtx.ComputeBlobKZGProof(gokzg4844.Blob(blob), commitment, 1 /*numGoRoutnes*/)
+		proof, err := kzgCtx.ComputeBlobKZGProof(blobs[i][:], commitment, 1 /*numGoRoutnes*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not compute proof for blob: %v", err)
 		}
@@ -226,10 +241,10 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	return commitments, versionedHashes, proofs, nil
 }
 
-func toBlobs(_blobs Blobs) []gokzg4844.Blob {
-	blobs := make([]gokzg4844.Blob, len(_blobs))
+func toBlobs(_blobs Blobs) []gokzg4844.BlobRef {
+	blobs := make([]gokzg4844.BlobRef, len(_blobs))
 	for i, _blob := range _blobs {
-		blobs[i] = gokzg4844.Blob(_blob)
+		blobs[i] = _blob[:]
 	}
 	return blobs
 }
@@ -256,10 +271,9 @@ func (c KZGCommitment) ComputeVersionedHash() libcommon.Hash {
 
 // validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
 func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
-	blobTx := txw.Tx
-	l1 := len(blobTx.BlobVersionedHashes)
+	l1 := len(txw.Tx.BlobVersionedHashes)
 	if l1 == 0 {
-		return fmt.Errorf("a blob tx must contain at least one blob")
+		return errors.New("a blob txn must contain at least one blob")
 	}
 	l2 := len(txw.Commitments)
 	l3 := len(txw.Blobs)
@@ -267,18 +281,12 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	if l1 != l2 || l1 != l3 || l1 != l4 {
 		return fmt.Errorf("lengths don't match %v %v %v %v", l1, l2, l3, l4)
 	}
-	// the following check isn't strictly necessary as it would be caught by blob gas processing
-	// (and hence it is not explicitly in the spec for this function), but it doesn't hurt to fail
-	// early in case we are getting spammed with too many blobs or there is a bug somewhere:
-	if uint64(l1) > fixedgas.DefaultMaxBlobsPerBlock {
-		return fmt.Errorf("number of blobs exceeds max: %v", l1)
-	}
 	kzgCtx := libkzg.Ctx()
 	err := kzgCtx.VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.Commitments), toProofs(txw.Proofs))
 	if err != nil {
 		return fmt.Errorf("error during proof verification: %v", err)
 	}
-	for i, h := range blobTx.BlobVersionedHashes {
+	for i, h := range txw.Tx.BlobVersionedHashes {
 		if computed := txw.Commitments[i].ComputeVersionedHash(); computed != h {
 			return fmt.Errorf("versioned hash %d supposedly %s but does not match computed %s", i, h, computed)
 		}
@@ -311,10 +319,6 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 	return txw.Tx.WithSignature(signer, sig)
 }
 
-func (txw *BlobTxWrapper) FakeSign(address libcommon.Address) (Transaction, error) {
-	return txw.Tx.FakeSign(address)
-}
-
 func (txw *BlobTxWrapper) Hash() libcommon.Hash { return txw.Tx.Hash() }
 
 func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) libcommon.Hash {
@@ -323,7 +327,7 @@ func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) libcommon.Hash {
 
 func (txw *BlobTxWrapper) GetData() []byte { return txw.Tx.GetData() }
 
-func (txw *BlobTxWrapper) GetAccessList() types2.AccessList { return txw.Tx.GetAccessList() }
+func (txw *BlobTxWrapper) GetAccessList() AccessList { return txw.Tx.GetAccessList() }
 
 func (txw *BlobTxWrapper) Protected() bool { return txw.Tx.Protected() }
 
@@ -331,7 +335,7 @@ func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uin
 	return txw.Tx.RawSignatureValues()
 }
 
-func (txw *BlobTxWrapper) cashedSender() (libcommon.Address, bool) { return txw.Tx.cashedSender() }
+func (txw *BlobTxWrapper) cachedSender() (libcommon.Address, bool) { return txw.Tx.cachedSender() }
 
 func (txw *BlobTxWrapper) Sender(s Signer) (libcommon.Address, error) { return txw.Tx.Sender(s) }
 

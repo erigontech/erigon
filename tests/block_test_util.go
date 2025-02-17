@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package tests implements execution of Ethereum JSON tests.
 package tests
@@ -22,32 +25,29 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"reflect"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconsensusconfig"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -62,13 +62,13 @@ func (bt *BlockTest) UnmarshalJSON(in []byte) error {
 }
 
 type btJSON struct {
-	Blocks     []btBlock             `json:"blocks"`
-	Genesis    btHeader              `json:"genesisBlockHeader"`
-	Pre        types.GenesisAlloc    `json:"pre"`
-	Post       types.GenesisAlloc    `json:"postState"`
-	BestBlock  common.UnprefixedHash `json:"lastblockhash"`
-	Network    string                `json:"network"`
-	SealEngine string                `json:"sealEngine"`
+	Blocks     []btBlock                `json:"blocks"`
+	Genesis    btHeader                 `json:"genesisBlockHeader"`
+	Pre        types.GenesisAlloc       `json:"pre"`
+	Post       types.GenesisAlloc       `json:"postState"`
+	BestBlock  libcommon.UnprefixedHash `json:"lastblockhash"`
+	Network    string                   `json:"network"`
+	SealEngine string                   `json:"sealEngine"`
 }
 
 type btBlock struct {
@@ -102,11 +102,11 @@ type btHeader struct {
 	BlobGasUsed           *uint64
 	ExcessBlobGas         *uint64
 	ParentBeaconBlockRoot *libcommon.Hash
-	RequestsRoot          *libcommon.Hash
+	RequestsHash          *libcommon.Hash
 }
 
 type btHeaderMarshaling struct {
-	ExtraData     hexutility.Bytes
+	ExtraData     hexutil.Bytes
 	Number        *math.HexOrDecimal256
 	Difficulty    *math.HexOrDecimal256
 	GasLimit      math.HexOrDecimal64
@@ -122,6 +122,7 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 	if !ok {
 		return UnsupportedForkError{bt.json.Network}
 	}
+
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
 	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false, checkStateRoot)
 	defer m.Close()
@@ -175,6 +176,7 @@ func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
 		BlobGasUsed:           bt.json.Genesis.BlobGasUsed,
 		ExcessBlobGas:         bt.json.Genesis.ExcessBlobGas,
 		ParentBeaconBlockRoot: bt.json.Genesis.ParentBeaconBlockRoot,
+		RequestsHash:          bt.json.Genesis.RequestsHash,
 	}
 }
 
@@ -219,7 +221,7 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 				return nil, err
 			}
 			defer roTx.Rollback()
-			canonical, cErr := bt.br.CanonicalHash(context.Background(), roTx, cb.NumberU64())
+			canonical, _, cErr := bt.br.CanonicalHash(context.Background(), roTx, cb.NumberU64())
 			if cErr != nil {
 				return nil, cErr
 			}
@@ -241,10 +243,10 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 
 func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h == nil {
-		return fmt.Errorf("validateHeader: h == nil")
+		return errors.New("validateHeader: h == nil")
 	}
 	if h2 == nil {
-		return fmt.Errorf("validateHeader: h2 == nil")
+		return errors.New("validateHeader: h2 == nil")
 	}
 	if h.Bloom != h2.Bloom {
 		return fmt.Errorf("bloom: want: %x have: %x", h.Bloom, h2.Bloom)
@@ -306,8 +308,8 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if !reflect.DeepEqual(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
 		return fmt.Errorf("parentBeaconBlockRoot: want: %v have: %v", h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot)
 	}
-	if !reflect.DeepEqual(h.RequestsRoot, h2.RequestsRoot) {
-		return fmt.Errorf("requestsRoot: want: %v have: %v", h.RequestsRoot, h2.RequestsRoot)
+	if !reflect.DeepEqual(h.RequestsHash, h2.RequestsHash) {
+		return fmt.Errorf("requestsHash: want: %v have: %v", h.RequestsHash, h2.RequestsHash)
 	}
 	return nil
 }
@@ -316,9 +318,18 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	// validate post state accounts in test file against what we have in state db
 	for addr, acct := range bt.json.Post {
 		// address is indirectly verified by the other fields, as it's the db key
-		code2 := statedb.GetCode(addr)
-		balance2 := statedb.GetBalance(addr)
-		nonce2 := statedb.GetNonce(addr)
+		code2, err := statedb.GetCode(addr)
+		if err != nil {
+			return err
+		}
+		balance2, err := statedb.GetBalance(addr)
+		if err != nil {
+			return err
+		}
+		nonce2, err := statedb.GetNonce(addr)
+		if err != nil {
+			return err
+		}
 		if nonce2 != acct.Nonce {
 			return fmt.Errorf("account nonce mismatch for addr: %x want: %d have: %d", addr, acct.Nonce, nonce2)
 		}

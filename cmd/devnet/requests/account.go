@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package requests
 
 import (
@@ -5,10 +21,9 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/rpc"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/rpc"
 )
 
 type DebugAccountAt struct {
@@ -22,7 +37,7 @@ type AccountResult struct {
 	AccountProof []string          `json:"accountProof"`
 	Balance      *hexutil.Big      `json:"balance"`
 	CodeHash     libcommon.Hash    `json:"codeHash"`
-	Code         hexutility.Bytes  `json:"code"`
+	Code         hexutil.Bytes     `json:"code"`
 	Nonce        hexutil.Uint64    `json:"nonce"`
 	StorageHash  libcommon.Hash    `json:"storageHash"`
 	StorageProof []StorageResult   `json:"storageProof"`
@@ -34,8 +49,8 @@ type StorageResult struct {
 	Proof []string     `json:"proof"`
 }
 
-func (reqGen *requestGenerator) GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutility.Bytes, error) {
-	var result hexutility.Bytes
+func (reqGen *requestGenerator) GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error) {
+	var result hexutil.Bytes
 
 	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGetCode, address, blockRef); err != nil {
 		return nil, err

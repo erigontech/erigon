@@ -1,95 +1,318 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 var databaseTablesCfg = kv.TableCfg{
-	kv.BorCheckpoints: {},
-	kv.BorMilestones:  {},
-	kv.BorSpans:       {},
+	kv.BorCheckpoints:        {},
+	kv.BorCheckpointEnds:     {},
+	kv.BorMilestones:         {},
+	kv.BorMilestoneEnds:      {},
+	kv.BorSpans:              {},
+	kv.BorProducerSelections: {},
 }
 
-type entityStore[TEntity Entity] interface {
+//go:generate mockgen -typed=true -source=./entity_store.go -destination=./entity_store_mock.go -package=heimdall
+type EntityStore[TEntity Entity] interface {
 	Prepare(ctx context.Context) error
 	Close()
-	GetLastEntityId(ctx context.Context) (uint64, bool, error)
-	GetLastEntity(ctx context.Context) (TEntity, error)
-	GetEntity(ctx context.Context, id uint64) (TEntity, error)
+
+	LastEntityId(ctx context.Context) (uint64, bool, error)
+	LastFrozenEntityId() uint64
+	LastEntity(ctx context.Context) (TEntity, bool, error)
+	Entity(ctx context.Context, id uint64) (TEntity, bool, error)
 	PutEntity(ctx context.Context, id uint64, entity TEntity) error
-	FindByBlockNum(ctx context.Context, blockNum uint64) (TEntity, error)
-	RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error)
+
+	EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error)
 	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error)
+	DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error)
+	DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error)
+
+	SnapType() snaptype.Type
 }
 
-type RangeIndexFactory func(ctx context.Context) (*RangeIndex, error)
-
-type entityStoreImpl[TEntity Entity] struct {
-	db    *polygoncommon.Database
-	label kv.Label
-	table string
-
-	makeEntity func() TEntity
-
-	blockNumToIdIndexFactory RangeIndexFactory
-	blockNumToIdIndex        *RangeIndex
-	prepareOnce              sync.Once
+type NoopEntityStore[TEntity Entity] struct {
+	Type snaptype.Type
 }
 
-func newEntityStore[TEntity Entity](
+func (NoopEntityStore[TEntity]) Prepare(ctx context.Context) error {
+	return nil
+}
+
+func (NoopEntityStore[TEntity]) Close() {}
+
+func (NoopEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {
+	return 0, false, errors.New("noop")
+}
+func (NoopEntityStore[TEntity]) LastFrozenEntityId() uint64 { return 0 }
+func (NoopEntityStore[TEntity]) LastEntity(ctx context.Context) (TEntity, bool, error) {
+	var res TEntity
+	return res, false, errors.New("noop")
+}
+func (NoopEntityStore[TEntity]) Entity(ctx context.Context, id uint64) (TEntity, bool, error) {
+	var res TEntity
+	return res, false, errors.New("noop")
+}
+func (NoopEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
+	return nil
+}
+
+func (NoopEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	return 0, false, errors.New("noop")
+}
+
+func (NoopEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
+	return nil, errors.New("noop")
+}
+func (NoopEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
+	return 0, nil
+}
+
+func (NoopEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error) {
+	return 0, nil
+}
+
+func (ns NoopEntityStore[TEntity]) SnapType() snaptype.Type { return ns.Type }
+
+type mdbxEntityStore[TEntity Entity] struct {
+	db                *polygoncommon.Database
+	table             string
+	snapType          snaptype.Type
+	makeEntity        func() TEntity
+	blockNumToIdIndex RangeIndex
+	prepareOnce       sync.Once
+}
+
+func newMdbxEntityStore[TEntity Entity](
 	db *polygoncommon.Database,
-	label kv.Label,
 	table string,
+	snapType snaptype.Type,
 	makeEntity func() TEntity,
-	blockNumToIdIndexFactory RangeIndexFactory,
-) entityStore[TEntity] {
-	return &entityStoreImpl[TEntity]{
-		db:    db,
-		label: label,
-		table: table,
-
-		makeEntity: makeEntity,
-
-		blockNumToIdIndexFactory: blockNumToIdIndexFactory,
+	rangeIndex RangeIndex,
+) *mdbxEntityStore[TEntity] {
+	return &mdbxEntityStore[TEntity]{
+		db:                db,
+		table:             table,
+		snapType:          snapType,
+		makeEntity:        makeEntity,
+		blockNumToIdIndex: rangeIndex,
 	}
 }
 
-func (s *entityStoreImpl[TEntity]) Prepare(ctx context.Context) error {
+func (s *mdbxEntityStore[TEntity]) Prepare(ctx context.Context) error {
 	var err error
 	s.prepareOnce.Do(func() {
-		err = s.db.OpenOnce(ctx, s.label, databaseTablesCfg)
+		err = s.db.OpenOnce(ctx)
 		if err != nil {
 			return
 		}
-		s.blockNumToIdIndex, err = s.blockNumToIdIndexFactory(ctx)
-		if err != nil {
-			return
-		}
-		iteratorFactory := func(tx kv.Tx) (iter.KV, error) { return tx.Range(s.table, nil, nil) }
-		err = buildBlockNumToIdIndex(ctx, s.blockNumToIdIndex, s.db.BeginRo, iteratorFactory, s.entityUnmarshalJSON)
 	})
 	return err
 }
 
-func (s *entityStoreImpl[TEntity]) Close() {
-	s.blockNumToIdIndex.Close()
+func (s *mdbxEntityStore[TEntity]) WithTx(tx kv.Tx) EntityStore[TEntity] {
+	return txEntityStore[TEntity]{s, tx}
 }
 
-func (s *entityStoreImpl[TEntity]) GetLastEntityId(ctx context.Context) (uint64, bool, error) {
+func (s *mdbxEntityStore[TEntity]) Close() {
+}
+
+func (s *mdbxEntityStore[TEntity]) SnapType() snaptype.Type {
+	return s.snapType
+}
+
+func (s *mdbxEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return 0, false, err
 	}
 	defer tx.Rollback()
 
-	cursor, err := tx.Cursor(s.table)
+	return txEntityStore[TEntity]{s, tx}.LastEntityId(ctx)
+}
+
+func (s *mdbxEntityStore[TEntity]) LastFrozenEntityId() uint64 {
+	return 0
+}
+
+func (s *mdbxEntityStore[TEntity]) LastEntity(ctx context.Context) (TEntity, bool, error) {
+	id, ok, err := s.LastEntityId(ctx)
+	if err != nil {
+		return generics.Zero[TEntity](), false, err
+	}
+	// not found
+	if !ok {
+		return generics.Zero[TEntity](), false, nil
+	}
+	return s.Entity(ctx, id)
+}
+
+func entityStoreKey(id uint64) [8]byte {
+	var key [8]byte
+	binary.BigEndian.PutUint64(key[:], id)
+	return key
+}
+
+func entityStoreKeyParse(key []byte) uint64 {
+	return binary.BigEndian.Uint64(key)
+}
+
+func (s *mdbxEntityStore[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntity, error) {
+	entity := s.makeEntity()
+	if err := json.Unmarshal(jsonBytes, entity); err != nil {
+		return generics.Zero[TEntity](), err
+	}
+	return entity, nil
+}
+
+func (s *mdbxEntityStore[TEntity]) Entity(ctx context.Context, id uint64) (TEntity, bool, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return generics.Zero[TEntity](), false, err
+	}
+	defer tx.Rollback()
+
+	key := entityStoreKey(id)
+	jsonBytes, err := tx.GetOne(s.table, key[:])
+	if err != nil {
+		return generics.Zero[TEntity](), false, err
+	}
+	// not found
+	if jsonBytes == nil {
+		return generics.Zero[TEntity](), false, nil
+	}
+
+	val, err := s.entityUnmarshalJSON(jsonBytes)
+	return val, true, err
+}
+
+func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
+	tx, err := s.db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err = (txEntityStore[TEntity]{s, tx}).PutEntity(ctx, id, entity); err != nil {
+		return nil
+	}
+
+	return tx.Commit()
+}
+
+func (s *mdbxEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	return txEntityStore[TEntity]{s, tx}.RangeFromId(ctx, startId)
+}
+
+func (s *mdbxEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	return txEntityStore[TEntity]{s, tx}.RangeFromBlockNum(ctx, startBlockNum)
+}
+
+func (s *mdbxEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	defer tx.Rollback()
+
+	return txEntityStore[TEntity]{s, tx}.EntityIdFromBlockNum(ctx, blockNum)
+}
+
+func (s *mdbxEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
+	tx, err := s.db.BeginRw(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	deleted, err := (txEntityStore[TEntity]{s, tx}).DeleteToBlockNum(ctx, unwindPoint, limit)
+
+	if err != nil {
+		return deleted, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return deleted, nil
+}
+
+func (s *mdbxEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error) {
+	tx, err := s.db.BeginRw(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	deleted, err := (txEntityStore[TEntity]{s, tx}).DeleteFromBlockNum(ctx, unwindPoint)
+
+	if err != nil {
+		return deleted, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return deleted, nil
+}
+
+type txEntityStore[TEntity Entity] struct {
+	*mdbxEntityStore[TEntity]
+	tx kv.Tx
+}
+
+func (s txEntityStore[TEntity]) Prepare(ctx context.Context) error {
+	return nil
+}
+
+func (s txEntityStore[TEntity]) Close() {
+
+}
+
+func (s txEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {
+	cursor, err := s.tx.Cursor(s.table)
 	if err != nil {
 		return 0, false, err
 	}
@@ -107,70 +330,28 @@ func (s *entityStoreImpl[TEntity]) GetLastEntityId(ctx context.Context) (uint64,
 	return entityStoreKeyParse(lastKey), true, nil
 }
 
-// Zero value of any type T
-// https://stackoverflow.com/questions/70585852/return-default-value-for-generic-type)
-// https://go.dev/ref/spec#The_zero_value
-func Zero[T any]() T {
-	var value T
-	return value
-}
-
-func (s *entityStoreImpl[TEntity]) GetLastEntity(ctx context.Context) (TEntity, error) {
-	id, ok, err := s.GetLastEntityId(ctx)
-	if err != nil {
-		return Zero[TEntity](), err
-	}
-	// not found
-	if !ok {
-		return Zero[TEntity](), nil
-	}
-	return s.GetEntity(ctx, id)
-}
-
-func entityStoreKey(id uint64) [8]byte {
-	var key [8]byte
-	binary.BigEndian.PutUint64(key[:], id)
-	return key
-}
-
-func entityStoreKeyParse(key []byte) uint64 {
-	return binary.BigEndian.Uint64(key)
-}
-
-func (s *entityStoreImpl[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntity, error) {
-	entity := s.makeEntity()
-	if err := json.Unmarshal(jsonBytes, entity); err != nil {
-		return Zero[TEntity](), err
-	}
-	return entity, nil
-}
-
-func (s *entityStoreImpl[TEntity]) GetEntity(ctx context.Context, id uint64) (TEntity, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return Zero[TEntity](), err
-	}
-	defer tx.Rollback()
-
+func (s txEntityStore[TEntity]) Entity(ctx context.Context, id uint64) (TEntity, bool, error) {
 	key := entityStoreKey(id)
-	jsonBytes, err := tx.GetOne(s.table, key[:])
+	jsonBytes, err := s.tx.GetOne(s.table, key[:])
 	if err != nil {
-		return Zero[TEntity](), err
+		return generics.Zero[TEntity](), false, err
 	}
 	// not found
 	if jsonBytes == nil {
-		return Zero[TEntity](), nil
+		return generics.Zero[TEntity](), false, nil
 	}
 
-	return s.entityUnmarshalJSON(jsonBytes)
+	val, err := s.entityUnmarshalJSON(jsonBytes)
+	return val, true, err
+
 }
 
-func (s *entityStoreImpl[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
-	tx, err := s.db.BeginRw(ctx)
-	if err != nil {
-		return err
+func (s txEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
+	tx, ok := s.tx.(kv.RwTx)
+
+	if !ok {
+		return fmt.Errorf("put entity: %s needs an RwTx", s.table)
 	}
-	defer tx.Rollback()
 
 	jsonBytes, err := json.Marshal(entity)
 	if err != nil {
@@ -181,36 +362,23 @@ func (s *entityStoreImpl[TEntity]) PutEntity(ctx context.Context, id uint64, ent
 	if err = tx.Put(s.table, key[:], jsonBytes); err != nil {
 		return err
 	}
-	if err = tx.Commit(); err != nil {
-		return err
+
+	if indexer, ok := s.blockNumToIdIndex.(RangeIndexer); ok {
+		if txIndexer, ok := indexer.(TransactionalRangeIndex); ok {
+			indexer = txIndexer.WithTx(tx).(RangeIndexer)
+		}
+
+		if err = indexer.Put(ctx, entity.BlockNumRange(), id); err != nil {
+			return err
+		}
 	}
 
-	// update blockNumToIdIndex
-	return s.blockNumToIdIndex.Put(ctx, entity.BlockNumRange(), id)
+	return nil
 }
 
-func (s *entityStoreImpl[TEntity]) FindByBlockNum(ctx context.Context, blockNum uint64) (TEntity, error) {
-	id, err := s.blockNumToIdIndex.Lookup(ctx, blockNum)
-	if err != nil {
-		return Zero[TEntity](), err
-	}
-	// not found
-	if id == 0 {
-		return Zero[TEntity](), nil
-	}
-
-	return s.GetEntity(ctx, id)
-}
-
-func (s *entityStoreImpl[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
+func (s txEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
 	startKey := entityStoreKey(startId)
-	it, err := tx.Range(s.table, startKey[:], nil)
+	it, err := s.tx.Range(s.table, startKey[:], nil, order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
@@ -231,53 +399,99 @@ func (s *entityStoreImpl[TEntity]) RangeFromId(ctx context.Context, startId uint
 	return entities, nil
 }
 
-func (s *entityStoreImpl[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
-	id, err := s.blockNumToIdIndex.Lookup(ctx, startBlockNum)
+func (s txEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
+	id, ok, err := s.EntityIdFromBlockNum(ctx, startBlockNum)
 	if err != nil {
 		return nil, err
 	}
 	// not found
-	if id == 0 {
+	if !ok {
 		return nil, nil
 	}
 
 	return s.RangeFromId(ctx, id)
 }
 
-func buildBlockNumToIdIndex[TEntity Entity](
-	ctx context.Context,
-	index *RangeIndex,
-	txFactory func(context.Context) (kv.Tx, error),
-	iteratorFactory func(tx kv.Tx) (iter.KV, error),
-	entityUnmarshalJSON func([]byte) (TEntity, error),
-) error {
-	tx, err := txFactory(ctx)
+func (s txEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	indexer := s.blockNumToIdIndex
+
+	if txIndexer, ok := indexer.(TransactionalRangeIndex); ok {
+		indexer = txIndexer.WithTx(s.tx)
+	}
+
+	return indexer.Lookup(ctx, blockNum)
+}
+
+func (s txEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
+	tx, ok := s.tx.(kv.RwTx)
+
+	if !ok {
+		return 0, fmt.Errorf("delete %s to %d needs an RwTx", s.table, unwindPoint)
+	}
+
+	cursor, err := tx.RwCursor(s.table)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	defer tx.Rollback()
 
-	it, err := iteratorFactory(tx)
+	defer cursor.Close()
+	lastEntityToKeep, ok, err := s.EntityIdFromBlockNum(ctx, unwindPoint)
 	if err != nil {
-		return err
-	}
-	defer it.Close()
-
-	for it.HasNext() {
-		_, jsonBytes, err := it.Next()
-		if err != nil {
-			return err
-		}
-
-		entity, err := entityUnmarshalJSON(jsonBytes)
-		if err != nil {
-			return err
-		}
-
-		if err = index.Put(ctx, entity.BlockNumRange(), entity.RawId()); err != nil {
-			return err
-		}
+		return 0, err
 	}
 
-	return nil
+	if !ok {
+		return 0, nil
+	}
+
+	var deleted int
+	for k, _, err := cursor.Next(); err == nil && k != nil; k, _, err = cursor.Next() {
+		if entityStoreKeyParse(k) >= lastEntityToKeep {
+			break
+		}
+
+		if err = cursor.DeleteCurrent(); err != nil {
+			return deleted, err
+		}
+		deleted++
+		if limit > 0 && deleted == limit {
+			break
+		}
+	}
+	return deleted, err
+}
+
+func (s txEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error) {
+	tx, ok := s.tx.(kv.RwTx)
+
+	if !ok {
+		return 0, fmt.Errorf("uwind %s to %d needs an RwTx", s.table, unwindPoint)
+	}
+
+	cursor, err := tx.RwCursor(s.table)
+	if err != nil {
+		return 0, err
+	}
+
+	defer cursor.Close()
+	lastEntityToKeep, ok, err := s.EntityIdFromBlockNum(ctx, unwindPoint)
+	if err != nil {
+		return 0, err
+	}
+
+	if !ok {
+		return 0, nil
+	}
+
+	var entityKey = entityStoreKey(lastEntityToKeep + 1)
+	var k []byte
+	var deleted int
+	for k, _, err = cursor.Seek(entityKey[:]); err == nil && k != nil; k, _, err = cursor.Next() {
+		if err = cursor.DeleteCurrent(); err != nil {
+			return deleted, err
+		}
+		deleted++
+	}
+
+	return deleted, err
 }

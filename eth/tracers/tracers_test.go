@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package tracers_test
 
@@ -26,23 +29,22 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/tests"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/tests"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 
 	// Force-load native and js packages, to trigger registration
-	"github.com/ledgerwatch/erigon/eth/tracers"
-	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
-	_ "github.com/ledgerwatch/erigon/eth/tracers/native"
+	"github.com/erigontech/erigon/eth/tracers"
+	_ "github.com/erigontech/erigon/eth/tracers/js"
+	_ "github.com/erigontech/erigon/eth/tracers/native"
 )
 
 func TestPrestateTracerCreate2(t *testing.T) {
@@ -103,7 +105,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	rules := params.AllProtocolChanges.Rules(context.BlockNumber, context.Time)
-	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber, m.HistoryV3)
+	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("prestateTracer", new(tracers.Context), json.RawMessage("{}"))

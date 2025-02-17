@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -11,8 +27,9 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 func TestArchiveWriter(t *testing.T) {
@@ -22,12 +39,14 @@ func TestArchiveWriter(t *testing.T) {
 
 	td := generateTestData(t, 20, 52, 1, 1, 100000)
 
-	openWriter := func(tb testing.TB, tmp, name string, compFlags FileCompression) ArchiveWriter {
+	openWriter := func(tb testing.TB, tmp, name string, compFlags seg.FileCompression) *seg.Writer {
 		tb.Helper()
 		file := filepath.Join(tmp, name)
-		comp, err := seg.NewCompressor(context.Background(), "", file, tmp, 8, 1, log.LvlDebug, logger)
+		compressCfg := seg.DefaultCfg
+		compressCfg.MinPatternScore = 8
+		comp, err := seg.NewCompressor(context.Background(), "", file, tmp, compressCfg, log.LvlDebug, logger)
 		require.NoError(tb, err)
-		return NewArchiveWriter(comp, compFlags)
+		return seg.NewWriter(comp, compFlags)
 	}
 	keys := make([][]byte, 0, len(td))
 	for k := range td {
@@ -35,7 +54,7 @@ func TestArchiveWriter(t *testing.T) {
 	}
 	sort.Slice(keys, func(i, j int) bool { return bytes.Compare(keys[i], keys[j]) < 0 })
 
-	writeLatest := func(tb testing.TB, w ArchiveWriter, td map[string][]upd) {
+	writeLatest := func(tb testing.TB, w *seg.Writer, td map[string][]upd) {
 		tb.Helper()
 
 		for _, k := range keys {
@@ -50,7 +69,7 @@ func TestArchiveWriter(t *testing.T) {
 		require.NoError(tb, err)
 	}
 
-	checkLatest := func(tb testing.TB, g ArchiveGetter, td map[string][]upd) {
+	checkLatest := func(tb testing.TB, g *seg.Reader, td map[string][]upd) {
 		tb.Helper()
 
 		for _, k := range keys {
@@ -64,7 +83,7 @@ func TestArchiveWriter(t *testing.T) {
 	}
 
 	t.Run("Uncompressed", func(t *testing.T) {
-		w := openWriter(t, tmp, "uncompressed", CompressNone)
+		w := openWriter(t, tmp, "uncompressed", seg.CompressNone)
 		writeLatest(t, w, td)
 		w.Close()
 
@@ -75,11 +94,11 @@ func TestArchiveWriter(t *testing.T) {
 		ds := (datasize.B * datasize.ByteSize(decomp.Size())).HR()
 		t.Logf("keys %d, fsize %v compressed fully", len(keys), ds)
 
-		r := NewArchiveGetter(decomp.MakeGetter(), CompressNone)
+		r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
 		checkLatest(t, r, td)
 	})
 	t.Run("Compressed", func(t *testing.T) {
-		w := openWriter(t, tmp, "compressed", CompressKeys|CompressVals)
+		w := openWriter(t, tmp, "compressed", seg.CompressKeys|seg.CompressVals)
 		writeLatest(t, w, td)
 		w.Close()
 
@@ -89,12 +108,12 @@ func TestArchiveWriter(t *testing.T) {
 		ds := (datasize.B * datasize.ByteSize(decomp.Size())).HR()
 		t.Logf("keys %d, fsize %v compressed fully", len(keys), ds)
 
-		r := NewArchiveGetter(decomp.MakeGetter(), CompressKeys|CompressVals)
+		r := seg.NewReader(decomp.MakeGetter(), seg.CompressKeys|seg.CompressVals)
 		checkLatest(t, r, td)
 	})
 
 	t.Run("Compressed Keys", func(t *testing.T) {
-		w := openWriter(t, tmp, "compressed-keys", CompressKeys)
+		w := openWriter(t, tmp, "compressed-keys", seg.CompressKeys)
 		writeLatest(t, w, td)
 		w.Close()
 
@@ -104,12 +123,12 @@ func TestArchiveWriter(t *testing.T) {
 		ds := (datasize.B * datasize.ByteSize(decomp.Size())).HR()
 		t.Logf("keys %d, fsize %v compressed keys", len(keys), ds)
 
-		r := NewArchiveGetter(decomp.MakeGetter(), CompressKeys)
+		r := seg.NewReader(decomp.MakeGetter(), seg.CompressKeys)
 		checkLatest(t, r, td)
 	})
 
 	t.Run("Compressed Vals", func(t *testing.T) {
-		w := openWriter(t, tmp, "compressed-vals", CompressVals)
+		w := openWriter(t, tmp, "compressed-vals", seg.CompressVals)
 		writeLatest(t, w, td)
 		w.Close()
 
@@ -119,8 +138,20 @@ func TestArchiveWriter(t *testing.T) {
 		ds := (datasize.B * datasize.ByteSize(decomp.Size())).HR()
 		t.Logf("keys %d, fsize %v compressed vals", len(keys), ds)
 
-		r := NewArchiveGetter(decomp.MakeGetter(), CompressVals)
+		r := seg.NewReader(decomp.MakeGetter(), seg.CompressVals)
 		checkLatest(t, r, td)
 	})
 
+}
+
+func TestPrunableProgress(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	SaveExecV3PrunableProgress(tx, []byte("test"), 100)
+	s, err := GetExecV3PrunableProgress(tx, []byte("test"))
+	require.NoError(t, err)
+	require.EqualValues(t, s, 100)
+	SaveExecV3PrunableProgress(tx, []byte("test"), 120)
+	s, err = GetExecV3PrunableProgress(tx, []byte("test"))
+	require.NoError(t, err)
+	require.EqualValues(t, s, 120)
 }

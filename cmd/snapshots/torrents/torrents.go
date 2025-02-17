@@ -1,7 +1,24 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package torrents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,18 +28,18 @@ import (
 	gosync "sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/manifest"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/cmd/snapshots/manifest"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 var Command = cli.Command{
@@ -94,10 +111,6 @@ func torrents(cliCtx *cli.Context, command string) error {
 		if src, err = sync.ParseLocator(cliCtx.Args().Get(pos)); err != nil {
 			return err
 		}
-
-		if err != nil {
-			return err
-		}
 	}
 
 	pos++
@@ -120,19 +133,17 @@ func torrents(cliCtx *cli.Context, command string) error {
 	}
 
 	if src == nil {
-		return fmt.Errorf("missing data source")
+		return errors.New("missing data source")
 	}
 
 	var rcCli *downloader.RCloneClient
 
 	switch src.LType {
 	case sync.RemoteFs:
-		if rcCli == nil {
-			rcCli, err = downloader.NewRCloneClient(logger)
+		rcCli, err = downloader.NewRCloneClient(logger)
 
-			if err != nil {
-				return err
-			}
+		if err != nil {
+			return err
 		}
 
 		if err = sync.CheckRemote(rcCli, src.Src); err != nil {
@@ -161,7 +172,7 @@ func torrents(cliCtx *cli.Context, command string) error {
 	}
 
 	if rcCli != nil {
-		if src != nil && src.LType == sync.RemoteFs {
+		if src.LType == sync.RemoteFs {
 			ctx := cliCtx.Context // avoiding sonar dup complaint
 			srcSession, err = rcCli.NewSession(ctx, filepath.Join(tempDir, "src"), src.Src+":"+src.Root, nil)
 
@@ -171,8 +182,8 @@ func torrents(cliCtx *cli.Context, command string) error {
 		}
 	}
 
-	if src != nil && srcSession == nil {
-		return fmt.Errorf("no src session established")
+	if srcSession == nil {
+		return errors.New("no src session established")
 	}
 
 	logger.Debug("Starting torrents " + command)
@@ -183,14 +194,14 @@ func torrents(cliCtx *cli.Context, command string) error {
 	case "update":
 		startTime := time.Now()
 
-		logger.Info(fmt.Sprintf("Starting update: %s", src.String()), "first", firstBlock, "last", lastBlock, "dir", tempDir)
+		logger.Info("Starting update: "+src.String(), "first", firstBlock, "last", lastBlock, "dir", tempDir)
 
 		err := updateTorrents(cliCtx.Context, srcSession, firstBlock, lastBlock, logger)
 
 		if err == nil {
-			logger.Info(fmt.Sprintf("Finished update: %s", src.String()), "elapsed", time.Since(startTime))
+			logger.Info("Finished update: "+src.String(), "elapsed", time.Since(startTime))
 		} else {
-			logger.Info(fmt.Sprintf("Aborted update: %s", src.String()), "err", err)
+			logger.Info("Aborted update: "+src.String(), "err", err)
 		}
 
 		return err
@@ -198,14 +209,14 @@ func torrents(cliCtx *cli.Context, command string) error {
 	case "verify":
 		startTime := time.Now()
 
-		logger.Info(fmt.Sprintf("Starting verify: %s", src.String()), "first", firstBlock, "last", lastBlock, "dir", tempDir)
+		logger.Info("Starting verify: "+src.String(), "first", firstBlock, "last", lastBlock, "dir", tempDir)
 
 		err := verifyTorrents(cliCtx.Context, srcSession, firstBlock, lastBlock, logger)
 
 		if err == nil {
-			logger.Info(fmt.Sprintf("Verified: %s", src.String()), "elapsed", time.Since(startTime))
+			logger.Info("Verified: "+src.String(), "elapsed", time.Since(startTime))
 		} else {
-			logger.Info(fmt.Sprintf("Verification failed: %s", src.String()), "err", err)
+			logger.Info("Verification failed: "+src.String(), "err", err)
 		}
 
 		return err
@@ -372,7 +383,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 				}
 			}
 
-			logger.Info(fmt.Sprintf("Updating %s", file+".torrent"))
+			logger.Info("Updating " + file + ".torrent")
 
 			err := srcSession.Download(gctx, file)
 
@@ -429,7 +440,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 				}
 			}
 
-			logger.Info(fmt.Sprintf("Validating %s", file+".torrent"))
+			logger.Info("Validating " + file + ".torrent")
 
 			var mi *metainfo.MetaInfo
 

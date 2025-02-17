@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package network
 
 import (
@@ -5,29 +21,27 @@ import (
 	"sync/atomic"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/net/context"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/rpc"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/rpc"
 )
 
 // Input: the currently highest slot processed and the list of blocks we want to know process
 // Output: the new last new highest slot processed and an error possibly?
 type ProcessFn func(
 	highestSlotProcessed uint64,
-	highestBlockRootProcessed libcommon.Hash,
 	blocks []*cltypes.SignedBeaconBlock) (
 	newHighestSlotProcessed uint64,
-	newHighestBlockRootProcessed libcommon.Hash,
 	err error)
 
 type ForwardBeaconDownloader struct {
-	ctx                       context.Context
-	highestSlotProcessed      uint64
-	highestBlockRootProcessed libcommon.Hash
-	rpc                       *rpc.BeaconRpcP2P
-	process                   ProcessFn
+	ctx                   context.Context
+	highestSlotProcessed  uint64
+	highestSlotUpdateTime time.Time
+	rpc                   *rpc.BeaconRpcP2P
+	process               ProcessFn
 
 	mu sync.Mutex
 }
@@ -50,21 +64,10 @@ func (f *ForwardBeaconDownloader) SetProcessFunction(fn ProcessFn) {
 func (f *ForwardBeaconDownloader) SetHighestProcessedSlot(highestSlotProcessed uint64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.highestSlotProcessed = highestSlotProcessed
-}
-
-// SetHighestProcessedRoot sets the highest processed block root so far.
-func (f *ForwardBeaconDownloader) SetHighestProcessedRoot(root libcommon.Hash) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.highestBlockRootProcessed = root
-}
-
-// HighestProcessedRoot returns the highest processed block root so far.
-func (f *ForwardBeaconDownloader) HighestProcessedRoot() libcommon.Hash {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.highestBlockRootProcessed
+	if highestSlotProcessed > f.highestSlotProcessed {
+		f.highestSlotProcessed = highestSlotProcessed
+		f.highestSlotUpdateTime = time.Now()
+	}
 }
 
 type peerAndBlocks struct {
@@ -78,6 +81,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	atomicResp.Store(peerAndBlocks{})
 	reqInterval := time.NewTicker(300 * time.Millisecond)
 	defer reqInterval.Stop()
+
 Loop:
 	for {
 		select {
@@ -86,10 +90,28 @@ Loop:
 				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 					return
 				}
-				// this is so we do not get stuck on a side-fork
-				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, f.highestSlotProcessed-2, count)
+				var reqSlot uint64
+				if f.highestSlotProcessed > 2 {
+					reqSlot = f.highestSlotProcessed - 2
+				}
+				// double the request count every 10 seconds. This is inspired by the mekong network, which has many consecutive missing blocks.
+				reqCount := count
+				// NEED TO COMMENT THIS BC IT CAUSES ISSUES ON MAINNET
 
+				// if !f.highestSlotUpdateTime.IsZero() {
+				// 	multiplier := int(time.Since(f.highestSlotUpdateTime).Seconds()) / 10
+				// 	multiplier = min(multiplier, 6)
+				// 	reqCount *= uint64(1 << uint(multiplier))
+				// }
+
+				// leave a warning if we are stuck for more than 90 seconds
+				if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
+					log.Trace("Forward beacon downloader gets stuck", "time", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
+				}
+				// this is so we do not get stuck on a side-fork
+				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount)
 				if err != nil {
+					log.Debug("Failed to send beacon blocks by range request", "err", err, "peer", peerId, "slot", reqSlot, "reqCount", reqCount)
 					return
 				}
 				if responses == nil {
@@ -117,17 +139,18 @@ Loop:
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	var highestBlockRootProcessed libcommon.Hash
 	var highestSlotProcessed uint64
 	var err error
 	blocks := atomicResp.Load().(peerAndBlocks).blocks
 	pid := atomicResp.Load().(peerAndBlocks).peerId
-	if highestSlotProcessed, highestBlockRootProcessed, err = f.process(f.highestSlotProcessed, f.highestBlockRootProcessed, blocks); err != nil {
+	if highestSlotProcessed, err = f.process(f.highestSlotProcessed, blocks); err != nil {
 		f.rpc.BanPeer(pid)
 		return
 	}
-	f.highestSlotProcessed = highestSlotProcessed
-	f.highestBlockRootProcessed = highestBlockRootProcessed
+	if highestSlotProcessed > f.highestSlotProcessed {
+		f.highestSlotProcessed = highestSlotProcessed
+		f.highestSlotUpdateTime = time.Now()
+	}
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.

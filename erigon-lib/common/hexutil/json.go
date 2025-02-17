@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package hexutil
 
@@ -210,25 +213,6 @@ func isString(input []byte) bool {
 	return len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"'
 }
 
-func bytesHave0xPrefix(input []byte) bool {
-	return len(input) >= 2 && input[0] == '0' && (input[1] == 'x' || input[1] == 'X')
-}
-
-func checkText(input []byte, wantPrefix bool) ([]byte, error) {
-	if len(input) == 0 {
-		return nil, nil // empty strings are allowed
-	}
-	if bytesHave0xPrefix(input) {
-		input = input[2:]
-	} else if wantPrefix {
-		return nil, ErrMissingPrefix
-	}
-	if len(input)%2 != 0 {
-		return nil, ErrOddLength
-	}
-	return input, nil
-}
-
 func checkNumberText(input []byte) (raw []byte, err error) {
 	if len(input) == 0 {
 		return nil, nil // empty strings are allowed
@@ -249,7 +233,11 @@ func checkNumberText(input []byte) (raw []byte, err error) {
 func wrapTypeError(err error, typ reflect.Type) error {
 	// keeping compatiblity with go ethereum tests
 	// nolint:errorlint
-	if _, ok := err.(*decError); ok {
+	//if _, ok := err.(*decError); ok {
+	//	return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
+	//}
+	var dec *decError
+	if errors.As(err, &dec) {
 		return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
 	}
 	return err
@@ -257,4 +245,14 @@ func wrapTypeError(err error, typ reflect.Type) error {
 
 func errNonString(typ reflect.Type) error {
 	return &json.UnmarshalTypeError{Value: "non-string", Type: typ}
+}
+
+// UnmarshalFixedJSON decodes the input as a string with 0x prefix. The length of out
+// determines the required input length. This function is commonly used to implement the
+// UnmarshalJSON method for fixed-size types.
+func UnmarshalFixedJSON(typ reflect.Type, input, out []byte) error {
+	if !isString(input) {
+		return &json.UnmarshalTypeError{Value: "non-string", Type: typ}
+	}
+	return wrapTypeError(UnmarshalFixedText(typ.String(), input[1:len(input)-1], out), typ)
 }

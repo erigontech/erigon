@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package dbutils
 
 import (
@@ -5,8 +21,8 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 )
 
 const NumberLength = 8
@@ -51,16 +67,6 @@ func LogKey(blockNumber uint64, txId uint32) []byte {
 	return newK
 }
 
-// bloomBitsKey = bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash
-func BloomBitsKey(bit uint, section uint64, hash libcommon.Hash) []byte {
-	key := append(make([]byte, 10), hash.Bytes()...)
-
-	binary.BigEndian.PutUint16(key[0:], uint16(bit))
-	binary.BigEndian.PutUint64(key[2:], section)
-
-	return key
-}
-
 // AddrHash + KeyHash
 // Only for trie
 func GenerateCompositeTrieKey(addressHash libcommon.Hash, seckey libcommon.Hash) []byte {
@@ -68,6 +74,14 @@ func GenerateCompositeTrieKey(addressHash libcommon.Hash, seckey libcommon.Hash)
 	compositeKey = append(compositeKey, addressHash[:]...)
 	compositeKey = append(compositeKey, seckey[:]...)
 	return compositeKey
+}
+
+// Address + storageLocationHash
+func GenerateStoragePlainKey(address libcommon.Address, storageKey libcommon.Hash) []byte {
+	storagePlainKey := make([]byte, 0, length.Addr+length.Hash)
+	storagePlainKey = append(storagePlainKey, address.Bytes()...)
+	storagePlainKey = append(storagePlainKey, storageKey.Bytes()...)
+	return storagePlainKey
 }
 
 // AddrHash + incarnation + KeyHash

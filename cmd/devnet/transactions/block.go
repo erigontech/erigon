@@ -1,20 +1,37 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package transactions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
+	"github.com/erigontech/erigon/cmd/devnet/requests"
+	"github.com/erigontech/erigon/cmd/devnet/services"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // max number of blocks to look for a transaction in
@@ -51,7 +68,7 @@ func searchBlockForHashes(
 	logger := devnet.Logger(ctx)
 
 	if len(hashmap) == 0 {
-		return nil, fmt.Errorf("no hashes to search for")
+		return nil, errors.New("no hashes to search for")
 	}
 
 	txToBlock := make(map[libcommon.Hash]uint64, len(hashmap))
@@ -60,7 +77,7 @@ func searchBlockForHashes(
 
 	// get a block from the new heads channel
 	if headsSub == nil {
-		return nil, fmt.Errorf("no block heads subscription")
+		return nil, errors.New("no block heads subscription")
 	}
 
 	var blockCount int
@@ -88,7 +105,7 @@ func searchBlockForHashes(
 				logger.Error("Missing Tx", "txHash", h)
 			}
 
-			return nil, fmt.Errorf("timeout when searching for tx")
+			return nil, errors.New("timeout when searching for tx")
 		}
 	}
 }

@@ -596,4 +596,3 @@ encoded as `[ 0x05 CBOR(ENCODE_KEY(key))... flags /CBOR(nonce).../ /CBOR(balance
 format: `NEW_TRIE`
 
 encoded as `[ 0xBB ]`
-

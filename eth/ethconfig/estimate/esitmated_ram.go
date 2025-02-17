@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package estimate
 
 import (
@@ -5,7 +21,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/ledgerwatch/erigon-lib/mmap"
+	"github.com/erigontech/erigon-lib/mmap"
 )
 
 type EstimatedRamPerWorker datasize.ByteSize
@@ -41,8 +57,8 @@ const (
 
 	StateV3Collate = EstimatedRamPerWorker(5 * datasize.GB)
 
-	//state-reconstitution is multi-threaded
-	ReconstituteState = EstimatedRamPerWorker(512 * datasize.MB)
+	//BlocksExecution - in multi-threaded mode
+	BlocksExecution = EstimatedRamPerWorker(512 * datasize.MB)
 )
 
 // AlmostAllCPUs - return all-but-one cpus. Leaving 1 cpu for "work producer", also cloud-providers do recommend leave 1 CPU for their IO software

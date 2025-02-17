@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package seg
 
@@ -27,14 +27,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestCompressEmptyDict(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 100, 1, log.LvlDebug, logger)
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 100
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +86,10 @@ func prepareDict(t *testing.T) *Decompressor {
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,9 +130,6 @@ func TestCompressDict1(t *testing.T) {
 		require.True(t, g.MatchPrefix([]byte("")))
 		require.True(t, g.MatchPrefix([]byte{}))
 
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("long")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte("")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte{}))
 		word, _ := g.Next(nil)
 		require.NotNil(t, word)
 		require.Zero(t, len(word))
@@ -139,11 +141,6 @@ func TestCompressDict1(t *testing.T) {
 		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
 		require.True(t, g.MatchPrefix([]byte{}))
 
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte("long")))
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("longlong")))
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("wordnotmatch")))
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("longnotmatch")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte{}))
 		_, _ = g.Next(nil)
 
 		// next word is `word`
@@ -155,13 +152,6 @@ func TestCompressDict1(t *testing.T) {
 		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
 		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
 
-		require.Equal(t, -1, g.MatchPrefixCmp([]byte("long")))
-		require.Equal(t, -1, g.MatchPrefixCmp([]byte("longlong")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte("word")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte("")))
-		require.Equal(t, 0, g.MatchPrefixCmp(nil))
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("wordnotmatch")))
-		require.Equal(t, -1, g.MatchPrefixCmp([]byte("longnotmatch")))
 		_, _ = g.Next(nil)
 
 		// next word is `longlongword %d`
@@ -175,13 +165,6 @@ func TestCompressDict1(t *testing.T) {
 		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
 		require.True(t, g.MatchPrefix([]byte{}))
 
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte(fmt.Sprintf("%d", i))))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte(expectPrefix)))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte(expectPrefix+"long")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte(expectPrefix+"longword ")))
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("wordnotmatch")))
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("longnotmatch")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte{}))
 		savePos := g.dataP
 		word, nextPos := g.Next(nil)
 		expected := fmt.Sprintf("%d longlongword %d", i, i)
@@ -196,7 +179,7 @@ func TestCompressDict1(t *testing.T) {
 
 	if cs := checksum(d.filePath); cs != 3153486123 {
 		// it's ok if hash changed, but need re-generate all existing snapshot hashes
-		// in https://github.com/ledgerwatch/erigon-snapshot
+		// in https://github.com/erigontech/erigon-snapshot
 		t.Errorf("result file hash changed, %d", cs)
 	}
 }
@@ -266,7 +249,7 @@ func TestCompressDictCmp(t *testing.T) {
 
 	if cs := checksum(d.filePath); cs != 3153486123 {
 		// it's ok if hash changed, but need re-generate all existing snapshot hashes
-		// in https://github.com/ledgerwatch/erigon-snapshot
+		// in https://github.com/erigontech/erigon-snapshot
 		t.Errorf("result file hash changed, %d", cs)
 	}
 }

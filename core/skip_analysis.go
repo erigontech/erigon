@@ -1,26 +1,26 @@
 // Copyright 2020 The erigon Authors
-// This file is part of the go-ethereum library.
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package core
 
 import (
 	"sort"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/networkname"
 )
 
 // SkipAnalysis function tells us whether we can skip performing jumpdest analysis
@@ -36,8 +36,8 @@ import (
 // 0x21ab7bf7245a87eae265124aaf180d91133377e47db2b1a4866493ec4b371150 (block 13119520)
 
 var analysisBlocks = map[string][]uint64{
-	networkname.MainnetChainName:    {5_800_596, 6_426_298, 6_426_432, 11_079_912, 13_119_520, 15_081_051},
-	networkname.BorMainnetChainName: {29_447_463},
+	networkname.Mainnet:    {5_800_596, 6_426_298, 6_426_432, 11_079_912, 13_119_520, 15_081_051},
+	networkname.BorMainnet: {29_447_463},
 }
 
 func SkipAnalysis(config *chain.Config, blockNumber uint64) bool {

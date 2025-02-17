@@ -1,9 +1,25 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cli
 
 import (
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils"
 )
 
 // DefaultFlags contains all flags that are used and supported by Erigon binary.
@@ -12,8 +28,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.EthashDatasetDirFlag,
 	&utils.ExternalConsensusFlag,
 	&utils.TxPoolDisableFlag,
-	&utils.TxPoolLocalsFlag,
-	&utils.TxPoolNoLocalsFlag,
 	&utils.TxPoolPriceLimitFlag,
 	&utils.TxPoolPriceBumpFlag,
 	&utils.TxPoolBlobPriceBumpFlag,
@@ -22,22 +36,12 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolTotalBlobPoolLimit,
 	&utils.TxPoolGlobalSlotsFlag,
 	&utils.TxPoolGlobalBaseFeeSlotsFlag,
-	&utils.TxPoolAccountQueueFlag,
 	&utils.TxPoolGlobalQueueFlag,
-	&utils.TxPoolLifetimeFlag,
 	&utils.TxPoolTraceSendersFlag,
 	&utils.TxPoolCommitEveryFlag,
-	&PruneFlag,
-	&PruneBlocksFlag,
-	&PruneHistoryFlag,
-	&PruneReceiptFlag,
-	&PruneTxIndexFlag,
-	&PruneCallTracesFlag,
-	&PruneBlocksBeforeFlag,
-	&PruneHistoryBeforeFlag,
-	&PruneReceiptBeforeFlag,
-	&PruneTxIndexBeforeFlag,
-	&PruneCallTracesBeforeFlag,
+	&PruneDistanceFlag,
+	&PruneBlocksDistanceFlag,
+	&PruneModeFlag,
 	&BatchSizeFlag,
 	&BodyCacheLimitFlag,
 	&DatabaseVerbosityFlag,
@@ -103,6 +107,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,
 	&utils.SnapStateStopFlag,
+	&utils.SnapSkipStateSnapshotDownloadFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
 	&utils.DbWriteMapFlag,
@@ -174,8 +179,16 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinDiscoveryPortFlag,
 	&utils.CaplinDiscoveryTCPPortFlag,
 	&utils.CaplinCheckpointSyncUrlFlag,
+	&utils.CaplinSubscribeAllTopicsFlag,
+	&utils.CaplinMaxPeerCount,
+	&utils.CaplinEnableUPNPlag,
+	&utils.CaplinMaxInboundTrafficPerPeerFlag,
+	&utils.CaplinMaxOutboundTrafficPerPeerFlag,
+	&utils.CaplinAdaptableTrafficRequirementsFlag,
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
+	&utils.SentinelBootnodes,
+	&utils.SentinelStaticPeers,
 
 	&utils.OtsSearchMaxCapFlag,
 
@@ -202,10 +215,18 @@ var DefaultFlags = []cli.Flag{
 	&utils.BeaconApiProtocolFlag,
 	&utils.BeaconApiIdleTimeoutFlag,
 
-	&utils.CaplinBackfillingFlag,
-	&utils.CaplinBlobBackfillingFlag,
+	&utils.CaplinArchiveBlocksFlag,
+	&utils.CaplinArchiveBlobsFlag,
+	&utils.CaplinArchiveStatesFlag,
+	&utils.CaplinImmediateBlobBackfillFlag,
+
 	&utils.CaplinDisableBlobPruningFlag,
-	&utils.CaplinArchiveFlag,
+	&utils.CaplinDisableCheckpointSyncFlag,
+	&utils.CaplinEnableSnapshotGeneration,
+	&utils.CaplinMevRelayUrl,
+	&utils.CaplinValidatorMonitorFlag,
+	&utils.CaplinCustomConfigFlag,
+	&utils.CaplinCustomGenesisFlag,
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,
@@ -213,5 +234,14 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolGossipDisableFlag,
 	&SyncLoopBlockLimitFlag,
 	&SyncLoopBreakAfterFlag,
-	&SyncLoopPruneLimitFlag,
+	&SyncParallelStateFlushing,
+
+	&utils.ChaosMonkeyFlag,
+
+	&utils.ShutterEnabledFlag,
+	&utils.ShutterP2pBootstrapNodesFlag,
+	&utils.ShutterP2pListenPortFlag,
+
+	&utils.PolygonPosSingleSlotFinalityFlag,
+	&utils.PolygonPosSingleSlotFinalityBlockAtFlag,
 }

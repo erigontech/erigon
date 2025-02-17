@@ -1,18 +1,21 @@
 // Copyright 2020 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package flags
 
@@ -89,7 +92,7 @@ func doMigrateFlags(ctx *cli.Context) {
 		for _, parent := range ctx.Lineage()[1:] {
 			if parent.IsSet(name) {
 				// When iterating across the lineage, we will be served both
-				// the 'canon' and alias formats of all commmands. In most cases,
+				// the 'canon' and alias formats of all commands. In most cases,
 				// it's fine to set it in the ctx multiple times (one for each
 				// name), however, the Slice-flags are not fine.
 				// The slice-flags accumulate, so if we set it once as
