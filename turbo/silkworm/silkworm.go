@@ -33,16 +33,18 @@ type SilkwormLogLevel = silkworm_go.SilkwormLogLevel
 type SentrySettings = silkworm_go.SentrySettings
 type RpcDaemonSettings = silkworm_go.RpcDaemonSettings
 type RpcInterfaceLogSettings = silkworm_go.RpcInterfaceLogSettings
-type MappedHeaderSnapshot = silkworm_go.MappedHeaderSnapshot
-type MappedBodySnapshot = silkworm_go.MappedBodySnapshot
-type MappedTxnSnapshot = silkworm_go.MappedTxnSnapshot
-type MappedChainSnapshot = silkworm_go.MappedChainSnapshot
 
-var NewMemoryMappedRegion = silkworm_go.NewMemoryMappedRegion
-var NewMappedHeaderSnapshot = silkworm_go.NewMappedHeaderSnapshot
-var NewMappedBodySnapshot = silkworm_go.NewMappedBodySnapshot
-var NewMappedTxnSnapshot = silkworm_go.NewMappedTxnSnapshot
+type HeadersSnapshot = silkworm_go.HeadersSnapshot
+type BodiesSnapshot = silkworm_go.BodiesSnapshot
+type TransactionsSnapshot = silkworm_go.TransactionsSnapshot
+type BlocksSnapshotBundle = silkworm_go.BlocksSnapshotBundle
+type InvertedIndexSnapshot = silkworm_go.InvertedIndexSnapshot
+type HistorySnapshot = silkworm_go.HistorySnapshot
+type DomainSnapshot = silkworm_go.DomainSnapshot
+type StateSnapshotBundleLatest = silkworm_go.StateSnapshotBundleLatest
+type StateSnapshotBundleHistorical = silkworm_go.StateSnapshotBundleHistorical
 
+var NewFilePath = silkworm_go.NewFilePath
 var ErrInterrupted = silkworm_go.ErrInterrupted
 
 func New(dataDirPath string, libMdbxVersion string, numIOContexts uint32, logLevel log.Lvl) (*Silkworm, error) {
@@ -124,8 +126,4 @@ func ExecuteBlocksPerpetual(s *Silkworm, db kv.RwDB, chainID *big.Int, startBloc
 		return lastExecutedBlock, consensus.ErrInvalidBlock
 	}
 	return lastExecutedBlock, err
-}
-
-type CanAddSnapshotsToSilkwarm interface {
-	AddSnapshotsToSilkworm(*Silkworm) error
 }
