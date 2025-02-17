@@ -1292,6 +1292,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 				curAtt.AggregationBits = mergedAggrBits
 				curAtt.CommitteeBits = mergedCommitteeBits
 				copy(curAtt.Signature[:], mergeSig)
+				mergeAny = true
 			}
 		}
 		if !mergeAny {
