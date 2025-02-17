@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/txnprovider/txpool"
+	"github.com/erigontech/erigon/txnprovider/txnparser"
 )
 
 func init() {
@@ -258,9 +258,9 @@ var (
 
 				chainId, _ := uint256.FromBig(chainConfig.ChainID)
 
-				parseCtx := txpool.NewTxnParseContext(*chainId)
+				parseCtx := txnparser.NewTxnParseContext(*chainId)
 				parseCtx.WithSender(false)
-				slot := txpool.TxnSlot{}
+				slot := txnparser.TxnSlot{}
 				bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 
 				defer d.EnableReadAhead().DisableReadAhead()

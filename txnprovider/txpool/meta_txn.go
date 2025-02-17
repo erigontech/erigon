@@ -16,9 +16,13 @@
 
 package txpool
 
-import "github.com/holiman/uint256"
+import (
+	"github.com/holiman/uint256"
 
-func newMetaTxn(slot *TxnSlot, isLocal bool, timestamp uint64) *metaTxn {
+	"github.com/erigontech/erigon/txnprovider/txnparser"
+)
+
+func newMetaTxn(slot *txnparser.TxnSlot, isLocal bool, timestamp uint64) *metaTxn {
 	mt := &metaTxn{TxnSlot: slot, worstIndex: -1, bestIndex: -1, timestamp: timestamp}
 	if isLocal {
 		mt.subPool = IsLocal
@@ -28,7 +32,7 @@ func newMetaTxn(slot *TxnSlot, isLocal bool, timestamp uint64) *metaTxn {
 
 // metaTxn holds transaction and some metadata
 type metaTxn struct {
-	TxnSlot                   *TxnSlot
+	TxnSlot                   *txnparser.TxnSlot
 	minFeeCap                 uint256.Int
 	nonceDistance             uint64 // how far their nonces are from the state's nonce for the sender
 	cumulativeBalanceDistance uint64 // how far their cumulativeRequiredBalance are from the state's balance for the sender

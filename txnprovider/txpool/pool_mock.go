@@ -13,10 +13,12 @@ import (
 	context "context"
 	reflect "reflect"
 
+	gomock "go.uber.org/mock/gomock"
+
 	remoteproto "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	kv "github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/txnprovider/txnparser"
 	txpoolcfg "github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-	gomock "go.uber.org/mock/gomock"
 )
 
 // MockPool is a mock of Pool interface.
@@ -44,7 +46,7 @@ func (m *MockPool) EXPECT() *MockPoolMockRecorder {
 }
 
 // AddLocalTxns mocks base method.
-func (m *MockPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+func (m *MockPool) AddLocalTxns(ctx context.Context, newTxns txnparser.TxnSlots) ([]txpoolcfg.DiscardReason, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "AddLocalTxns", ctx, newTxns)
 	ret0, _ := ret[0].([]txpoolcfg.DiscardReason)
@@ -71,13 +73,13 @@ func (c *MockPoolAddLocalTxnsCall) Return(arg0 []txpoolcfg.DiscardReason, arg1 e
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolAddLocalTxnsCall) Do(f func(context.Context, TxnSlots) ([]txpoolcfg.DiscardReason, error)) *MockPoolAddLocalTxnsCall {
+func (c *MockPoolAddLocalTxnsCall) Do(f func(context.Context, txnparser.TxnSlots) ([]txpoolcfg.DiscardReason, error)) *MockPoolAddLocalTxnsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolAddLocalTxnsCall) DoAndReturn(f func(context.Context, TxnSlots) ([]txpoolcfg.DiscardReason, error)) *MockPoolAddLocalTxnsCall {
+func (c *MockPoolAddLocalTxnsCall) DoAndReturn(f func(context.Context, txnparser.TxnSlots) ([]txpoolcfg.DiscardReason, error)) *MockPoolAddLocalTxnsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -119,7 +121,7 @@ func (c *MockPoolAddNewGoodPeerCall) DoAndReturn(f func(PeerID)) *MockPoolAddNew
 }
 
 // AddRemoteTxns mocks base method.
-func (m *MockPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots) {
+func (m *MockPool) AddRemoteTxns(ctx context.Context, newTxns txnparser.TxnSlots) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "AddRemoteTxns", ctx, newTxns)
 }
@@ -143,13 +145,13 @@ func (c *MockPoolAddRemoteTxnsCall) Return() *MockPoolAddRemoteTxnsCall {
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolAddRemoteTxnsCall) Do(f func(context.Context, TxnSlots)) *MockPoolAddRemoteTxnsCall {
+func (c *MockPoolAddRemoteTxnsCall) Do(f func(context.Context, txnparser.TxnSlots)) *MockPoolAddRemoteTxnsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolAddRemoteTxnsCall) DoAndReturn(f func(context.Context, TxnSlots)) *MockPoolAddRemoteTxnsCall {
+func (c *MockPoolAddRemoteTxnsCall) DoAndReturn(f func(context.Context, txnparser.TxnSlots)) *MockPoolAddRemoteTxnsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -272,7 +274,7 @@ func (c *MockPoolIdHashKnownCall) DoAndReturn(f func(kv.Tx, []byte) (bool, error
 }
 
 // OnNewBlock mocks base method.
-func (m *MockPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
+func (m *MockPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns txnparser.TxnSlots) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "OnNewBlock", ctx, stateChanges, unwindTxns, unwindBlobTxns, minedTxns)
 	ret0, _ := ret[0].(error)
@@ -298,13 +300,13 @@ func (c *MockPoolOnNewBlockCall) Return(arg0 error) *MockPoolOnNewBlockCall {
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolOnNewBlockCall) Do(f func(context.Context, *remoteproto.StateChangeBatch, TxnSlots, TxnSlots, TxnSlots) error) *MockPoolOnNewBlockCall {
+func (c *MockPoolOnNewBlockCall) Do(f func(context.Context, *remoteproto.StateChangeBatch, txnparser.TxnSlots, txnparser.TxnSlots, txnparser.TxnSlots) error) *MockPoolOnNewBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolOnNewBlockCall) DoAndReturn(f func(context.Context, *remoteproto.StateChangeBatch, TxnSlots, TxnSlots, TxnSlots) error) *MockPoolOnNewBlockCall {
+func (c *MockPoolOnNewBlockCall) DoAndReturn(f func(context.Context, *remoteproto.StateChangeBatch, txnparser.TxnSlots, txnparser.TxnSlots, txnparser.TxnSlots) error) *MockPoolOnNewBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

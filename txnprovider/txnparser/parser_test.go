@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package txpool
+package txnparser
 
 import (
 	"bytes"
@@ -131,54 +131,6 @@ func TestTxnSlotsGrowth(t *testing.T) {
 	s.Resize(2)
 	assert.Equal(2, len(s.Txns))
 	assert.Equal(2, s.Senders.Len())
-}
-
-func TestDedupHashes(t *testing.T) {
-	assert := assert.New(t)
-	h := toHashes(2, 6, 2, 5, 2, 4)
-	c := h.DedupCopy()
-	assert.Equal(6, h.Len())
-	assert.Equal(4, c.Len())
-	assert.Equal(toHashes(2, 2, 2, 4, 5, 6), h)
-	assert.Equal(toHashes(2, 4, 5, 6), c)
-
-	h = toHashes(2, 2)
-	c = h.DedupCopy()
-	assert.Equal(toHashes(2, 2), h)
-	assert.Equal(toHashes(2), c)
-
-	h = toHashes(1)
-	c = h.DedupCopy()
-	assert.Equal(1, h.Len())
-	assert.Equal(1, c.Len())
-	assert.Equal(toHashes(1), h)
-	assert.Equal(toHashes(1), c)
-
-	h = toHashes()
-	c = h.DedupCopy()
-	assert.Zero(h.Len())
-	assert.Zero(c.Len())
-	assert.Zero(len(h))
-	assert.Zero(len(c))
-
-	h = toHashes(1, 2, 3, 4)
-	c = h.DedupCopy()
-	assert.Equal(toHashes(1, 2, 3, 4), h)
-	assert.Equal(toHashes(1, 2, 3, 4), c)
-
-	h = toHashes(4, 2, 1, 3)
-	c = h.DedupCopy()
-	assert.Equal(toHashes(1, 2, 3, 4), h)
-	assert.Equal(toHashes(1, 2, 3, 4), c)
-
-}
-
-func toHashes(h ...byte) (out Hashes) {
-	for i := range h {
-		hash := [32]byte{h[i]}
-		out = append(out, hash[:]...)
-	}
-	return out
 }
 
 func TestBlobTxnParsing(t *testing.T) {

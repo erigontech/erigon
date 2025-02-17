@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/txnprovider/txnparser"
 )
 
 func TestFetch(t *testing.T) {
@@ -103,7 +104,7 @@ func TestSendTxnPropagate(t *testing.T) {
 		m := NewMockSentry(ctx, sentryServer)
 		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
-		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
+		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, txnparser.toHashes(1, 42), 100)
 
 		require.Equal(t, 2, len(requests))
 
@@ -168,7 +169,7 @@ func TestSendTxnPropagate(t *testing.T) {
 		m := NewMockSentry(ctx, sentryServer)
 		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
-		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
+		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, txnparser.toHashes(1, 42), 100)
 
 		require.Equal(t, 2, len(requests))
 
@@ -208,7 +209,7 @@ func TestSendTxnPropagate(t *testing.T) {
 		m := NewMockSentry(ctx, sentryServer)
 		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
 		expectPeers := toPeerIDs(1, 2, 42)
-		send.PropagatePooledTxnsToPeersList(expectPeers, []byte{0, 1}, []uint32{10, 15}, toHashes(1, 42))
+		send.PropagatePooledTxnsToPeersList(expectPeers, []byte{0, 1}, []uint32{10, 15}, txnparser.toHashes(1, 42))
 
 		require.Equal(t, 3, len(requests))
 		for i, req := range requests {
@@ -247,9 +248,9 @@ func TestOnNewBlock(t *testing.T) {
 				ChangeBatch: []*remote.StateChange{
 					{
 						Txs: [][]byte{
-							decodeHex(TxnParseMainnetTests[0].PayloadStr),
-							decodeHex(TxnParseMainnetTests[1].PayloadStr),
-							decodeHex(TxnParseMainnetTests[2].PayloadStr),
+							decodeHex(txnparser.TxnParseMainnetTests[0].PayloadStr),
+							decodeHex(txnparser.TxnParseMainnetTests[1].PayloadStr),
+							decodeHex(txnparser.TxnParseMainnetTests[2].PayloadStr),
 						},
 						BlockHeight: 1,
 						BlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
@@ -276,10 +277,10 @@ func TestOnNewBlock(t *testing.T) {
 		}).
 		Times(3)
 
-	var minedTxns TxnSlots
+	var minedTxns txnparser.TxnSlots
 	pool.EXPECT().
 		OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ *remote.StateChangeBatch, _ TxnSlots, _ TxnSlots, minedTxnsArg TxnSlots) error {
+		DoAndReturn(func(_ context.Context, _ *remote.StateChangeBatch, _ txnparser.TxnSlots, _ txnparser.TxnSlots, minedTxnsArg txnparser.TxnSlots) error {
 			minedTxns = minedTxnsArg
 			return nil
 		}).

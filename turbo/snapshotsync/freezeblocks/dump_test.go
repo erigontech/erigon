@@ -32,8 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/txnprovider/txpool"
-
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
@@ -42,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/txnprovider/txnparser"
 )
 
 func nonceRange(from, to int) []uint64 {
@@ -122,8 +121,8 @@ func TestDump(t *testing.T) {
 		chainID, _ := uint256.FromBig(m.ChainConfig.ChainID)
 		t.Run("txs", func(t *testing.T) {
 			require := require.New(t)
-			slot := txpool.TxnSlot{}
-			parseCtx := txpool.NewTxnParseContext(*chainID)
+			slot := txnparser.TxnSlot{}
+			parseCtx := txnparser.NewTxnParseContext(*chainID)
 			parseCtx.WithSender(false)
 			var sender [20]byte
 
@@ -147,8 +146,8 @@ func TestDump(t *testing.T) {
 		})
 		t.Run("txs_not_from_zero", func(t *testing.T) {
 			require := require.New(t)
-			slot := txpool.TxnSlot{}
-			parseCtx := txpool.NewTxnParseContext(*chainID)
+			slot := txnparser.TxnSlot{}
+			parseCtx := txnparser.NewTxnParseContext(*chainID)
 			parseCtx.WithSender(false)
 			var sender [20]byte
 

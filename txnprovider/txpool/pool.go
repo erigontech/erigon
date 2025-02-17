@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/txnprovider"
+	"github.com/erigontech/erigon/txnprovider/txnparser"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -76,9 +77,9 @@ type Pool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
 	// Handle 3 main events - new remote txns from p2p, new local txns from RPC, new blocks from execution layer
-	AddRemoteTxns(ctx context.Context, newTxns TxnSlots)
-	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
-	OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
+	AddRemoteTxns(ctx context.Context, newTxns txnparser.TxnSlots)
+	AddLocalTxns(ctx context.Context, newTxns txnparser.TxnSlots) ([]txpoolcfg.DiscardReason, error)
+	OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns txnparser.TxnSlots) error
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
@@ -111,7 +112,7 @@ type TxPool struct {
 	//   - fewer _chainDB transactions
 	//   - batch notifications about new txns (reduced P2P spam to other nodes about txns propagation)
 	//   - and as a result reducing lock contention
-	unprocessedRemoteTxns   *TxnSlots
+	unprocessedRemoteTxns   *txnparser.TxnSlots
 	unprocessedRemoteByHash map[string]int                                  // to reject duplicates
 	byHash                  map[string]*metaTxn                             // txn_hash => txn : only those records not committed to db yet
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // txn_hash => discard_reason : non-persisted
@@ -189,7 +190,7 @@ func New(
 
 	byNonce := &BySenderAndNonce{
 		tree:              btree.NewG[*metaTxn](32, SortByNonceLess),
-		search:            &metaTxn{TxnSlot: &TxnSlot{}},
+		search:            &metaTxn{TxnSlot: &txnparser.TxnSlot{}},
 		senderIDTxnCount:  map[uint64]int{},
 		senderIDBlobCount: map[uint64]uint64{},
 	}
@@ -218,7 +219,7 @@ func New(
 		_chainDB:                chainDB,
 		cfg:                     cfg,
 		chainID:                 chainID,
-		unprocessedRemoteTxns:   &TxnSlots{},
+		unprocessedRemoteTxns:   &txnparser.TxnSlots{},
 		unprocessedRemoteByHash: map[string]int{},
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
@@ -290,7 +291,7 @@ func (p *TxPool) start(ctx context.Context) error {
 	})
 }
 
-func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
+func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns txnparser.TxnSlots) error {
 	defer newBlockTimer.ObserveDuration(time.Now())
 
 	coreDB, cache := p.chainDB()
@@ -385,7 +386,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	}
 
 	for i, txn := range unwindBlobTxns.Txns {
-		if txn.Type == BlobTxnType {
+		if txn.Type == txnparser.BlobTxnType {
 			knownBlobTxn, err := p.getCachedBlobTxnLocked(coreTx, txn.IDHash[:])
 			if err != nil {
 				return err
@@ -427,7 +428,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	// remove auths from pool map
 	for _, mt := range minedTxns.Txns {
-		if mt.Type == SetCodeTxnType {
+		if mt.Type == txnparser.SetCodeTxnType {
 			numAuths := len(mt.AuthRaw)
 			for i := range numAuths {
 				signature := mt.Authorizations[i]
@@ -643,7 +644,7 @@ func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Has
 	return unknownHashes, err
 }
 
-func (p *TxPool) getUnprocessedTxn(hashS string) (*TxnSlot, bool) {
+func (p *TxPool) getUnprocessedTxn(hashS string) (*txnparser.TxnSlot, bool) {
 	if i, ok := p.unprocessedRemoteByHash[hashS]; ok {
 		return p.unprocessedRemoteTxns.Txns[i], true
 	}
@@ -669,9 +670,9 @@ func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTxn, error)
 		return nil, nil
 	}
 	txnRlp := common.Copy(v[20:])
-	parseCtx := NewTxnParseContext(p.chainID)
+	parseCtx := txnparser.NewTxnParseContext(p.chainID)
 	parseCtx.WithSender(false)
-	txnSlot := &TxnSlot{}
+	txnSlot := &txnparser.TxnSlot{}
 	parseCtx.ParseTransaction(txnRlp, 0, txnSlot, nil, false, true, nil)
 	return newMetaTxn(txnSlot, false, 0), nil
 }
@@ -691,7 +692,7 @@ func (p *TxPool) Started() bool {
 	return p.started.Load()
 }
 
-func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte]) (bool, int, error) {
+func (p *TxPool) best(ctx context.Context, n int, txns *txnparser.TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte]) (bool, int, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -785,7 +786,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	provideOptions := txnprovider.ApplyProvideOptions(opts...)
-	var txnsRlp TxnsRlp
+	var txnsRlp txnparser.TxnsRlp
 	_, _, err := p.YieldBest(
 		ctx,
 		provideOptions.Amount,
@@ -815,11 +816,11 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 	return txns, nil
 }
 
-func (p *TxPool) YieldBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
+func (p *TxPool) YieldBest(ctx context.Context, n int, txns *txnparser.TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
 	return p.best(ctx, n, txns, onTopOf, availableGas, availableBlobGas, toSkip)
 }
 
-func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64) (bool, error) {
+func (p *TxPool) PeekBest(ctx context.Context, n int, txns *txnparser.TxnsRlp, onTopOf, availableGas, availableBlobGas uint64) (bool, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
 	onTime, _, err := p.YieldBest(ctx, n, txns, onTopOf, availableGas, availableBlobGas, set)
 	return onTime, err
@@ -831,7 +832,7 @@ func (p *TxPool) CountContent() (int, int, int) {
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
 }
 
-func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
+func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns txnparser.TxnSlots) {
 	if p.cfg.NoGossip {
 		// if no gossip, then
 		// disable adding remote transactions
@@ -861,12 +862,12 @@ func toBlobs(_blobs [][]byte) []gokzg4844.BlobRef {
 	return blobs
 }
 
-func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
+func (p *TxPool) validateTx(txn *txnparser.TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
 	isShanghai := p.isShanghai() || p.isAgra()
 	if isShanghai && txn.Creation && txn.DataLen > fixedgas.MaxInitCodeSize {
 		return txpoolcfg.InitCodeTooLarge // EIP-3860
 	}
-	if txn.Type == BlobTxnType {
+	if txn.Type == txnparser.BlobTxnType {
 		if !p.isCancun() {
 			return txpoolcfg.TypeNotActivated
 		}
@@ -916,7 +917,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	authorizationLen := len(txn.Authorizations)
-	if txn.Type == SetCodeTxnType {
+	if txn.Type == txnparser.SetCodeTxnType {
 		if !p.isPrague() {
 			return txpoolcfg.TypeNotActivated
 		}
@@ -993,7 +994,7 @@ var maxUint256 = new(uint256.Int).SetAllOne()
 
 // Sender should have enough balance for: gasLimit x feeCap + blobGas x blobFeeCap + transferred_value
 // See YP, Eq (61) in Section 6.2 "Execution"
-func requiredBalance(txn *TxnSlot) *uint256.Int {
+func requiredBalance(txn *txnparser.TxnSlot) *uint256.Int {
 	// See https://github.com/ethereum/EIPs/pull/3594
 	total := uint256.NewInt(txn.Gas)
 	_, overflow := total.MulOverflow(total, &txn.FeeCap)
@@ -1116,21 +1117,21 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		// Should be enough for a transaction with 6 blobs
 		blobTxnMaxSize = 800_000
 	)
-	txnType, err := PeekTransactionType(serializedTxn)
+	txnType, err := txnparser.PeekTransactionType(serializedTxn)
 	if err != nil {
 		return err
 	}
 	maxSize := txnMaxSize
-	if txnType == BlobTxnType {
+	if txnType == txnparser.BlobTxnType {
 		maxSize = blobTxnMaxSize
 	}
 	if len(serializedTxn) > maxSize {
-		return ErrRlpTooBig
+		return txnparser.ErrRlpTooBig
 	}
 	return nil
 }
 
-func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (reasons []txpoolcfg.DiscardReason, goodTxns TxnSlots, err error) {
+func (p *TxPool) validateTxns(txns *txnparser.TxnSlots, stateCache kvcache.CacheView) (reasons []txpoolcfg.DiscardReason, goodTxns txnparser.TxnSlots, err error) {
 	// reasons is pre-sized for direct indexing, with the default zero
 	// value DiscardReason of NotSet
 	reasons = make([]txpoolcfg.DiscardReason, len(txns.Txns))
@@ -1195,7 +1196,7 @@ func (p *TxPool) punishSpammer(spammer uint64) {
 	}
 }
 
-func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, discardReasonsLRU *simplelru.LRU[string, txpoolcfg.DiscardReason]) []txpoolcfg.DiscardReason {
+func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns txnparser.TxnSlots, discardReasonsLRU *simplelru.LRU[string, txpoolcfg.DiscardReason]) []txpoolcfg.DiscardReason {
 	for i := range reasons {
 		if reasons[i] != txpoolcfg.NotSet {
 			continue
@@ -1210,7 +1211,7 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 	return reasons
 }
 
-func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns txnparser.TxnSlots) ([]txpoolcfg.DiscardReason, error) {
 	coreDb, cache := p.chainDB()
 	coreTx, err := coreDb.BeginRo(ctx)
 	if err != nil {
@@ -1275,7 +1276,7 @@ func (p *TxPool) chainDB() (kv.RoDB, kvcache.Cache) {
 }
 
 func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
-	newTxns TxnSlots, pendingBaseFee, pendingBlobFee, blockGasLimit uint64, collect bool, logger log.Logger) (Announcements, []txpoolcfg.DiscardReason, error) {
+	newTxns txnparser.TxnSlots, pendingBaseFee, pendingBlobFee, blockGasLimit uint64, collect bool, logger log.Logger) (Announcements, []txpoolcfg.DiscardReason, error) {
 	if assert.Enable {
 		for _, txn := range newTxns.Txns {
 			if txn.SenderID == 0 {
@@ -1334,7 +1335,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 
 // TODO: Looks like a copy of the above
 func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remote.StateChangeBatch,
-	senders *sendersBatch, newTxns TxnSlots, pendingBaseFee uint64, blockGasLimit uint64, logger log.Logger) (Announcements, error) {
+	senders *sendersBatch, newTxns txnparser.TxnSlots, pendingBaseFee uint64, blockGasLimit uint64, logger log.Logger) (Announcements, error) {
 	if assert.Enable {
 		for _, txn := range newTxns.Txns {
 			if txn.SenderID == 0 {
@@ -1412,13 +1413,13 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	// Insert to pending pool, if pool doesn't have txn with same Nonce and bigger Tip
 	found := p.all.get(mt.TxnSlot.SenderID, mt.TxnSlot.Nonce)
 	if found != nil {
-		if found.TxnSlot.Type == BlobTxnType && mt.TxnSlot.Type != BlobTxnType {
+		if found.TxnSlot.Type == txnparser.BlobTxnType && mt.TxnSlot.Type != txnparser.BlobTxnType {
 			return txpoolcfg.BlobTxReplace
 		}
 		priceBump := p.cfg.PriceBump
 
 		//Blob txn threshold checks for replace txn
-		if mt.TxnSlot.Type == BlobTxnType {
+		if mt.TxnSlot.Type == txnparser.BlobTxnType {
 			priceBump = p.cfg.BlobPriceBump
 			blobFeeThreshold, overflow := (&uint256.Int{}).MulDivOverflow(
 				&found.TxnSlot.BlobFeeCap,
@@ -1467,12 +1468,12 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	}
 
 	// Don't add blob txn to queued if it's less than current pending blob base fee
-	if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.BlobFeeCap.LtUint64(p.pendingBlobFee.Load()) {
+	if mt.TxnSlot.Type == txnparser.BlobTxnType && mt.TxnSlot.BlobFeeCap.LtUint64(p.pendingBlobFee.Load()) {
 		return txpoolcfg.FeeTooLow
 	}
 
 	// Check if we have txn with same authorization in the pool
-	if mt.TxnSlot.Type == SetCodeTxnType {
+	if mt.TxnSlot.Type == txnparser.SetCodeTxnType {
 		numAuths := len(mt.TxnSlot.AuthRaw)
 		foundDuplicate := false
 		for i := range numAuths {
@@ -1519,7 +1520,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	}
 	// All transactions are first added to the queued pool and then immediately promoted from there if required
 	p.queued.Add(mt, "addLocked", p.logger)
-	if mt.TxnSlot.Type == BlobTxnType {
+	if mt.TxnSlot.Type == txnparser.BlobTxnType {
 		t := p.totalBlobsInPool.Load()
 		p.totalBlobsInPool.Store(t + (uint64(len(mt.TxnSlot.BlobHashes))))
 	}
@@ -1537,11 +1538,11 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	p.deletedTxns = append(p.deletedTxns, mt)
 	p.all.delete(mt, reason, p.logger)
 	p.discardReasonsLRU.Add(hashStr, reason)
-	if mt.TxnSlot.Type == BlobTxnType {
+	if mt.TxnSlot.Type == txnparser.BlobTxnType {
 		t := p.totalBlobsInPool.Load()
 		p.totalBlobsInPool.Store(t - uint64(len(mt.TxnSlot.BlobHashes)))
 	}
-	if mt.TxnSlot.Type == SetCodeTxnType {
+	if mt.TxnSlot.Type == txnparser.SetCodeTxnType {
 		numAuths := len(mt.TxnSlot.AuthRaw)
 		for i := range numAuths {
 			signature := mt.TxnSlot.Authorizations[i]
@@ -1556,7 +1557,7 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
-func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock uint64) error {
+func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*txnparser.TxnSlot, finalizedBlock uint64) error {
 	p.lastFinalizedBlock.Store(finalizedBlock)
 	// Remove blobs in the finalized block and older, loop through all entries
 	for l := len(p.minedBlobTxnsByBlock); l > 0 && finalizedBlock > 0; l-- {
@@ -1574,7 +1575,7 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock
 	minedBlock := p.lastSeenBlock.Load()
 	p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0)
 	for _, txn := range minedTxns {
-		if txn.Type == BlobTxnType {
+		if txn.Type == txnparser.BlobTxnType {
 			mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock}
 			p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
 			mt.bestIndex = len(p.minedBlobTxnsByBlock[minedBlock]) - 1
@@ -1615,7 +1616,7 @@ func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) {
 // modify state_balance and state_nonce, potentially remove some elements (if transaction with some nonce is
 // included into a block), and finally, walk over the transaction records and update SubPool fields depending on
 // the actual presence of nonce gaps and what the balance is.
-func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) error {
+func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*txnparser.TxnSlot) error {
 	noncesToRemove := map[uint64]uint64{}
 	for _, txn := range minedTxns {
 		nonce, ok := noncesToRemove[txn.SenderID]
@@ -1693,7 +1694,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		deleteAndContinueReasonLog := ""
 		if senderNonce > mt.TxnSlot.Nonce {
 			deleteAndContinueReasonLog = "low nonce"
-		} else if mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.Type == BlobTxnType { // Discard nonce-gapped blob txns
+		} else if mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.Type == txnparser.BlobTxnType { // Discard nonce-gapped blob txns
 			deleteAndContinueReasonLog = "nonce-gapped blob txn"
 		}
 		if deleteAndContinueReasonLog != "" {
@@ -1791,7 +1792,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 // being promoted to the pending or basefee pool, for re-broadcasting
 func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) {
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
-	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || worst.minFeeCap.LtUint64(pendingBaseFee) || (worst.TxnSlot.Type == BlobTxnType && worst.TxnSlot.BlobFeeCap.LtUint64(pendingBlobFee))); worst = p.pending.Worst() {
+	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || worst.minFeeCap.LtUint64(pendingBaseFee) || (worst.TxnSlot.Type == txnparser.BlobTxnType && worst.TxnSlot.BlobFeeCap.LtUint64(pendingBlobFee))); worst = p.pending.Worst() {
 		if worst.subPool >= BaseFeePoolBits {
 			tx := p.pending.PopWorst()
 			announcements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
@@ -1802,7 +1803,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	}
 
 	// Promote best transactions from base fee pool to pending pool while they qualify
-	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 && (best.TxnSlot.Type != BlobTxnType || best.TxnSlot.BlobFeeCap.CmpUint64(pendingBlobFee) >= 0); best = p.baseFee.Best() {
+	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 && (best.TxnSlot.Type != txnparser.BlobTxnType || best.TxnSlot.BlobFeeCap.CmpUint64(pendingBlobFee) >= 0); best = p.baseFee.Best() {
 		tx := p.baseFee.PopBest()
 		announcements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 		p.pending.Add(tx, logger)
@@ -1969,7 +1970,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 							localTxnHashes = append(localTxnHashes, hash...)
 
 							// "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
-							if t != BlobTxnType {
+							if t != txnparser.BlobTxnType {
 								localTxnRlps = append(localTxnRlps, slotRlp)
 								broadcastHashes = append(broadcastHashes, hash...)
 							}
@@ -1979,7 +1980,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 							remoteTxnHashes = append(remoteTxnHashes, hash...)
 
 							// "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
-							if t != BlobTxnType && len(slotRlp) < txMaxBroadcastSize {
+							if t != txnparser.BlobTxnType && len(slotRlp) < txMaxBroadcastSize {
 								remoteTxnRlps = append(remoteTxnRlps, slotRlp)
 							}
 						}
@@ -2206,8 +2207,8 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		p.isLocalLRU.Add(string(v), struct{}{})
 	}
 
-	txns := TxnSlots{}
-	parseCtx := NewTxnParseContext(p.chainID)
+	txns := txnparser.TxnSlots{}
+	parseCtx := txnparser.NewTxnParseContext(p.chainID)
 	parseCtx.WithSender(false)
 
 	i := 0
@@ -2221,7 +2222,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 			return err
 		}
 		addr, txnRlp := *(*[20]byte)(v[:20]), v[20:]
-		txn := &TxnSlot{}
+		txn := &txnparser.TxnSlot{}
 
 		// TODO(eip-4844) ensure wrappedWithBlobs when transactions are saved to the DB
 		_, err = parseCtx.ParseTransaction(txnRlp, 0, txn, nil, false /* hasEnvelope */, true /*wrappedWithBlobs*/, nil)

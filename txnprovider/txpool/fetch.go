@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/txnprovider/txnparser"
 )
 
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
@@ -46,8 +47,8 @@ type Fetch struct {
 	db                       kv.RwDB
 	stateChangesClient       StateChangesClient
 	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
-	stateChangesParseCtx     *TxnParseContext
-	pooledTxnsParseCtx       *TxnParseContext
+	stateChangesParseCtx     *txnparser.TxnParseContext
+	pooledTxnsParseCtx       *txnparser.TxnParseContext
 	sentryClients            []sentry.SentryClient // sentry clients that will be used for accessing the network
 	stateChangesParseCtxLock sync.Mutex
 	pooledTxnsParseCtxLock   sync.Mutex
@@ -78,8 +79,8 @@ func NewFetch(
 		pool:                 pool,
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
-		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), //TODO: change ctx if rules changed
-		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
+		stateChangesParseCtx: txnparser.NewTxnParseContext(chainID).ChainIDRequired(), //TODO: change ctx if rules changed
+		pooledTxnsParseCtx:   txnparser.NewTxnParseContext(chainID).ChainIDRequired(),
 		wg:                   options.p2pFetcherWg,
 		logger:               logger,
 	}
@@ -89,13 +90,13 @@ func NewFetch(
 	return f
 }
 
-func (f *Fetch) threadSafeParsePooledTxn(cb func(*TxnParseContext) error) error {
+func (f *Fetch) threadSafeParsePooledTxn(cb func(*txnparser.TxnParseContext) error) error {
 	f.pooledTxnsParseCtxLock.Lock()
 	defer f.pooledTxnsParseCtxLock.Unlock()
 	return cb(f.pooledTxnsParseCtx)
 }
 
-func (f *Fetch) threadSafeParseStateChangeTxn(cb func(*TxnParseContext) error) error {
+func (f *Fetch) threadSafeParseStateChangeTxn(cb func(*txnparser.TxnParseContext) error) error {
 	f.stateChangesParseCtxLock.Lock()
 	defer f.stateChangesParseCtxLock.Unlock()
 	return cb(f.stateChangesParseCtx)
@@ -322,8 +323,8 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			return err
 		}
 	case sentry.MessageId_POOLED_TRANSACTIONS_66, sentry.MessageId_TRANSACTIONS_66:
-		txns := TxnSlots{}
-		if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
+		txns := txnparser.TxnSlots{}
+		if err := f.threadSafeParsePooledTxn(func(parseContext *txnparser.TxnParseContext) error {
 			return nil
 		}); err != nil {
 			return err
@@ -331,14 +332,14 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 
 		switch req.Id {
 		case sentry.MessageId_TRANSACTIONS_66:
-			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
+			if err := f.threadSafeParsePooledTxn(func(parseContext *txnparser.TxnParseContext) error {
 				if _, err := ParseTransactions(req.Data, 0, parseContext, &txns, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
 					if err != nil {
 						return err
 					}
 					if known {
-						return ErrRejected
+						return txnparser.ErrRejected
 					}
 					return nil
 				}); err != nil {
@@ -349,14 +350,14 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 				return err
 			}
 		case sentry.MessageId_POOLED_TRANSACTIONS_66:
-			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
+			if err := f.threadSafeParsePooledTxn(func(parseContext *txnparser.TxnParseContext) error {
 				if _, _, err := ParsePooledTransactions66(req.Data, 0, parseContext, &txns, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
 					if err != nil {
 						return err
 					}
 					if known {
-						return ErrRejected
+						return txnparser.ErrRejected
 					}
 					return nil
 				}); err != nil {
@@ -476,13 +477,13 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 }
 
 func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.StateChangeBatch) error {
-	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
+	var unwindTxns, unwindBlobTxns, minedTxns txnparser.TxnSlots
 	for _, change := range req.ChangeBatch {
 		if change.Direction == remote.Direction_FORWARD {
 			minedTxns.Resize(uint(len(change.Txs)))
 			for i := range change.Txs {
-				minedTxns.Txns[i] = &TxnSlot{}
-				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
+				minedTxns.Txns[i] = &txnparser.TxnSlot{}
+				if err := f.threadSafeParseStateChangeTxn(func(parseContext *txnparser.TxnParseContext) error {
 					_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxns.Txns[i], minedTxns.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
 					return err
 				}); err != nil && !errors.Is(err, context.Canceled) {
@@ -492,14 +493,14 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.State
 			}
 		} else if change.Direction == remote.Direction_UNWIND {
 			for i := range change.Txs {
-				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
-					utx := &TxnSlot{}
+				if err := f.threadSafeParseStateChangeTxn(func(parseContext *txnparser.TxnParseContext) error {
+					utx := &txnparser.TxnSlot{}
 					sender := make([]byte, 20)
 					_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
 					if err != nil {
 						return err
 					}
-					if utx.Type == BlobTxnType {
+					if utx.Type == txnparser.BlobTxnType {
 						unwindBlobTxns.Append(utx, sender, false)
 					} else {
 						unwindTxns.Append(utx, sender, false)

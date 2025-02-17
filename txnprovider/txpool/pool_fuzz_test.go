@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/txnprovider/txnparser"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -175,7 +176,7 @@ func parseSenders(in []byte) (nonces []uint64, balances []uint256.Int) {
 	return
 }
 
-func poolsFromFuzzBytes(rawTxnNonce, rawValues, rawTips, rawFeeCap, rawSender []byte) (sendersInfo map[uint64]*sender, senderIDs map[common.Address]uint64, txns TxnSlots, ok bool) {
+func poolsFromFuzzBytes(rawTxnNonce, rawValues, rawTips, rawFeeCap, rawSender []byte) (sendersInfo map[uint64]*sender, senderIDs map[common.Address]uint64, txns txnparser.TxnSlots, ok bool) {
 	if len(rawTxnNonce) < 1 || len(rawValues) < 1 || len(rawTips) < 1 || len(rawFeeCap) < 1 || len(rawSender) < 1+1 {
 		return nil, nil, txns, false
 	}
@@ -199,18 +200,18 @@ func poolsFromFuzzBytes(rawTxnNonce, rawValues, rawTips, rawFeeCap, rawSender []
 
 	sendersInfo = map[uint64]*sender{}
 	senderIDs = map[common.Address]uint64{}
-	senders := make(Addresses, 20*len(senderNonce))
+	senders := make(txnparser.Addresses, 20*len(senderNonce))
 	for i := 0; i < len(senderNonce); i++ {
 		senderID := uint64(i + 1) //non-zero expected
 		binary.BigEndian.PutUint64(senders.At(i%senders.Len()), senderID)
 		sendersInfo[senderID] = newSender(senderNonce[i], senderBalance[i%len(senderBalance)])
 		senderIDs[senders.AddressAt(i%senders.Len())] = senderID
 	}
-	txns.Txns = make([]*TxnSlot, len(txnNonce))
-	parseCtx := NewTxnParseContext(*u256.N1)
+	txns.Txns = make([]*txnparser.TxnSlot, len(txnNonce))
+	parseCtx := txnparser.NewTxnParseContext(*u256.N1)
 	parseCtx.WithSender(false)
 	for i := range txnNonce {
-		txns.Txns[i] = &TxnSlot{
+		txns.Txns[i] = &txnparser.TxnSlot{
 			Nonce:  txnNonce[i],
 			Value:  values[i%len(values)],
 			Tip:    *uint256.NewInt(tips[i%len(tips)]),
@@ -229,7 +230,7 @@ func poolsFromFuzzBytes(rawTxnNonce, rawValues, rawTips, rawFeeCap, rawSender []
 }
 
 // fakeRlpTxn add anything what identifying txn to `data` to make hash unique
-func fakeRlpTxn(slot *TxnSlot, data []byte) []byte {
+func fakeRlpTxn(slot *txnparser.TxnSlot, data []byte) []byte {
 	dataLen := rlp.U64Len(1) + //chainID
 		rlp.U64Len(slot.Nonce) + rlp.U256Len(&slot.Tip) + rlp.U256Len(&slot.FeeCap) +
 		rlp.U64Len(0) + // gas
@@ -240,7 +241,7 @@ func fakeRlpTxn(slot *TxnSlot, data []byte) []byte {
 		+3 // v,r,s
 
 	buf := make([]byte, 1+rlp.ListPrefixLen(dataLen)+dataLen)
-	buf[0] = DynamicFeeTxnType
+	buf[0] = txnparser.DynamicFeeTxnType
 	p := 1
 	p += rlp.EncodeListPrefix(dataLen, buf[p:])
 	p += rlp.EncodeU64(1, buf[p:]) //chainID
@@ -271,8 +272,8 @@ func iterateSubPoolUnordered(subPool *SubPool, f func(txn *metaTxn)) {
 	}
 }
 
-func splitDataset(in TxnSlots) (TxnSlots, TxnSlots, TxnSlots, TxnSlots) {
-	p1, p2, p3, p4 := TxnSlots{}, TxnSlots{}, TxnSlots{}, TxnSlots{}
+func splitDataset(in txnparser.TxnSlots) (txnparser.TxnSlots, txnparser.TxnSlots, txnparser.TxnSlots, txnparser.TxnSlots) {
+	p1, p2, p3, p4 := txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{}
 	l := len(in.Txns) / 4
 
 	p1.Txns = in.Txns[:l]
@@ -335,7 +336,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			pool.senders.senderID2Addr[id] = addr
 		}
 		pool.senders.senderID = uint64(len(senderIDs))
-		check := func(unwindTxns, minedTxns TxnSlots, msg string) {
+		check := func(unwindTxns, minedTxns txnparser.TxnSlots, msg string) {
 			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
 			best, worst := pending.Best(), pending.Worst()
 			assert.LessOrEqual(pending.Len(), cfg.PendingSubPoolLimit)
@@ -439,7 +440,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			}
 		}
 
-		checkNotify := func(unwindTxns, minedTxns TxnSlots, msg string) {
+		checkNotify := func(unwindTxns, minedTxns txnparser.TxnSlots, msg string) {
 			select {
 			case newAnnouncements := <-ch:
 				assert.Greater(newAnnouncements.Len(), 0)
@@ -495,10 +496,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 		}
 		// go to first fork
 		txns1, txns2, p2pReceived, txns3 := splitDataset(txns)
-		err = pool.OnNewBlock(ctx, change, txns1, TxnSlots{}, TxnSlots{})
+		err = pool.OnNewBlock(ctx, change, txns1, txnparser.TxnSlots{}, txnparser.TxnSlots{})
 		assert.NoError(err)
-		check(txns1, TxnSlots{}, "fork1")
-		checkNotify(txns1, TxnSlots{}, "fork1")
+		check(txns1, txnparser.TxnSlots{}, "fork1")
+		checkNotify(txns1, txnparser.TxnSlots{}, "fork1")
 
 		_, _, _ = p2pReceived, txns2, txns3
 		change = &remote.StateChangeBatch{
@@ -508,10 +509,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 1, BlockHash: h0},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, txns2)
+		err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txns2)
 		assert.NoError(err)
-		check(TxnSlots{}, txns2, "fork1 mined")
-		checkNotify(TxnSlots{}, txns2, "fork1 mined")
+		check(txnparser.TxnSlots{}, txns2, "fork1 mined")
+		checkNotify(txnparser.TxnSlots{}, txns2, "fork1 mined")
 
 		// unwind everything and switch to new fork (need unwind mined now)
 		change = &remote.StateChangeBatch{
@@ -521,10 +522,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 0, BlockHash: h0, Direction: remote.Direction_UNWIND},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, txns2, TxnSlots{}, TxnSlots{})
+		err = pool.OnNewBlock(ctx, change, txns2, txnparser.TxnSlots{}, txnparser.TxnSlots{})
 		assert.NoError(err)
-		check(txns2, TxnSlots{}, "fork2")
-		checkNotify(txns2, TxnSlots{}, "fork2")
+		check(txns2, txnparser.TxnSlots{}, "fork2")
+		checkNotify(txns2, txnparser.TxnSlots{}, "fork2")
 
 		change = &remote.StateChangeBatch{
 			StateVersionId:      txID,
@@ -533,22 +534,22 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 1, BlockHash: h22},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, txns3)
+		err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txns3)
 		assert.NoError(err)
-		check(TxnSlots{}, txns3, "fork2 mined")
-		checkNotify(TxnSlots{}, txns3, "fork2 mined")
+		check(txnparser.TxnSlots{}, txns3, "fork2 mined")
+		checkNotify(txnparser.TxnSlots{}, txns3, "fork2 mined")
 
 		// add some remote txns from p2p
 		pool.AddRemoteTxns(ctx, p2pReceived)
 		err = pool.processRemoteTxns(ctx)
 		assert.NoError(err)
-		check(p2pReceived, TxnSlots{}, "p2pmsg1")
-		checkNotify(p2pReceived, TxnSlots{}, "p2pmsg1")
+		check(p2pReceived, txnparser.TxnSlots{}, "p2pmsg1")
+		checkNotify(p2pReceived, txnparser.TxnSlots{}, "p2pmsg1")
 
 		err = pool.flushLocked(tx) // we don't test eviction here, because dedicated test exists
 		require.NoError(err)
-		check(p2pReceived, TxnSlots{}, "after_flush")
-		checkNotify(p2pReceived, TxnSlots{}, "after_flush")
+		check(p2pReceived, txnparser.TxnSlots{}, "after_flush")
+		checkNotify(p2pReceived, txnparser.TxnSlots{}, "after_flush")
 
 		p2, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 		assert.NoError(err)
@@ -560,8 +561,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 			assert.Nil(txn.TxnSlot.Rlp)
 		}
 
-		check(txns2, TxnSlots{}, "fromDB")
-		checkNotify(txns2, TxnSlots{}, "fromDB")
+		check(txns2, txnparser.TxnSlots{}, "fromDB")
+		checkNotify(txns2, txnparser.TxnSlots{}, "fromDB")
 		assert.Equal(pool.senders.senderID, p2.senders.senderID)
 		assert.Equal(pool.lastSeenBlock.Load(), p2.lastSeenBlock.Load())
 		assert.Equal(pool.pending.Len(), p2.pending.Len())

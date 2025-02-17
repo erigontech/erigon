@@ -16,7 +16,7 @@
 
 //go:build !nofuzz
 
-package txpool
+package txnparser
 
 import (
 	"testing"

@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/txnprovider/txnparser"
 )
 
 type NewPooledTransactionHashesPacket [][length.Hash]byte
@@ -170,7 +171,7 @@ func EncodeTransactions(txnsRlp [][]byte, encodeBuf []byte) []byte {
 	return encodeBuf
 }
 
-func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *TxnSlots, validateHash func([]byte) error) (newPos int, err error) {
+func ParseTransactions(payload []byte, pos int, ctx *txnparser.TxnParseContext, txnSlots *txnparser.TxnSlots, validateHash func([]byte) error) (newPos int, err error) {
 	pos, _, err = rlp.ParseList(payload, pos)
 	if err != nil {
 		return 0, err
@@ -178,10 +179,10 @@ func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *
 
 	for i := 0; pos < len(payload); i++ {
 		txnSlots.Resize(uint(i + 1))
-		txnSlots.Txns[i] = &TxnSlot{}
+		txnSlots.Txns[i] = &txnparser.TxnSlot{}
 		pos, err = ctx.ParseTransaction(payload, pos, txnSlots.Txns[i], txnSlots.Senders.At(i), true /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash)
 		if err != nil {
-			if errors.Is(err, ErrRejected) {
+			if errors.Is(err, txnparser.ErrRejected) {
 				txnSlots.Resize(uint(i))
 				i--
 				continue
@@ -192,7 +193,7 @@ func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *
 	return pos, nil
 }
 
-func ParsePooledTransactions66(payload []byte, pos int, ctx *TxnParseContext, txnSlots *TxnSlots, validateHash func([]byte) error) (requestID uint64, newPos int, err error) {
+func ParsePooledTransactions66(payload []byte, pos int, ctx *txnparser.TxnParseContext, txnSlots *txnparser.TxnSlots, validateHash func([]byte) error) (requestID uint64, newPos int, err error) {
 	p, _, err := rlp.ParseList(payload, pos)
 	if err != nil {
 		return requestID, 0, err
@@ -208,10 +209,10 @@ func ParsePooledTransactions66(payload []byte, pos int, ctx *TxnParseContext, tx
 
 	for i := 0; p < len(payload); i++ {
 		txnSlots.Resize(uint(i + 1))
-		txnSlots.Txns[i] = &TxnSlot{}
+		txnSlots.Txns[i] = &txnparser.TxnSlot{}
 		p, err = ctx.ParseTransaction(payload, p, txnSlots.Txns[i], txnSlots.Senders.At(i), true /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash)
 		if err != nil {
-			if errors.Is(err, ErrRejected) {
+			if errors.Is(err, txnparser.ErrRejected) {
 				txnSlots.Resize(uint(i))
 				i--
 				continue

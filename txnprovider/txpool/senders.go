@@ -18,9 +18,11 @@ package txpool
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/bits"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/txnprovider/txnparser"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
@@ -138,7 +140,7 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 			delete(b.senderIDTxnCount, senderID)
 		}
 
-		if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.Blobs != nil {
+		if mt.TxnSlot.Type == txnparser.BlobTxnType && mt.TxnSlot.Blobs != nil {
 			accBlobCount := b.senderIDBlobCount[senderID]
 			txnBlobCount := len(mt.TxnSlot.Blobs)
 			if txnBlobCount > 1 {
@@ -165,7 +167,7 @@ func (b *BySenderAndNonce) replaceOrInsert(mt *metaTxn, logger log.Logger) *meta
 	}
 
 	b.senderIDTxnCount[mt.TxnSlot.SenderID]++
-	if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.Blobs != nil {
+	if mt.TxnSlot.Type == txnparser.BlobTxnType && mt.TxnSlot.Blobs != nil {
 		b.senderIDBlobCount[mt.TxnSlot.SenderID] += uint64(len(mt.TxnSlot.Blobs))
 	}
 	return nil
@@ -242,14 +244,14 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, ui
 	return acc.Nonce, acc.Balance, nil
 }
 
-func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger) (err error) {
+func (sc *sendersBatch) registerNewSenders(newTxns *txnparser.TxnSlots, logger log.Logger) (err error) {
 	for i, txn := range newTxns.Txns {
 		txn.SenderID, txn.Traced = sc.getOrCreateID(newTxns.Senders.AddressAt(i), logger)
 	}
 	return nil
 }
 
-func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
+func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwindTxns, minedTxns txnparser.TxnSlots, logger log.Logger) error {
 	for _, diff := range stateChanges.ChangeBatch {
 		for _, change := range diff.Changes { // merge state changes
 			addrB := gointerfaces.ConvertH160toAddress(change.Address)

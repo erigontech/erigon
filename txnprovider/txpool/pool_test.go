@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/state"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/big"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/state"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/txnprovider/txnparser"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -92,12 +94,12 @@ func TestNonceFromAddress(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{})
 	assert.NoError(err)
 
 	{
-		var txnSlots TxnSlots
-		txnSlot1 := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot1 := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -114,15 +116,15 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 
 	{
-		txnSlots := TxnSlots{}
-		txnSlot2 := &TxnSlot{
+		txnSlots := txnparser.TxnSlots{}
+		txnSlot2 := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
 			Nonce:  4,
 		}
 		txnSlot2.IDHash[0] = 2
-		txnSlot3 := &TxnSlot{
+		txnSlot3 := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -142,8 +144,8 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 	// test too expensive tx
 	{
-		var txnSlots TxnSlots
-		txnSlot1 := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot1 := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(9 * common.Ether),
 			Gas:    100000,
@@ -160,8 +162,8 @@ func TestNonceFromAddress(t *testing.T) {
 
 	// test too low nonce
 	{
-		var txnSlots TxnSlots
-		txnSlot1 := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot1 := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -235,7 +237,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{})
 	assert.NoError(t, err)
 
 	// Generate auth data for transactions
@@ -262,7 +264,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 	s := uint256.NewInt(0).SetBytes(sig[32:64])
 	yParity := sig[64]
 
-	var auth Signature
+	var auth txnparser.Signature
 	auth.ChainID.Set(uint256.NewInt(chainID))
 	auth.V.Set(uint256.NewInt(uint64(yParity)))
 	auth.R.Set(r)
@@ -272,27 +274,27 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	// txn with existing authorization should not be accepted
 	{
-		var txnSlots TxnSlots
-		txnSlot1 := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot1 := &txnparser.TxnSlot{
 			Tip:            *uint256.NewInt(300000),
 			FeeCap:         *uint256.NewInt(300000),
 			Gas:            100000,
 			Nonce:          0,
-			Authorizations: []Signature{auth},
+			Authorizations: []txnparser.Signature{auth},
 			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Type:           txnparser.SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 1
 		txnSlots.Append(txnSlot1, addr1[:], true)
 
-		txnSlot2 := &TxnSlot{
+		txnSlot2 := &txnparser.TxnSlot{
 			Tip:            *uint256.NewInt(300000),
 			FeeCap:         *uint256.NewInt(300000),
 			Gas:            100000,
 			Nonce:          0,
-			Authorizations: []Signature{auth},
+			Authorizations: []txnparser.Signature{auth},
 			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Type:           txnparser.SetCodeTxnType,
 		}
 		txnSlot2.IDHash[0] = 2
 		txnSlots.Append(txnSlot2, addr2[:], true)
@@ -307,7 +309,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 		_, ok := pool.auths[authAddress]
 		assert.True(t, ok)
 
-		err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{[]*TxnSlot{txnSlot1}, Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []bool{true}})
+		err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{[]*txnparser.TxnSlot{txnSlot1}, txnparser.Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []bool{true}})
 		assert.NoError(t, err)
 
 		assert.Len(t, pool.auths, 0) // auth address should not be there after block has been mined
@@ -315,15 +317,15 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	// fee bump
 	{
-		var txnSlots TxnSlots
-		txnSlot1 := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot1 := &txnparser.TxnSlot{
 			Tip:            *uint256.NewInt(300000),
 			FeeCap:         *uint256.NewInt(300000),
 			Gas:            100000,
 			Nonce:          1,
-			Authorizations: []Signature{auth},
+			Authorizations: []txnparser.Signature{auth},
 			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Type:           txnparser.SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 3
 		txnSlots.Append(txnSlot1, addr1[:], true)
@@ -333,15 +335,15 @@ func TestMultipleAuthorizations(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success})
 
-		txnSlots = TxnSlots{}
-		txnSlot2 := &TxnSlot{
+		txnSlots = txnparser.TxnSlots{}
+		txnSlot2 := &txnparser.TxnSlot{
 			Tip:            *uint256.NewInt(900000),
 			FeeCap:         *uint256.NewInt(900000),
 			Gas:            100000,
 			Nonce:          1,
-			Authorizations: []Signature{auth},
+			Authorizations: []txnparser.Signature{auth},
 			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Type:           txnparser.SetCodeTxnType,
 		}
 		txnSlot2.IDHash[0] = 4
 		txnSlots.Append(txnSlot2, addr1[:], true)
@@ -352,21 +354,21 @@ func TestMultipleAuthorizations(t *testing.T) {
 		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success})
 		assert.Equal(t, pool.queued.Best().TxnSlot, txnSlot2)
 
-		err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{[]*TxnSlot{txnSlot1}, Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []bool{true}})
+		err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{[]*txnparser.TxnSlot{txnSlot1}, txnparser.Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []bool{true}})
 		assert.NoError(t, err)
 	}
 
 	// do not allow transactions from delegated addresses
 	{
-		var txnSlots TxnSlots
-		txnSlot1 := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot1 := &txnparser.TxnSlot{
 			Tip:            *uint256.NewInt(300000),
 			FeeCap:         *uint256.NewInt(300000),
 			Gas:            100000,
 			Nonce:          1,
-			Authorizations: []Signature{auth},
+			Authorizations: []txnparser.Signature{auth},
 			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Type:           txnparser.SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 5
 		txnSlots.Append(txnSlot1, addr1[:], true)
@@ -376,13 +378,13 @@ func TestMultipleAuthorizations(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success})
 
-		txnSlots = TxnSlots{}
-		txnSlot2 := &TxnSlot{
+		txnSlots = txnparser.TxnSlots{}
+		txnSlot2 := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
 			Nonce:  1,
-			Type:   DynamicFeeTxnType,
+			Type:   txnparser.DynamicFeeTxnType,
 		}
 		txnSlot2.IDHash[0] = 6
 
@@ -476,12 +478,12 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{})
 	assert.NoError(err)
 
 	{
-		var txnSlots TxnSlots
-		txnSlot := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -498,8 +500,8 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	}
 	// Bumped only feeCap, transaction not accepted
 	{
-		txnSlots := TxnSlots{}
-		txnSlot := &TxnSlot{
+		txnSlots := txnparser.TxnSlots{}
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(3000000),
 			Gas:    100000,
@@ -518,8 +520,8 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	}
 	// Bumped only tip, transaction not accepted
 	{
-		txnSlots := TxnSlots{}
-		txnSlot := &TxnSlot{
+		txnSlots := txnparser.TxnSlots{}
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(3000000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -538,8 +540,8 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	}
 	// Bumped both tip and feeCap by 10%, txn accepted
 	{
-		txnSlots := TxnSlots{}
-		txnSlot := &TxnSlot{
+		txnSlots := txnparser.TxnSlots{}
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(330000),
 			FeeCap: *uint256.NewInt(330000),
 			Gas:    100000,
@@ -599,12 +601,12 @@ func TestReverseNonces(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{})
 	assert.NoError(err)
 	// 1. Send high fee transaction with nonce gap
 	{
-		var txnSlots TxnSlots
-		txnSlot := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(500_000),
 			FeeCap: *uint256.NewInt(3_000_000),
 			Gas:    100000,
@@ -630,8 +632,8 @@ func TestReverseNonces(t *testing.T) {
 	}
 	// 2. Send low fee (below base fee) transaction without nonce gap
 	{
-		var txnSlots TxnSlots
-		txnSlot := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(500_000),
 			FeeCap: *uint256.NewInt(500_000),
 			Gas:    100000,
@@ -657,8 +659,8 @@ func TestReverseNonces(t *testing.T) {
 	}
 
 	{
-		var txnSlots TxnSlots
-		txnSlot := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(600_000),
 			FeeCap: *uint256.NewInt(3_000_000),
 			Gas:    100000,
@@ -729,13 +731,13 @@ func TestTxnPoke(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{})
 	assert.NoError(err)
 
 	var idHash Hashes
 	{
-		var txnSlots TxnSlots
-		txnSlot := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -762,8 +764,8 @@ func TestTxnPoke(t *testing.T) {
 	}
 	// Send the same transaction, not accepted
 	{
-		txnSlots := TxnSlots{}
-		txnSlot := &TxnSlot{
+		txnSlots := txnparser.TxnSlots{}
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -791,8 +793,8 @@ func TestTxnPoke(t *testing.T) {
 	}
 	// Send different transaction, but only with tip bumped
 	{
-		txnSlots := TxnSlots{}
-		txnSlot := &TxnSlot{
+		txnSlots := txnparser.TxnSlots{}
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(3000000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -821,8 +823,8 @@ func TestTxnPoke(t *testing.T) {
 
 	// Send the same transaction, but as remote
 	{
-		txnSlots := TxnSlots{}
-		txnSlot := &TxnSlot{
+		txnSlots := txnparser.TxnSlots{}
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -843,8 +845,8 @@ func TestTxnPoke(t *testing.T) {
 	}
 	// Send different transaction, but only with tip bumped, as a remote
 	{
-		txnSlots := TxnSlots{}
-		txnSlot := &TxnSlot{
+		txnSlots := txnparser.TxnSlots{}
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(3000000),
 			FeeCap: *uint256.NewInt(3000000),
 			Gas:    100000,
@@ -945,7 +947,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			err = sd.Flush(ctx, tx)
 			asrt.NoError(err)
 
-			txn := &TxnSlot{
+			txn := &txnparser.TxnSlot{
 				DataLen:  test.dataLen,
 				FeeCap:   *uint256.NewInt(21000),
 				Gas:      500000,
@@ -953,9 +955,9 @@ func TestShanghaiValidateTxn(t *testing.T) {
 				Creation: test.creation,
 			}
 
-			txns := TxnSlots{
-				Txns:    append([]*TxnSlot{}, txn),
-				Senders: Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+			txns := txnparser.TxnSlots{
+				Txns:    append([]*txnparser.TxnSlot{}, txn),
+				Senders: txnparser.Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 			}
 			err = pool.senders.registerNewSenders(&txns, logger)
 			asrt.NoError(err)
@@ -1014,12 +1016,12 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{})
 	assert.NoError(err)
 
 	{
-		var txnSlots TxnSlots
-		txnSlot := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    1000001,
@@ -1064,21 +1066,21 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	err = sd.Flush(ctx, tx)
 	assert.NoError(t, err)
 
-	txn := &TxnSlot{
+	txn := &txnparser.TxnSlot{
 		FeeCap:         *uint256.NewInt(21000),
 		Gas:            500000,
 		SenderID:       0,
-		Type:           SetCodeTxnType,
-		Authorizations: make([]Signature, 1),
+		Type:           txnparser.SetCodeTxnType,
+		Authorizations: make([]txnparser.Signature, 1),
 	}
 	txn.Authorizations[0].ChainID = chainID
 	txn.Authorizations[0].V.Set(maxUint256)
 	txn.Authorizations[0].R.Set(maxUint256)
 	txn.Authorizations[0].S.Set(maxUint256)
 
-	txns := TxnSlots{
-		Txns:    append([]*TxnSlot{}, txn),
-		Senders: Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+	txns := txnparser.TxnSlots{
+		Txns:    append([]*txnparser.TxnSlot{}, txn),
+		Senders: txnparser.Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 	}
 	err = pool.senders.registerNewSenders(&txns, logger)
 	assert.NoError(t, err)
@@ -1135,14 +1137,14 @@ func TestBlobTxnReplacement(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{})
 	assert.NoError(err)
 
 	tip, feeCap, blobFeeCap := uint256.NewInt(100_000), uint256.NewInt(200_000), uint256.NewInt(200_000)
 
 	//add a blob txn to the pool
 	{
-		txnSlots := TxnSlots{}
+		txnSlots := txnparser.TxnSlots{}
 		blobTxn := makeBlobTxn()
 
 		blobTxn.IDHash[0] = 0x00
@@ -1158,7 +1160,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 
 	{
 		// try to replace it with 5% extra blob gas, 2x higher txn fee - should fail
-		txnSlots := TxnSlots{}
+		txnSlots := txnparser.TxnSlots{}
 		blobTxn := makeBlobTxn()
 		blobTxn.Nonce = 0x2
 		blobTxn.FeeCap.Mul(uint256.NewInt(2), feeCap)
@@ -1176,9 +1178,9 @@ func TestBlobTxnReplacement(t *testing.T) {
 	}
 
 	{
-		txnSlots := TxnSlots{}
+		txnSlots := txnparser.TxnSlots{}
 		//try to replace it with a regular txn - should fail
-		regularTxn := TxnSlot{
+		regularTxn := txnparser.TxnSlot{
 			DataLen:    32,
 			FeeCap:     *uint256.NewInt(1).Mul(uint256.NewInt(10), feeCap), //10x the previous
 			Tip:        *uint256.NewInt(1).Mul(uint256.NewInt(10), tip),
@@ -1205,7 +1207,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 		origFee := blobTxn.FeeCap
 		blobTxn.Nonce = 0x2
 		blobTxn.IDHash[0] = 0x03
-		txnSlots := TxnSlots{}
+		txnSlots := txnparser.TxnSlots{}
 		txnSlots.Append(&blobTxn, addr[:], true)
 
 		// Get the config of the pool for BlobPriceBump and bump prices
@@ -1251,13 +1253,13 @@ func TestBlobTxnReplacement(t *testing.T) {
 }
 
 // Todo, make the txn more realistic with good values
-func makeBlobTxn() TxnSlot {
+func makeBlobTxn() txnparser.TxnSlot {
 	wrapperRlp, commitments := typestest.MakeBlobTxnRlp()
 	commitment0 := commitments[0]
 	commitment1 := commitments[1]
 	tip, feeCap, blobFeeCap := uint256.NewInt(100_000), uint256.NewInt(200_000), uint256.NewInt(200_000)
-	blobTxn := TxnSlot{}
-	tctx := NewTxnParseContext(*uint256.NewInt(5))
+	blobTxn := txnparser.TxnSlot{}
+	tctx := txnparser.NewTxnParseContext(*uint256.NewInt(5))
 	tctx.WithSender(false)
 	tctx.ParseTransaction(wrapperRlp, 0, &blobTxn, nil, false, true, nil)
 	blobTxn.BlobHashes = make([]common.Hash, 2)
@@ -1319,12 +1321,12 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = txnPool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = txnPool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{})
 	assert.NoError(err)
 	// 1. Try Local TxnSlot
 	{
-		var txnSlots TxnSlots
-		txnSlot := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(500_000),
 			FeeCap: *uint256.NewInt(3_000_000),
 			Gas:    100000,
@@ -1351,8 +1353,8 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 
 	// 2. Try same TxnSlot, but as remote; txn must be dropped
 	{
-		var txnSlots TxnSlots
-		txnSlot := &TxnSlot{
+		var txnSlots txnparser.TxnSlots
+		txnSlot := &txnparser.TxnSlot{
 			Tip:    *uint256.NewInt(500_000),
 			FeeCap: *uint256.NewInt(3_000_000),
 			Gas:    100000,
@@ -1432,12 +1434,12 @@ func TestBlobSlots(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{})
 	assert.NoError(err)
 
 	//Adding 20 blobs from 10 different accounts
 	for i := 0; i < int(cfg.TotalBlobPoolLimit/2); i++ {
-		txnSlots := TxnSlots{}
+		txnSlots := txnparser.TxnSlots{}
 		addr[0] = uint8(i + 1)
 		blobTxn := makeBlobTxn() // makes a txn with 2 blobs
 		blobTxn.IDHash[0] = uint8(2*i + 1)
@@ -1451,7 +1453,7 @@ func TestBlobSlots(t *testing.T) {
 	}
 
 	// Adding another blob txn should reject
-	txnSlots := TxnSlots{}
+	txnSlots := txnparser.TxnSlots{}
 	addr[0] = 11
 	blobTxn := makeBlobTxn()
 	blobTxn.IDHash[0] = uint8(21)
@@ -1507,11 +1509,11 @@ func TestGasLimitChanged(t *testing.T) {
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{})
 	assert.NoError(err)
 
-	var txnSlots TxnSlots
-	txnSlot1 := &TxnSlot{
+	var txnSlots txnparser.TxnSlots
+	txnSlot1 := &txnparser.TxnSlot{
 		Tip:    *uint256.NewInt(300000),
 		FeeCap: *uint256.NewInt(300000),
 		Gas:    100_000,
@@ -1528,7 +1530,7 @@ func TestGasLimitChanged(t *testing.T) {
 
 	change.ChangeBatch[0].Changes = nil
 	change.BlockGasLimit = 150_000
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	err = pool.OnNewBlock(ctx, change, txnparser.TxnSlots{}, txnparser.TxnSlots{}, txnparser.TxnSlots{})
 	assert.NoError(err)
 
 	reasons, err = pool.AddLocalTxns(ctx, txnSlots)

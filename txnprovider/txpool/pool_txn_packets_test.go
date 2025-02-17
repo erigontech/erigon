@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/txnprovider/txnparser"
 )
 
 var hashParseTests = []struct {
@@ -57,7 +58,7 @@ var hashEncodeTests = []struct {
 }{
 	{payloadStr: "e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
 		hashesStr: "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashCount: 1, expectedErr: false},
-	{hashesStr: fmt.Sprintf("%x", toHashes(1, 2, 3)),
+	{hashesStr: fmt.Sprintf("%x", txnparser.toHashes(1, 2, 3)),
 		payloadStr: "f863a00100000000000000000000000000000000000000000000000000000000000000a00200000000000000000000000000000000000000000000000000000000000000a00300000000000000000000000000000000000000000000000000000000000000", hashCount: 3, expectedErr: false},
 }
 
@@ -143,8 +144,8 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			encodeBuf = EncodePooledTransactions66(tt.txns, tt.requestID, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
-			ctx := NewTxnParseContext(*uint256.NewInt(tt.chainID))
-			slots := &TxnSlots{}
+			ctx := txnparser.NewTxnParseContext(*uint256.NewInt(tt.chainID))
+			slots := &txnparser.TxnSlots{}
 			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots, nil)
 			require.NoError(err)
 			require.Equal(tt.requestID, requestID)
@@ -162,9 +163,9 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
 			chainID := uint256.NewInt(tt.chainID)
-			ctx := NewTxnParseContext(*chainID)
-			slots := &TxnSlots{}
-			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return ErrRejected })
+			ctx := txnparser.NewTxnParseContext(*chainID)
+			slots := &txnparser.TxnSlots{}
+			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return txnparser.ErrRejected })
 			require.NoError(err)
 			require.Equal(tt.requestID, requestID)
 			require.Equal(0, len(slots.Txns))
@@ -203,8 +204,8 @@ func TestTransactionsPacket(t *testing.T) {
 			encodeBuf = EncodeTransactions(tt.txns, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
-			ctx := NewTxnParseContext(*uint256.NewInt(tt.chainID))
-			slots := &TxnSlots{}
+			ctx := txnparser.NewTxnParseContext(*uint256.NewInt(tt.chainID))
+			slots := &txnparser.TxnSlots{}
 			_, err := ParseTransactions(encodeBuf, 0, ctx, slots, nil)
 			require.NoError(err)
 			require.Equal(len(tt.txns), len(slots.Txns))
@@ -221,9 +222,9 @@ func TestTransactionsPacket(t *testing.T) {
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
 			chainID := uint256.NewInt(tt.chainID)
-			ctx := NewTxnParseContext(*chainID)
-			slots := &TxnSlots{}
-			_, err := ParseTransactions(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return ErrRejected })
+			ctx := txnparser.NewTxnParseContext(*chainID)
+			slots := &txnparser.TxnSlots{}
+			_, err := ParseTransactions(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return txnparser.ErrRejected })
 			require.NoError(err)
 			require.Equal(0, len(slots.Txns))
 			require.Equal(0, slots.Senders.Len())
