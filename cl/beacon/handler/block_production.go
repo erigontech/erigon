@@ -1302,14 +1302,20 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	}
 
 	attestationCandidates := []attestationCandidate{}
+	count := 0
+	candCount := 0
 	for _, atts := range hashToAtts {
 		for _, att := range atts {
+			candCount++
 			expectedReward, err := computeAttestationReward(s, att)
 			if err != nil {
 				log.Debug("[Block Production] Could not compute expected attestation reward", "reason", err)
 				continue
 			}
 			if expectedReward == 0 {
+				bytes, _ := json.Marshal(att)
+				log.Debug("[Block Production] Attestation reward is zero", "att", string(bytes))
+				count++
 				continue
 			}
 			attestationCandidates = append(attestationCandidates, attestationCandidate{
@@ -1322,6 +1328,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		return attestationCandidates[i].reward > attestationCandidates[j].reward
 	})
 
+	log.Debug("[Block Production] # of zero Attestation reward", "count", count, "total", candCount)
 	// decide the max attestation length based on the version
 	var maxAttLen int
 	if s.Version().BeforeOrEqual(clparams.DenebVersion) {
