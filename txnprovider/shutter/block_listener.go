@@ -25,9 +25,10 @@ import (
 )
 
 type BlockEvent struct {
-	LatestBlockNum uint64
-	BlocksBatchLen uint64
-	Unwind         bool
+	LatestBlockNum  uint64
+	LatestBlockTime uint64
+	BlocksBatchLen  uint64
+	Unwind          bool
 }
 
 type BlockListener struct {
@@ -66,9 +67,10 @@ func (bl BlockListener) Run(ctx context.Context) error {
 
 		latestChange := batch.ChangeBatch[len(batch.ChangeBatch)-1]
 		blockEvent := BlockEvent{
-			LatestBlockNum: latestChange.BlockHeight,
-			BlocksBatchLen: uint64(len(batch.ChangeBatch)),
-			Unwind:         latestChange.Direction == remoteproto.Direction_UNWIND,
+			LatestBlockNum:  latestChange.BlockHeight,
+			LatestBlockTime: latestChange.BlockTime,
+			BlocksBatchLen:  uint64(len(batch.ChangeBatch)),
+			Unwind:          latestChange.Direction == remoteproto.Direction_UNWIND,
 		}
 
 		bl.events.NotifySync(blockEvent)

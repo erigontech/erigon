@@ -64,17 +64,6 @@ func (etp *EncryptedTxnsPool) Run(ctx context.Context) error {
 	defer etp.logger.Info("encrypted txns pool stopped")
 	etp.logger.Info("running encrypted txns pool")
 
-	//
-	// TODO implement cleanup
-	//     - use decryption keys listener
-	//     - remember previous eon+txn pointer from the previous decryption keys msg
-	//     - when the new one comes if the eon+txn pointer have moved forward then drop all <= old tx pointer
-	//     - to handle reorgs:
-	//     - keep these in a doubly linked list of size 5 msgs (for forking depth in blocks)
-	//     - when len > 128 start cleaning up backwards until len <= 128
-	//     - upon reorgs will need to
-	//
-
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return etp.watchSubmissions(ctx) })
 	eg.Go(func() error { return etp.loadSubmissionsOnInit(ctx) })
@@ -139,6 +128,35 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 	})
 
 	return txns, err
+}
+
+func (etp *EncryptedTxnsPool) DeleteUpTo(eon EonIndex, to TxnIndex) {
+	etp.mu.Lock()
+	defer etp.mu.Unlock()
+
+	var toDelete []EncryptedTxnSubmission
+	pivot := EncryptedTxnSubmission{EonIndex: eon, TxnIndex: to}
+	etp.submissions.AscendLessThan(pivot, func(item EncryptedTxnSubmission) bool {
+		toDelete = append(toDelete, item)
+		return true
+	})
+
+	if len(toDelete) == 0 {
+		return
+	}
+
+	for _, item := range toDelete {
+		etp.submissions.Delete(item)
+	}
+
+	etp.logger.Debug(
+		"deleted encrypted txns",
+		"count", len(toDelete),
+		"fromEon", toDelete[0].EonIndex,
+		"fromTxn", toDelete[0].TxnIndex,
+		"toEon", toDelete[len(toDelete)-1].EonIndex,
+		"toTxn", toDelete[len(toDelete)-1].TxnIndex,
+	)
 }
 
 func (etp *EncryptedTxnsPool) watchSubmissions(ctx context.Context) error {

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"golang.org/x/sync/errgroup"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -39,9 +40,11 @@ type DecryptionKeysProcessor struct {
 	config            Config
 	encryptedTxnsPool *EncryptedTxnsPool
 	decryptedTxnsPool *DecryptedTxnsPool
+	blockListener     BlockListener
+	slotCalculator    SlotCalculator
 	txnParseCtx       *txpool.TxnParseContext
 	queue             chan *proto.DecryptionKeys
-	processed         map[ProcessedMark]struct{}
+	processed         mapset.Set[ProcessedMark]
 }
 
 func NewDecryptionKeysProcessor(
@@ -49,14 +52,19 @@ func NewDecryptionKeysProcessor(
 	config Config,
 	encryptedTxnsPool *EncryptedTxnsPool,
 	decryptedTxnsPool *DecryptedTxnsPool,
+	blockListener BlockListener,
+	slotCalculator SlotCalculator,
 ) DecryptionKeysProcessor {
 	return DecryptionKeysProcessor{
 		logger:            logger,
 		config:            config,
 		encryptedTxnsPool: encryptedTxnsPool,
 		decryptedTxnsPool: decryptedTxnsPool,
+		blockListener:     blockListener,
+		slotCalculator:    slotCalculator,
 		txnParseCtx:       txpool.NewTxnParseContext(*config.ChainId).ChainIDRequired(),
 		queue:             make(chan *proto.DecryptionKeys),
+		processed:         mapset.NewSet[ProcessedMark](),
 	}
 }
 
@@ -68,6 +76,13 @@ func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
 	defer dkp.logger.Info("decryption keys processor stopped")
 	dkp.logger.Info("running decryption keys processor")
 
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return dkp.processKeys(ctx) })
+	eg.Go(func() error { return dkp.cleanupLoop(ctx) })
+	return eg.Wait()
+}
+
+func (dkp DecryptionKeysProcessor) processKeys(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -96,7 +111,7 @@ func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.Decry
 	from := TxnIndex(msg.GetGnosis().TxPointer)
 	to := from + TxnIndex(len(keys)) // [from,to)
 	processedMark := ProcessedMark{Slot: msg.GetGnosis().Slot, Eon: eonIndex, From: from, To: to}
-	if _, ok := dkp.processed[processedMark]; ok {
+	if dkp.processed.Contains(processedMark) {
 		dkp.logger.Debug(
 			"skipping decryption keys message - already processed",
 			"slot", processedMark.Slot,
@@ -161,7 +176,7 @@ func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.Decry
 	decryptionMark := DecryptionMark{Slot: msg.GetGnosis().Slot, Eon: eonIndex}
 	txnBatch := TxnBatch{Transactions: filteredTxns, TotalGasLimit: totalGasLimit.Load()}
 	dkp.decryptedTxnsPool.AddDecryptedTxns(decryptionMark, txnBatch)
-	dkp.processed[processedMark] = struct{}{}
+	dkp.processed.Add(processedMark)
 	return nil
 }
 
@@ -213,6 +228,63 @@ func (dkp DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub 
 	}
 
 	return txn, nil
+}
+
+func (dkp DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
+	blockEventC := make(chan BlockEvent)
+	unregister := dkp.blockListener.RegisterObserver(func(event BlockEvent) {
+		select {
+		case <-ctx.Done():
+		case blockEventC <- event:
+		}
+	})
+	defer unregister()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case blockEvent := <-blockEventC:
+			err := dkp.processBlockEventCleanup(blockEvent)
+			if err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (dkp DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEvent) error {
+	slot, err := dkp.slotCalculator.CalcSlot(blockEvent.LatestBlockTime)
+	if err != nil {
+		return err
+	}
+
+	// decryptedTxnsPool is not re-org aware since it is slot based - we can clean it up straight away
+	decryptedTxnsDeletions := dkp.decryptedTxnsPool.DeleteDecryptedTxnsUpToSlot(slot)
+	if decryptedTxnsDeletions > 0 {
+		dkp.logger.Debug("cleaned up decrypted txns up to", "slot", slot, "deletions", decryptedTxnsDeletions)
+	}
+
+	// encryptedTxnPool on the other hand may be sensitive to re-orgs - clean it up with some delay
+	var cleanUpToSlot uint64
+	if slot > dkp.config.ReorgDepthAwareness {
+		cleanUpToSlot = slot - dkp.config.ReorgDepthAwareness
+	}
+
+	var cleanUpMarks []ProcessedMark
+	dkp.processed.Each(func(mark ProcessedMark) bool {
+		if mark.Slot <= cleanUpToSlot {
+			cleanUpMarks = append(cleanUpMarks, mark)
+		}
+		return false // continue, want to check all
+	})
+
+	for _, mark := range cleanUpMarks {
+		dkp.processed.Remove(mark)
+		dkp.encryptedTxnsPool.DeleteUpTo(mark.Eon, mark.To+1)
+	}
+
+	return nil
 }
 
 func identityPreimageMismatchErr(keyIpBytes, submissionIpBytes []byte) error {

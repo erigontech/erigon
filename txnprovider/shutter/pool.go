@@ -57,7 +57,14 @@ func NewPool(
 	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysValidator)
 	encryptedTxnsPool := NewEncryptedTxnsPool(logger, config, contractBackend, blockListener)
 	decryptedTxnsPool := NewDecryptedTxnsPool()
-	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger, config, encryptedTxnsPool, decryptedTxnsPool)
+	decryptionKeysProcessor := NewDecryptionKeysProcessor(
+		logger,
+		config,
+		encryptedTxnsPool,
+		decryptedTxnsPool,
+		blockListener,
+		slotCalculator,
+	)
 	return &Pool{
 		logger:                  logger,
 		config:                  config,
@@ -86,7 +93,6 @@ func (p Pool) Run(ctx context.Context) error {
 	eg.Go(func() error { return p.decryptionKeysListener.Run(ctx) })
 	eg.Go(func() error { return p.decryptionKeysProcessor.Run(ctx) })
 	eg.Go(func() error { return p.encryptedTxnsPool.Run(ctx) })
-	eg.Go(func() error { return p.decryptedTxnsPool.Run(ctx) })
 	return eg.Wait()
 }
 

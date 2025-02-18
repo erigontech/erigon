@@ -87,12 +87,17 @@ func (p *DecryptedTxnsPool) AddDecryptedTxns(mark DecryptionMark, txnBatch TxnBa
 	p.decryptionCond.Broadcast()
 }
 
-func (p *DecryptedTxnsPool) Run(ctx context.Context) error {
-	//
-	// TODO implement cleanup
-	//      - use block listener
-	//      - when a new block comes in - calculate its slots using its timestamp (need changes to StateChange)
-	//      - remove all decrypted txns for slots <= slot
-	//
-	return nil
+func (p *DecryptedTxnsPool) DeleteDecryptedTxnsUpToSlot(slot uint64) uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var deletions uint64
+	for mark := range p.decryptedTxns {
+		if mark.Slot <= slot {
+			deletions++
+			delete(p.decryptedTxns, mark)
+		}
+	}
+
+	return deletions
 }
