@@ -106,16 +106,11 @@ func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.Decry
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(estimate.AlmostAllCPUs())
-	txns := make([]types.Transaction, 0, len(encryptedTxns))
+	txns := make([]types.Transaction, len(encryptedTxns))
 	totalGasLimit := atomic.Uint64{}
 	for i, encryptedTxn := range encryptedTxns {
 		eg.Go(func() error {
-			key, ok := txnIndexToKey[encryptedTxn.TxnIndex]
-			if !ok {
-				return fmt.Errorf("key not found for txn index %d", encryptedTxn.TxnIndex)
-			}
-
-			txn, err := dkp.decryptTxn(key, encryptedTxn)
+			txn, err := dkp.decryptTxn(txnIndexToKey, encryptedTxn)
 			if err != nil {
 				dkp.logger.Warn(
 					"failed to decrypt transaction - skipping",
@@ -124,6 +119,8 @@ func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.Decry
 					"txnIndex", encryptedTxn.TxnIndex,
 					"err", err,
 				)
+				// we do not return err here since as per protocol we skip bad decryption
+				// and also so that we don't interrupt other decryption goroutines
 				return nil
 			}
 
@@ -138,13 +135,28 @@ func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.Decry
 		return err
 	}
 
+	// txns that didn't pass decryption and other checks will be left nil -> filter those out
+	filteredTxns := make([]types.Transaction, 0, len(txns))
+	for _, txn := range txns {
+		if txn == nil {
+			continue
+		}
+
+		filteredTxns = append(filteredTxns, txn)
+	}
+
 	decryptionMark := DecryptionMark{Slot: msg.GetGnosis().Slot, Eon: eonIndex}
-	txnBatch := TxnBatch{Transactions: txns, TotalGasLimit: totalGasLimit.Load()}
+	txnBatch := TxnBatch{Transactions: filteredTxns, TotalGasLimit: totalGasLimit.Load()}
 	dkp.decryptedTxnsPool.AddDecryptedTxns(decryptionMark, txnBatch)
 	return nil
 }
 
-func (dkp DecryptionKeysProcessor) decryptTxn(key *proto.Key, sub EncryptedTxnSubmission) (types.Transaction, error) {
+func (dkp DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub EncryptedTxnSubmission) (types.Transaction, error) {
+	key, ok := keys[sub.TxnIndex]
+	if !ok {
+		return nil, fmt.Errorf("key not found for txn index %d", sub.TxnIndex)
+	}
+
 	epochSecretKey, err := EpochSecretKeyFromBytes(key.Key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode epoch secret key during txn decryption: %w", err)
@@ -173,7 +185,20 @@ func (dkp DecryptionKeysProcessor) decryptTxn(key *proto.Key, sub EncryptedTxnSu
 		return nil, fmt.Errorf("failed to parse decrypted transaction: %w", err)
 	}
 
-	return types.DecodeWrappedTransaction(txnSlot.Rlp)
+	txn, err := types.DecodeWrappedTransaction(txnSlot.Rlp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode transaction: %w", err)
+	}
+
+	if txn.Type() == types.BlobTxType {
+		return nil, errors.New("blob txns not allowed in shutter")
+	}
+
+	if subGasLimit := sub.GasLimit.Uint64(); txn.GetGas() != subGasLimit {
+		return nil, fmt.Errorf("txn gas limit mismatch: txn=%d, encryptedTxnSubmission=%d", txn.GetGas(), subGasLimit)
+	}
+
+	return txn, nil
 }
 
 func identityPreimageMismatchErr(keyIpBytes, submissionIpBytes []byte) error {
