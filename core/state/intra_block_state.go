@@ -1103,7 +1103,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 			return err
 		}
 		if dbg.TraceTransactionIO && (trace || traceAccount(addr)) {
-			fmt.Printf("UpdateAccountData: %x, balance=%d, nonce=%d\n", addr, stateObject.data.Balance.Uint64(), stateObject.data.Nonce)
+			fmt.Printf("%d (%d.%d) UpdateAccountData: %x, balance=%d, nonce=%d codehash=%x\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.data.Balance.Uint64(), stateObject.data.Nonce, stateObject.data.CodeHash)
 		}
 		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
