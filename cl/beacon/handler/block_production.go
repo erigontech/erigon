@@ -1316,7 +1316,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 				bytes, _ := json.Marshal(att)
 				log.Debug("[Block Production] Attestation reward is zero", "att", string(bytes))
 				count++
-				continue
+				//continue
 			}
 			attestationCandidates = append(attestationCandidates, attestationCandidate{
 				attestation: att,
