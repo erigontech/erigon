@@ -150,7 +150,7 @@ func (c *CommitteeSubscribeMgmt) AggregateAttestation(att *solid.Attestation) er
 
 	c.validatorSubsMutex.RLock()
 	defer c.validatorSubsMutex.RUnlock()
-	if _, ok := c.validatorSubs[committeeIndex]; ok {
+	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
 		// aggregate attestation
 		if err := c.aggregationPool.AddAttestation(att); err != nil {
 			return err
