@@ -512,7 +512,7 @@ Loop:
 			if err != nil {
 				return err
 			}
-			accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
+			accumulator.StartChange(header, txs, false)
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
