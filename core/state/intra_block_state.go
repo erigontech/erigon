@@ -561,6 +561,9 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 	if amount.IsZero() {
 		if stateObject.empty() {
 			sdb.versionWritten(addr, BalancePath, libcommon.Hash{}, prev)
+			if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
+				fmt.Printf("%d (%d.%d) TOUCH %x %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, AccountKey{Path: BalancePath})
+			}
 			stateObject.touch()
 		}
 
@@ -862,7 +865,7 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (*stateObject
 
 	if account == nil {
 		if sdb.versionMap != nil {
-			account, _,  _ = versionedRead[*accounts.Account](sdb, addr, AddressPath, libcommon.Hash{}, false, nil, nil, nil)
+			account, _, _ = versionedRead[*accounts.Account](sdb, addr, AddressPath, libcommon.Hash{}, false, nil, nil, nil)
 
 			if account == nil {
 				return nil, nil
@@ -1218,6 +1221,9 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 			} else {
 				fmt.Printf("%d (%d.%d) Balance: %x (%v): %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, isDirty, &stateObject.data.Balance)
 			}
+		}
+		if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
+			fmt.Printf("%d (%d.%d) Update Acount%x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		}
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.tracingHooks); err != nil {
 			return err

@@ -444,8 +444,8 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 
 	if !commited {
 		if vw, ok := s.versionedWrite(addr, path, key); ok {
-			if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
-				fmt.Printf("%d (%d.%d) RD %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead)
+			if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+				fmt.Printf("%d (%d.%d) RD %s %x %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead, addr, AccountKey{path, key})
 			}
 
 			val := vw.Val.(T)
@@ -469,7 +469,7 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 	switch res.Status() {
 	case MVReadResultDone:
 
-		if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
+		if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
 			fmt.Printf("%d (%d.%d) RD %s (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key})
 		}
 
@@ -483,7 +483,7 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 					s.dep = vr.Version.TxIndex
 				}
 
-				if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
+				if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
 					fmt.Printf("%d (%d.%d) DEP (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
 				}
 
@@ -504,8 +504,8 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 		vr.Val = copyV(v)
 
 	case MVReadResultDependency:
-		if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
-			fmt.Printf("%d (%d.%d) DEP (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, res.DepIdx(), res.Incarnation(),addr, AccountKey{path, key})
+		if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+			fmt.Printf("%d (%d.%d) DEP (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key})
 		}
 
 		s.dep = res.DepIdx()
@@ -515,7 +515,7 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 		if versionedReads := s.versionedReads; versionedReads != nil {
 			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 				if pr.Version == vr.Version {
-					if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
+					if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
 						fmt.Printf("%d (%d.%d) RD %s %x %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead, addr, AccountKey{path, key})
 					}
 
@@ -539,8 +539,8 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 			return defaultV, StorageRead, nil
 		}
 
-		if s.trace || traceAccount(addr) && dbg.TraceTransactionIO {
-			fmt.Printf("%d (%d.%d) RD %s %x %s\n", s.blockNum, s.txIndex, s.version, StorageRead,addr, AccountKey{path, key})
+		if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+			fmt.Printf("%d (%d.%d) RD %s %x %s\n", s.blockNum, s.txIndex, s.version, StorageRead, addr, AccountKey{path, key})
 		}
 
 		vr.Val = copyV(v)
