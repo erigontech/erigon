@@ -39,7 +39,6 @@ func MakeBlobTxnRlp() ([]byte, []gokzg4844.KZGCommitment) {
 	proofsRlpPrefix := hexutil.MustDecodeHex("f862")
 	commitment0, _ := kzg.Ctx().BlobToKZGCommitment(blob0[:], 0)
 	commitment1, _ := kzg.Ctx().BlobToKZGCommitment(blob1[:], 0)
-
 	proof0, err := kzg.Ctx().ComputeBlobKZGProof(blob0[:], commitment0, 0)
 	if err != nil {
 		fmt.Println("error", err)
