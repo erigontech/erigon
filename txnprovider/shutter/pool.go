@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -39,6 +40,7 @@ type Pool struct {
 	config                  Config
 	secondaryTxnProvider    txnprovider.TxnProvider
 	blockListener           BlockListener
+	blockTracker            BlockTracker
 	eonTracker              EonTracker
 	decryptionKeysListener  DecryptionKeysListener
 	decryptionKeysProcessor DecryptionKeysProcessor
@@ -57,6 +59,7 @@ func NewPool(
 	logger = logger.New("component", "shutter")
 	slotCalculator := NewBeaconChainSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot)
 	blockListener := NewBlockListener(logger, stateChangesClient)
+	blockTracker := NewBlockTracker(logger, blockListener)
 	eonTracker := NewKsmEonTracker(logger, config, blockListener, contractBackend)
 	decryptionKeysValidator := NewDecryptionKeysExtendedValidator(logger, config, slotCalculator, eonTracker)
 	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysValidator)
@@ -74,6 +77,7 @@ func NewPool(
 		logger:                  logger,
 		config:                  config,
 		blockListener:           blockListener,
+		blockTracker:            blockTracker,
 		eonTracker:              eonTracker,
 		secondaryTxnProvider:    secondaryTxnProvider,
 		decryptionKeysListener:  decryptionKeysListener,
@@ -95,6 +99,7 @@ func (p Pool) Run(ctx context.Context) error {
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return p.blockListener.Run(ctx) })
+	eg.Go(func() error { return p.blockTracker.Run(ctx) })
 	eg.Go(func() error { return p.eonTracker.Run(ctx) })
 	eg.Go(func() error { return p.decryptionKeysListener.Run(ctx) })
 	eg.Go(func() error { return p.decryptionKeysProcessor.Run(ctx) })
@@ -109,23 +114,31 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 		return nil, errors.New("block time option is required by the shutter provider")
 	}
 
+	parentBlockNum := provideOpts.ParentBlockNum
+	parentBlockWaitTime := time.Second * time.Duration(p.slotCalculator.SecondsPerSlot())
+	parentBlockWaitCtx, parentBlockWaitCtxCancel := context.WithTimeout(ctx, parentBlockWaitTime)
+	defer parentBlockWaitCtxCancel()
+	err := p.blockTracker.Wait(parentBlockWaitCtx, parentBlockNum)
+	if err != nil {
+		return nil, fmt.Errorf("issue while waiting for parent block %d: %w", parentBlockNum, err)
+	}
+
+	eon, ok := p.eonTracker.EonByBlockNum(parentBlockNum)
+	if !ok {
+		return nil, fmt.Errorf("unknown eon for block num %d", parentBlockNum)
+	}
+
 	slot, err := p.slotCalculator.CalcSlot(blockTime)
 	if err != nil {
 		return nil, err
 	}
 
-	blockNum := provideOpts.ParentBlockNum + 1
-	eon, ok := p.eonTracker.EonByBlockNum(blockNum)
-	if !ok {
-		return nil, fmt.Errorf("unknown eon for block num %d", blockNum)
-	}
-
 	decryptionMark := DecryptionMark{Slot: slot, Eon: eon.Index}
 	slotAge := p.slotCalculator.CalcSlotAge(slot)
 	keysWaitTime := p.config.MaxDecryptionKeysDelay - slotAge
-	ctx, cancel := context.WithTimeout(ctx, keysWaitTime)
-	defer cancel()
-	err = p.decryptedTxnsPool.Wait(ctx, decryptionMark)
+	decryptionWaitCtx, decryptionWaitCtxCancel := context.WithTimeout(ctx, keysWaitTime)
+	defer decryptionWaitCtxCancel()
+	err = p.decryptedTxnsPool.Wait(decryptionWaitCtx, decryptionMark)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			p.logger.Warn(
