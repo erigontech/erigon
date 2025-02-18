@@ -474,6 +474,10 @@ func (a *ApiHandler) produceBlock(
 		block.Blobs = blobs
 		block.KzgProofs = kzgProofs
 		block.ExecutionValue = new(big.Int).SetUint64(localExecValue)
+		bytes, _ := json.Marshal(beaconBody)
+		log.Debug("[Block Production] Produced block", "slot", targetSlot, "beacon_body", string(bytes))
+		bytes, _ = json.Marshal(blobs)
+		log.Debug("[Block Production] Produced block", "slot", targetSlot, "blobs", string(bytes))
 		return block, nil
 	}
 
