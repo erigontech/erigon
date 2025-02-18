@@ -43,9 +43,9 @@ func WithParentBlockNum(blockNum uint64) ProvideOption {
 	}
 }
 
-func WithBlockTimestamp(blockTimestamp uint64) ProvideOption {
+func WithBlockTime(blockTime uint64) ProvideOption {
 	return func(opt *ProvideOptions) {
-		opt.BlockTimestamp = blockTimestamp
+		opt.BlockTime = blockTime
 	}
 }
 
@@ -74,8 +74,8 @@ func WithTxnIdsFilter(txnIdsFilter mapset.Set[[32]byte]) ProvideOption {
 }
 
 type ProvideOptions struct {
+	BlockTime      uint64
 	ParentBlockNum uint64
-	BlockTimestamp uint64
 	Amount         int
 	GasTarget      uint64
 	BlobGasTarget  uint64

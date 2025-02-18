@@ -104,12 +104,12 @@ func (p Pool) Run(ctx context.Context) error {
 
 func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	provideOpts := txnprovider.ApplyProvideOptions(opts...)
-	blockTimestamp := provideOpts.BlockTimestamp
-	if blockTimestamp == 0 {
-		return nil, errors.New("block timestamp option is required by the shutter provider")
+	blockTime := provideOpts.BlockTime
+	if blockTime == 0 {
+		return nil, errors.New("block time option is required by the shutter provider")
 	}
 
-	slot, err := p.slotCalculator.CalcSlot(blockTimestamp)
+	slot, err := p.slotCalculator.CalcSlot(blockTime)
 	if err != nil {
 		return nil, err
 	}
