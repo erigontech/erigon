@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
 
@@ -37,7 +38,7 @@ type DecryptionKeysProcessor struct {
 	logger            log.Logger
 	config            Config
 	encryptedTxnsPool *EncryptedTxnsPool
-	decryptedTxnsPool DecryptedTxnsPool
+	decryptedTxnsPool *DecryptedTxnsPool
 	txnParseCtx       *txpool.TxnParseContext
 	queue             chan *proto.DecryptionKeys
 }
@@ -46,7 +47,7 @@ func NewDecryptionKeysProcessor(
 	logger log.Logger,
 	config Config,
 	encryptedTxnsPool *EncryptedTxnsPool,
-	decryptedTxnsPool DecryptedTxnsPool,
+	decryptedTxnsPool *DecryptedTxnsPool,
 ) DecryptionKeysProcessor {
 	return DecryptionKeysProcessor{
 		logger:            logger,
@@ -65,17 +66,6 @@ func (dkp DecryptionKeysProcessor) Enqueue(msg *proto.DecryptionKeys) {
 func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
 	defer dkp.logger.Info("decryption keys processor stopped")
 	dkp.logger.Info("running decryption keys processor")
-
-	//
-	// TODO - the dkp can actually clean the encrypted and decrypted pools (so we wont have to use LRU)
-	//      - uses block listener
-	//         - for decrypted pool: when a new block comes in - calculate its slots using its timestamp (need changes to StateChange) - remove all decrypted txns for slots <= slot
-	//         - for encrypted pool: remember previous eon+txn pointer from the previous decryption keys msg - when the new one comes if the eon+txn pointer have moved forward then drop all <= old tx pointer
-	//      - to handle reorgs:
-	//         - keep these in a doubly linked list of size 128 (for forking depth in blocks)
-	//         - when len > 128 start cleaning up backwards until len <= 128
-	//         - upon reorgs will need to
-	//
 
 	for {
 		select {
@@ -117,6 +107,7 @@ func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.Decry
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(estimate.AlmostAllCPUs())
 	txns := make([]types.Transaction, 0, len(encryptedTxns))
+	totalGasLimit := atomic.Uint64{}
 	for i, encryptedTxn := range encryptedTxns {
 		eg.Go(func() error {
 			key, ok := txnIndexToKey[encryptedTxn.TxnIndex]
@@ -137,6 +128,7 @@ func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.Decry
 			}
 
 			txns[i] = txn
+			totalGasLimit.Add(encryptedTxn.GasLimit.Uint64())
 			return nil
 		})
 	}
@@ -146,12 +138,9 @@ func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.Decry
 		return err
 	}
 
-	decryptionMark := DecryptionMark{
-		Slot: msg.GetGnosis().Slot,
-		Eon:  eonIndex,
-	}
-
-	dkp.decryptedTxnsPool.AddDecryptedTxns(decryptionMark, txns)
+	decryptionMark := DecryptionMark{Slot: msg.GetGnosis().Slot, Eon: eonIndex}
+	txnBatch := TxnBatch{Transactions: txns, TotalGasLimit: totalGasLimit.Load()}
+	dkp.decryptedTxnsPool.AddDecryptedTxns(decryptionMark, txnBatch)
 	return nil
 }
 

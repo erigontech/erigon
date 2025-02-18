@@ -39,7 +39,7 @@ type Pool struct {
 	decryptionKeysListener  DecryptionKeysListener
 	decryptionKeysProcessor DecryptionKeysProcessor
 	encryptedTxnsPool       *EncryptedTxnsPool
-	decryptedTxnsPool       DecryptedTxnsPool
+	decryptedTxnsPool       *DecryptedTxnsPool
 }
 
 func NewPool(
@@ -56,7 +56,7 @@ func NewPool(
 	decryptionKeysValidator := NewDecryptionKeysExtendedValidator(logger, config, slotCalculator, eonTracker)
 	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysValidator)
 	encryptedTxnsPool := NewEncryptedTxnsPool(logger, config, contractBackend, blockListener)
-	decryptedTxnsPool := DecryptedTxnsPool{}
+	decryptedTxnsPool := NewDecryptedTxnsPool()
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger, config, encryptedTxnsPool, decryptedTxnsPool)
 	return &Pool{
 		logger:                  logger,

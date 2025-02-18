@@ -64,6 +64,17 @@ func (etp *EncryptedTxnsPool) Run(ctx context.Context) error {
 	defer etp.logger.Info("encrypted txns pool stopped")
 	etp.logger.Info("running encrypted txns pool")
 
+	//
+	// TODO implement cleanup
+	//     - use decryption keys listener
+	//     - remember previous eon+txn pointer from the previous decryption keys msg
+	//     - when the new one comes if the eon+txn pointer have moved forward then drop all <= old tx pointer
+	//     - to handle reorgs:
+	//     - keep these in a doubly linked list of size 5 msgs (for forking depth in blocks)
+	//     - when len > 128 start cleaning up backwards until len <= 128
+	//     - upon reorgs will need to
+	//
+
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return etp.watchSubmissions(ctx) })
 	eg.Go(func() error { return etp.loadSubmissionsOnInit(ctx) })
@@ -83,12 +94,12 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 	count := to - from
 	txns := make([]EncryptedTxnSubmission, 0, count)
 
-	var accumulatedGasLimit uint64
+	var totalGasLimit uint64
 	var idxOffset TxnIndex
 	var err error
 	etp.submissions.AscendRange(fromKey, toKey, func(item EncryptedTxnSubmission) bool {
-		accumulatedGasLimit += item.GasLimit.Uint64()
-		if accumulatedGasLimit > gasLimit {
+		newTotalGasLimit := totalGasLimit + item.GasLimit.Uint64()
+		if newTotalGasLimit > gasLimit {
 			etp.logger.Warn(
 				"exceeded gas limit when reading encrypted txns",
 				"eonIndex", item.EonIndex,
@@ -96,11 +107,13 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 				"from", from,
 				"to", to,
 				"gasLimit", gasLimit,
-				"accumulatedGasLimit", accumulatedGasLimit,
+				"totalGasLimit", totalGasLimit,
+				"newTotalGasLimit", newTotalGasLimit,
 			)
 			return false // break
 		}
 
+		totalGasLimit = newTotalGasLimit
 		nextTxnIndex := from + idxOffset
 		if item.TxnIndex < nextTxnIndex {
 			// this should never happen - highlights bug in the logic somewhere

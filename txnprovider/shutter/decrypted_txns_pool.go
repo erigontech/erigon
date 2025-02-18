@@ -18,37 +18,81 @@ package shutter
 
 import (
 	"context"
+	"sync"
 
 	"github.com/erigontech/erigon/core/types"
 )
-
-type DecryptedTxns struct {
-	TotalGas     uint64
-	Transactions []types.Transaction
-}
 
 type DecryptionMark struct {
 	Slot uint64
 	Eon  EonIndex
 }
 
+type TxnBatch struct {
+	Transactions  []types.Transaction
+	TotalGasLimit uint64
+}
+
 type DecryptedTxnsPool struct {
+	mu             *sync.Mutex
+	decryptedTxns  map[DecryptionMark]TxnBatch
+	decryptionCond *sync.Cond
 }
 
-func (p DecryptedTxnsPool) Wait(ctx context.Context, mark DecryptionMark) error {
+func NewDecryptedTxnsPool() *DecryptedTxnsPool {
+	mu := sync.Mutex{}
+	return &DecryptedTxnsPool{
+		mu:             &mu,
+		decryptedTxns:  make(map[DecryptionMark]TxnBatch),
+		decryptionCond: sync.NewCond(&mu),
+	}
+}
+
+func (p *DecryptedTxnsPool) Wait(ctx context.Context, mark DecryptionMark) error {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+
+		p.mu.Lock()
+		defer p.mu.Unlock()
+
+		for _, ok := p.decryptedTxns[mark]; !ok && ctx.Err() == nil; _, ok = p.decryptedTxns[mark] {
+			p.decryptionCond.Wait()
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		// note the below will wake up all waiters prematurely, but thanks to the for loop condition
+		// in the waiting goroutine the ones that still need to wait will go back to sleep
+		p.decryptionCond.Broadcast()
+	case <-done:
+		// no-op
+	}
+
+	return ctx.Err()
+}
+
+func (p *DecryptedTxnsPool) DecryptedTxns(mark DecryptionMark) (TxnBatch, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	txnBatch, ok := p.decryptedTxns[mark]
+	return txnBatch, ok
+}
+
+func (p *DecryptedTxnsPool) AddDecryptedTxns(mark DecryptionMark, txnBatch TxnBatch) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.decryptedTxns[mark] = txnBatch
+	p.decryptionCond.Broadcast()
+}
+
+func (p *DecryptedTxnsPool) Run(ctx context.Context) error {
 	//
-	// TODO - return instantly if mark already present, otherwise use sync.Cond to wait
+	// TODO implement cleanup
+	//      - use block listener
+	//      - when a new block comes in - calculate its slots using its timestamp (need changes to StateChange)
+	//      - remove all decrypted txns for slots <= slot
 	//
-	return nil
-}
-
-func (p DecryptedTxnsPool) DecryptedTxns(mark DecryptionMark) (DecryptedTxns, error) {
-	return DecryptedTxns{}, nil
-}
-
-func (p DecryptedTxnsPool) AddDecryptedTxns(mark DecryptionMark, txns []types.Transaction) {
-}
-
-func (p DecryptedTxnsPool) Run(ctx context.Context) error {
 	return nil
 }
