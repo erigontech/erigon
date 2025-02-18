@@ -478,7 +478,7 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	if (h.notifications.Accumulator != nil) && (currentHeader != nil) {
 		if currentHeader.Number.Uint64() == 0 {
-			h.notifications.Accumulator.StartChange(0, currentHeader.Hash(), nil, false)
+			h.notifications.Accumulator.StartChange(currentHeader, nil, false)
 		}
 
 		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
