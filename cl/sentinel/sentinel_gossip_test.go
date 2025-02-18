@@ -63,6 +63,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
+		MaxPeerCount:  9999999,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel1.Stop()
@@ -77,6 +78,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		Port:          7077,
 		EnableBlocks:  true,
 		TCPPort:       9123,
+		MaxPeerCount:  9999999,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel2.Stop()
