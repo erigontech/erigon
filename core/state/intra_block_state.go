@@ -567,6 +567,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 			stateObject.touch()
 		}
 
+		fmt.Printf("%d (%d.%d) Add Zero%x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		return nil
 	}
 
@@ -588,6 +589,7 @@ func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.I
 	}
 
 	if amount.IsZero() {
+		fmt.Printf("%d (%d.%d) Sub Zero%x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		return nil
 	}
 
@@ -1103,7 +1105,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 			return err
 		}
 		if dbg.TraceTransactionIO && (trace || traceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) UpdateAccountData: %x, balance=%d, nonce=%d codehash=%x\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.data.Balance.Uint64(), stateObject.data.Nonce, stateObject.data.CodeHash)
+			fmt.Printf("%d (%d.%d) Update Account Data: %x, balance=%d, nonce=%d codehash=%x\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.data.Balance.Uint64(), stateObject.data.Nonce, stateObject.data.CodeHash)
 		}
 		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
