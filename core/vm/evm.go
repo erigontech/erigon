@@ -515,10 +515,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		err = ErrLegacyCode
 	}
 
-	// Reject legacy contract deployment from EOF.
-	if isInitcodeEOF && !hasEOFMagic(ret) {
-		err = fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, ErrLegacyCode)
-	}
 	// Reject EOF deployment from legacy.
 	if !isInitcodeEOF && hasEOFMagic(ret) {
 		err = ErrLegacyCode
