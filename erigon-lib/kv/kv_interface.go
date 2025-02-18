@@ -78,43 +78,84 @@ import (
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 const dbLabelName = "db"
 
+type DBGauges struct { // these gauges are shared by all MDBX instances, but need to be filtered by label
+	DbSize    *metrics.GaugeVec
+	TxLimit   *metrics.GaugeVec
+	TxSpill   *metrics.GaugeVec
+	TxUnspill *metrics.GaugeVec
+	TxDirty   *metrics.GaugeVec
+	TxRetired *metrics.GaugeVec
+
+	DbPgopsNewly   *metrics.GaugeVec
+	DbPgopsCow     *metrics.GaugeVec
+	DbPgopsClone   *metrics.GaugeVec
+	DbPgopsSplit   *metrics.GaugeVec
+	DbPgopsMerge   *metrics.GaugeVec
+	DbPgopsSpill   *metrics.GaugeVec
+	DbPgopsUnspill *metrics.GaugeVec
+	DbPgopsWops    *metrics.GaugeVec
+
+	GcLeafMetric     *metrics.GaugeVec
+	GcOverflowMetric *metrics.GaugeVec
+	GcPagesMetric    *metrics.GaugeVec
+}
+
+type DBSummaries struct { // the summaries are particular to a DB instance
+	DbCommitPreparation metrics.Summary
+	DbCommitWrite       metrics.Summary
+	DbCommitSync        metrics.Summary
+	DbCommitEnding      metrics.Summary
+	DbCommitTotal       metrics.Summary
+}
+
+// this only needs to be called once during startup
+func InitMDBXMGauges() *DBGauges {
+	return &DBGauges{
+		DbSize:         metrics.GetOrCreateGaugeVec(`db_size`, []string{dbLabelName}),
+		TxLimit:        metrics.GetOrCreateGaugeVec(`tx_limit`, []string{dbLabelName}),
+		TxSpill:        metrics.GetOrCreateGaugeVec(`tx_spill`, []string{dbLabelName}),
+		TxUnspill:      metrics.GetOrCreateGaugeVec(`tx_unspill`, []string{dbLabelName}),
+		TxDirty:        metrics.GetOrCreateGaugeVec(`tx_dirty`, []string{dbLabelName}),
+		TxRetired:      metrics.GetOrCreateGaugeVec(`tx_retired`, []string{dbLabelName}),
+		DbPgopsNewly:   metrics.GetOrCreateGaugeVec(`db_pgops{phase="newly"}`, []string{dbLabelName}),
+		DbPgopsCow:     metrics.GetOrCreateGaugeVec(`db_pgops{phase="cow"}`, []string{dbLabelName}),
+		DbPgopsClone:   metrics.GetOrCreateGaugeVec(`db_pgops{phase="clone"}`, []string{dbLabelName}),
+		DbPgopsSplit:   metrics.GetOrCreateGaugeVec(`db_pgops{phase="split"}`, []string{dbLabelName}),
+		DbPgopsMerge:   metrics.GetOrCreateGaugeVec(`db_pgops{phase="merge"}`, []string{dbLabelName}),
+		DbPgopsSpill:   metrics.GetOrCreateGaugeVec(`db_pgops{phase="spill"}`, []string{dbLabelName}),
+		DbPgopsUnspill: metrics.GetOrCreateGaugeVec(`db_pgops{phase="unspill"}`, []string{dbLabelName}),
+		DbPgopsWops:    metrics.GetOrCreateGaugeVec(`db_pgops{phase="wops"}`, []string{dbLabelName}),
+
+		GcLeafMetric:     metrics.GetOrCreateGaugeVec(`db_gc_leaf`, []string{dbLabelName}),
+		GcOverflowMetric: metrics.GetOrCreateGaugeVec(`db_gc_overflow`, []string{dbLabelName}),
+		GcPagesMetric:    metrics.GetOrCreateGaugeVec(`db_gc_pages`, []string{dbLabelName}),
+	}
+}
+
+// initialize summaries for a particular MDBX instance
+func InitSummaries(dbLabel Label) {
+	// just in case the global singleton map is not already initialized
+	if MDBXSummaries == nil {
+		MDBXSummaries = make(map[Label]*DBSummaries)
+	}
+
+	_, ok := MDBXSummaries[dbLabel]
+	if !ok {
+		dbName := string(dbLabel)
+		MDBXSummaries[dbLabel] = &DBSummaries{
+			DbCommitWrite:  metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "write"}),
+			DbCommitSync:   metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "sync"}),
+			DbCommitEnding: metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "ending"}),
+			DbCommitTotal:  metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "total"}),
+		}
+	}
+}
+
+var MDBXGauges *DBGauges = InitMDBXMGauges()                            // global mdbx gauges. each gauge can be filtered by db name
+var MDBXSummaries map[Label]*DBSummaries = make(map[Label]*DBSummaries) // dbName => Summaries mapping
+
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
-
-	DbSize    = metrics.GetOrCreateGaugeVec(`db_size`, []string{dbLabelName})    //nolint
-	TxLimit   = metrics.GetOrCreateGaugeVec(`tx_limit`, []string{dbLabelName})   //nolint
-	TxSpill   = metrics.GetOrCreateGaugeVec(`tx_spill`, []string{dbLabelName})   //nolint
-	TxUnspill = metrics.GetOrCreateGaugeVec(`tx_unspill`, []string{dbLabelName}) //nolint
-	TxDirty   = metrics.GetOrCreateGaugeVec(`tx_dirty`, []string{dbLabelName})   //nolint
-	TxRetired = metrics.GetOrCreateGaugeVec(`tx_retired`, []string{dbLabelName}) //nolint
-
-	DbCommitPreparation = func(dbName string) metrics.Summary {
-		return metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "preparation"})
-	}
-	//DbGCWallClock       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_wall_clock"}`) //nolint
-	//DbGCCpuTime         = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_cpu_time"}`)   //nolint
-	//DbCommitAudit       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="audit"}`)         //nolint
-	DbCommitWrite = func(dbName string) metrics.Summary {
-		return metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "write"})
-	} //nolint
-	DbCommitSync = func(dbName string) metrics.Summary {
-		return metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "sync"})
-	}
-
-	DbCommitEnding = func(dbName string) metrics.Summary {
-		return metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "ending"})
-	}
-	DbCommitTotal = func(dbName string) metrics.Summary {
-		return metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "total"})
-	}
-	DbPgopsNewly   = metrics.GetOrCreateGaugeVec(`db_pgops{phase="newly"}`, []string{dbLabelName})   //nolint
-	DbPgopsCow     = metrics.GetOrCreateGaugeVec(`db_pgops{phase="cow"}`, []string{dbLabelName})     //nolint
-	DbPgopsClone   = metrics.GetOrCreateGaugeVec(`db_pgops{phase="clone"}`, []string{dbLabelName})   //nolint
-	DbPgopsSplit   = metrics.GetOrCreateGaugeVec(`db_pgops{phase="split"}`, []string{dbLabelName})   //nolint
-	DbPgopsMerge   = metrics.GetOrCreateGaugeVec(`db_pgops{phase="merge"}`, []string{dbLabelName})   //nolint
-	DbPgopsSpill   = metrics.GetOrCreateGaugeVec(`db_pgops{phase="spill"}`, []string{dbLabelName})   //nolint
-	DbPgopsUnspill = metrics.GetOrCreateGaugeVec(`db_pgops{phase="unspill"}`, []string{dbLabelName}) //nolint
-	DbPgopsWops    = metrics.GetOrCreateGaugeVec(`db_pgops{phase="wops"}`, []string{dbLabelName})    //nolint
 	/*
 		DbPgopsPrefault = metrics.NewCounter(`db_pgops{phase="prefault"}`) //nolint
 		DbPgopsMinicore = metrics.NewCounter(`db_pgops{phase="minicore"}`) //nolint
@@ -147,11 +188,6 @@ var (
 	//DbGcSelfPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="slef_merge_time"}`) //nolint
 	//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
 	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
-
-	GcLeafMetric     = metrics.GetOrCreateGaugeVec(`db_gc_leaf`, []string{dbLabelName})     //nolint
-	GcOverflowMetric = metrics.GetOrCreateGaugeVec(`db_gc_overflow`, []string{dbLabelName}) //nolint
-	GcPagesMetric    = metrics.GetOrCreateGaugeVec(`db_gc_pages`, []string{dbLabelName})    //nolint
-
 )
 
 type DBVerbosityLvl int8
