@@ -247,8 +247,8 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 	)
 	if version.AfterOrEqual(clparams.ElectraVersion) {
 		// upgrade to electra
-		maxAttSlashing = MaxAttesterSlashingsElectra
-		maxAttestation = MaxAttestationsElectra
+		maxAttSlashing = int(beaconCfg.MaxAttesterSlashingsElectra)
+		maxAttestation = int(beaconCfg.MaxAttestationsElectra)
 		executionRequests = NewExecutionRequests(beaconCfg)
 	}
 
