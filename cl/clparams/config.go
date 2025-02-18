@@ -210,8 +210,8 @@ type NetworkConfig struct {
 	SyncCommsSubnetKey         string `yaml:"-" json:"-"` // SyncCommsSubnetKey is the ENR key of the sync committee subnet bitfield in the enr.
 	MinimumPeersInSubnetSearch uint64 `yaml:"-" json:"-"` // PeersInSubnetSearch is the required amount of peers that we need to be able to lookup in a subnet search.
 
-	BootNodes   []string
-	StaticPeers []string
+	BootNodes   []string `yaml:"-" json:"-"`
+	StaticPeers []string `yaml:"-" json:"-"`
 }
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
