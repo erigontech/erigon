@@ -218,3 +218,7 @@ func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int) *Attestati
 		CommitteeBits:   committeeBits,
 	}
 }
+
+func (s *SingleAttestation) AttestationData() *AttestationData {
+	return s.Data
+}

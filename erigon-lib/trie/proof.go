@@ -22,7 +22,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -215,7 +215,7 @@ type rawProofElement struct {
 }
 
 // proofMap creates a map from hash to proof node
-func proofMap(proof []hexutility.Bytes) (map[libcommon.Hash]Node, map[libcommon.Hash]rawProofElement, error) {
+func proofMap(proof []hexutil.Bytes) (map[libcommon.Hash]Node, map[libcommon.Hash]rawProofElement, error) {
 	res := map[libcommon.Hash]Node{}
 	raw := map[libcommon.Hash]rawProofElement{}
 	for i, proofB := range proof {
@@ -338,7 +338,9 @@ func VerifyAccountProofByHash(stateRoot libcommon.Hash, accountKey libcommon.Has
 }
 
 func VerifyStorageProof(storageRoot libcommon.Hash, proof accounts.StorProofResult) error {
-	storageKey := crypto.Keccak256Hash(proof.Key[:])
+	keyhash := &libcommon.Hash{}
+	keyhash.SetBytes(hexutil.FromHex(proof.Key))
+	storageKey := crypto.Keccak256Hash(keyhash[:])
 	return VerifyStorageProofByHash(storageRoot, storageKey, proof)
 }
 
@@ -354,13 +356,13 @@ func VerifyStorageProofByHash(storageRoot libcommon.Hash, keyHash libcommon.Hash
 		// if it corresponds to empty storage tree, having value EmptyRoot above
 		// then proof should be RLP encoding of empty proof (0x80)
 		if storageRoot == EmptyRoot {
-			for i, _ := range proof.Proof {
+			for i := range proof.Proof {
 				if len(proof.Proof[i]) != 1 || proof.Proof[i][0] != 0x80 {
 					return errors.New("empty storage root should have RLP encoding of empty proof")
 				}
 			}
 		} else {
-			for i, _ := range proof.Proof {
+			for i := range proof.Proof {
 				if len(proof.Proof[i]) != 0 {
 					return errors.New("zero storage root should have empty proof")
 				}

@@ -21,22 +21,22 @@ import (
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 )
 
 func MakeBlobTxnRlp() ([]byte, []gokzg4844.KZGCommitment) {
-	bodyRlp := hexutility.MustDecodeHex(BodyRlpHex)
+	bodyRlp := hexutil.MustDecodeHex(BodyRlpHex)
 
-	blobsRlpPrefix := hexutility.MustDecodeHex("fa040008")
-	blobRlpPrefix := hexutility.MustDecodeHex("ba020000")
+	blobsRlpPrefix := hexutil.MustDecodeHex("fa040008")
+	blobRlpPrefix := hexutil.MustDecodeHex("ba020000")
 
 	var blob0, blob1 = gokzg4844.Blob{}, gokzg4844.Blob{}
-	copy(blob0[:], hexutility.MustDecodeHex(ValidBlob1Hex))
-	copy(blob1[:], hexutility.MustDecodeHex(ValidBlob2Hex))
+	copy(blob0[:], hexutil.MustDecodeHex(ValidBlob1Hex))
+	copy(blob1[:], hexutil.MustDecodeHex(ValidBlob2Hex))
 
 	var err error
-	proofsRlpPrefix := hexutility.MustDecodeHex("f862")
+	proofsRlpPrefix := hexutil.MustDecodeHex("f862")
 	commitment0, _ := kzg.Ctx().BlobToKZGCommitment(blob0[:], 0)
 	commitment1, _ := kzg.Ctx().BlobToKZGCommitment(blob1[:], 0)
 
@@ -49,7 +49,7 @@ func MakeBlobTxnRlp() ([]byte, []gokzg4844.KZGCommitment) {
 		fmt.Println("error", err)
 	}
 
-	wrapperRlp := hexutility.MustDecodeHex("03fa0401fe")
+	wrapperRlp := hexutil.MustDecodeHex("03fa0401fe")
 	wrapperRlp = append(wrapperRlp, bodyRlp...)
 	wrapperRlp = append(wrapperRlp, blobsRlpPrefix...)
 	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)

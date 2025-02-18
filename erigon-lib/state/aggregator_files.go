@@ -17,6 +17,7 @@
 package state
 
 import (
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 )
 
@@ -27,7 +28,23 @@ type SelectedStaticFilesV3 struct {
 	ii    [][]*filesItem
 }
 
-func (sf SelectedStaticFilesV3) Close() {
+func (sf *SelectedStaticFilesV3) DomainFiles(name kv.Domain) []FilesItem {
+	return common.SliceMap(sf.d[name], func(item *filesItem) FilesItem { return item })
+}
+
+func (sf *SelectedStaticFilesV3) DomainHistoryFiles(name kv.Domain) []FilesItem {
+	return common.SliceMap(sf.dHist[name], func(item *filesItem) FilesItem { return item })
+}
+
+func (sf *SelectedStaticFilesV3) DomainInvertedIndexFiles(name kv.Domain) []FilesItem {
+	return common.SliceMap(sf.dIdx[name], func(item *filesItem) FilesItem { return item })
+}
+
+func (sf *SelectedStaticFilesV3) InvertedIndexFiles(id int) []FilesItem {
+	return common.SliceMap(sf.ii[id], func(item *filesItem) FilesItem { return item })
+}
+
+func (sf *SelectedStaticFilesV3) Close() {
 	clist := make([][]*filesItem, 0, int(kv.DomainLen)+len(sf.ii))
 	for id := range sf.d {
 		clist = append(clist, sf.d[id], sf.dIdx[id], sf.dHist[id])
@@ -48,7 +65,7 @@ func (sf SelectedStaticFilesV3) Close() {
 	}
 }
 
-func (ac *AggregatorRoTx) staticFilesInRange(r *RangesV3) (*SelectedStaticFilesV3, error) {
+func (ac *AggregatorRoTx) StaticFilesInRange(r *RangesV3) (*SelectedStaticFilesV3, error) {
 	sf := &SelectedStaticFilesV3{ii: make([][]*filesItem, len(r.invertedIndex))}
 	for id := range ac.d {
 		if !r.domain[id].any() {
@@ -63,6 +80,14 @@ func (ac *AggregatorRoTx) staticFilesInRange(r *RangesV3) (*SelectedStaticFilesV
 		sf.ii[id] = ac.iis[id].staticFilesInRange(rng.from, rng.to)
 	}
 	return sf, nil
+}
+
+func (ac *AggregatorRoTx) InvertedIndicesLen() int {
+	return len(ac.iis)
+}
+
+func (ac *AggregatorRoTx) InvertedIndexName(id int) kv.InvertedIdx {
+	return ac.iis[id].name
 }
 
 type MergedFilesV3 struct {

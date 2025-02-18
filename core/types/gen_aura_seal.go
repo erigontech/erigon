@@ -5,7 +5,7 @@ package types
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 )
 
@@ -14,7 +14,7 @@ func (a AuRaSeal) MarshalJSON() ([]byte, error) {
 	type AuRaSeal struct {
 		AuthorityRound struct {
 			Step      math.HexOrDecimal64 "json:\"step\""
-			Signature hexutility.Bytes    "json:\"signature\""
+			Signature hexutil.Bytes       "json:\"signature\""
 		} `json:"authorityRound"`
 	}
 	var enc AuRaSeal
@@ -27,7 +27,7 @@ func (a *AuRaSeal) UnmarshalJSON(input []byte) error {
 	type AuRaSeal struct {
 		AuthorityRound *struct {
 			Step      math.HexOrDecimal64 "json:\"step\""
-			Signature hexutility.Bytes    "json:\"signature\""
+			Signature hexutil.Bytes       "json:\"signature\""
 		} `json:"authorityRound"`
 	}
 	var dec AuRaSeal

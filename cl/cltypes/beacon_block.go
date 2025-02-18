@@ -22,7 +22,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
@@ -535,12 +535,12 @@ func (b *BeaconBody) GetExecutionRequests() *ExecutionRequests {
 	return b.ExecutionRequests
 }
 
-func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
+func (b *BeaconBody) GetExecutionRequestsList() []hexutil.Bytes {
 	r := b.ExecutionRequests
 	if r == nil {
 		return nil
 	}
-	ret := []hexutility.Bytes{}
+	ret := []hexutil.Bytes{}
 	for _, r := range []struct {
 		typ      byte
 		requests ssz.EncodableSSZ
@@ -556,7 +556,7 @@ func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
 		}
 		// type + ssz
 		if len(ssz) > 0 {
-			ret = append(ret, append(hexutility.Bytes{r.typ}, ssz...))
+			ret = append(ret, append(hexutil.Bytes{r.typ}, ssz...))
 		}
 	}
 	return ret

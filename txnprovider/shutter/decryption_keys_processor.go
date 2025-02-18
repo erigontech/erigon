@@ -40,6 +40,7 @@ func (dkp DecryptionKeysProcessor) Enqueue(msg *proto.DecryptionKeys) {
 }
 
 func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
+	defer dkp.logger.Info("decryption keys processor stopped")
 	dkp.logger.Info("running decryption keys processor")
 
 	for {

@@ -185,12 +185,16 @@ func (suite *ServiceTestSuite) SetupSuite() {
 		return suite.service.Run(suite.ctx)
 	})
 
-	lastMilestone, err := suite.service.SynchronizeMilestones(suite.ctx)
+	lastMilestone, ok, err := suite.service.SynchronizeMilestones(suite.ctx)
 	require.NoError(suite.T(), err)
+	require.True(suite.T(), ok)
 	require.Equal(suite.T(), suite.expectedLastMilestone, uint64(lastMilestone.Id))
-	lastCheckpoint, err := suite.service.SynchronizeCheckpoints(suite.ctx)
+
+	lastCheckpoint, ok, err := suite.service.SynchronizeCheckpoints(suite.ctx)
 	require.NoError(suite.T(), err)
+	require.True(suite.T(), ok)
 	require.Equal(suite.T(), suite.expectedLastCheckpoint, uint64(lastCheckpoint.Id))
+
 	err = suite.service.SynchronizeSpans(suite.ctx, math.MaxInt)
 	require.NoError(suite.T(), err)
 }
@@ -488,4 +492,48 @@ type proposerSequenceResult struct {
 type difficultiesKV struct {
 	Signer     common.Address
 	Difficulty uint64
+}
+
+func TestIsCatchingUp(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := NewMockClient(ctrl)
+
+	s := Service{
+		client: mockClient,
+	}
+
+	mockClient.EXPECT().
+		FetchStatus(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (*Status, error) {
+			return &Status{
+				LatestBlockTime: "",
+				CatchingUp:      true,
+			}, nil
+		})
+
+	isCatchingUp, err := s.IsCatchingUp(context.TODO())
+	require.NoError(t, err)
+	require.True(t, isCatchingUp)
+}
+
+func TestIsCatchingUpLateBlock(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := NewMockClient(ctrl)
+
+	s := Service{
+		client: mockClient,
+	}
+
+	mockClient.EXPECT().
+		FetchStatus(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (*Status, error) {
+			return &Status{
+				LatestBlockTime: "2025-02-14T11:45:00.764588Z",
+				CatchingUp:      false,
+			}, nil
+		})
+
+	isCatchingUp, err := s.IsCatchingUp(context.TODO())
+	require.NoError(t, err)
+	require.True(t, isCatchingUp)
 }

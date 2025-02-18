@@ -71,6 +71,9 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	if err != nil {
 		return nil, err
 	}
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
 	if !ok {
 		if chainConfig.Bor == nil {
 			return nil, nil
@@ -79,6 +82,13 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		// otherwise this may be a bor state sync transaction - check
 		if api.useBridgeReader {
 			blockNumber, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
+			if ok {
+				txNumNextBlock, err := txNumsReader.Min(tx, blockNumber+1)
+				if err != nil {
+					return nil, err
+				}
+				txNum = txNumNextBlock - 1
+			}
 		} else {
 			blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
 		}
@@ -99,8 +109,6 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	if header == nil {
 		return nil, nil
 	}
-
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
 	txNumMin, err := txNumsReader.Min(tx, blockNumber)
 	if err != nil {

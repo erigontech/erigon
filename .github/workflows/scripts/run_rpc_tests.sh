@@ -15,11 +15,6 @@ disabled_tests=(
     engine_exchangeTransitionConfigurationV1/test_01.json
     engine_getClientVersionV1/test_1.json
     # these tests require Fix on erigon DM on repeipts domain
-    eth_getLogs/test_16
-    eth_getLogs/test_17
-    eth_getLogs/test_18
-    eth_getLogs/test_19
-    eth_getLogs/test_20
     # these tests requires Erigon active
     admin_nodeInfo/test_01.json
     admin_peers/test_01.json
@@ -42,6 +37,6 @@ disabled_tests=(
 # Transform the array into a comma-separated string
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
 
-python3 ./run_tests.py -p 8545 --continue -f --json-diff -x "$disabled_test_list"
+python3 ./run_tests.py -p 8545 --continue -f --json-diff --serial -x "$disabled_test_list"
 
 exit $?
