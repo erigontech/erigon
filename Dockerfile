@@ -1,12 +1,20 @@
-## End-User ssage note:
+######
+##  End-User usage note:
 ##
-##   to build own docker image erigon-image:tag with just two binaries "erigon" and "downloader"
-##   and with db_tools inside run following docker command:
+##  to build own docker image my-erigon-image:tag with just two binaries "erigon" and "downloader"
+##  and with db_tools inside -- run following docker command in erigon/ directory:
 ##   
-##   docker build --target erigon --build-arg BINARIES="erigon downloader" --build-arg BUILD_DBTOOLS="true"  --progress plain -t erigon-image:tag .
+##    docker build --target erigon --build-arg BINARIES="erigon downloader" --build-arg BUILD_DBTOOLS="true"  --progress plain -t my-erigon-image:tag .
 ##
+##  or simple build with default arguments (erigon only binary and without db-tools):
+##
+##    docker build --target erigon -t my-erigon-image:tag .
+##
+##  Note: build ARG "RELEASE_DOCKER_BASE_IMAGE" purposely defined incorrectly in order to fail "docker build"
+##
+######
 
-ARG RELEASE_DOCKER_BASE_IMAGE="alpine:3.20.1" \
+ARG RELEASE_DOCKER_BASE_IMAGE=" Intentionally misdefined debian:12-slim" \
     BUILDER_IMAGE="golang" \
     BUILDER_TAG="1.23-bookworm" \
     TARGET_IMAGE="debian" \
@@ -30,7 +38,7 @@ ARG RELEASE_DOCKER_BASE_IMAGE="alpine:3.20.1" \
        6060"
 
 
-### Builder:
+### Erigon Builder section:
 FROM docker.io/library/${BUILDER_IMAGE}:${BUILDER_TAG} AS builder 
 ARG TARGETARCH \
     TARGETVARIANT \
@@ -41,7 +49,8 @@ WORKDIR /erigon
 
 COPY . /erigon
 SHELL ["/bin/bash", "-c"]
-RUN if [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "x" ]; then \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    if [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "x" ]; then \
         echo "DEBUG: detected architecture AMD64v1"; \
         export AMD_FLAGS="GOAMD64_VERSION=v1 GOARCH=amd64"; \
     elif [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "xv2" ]; then \
@@ -63,10 +72,10 @@ RUN if [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "x" ]; then 
     fi && \
     find /build -ls
 
-### End of builder
+### End of builder section
 
 
-### Target:
+### Erigon Target section:
 FROM docker.io/library/${TARGET_IMAGE}:${TARGET_TAG} AS erigon
 ARG USER=erigon \
     GROUP=erigon \
@@ -117,10 +126,10 @@ USER ${USER}
 EXPOSE ${EXPOSED_PORTS}
 
 ENTRYPOINT [ "/usr/local/bin/erigon" ]
+### End of Erigon Target section
 
 
-
-### Release Dockerfile
+### Erigon Release section
 FROM ${RELEASE_DOCKER_BASE_IMAGE} AS temporary
 ARG TARGETARCH \
     TARGETVARIANT \
@@ -177,4 +186,4 @@ EXPOSE ${EXPOSED_PORTS}
 
 ENTRYPOINT [ "/usr/local/bin/erigon" ]
 
-### End of Release Dockerfile
+### End Erigon Release section
