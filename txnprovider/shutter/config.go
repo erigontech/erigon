@@ -18,6 +18,7 @@ package shutter
 
 import (
 	"crypto/ecdsa"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -44,6 +45,7 @@ type Config struct {
 	MaxPooledEncryptedTxns           int
 	EncryptedGasLimit                uint64
 	EncryptedTxnsLookBackDistance    uint64
+	MaxDecryptionKeysDelay           time.Duration
 }
 
 type P2pConfig struct {
@@ -98,6 +100,7 @@ var (
 		MaxPooledEncryptedTxns:           defaultMaxPooledEncryptedTxns,
 		EncryptedGasLimit:                defaultEncryptedGasLimit,
 		EncryptedTxnsLookBackDistance:    defaultEncryptedTxnsLookBackDistance,
+		MaxDecryptionKeysDelay:           defaultMaxDecryptionKeysDelay,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -122,6 +125,7 @@ var (
 		MaxPooledEncryptedTxns:           defaultMaxPooledEncryptedTxns,
 		EncryptedGasLimit:                defaultEncryptedGasLimit,
 		EncryptedTxnsLookBackDistance:    defaultEncryptedTxnsLookBackDistance,
+		MaxDecryptionKeysDelay:           defaultMaxDecryptionKeysDelay,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -139,4 +143,5 @@ const (
 	defaultMaxPooledEncryptedTxns        = 10_000
 	defaultEncryptedGasLimit             = 10_000_000
 	defaultEncryptedTxnsLookBackDistance = 128
+	defaultMaxDecryptionKeysDelay        = 1_666 * time.Millisecond
 )
