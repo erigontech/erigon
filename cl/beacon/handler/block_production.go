@@ -1458,6 +1458,8 @@ func computeAttestationReward(
 			}
 			proposerRewardNumerator += baseReward * weight
 		}
+		log.Debug("[Block Production] Attestation reward", "attester", attesterIndex, "reward", proposerRewardNumerator, "participation", participationFlagsIndicies,
+			"flagParticipation", s.EpochParticipationForValidatorIndex(isCurrentEpoch, int(attesterIndex)))
 	}
 	proposerRewardDenominator := (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
