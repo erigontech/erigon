@@ -149,6 +149,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 	versionedReader := state.NewVersionedStateReader(txIndex, result.TxIn, vm)
 	ibs := state.New(versionedReader)
+	ibs.SetTrace(task.execTask.Task.(*exec.TxTask).Trace)
 	ibs.SetTxContext(task.Version().BlockNum, txIndex)
 	ibs.SetVersion(task.version.Incarnation)
 	ibs.ApplyVersionedWrites(result.TxOut)
@@ -256,6 +257,10 @@ type taskVersion struct {
 	profile    bool
 	stats      map[int]ExecutionStat
 	statsMutex *sync.Mutex
+}
+
+func (ev *taskVersion) Trace() bool {
+	return ev.Task.(*exec.TxTask).Trace
 }
 
 func (ev *taskVersion) Execute(evm *vm.EVM,
