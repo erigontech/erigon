@@ -902,9 +902,8 @@ func (tx *MdbxTx) Commit() error {
 		return fmt.Errorf("label: %s, %w", tx.db.opts.label, err)
 	}
 
-	dbLabel := tx.db.opts.label
-
 	if tx.db.opts.metrics {
+		dbLabel := tx.db.opts.label
 		kv.MDBXSummaries[dbLabel].DbCommitPreparation.Observe(latency.Preparation.Seconds())
 		kv.MDBXSummaries[dbLabel].DbCommitWrite.Observe(latency.Write.Seconds())
 		kv.MDBXSummaries[dbLabel].DbCommitSync.Observe(latency.Sync.Seconds())
