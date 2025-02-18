@@ -110,7 +110,7 @@ func SpawnStageWitness(
 		return fmt.Errorf("GetLatestVerification: %w", err)
 	}
 
-	highestVerifiedBatchWithOffset := highestVerifiedBatch.BatchNo - cfg.zkCfg.WitnessCacheBatchOffset // default 5
+	highestVerifiedBatchWithOffset := highestVerifiedBatch.BatchNo - cfg.zkCfg.WitnessCacheBatchBehindOffset // default 5
 
 	latestCachedWitnessBatchNo, err := reader.GetLatestCachedWitnessBatchNo()
 	if err != nil {
@@ -122,10 +122,19 @@ func SpawnStageWitness(
 		fromBatch = highestVerifiedBatchWithOffset
 	}
 
+	toBatch := highestVerifiedBatch.BatchNo + cfg.zkCfg.WitnessCacheBatchAheadOffset
+	highestBatch, err := stages.GetStageProgress(tx, stages.HighestSeenBatchNumber)
+	if err != nil {
+		return fmt.Errorf("GetStageProgress: %w", err)
+	}
+	if toBatch > highestBatch {
+		toBatch = highestBatch
+	}
+
 	hermezDb := hermez_db.NewHermezDb(tx)
 	g := witness.NewGenerator(cfg.dirs, cfg.historyV3, cfg.agg, cfg.blockReader, cfg.chainConfig, cfg.zkCfg, cfg.engine, cfg.forcedContracts, cfg.unwindLimit)
 
-	for batchNo := fromBatch; batchNo <= highestVerifiedBatch.BatchNo; batchNo++ {
+	for batchNo := fromBatch; batchNo <= toBatch; batchNo++ {
 		badBatch, err := reader.GetInvalidBatch(batchNo)
 		if err != nil {
 			return fmt.Errorf("GetInvalidBatch: %w", err)

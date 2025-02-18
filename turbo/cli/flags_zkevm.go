@@ -159,7 +159,6 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	// if dicabled, set limit to 0 and only check for it to be 0 or not
 	witnessCacheEnabled := ctx.Bool(utils.WitnessCacheEnable.Name)
 	witnessCachePurge := ctx.Bool(utils.WitnessCachePurge.Name)
-	witnessCacheBatchOffset := ctx.Uint64(utils.WitnessCacheBatchOffset.Name)
 	var witnessInclusion []libcommon.Address
 	for _, s := range strings.Split(ctx.String(utils.WitnessContractInclusion.Name), ",") {
 		if s == "" {
@@ -266,7 +265,8 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		MockWitnessGeneration:                  ctx.Bool(utils.MockWitnessGeneration.Name),
 		WitnessCacheEnabled:                    witnessCacheEnabled,
 		WitnessCachePurge:                      witnessCachePurge,
-		WitnessCacheBatchOffset:                witnessCacheBatchOffset,
+		WitnessCacheBatchAheadOffset:           ctx.Uint64(utils.WitnessCacheBatchAheadOffset.Name),
+		WitnessCacheBatchBehindOffset:          ctx.Uint64(utils.WitnessCacheBatchBehindOffset.Name),
 		WitnessContractInclusion:               witnessInclusion,
 		GasPriceCheckFrequency:                 ctx.Duration(utils.GasPriceCheckFrequency.Name),
 		GasPriceHistoryCount:                   ctx.Uint64(utils.GasPriceHistoryCount.Name),
