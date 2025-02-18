@@ -41,6 +41,7 @@ type DecryptionKeysProcessor struct {
 	decryptedTxnsPool *DecryptedTxnsPool
 	txnParseCtx       *txpool.TxnParseContext
 	queue             chan *proto.DecryptionKeys
+	processed         map[ProcessedMark]struct{}
 }
 
 func NewDecryptionKeysProcessor(
@@ -94,6 +95,18 @@ func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.Decry
 	eonIndex := EonIndex(msg.Eon)
 	from := TxnIndex(msg.GetGnosis().TxPointer)
 	to := from + TxnIndex(len(keys)) // [from,to)
+	processedMark := ProcessedMark{Slot: msg.GetGnosis().Slot, Eon: eonIndex, From: from, To: to}
+	if _, ok := dkp.processed[processedMark]; ok {
+		dkp.logger.Debug(
+			"skipping decryption keys message - already processed",
+			"slot", processedMark.Slot,
+			"eonIndex", processedMark.Eon,
+			"from", processedMark.From,
+			"to", processedMark.To,
+		)
+		return nil
+	}
+
 	encryptedTxns, err := dkp.encryptedTxnsPool.Txns(eonIndex, from, to, dkp.config.EncryptedGasLimit)
 	if err != nil {
 		return err
@@ -148,6 +161,7 @@ func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.Decry
 	decryptionMark := DecryptionMark{Slot: msg.GetGnosis().Slot, Eon: eonIndex}
 	txnBatch := TxnBatch{Transactions: filteredTxns, TotalGasLimit: totalGasLimit.Load()}
 	dkp.decryptedTxnsPool.AddDecryptedTxns(decryptionMark, txnBatch)
+	dkp.processed[processedMark] = struct{}{}
 	return nil
 }
 
@@ -219,4 +233,11 @@ func identityPreimageMismatchErr(keyIpBytes, submissionIpBytes []byte) error {
 	}
 
 	return err
+}
+
+type ProcessedMark struct {
+	Slot uint64
+	Eon  EonIndex
+	From TxnIndex
+	To   TxnIndex
 }
