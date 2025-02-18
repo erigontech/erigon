@@ -208,7 +208,7 @@ func (so *stateObject) GetCommittedState(key libcommon.Hash, out *uint256.Int) e
 }
 
 // SetState updates a value in account storage.
-func (so *stateObject) SetState(key libcommon.Hash, value uint256.Int) bool {
+func (so *stateObject) SetState(key libcommon.Hash, value uint256.Int, force bool) bool {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
 		so.db.journal.append(fakeStorageChange{
@@ -236,7 +236,7 @@ func (so *stateObject) SetState(key libcommon.Hash, value uint256.Int) bool {
 			return value, nil
 		})
 
-	if prev == value {
+	if !force && prev == value {
 		return false
 	}
 

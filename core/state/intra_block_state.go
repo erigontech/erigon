@@ -567,7 +567,6 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 			stateObject.touch()
 		}
 
-		fmt.Printf("%d (%d.%d) Add Zero%x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		return nil
 	}
 
@@ -589,7 +588,6 @@ func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.I
 	}
 
 	if amount.IsZero() {
-		fmt.Printf("%d (%d.%d) Sub Zero%x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		return nil
 	}
 
@@ -710,6 +708,10 @@ func (sdb *IntraBlockState) Incarnation() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetState(addr libcommon.Address, key libcommon.Hash, value uint256.Int) error {
+	return sdb.setState(addr, key, value, false)
+}
+
+func (sdb *IntraBlockState) setState(addr libcommon.Address, key libcommon.Hash, value uint256.Int, force bool) error {
 	if sdb.trace || (traceAccount(addr) && traceKey(key)) {
 		fmt.Printf("%d (%d.%d) SetState %x, %x=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, key[:], value.Hex())
 	}
@@ -718,7 +720,7 @@ func (sdb *IntraBlockState) SetState(addr libcommon.Address, key libcommon.Hash,
 	if err != nil {
 		return err
 	}
-	if stateObject.SetState(key, value) {
+	if stateObject.SetState(key, value, force) {
 		sdb.versionWritten(addr, StatePath, key, value)
 	}
 	return nil
@@ -1156,7 +1158,9 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		//fmt.Printf("FinalizeTx: %x, balance=%d %T\n", addr, so.data.Balance.Uint64(), stateWriter)
+		if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
+			fmt.Printf("%d (%d.%d) Update Acount %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
+		}
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks); err != nil {
 			return err
 		}
@@ -1519,7 +1523,7 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 			if path == StatePath {
 				stateKey := writes[i].Key
 				state := val.(uint256.Int)
-				s.SetState(addr, stateKey, state)
+				s.setState(addr, stateKey, state, true)
 			} else if path == AddressPath {
 				continue
 			} else {
