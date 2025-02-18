@@ -454,6 +454,60 @@ func (s *CheckpointSnapshotStore) ValidateSnapshots(logger log.Logger, failFast 
 	return validateSnapshots(logger, failFast, s.snapshots, s.SnapType(), generics.New[Checkpoint])
 }
 
+func validateSnapshots[T Entity](logger log.Logger, failFast bool, snaps *RoSnapshots, t snaptype.Type, makeEntity func() T) error {
+	tx := snaps.ViewType(t)
+	defer tx.Close()
+
+	segs := tx.Segments
+	if len(segs) == 0 {
+		return errors.New("no segments")
+	}
+
+	var accumulatedErr error
+	var prev *T
+	for _, seg := range segs {
+		idx := seg.Src().Index()
+		if idx == nil || idx.KeyCount() == 0 {
+			continue
+		}
+
+		segGetter := seg.Src().MakeGetter()
+		for segGetter.HasNext() {
+			buf, _ := segGetter.Next(nil)
+			entity := makeEntity()
+			if err := json.Unmarshal(buf, entity); err != nil {
+				return err
+			}
+
+			logger.Trace("validating entity", "id", entity.RawId(), "kind", reflect.TypeOf(entity))
+
+			if prev == nil {
+				prev = &entity
+				continue
+			}
+
+			expectedId := (*prev).RawId() + 1
+			if expectedId == entity.RawId() {
+				prev = &entity
+				continue
+			}
+
+			if accumulatedErr == nil {
+				accumulatedErr = errors.New("missing entities")
+			}
+
+			accumulatedErr = fmt.Errorf("%w: [%d, %d)", accumulatedErr, expectedId, entity.RawId())
+			if failFast {
+				return accumulatedErr
+			}
+
+			prev = &entity
+		}
+	}
+
+	return accumulatedErr
+}
+
 func snapshotStoreLastEntity[T Entity](ctx context.Context, store EntityStore[T]) (T, bool, error) {
 	entityId, ok, err := store.LastEntityId(ctx)
 	if err != nil || !ok {
@@ -530,58 +584,4 @@ OUTER:
 	// prepend snapshot dbEntities that fall in the range
 	slices.Reverse(snapshotEntities)
 	return append(snapshotEntities, dbEntities...), nil
-}
-
-func validateSnapshots[T Entity](logger log.Logger, failFast bool, snaps *RoSnapshots, t snaptype.Type, makeEntity func() T) error {
-	tx := snaps.ViewType(t)
-	defer tx.Close()
-
-	segs := tx.Segments
-	if len(segs) == 0 {
-		return errors.New("no segments")
-	}
-
-	var accumulatedErr error
-	var prev *T
-	for _, seg := range segs {
-		idx := seg.Src().Index()
-		if idx == nil || idx.KeyCount() == 0 {
-			continue
-		}
-
-		segGetter := seg.Src().MakeGetter()
-		for segGetter.HasNext() {
-			buf, _ := segGetter.Next(nil)
-			entity := makeEntity()
-			if err := json.Unmarshal(buf, entity); err != nil {
-				return err
-			}
-
-			logger.Trace("validating entity", "id", entity.RawId(), "kind", reflect.TypeOf(entity))
-
-			if prev == nil {
-				prev = &entity
-				continue
-			}
-
-			expectedId := (*prev).RawId() + 1
-			if expectedId == entity.RawId() {
-				prev = &entity
-				continue
-			}
-
-			if accumulatedErr == nil {
-				accumulatedErr = errors.New("missing entities")
-			}
-
-			accumulatedErr = fmt.Errorf("%w: [%d, %d)", accumulatedErr, expectedId, entity.RawId())
-			if failFast {
-				return accumulatedErr
-			}
-
-			prev = &entity
-		}
-	}
-
-	return accumulatedErr
 }
