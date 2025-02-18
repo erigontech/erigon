@@ -558,7 +558,7 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 	return v, vr.Source, nil
 }
 
-func ApplyVersionedWrites(chainRules *chain.Rules, writes VersionedWrites, stateWriter StateWriter) error {
+func ApplyVersionedWrites(chainRules *chain.Rules, writes VersionedWrites, stateWriter StateWriter, trace bool) error {
 	stateObjects, err := writes.stateObjects()
 
 	if err != nil {
@@ -567,7 +567,7 @@ func ApplyVersionedWrites(chainRules *chain.Rules, writes VersionedWrites, state
 
 	for addr, sos := range stateObjects {
 		for _, so := range sos {
-			if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, so.IsDirty(), nil); err != nil {
+			if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, so.IsDirty(), trace, nil); err != nil {
 				return err
 			}
 		}
