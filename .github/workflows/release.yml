@@ -288,6 +288,7 @@ jobs:
   build-debian-pkg:
     name: Debian packages
     needs: [ build-release, test-release ]
+    if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
     uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@main
     with:
       application: ${{ needs.build-release.outputs.application }}
@@ -296,6 +297,7 @@ jobs:
 
   publish-docker-image:
     needs: [ build-release, test-release ]
+    if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     name: Docker image        
@@ -374,6 +376,7 @@ jobs:
 
   publish-release:
     needs: [ build-debian-pkg, publish-docker-image, build-release ]
+    if: always() && contains(needs.build-release.result, 'success') && contains(needs.build-debian-pkg.result, 'success') && contains(needs.publish-docker-image.result, 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     name: Publish release notes
