@@ -134,6 +134,14 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 				"age", slotAge,
 			)
 
+			// Note: specs say to produce empty block in case decryption keys do not arrive on time.
+			// However, upon discussion with Shutter and Nethermind it was agreed that this is not
+			// practical at this point in time as it can hurt validator rewards across the network,
+			// and also it doesn't in any way prevent any cheating from happening.
+			// To properly address cheating, we need a mechanism for slashing which is a future
+			// work stream item for the Shutter team. For now, we follow what Nethermind does
+			// and fallback to the public devp2p mempool - any changes to this should be
+			// co-ordinated with them.
 			return p.secondaryTxnProvider.ProvideTxns(ctx, opts...)
 		}
 
