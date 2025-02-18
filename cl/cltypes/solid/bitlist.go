@@ -288,6 +288,7 @@ func NewBitSlice() *BitSlice {
 	}
 }
 
+// AppendBit appends one bit to the BitSlice.
 func (b *BitSlice) AppendBit(bit bool) {
 	if b.length%8 == 0 {
 		b.container = append(b.container, 0)
@@ -298,6 +299,12 @@ func (b *BitSlice) AppendBit(bit bool) {
 	b.length++
 }
 
+// Bytes returns the underlying byte slice of the BitSlice.
 func (b *BitSlice) Bytes() []byte {
 	return b.container
+}
+
+// Length returns the length of the BitSlice.
+func (b *BitSlice) Length() int {
+	return b.length
 }
