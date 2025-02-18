@@ -147,6 +147,8 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 	//fmt.Printf("(%d.%d) Finalize\n", txIndex, task.version.Incarnation)
 
+	// we want to force a re-read of the conbiase if it was referenced by the tx
+	delete(result.TxIn, result.Coinbase)
 	versionedReader := state.NewVersionedStateReader(txIndex, result.TxIn, vm)
 	ibs := state.New(versionedReader)
 	ibs.SetTrace(task.execTask.Task.(*exec.TxTask).Trace)
