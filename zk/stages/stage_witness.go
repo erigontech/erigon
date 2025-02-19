@@ -128,7 +128,7 @@ func SpawnStageWitness(
 		return fmt.Errorf("GetStageProgress: %w", err)
 	}
 	if toBatch > highestBatch {
-		toBatch = highestBatch
+		toBatch = highestBatch - 1 // we cannot cache the highest batch because it might not be full yet
 	}
 
 	hermezDb := hermez_db.NewHermezDb(tx)
