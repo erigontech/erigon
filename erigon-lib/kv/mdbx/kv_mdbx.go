@@ -101,6 +101,9 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 	if label == kv.ChainDB {
 		opts = opts.RemoveFlags(mdbx.NoReadahead) // enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (doesen GB)
 	}
+	if opts.metrics {
+		kv.InitSummaries(label)
+	}
 	return opts
 }
 
@@ -699,34 +702,35 @@ func (tx *MdbxTx) CollectMetrics() {
 		}
 	}
 
-	kv.DbSize.SetUint64(info.Geo.Current)
-	kv.DbPgopsNewly.SetUint64(info.PageOps.Newly)
-	kv.DbPgopsCow.SetUint64(info.PageOps.Cow)
-	kv.DbPgopsClone.SetUint64(info.PageOps.Clone)
-	kv.DbPgopsSplit.SetUint64(info.PageOps.Split)
-	kv.DbPgopsMerge.SetUint64(info.PageOps.Merge)
-	kv.DbPgopsSpill.SetUint64(info.PageOps.Spill)
-	kv.DbPgopsUnspill.SetUint64(info.PageOps.Unspill)
-	kv.DbPgopsWops.SetUint64(info.PageOps.Wops)
+	var dbLabel = string(tx.db.opts.label)
+	kv.MDBXGauges.DbSize.WithLabelValues(dbLabel).SetUint64(info.Geo.Current)
+	kv.MDBXGauges.DbPgopsNewly.WithLabelValues(dbLabel).SetUint64(info.PageOps.Newly)
+	kv.MDBXGauges.DbPgopsCow.WithLabelValues(dbLabel).SetUint64(info.PageOps.Cow)
+	kv.MDBXGauges.DbPgopsClone.WithLabelValues(dbLabel).SetUint64(info.PageOps.Clone)
+	kv.MDBXGauges.DbPgopsSplit.WithLabelValues(dbLabel).SetUint64(info.PageOps.Split)
+	kv.MDBXGauges.DbPgopsMerge.WithLabelValues(dbLabel).SetUint64(info.PageOps.Merge)
+	kv.MDBXGauges.DbPgopsSpill.WithLabelValues(dbLabel).SetUint64(info.PageOps.Spill)
+	kv.MDBXGauges.DbPgopsUnspill.WithLabelValues(dbLabel).SetUint64(info.PageOps.Unspill)
+	kv.MDBXGauges.DbPgopsWops.WithLabelValues(dbLabel).SetUint64(info.PageOps.Wops)
 
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
 		return
 	}
 
-	kv.TxDirty.SetUint64(txInfo.SpaceDirty)
-	kv.TxRetired.SetUint64(txInfo.SpaceRetired)
-	kv.TxLimit.SetUint64(tx.db.txSize)
-	kv.TxSpill.SetUint64(txInfo.Spill)
-	kv.TxUnspill.SetUint64(txInfo.Unspill)
+	kv.MDBXGauges.TxDirty.WithLabelValues(dbLabel).SetUint64(txInfo.SpaceDirty)
+	kv.MDBXGauges.TxRetired.WithLabelValues(dbLabel).SetUint64(txInfo.SpaceRetired)
+	kv.MDBXGauges.TxLimit.WithLabelValues(dbLabel).SetUint64(tx.db.txSize)
+	kv.MDBXGauges.TxSpill.WithLabelValues(dbLabel).SetUint64(txInfo.Spill)
+	kv.MDBXGauges.TxUnspill.WithLabelValues(dbLabel).SetUint64(txInfo.Unspill)
 
 	gc, err := tx.BucketStat("gc")
 	if err != nil {
 		return
 	}
-	kv.GcLeafMetric.SetUint64(gc.LeafPages)
-	kv.GcOverflowMetric.SetUint64(gc.OverflowPages)
-	kv.GcPagesMetric.SetUint64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize.Bytes() / 8)
+	kv.MDBXGauges.GcLeafMetric.WithLabelValues(dbLabel).SetUint64(gc.LeafPages)
+	kv.MDBXGauges.GcOverflowMetric.WithLabelValues(dbLabel).SetUint64(gc.OverflowPages)
+	kv.MDBXGauges.GcPagesMetric.WithLabelValues(dbLabel).SetUint64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize.Bytes() / 8)
 }
 
 func (tx *MdbxTx) WarmupDB(force bool) error {
@@ -908,12 +912,12 @@ func (tx *MdbxTx) Commit() error {
 	}
 
 	if tx.db.opts.metrics {
-		kv.DbCommitPreparation.Observe(latency.Preparation.Seconds())
-		//kv.DbCommitAudit.Update(latency.Audit.Seconds())
-		kv.DbCommitWrite.Observe(latency.Write.Seconds())
-		kv.DbCommitSync.Observe(latency.Sync.Seconds())
-		kv.DbCommitEnding.Observe(latency.Ending.Seconds())
-		kv.DbCommitTotal.Observe(latency.Whole.Seconds())
+		dbLabel := tx.db.opts.label
+		kv.MDBXSummaries[dbLabel].DbCommitPreparation.Observe(latency.Preparation.Seconds())
+		kv.MDBXSummaries[dbLabel].DbCommitWrite.Observe(latency.Write.Seconds())
+		kv.MDBXSummaries[dbLabel].DbCommitSync.Observe(latency.Sync.Seconds())
+		kv.MDBXSummaries[dbLabel].DbCommitEnding.Observe(latency.Ending.Seconds())
+		kv.MDBXSummaries[dbLabel].DbCommitTotal.Observe(latency.Whole.Seconds())
 
 		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
 		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
