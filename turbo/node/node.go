@@ -17,9 +17,14 @@
 // Package node contains classes for running an Erigon node.
 package node
 
+/*
+#include <stdlib.h>
+*/
+import "C"
+
 import (
 	"context"
-
+	"github.com/erigontech/erigon/core/gdbme"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
@@ -114,6 +119,11 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, e
 		return nil, err
 	}
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig, logger)
+
+	if ctx.Bool(utils.GDBMeFlag.Name) {
+		gdbme.RestartWithGDB(ctx.NumFlags(), ctx.FlagNames())
+	}
+
 	return nodeConfig, nil
 }
 func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
