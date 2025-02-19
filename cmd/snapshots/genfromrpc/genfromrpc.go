@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -698,6 +699,26 @@ func genFromRPc(cliCtx *cli.Context) error {
 	verification := cliCtx.Bool(Verify.Name)
 	db := mdbx.MustOpen(dirs.Chaindata)
 	defer db.Close()
+	start := cliCtx.Uint64(FromBlock.Name)
+	if start == 0 {
+		var curBlock uint64
+		err = db.Update(context.Background(), func(tx kv.RwTx) error {
+			curBlock, err = stages.GetStageProgress(tx, stages.Bodies)
+			return err
+		})
+		if err != nil {
+			log.Warn("can't check current block", "err", err)
+		}
+		if curBlock == 0 {
+			// write arb genesis
+			log.Info("Writing arbitrum sepolia-rollup genesis")
+			gen := core.GenesisBlockByChainName("sepolia-rollup")
+			b := core.MustCommitGenesis(gen, db, dirs, log.New())
+			log.Info("wrote arbitrum sepolia-rollup genesis", "block_hash", b.Hash().String(), "state_root", b.Root().String())
+		} else {
+			start = curBlock
+		}
+	}
 
 	// Query latest block number.
 	var latestBlockHex string
@@ -705,12 +726,12 @@ func genFromRPc(cliCtx *cli.Context) error {
 		log.Warn("Error fetching latest block number", "err", err)
 		return err
 	}
+
 	latestBlock := new(big.Int)
 	latestBlock.SetString(latestBlockHex[2:], 16)
 	noWrite := cliCtx.Bool(NoWrite.Name)
 
 	var blockNumber big.Int
-	start := cliCtx.Uint64(FromBlock.Name)
 	// Process blocks from the starting block up to the latest.
 	for i := start; i < latestBlock.Uint64(); {
 		prev := i
@@ -744,6 +765,9 @@ func genFromRPc(cliCtx *cli.Context) error {
 						return err
 					}
 					if err := stages.SaveStageProgress(tx, stages.Bodies, blockNum); err != nil {
+						return err
+					}
+					if err := stages.SaveStageProgress(tx, stages.Senders, blockNum); err != nil {
 						return err
 					}
 
