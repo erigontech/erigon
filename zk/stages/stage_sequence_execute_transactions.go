@@ -31,6 +31,9 @@ func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executio
 	ti := utils.StartTimer("txpool", "get-transactions")
 	defer ti.LogTimer()
 
+	cfg.txPool.PreYield()
+	defer cfg.txPool.PostYield()
+
 	if err := cfg.txPoolDb.View(ctx, func(poolTx kv.Tx) error {
 		slots := types2.TxsRlp{}
 		if allConditionsOk, _, err = cfg.txPool.YieldBest(cfg.yieldSize, &slots, poolTx, executionAt, gasLimit, 0, alreadyYielded); err != nil {

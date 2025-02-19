@@ -156,11 +156,6 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 // zk: the implementation of best here is changed only to not take into account block gas limits as we don't care about
 // these in zk.  Instead we do a quick check on the transaction maximum gas in zk
 func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
-	// we need to take a lock here to avoid a potential deadlock with the pool flush routine.  Nested locks are not a good pattern
-	// but it is difficult to avoid here as the flush routine needs to wait until the best queue is unlocked before it can flush
-	p.flushMtx.Lock()
-	defer p.flushMtx.Unlock()
-
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -422,4 +417,16 @@ func markAsLocal(txSlots *types2.TxSlots) {
 	for i := range txSlots.IsLocal {
 		txSlots.IsLocal[i] = true
 	}
+}
+
+// PreYield is a function that is called before the yield function is called.  Because the yield function is called from outside
+// the txpool and relies on using the txpool db to create a View there is a potential race between the flush function running
+// and the yield function starting which can result in it appearing that a transaction has no RLP because the flush has not yet
+// finished
+func (p *TxPool) PreYield() {
+	p.flushMtx.Lock()
+}
+
+func (p *TxPool) PostYield() {
+	p.flushMtx.Unlock()
 }
