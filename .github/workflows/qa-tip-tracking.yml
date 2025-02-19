@@ -36,9 +36,9 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-    - name: Clean Erigon Chaindata Directory
+    - name: Save Erigon Chaindata Directory
       run: |
-        rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
+        mv $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
 
     - name: Run Erigon, wait sync and check ability to maintain sync
       id: test_step
@@ -115,10 +115,11 @@ jobs:
         name: metric-plots
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
-    - name: Clean Erigon Chaindata Directory
+    - name: Restore Erigon Chaindata Directory
       if: always()
       run: |
         rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
+        mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
 
     - name: Resume the Erigon instance dedicated to db maintenance
       run: |
