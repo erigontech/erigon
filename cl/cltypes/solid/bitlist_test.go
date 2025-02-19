@@ -134,6 +134,7 @@ func TestBitlistMerge(t *testing.T) {
 	merged, err := b1.Merge(b2)
 	require.NoError(err)
 
+	require.Equal(7, merged.Bits(), "BitList Merge did not return the expected number of bits")
 	require.Equal(1, merged.Length(), "BitList Union did not return the expected length")
 	require.Equal(byte(0b11010101), merged.Get(0), "BitList Union did not return the expected value")
 }
