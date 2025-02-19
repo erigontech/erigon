@@ -7,8 +7,8 @@
 #define GDB_PATH "/usr/bin/gdb"  // Adjust this if gdb is in a different location
 
 // Returns non-zero if the last argument equals our marker flag.
-int is_running_under_gdb(int argc, char *argv[]) {
-    if (argc >= 1 && strcmp(argv[argc - 1], "--restarting-under-gdb") == 0) {
+int has_gdb_flag(int argc, char *argv[]) {
+    if (argc >= 1 && strcmp(argv[argc - 1], "--gdbme") == 0) {
         return 1;
     }
     return 0;
@@ -38,31 +38,24 @@ void restart_under_gdb(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
     int pos = 0;
-    // Copy gdb options.
+
     for (int i = 0; i < num_gdb_opts; i++) {
         new_argv[pos++] = (char *)gdb_options[i];
     }
-    // Append original program arguments.
-    for (int i = 0; i < argc; i++) {
+
+    for (int i = 0; i < argc-1; i++) {
         new_argv[pos++] = argv[i];
     }
-    // Append the marker flag so we do not restart under gdb again.
-    new_argv[pos++] = "--restarting-under-gdb";
     new_argv[pos] = NULL;  // Null-terminate the array
 
     fprintf(stderr, "Restarting under gdb for enhanced crash diagnostics...\n");
     execvp(new_argv[0], new_argv);
-    // If execvp returns, an error occurred.
     perror("execvp");
     exit(EXIT_FAILURE);
 }
 
-// Called at the beginning of main to ensure that the process
-// is running under gdb. If not, it re-executes itself under gdb.
 void check_and_restart(int argc, char *argv[]) {
-    if (!is_running_under_gdb(argc, argv)) {
+    if (has_gdb_flag(argc, argv)) {
         restart_under_gdb(argc, argv);
     }
 }
-
-void __dummy_function__() {}  // Dummy function to force linking
