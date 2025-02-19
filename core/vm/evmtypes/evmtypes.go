@@ -123,6 +123,7 @@ type IntraBlockState interface {
 
 	SubBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason) error
 	AddBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason) error
+	SetBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason) error
 	GetBalance(common.Address) (*uint256.Int, error)
 
 	GetNonce(common.Address) (uint64, error)
