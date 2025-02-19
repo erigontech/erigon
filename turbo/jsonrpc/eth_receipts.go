@@ -696,7 +696,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	}
 	defer tx.Rollback()
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber_zkevm(rpc.BlockNumberOrHashWithNumber(*number.BlockNumber), tx, api.filters)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber_zkevm(number, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
