@@ -87,12 +87,14 @@ import (
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/silkworm"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	stages2 "github.com/erigontech/erigon/turbo/stages"
 	"github.com/erigontech/erigon/turbo/stages/bodydownload"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 const MockInsertAsInitialCycle = false
@@ -103,6 +105,7 @@ type MockSentry struct {
 	Log                  log.Logger
 	tb                   testing.TB
 	cancel               context.CancelFunc
+	EthConfig            *ethconfig.Config
 	DB                   kv.TemporalRwDB
 	Dirs                 datadir.Dirs
 	Engine               consensus.Engine
@@ -243,9 +246,9 @@ func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey,
 	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.DefaultMode, withPosDownloader)
 }
 
-func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine consensus.Engine, withPosDownloader, checkStateRoot bool) *MockSentry {
+func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine consensus.Engine, withPosDownloader, checkStateRoot bool, useSilkworm bool) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(tb, gspec, key, prune.DefaultMode, engine, blockBufferSize, false, withPosDownloader, checkStateRoot)
+	return MockWithEverything(tb, gspec, key, prune.DefaultMode, engine, blockBufferSize, false, withPosDownloader, checkStateRoot, useSilkworm)
 }
 
 func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, withPosDownloader bool) *MockSentry {
@@ -259,11 +262,12 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.Pr
 	}
 
 	checkStateRoot := true
-	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader, checkStateRoot)
+	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader, checkStateRoot, false)
 }
 
 func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode,
 	engine consensus.Engine, blockBufferSize int, withTxPool, withPosDownloader, checkStateRoot bool,
+	useSilkworm bool,
 ) *MockSentry {
 	tmpdir := os.TempDir()
 	if tb != nil {
@@ -282,16 +286,17 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.AlwaysGenerateChangesets = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
+	cfg.SilkwormExecution = useSilkworm
 
 	logger := log.Root()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+	logger.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StdoutHandler))
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	db, agg := temporaltest.NewTestDB(tb, dirs)
 
-	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
 	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
+	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, allSnapshots, allBorSnapshots, agg, logger)
 
 	bridgeStore := bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots, gspec.Config.Bor)
 	heimdallStore := heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
@@ -300,6 +305,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
+		EthConfig:      &cfg,
 		tb:             tb,
 		Log:            logger,
 		Dirs:           dirs,
@@ -307,7 +313,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		gspec:          gspec,
 		ChainConfig:    gspec.Config,
 		Key:            key,
-		Notifications:  shards.NewNotifications(erigonGrpcServeer),
+		Notifications:  shards.NewNotifications(erigonGrpcServer),
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
 		BlockReader:    br,
@@ -344,7 +350,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 	if !cfg.TxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
-		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
+		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServer)
 		mock.TxPool, mock.TxPoolGrpcServer, err = txpool.Assemble(
 			ctx,
 			poolCfg,
@@ -470,6 +476,14 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		close(miningCancel)
 	}()
 
+	var silkworm_instance *silkworm.Silkworm
+	if useSilkworm {
+		silkworm_instance, err = silkworm.New(cfg.Dirs.DataDir, mdbx.Version(), cfg.SilkwormNumContexts, log.LvlDebug)
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	miner := stagedsync.NewMiningState(&miningConfig)
 	mock.PendingBlocks = miner.PendingResultCh
 	mock.MinedBlocks = miner.MiningResultCh
@@ -497,7 +511,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					mock.sentriesClient.Hd,
 					mock.gspec,
 					cfg.Sync,
-					nil,
+					silkworm_instance,
 				),
 				stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, cfg.Sync, false, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
 				stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
@@ -534,7 +548,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			mock.sentriesClient.Hd,
 			mock.gspec,
 			cfg.Sync,
-			nil,
+			silkworm_instance,
 		), stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.ChainConfig.Bor, mock.BlockReader), stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, forkValidator), !withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
@@ -570,7 +584,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				mock.sentriesClient.Hd,
 				mock.gspec,
 				cfg.Sync,
-				nil,
+				silkworm_instance,
 			),
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, cfg.Sync, false, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
 			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
@@ -634,7 +648,7 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 	}
 
 	checkStateRoot := true
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot, false)
 }
 
 func MockWithAllProtocolChanges(t *testing.T) *MockSentry {
@@ -650,7 +664,7 @@ func MockWithAllProtocolChanges(t *testing.T) *MockSentry {
 	}
 
 	checkStateRoot := true
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot, false)
 }
 
 func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
@@ -683,7 +697,7 @@ func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
 	}
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), chainConfig, log.New())
 	checkStateRoot := true
-	return MockWithGenesisEngine(t, gspec, engine, withPosDownloader, checkStateRoot)
+	return MockWithGenesisEngine(t, gspec, engine, withPosDownloader, checkStateRoot, false)
 }
 
 func (ms *MockSentry) EnableLogs() {

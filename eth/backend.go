@@ -238,6 +238,25 @@ func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
 
 const blockBufferSize = 128
 
+func NewEthereum(ctx context.Context, ctxCancel context.CancelFunc, config *ethconfig.Config, logger log.Logger, stopNode func() error) *Ethereum {
+	backend := &Ethereum{
+		sentryCtx:                 ctx,
+		sentryCancel:              ctxCancel,
+		config:                    config,
+		networkID:                 config.NetworkID,
+		etherbase:                 config.Miner.Etherbase,
+		waitForStageLoopStop:      make(chan struct{}),
+		waitForMiningStop:         make(chan struct{}),
+		blockBuilderNotifyNewTxns: make(chan struct{}, 1),
+		miningSealingQuit:         make(chan struct{}),
+		minedBlocks:               make(chan *types.Block, 1),
+		logger:                    logger,
+		stopNode:                  stopNode,
+	}
+
+	return backend
+}
+
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
@@ -277,22 +296,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
-	backend := &Ethereum{
-		sentryCtx:                 ctx,
-		sentryCancel:              ctxCancel,
-		config:                    config,
-		networkID:                 config.NetworkID,
-		etherbase:                 config.Miner.Etherbase,
-		waitForStageLoopStop:      make(chan struct{}),
-		waitForMiningStop:         make(chan struct{}),
-		blockBuilderNotifyNewTxns: make(chan struct{}, 1),
-		miningSealingQuit:         make(chan struct{}),
-		minedBlocks:               make(chan *types.Block, 1),
-		logger:                    logger,
-		stopNode: func() error {
-			return stack.Close()
-		},
-	}
+
+	backend := NewEthereum(ctx, ctxCancel, config, logger, func() error { return stack.Close() })
 
 	var chainConfig *chain.Config
 	var genesis *types.Block
@@ -346,6 +351,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if err != nil {
 		return nil, err
 	}
+
 	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
 
 	backend.chainDB, err = temporal.New(rawChainDB, agg)

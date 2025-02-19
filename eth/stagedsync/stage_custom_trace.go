@@ -248,7 +248,7 @@ func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsRea
 	return fromBlock + i
 }
 
-func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()

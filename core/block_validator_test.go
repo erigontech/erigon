@@ -46,7 +46,7 @@ func TestHeaderVerification(t *testing.T) {
 	)
 	logger := testlog.Logger(t, log.LvlInfo)
 	checkStateRoot := true
-	m := mock.MockWithGenesisEngine(t, gspec, engine, false, checkStateRoot)
+	m := mock.MockWithGenesisEngine(t, gspec, engine, false, checkStateRoot, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {
@@ -95,7 +95,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 	)
 	logger := testlog.Logger(t, log.LvlInfo)
 	checkStateRoot := true
-	m := mock.MockWithGenesisEngine(t, gspec, engine, false, checkStateRoot)
+	m := mock.MockWithGenesisEngine(t, gspec, engine, false, checkStateRoot, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {

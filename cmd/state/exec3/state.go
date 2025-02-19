@@ -34,6 +34,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -42,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/silkworm"
 )
 
 var noop = state.NewNoopWriter()
@@ -153,7 +155,7 @@ func (rw *Worker) Run() (err error) {
 func (rw *Worker) RunTxTask(txTask *state.TxTask, isMining bool) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	rw.RunTxTaskNoLock(txTask, isMining)
+	rw.RunTxTaskNoLock(txTask, isMining, nil, nil)
 }
 
 // Needed to set history reader when need to offset few txs from block beginning and does not break processing,
@@ -175,7 +177,7 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
-func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
+func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool, silk *silkworm.Silkworm, applyTx kv.RwTx) {
 	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
@@ -263,6 +265,15 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			}
 		}
 	default:
+
+		if silk != nil {
+			silkworm.ExecuteTx(silk, applyTx, txTask)
+			break
+		}
+
+		fmt.Println("JG RunTxTaskNoLock", "BlockNum", txTask.BlockNum, "BlockHash", hexutil.Encode(txTask.BlockHash.Bytes()),
+			"TxIndex", txTask.TxIndex, "TxNum", txTask.TxNum, "Transactions in block", len(txTask.Txs))
+
 		rw.taskGasPool.Reset(txTask.Tx.GetGas(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
@@ -285,15 +296,18 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		} else {
 			txTask.Failed = applyRes.Failed()
 			txTask.UsedGas = applyRes.UsedGas
+			txTask.UsedBlobGas = txTask.Tx.GetBlobGas()
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
-		}
 
+			fmt.Println("JG RunTxTaskNoLock", "UsedGas", txTask.UsedGas, "UsedBlobGas", txTask.UsedBlobGas, "Error", err)
+		}
 	}
+
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()

@@ -182,11 +182,11 @@ func CreateHistoryStateReader(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReade
 	return r, nil
 }
 
-func NewLatestDomainStateReader(sd *state2.SharedDomains) state.StateReader {
+func NewLatestDomainStateReader(sd state2.SharedDomains) state.StateReader {
 	return state.NewReaderV3(sd)
 }
 
-func NewLatestDomainStateWriter(domains *state2.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
+func NewLatestDomainStateWriter(domains state2.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
 	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)
 	if err != nil {
 		panic(err)

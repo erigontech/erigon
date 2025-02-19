@@ -18,12 +18,15 @@ package silkworm
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"unsafe"
 
 	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/state"
 	silkworm_go "github.com/erigontech/silkworm-go"
 
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -126,4 +129,28 @@ func ExecuteBlocksPerpetual(s *Silkworm, db kv.RwDB, chainID *big.Int, startBloc
 		return lastExecutedBlock, consensus.ErrInvalidBlock
 	}
 	return lastExecutedBlock, err
+}
+
+type CanAddSnapshotsToSilkwarm interface {
+	AddSnapshotsToSilkworm(*Silkworm) error
+}
+
+func ExecuteTx(s *Silkworm, txn kv.Tx, txTask *state.TxTask) error {
+	var txnHandle unsafe.Pointer
+	if txn != nil {
+		txnHandle = txn.CHandle()
+	}
+
+	fmt.Println("JG silkworm.ExecuteTx", "BlockNum", txTask.BlockNum, "BlockHash", hexutil.Encode(txTask.BlockHash.Bytes()),
+		"TxIndex", txTask.TxIndex, "TxNum", txTask.TxNum, "Transactions in block", len(txTask.Txs))
+
+	gasUsed, blobGasUsed, err := s.ExecuteTxn(txnHandle, txTask.BlockNum, silkworm_go.Hash(txTask.BlockHash), uint64(txTask.TxIndex), txTask.TxNum)
+
+	txTask.UsedGas = gasUsed
+	txTask.UsedBlobGas = blobGasUsed
+	txTask.Error = err
+
+	fmt.Println("JG silkworm.ExecuteTx", "UsedGas", gasUsed, "UsedBlobGas", blobGasUsed, "Error", err)
+
+	return err
 }

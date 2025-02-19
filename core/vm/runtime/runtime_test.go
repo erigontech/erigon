@@ -186,7 +186,7 @@ func testTemporalDB(t testing.TB) *temporal.DB {
 	return _db
 }
 
-func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *stateLib.SharedDomains) {
+func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, stateLib.SharedDomains) {
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)

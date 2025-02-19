@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -445,7 +444,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			}
 
 			var rwTx kv.RwTx
-			var domains *SharedDomains
+			var domains *BufferedSharedDomains
 			var ac *AggregatorRoTx
 
 			if rwDb != nil {
@@ -457,16 +456,12 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 				defer rwTx.Rollback()
 
 				domains, err = NewSharedDomains(rwTx, log.New())
+				defer fmt.Println("rebuild commitment closing", domains.ObjectInfo())
 				if err != nil {
 					return nil, err
 				}
 
-				var ok bool
-				ac, ok = domains.AggTx().(*AggregatorRoTx)
-				if !ok {
-					return nil, errors.New("failed to get state aggregatorTx")
-				}
-
+				ac = domains.AggTx()
 			} else {
 				// case when we do testing and temporal db with aggtx is not available
 				ac = a.BeginFilesRo()

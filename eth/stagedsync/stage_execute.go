@@ -168,7 +168,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, br services.FullBlockReader, accumulator *shards.Accumulator, logger log.Logger) (err error) {
-	var domains *libstate.SharedDomains
+	var domains libstate.SharedDomains
 	if txc.Doms == nil {
 		domains, err = libstate.NewSharedDomains(txc.Tx, logger)
 		if err != nil {

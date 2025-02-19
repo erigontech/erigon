@@ -20,10 +20,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -218,7 +219,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	require := require.New(t)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 
-	iterCount := func(domains *SharedDomains) int {
+	iterCount := func(domains *BufferedSharedDomains) int {
 		var list [][]byte
 		require.NoError(domains.IterateStoragePrefix(nil, func(k []byte, v []byte, step uint64) error {
 			list = append(list, k)
