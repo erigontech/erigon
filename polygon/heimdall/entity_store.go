@@ -44,6 +44,13 @@ var databaseTablesCfg = kv.TableCfg{
 type EntityStore[TEntity Entity] interface {
 	Prepare(ctx context.Context) error
 	Close()
+
+	LastEntityId(ctx context.Context) (uint64, bool, error)
+	LastFrozenEntityId() uint64
+	LastEntity(ctx context.Context) (TEntity, bool, error)
+	Entity(ctx context.Context, id uint64) (TEntity, bool, error)
+	PutEntity(ctx context.Context, id uint64, entity TEntity) error
+
 	EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error)
 	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error)
 	DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error)
