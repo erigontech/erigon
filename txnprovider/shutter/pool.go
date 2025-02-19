@@ -38,6 +38,8 @@ type Pool struct {
 	eonTracker              EonTracker
 	decryptionKeysListener  DecryptionKeysListener
 	decryptionKeysProcessor DecryptionKeysProcessor
+	encryptedTxnsPool       *EncryptedTxnsPool
+	decryptedTxnsPool       *DecryptedTxnsPool
 }
 
 func NewPool(
@@ -53,7 +55,16 @@ func NewPool(
 	eonTracker := NewKsmEonTracker(logger, config, blockListener, contractBackend)
 	decryptionKeysValidator := NewDecryptionKeysExtendedValidator(logger, config, slotCalculator, eonTracker)
 	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysValidator)
-	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
+	encryptedTxnsPool := NewEncryptedTxnsPool(logger, config, contractBackend, blockListener)
+	decryptedTxnsPool := NewDecryptedTxnsPool()
+	decryptionKeysProcessor := NewDecryptionKeysProcessor(
+		logger,
+		config,
+		encryptedTxnsPool,
+		decryptedTxnsPool,
+		blockListener,
+		slotCalculator,
+	)
 	return &Pool{
 		logger:                  logger,
 		config:                  config,
@@ -62,6 +73,8 @@ func NewPool(
 		secondaryTxnProvider:    secondaryTxnProvider,
 		decryptionKeysListener:  decryptionKeysListener,
 		decryptionKeysProcessor: decryptionKeysProcessor,
+		encryptedTxnsPool:       encryptedTxnsPool,
+		decryptedTxnsPool:       decryptedTxnsPool,
 	}
 }
 
@@ -79,6 +92,7 @@ func (p Pool) Run(ctx context.Context) error {
 	eg.Go(func() error { return p.eonTracker.Run(ctx) })
 	eg.Go(func() error { return p.decryptionKeysListener.Run(ctx) })
 	eg.Go(func() error { return p.decryptionKeysProcessor.Run(ctx) })
+	eg.Go(func() error { return p.encryptedTxnsPool.Run(ctx) })
 	return eg.Wait()
 }
 
