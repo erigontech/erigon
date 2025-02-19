@@ -35,8 +35,6 @@ type BitList struct {
 	c int
 	// current length of the bitlist
 	l int
-
-	hashBuf
 }
 
 // NewBitList creates a brand new BitList, just like when Zordon created the Power Rangers!
@@ -140,21 +138,25 @@ func (u *BitList) removeMsb() {
 }
 
 // addMsb adds a most significant bit to the list, but doesn't change the length l.
-func (u *BitList) addMsb() {
+func (u *BitList) addMsb() int {
+	byteLen := len(u.u)
 	for i := len(u.u) - 1; i >= 0; i-- {
 		if u.u[i] != 0 {
 			msb := bits.Len8(u.u[i])
-			if msb == 7 {
+			if msb == 8 {
 				if i == len(u.u)-1 {
 					u.u = append(u.u, 0)
 				}
+				byteLen++
 				u.u[i+1] |= 1
 			} else {
-				u.u[i] |= 1 << uint(msb+1)
+				u.u[i] |= 1 << uint(msb)
 			}
 			break
 		}
+		byteLen--
 	}
+	return byteLen
 }
 
 func (u *BitList) SetOnBit(bitIndex int) {
@@ -170,8 +172,8 @@ func (u *BitList) SetOnBit(bitIndex int) {
 	// set the bit
 	u.u[bitIndex/8] |= 1 << uint(bitIndex%8)
 	// set last bit
-	u.addMsb()
-	u.l = len(u.u)
+	byteLen := u.addMsb()
+	u.l = byteLen
 }
 
 // Length gives us the length of the bitlist, just like a roll call tells us how many Rangers there are.
@@ -270,12 +272,13 @@ func (u *BitList) Merge(other *BitList) (*BitList, error) {
 	for i := 0; i < unionFrom.l; i++ {
 		ret.u[i] |= unionFrom.u[i]
 	}
-	ret.addMsb()
-	ret.l = len(ret.u)
 	unionFrom.addMsb()
+	byteLen := ret.addMsb()
+	ret.l = byteLen
 	return ret, nil
 }
 
+// BitSlice maintains a slice of bits with underlying byte slice.
 type BitSlice struct {
 	container []byte
 	length    int
