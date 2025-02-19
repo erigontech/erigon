@@ -1317,8 +1317,6 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 				continue
 			}
 			if expectedReward == 0 {
-				//bytes, _ := json.Marshal(att)
-				//log.Debug("[Block Production] Attestation reward is zero", "att", string(bytes))
 				count++
 				continue
 			}
@@ -1464,8 +1462,6 @@ func computeAttestationReward(
 			}
 			proposerRewardNumerator += baseReward * weight
 		}
-		log.Debug("[Block Production] Attestation reward", "attester", attesterIndex, "reward", proposerRewardNumerator, "participation", participationFlagsIndicies,
-			"flagParticipation", s.EpochParticipationForValidatorIndex(isCurrentEpoch, int(attesterIndex)))
 	}
 	proposerRewardDenominator := (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
