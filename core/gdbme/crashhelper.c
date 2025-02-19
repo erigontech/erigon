@@ -6,12 +6,19 @@
 
 #define GDB_PATH "/usr/bin/gdb"  // Adjust this if gdb is in a different location
 
-// Returns non-zero if the last argument equals our marker flag.
+// Returns non-zero if the some of arguments equals our marker flag.
 int has_gdb_flag(int argc, char *argv[]) {
-    if (argc >= 1 && strcmp(argv[argc - 1], "--gdbme") == 0) {
-        return 1;
+    if (argc < 1) {
+        return 0;
     }
-    return 0;
+    int gdb_flag = 0;
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--gdbme") == 0) {
+            gdb_flag = 1;
+        }
+    }
+
+    return gdb_flag;
 }
 
 // Restart the process under gdb with options that run the program
@@ -43,7 +50,8 @@ void restart_under_gdb(int argc, char *argv[]) {
         new_argv[pos++] = (char *)gdb_options[i];
     }
 
-    for (int i = 0; i < argc-1; i++) {
+    for (int i = 0; i < argc; i++) {
+
         new_argv[pos++] = argv[i];
     }
     new_argv[pos] = NULL;  // Null-terminate the array
