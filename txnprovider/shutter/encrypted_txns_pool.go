@@ -276,7 +276,11 @@ func (etp *EncryptedTxnsPool) loadSubmissionsOnInit(ctx context.Context) error {
 
 func (etp *EncryptedTxnsPool) loadSubmissions(start, end uint64, cont submissionsContinuer) error {
 	startTime := time.Now()
-	defer etp.logger.Debug("loadSubmissions timing", "start", start, "end", end, "duration", time.Since(startTime))
+	defer func() {
+		duration := time.Since(startTime)
+		etp.logger.Debug("loadSubmissions timing", "start", start, "end", end, "duration", duration)
+	}()
+
 	opts := bind.FilterOpts{
 		Start: start,
 		End:   &end,

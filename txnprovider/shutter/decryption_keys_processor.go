@@ -88,7 +88,7 @@ func (dkp DecryptionKeysProcessor) processKeys(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case msg := <-dkp.queue:
-			err := dkp.process(ctx, msg)
+			err := dkp.process(msg)
 			if err != nil {
 				return err
 			}
@@ -96,7 +96,7 @@ func (dkp DecryptionKeysProcessor) processKeys(ctx context.Context) error {
 	}
 }
 
-func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.DecryptionKeys) error {
+func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 	dkp.logger.Debug(
 		"processing decryption keys message",
 		"instanceId", msg.InstanceId,
@@ -132,7 +132,7 @@ func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.Decry
 		txnIndexToKey[from+TxnIndex(i)] = key
 	}
 
-	eg, ctx := errgroup.WithContext(ctx)
+	var eg errgroup.Group
 	eg.SetLimit(estimate.AlmostAllCPUs())
 	txns := make([]types.Transaction, len(encryptedTxns))
 	totalGasLimit := atomic.Uint64{}
@@ -148,7 +148,7 @@ func (dkp DecryptionKeysProcessor) process(ctx context.Context, msg *proto.Decry
 					"err", err,
 				)
 				// we do not return err here since as per protocol we skip bad decryption
-				// and also so that we don't interrupt other decryption goroutines
+				// we also do not want to interrupt other decryption goroutines
 				return nil
 			}
 
