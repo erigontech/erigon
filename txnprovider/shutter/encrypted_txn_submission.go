@@ -41,7 +41,7 @@ type EncryptedTxnSubmission struct {
 func (ets EncryptedTxnSubmission) IdentityPreimageBytes() []byte {
 	buf := make([]byte, len(ets.IdentityPrefix)+len(ets.Sender))
 	copy(buf[:len(ets.IdentityPrefix)], ets.IdentityPrefix[:])
-	copy(buf[len(ets.IdentityPrefix):], ets.Sender[:])
+	copy(buf[len(ets.IdentityPrefix):], ets.Sender.Bytes())
 	return buf
 }
 
