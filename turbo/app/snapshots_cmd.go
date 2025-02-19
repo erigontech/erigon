@@ -1383,10 +1383,12 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		if ok {
 			from, to, every = from2, to2, to2-from2
 		}
+	} else {
+		forwardProgress = to
 	}
 
 	logger.Info("Params", "from", from, "to", to, "every", every)
-	if err := br.RetireBlocks(ctx, 0, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
+	if err := br.RetireBlocks(ctx, from, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
 
