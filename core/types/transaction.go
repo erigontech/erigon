@@ -55,13 +55,13 @@ const (
 	SetCodeTxType
 
 	// Arbitrum transaction types
-	ArbitrumDepositTxType         = 0x64
-	ArbitrumUnsignedTxType        = 0x65
-	ArbitrumContractTxType        = 0x66
-	ArbitrumRetryTxType           = 0x68
-	ArbitrumSubmitRetryableTxType = 0x69
-	ArbitrumInternalTxType        = 0x6A
-	ArbitrumLegacyTxType          = 0x78
+	ArbitrumDepositTxType         byte = 0x64
+	ArbitrumUnsignedTxType        byte = 0x65
+	ArbitrumContractTxType        byte = 0x66
+	ArbitrumRetryTxType           byte = 0x68
+	ArbitrumSubmitRetryableTxType byte = 0x69
+	ArbitrumInternalTxType        byte = 0x6A
+	ArbitrumLegacyTxType          byte = 0x78
 )
 
 // Transaction is an Ethereum transaction.
@@ -205,6 +205,18 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		}
 	case SetCodeTxType:
 		t = &SetCodeTransaction{}
+	case ArbitrumDepositTxType:
+		t = &ArbitrumDepositTx{}
+	case ArbitrumUnsignedTxType:
+		t = &ArbitrumUnsignedTx{}
+	case ArbitrumContractTxType:
+		t = &ArbitrumContractTx{}
+	case ArbitrumRetryTxType:
+		t = &ArbitrumRetryTx{}
+	case ArbitrumSubmitRetryableTxType:
+		t = &ArbitrumSubmitRetryableTx{}
+	case ArbitrumInternalTxType:
+		t = &ArbitrumInternalTx{}
 	default:
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded

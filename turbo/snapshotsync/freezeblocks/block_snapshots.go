@@ -598,6 +598,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		}
 
 		valueBuf = valueBuf[:0]
+		// TODO seems like first byte of txn hash and it's sender does not used anywhere
 		valueBuf = append(valueBuf, slot.IDHash[:1]...)
 		valueBuf = append(valueBuf, sender[:]...)
 		valueBuf = append(valueBuf, v...)

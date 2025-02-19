@@ -35,20 +35,45 @@ import (
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/core/types"
 )
 
 const (
-	LegacyTxnType     byte = 0
-	AccessListTxnType byte = 1 // EIP-2930
-	DynamicFeeTxnType byte = 2 // EIP-1559
-	BlobTxnType       byte = 3 // EIP-4844
-	SetCodeTxnType    byte = 4 // EIP-7702
+	LegacyTxnType                 = types.LegacyTxType
+	AccessListTxnType             = types.AccessListTxType // EIP-2930
+	DynamicFeeTxnType             = types.DynamicFeeTxType // EIP-1559
+	BlobTxnType                   = types.BlobTxType       // EIP-4844
+	SetCodeTxnType                = types.SetCodeTxType    // EIP-7702
+	ArbitrumDepositTxType         = types.ArbitrumDepositTxType
+	ArbitrumUnsignedTxType        = types.ArbitrumUnsignedTxType
+	ArbitrumContractTxType        = types.ArbitrumContractTxType
+	ArbitrumRetryTxType           = types.ArbitrumRetryTxType
+	ArbitrumSubmitRetryableTxType = types.ArbitrumSubmitRetryableTxType
+	ArbitrumInternalTxType        = types.ArbitrumInternalTxType
+	ArbitrumLegacyTxType          = types.ArbitrumLegacyTxType
 )
 
-var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
-var ErrRejected = errors.New("rejected")
-var ErrAlreadyKnown = errors.New("already known")
-var ErrRlpTooBig = errors.New("txn rlp too big")
+var ValidTxnTypes = map[byte]struct{}{
+	LegacyTxnType:                 {},
+	AccessListTxnType:             {},
+	DynamicFeeTxnType:             {},
+	BlobTxnType:                   {},
+	SetCodeTxnType:                {},
+	ArbitrumDepositTxType:         {},
+	ArbitrumUnsignedTxType:        {},
+	ArbitrumContractTxType:        {},
+	ArbitrumRetryTxType:           {},
+	ArbitrumSubmitRetryableTxType: {},
+	ArbitrumInternalTxType:        {},
+	ArbitrumLegacyTxType:          {},
+}
+
+var (
+	ErrParseTxn     = fmt.Errorf("%w transaction", rlp.ErrParse)
+	ErrRejected     = errors.New("rejected")
+	ErrAlreadyKnown = errors.New("already known")
+	ErrRlpTooBig    = errors.New("txn rlp too big")
+)
 
 type TxnParseConfig struct {
 	ChainID uint256.Int
@@ -145,15 +170,17 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: expected envelope in the payload, got %x", ErrParseTxn, payload[dataPos:dataPos+dataLen])
 		}
 	}
-
 	p = dataPos
+	if payload[p] >= ArbitrumDepositTxType && payload[p] <= ArbitrumLegacyTxType && legacy { // todo remove later, need to understand if there a legacy txns as well
+		fmt.Printf("arbTxType %x isLegacyList %t\n", payload[p], legacy)
+	}
 
 	var wrapperDataPos, wrapperDataLen int
 
 	// If it is non-legacy transaction, the transaction type follows, and then the list
 	if !legacy {
 		slot.Type = payload[p]
-		if slot.Type > SetCodeTxnType {
+		if _, knownType := ValidTxnTypes[slot.Type]; !knownType {
 			return 0, fmt.Errorf("%w: unknown transaction type: %d", ErrParseTxn, slot.Type)
 		}
 		p++
@@ -185,6 +212,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	p, err = ctx.parseTransactionBody(payload, pos, p, slot, sender, validateHash)
 	if err != nil {
 		return p, err
+	}
+	if slot.Type >= ArbitrumDepositTxType && slot.Type <= ArbitrumLegacyTxType {
+		return p, nil
 	}
 
 	if slot.Type == BlobTxnType && wrappedWithBlobs {
@@ -337,6 +367,20 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	if ctx.validateRlp != nil {
 		if err := ctx.validateRlp(slot.Rlp); err != nil {
 			return p, err
+		}
+	}
+	if slot.Type >= ArbitrumDepositTxType && slot.Type <= ArbitrumLegacyTxType {
+		// Arb txs have different parsing, but who cares
+		switch slot.Type {
+		case ArbitrumDepositTxType, ArbitrumUnsignedTxType, ArbitrumContractTxType, ArbitrumRetryTxType, ArbitrumSubmitRetryableTxType, ArbitrumInternalTxType, ArbitrumLegacyTxType:
+			_, _ = ctx.Keccak1.(io.Reader).Read(slot.IDHash[:32])
+			if validateHash != nil {
+				if err := validateHash(slot.IDHash[:32]); err != nil {
+					return p, err
+				}
+			}
+			p = len(payload)
+			return p, nil
 		}
 	}
 

@@ -1373,7 +1373,9 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	//agg.LimitRecentHistoryWithoutFiles(0)
 
 	var forwardProgress uint64
-	if to == 0 {
+	if to != 0 {
+		forwardProgress = to
+	} else {
 		db.View(ctx, func(tx kv.Tx) error {
 			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
 			return err

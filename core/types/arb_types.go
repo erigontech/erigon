@@ -875,10 +875,9 @@ func (tx *ArbitrumContractTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //}
 
 type ArbitrumRetryTx struct {
-	ChainId *big.Int
-	Nonce   uint64
-	From    common.Address
-
+	ChainId             *big.Int
+	Nonce               uint64
+	From                common.Address
 	GasFeeCap           *big.Int        // wei per gas
 	Gas                 uint64          // gas limit
 	To                  *common.Address `rlp:"nil"` // nil means contract creation
