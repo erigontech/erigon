@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -39,6 +40,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 		version = s.Version()
 		body    = block.GetBody()
 	)
+	log.Debug("[Block Production ProcessBlock] Processing block body operations 1", "block", s.Slot(), "attestations", block.GetBody().GetAttestations().Len())
 	payloadHeader, err := body.GetPayloadHeader()
 	if err != nil {
 		return errors.WithMessage(err, "processBlock: failed to extract execution payload header")
@@ -52,6 +54,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	if err != nil {
 		return errors.WithMessagef(err, "processBlock: failed to hash block body")
 	}
+	log.Debug("[Block Production ProcessBlock] Processing block body operations 2", "block", s.Slot(), "attestations", block.GetBody().GetAttestations().Len())
 	if err := impl.ProcessBlockHeader(s, block.GetSlot(), block.GetProposerIndex(), block.GetParentRoot(), bodyRoot); err != nil {
 		return fmt.Errorf("processBlock: failed to process block header: %v", err)
 	}
@@ -59,6 +62,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	if version >= clparams.BellatrixVersion && executionEnabled(s, payloadHeader.BlockHash) {
 		if s.Version() >= clparams.CapellaVersion {
 			// Process withdrawals in the execution payload.
+			log.Debug("[Block Production ProcessBlock] Processing block body operations 3", "block", s.Slot(), "attestations", block.GetBody().GetAttestations().Len())
 			expect, _ := state.ExpectedWithdrawals(s, state.Epoch(s))
 			expectWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(s.BeaconConfig().MaxWithdrawalsPerPayload), 44)
 			for i := range expect {
@@ -68,12 +72,15 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 			}
 		}
+
+		log.Debug("[Block Production ProcessBlock] Processing block body operations 4", "block", s.Slot(), "attestations", block.GetBody().GetAttestations().Len())
 		if err := impl.ProcessExecutionPayload(s, body); err != nil {
 			return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
 		}
 	}
 	var signatures, messages, publicKeys [][]byte
 
+	log.Debug("[Block Production ProcessBlock] Processing block body operations 5", "block", s.Slot(), "attestations", block.GetBody().GetAttestations().Len())
 	// Process each proposer slashing
 	sigs, msgs, pubKeys, err := processRandao(impl, s, body, block)
 	if err != nil {
@@ -81,17 +88,20 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
+	log.Debug("[Block Production ProcessBlock] Processing block body operations 6", "block", s.Slot(), "attestations", block.GetBody().GetAttestations().Len())
 	// Process Eth1 data.
 	if err := impl.ProcessEth1Data(s, body.GetEth1Data()); err != nil {
 		return fmt.Errorf("processBlock: failed to process Eth1 data: %v", err)
 	}
 
+	log.Debug("[Block Production ProcessBlock] Processing block body operations 7", "block", s.Slot(), "attestations", block.GetBody().GetAttestations().Len())
 	// Process block body operations.
 	sigs, msgs, pubKeys, err = ProcessOperations(impl, s, body)
 	if err != nil {
 		return fmt.Errorf("processBlock: failed to process block body operations: %v", err)
-
 	}
+
+	log.Debug("[Block Production ProcessBlock] Processing block body operations 8", "block", s.Slot(), "attestations", block.GetBody().GetAttestations().Len())
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
 	// process signature validation
@@ -111,12 +121,14 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 			return fmt.Errorf("processBlock: failed to process sync aggregate: %v", err)
 		}
 	}
+	log.Debug("[Block Production ProcessBlock] Processing block body operations 9", "block", s.Slot(), "attestations", block.GetBody().GetAttestations().Len())
 
 	return nil
 }
 
 // ProcessOperations is called by ProcessBlock and processes the block body operations
 func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (signatures [][]byte, messages [][]byte, publicKeys [][]byte, err error) {
+	log.Debug("[Block Production Process] Processing block body operations 1", "block", s.Slot(), "attestations", blockBody.GetAttestations().Len())
 	maxDepositsAllowed := int(min(s.BeaconConfig().MaxDeposits, s.Eth1Data().DepositCount-s.Eth1DepositIndex()))
 	if s.Version() <= clparams.DenebVersion {
 		if blockBody.GetDeposits().Len() != maxDepositsAllowed {
@@ -135,6 +147,7 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 		}
 	}
 
+	log.Debug("[Block Production Process] Processing block body operations 2", "block", s.Slot(), "attestations", blockBody.GetAttestations().Len())
 	// Process each proposer slashing
 	sigs, msgs, pubKeys, err := processProposerSlashings(impl, s, blockBody)
 	if err != nil {
@@ -142,21 +155,25 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
+	log.Debug("[Block Production Process] Processing block body operations 3", "block", s.Slot(), "attestations", blockBody.GetAttestations().Len())
 	// attester slashings
 	if err := forEachProcess(s, blockBody.GetAttesterSlashings(), impl.ProcessAttesterSlashing); err != nil {
 		return nil, nil, nil, fmt.Errorf("ProcessProposerSlashing: %s", err)
 	}
 
+	log.Debug("[Block Production Process] Processing block body operations 4", "block", s.Slot(), "attestations", blockBody.GetAttestations().Len())
 	// Process each attestations
 	if err := impl.ProcessAttestations(s, blockBody.GetAttestations()); err != nil {
 		return nil, nil, nil, fmt.Errorf("ProcessAttestation: %s", err)
 	}
 
+	log.Debug("[Block Production Process] Processing block body operations 5", "block", s.Slot(), "attestations", blockBody.GetAttestations().Len())
 	// Process each deposit
 	if err := forEachProcess(s, blockBody.GetDeposits(), impl.ProcessDeposit); err != nil {
 		return nil, nil, nil, fmt.Errorf("ProcessDeposit: %s", err)
 	}
 
+	log.Debug("[Block Production Process] Processing block body operations 6", "block", s.Slot(), "attestations", blockBody.GetAttestations().Len())
 	// Process each voluntary exit.
 	sigs, msgs, pubKeys, err = processVoluntaryExits(impl, s, blockBody)
 	if err != nil {
@@ -168,6 +185,7 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 		return
 	}
 
+	log.Debug("[Block Production Process] Processing block body operations 7", "block", s.Slot(), "attestations", blockBody.GetAttestations().Len())
 	// Process each execution change. this will only have entries after the capella fork.
 	sigs, msgs, pubKeys, err = processBlsToExecutionChanges(impl, s, blockBody)
 	if err != nil {
@@ -175,6 +193,7 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
+	log.Debug("[Block Production Process] Processing block body operations 8", "block", s.Slot(), "attestations", blockBody.GetAttestations().Len())
 	if s.Version() >= clparams.ElectraVersion {
 		if err := forEachProcess(s, blockBody.GetExecutionRequests().Deposits, impl.ProcessDepositRequest); err != nil {
 			return nil, nil, nil, fmt.Errorf("ProcessDepositRequest: %s", err)
@@ -186,6 +205,7 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 			return nil, nil, nil, fmt.Errorf("ProcessConsolidationRequest: %s", err)
 		}
 	}
+	log.Debug("[Block Production Process] Processing block body operations 9", "block", s.Slot(), "attestations", blockBody.GetAttestations().Len())
 
 	return
 }
