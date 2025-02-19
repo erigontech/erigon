@@ -1360,6 +1360,7 @@ func (a *ApiHandler) tryMergeAggregationBits(state abstract.BeaconState, att1, a
 	index1, index2 := 0, 0
 	committeeOffset1, committeeOffset2 := 0, 0
 
+	// appendBits is a helper func to append the aggregation bits of the committee to the bitSlice
 	appendBits := func(bitSlice *solid.BitSlice, committeeIndex int, att *solid.Attestation, offset int) (*solid.BitSlice, int) {
 		members, err := state.GetBeaconCommitee(slot, uint64(committeeIndex))
 		if err != nil {

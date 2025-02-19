@@ -223,7 +223,15 @@ func (u *BitList) Bits() int {
 		return 0
 	}
 	// The most significant bit is present in the last byte in the array.
-	last := u.u[u.l-1]
+	var last byte
+	var byteLen int
+	for i := len(u.u) - 1; i >= 0; i-- {
+		if u.u[i] != 0 {
+			last = u.u[i]
+			byteLen = i + 1
+			break
+		}
+	}
 
 	// Determine the position of the most significant bit.
 	msb := bits.Len8(last)
@@ -234,7 +242,7 @@ func (u *BitList) Bits() int {
 	// The absolute position of the most significant bit will be the number of
 	// bits in the preceding bytes plus the position of the most significant
 	// bit. Subtract this value by 1 to determine the length of the bitlist.
-	return 8*(u.l-1) + msb - 1
+	return 8*(byteLen-1) + msb - 1
 }
 
 func (u *BitList) MarshalJSON() ([]byte, error) {
@@ -279,6 +287,7 @@ func (u *BitList) Merge(other *BitList) (*BitList, error) {
 }
 
 // BitSlice maintains a slice of bits with underlying byte slice.
+// This is just a auxiliary struct for merging BitList.
 type BitSlice struct {
 	container []byte
 	length    int
