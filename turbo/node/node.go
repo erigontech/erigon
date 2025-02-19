@@ -26,6 +26,7 @@ import (
 	"context"
 	"github.com/erigontech/erigon/core/gdbme"
 	"github.com/urfave/cli/v2"
+	"os"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/kv"
@@ -121,7 +122,7 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, e
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig, logger)
 
 	if ctx.Bool(utils.GDBMeFlag.Name) {
-		gdbme.RestartWithGDB(ctx.NumFlags(), ctx.FlagNames())
+		gdbme.RestartWithGDB(len(os.Args), os.Args)
 	}
 
 	return nodeConfig, nil
