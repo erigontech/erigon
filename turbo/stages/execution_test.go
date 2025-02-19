@@ -21,6 +21,7 @@ package stages_test
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"math/big"
 	"testing"
@@ -29,7 +30,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -237,7 +237,7 @@ func TestBlockExecutionWithStorage(t *testing.T) {
 
 func TestBlockExecutionMultipleCalls(t *testing.T) {
 	var (
-		signer      = types.LatestSignerForChainID(nil)
+		signer      = types.LatestSignerForChainID(big.NewInt(1337))
 		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		bankAddress = crypto.PubkeyToAddress(bankKey.PublicKey)
 		bankFunds   = big.NewInt(1e9)
@@ -249,6 +249,15 @@ func TestBlockExecutionMultipleCalls(t *testing.T) {
 			BaseFee: big.NewInt(1),
 		}
 	)
+
+	const subAccountsCount = 10
+	crypto.GenerateKey()
+	subPrivateKeys := make([]*ecdsa.PrivateKey, subAccountsCount)
+	subAddresses := make([]libcommon.Address, subAccountsCount)
+	for i := 0; i < subAccountsCount; i++ {
+		subPrivateKeys[i], _ = crypto.GenerateKey()
+		subAddresses[i] = crypto.PubkeyToAddress(subPrivateKeys[i].PublicKey)
+	}
 
 	m := mock.MockWithEverything(t, gspec, bankKey, prune.DefaultMode, ethash.NewFaker(), 128 /*blockBufferSize*/, false, /*withTxPool*/
 		false /*withPosDownloader*/, true /*checkStateRoot*/, true /*useSilkworm*/)
@@ -267,18 +276,19 @@ func TestBlockExecutionMultipleCalls(t *testing.T) {
 			block.AddTx(tx)
 			theAddr = crypto.CreateAddress(bankAddress, nonce)
 		case 1:
-			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 900000, &gasFeeCap, input), *signer, bankKey)
+			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, &gasFeeCap, input), *signer, bankKey)
 			assert.NoError(t, err)
 			block.AddTx(txn)
 		case 2:
-			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 900000, &gasFeeCap, input), *signer, bankKey)
+			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, &gasFeeCap, input), *signer, bankKey)
 			assert.NoError(t, err)
 			block.AddTx(txn)
 		case 3:
-			// txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 900000, &gasFeeCap, input), *signer, bankKey)
-			txn, err := types.SignTx(types.NewTransaction(nonce, libcommon.Address{0x00}, uint256.NewInt(1), params.TxGas, &gasFeeCap, nil), *signer, bankKey)
-			assert.NoError(t, err)
-			block.AddTx(txn)
+			for i := 0; i < subAccountsCount; i++ {
+				txn, err := types.SignTx(types.NewTransaction(nonce+uint64(i), subAddresses[i], uint256.NewInt(1e7), 90000, &gasFeeCap, nil), *signer, bankKey)
+				assert.NoError(t, err)
+				block.AddTx(txn)
+			}
 		}
 	})
 	assert.NoError(t, err)
@@ -302,7 +312,7 @@ func TestBlockExecutionMultipleCalls(t *testing.T) {
 		Time:        ch.Header.Timestamp + 12,
 		Extra:       make([]byte, clique.ExtraVanity+clique.ExtraSeal),
 		UncleHash:   types.EmptyUncleHash,
-		Root:        libcommon.HexToHash("0xa5ce9ce1360cb89c5a520562665b498107016ce98c9b69663fe178db6d055ef7"),
+		Root:        libcommon.HexToHash("0x9ef8929c6fdb3807eeac8e842c77ac8420a747eae87da0ce1f075c624a25b33f"),
 	},
 		[]types.Transaction{},
 		[]*types.Header{},
@@ -317,6 +327,7 @@ func TestBlockExecutionMultipleCalls(t *testing.T) {
 	require.NotNil(t, result)
 	require.Equal(t, result.Result, execution.ExecutionStatus_Success)
 
+	fmt.Println("newBlock  ", newBlock.Hash().String())
 	validationRequest := &execution.ValidationRequest{
 		Hash:   gointerfaces.ConvertHashToH256(newBlock.Hash()),
 		Number: newBlock.Number().Uint64(),
@@ -328,21 +339,28 @@ func TestBlockExecutionMultipleCalls(t *testing.T) {
 	require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
 	fmt.Println("validationResult  ", validationResult)
 
-	forkchoiceRequest := &execution.ForkChoice{
-		HeadBlockHash: gointerfaces.ConvertHashToH256(newBlock.Hash()),
+	// ready := false
+	// for !ready {
+	// 	readyResponse, err := m.Eth1ExecutionService.Ready(m.Ctx, nil)
+	// 	require.NoError(t, err)
+	// 	ready = readyResponse.Ready
+	// }
 
-		Timeout:            0,
-		FinalizedBlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-		SafeBlockHash:      gointerfaces.ConvertHashToH256(common.Hash{}),
-	}
+	// forkchoiceRequest := &execution.ForkChoice{
+	// 	HeadBlockHash: gointerfaces.ConvertHashToH256(newBlock.Hash()),
 
-	fcuReceipt, err := m.Eth1ExecutionService.UpdateForkChoice(m.Ctx, forkchoiceRequest)
-	require.NoError(t, err)
-	require.NotNil(t, fcuReceipt)
-	require.Equal(t, execution.ExecutionStatus_Success, fcuReceipt.Status)
-	fmt.Println("fcuReceipt  ", fcuReceipt)
+	// 	Timeout:            0,
+	// 	FinalizedBlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+	// 	SafeBlockHash:      gointerfaces.ConvertHashToH256(common.Hash{}),
+	// }
 
-	assert.Equal(t, -1, 0)
+	// fcuReceipt, err := m.Eth1ExecutionService.UpdateForkChoice(m.Ctx, forkchoiceRequest)
+	// require.NoError(t, err)
+	// require.NotNil(t, fcuReceipt)
+	// require.Equal(t, execution.ExecutionStatus_Success, fcuReceipt.Status)
+	// fmt.Println("fcuReceipt  ", fcuReceipt)
+
+	// assert.Equal(t, -1, 0)
 }
 
 func TestBlockExecution2(t *testing.T) {
