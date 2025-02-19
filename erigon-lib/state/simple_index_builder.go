@@ -59,11 +59,11 @@ func NewAccessorArgs(enums, lessFalsePositives, nofsync bool, salt uint32) *Acce
 type SimpleAccessorBuilder struct {
 	args     *AccessorArgs
 	indexPos uint64
-	id       ae.EntityId
+	id       EntityId
 	kf       IndexKeyFactory
 }
 
-func NewSimpleAccessorBuilder(args *AccessorArgs, id ae.EntityId, options ...SimpleABOptions) *SimpleAccessorBuilder {
+func NewSimpleAccessorBuilder(args *AccessorArgs, id EntityId, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
 	b := &SimpleAccessorBuilder{
 		args: args,
 		id:   id,
@@ -77,9 +77,9 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, id ae.EntityId, options ...Sim
 	return b
 }
 
-type SimpleABOptions func(*SimpleAccessorBuilder)
+type AccessorBuilderOptions func(*SimpleAccessorBuilder)
 
-func WithIndexPos(indexPos uint64) SimpleABOptions {
+func WithIndexPos(indexPos uint64) AccessorBuilderOptions {
 	return func(s *SimpleAccessorBuilder) {
 		if int(s.indexPos) >= len(s.id.IndexPrefix()) {
 			panic("indexPos greater than indexPrefix length")

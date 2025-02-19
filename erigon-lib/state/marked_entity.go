@@ -15,7 +15,7 @@ import (
 const MaxUint64 = ^uint64(0)
 
 /*
-marked appendable has two tables
+marked entity has two tables
 
  1. canonicalMarkerTbl: stores num -> canonical hash
 
@@ -28,7 +28,7 @@ marked appendable has two tables
     values of Num == values of RootNum
     headers, bodies, caplin blockbodies are marked entity.
 */
-type Marker struct {
+type MarkedEntity struct {
 	*ProtoEntity
 
 	canonicalTbl string
@@ -41,34 +41,34 @@ type Marker struct {
 	pruneFrom Num
 }
 
-type MAOpts func(*Marker)
+type MAOpts func(*MarkedEntity)
 
 func (r *MAOpts) WithFreezer(freezer Freezer) MAOpts {
-	return func(a *Marker) {
+	return func(a *MarkedEntity) {
 		a.freezer = freezer
 	}
 }
 
 func (r *MAOpts) WithIndexBuilders(builders ...AccessorIndexBuilder) MAOpts {
-	return func(a *Marker) {
+	return func(a *MarkedEntity) {
 		a.builders = builders
 	}
 }
 
 func (r *MAOpts) WithTs8Bytes(ts8Bytes bool) MAOpts {
-	return func(a *Marker) {
+	return func(a *MarkedEntity) {
 		a.ts8Bytes = ts8Bytes
 	}
 }
 
 func (r *MAOpts) WithPruneFrom(pruneFrom Num) MAOpts {
-	return func(a *Marker) {
+	return func(a *MarkedEntity) {
 		a.pruneFrom = pruneFrom
 	}
 }
 
-func NewMarkedAppendable(id EntityId, canonicalTbl, valsTbl string, logger log.Logger, options ...MAOpts) (*Marker, error) {
-	m := &Marker{
+func NewMarkedAppendable(id EntityId, canonicalTbl, valsTbl string, logger log.Logger, options ...MAOpts) (*MarkedEntity, error) {
+	m := &MarkedEntity{
 		ProtoEntity:  NewProto(id, nil, nil, logger),
 		canonicalTbl: canonicalTbl,
 		valsTbl:      valsTbl,
@@ -95,11 +95,11 @@ func NewMarkedAppendable(id EntityId, canonicalTbl, valsTbl string, logger log.L
 	return m, nil
 }
 
-func (a *Marker) encTs(ts Num) []byte {
+func (a *MarkedEntity) encTs(ts Num) []byte {
 	return ts.EncToBytes(a.ts8Bytes)
 }
 
-func (a *Marker) combK(ts Num, hash []byte) []byte {
+func (a *MarkedEntity) combK(ts Num, hash []byte) []byte {
 	// assuming hash is common.Hash which is 32 butes
 	const HashBytes = 32
 	k := make([]byte, 8+HashBytes)
@@ -108,7 +108,7 @@ func (a *Marker) combK(ts Num, hash []byte) []byte {
 	return k
 }
 
-func (a *Marker) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
+func (a *MarkedEntity) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
 	if hash == nil {
 		// find canonical hash
 		canHash, err := tx.GetOne(a.canonicalTbl, a.encTs(num))
@@ -123,11 +123,11 @@ func (a *Marker) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
 // rotx
 type MarkerTx struct {
 	*ProtoEntityTx
-	a  *Marker
+	a  *MarkedEntity
 	id EntityId
 }
 
-func (m *Marker) BeginFilesRo() *MarkerTx {
+func (m *MarkedEntity) BeginFilesRo() MarkedTxI {
 	return &MarkerTx{
 		ProtoEntityTx: m.ProtoEntity.BeginFilesRo(),
 		a:             m,

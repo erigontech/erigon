@@ -81,7 +81,7 @@ type RangedEntityTx struct {
 	id EntityId
 }
 
-func (a *RangedEntity) BeginFilesRo() *RangedEntityTx {
+func (a *RangedEntity) BeginFilesRo() RangedTxI {
 	return &RangedEntityTx{
 		ProtoEntityTx: a.ProtoEntity.BeginFilesRo(),
 		a:             a,
@@ -89,33 +89,30 @@ func (a *RangedEntity) BeginFilesRo() *RangedEntityTx {
 	}
 }
 
-func (a *RangedEntityTx) GetWithFlags(entityNum Num, tx kv.Tx) (Bytes, error) {
+func (a *RangedEntityTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
 	ap := a.a
 	lastNum := ap.VisibleFilesMaxNum()
+	var word []byte
 	if entityNum <= lastNum {
-		lastNum := ap.VisibleFilesMaxNum()
-		var word []byte
-		if entityNum <= lastNum {
-			index := sort.Search(len(ap._visible), func(i int) bool {
-				return ap._visible[i].src.FirstEntityNum() >= uint64(entityNum)
-			})
+		index := sort.Search(len(ap._visible), func(i int) bool {
+			return ap._visible[i].src.FirstEntityNum() >= uint64(entityNum)
+		})
 
-			if index == -1 {
-				return nil, fmt.Errorf("entity get error: snapshot expected but now found: (%s, %d)", ap.a.Name(), entityNum)
-			}
-
-			visible := ap._visible[index]
-			g := visible.getter
-
-			offset := visible.reader.OrdinalLookup(uint64(entityNum)) // TODO: allowed values
-			g.Reset(offset)
-			if g.HasNext() {
-				word, _ = g.Next(word[:0])
-				return word, nil
-			}
-
-			return nil, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, visible.src.decompressor.FileName())
+		if index == -1 {
+			return nil, fmt.Errorf("entity get error: snapshot expected but now found: (%s, %d)", ap.a.Name(), entityNum)
 		}
+
+		visible := ap._visible[index]
+		g := visible.getter
+
+		offset := visible.reader.OrdinalLookup(uint64(entityNum)) // TODO: allowed values
+		g.Reset(offset)
+		if g.HasNext() {
+			word, _ = g.Next(word[:0])
+			return word, nil
+		}
+
+		return nil, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, visible.src.decompressor.FileName())
 	}
 
 	// else the db
@@ -170,10 +167,10 @@ func (a *RangedEntityTx) Unwind(ctx context.Context, from RootNum, rwTx kv.RwTx)
 	return ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(uint64(fromId)), nil, 0, rwTx)
 }
 
-func (a *RangedEntityTx) NewWriter() *RelationalAppendableWriter {
+func (a *RangedEntityTx) NewWriter() *RangedEntityWriter {
 	// TODO: caplin uses some pool for sortable buffer
 	// probably can have a global pool here for this...
-	return &RelationalAppendableWriter{
+	return &RangedEntityWriter{
 		values: etl.NewCollector(a.id.Name()+".rappendable.flush",
 			a.id.Dirs().Tmp, etl.NewSortableBuffer(WALCollectorRAM), a.a.logger).LogLvl(log.LvlTrace),
 		valsTable: a.a.valsTbl,
@@ -189,25 +186,23 @@ func (a *RangedEntityTx) Close() {
 	a.ProtoEntityTx.Close()
 }
 
-// buffered writer
-
-// buffered write into etl collector, and then flush to db
+// RangedEntityWriter buffered write into etl collector, and then flush to db
 // can't perform unwinds on this writer
-type RelationalAppendableWriter struct {
+type RangedEntityWriter struct {
 	values    *etl.Collector
 	valsTable string
 	encFn     func(ts uint64) []byte
 }
 
-func NewRelationalAppendableWriter(r *RangedEntity, valsTable string, values *etl.Collector) *RelationalAppendableWriter {
-	return &RelationalAppendableWriter{
+func NewRelationalAppendableWriter(r *RangedEntity, valsTable string, values *etl.Collector) *RangedEntityWriter {
+	return &RangedEntityWriter{
 		values:    values,
 		valsTable: valsTable,
 		encFn:     r.encTs,
 	}
 }
 
-func (w *RelationalAppendableWriter) Close() {
+func (w *RangedEntityWriter) Close() {
 	if w == nil {
 		return
 	}
@@ -216,7 +211,7 @@ func (w *RelationalAppendableWriter) Close() {
 	}
 }
 
-func (w *RelationalAppendableWriter) Add(id Id, value Bytes) error {
+func (w *RangedEntityWriter) Add(id Id, value Bytes) error {
 	key := w.encFn(uint64(id))
 	if err := w.values.Collect(key, value); err != nil {
 		return err
@@ -225,7 +220,7 @@ func (w *RelationalAppendableWriter) Add(id Id, value Bytes) error {
 	return nil
 }
 
-func (w *RelationalAppendableWriter) Flush(ctx context.Context, tx kv.RwTx) error {
+func (w *RangedEntityWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.values == nil {
 		return nil
 	}
