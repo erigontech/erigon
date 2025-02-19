@@ -51,8 +51,9 @@ void restart_under_gdb(int argc, char *argv[]) {
     }
 
     for (int i = 0; i < argc; i++) {
-
-        new_argv[pos++] = argv[i];
+        if (strcmp(argv[i], "--gdbme") != 0) {
+            new_argv[pos++] = argv[i];
+        }
     }
     new_argv[pos] = NULL;  // Null-terminate the array
 
