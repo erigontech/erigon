@@ -47,7 +47,7 @@ func (a *PendingAttestation) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < a.EncodingSizeSSZ() {
 		return ssz.ErrLowBufferSize
 	}
-	a.AggregationBits = NewBitList(0, 2048*64)
+	a.AggregationBits = NewBitList(0, 2048)
 	a.Data = &AttestationData{}
 	return ssz2.UnmarshalSSZ(buf, 0, a.AggregationBits, a.Data, &a.InclusionDelay, &a.ProposerIndex)
 }
@@ -77,7 +77,7 @@ func (p *PendingAttestation) UnmarshalJSON(data []byte) error {
 		ProposerIndex   uint64           `json:"proposer_index,string"`
 	}
 	var temp tempPendingAttestation
-	temp.AggregationBits = NewBitList(0, 2048*64)
+	temp.AggregationBits = NewBitList(0, 2048)
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return err
 	}
