@@ -29,6 +29,7 @@ var (
 
 type TxMessage struct {
 	MessageID sentryproto.MessageId
+	Payload   []byte
 }
 
 type p2pClient struct {
@@ -196,6 +197,7 @@ func (p *p2pClient) serve(conn sentryproto.Sentry_MessagesClient, gotTxCh chan<-
 
 		gotTxCh <- TxMessage{
 			MessageID: req.Id,
+			Payload:   req.Data,
 		}
 	}
 }
