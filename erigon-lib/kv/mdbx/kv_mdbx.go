@@ -913,11 +913,10 @@ func (tx *MdbxTx) Commit() error {
 
 	if tx.db.opts.metrics {
 		dbLabel := tx.db.opts.label
-		kv.MDBXSummaries[dbLabel].DbCommitPreparation.Observe(latency.Preparation.Seconds())
-		kv.MDBXSummaries[dbLabel].DbCommitWrite.Observe(latency.Write.Seconds())
-		kv.MDBXSummaries[dbLabel].DbCommitSync.Observe(latency.Sync.Seconds())
-		kv.MDBXSummaries[dbLabel].DbCommitEnding.Observe(latency.Ending.Seconds())
-		kv.MDBXSummaries[dbLabel].DbCommitTotal.Observe(latency.Whole.Seconds())
+		err = kv.RecordSummaries(dbLabel, latency)
+		if err != nil {
+			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
+		}
 
 		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
 		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
