@@ -411,7 +411,7 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (Message, error) {
+func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -426,12 +426,12 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (Mes
 	}
 
 	if !rules.IsBerlin {
-		return msg, errors.New("eip-2930 transactions require Berlin")
+		return nil, errors.New("eip-2930 transactions require Berlin")
 	}
 
 	var err error
 	msg.from, err = tx.Sender(s)
-	return msg, err
+	return &msg, err
 }
 
 func (tx *AccessListTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
