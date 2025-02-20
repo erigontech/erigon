@@ -33,7 +33,7 @@ import (
 type rangeIndexTest struct {
 	index  RangeIndex
 	ctx    context.Context
-	logger log.Logger
+	logger log.LoggerI
 }
 
 func newRangeIndexTest(t *testing.T) rangeIndexTest {

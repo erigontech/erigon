@@ -105,7 +105,7 @@ func (p *SubPool) Len() int {
 	return p.best.Len()
 }
 
-func (p *SubPool) Add(i *metaTxn, reason string, logger log.Logger) {
+func (p *SubPool) Add(i *metaTxn, reason string, logger log.LoggerI) {
 	if i.TxnSlot.Traced {
 		logger.Info(fmt.Sprintf("TX TRACING: added to subpool %s", p.t), "idHash", fmt.Sprintf("%x", i.TxnSlot.IDHash), "sender", i.TxnSlot.SenderID, "nonce", i.TxnSlot.Nonce, "reason", reason)
 	}
@@ -114,7 +114,7 @@ func (p *SubPool) Add(i *metaTxn, reason string, logger log.Logger) {
 	heap.Push(p.worst, i)
 }
 
-func (p *SubPool) Remove(i *metaTxn, reason string, logger log.Logger) {
+func (p *SubPool) Remove(i *metaTxn, reason string, logger log.LoggerI) {
 	if i.TxnSlot.Traced {
 		logger.Info(fmt.Sprintf("TX TRACING: removed from subpool %s", p.t), "idHash", fmt.Sprintf("%x", i.TxnSlot.IDHash), "sender", i.TxnSlot.SenderID, "nonce", i.TxnSlot.Nonce, "reason", reason)
 	}

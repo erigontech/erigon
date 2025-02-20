@@ -54,10 +54,10 @@ type SentinelServer struct {
 	sentinel       *sentinel.Sentinel
 	gossipNotifier *gossipNotifier
 
-	logger log.Logger
+	logger log.LoggerI
 }
 
-func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.Logger) *SentinelServer {
+func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.LoggerI) *SentinelServer {
 	return &SentinelServer{
 		sentinel:       sentinel,
 		ctx:            ctx,

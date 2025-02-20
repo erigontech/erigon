@@ -60,7 +60,7 @@ func (m VirtualMemStat) Fields() []interface{} {
 	return s
 }
 
-func LogMemStats(ctx context.Context, logger log.Logger) {
+func LogMemStats(ctx context.Context, logger log.LoggerI) {
 	logEvery := time.NewTicker(180 * time.Second)
 	defer logEvery.Stop()
 

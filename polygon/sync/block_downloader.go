@@ -46,7 +46,7 @@ const (
 )
 
 func NewBlockDownloader(
-	logger log.Logger,
+	logger log.LoggerI,
 	p2pService p2pService,
 	waypointReader waypointReader,
 	checkpointVerifier WaypointHeadersVerifier,
@@ -77,7 +77,7 @@ func NewBlockDownloader(
 }
 
 type BlockDownloader struct {
-	logger             log.Logger
+	logger             log.LoggerI
 	p2pService         p2pService
 	waypointReader     waypointReader
 	checkpointVerifier WaypointHeadersVerifier

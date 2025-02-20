@@ -41,7 +41,7 @@ type eventFetcher interface {
 
 type ServiceConfig struct {
 	Store        Store
-	Logger       log.Logger
+	Logger       log.LoggerI
 	BorConfig    *borcfg.BorConfig
 	EventFetcher eventFetcher
 }
@@ -60,7 +60,7 @@ func NewService(config ServiceConfig) *Service {
 
 type Service struct {
 	store           Store
-	logger          log.Logger
+	logger          log.LoggerI
 	borConfig       *borcfg.BorConfig
 	eventFetcher    eventFetcher
 	reader          *Reader

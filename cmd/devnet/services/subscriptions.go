@@ -94,7 +94,7 @@ func subscribe(client *rpc.Client, method requests.SubMethod, args ...interface{
 	return methodSub, nil
 }
 
-func subscribeToMethod(target string, method requests.SubMethod, logger log.Logger) (*Subscription, error) {
+func subscribeToMethod(target string, method requests.SubMethod, logger log.LoggerI) (*Subscription, error) {
 	client, err := rpc.DialWebsocket(context.Background(), "ws://"+target, "", logger)
 
 	if err != nil {

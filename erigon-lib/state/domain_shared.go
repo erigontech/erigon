@@ -23,13 +23,14 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/trie"
@@ -86,7 +87,7 @@ type SharedDomains struct {
 	aggTx  *AggregatorRoTx
 	sdCtx  *SharedDomainsCommitmentContext
 	roTx   kv.Tx
-	logger log.Logger
+	logger log.LoggerI
 
 	txNum    uint64
 	blockNum atomic.Uint64
@@ -112,7 +113,7 @@ type HasAgg interface {
 	Agg() any
 }
 
-func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
+func NewSharedDomains(tx kv.Tx, logger log.LoggerI) (*SharedDomains, error) {
 
 	sd := &SharedDomains{
 		logger:  logger,

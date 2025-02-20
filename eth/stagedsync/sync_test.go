@@ -37,7 +37,7 @@ func TestStagesSuccess(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Headers)
 				return nil
 			},
@@ -45,7 +45,7 @@ func TestStagesSuccess(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Bodies)
 				return nil
 			},
@@ -53,7 +53,7 @@ func TestStagesSuccess(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from txn signatures",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Senders)
 				return nil
 			},
@@ -76,7 +76,7 @@ func TestDisabledStages(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Headers)
 				return nil
 			},
@@ -84,7 +84,7 @@ func TestDisabledStages(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Bodies)
 				return nil
 			},
@@ -93,7 +93,7 @@ func TestDisabledStages(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from txn signatures",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Senders)
 				return nil
 			},
@@ -117,7 +117,7 @@ func TestErroredStage(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Headers)
 				return nil
 			},
@@ -125,7 +125,7 @@ func TestErroredStage(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Bodies)
 				return expectedErr
 			},
@@ -133,7 +133,7 @@ func TestErroredStage(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from txn signatures",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Senders)
 				return nil
 			},
@@ -157,14 +157,14 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
 					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, unwindOf(stages.Headers))
 				return u.Done(txc.Tx)
 			},
@@ -172,14 +172,14 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
 					return s.Update(txc.Tx, 1000)
 				}
 				return nil
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, unwindOf(stages.Bodies))
 				return u.Done(txc.Tx)
 			},
@@ -187,7 +187,7 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from txn signatures",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				if s.BlockNumber == 0 {
 					if err := s.Update(txc.Tx, 1700); err != nil {
 						return err
@@ -201,7 +201,7 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				}
 				return nil
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, unwindOf(stages.Senders))
 				return u.Done(txc.Tx)
 			},
@@ -240,14 +240,14 @@ func TestUnwind(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
 					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, unwindOf(stages.Headers))
 				return u.Done(txc.Tx)
 			},
@@ -255,14 +255,14 @@ func TestUnwind(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
 					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, unwindOf(stages.Bodies))
 				return u.Done(txc.Tx)
 			},
@@ -270,7 +270,7 @@ func TestUnwind(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from txn signatures",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
@@ -279,7 +279,7 @@ func TestUnwind(t *testing.T) {
 				}
 				return nil
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, unwindOf(stages.Senders))
 				return u.Done(txc.Tx)
 			},
@@ -333,14 +333,14 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
 					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, unwindOf(stages.Headers))
 				return u.Done(txc.Tx)
 			},
@@ -348,7 +348,7 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
 					return s.Update(txc.Tx, 2000)
@@ -359,7 +359,7 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from txn signatures",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
@@ -368,7 +368,7 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 				}
 				return nil
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, unwindOf(stages.Senders))
 				return u.Done(txc.Tx)
 			},
@@ -407,7 +407,7 @@ func TestSyncDoTwice(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Headers)
 				return s.Update(txc.Tx, s.BlockNumber+100)
 			},
@@ -415,7 +415,7 @@ func TestSyncDoTwice(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Bodies)
 				return s.Update(txc.Tx, s.BlockNumber+200)
 			},
@@ -423,7 +423,7 @@ func TestSyncDoTwice(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from txn signatures",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Senders)
 				return s.Update(txc.Tx, s.BlockNumber+300)
 			},
@@ -465,7 +465,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Headers)
 				return nil
 			},
@@ -473,7 +473,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Bodies)
 				return expectedErr
 			},
@@ -481,7 +481,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from txn signatures",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Senders)
 				return nil
 			},
@@ -517,14 +517,14 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
 					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, unwindOf(stages.Headers))
 				return u.Done(txc.Tx)
 			},
@@ -532,14 +532,14 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
 					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, unwindOf(stages.Bodies))
 				return u.Done(txc.Tx)
 			},
@@ -547,7 +547,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from txn signatures",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
@@ -556,7 +556,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 				}
 				return nil
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				flow = append(flow, unwindOf(stages.Senders))
 				if !interrupted {
 					interrupted = true

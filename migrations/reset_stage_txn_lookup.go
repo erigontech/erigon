@@ -28,7 +28,7 @@ import (
 // for new txn index.
 var ResetStageTxnLookup = Migration{
 	Name: "reset_stage_txn_lookup",
-	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.LoggerI) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			return err

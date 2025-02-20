@@ -74,7 +74,7 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
+func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.LoggerI) *RoSnapshots {
 	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, coresnaptype.BlockSnapshotTypes, segmentsMin, true, logger)}
 }
 
@@ -156,7 +156,7 @@ type BlockRetire struct {
 	db      kv.RoDB
 
 	notifier    services.DBEventNotifier
-	logger      log.Logger
+	logger      log.LoggerI
 	blockReader services.FullBlockReader
 	blockWriter *blockio.BlockWriter
 	dirs        datadir.Dirs
@@ -179,7 +179,7 @@ func NewBlockRetire(
 	config *ethconfig.Config,
 	notifier services.DBEventNotifier,
 	snBuildAllowed *semaphore.Weighted,
-	logger log.Logger,
+	logger log.LoggerI,
 ) *BlockRetire {
 	return &BlockRetire{
 		workers:        compressWorkers,
@@ -475,7 +475,7 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	return nil
 }
 
-func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.LoggerI, blockReader services.FullBlockReader) error {
 	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, coresnaptype.Enums.Headers, chainConfig) {
 		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, coresnaptype.Enums.Headers, chainConfig), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
@@ -487,7 +487,7 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *cha
 	return nil
 }
 
-func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger) (lastTxNum uint64, err error) {
+func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.LoggerI) (lastTxNum uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -510,7 +510,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 }
 
 type firstKeyGetter func(ctx context.Context) uint64
-type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collecter func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
+type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collecter func(v []byte) error, workers int, lvl log.Lvl, logger log.LoggerI) (uint64, error)
 
 var BlockCompressCfg = seg.Cfg{
 	MinPatternScore: 1_000,
@@ -523,7 +523,7 @@ var BlockCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
-func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.LoggerI) (uint64, error) {
 	var lastKeyValue uint64
 
 	compressCfg := BlockCompressCfg
@@ -576,7 +576,7 @@ var bufPool = sync.Pool{
 
 // DumpTxs - [from, to)
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
-func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (lastTx uint64, err error) {
+func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.LoggerI) (lastTx uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	warmupCtx, cancel := context.WithCancel(ctx)
@@ -773,7 +773,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 }
 
 // DumpHeaders - [from, to)
-func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.LoggerI) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -826,7 +826,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 }
 
 // DumpBodies - [from, to)
-func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, firstTxNum firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, firstTxNum firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.LoggerI) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 

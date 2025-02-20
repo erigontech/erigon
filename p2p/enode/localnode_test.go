@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-func newLocalNodeForTesting(tmpDir string, logger log.Logger) (*LocalNode, *DB) {
+func newLocalNodeForTesting(tmpDir string, logger log.LoggerI) (*LocalNode, *DB) {
 	db, err := OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)

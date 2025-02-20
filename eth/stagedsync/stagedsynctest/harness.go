@@ -171,7 +171,7 @@ func (hc *HarnessCfg) GetOrCreateDefaultHeimdallProducersOverride() map[uint64][
 }
 
 type Harness struct {
-	logger                     log.Logger
+	logger                     log.LoggerI
 	chainDataDB                kv.RwDB
 	borConsensusDB             kv.RwDB
 	chainConfig                *chain.Config
@@ -195,7 +195,7 @@ type Harness struct {
 	genesisInitData            *genesisInitData
 }
 
-func (h *Harness) Logger() log.Logger {
+func (h *Harness) Logger() log.LoggerI {
 	return h.logger
 }
 

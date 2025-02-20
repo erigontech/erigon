@@ -23,14 +23,14 @@ type SnapshotsRepository struct {
 	blockSnapshots *freezeblocks.RoSnapshots
 	stateSnapshots *state.Aggregator
 
-	logger log.Logger
+	logger log.LoggerI
 }
 
 func NewSnapshotsRepository(
 	silkworm *Silkworm,
 	blockSnapshots *freezeblocks.RoSnapshots,
 	stateSnapshots *state.Aggregator,
-	logger log.Logger,
+	logger log.LoggerI,
 ) *SnapshotsRepository {
 	return &SnapshotsRepository{
 		silkworm,

@@ -150,7 +150,7 @@ func init() {
 	rootCmd.AddCommand(loopExecCmd)
 }
 
-func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx context.Context, logger1 log.Logger) error {
+func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx context.Context, logger1 log.LoggerI) error {
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
@@ -192,7 +192,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, genesis, syncCfg, nil)
 
 	execUntilFunc := func(execToBlock uint64) stagedsync.ExecFunc {
-		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 			if err := stagedsync.SpawnExecuteBlocksStage(s, unwinder, txc, execToBlock, ctx, execCfg, logger); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
@@ -309,7 +309,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Coinbase() != (common2.Address{}) {
 			miner.MiningConfig.Etherbase = nextBlock.Coinbase()
 			miner.MiningConfig.ExtraData = nextBlock.Extra()
-			miningStages.MockExecFunc(stages.MiningCreateBlock, func(badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			miningStages.MockExecFunc(stages.MiningCreateBlock, func(badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, txc,
 					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, dirs.Tmp, br),
 					quit, logger)
@@ -387,7 +387,7 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *chain2.Config) {
 	}
 }
 
-func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
+func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log.LoggerI) error {
 	chainConfig := fromdb.ChainConfig(db)
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 	sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
@@ -424,7 +424,7 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, genesis, syncCfg, nil)
 
 	// set block limit of execute stage
-	sync.MockExecFunc(stages.Execution, func(badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+	sync.MockExecFunc(stages.Execution, func(badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 		if err = stagedsync.SpawnExecuteBlocksStage(stageState, sync, txc, to, ctx, cfg, logger); err != nil {
 			return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 		}

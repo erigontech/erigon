@@ -31,7 +31,7 @@ import (
 )
 
 func newSpanBlockProducersTracker(
-	logger log.Logger,
+	logger log.LoggerI,
 	borConfig *borcfg.BorConfig,
 	store EntityStore[*SpanBlockProducerSelection],
 ) *spanBlockProducersTracker {
@@ -51,7 +51,7 @@ func newSpanBlockProducersTracker(
 }
 
 type spanBlockProducersTracker struct {
-	logger           log.Logger
+	logger           log.LoggerI
 	borConfig        *borcfg.BorConfig
 	store            EntityStore[*SpanBlockProducerSelection]
 	recentSelections *lru.Cache[uint64, SpanBlockProducerSelection] // sprint number -> SpanBlockProducerSelection

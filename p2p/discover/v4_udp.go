@@ -78,7 +78,7 @@ const (
 type UDPv4 struct {
 	mutex       sync.Mutex
 	conn        UDPConn
-	log         log.Logger
+	log         log.LoggerI
 	netrestrict *netutil.Netlist
 	priv        *ecdsa.PrivateKey
 	localNode   *enode.LocalNode

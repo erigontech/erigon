@@ -62,7 +62,7 @@ func WithChaindataTables(defaultBuckets kv.TableCfg) kv.TableCfg {
 type MdbxOpts struct {
 	// must be in the range from 12.5% (almost empty) to 50% (half empty)
 	// which corresponds to the range from 8192 and to 32768 in units respectively
-	log             log.Logger
+	log             log.LoggerI
 	roTxsLimiter    *semaphore.Weighted
 	bucketsCfg      TableCfgFunc
 	path            string
@@ -84,7 +84,7 @@ type MdbxOpts struct {
 const DefaultMapSize = 2 * datasize.TB
 const DefaultGrowthStep = 1 * datasize.GB
 
-func New(label kv.Label, log log.Logger) MdbxOpts {
+func New(label kv.Label, log log.LoggerI) MdbxOpts {
 	opts := MdbxOpts{
 		bucketsCfg: WithChaindataTables,
 		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
@@ -431,7 +431,7 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 }
 
 type MdbxKV struct {
-	log          log.Logger
+	log          log.LoggerI
 	env          *mdbx.Env
 	buckets      kv.TableCfg
 	roTxsLimiter *semaphore.Weighted // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)

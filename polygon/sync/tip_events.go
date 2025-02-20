@@ -114,7 +114,7 @@ type heimdallObserverRegistrar interface {
 	RegisterMilestoneObserver(callback func(*heimdall.Milestone), opts ...heimdall.ObserverOption) event.UnregisterFunc
 }
 
-func NewTipEvents(logger log.Logger, p2pReg p2pObserverRegistrar, heimdallReg heimdallObserverRegistrar) *TipEvents {
+func NewTipEvents(logger log.LoggerI, p2pReg p2pObserverRegistrar, heimdallReg heimdallObserverRegistrar) *TipEvents {
 	heimdallEventsChannel := NewEventChannel[Event](10, WithEventChannelLogging(logger, log.LvlTrace, EventTopicHeimdall.String()))
 	p2pEventsChannel := NewEventChannel[Event](1000, WithEventChannelLogging(logger, log.LvlTrace, EventTopicP2P.String()))
 	compositeEventsChannel := NewTipEventsCompositeChannel(heimdallEventsChannel, p2pEventsChannel)
@@ -128,7 +128,7 @@ func NewTipEvents(logger log.Logger, p2pReg p2pObserverRegistrar, heimdallReg he
 }
 
 type TipEvents struct {
-	logger                    log.Logger
+	logger                    log.LoggerI
 	events                    *TipEventsCompositeChannel
 	p2pObserverRegistrar      p2pObserverRegistrar
 	heimdallObserverRegistrar heimdallObserverRegistrar
@@ -280,7 +280,7 @@ type blockEventKey struct {
 	blockNum  uint64
 }
 
-func newBlockEventsSpamGuard(logger log.Logger) blockEventsSpamGuard {
+func newBlockEventsSpamGuard(logger log.LoggerI) blockEventsSpamGuard {
 	// 1 key is 104 bytes, 10 keys is ~1KB, 10_000 keys is ~1MB
 	// assume 200 peers, that should be enough to keep roughly on average
 	// the last 50 messages from each peer - that should be plenty!
@@ -295,7 +295,7 @@ func newBlockEventsSpamGuard(logger log.Logger) blockEventsSpamGuard {
 }
 
 type blockEventsSpamGuard struct {
-	logger              log.Logger
+	logger              log.LoggerI
 	seenPeerBlockHashes *lru.Cache[blockEventKey, struct{}]
 }
 

@@ -170,7 +170,7 @@ func init() {
 	rootCmd.AddCommand(cmdFToMdbx)
 }
 
-func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
+func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log.LoggerI) error {
 	const ThreadsLimit = 5_000
 	dbOpts := mdbx2.New(kv.ChainDB, logger).Path(chaindata).Accede(true).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
 		WriteMap(dbWriteMap)
@@ -333,7 +333,7 @@ func compareBuckets(ctx context.Context, tx kv.Tx, b string, refTx kv.Tx, refB s
 	return nil
 }
 
-func fToMdbx(ctx context.Context, logger log.Logger, to string) error {
+func fToMdbx(ctx context.Context, logger log.LoggerI, to string) error {
 	file, err := os.Open(file)
 	if err != nil {
 		panic(err)

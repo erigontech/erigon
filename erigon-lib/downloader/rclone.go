@@ -94,7 +94,7 @@ type RCloneClient struct {
 	rclone        *exec.Cmd
 	rcloneUrl     string
 	rcloneSession *http.Client
-	logger        log.Logger
+	logger        log.LoggerI
 	bwLimit       *rate.Limit
 	optionsQueue  chan RCloneOptions
 }
@@ -104,7 +104,7 @@ type RCloneOptions struct {
 	BwLimitFile string `json:"BwLimitFile,omitempty"`
 }
 
-func (c *RCloneClient) start(logger log.Logger) error {
+func (c *RCloneClient) start(logger log.LoggerI) error {
 	c.logger = logger
 
 	rclone, _ := exec.LookPath("rclone")
@@ -384,7 +384,7 @@ type RCloneSession struct {
 var rcClient RCloneClient
 var rcClientStart sync.Once
 
-func NewRCloneClient(logger log.Logger) (*RCloneClient, error) {
+func NewRCloneClient(logger log.LoggerI) (*RCloneClient, error) {
 	var err error
 
 	rcClientStart.Do(func() {

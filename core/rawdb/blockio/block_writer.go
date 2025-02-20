@@ -48,7 +48,7 @@ func NewBlockWriter() *BlockWriter {
 	return &BlockWriter{}
 }
 
-func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir string, from, to uint64, ctx context.Context, logger log.Logger) error {
+func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir string, from, to uint64, ctx context.Context, logger log.LoggerI) error {
 	startKey := make([]byte, 8)
 	binary.BigEndian.PutUint64(startKey, from)
 	endKey := dbutils.HeaderKey(to, common.Hash{}) // etl.Tranform uses ExractEndKey as exclusive bound, therefore +1

@@ -527,7 +527,7 @@ type handshakeTestNode struct {
 	c  *Codec
 }
 
-func newHandshakeTest(tmpDir string, logger log.Logger) *handshakeTest {
+func newHandshakeTest(tmpDir string, logger log.LoggerI) *handshakeTest {
 	t := new(handshakeTest)
 	t.nodeA.init(testKeyA, net.IP{127, 0, 0, 1}, &t.clock, tmpDir, logger)
 	t.nodeB.init(testKeyB, net.IP{127, 0, 0, 1}, &t.clock, tmpDir, logger)
@@ -539,7 +539,7 @@ func (t *handshakeTest) close() {
 	t.nodeB.ln.Database().Close()
 }
 
-func (n *handshakeTestNode) init(key *ecdsa.PrivateKey, ip net.IP, clock mclock.Clock, tmpDir string, logger log.Logger) {
+func (n *handshakeTestNode) init(key *ecdsa.PrivateKey, ip net.IP, clock mclock.Clock, tmpDir string, logger log.LoggerI) {
 	db, err := enode.OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)

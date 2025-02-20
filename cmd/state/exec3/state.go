@@ -48,7 +48,7 @@ var noop = state.NewNoopWriter()
 
 type Worker struct {
 	lock        sync.Locker
-	logger      log.Logger
+	logger      log.LoggerI
 	chainDb     kv.RoDB
 	chainTx     kv.TemporalTx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
@@ -78,7 +78,7 @@ type Worker struct {
 	isMining bool
 }
 
-func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, isMining bool) *Worker {
+func NewWorker(lock sync.Locker, logger log.LoggerI, ctx context.Context, background bool, chainDb kv.RoDB, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, isMining bool) *Worker {
 	w := &Worker{
 		lock:        lock,
 		logger:      logger,
@@ -309,7 +309,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 	}
 }
 
-func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
+func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.LoggerI, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultChSize := workerCount * 8

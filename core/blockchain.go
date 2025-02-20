@@ -89,7 +89,7 @@ func ExecuteBlockEphemerally(
 	engine consensus.Engine, block *types.Block,
 	stateReader state.StateReader, stateWriter state.WriterWithChangeSets,
 	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
-	logger log.Logger,
+	logger log.LoggerI,
 ) (*EphemeralExecResult, error) {
 
 	defer blockExecutionTimer.ObserveDuration(time.Now())
@@ -215,7 +215,7 @@ func ExecuteBlockEphemerally(
 	return execRs, nil
 }
 
-func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {
+func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.LoggerI) {
 	if len(receipts) == 0 {
 		// no-op, can happen if vmConfig.NoReceipts=true or vmConfig.StatelessExec=true
 		return
@@ -328,7 +328,7 @@ func FinalizeBlockExecution(
 	ibs *state.IntraBlockState, receipts types.Receipts,
 	withdrawals []*types.Withdrawal, chainReader consensus.ChainReader,
 	isMining bool,
-	logger log.Logger,
+	logger log.LoggerI,
 ) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, retRequests types.FlatRequests, err error) {
 	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
@@ -356,7 +356,7 @@ func FinalizeBlockExecution(
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header,
-	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
+	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.LoggerI, tracer *tracing.Hooks,
 ) error {
 	engine.Initialize(cc, chain, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibState, header, engine, constCall)

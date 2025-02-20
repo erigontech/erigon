@@ -37,7 +37,7 @@ import (
 
 func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txPoolServer txpoolproto.TxpoolServer,
 	miningServer txpoolproto.MiningServer, bridgeServer *bridge.BackendServer, heimdallServer *heimdall.BackendServer,
-	addr string, rateLimit uint32, creds credentials.TransportCredentials, healthCheck bool, logger log.Logger) (*grpc.Server, error) {
+	addr string, rateLimit uint32, creds credentials.TransportCredentials, healthCheck bool, logger log.LoggerI) (*grpc.Server, error) {
 	logger.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {

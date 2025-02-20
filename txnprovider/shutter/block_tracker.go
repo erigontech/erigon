@@ -25,7 +25,7 @@ import (
 )
 
 type BlockTracker struct {
-	logger          log.Logger
+	logger          log.LoggerI
 	blockListener   BlockListener
 	blockChangeMu   *sync.Mutex
 	blockChangeCond *sync.Cond
@@ -33,7 +33,7 @@ type BlockTracker struct {
 	stopped         bool
 }
 
-func NewBlockTracker(logger log.Logger, blockListener BlockListener) BlockTracker {
+func NewBlockTracker(logger log.LoggerI, blockListener BlockListener) BlockTracker {
 	blockChangeMu := sync.Mutex{}
 	return BlockTracker{
 		logger:          logger,

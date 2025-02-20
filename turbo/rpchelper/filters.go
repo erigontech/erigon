@@ -65,7 +65,7 @@ type Filters struct {
 	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
-	logger             log.Logger
+	logger             log.LoggerI
 
 	config FiltersConfig
 }
@@ -73,7 +73,7 @@ type Filters struct {
 // New creates a new Filters instance, initializes it, and starts subscription goroutines for Ethereum events.
 // It requires a context, Ethereum backend, transaction pool client, mining client, snapshot callback function,
 // and a logger for logging events.
-func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func(), logger log.Logger) *Filters {
+func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func(), logger log.LoggerI) *Filters {
 	logger.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{

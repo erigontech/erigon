@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
-func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string, logger log.Logger) *types.Block {
+func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string, logger log.LoggerI) *types.Block {
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset

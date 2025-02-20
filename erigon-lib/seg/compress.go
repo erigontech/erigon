@@ -116,11 +116,11 @@ type Compressor struct {
 	Ratio            CompressionRatio
 	lvl              log.Lvl
 	trace            bool
-	logger           log.Logger
+	logger           log.LoggerI
 	noFsync          bool // fsync is enabled by default, but tests can manually disable
 }
 
-func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
+func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.LoggerI) (*Compressor, error) {
 	workers := cfg.Workers
 	dir2.MustExist(tmpDir)
 	dir, fileName := filepath.Split(outputFile)

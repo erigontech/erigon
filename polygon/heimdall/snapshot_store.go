@@ -86,7 +86,7 @@ func (s *SpanSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Span] {
 
 func (s *SpanSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
-		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.LoggerI) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
 				s.EntityStore.(*mdbxEntityStore[*Span]).db.RoDB(), chainConfig, collect, workers, lvl, logger)
 		})
@@ -193,7 +193,7 @@ func (s *SpanSnapshotStore) LastEntity(ctx context.Context) (*Span, bool, error)
 	return snapshotStoreLastEntity(ctx, s)
 }
 
-func (s *SpanSnapshotStore) ValidateSnapshots(logger log.Logger, failFast bool) error {
+func (s *SpanSnapshotStore) ValidateSnapshots(logger log.LoggerI, failFast bool) error {
 	return validateSnapshots(logger, failFast, s.snapshots, s.SnapType(), generics.New[Span])
 }
 
@@ -220,7 +220,7 @@ func (s *MilestoneSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Milestone] {
 
 func (s *MilestoneSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
-		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.LoggerI) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
 				s.EntityStore.(*mdbxEntityStore[*Milestone]).db.RoDB(), chainConfig, collect, workers, lvl, logger)
 		})
@@ -320,7 +320,7 @@ func (s *MilestoneSnapshotStore) LastEntity(ctx context.Context) (*Milestone, bo
 	return snapshotStoreLastEntity(ctx, s)
 }
 
-func (s *MilestoneSnapshotStore) ValidateSnapshots(logger log.Logger, failFast bool) error {
+func (s *MilestoneSnapshotStore) ValidateSnapshots(logger log.LoggerI, failFast bool) error {
 	return validateSnapshots(logger, failFast, s.snapshots, s.SnapType(), generics.New[Milestone])
 }
 
@@ -335,7 +335,7 @@ func NewCheckpointSnapshotStore(base EntityStore[*Checkpoint], snapshots *RoSnap
 
 func (s *CheckpointSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
-		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.LoggerI) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
 				s.EntityStore.(*mdbxEntityStore[*Checkpoint]).db.RoDB(), chainConfig, collect, workers, lvl, logger)
 		})
@@ -437,11 +437,11 @@ func (s *CheckpointSnapshotStore) LastEntity(ctx context.Context) (*Checkpoint, 
 	return snapshotStoreLastEntity(ctx, s)
 }
 
-func (s *CheckpointSnapshotStore) ValidateSnapshots(logger log.Logger, failFast bool) error {
+func (s *CheckpointSnapshotStore) ValidateSnapshots(logger log.LoggerI, failFast bool) error {
 	return validateSnapshots(logger, failFast, s.snapshots, s.SnapType(), generics.New[Checkpoint])
 }
 
-func validateSnapshots[T Entity](logger log.Logger, failFast bool, snaps *RoSnapshots, t snaptype.Type, makeEntity func() T) error {
+func validateSnapshots[T Entity](logger log.LoggerI, failFast bool, snaps *RoSnapshots, t snaptype.Type, makeEntity func() T) error {
 	tx := snaps.ViewType(t)
 	defer tx.Close()
 

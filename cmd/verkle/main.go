@@ -51,7 +51,7 @@ type optionsCfg struct {
 
 const DumpSize = uint64(20000000000)
 
-func IncrementVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+func IncrementVerkleTree(ctx context.Context, cfg optionsCfg, logger log.LoggerI) error {
 	start := time.Now()
 
 	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
@@ -105,7 +105,7 @@ func IncrementVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger)
 	return vTx.Commit()
 }
 
-func RegeneratePedersenHashstate(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+func RegeneratePedersenHashstate(ctx context.Context, cfg optionsCfg, logger log.LoggerI) error {
 	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
 	if err != nil {
 		logger.Error("Error while opening database", "err", err.Error())
@@ -147,7 +147,7 @@ func RegeneratePedersenHashstate(ctx context.Context, cfg optionsCfg, logger log
 	return vTx.Commit()
 }
 
-func GenerateVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+func GenerateVerkleTree(ctx context.Context, cfg optionsCfg, logger log.LoggerI) error {
 	start := time.Now()
 	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
 	if err != nil {
@@ -208,7 +208,7 @@ func GenerateVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) 
 	return vTx.Commit()
 }
 
-func analyseOut(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+func analyseOut(ctx context.Context, cfg optionsCfg, logger log.LoggerI) error {
 	db, err := openDB(ctx, cfg.verkleDb, logger, false)
 	if err != nil {
 		return err
@@ -358,7 +358,7 @@ func dump_acc_preimages(ctx context.Context, cfg optionsCfg) error {
 	return nil
 }
 
-func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.LoggerI) error {
 	db, err := openDB(ctx, cfg.stateDb, logger, false)
 	if err != nil {
 		return err
@@ -496,6 +496,6 @@ func main() {
 	}
 }
 
-func openDB(ctx context.Context, path string, logger log.Logger, accede bool) (kv.RwDB, error) {
+func openDB(ctx context.Context, path string, logger log.LoggerI, accede bool) (kv.RwDB, error) {
 	return mdbx.New(kv.ChainDB, logger).Path(path).Accede(accede).Open(ctx)
 }

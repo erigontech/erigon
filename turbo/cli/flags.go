@@ -268,7 +268,7 @@ var (
 	}
 )
 
-func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
+func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.LoggerI) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
@@ -465,13 +465,13 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	}
 }
 
-func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
+func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.LoggerI) {
 	setPrivateApi(ctx, cfg)
 	setEmbeddedRpcDaemon(ctx, cfg, logger)
 	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.Int(DatabaseVerbosityFlag.Name))
 }
 
-func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
+func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.LoggerI) {
 	jwtSecretPath := ctx.String(utils.JWTSecretPath.Name)
 	if jwtSecretPath == "" {
 		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"

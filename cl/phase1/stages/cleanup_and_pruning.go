@@ -8,7 +8,7 @@ import (
 )
 
 // cleanupAndPruning cleans up the database and prunes old data.
-func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+func cleanupAndPruning(ctx context.Context, logger log.LoggerI, cfg *Cfg, args Args) error {
 	tx, err := cfg.indiciesDB.BeginRw(ctx)
 	if err != nil {
 		return err

@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 )
 
-func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {
+func CompareAccountRange(logger log.LoggerI, erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {
 	err := os.RemoveAll(tmpDataDir)
 	if err != nil {
 		log.Error(err.Error())

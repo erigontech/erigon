@@ -99,7 +99,7 @@ type requestGenerator struct {
 	client             *http.Client
 	subscriptionClient *rpc.Client
 	requestClient      *rpc.Client
-	logger             log.Logger
+	logger             log.LoggerI
 	target             string
 }
 
@@ -300,7 +300,7 @@ func (req *requestGenerator) PingErigonRpc() PingResult {
 	return PingResult(res)
 }
 
-func NewRequestGenerator(target string, logger log.Logger) RequestGenerator {
+func NewRequestGenerator(target string, logger log.LoggerI) RequestGenerator {
 	// TODO
 	//rpc.DialHTTPWithClient(target, &http.Client{
 	//		Timeout: time.Second * 10,
@@ -327,7 +327,7 @@ func (req *requestGenerator) rpcClient(ctx context.Context) (*rpc.Client, error)
 	return req.requestClient, nil
 }
 
-func post(ctx context.Context, client *http.Client, url, method, request string, response interface{}, logger log.Logger) error {
+func post(ctx context.Context, client *http.Client, url, method, request string, response interface{}, logger log.LoggerI) error {
 	start := time.Now()
 
 	req, err := http.NewRequest("POST", url, strings.NewReader(request))

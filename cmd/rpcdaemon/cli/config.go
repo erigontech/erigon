@@ -309,7 +309,7 @@ func EmbeddedServices(ctx context.Context,
 	rpcFiltersConfig rpchelper.FiltersConfig,
 	blockReader services.FullBlockReader, ethBackendServer remote.ETHBACKENDServer, txPoolServer txpool.TxpoolServer,
 	miningServer txpool.MiningServer, stateDiffClient StateChangesClient,
-	logger log.Logger,
+	logger log.LoggerI,
 ) (eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, stateCache kvcache.Cache, ff *rpchelper.Filters) {
 	if stateCacheCfg.CacheSize > 0 {
 		// notification about new blocks (state stream) doesn't work now inside erigon - because
@@ -336,7 +336,7 @@ func EmbeddedServices(ctx context.Context,
 
 // RemoteServices - use when RPCDaemon run as independent process. Still it can use --datadir flag to enable
 // `cfg.WithDatadir` (mode when it on 1 machine with Erigon)
-func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
+func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.LoggerI, rootCancel context.CancelFunc) (
 	db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine consensus.EngineReader,
 	ff *rpchelper.Filters, bridgeReader BridgeReader, heimdallReader HeimdallReader, err error) {
@@ -650,7 +650,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	return db, eth, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err
 }
 
-func StartRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
+func StartRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.LoggerI) error {
 	if cfg.Enabled {
 		return startRegularRpcServer(ctx, cfg, rpcAPI, logger)
 	}
@@ -658,7 +658,7 @@ func StartRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API,
 	return nil
 }
 
-func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
+func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.LoggerI) error {
 	if len(rpcAPI) == 0 {
 		return nil
 	}
@@ -670,7 +670,7 @@ func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpC
 	return nil
 }
 
-func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
+func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.LoggerI) error {
 	// register apis and create handler stack
 	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
 
@@ -854,7 +854,7 @@ type engineInfo struct {
 	EngineHttpEndpoint string
 }
 
-func startAuthenticatedRpcServer(cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) (*engineInfo, error) {
+func startAuthenticatedRpcServer(cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.LoggerI) (*engineInfo, error) {
 	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
 
 	engineListener, engineSrv, engineHttpEndpoint, err := createEngineListener(cfg, rpcAPI, logger)
@@ -864,7 +864,7 @@ func startAuthenticatedRpcServer(cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger 
 	return &engineInfo{Srv: srv, EngineSrv: engineSrv, EngineListener: engineListener, EngineHttpEndpoint: engineHttpEndpoint}, nil
 }
 
-func stopAuthenticatedRpcServer(ctx context.Context, engineInfo *engineInfo, logger log.Logger) {
+func stopAuthenticatedRpcServer(ctx context.Context, engineInfo *engineInfo, logger log.LoggerI) {
 	defer func() {
 		engineInfo.Srv.Stop()
 		if engineInfo.EngineSrv != nil {
@@ -891,7 +891,7 @@ func isWebsocket(r *http.Request) bool {
 // ObtainJWTSecret loads the jwt-secret, either from the provided config,
 // or from the default location. If neither of those are present, it generates
 // a new secret and stores to the default location.
-func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
+func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.LoggerI) ([]byte, error) {
 	// try reading from file
 	logger.Info("Reading JWT secret", "path", cfg.JWTSecretPath)
 	// If we run the rpcdaemon and datadir is not specified we just use jwt.hex in current directory.
@@ -942,7 +942,7 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 	return handler, nil
 }
 
-func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.Logger) (*http.Server, *rpc.Server, string, error) {
+func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.LoggerI) (*http.Server, *rpc.Server, string, error) {
 	engineHttpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
 
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, true, logger, cfg.RPCSlowLogThreshold)
@@ -1008,7 +1008,7 @@ func (e *remoteConsensusEngine) validateEngineReady() error {
 // service startup or in a background goroutine, so that we do not depend on the liveness of other services when
 // starting up rpcdaemon and do not block startup (avoiding "cascade outage" scenario). In this case the DB dependency
 // can be a remote DB service running on another machine.
-func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockReader, remoteKV remote.KVClient, logger log.Logger) error {
+func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockReader, remoteKV remote.KVClient, logger log.LoggerI) error {
 	var cc *chain.Config
 
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -1104,7 +1104,7 @@ func (e *remoteConsensusEngine) Close() error {
 	return e.engine.Close()
 }
 
-func (e *remoteConsensusEngine) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+func (e *remoteConsensusEngine) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.LoggerI, tracer *tracing.Hooks) {
 	if err := e.validateEngineReady(); err != nil {
 		panic(err)
 	}
@@ -1140,11 +1140,11 @@ func (e *remoteConsensusEngine) Prepare(_ consensus.ChainHeaderReader, _ *types.
 	panic("remoteConsensusEngine.Prepare not supported")
 }
 
-func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, types.FlatRequests, error) {
+func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.LoggerI) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	panic("remoteConsensusEngine.Finalize not supported")
 }
 
-func (e *remoteConsensusEngine) FinalizeAndAssemble(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ consensus.Call, _ log.Logger) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
+func (e *remoteConsensusEngine) FinalizeAndAssemble(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ consensus.Call, _ log.LoggerI) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	panic("remoteConsensusEngine.FinalizeAndAssemble not supported")
 }
 

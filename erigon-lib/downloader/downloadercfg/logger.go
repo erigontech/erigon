@@ -139,10 +139,10 @@ func (b adapterHandler) Handle(r lg.Record) {
 }
 
 type RetryableHttpLogger struct {
-	l log.Logger
+	l log.LoggerI
 }
 
-func NewRetryableHttpLogger(l log.Logger) *RetryableHttpLogger {
+func NewRetryableHttpLogger(l log.LoggerI) *RetryableHttpLogger {
 	return &RetryableHttpLogger{l: l}
 }
 

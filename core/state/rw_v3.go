@@ -49,12 +49,12 @@ type StateV3 struct {
 
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
-	logger              log.Logger
+	logger              log.LoggerI
 
 	trace bool
 }
 
-func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
+func NewStateV3(domains *libstate.SharedDomains, logger log.LoggerI) *StateV3 {
 	return &StateV3{
 		domains:             domains,
 		triggers:            map[uint64]*TxTask{},

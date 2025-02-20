@@ -142,14 +142,14 @@ func (ec *EventChannel[TEvent]) Run(ctx context.Context) error {
 }
 
 type eventChannelOptions struct {
-	logger    log.Logger
+	logger    log.LoggerI
 	loggerLvl log.Lvl
 	loggerId  string
 }
 
 type EventChannelOption func(opts *eventChannelOptions)
 
-func WithEventChannelLogging(logger log.Logger, lvl log.Lvl, id string) EventChannelOption {
+func WithEventChannelLogging(logger log.LoggerI, lvl log.Lvl, id string) EventChannelOption {
 	return func(opts *eventChannelOptions) {
 		opts.logger = logger
 		opts.loggerLvl = lvl

@@ -51,7 +51,7 @@ var _ services.FullBlockReader = &RemoteBackend{}
 
 type RemoteBackend struct {
 	remoteEthBackend remote.ETHBACKENDClient
-	log              log.Logger
+	log              log.LoggerI
 	version          gointerfaces.Version
 	db               kv.RoDB
 	blockReader      services.FullBlockReader

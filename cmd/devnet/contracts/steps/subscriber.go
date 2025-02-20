@@ -126,7 +126,7 @@ func DeploySubsriptionContract(node devnet.Node, deployer common.Address) (types
 }
 
 // EmitFallbackEvent emits an event from the contract using the fallback method
-func EmitFallbackEvent(node devnet.Node, subContract *contracts.Subscription, opts *bind.TransactOpts, logger log.Logger) (common.Hash, error) {
+func EmitFallbackEvent(node devnet.Node, subContract *contracts.Subscription, opts *bind.TransactOpts, logger log.LoggerI) (common.Hash, error) {
 	logger.Info("EMITTING EVENT FROM FALLBACK...")
 
 	// adding one to the nonce before initiating another transaction

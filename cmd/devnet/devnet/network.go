@@ -43,7 +43,7 @@ import (
 type Network struct {
 	DataDir            string
 	Chain              string
-	Logger             log.Logger
+	Logger             log.LoggerI
 	BasePort           int
 	BasePrivateApiAddr string
 	BaseRPCHost        string

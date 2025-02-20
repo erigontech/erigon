@@ -398,7 +398,7 @@ func (c comparitor) chainConfig() *chain.Config {
 	return params.ChainConfigByChainName(c.chain)
 }
 
-func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2ents []fs.DirEntry, workers int, logger log.Logger) (time.Duration, time.Duration, time.Duration, error) {
+func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2ents []fs.DirEntry, workers int, logger log.LoggerI) (time.Duration, time.Duration, time.Duration, error) {
 	var downloadTime uint64
 	var compareTime uint64
 
@@ -575,7 +575,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 	return time.Duration(downloadTime), 0, time.Duration(compareTime), err
 }
 
-func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2ents []*BodyEntry, workers int, logger log.Logger) (time.Duration, time.Duration, time.Duration, error) {
+func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2ents []*BodyEntry, workers int, logger log.LoggerI) (time.Duration, time.Duration, time.Duration, error) {
 	var downloadTime uint64
 	var indexTime uint64
 	var compareTime uint64

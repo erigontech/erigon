@@ -235,7 +235,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 					return ChainTipSync
 				},
-				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+				ActionFunc: func(ctx context.Context, logger log.LoggerI, cfg *Cfg, args Args) error {
 					if err := saveHeadStateOnDiskIfNeeded(cfg, cfg.state); err != nil {
 						return err
 					}
@@ -310,7 +310,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 					return ChainTipSync
 				},
-				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+				ActionFunc: func(ctx context.Context, logger log.LoggerI, cfg *Cfg, args Args) error {
 					nextSlot := args.seenSlot + 1
 					nextSlotTime := cfg.ethClock.GetSlotTime(nextSlot)
 					time.Sleep(time.Until(nextSlotTime))

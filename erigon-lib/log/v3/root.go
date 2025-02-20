@@ -29,12 +29,12 @@ func init() {
 
 // New returns a new logger with the given context.
 // New is a convenient alias for Root().New
-func New(ctx ...interface{}) Logger {
+func New(ctx ...interface{}) LoggerI {
 	return root.New(ctx...)
 }
 
 // Root returns the root logger
-func Root() Logger {
+func Root() LoggerI {
 	return root
 }
 

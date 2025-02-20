@@ -53,11 +53,11 @@ type Client struct {
 	URL string
 
 	client *http.Client
-	logger log.Logger
+	logger log.LoggerI
 }
 
 // NewClient returns a new simulation API client
-func NewClient(url string, logger log.Logger) *Client {
+func NewClient(url string, logger log.LoggerI) *Client {
 	return &Client{
 		URL:    url,
 		client: http.DefaultClient,

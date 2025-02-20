@@ -215,7 +215,7 @@ func AwaitBlocks(ctx context.Context, sleepTime time.Duration) error {
 
 const gasPrice = 912_345_678
 
-func CreateManyEIP1559TransactionsRefWithBaseFee(ctx context.Context, to, from string, logger log.Logger) ([]types.Transaction, []types.Transaction, error) {
+func CreateManyEIP1559TransactionsRefWithBaseFee(ctx context.Context, to, from string, logger log.LoggerI) ([]types.Transaction, []types.Transaction, error) {
 	toAddress := libcommon.HexToAddress(to)
 	fromAddress := libcommon.HexToAddress(from)
 

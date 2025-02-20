@@ -117,7 +117,7 @@ func fetchWhitelistMilestone(ctx context.Context, heimdallClient heimdall.Client
 	return num, hash, nil
 }
 
-func fetchNoAckMilestone(ctx context.Context, heimdallClient heimdall.Client, logger log.Logger) (string, error) {
+func fetchNoAckMilestone(ctx context.Context, heimdallClient heimdall.Client, logger log.LoggerI) (string, error) {
 	var (
 		milestoneID string
 	)
@@ -136,7 +136,7 @@ func fetchNoAckMilestone(ctx context.Context, heimdallClient heimdall.Client, lo
 	return milestoneID, nil
 }
 
-func fetchNoAckMilestoneByID(ctx context.Context, heimdallClient heimdall.Client, milestoneID string, logger log.Logger) error {
+func fetchNoAckMilestoneByID(ctx context.Context, heimdallClient heimdall.Client, milestoneID string, logger log.LoggerI) error {
 	err := heimdallClient.FetchNoAckMilestone(ctx, milestoneID)
 	if errors.Is(err, heimdall.ErrServiceUnavailable) {
 		logger.Debug("[bor.heimdall] Failed to fetch no-ack milestone by ID", "milestoneID", milestoneID, "err", err)

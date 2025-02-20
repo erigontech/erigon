@@ -834,7 +834,7 @@ func safeSubClip(a, b int64) int64 {
 	return c
 }
 
-func GetUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*Validator, logger log.Logger) *ValidatorSet {
+func GetUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*Validator, logger log.LoggerI) *ValidatorSet {
 	v := oldValidatorSet
 	oldVals := v.Validators
 

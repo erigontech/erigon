@@ -530,7 +530,7 @@ type RoSnapshots struct {
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
-	logger      log.Logger
+	logger      log.LoggerI
 
 	// allows for pruning segments - this is the min availible segment
 	segmentsMin atomic.Uint64
@@ -544,11 +544,11 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
+func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.LoggerI) *RoSnapshots {
 	return newRoSnapshots(cfg, snapDir, types, segmentsMin, alignMin, logger)
 }
 
-func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
+func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.LoggerI) *RoSnapshots {
 	if cfg.ChainName == "" {
 		log.Debug("[dbg] newRoSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
@@ -1250,7 +1250,7 @@ type snapshotNotifier interface {
 	OnNewSnapshot()
 }
 
-func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, notifier snapshotNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
+func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, notifier snapshotNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.LoggerI) error {
 	if s.IndicesMax() >= s.SegmentsMax() {
 		return nil
 	}
@@ -1332,7 +1332,7 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	return nil
 }
 
-func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
+func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.LoggerI) error {
 	if s == nil {
 		return nil
 	}

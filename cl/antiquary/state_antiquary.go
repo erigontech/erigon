@@ -129,7 +129,7 @@ func (s *Antiquary) readHistoricalProcessingProgress(ctx context.Context) (progr
 	return
 }
 
-func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, stateSn *snapshotsync.CaplinStateSnapshots, validatorsTable *state_accessors.StaticValidatorTable) (bool, error) {
+func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.LoggerI, stateSn *snapshotsync.CaplinStateSnapshots, validatorsTable *state_accessors.StaticValidatorTable) (bool, error) {
 	if stateSn == nil || validatorsTable.Slot() != 0 {
 		return false, nil
 	}

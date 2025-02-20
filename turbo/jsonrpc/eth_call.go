@@ -361,7 +361,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	return api.getProof(ctx, &roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(latestBlock)), api.db, api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
+func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.LoggerI) (*accounts.AccProofResult, error) {
 	// get the root hash from header to validate proofs along the way
 	header, err := api._blockReader.HeaderByNumber(ctx, *roTx, blockNrOrHash.BlockNumber.Uint64())
 	if err != nil {
@@ -533,7 +533,7 @@ func verifyExecResult(execResult *core.EphemeralExecResult, block *types.Block) 
 	return nil
 }
 
-func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
+func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.LoggerI) (hexutil.Bytes, error) {
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
 		return nil, err

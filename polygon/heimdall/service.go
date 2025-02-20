@@ -40,11 +40,11 @@ type ServiceConfig struct {
 	Store     Store
 	BorConfig *borcfg.BorConfig
 	Client    Client
-	Logger    log.Logger
+	Logger    log.LoggerI
 }
 
 type Service struct {
-	logger                    log.Logger
+	logger                    log.LoggerI
 	store                     Store
 	reader                    *Reader
 	checkpointScraper         *Scraper[*Checkpoint]
@@ -109,7 +109,7 @@ func NewService(config ServiceConfig) *Service {
 	}
 }
 
-func NewCheckpointFetcher(client Client, logger log.Logger) *EntityFetcher[*Checkpoint] {
+func NewCheckpointFetcher(client Client, logger log.LoggerI) *EntityFetcher[*Checkpoint] {
 	return NewEntityFetcher(
 		"CheckpointFetcher",
 		func(ctx context.Context) (int64, error) {
@@ -124,7 +124,7 @@ func NewCheckpointFetcher(client Client, logger log.Logger) *EntityFetcher[*Chec
 	)
 }
 
-func NewMilestoneFetcher(client Client, logger log.Logger) *EntityFetcher[*Milestone] {
+func NewMilestoneFetcher(client Client, logger log.LoggerI) *EntityFetcher[*Milestone] {
 	return NewEntityFetcher(
 		"MilestoneFetcher",
 		client.FetchFirstMilestoneNum,
@@ -137,7 +137,7 @@ func NewMilestoneFetcher(client Client, logger log.Logger) *EntityFetcher[*Miles
 	)
 }
 
-func NewSpanFetcher(client Client, logger log.Logger) *EntityFetcher[*Span] {
+func NewSpanFetcher(client Client, logger log.LoggerI) *EntityFetcher[*Span] {
 	fetchLastEntityId := func(ctx context.Context) (int64, error) {
 		span, err := client.FetchLatestSpan(ctx)
 		if err != nil {

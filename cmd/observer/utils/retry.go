@@ -30,7 +30,7 @@ func Retry(
 	retryCount int,
 	delayForAttempt func(attempt int) time.Duration,
 	isRecoverableError func(error) bool,
-	logger log.Logger,
+	logger log.LoggerI,
 	opName string,
 	op func(context.Context) (interface{}, error),
 ) (interface{}, error) {

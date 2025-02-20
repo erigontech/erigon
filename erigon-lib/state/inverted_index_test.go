@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
+func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.LoggerI) (kv.RwDB, *InvertedIndex) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
 	keysTable := "Keys"
@@ -320,7 +320,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.Equal(t, float64(0), to)
 }
 
-func filledInvIndex(tb testing.TB, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
+func filledInvIndex(tb testing.TB, logger log.LoggerI) (kv.RwDB, *InvertedIndex, uint64) {
 	tb.Helper()
 	return filledInvIndexOfSize(tb, uint64(1000), 16, 31, logger)
 }
@@ -329,7 +329,7 @@ func filledInvIndex(tb testing.TB, logger log.Logger) (kv.RwDB, *InvertedIndex, 
 // Txs - amount of transactions to generate
 // AggStep - aggregation step for InvertedIndex
 // Module - amount of keys to generate
-func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
+func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log.LoggerI) (kv.RwDB, *InvertedIndex, uint64) {
 	tb.Helper()
 	db, ii := testDbAndInvertedIndex(tb, aggStep, logger)
 	ctx, require := context.Background(), require.New(tb)

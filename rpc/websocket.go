@@ -50,7 +50,7 @@ var wsBufferPool = new(sync.Pool)
 //
 // allowedOrigins should be a comma-separated list of allowed origin URLs.
 // To allow connections with any origin, pass "*".
-func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, compression bool, logger log.Logger) http.Handler {
+func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, compression bool, logger log.LoggerI) http.Handler {
 	upgrader := websocket.Upgrader{
 		EnableCompression: compression,
 		ReadBufferSize:    wsReadBuffer,
@@ -75,7 +75,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 // wsHandshakeValidator returns a handler that verifies the origin during the
 // websocket upgrade process. When a '*' is specified as an allowed origins all
 // connections are accepted.
-func wsHandshakeValidator(allowedOrigins []string, logger log.Logger) func(*http.Request) bool {
+func wsHandshakeValidator(allowedOrigins []string, logger log.LoggerI) func(*http.Request) bool {
 	origins := mapset.NewSet[string]()
 	allowAllOrigins := false
 
@@ -133,7 +133,7 @@ func (e wsHandshakeError) Unwrap() error {
 	return e.err
 }
 
-func originIsAllowed(allowedOrigins mapset.Set[string], browserOrigin string, logger log.Logger) bool {
+func originIsAllowed(allowedOrigins mapset.Set[string], browserOrigin string, logger log.LoggerI) bool {
 	it := allowedOrigins.Iterator()
 	for origin := range it.C {
 		if ruleAllowsOrigin(origin, browserOrigin, logger) {
@@ -143,7 +143,7 @@ func originIsAllowed(allowedOrigins mapset.Set[string], browserOrigin string, lo
 	return false
 }
 
-func ruleAllowsOrigin(allowedOrigin string, browserOrigin string, logger log.Logger) bool {
+func ruleAllowsOrigin(allowedOrigin string, browserOrigin string, logger log.LoggerI) bool {
 	var (
 		allowedScheme, allowedHostname, allowedPort string
 		browserScheme, browserHostname, browserPort string
@@ -194,7 +194,7 @@ func parseOriginURL(origin string) (string, string, string, error) {
 
 // DialWebsocketWithDialer creates a new RPC client that communicates with a JSON-RPC server
 // that is listening on the given endpoint using the provided dialer.
-func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, dialer websocket.Dialer, logger log.Logger) (*Client, error) {
+func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, dialer websocket.Dialer, logger log.LoggerI) (*Client, error) {
 	endpoint, header, err := wsClientHeaders(endpoint, origin)
 	if err != nil {
 		return nil, err
@@ -218,7 +218,7 @@ func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, diale
 //
 // The context is used for the initial connection establishment. It does not
 // affect subsequent interactions with the client.
-func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logger) (*Client, error) {
+func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.LoggerI) (*Client, error) {
 	dialer := websocket.Dialer{
 		ReadBufferSize:  wsReadBuffer,
 		WriteBufferSize: wsWriteBuffer,

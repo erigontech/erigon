@@ -56,7 +56,7 @@ type LocalNode struct {
 	entries   map[string]enr.Entry
 	endpoint4 lnEndpoint
 	endpoint6 lnEndpoint
-	logger    log.Logger
+	logger    log.LoggerI
 }
 
 type lnEndpoint struct {
@@ -66,7 +66,7 @@ type lnEndpoint struct {
 }
 
 // NewLocalNode creates a local node.
-func NewLocalNode(db *DB, key *ecdsa.PrivateKey, logger log.Logger) *LocalNode {
+func NewLocalNode(db *DB, key *ecdsa.PrivateKey, logger log.LoggerI) *LocalNode {
 	ln := &LocalNode{
 		id:      PubkeyToIDV4(&key.PublicKey),
 		db:      db,

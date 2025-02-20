@@ -105,7 +105,7 @@ type histCfg struct {
 	integrity rangeIntegrityChecker
 }
 
-func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
+func NewHistory(cfg histCfg, logger log.LoggerI) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {

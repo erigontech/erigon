@@ -67,12 +67,12 @@ type Oracle struct {
 	percentile                        int
 	maxHeaderHistory, maxBlockHistory int
 
-	log log.Logger
+	log log.LoggerI
 }
 
 // NewOracle returns a new gasprice oracle which can recommend suitable
 // gasprice for newly created transaction.
-func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, log log.Logger) *Oracle {
+func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, log log.LoggerI) *Oracle {
 	blocks := params.Blocks
 	if blocks < 1 {
 		blocks = 1
@@ -173,11 +173,11 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 type transactionsByGasPrice struct {
 	txs     []types.Transaction
 	baseFee *uint256.Int
-	log     log.Logger
+	log     log.LoggerI
 }
 
 func newTransactionsByGasPrice(txs []types.Transaction,
-	baseFee *uint256.Int, log log.Logger) transactionsByGasPrice {
+	baseFee *uint256.Int, log log.LoggerI) transactionsByGasPrice {
 	return transactionsByGasPrice{
 		txs:     txs,
 		baseFee: baseFee,
@@ -294,7 +294,7 @@ func (s *sortingHeap) Pop() interface{} {
 }
 
 // setBorDefaultGpoIgnorePrice enforces gpo IgnorePrice to be equal to BorDefaultGpoIgnorePrice (25gwei by default)
-func setBorDefaultGpoIgnorePrice(chainConfig *chain.Config, gasPriceConfig gaspricecfg.Config, log log.Logger) {
+func setBorDefaultGpoIgnorePrice(chainConfig *chain.Config, gasPriceConfig gaspricecfg.Config, log log.LoggerI) {
 	if chainConfig.Bor != nil && gasPriceConfig.IgnorePrice != gaspricecfg.BorDefaultGpoIgnorePrice {
 		log.Warn("Sanitizing invalid bor gasprice oracle ignore price", "provided", gasPriceConfig.IgnorePrice, "updated", gaspricecfg.BorDefaultGpoIgnorePrice)
 		gasPriceConfig.IgnorePrice = gaspricecfg.BorDefaultGpoIgnorePrice

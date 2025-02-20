@@ -133,7 +133,7 @@ var DomainCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
-func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg domainCfg, logger log.LoggerI) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
@@ -1272,7 +1272,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 	}
 }
 
-func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.LoggerI) error {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {

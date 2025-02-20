@@ -30,7 +30,7 @@ import (
 
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
 // It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
-func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
+func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.LoggerI, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
 	if err = cfg.syncedData.ViewHeadState(func(prevHeadState *state.CachingBeaconState) error {
 		// Get the current head of the fork choice
 		headRoot, headSlot, err = cfg.forkChoice.GetHead(prevHeadState)
@@ -294,7 +294,7 @@ func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) 
 
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
-func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
+func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.LoggerI, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
 	// Retrieve the head state
 	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
 	if err != nil {
@@ -343,7 +343,7 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 }
 
 // doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,
-func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+func doForkchoiceRoutine(ctx context.Context, logger log.LoggerI, cfg *Cfg, args Args) error {
 	var (
 		headSlot uint64
 		headRoot common.Hash
@@ -379,7 +379,7 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 // we need to generate only one goroutine for pre-caching shuffled set
 var workingPreCacheNextShuffledValidatorSet atomic.Bool
 
-func preCacheNextShuffledValidatorSet(ctx context.Context, logger log.Logger, cfg *Cfg, b *state.CachingBeaconState) {
+func preCacheNextShuffledValidatorSet(ctx context.Context, logger log.LoggerI, cfg *Cfg, b *state.CachingBeaconState) {
 	if workingPreCacheNextShuffledValidatorSet.Load() {
 		return
 	}

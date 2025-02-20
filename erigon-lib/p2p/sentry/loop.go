@@ -32,7 +32,7 @@ func ReconnectAndPumpStreamLoop[TMessage interface{}](
 	messageFactory MessageFactory[TMessage],
 	handleInboundMessage MessageHandler[TMessage],
 	wg *sync.WaitGroup,
-	logger log.Logger,
+	logger log.LoggerI,
 ) {
 	for ctx.Err() == nil {
 		if _, err := sentryClient.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
@@ -98,7 +98,7 @@ func pumpStreamLoop[TMessage interface{}](
 	messageFactory MessageFactory[TMessage],
 	handleInboundMessage MessageHandler[TMessage],
 	wg *sync.WaitGroup,
-	logger log.Logger,
+	logger log.LoggerI,
 ) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {

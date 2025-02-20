@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/turbo/debug"
 )
 
-func initDevnet(chainName string, dataDir string, producerCount int, gasLimit uint64, logger log.Logger, consoleLogLevel log.Lvl, dirLogLevel log.Lvl) (devnet.Devnet, error) {
+func initDevnet(chainName string, dataDir string, producerCount int, gasLimit uint64, logger log.LoggerI, consoleLogLevel log.Lvl, dirLogLevel log.Lvl) (devnet.Devnet, error) {
 	const baseRpcHost = "localhost"
 	const baseRpcPort = 9545
 

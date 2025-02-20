@@ -40,7 +40,7 @@ type HeimdallSimulator struct {
 	iterations               []uint64 // list of final block numbers for an iteration
 	lastAvailableBlockNumber uint64
 
-	logger log.Logger
+	logger log.LoggerI
 }
 
 var _ heimdall.Client = (*HeimdallSimulator)(nil)
@@ -136,7 +136,7 @@ func (heimdallStore) Prepare(ctx context.Context) error {
 func (heimdallStore) Close() {
 }
 
-func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger, iterations []uint64) (*HeimdallSimulator, error) {
+func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.LoggerI, iterations []uint64) (*HeimdallSimulator, error) {
 	snapshots := heimdall.NewRoSnapshots(ethconfig.Defaults.Snapshot, snapDir, 0, logger)
 
 	// index local files

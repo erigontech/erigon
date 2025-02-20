@@ -85,7 +85,7 @@ func Transform(
 	extractFunc ExtractFunc,
 	loadFunc LoadFunc,
 	args TransformArgs,
-	logger log.Logger,
+	logger log.LoggerI,
 ) error {
 	bufferSize := BufferOptimalSize
 	if args.BufferSize > 0 {
@@ -118,7 +118,7 @@ func extractBucketIntoFiles(
 	extractFunc ExtractFunc,
 	quit <-chan struct{},
 	additionalLogArguments AdditionalLogArguments,
-	logger log.Logger,
+	logger log.LoggerI,
 ) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()

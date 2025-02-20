@@ -48,7 +48,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	return br, bw
 }
 
-func ValidateTxLookups(chaindata string, logger log.Logger) error {
+func ValidateTxLookups(chaindata string, logger log.LoggerI) error {
 	db := mdbx.MustOpen(chaindata)
 	br, _ := blocksIO(db)
 	tx, err := db.BeginRo(context.Background())

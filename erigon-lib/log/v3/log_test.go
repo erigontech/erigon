@@ -22,7 +22,7 @@ func testHandler() (Handler, *Record) {
 	}), rec
 }
 
-func testLogger() (Logger, Handler, *Record) {
+func testLogger() (LoggerI, Handler, *Record) {
 	l := New()
 	h, r := testHandler()
 	l.SetHandler(LazyHandler(h))
@@ -84,7 +84,7 @@ func TestCtx(t *testing.T) {
 	}
 }
 
-func testFormatter(f Format) (Logger, *bytes.Buffer) {
+func testFormatter(f Format) (LoggerI, *bytes.Buffer) {
 	l := New()
 	var buf bytes.Buffer
 	l.SetHandler(StreamHandler(&buf, f))

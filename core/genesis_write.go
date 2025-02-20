@@ -69,11 +69,11 @@ var allocs embed.FS
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, dirs datadir.Dirs, logger log.LoggerI) (*chain.Config, *types.Block, error) {
 	return CommitGenesisBlockWithOverride(db, genesis, nil, dirs, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overridePragueTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overridePragueTime *big.Int, dirs datadir.Dirs, logger log.LoggerI) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
@@ -90,7 +90,7 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 	return c, b, nil
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *big.Int, dirs datadir.Dirs, logger log.LoggerI) (*chain.Config, *types.Block, error) {
 	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -188,7 +188,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 	return newCfg, storedBlock, nil
 }
 
-func WriteGenesisState(g *types.Genesis, tx kv.RwTx, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+func WriteGenesisState(g *types.Genesis, tx kv.RwTx, dirs datadir.Dirs, logger log.LoggerI) (*types.Block, *state.IntraBlockState, error) {
 	block, statedb, err := GenesisToBlock(g, dirs, logger)
 	if err != nil {
 		return nil, nil, err
@@ -207,7 +207,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, dirs datadir.Dirs, logger l
 	return block, statedb, nil
 }
 
-func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger log.Logger) *types.Block {
+func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger log.LoggerI) *types.Block {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
@@ -226,7 +226,7 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger l
 
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.LoggerI) (*types.Block, *state.IntraBlockState, error) {
 	block, statedb, err2 := WriteGenesisState(g, tx, dirs, logger)
 	if err2 != nil {
 		return block, statedb, err2
@@ -265,7 +265,7 @@ func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 }
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
-func GenesisBlockForTesting(db kv.RwDB, addr libcommon.Address, balance *big.Int, dirs datadir.Dirs, logger log.Logger) *types.Block {
+func GenesisBlockForTesting(db kv.RwDB, addr libcommon.Address, balance *big.Int, dirs datadir.Dirs, logger log.LoggerI) *types.Block {
 	g := types.Genesis{Alloc: types.GenesisAlloc{addr: {Balance: balance}}, Config: params.TestChainConfig}
 	block := MustCommitGenesis(&g, db, dirs, logger)
 	return block
@@ -276,7 +276,7 @@ type GenAccount struct {
 	Balance *big.Int
 }
 
-func GenesisWithAccounts(db kv.RwDB, accs []GenAccount, dirs datadir.Dirs, logger log.Logger) *types.Block {
+func GenesisWithAccounts(db kv.RwDB, accs []GenAccount, dirs datadir.Dirs, logger log.LoggerI) *types.Block {
 	g := types.Genesis{Config: params.TestChainConfig}
 	allocs := make(map[libcommon.Address]types.GenesisAccount)
 	for _, acc := range accs {
@@ -422,7 +422,7 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
-func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.LoggerI) (*types.Block, *state.IntraBlockState, error) {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}

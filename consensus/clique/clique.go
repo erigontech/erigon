@@ -196,12 +196,12 @@ type Clique struct {
 	FakeDiff bool // Skip difficulty verifications
 
 	exitCh chan struct{}
-	logger log.Logger
+	logger log.LoggerI
 }
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliqueDB kv.RwDB, logger log.Logger) *Clique {
+func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliqueDB kv.RwDB, logger log.LoggerI) *Clique {
 	config := cfg.Clique
 
 	// Set any missing consensus parameters to their defaults
@@ -367,7 +367,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 }
 
 func (c *Clique) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.LoggerI, tracer *tracing.Hooks) {
 }
 
 func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall,
@@ -379,7 +379,7 @@ func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, un
 // rewards given.
 func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.LoggerI,
 ) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	return txs, r, nil, nil
 }
@@ -387,7 +387,7 @@ func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *sta
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
 func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.LoggerI,
 ) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	// Assemble and return the final block for sealing
 	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals), txs, receipts, nil, nil

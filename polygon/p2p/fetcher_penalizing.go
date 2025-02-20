@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 )
 
-func NewPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer *PeerPenalizer) *PenalizingFetcher {
+func NewPenalizingFetcher(logger log.LoggerI, fetcher Fetcher, peerPenalizer *PeerPenalizer) *PenalizingFetcher {
 	fetchHeadersPenalizeErrs := []error{
 		&ErrTooManyHeaders{},
 		&ErrNonSequentialHeaderNumbers{},
@@ -55,7 +55,7 @@ func NewPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer *Pee
 
 type PenalizingFetcher struct {
 	Fetcher
-	logger                                 log.Logger
+	logger                                 log.LoggerI
 	peerPenalizer                          *PeerPenalizer
 	fetchHeadersPenalizeErrs               []error
 	fetchBodiesPenalizeErrs                []error

@@ -74,7 +74,7 @@ type UDPv5 struct {
 	priv         *ecdsa.PrivateKey
 	localNode    *enode.LocalNode
 	db           *enode.DB
-	log          log.Logger
+	log          log.LoggerI
 	clock        mclock.Clock
 	validSchemes enr.IdentityScheme
 

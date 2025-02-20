@@ -115,7 +115,7 @@ type RecSplit struct {
 	lessFalsePositives bool
 	built              bool // Flag indicating that the hash function has been built and no more keys can be added
 	trace              bool
-	logger             log.Logger
+	logger             log.LoggerI
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
@@ -149,7 +149,7 @@ const DefaultBucketSize = 100 // typical from 100 to 2000, with smaller buckets 
 // Typical bucket size is 100 - 2000, larger bucket sizes result in smaller representations of hash functions, at a cost of slower access
 // salt parameters is used to randomise the hash function construction, to ensure that different Erigon instances (nodes)
 // are likely to use different hash function, to collision attacks are unlikely to slow down any meaningful number of nodes at the same time
-func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
+func NewRecSplit(args RecSplitArgs, logger log.LoggerI) (*RecSplit, error) {
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
 	rs := &RecSplit{bucketSize: args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount), lvl: log.LvlDebug, logger: logger}
 	if len(args.StartSeed) == 0 {

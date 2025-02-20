@@ -81,7 +81,7 @@ type Params struct {
 	CustomBuckets kv.TableCfg
 }
 
-func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, error) {
+func NewNodConfigUrfave(ctx *cli.Context, logger log.LoggerI) (*nodecfg.Config, error) {
 	// If we're running a known preset, log it for convenience.
 	chain := ctx.String(utils.ChainFlag.Name)
 	switch chain {
@@ -116,7 +116,7 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, e
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig, logger)
 	return nodeConfig, nil
 }
-func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
+func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.LoggerI) *ethconfig.Config {
 	ethConfig := ethconfig.Defaults // Needs to be a copy, not pointer
 	utils.SetEthConfig(ctx, nodeConfig, &ethConfig, logger)
 	erigoncli.ApplyFlagsForEthConfig(ctx, &ethConfig, logger)
@@ -132,7 +132,7 @@ func New(
 	ctx context.Context,
 	nodeConfig *nodecfg.Config,
 	ethConfig *ethconfig.Config,
-	logger log.Logger,
+	logger log.LoggerI,
 ) (*ErigonNode, error) {
 	//prepareBuckets(optionalParams.CustomBuckets)
 	node, err := node.New(ctx, nodeConfig, logger)

@@ -34,7 +34,7 @@ import (
 
 type TxPoolService struct {
 	txpooproto.TxpoolClient
-	log     log.Logger
+	log     log.LoggerI
 	version gointerfaces.Version
 }
 

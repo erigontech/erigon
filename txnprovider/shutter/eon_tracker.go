@@ -42,7 +42,7 @@ type EonTracker interface {
 }
 
 type KsmEonTracker struct {
-	logger               log.Logger
+	logger               log.LoggerI
 	blockListener        BlockListener
 	contractBackend      bind.ContractBackend
 	ksmContract          *contracts.KeyperSetManager
@@ -54,7 +54,7 @@ type KsmEonTracker struct {
 	lastCleanupBlockNum  uint64
 }
 
-func NewKsmEonTracker(logger log.Logger, config Config, bl BlockListener, cb bind.ContractBackend) *KsmEonTracker {
+func NewKsmEonTracker(logger log.LoggerI, config Config, bl BlockListener, cb bind.ContractBackend) *KsmEonTracker {
 	ksmContractAddr := libcommon.HexToAddress(config.KeyperSetManagerContractAddress)
 	ksmContract, err := contracts.NewKeyperSetManager(ksmContractAddr, cb)
 	if err != nil {

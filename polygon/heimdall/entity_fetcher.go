@@ -33,7 +33,7 @@ type EntityFetcher[TEntity Entity] struct {
 	fetchEntitiesPage         func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error)
 	fetchEntitiesPageLimit    uint64
 	fetchAllEntitiesIdxOffset uint64
-	logger                    log.Logger
+	logger                    log.LoggerI
 }
 
 func NewEntityFetcher[TEntity Entity](
@@ -44,7 +44,7 @@ func NewEntityFetcher[TEntity Entity](
 	fetchEntitiesPage func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error),
 	fetchEntitiesPageLimit uint64,
 	fetchAllEntitiesIdxOffset uint64,
-	logger log.Logger,
+	logger log.LoggerI,
 ) *EntityFetcher[TEntity] {
 	return &EntityFetcher[TEntity]{
 		name:                      name,

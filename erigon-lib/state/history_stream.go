@@ -49,7 +49,7 @@ type HistoryRangeAsOfFiles struct {
 	k, v, kBackup, vBackup []byte
 	orderAscend            order.By
 
-	logger log.Logger
+	logger log.LoggerI
 	ctx    context.Context
 }
 
@@ -198,7 +198,7 @@ type HistoryRangeAsOfDB struct {
 	k, v, kBackup, vBackup []byte
 	err                    error
 
-	logger log.Logger
+	logger log.LoggerI
 	ctx    context.Context
 }
 

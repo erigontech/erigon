@@ -60,7 +60,7 @@ type EthBackendServer struct {
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 
 	logsFilter *LogsFilterAggregator
-	logger     log.Logger
+	logger     log.LoggerI
 }
 
 type EthBackend interface {
@@ -73,7 +73,7 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
-	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore,
+	logger log.LoggerI, latestBlockBuiltStore *builder.LatestBlockBuiltStore,
 ) *EthBackendServer {
 	s := &EthBackendServer{
 		ctx:                   ctx,

@@ -61,7 +61,7 @@ type rpcHandler struct {
 }
 
 type httpServer struct {
-	logger   log.Logger
+	logger   log.LoggerI
 	timeouts rpccfg.HTTPTimeouts
 	mux      http.ServeMux // registered handlers go here
 
@@ -86,7 +86,7 @@ type httpServer struct {
 	handlerNames map[string]string
 }
 
-func newHTTPServer(logger log.Logger, timeouts rpccfg.HTTPTimeouts) *httpServer {
+func newHTTPServer(logger log.LoggerI, timeouts rpccfg.HTTPTimeouts) *httpServer {
 	h := &httpServer{logger: logger, timeouts: timeouts, handlerNames: make(map[string]string)}
 
 	h.httpHandler.Store((*rpcHandler)(nil))
@@ -460,7 +460,7 @@ func newGzipHandler(next http.Handler) http.Handler {
 
 // RegisterApisFromWhitelist checks the given modules' availability, generates a whitelist based on the allowed modules,
 // and then registers all of the APIs exposed by the services.
-func RegisterApisFromWhitelist(apis []rpc.API, modules []string, srv *rpc.Server, exposeAll bool, logger log.Logger) error {
+func RegisterApisFromWhitelist(apis []rpc.API, modules []string, srv *rpc.Server, exposeAll bool, logger log.LoggerI) error {
 	if bad, available := checkModuleAvailability(modules, apis); len(bad) > 0 {
 		logger.Error("Non-existing modules in HTTP API list, please remove it", "non-existing", bad, "existing", available)
 	}

@@ -37,10 +37,10 @@ type Send struct {
 	ctx           context.Context
 	wg            *sync.WaitGroup
 	sentryClients []sentryproto.SentryClient // sentry clients that will be used for accessing the network
-	logger        log.Logger
+	logger        log.LoggerI
 }
 
-func NewSend(ctx context.Context, sentryClients []sentryproto.SentryClient, logger log.Logger, opts ...Option) *Send {
+func NewSend(ctx context.Context, sentryClients []sentryproto.SentryClient, logger log.LoggerI, opts ...Option) *Send {
 	options := applyOpts(opts...)
 	return &Send{
 		ctx:           ctx,

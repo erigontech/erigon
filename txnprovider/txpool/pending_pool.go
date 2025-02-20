@@ -75,7 +75,7 @@ func (p *PendingPool) Len() int {
 	return len(p.best.ms)
 }
 
-func (p *PendingPool) Remove(i *metaTxn, reason string, logger log.Logger) {
+func (p *PendingPool) Remove(i *metaTxn, reason string, logger log.LoggerI) {
 	if i.TxnSlot.Traced {
 		logger.Info(fmt.Sprintf("TX TRACING: removed from subpool %s", p.t), "idHash", fmt.Sprintf("%x", i.TxnSlot.IDHash), "sender", i.TxnSlot.SenderID, "nonce", i.TxnSlot.Nonce, "reason", reason)
 	}
@@ -88,7 +88,7 @@ func (p *PendingPool) Remove(i *metaTxn, reason string, logger log.Logger) {
 	i.currentSubPool = 0
 }
 
-func (p *PendingPool) Add(i *metaTxn, logger log.Logger) {
+func (p *PendingPool) Add(i *metaTxn, logger log.LoggerI) {
 	if i.TxnSlot.Traced {
 		logger.Info(fmt.Sprintf("TX TRACING: added to subpool %s, IdHash=%x, sender=%d, nonce=%d", p.t, i.TxnSlot.IDHash, i.TxnSlot.SenderID, i.TxnSlot.Nonce))
 	}

@@ -49,7 +49,7 @@ type Collector struct {
 	bufType       int
 	allFlushed    bool
 	autoClean     bool
-	logger        log.Logger
+	logger        log.LoggerI
 
 	// sortAndFlushInBackground increase insert performance, but make RAM use less-predictable:
 	//   - if disk is over-loaded - app may have much background threads which waiting for flush - and each thread whill hold own `buf` (can't free RAM until flush is done)
@@ -58,7 +58,7 @@ type Collector struct {
 }
 
 // NewCollectorFromFiles creates collector from existing files (left over from previous unsuccessful loading)
-func NewCollectorFromFiles(logPrefix, tmpdir string, logger log.Logger) (*Collector, error) {
+func NewCollectorFromFiles(logPrefix, tmpdir string, logger log.LoggerI) (*Collector, error) {
 	if _, err := os.Stat(tmpdir); os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -86,13 +86,13 @@ func NewCollectorFromFiles(logPrefix, tmpdir string, logger log.Logger) (*Collec
 }
 
 // NewCriticalCollector does not clean up temporary files if loading has failed
-func NewCriticalCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.Logger) *Collector {
+func NewCriticalCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.LoggerI) *Collector {
 	c := NewCollector(logPrefix, tmpdir, sortableBuffer, logger)
 	c.autoClean = false
 	return c
 }
 
-func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.Logger) *Collector {
+func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.LoggerI) *Collector {
 	return &Collector{autoClean: true, bufType: getTypeByBuffer(sortableBuffer), buf: sortableBuffer, logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
 }
 

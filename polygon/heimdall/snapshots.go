@@ -53,7 +53,7 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to] semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
+func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.LoggerI) *RoSnapshots {
 	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, SnapshotTypes(), segmentsMin, false, logger)}
 }
 
@@ -257,7 +257,7 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 }
 
 func RemoteEventCheckForBlock(header *types.Header, previousHeader *types.Header, chainId string, startEventId uint64, events []rlp.RawValue,
-	heimdallClient Client, config *borcfg.BorConfig, logger log.Logger) error {
+	heimdallClient Client, config *borcfg.BorConfig, logger log.LoggerI) error {
 
 	blockNum := header.Number.Uint64()
 

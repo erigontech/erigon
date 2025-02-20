@@ -48,7 +48,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
-func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.LoggerI) (err error) {
 	num := make([]byte, binary.MaxVarintLen64)
 	cfg := recsplit.RecSplitArgs{
 		Enums:      true,
@@ -145,7 +145,7 @@ type CaplinStateSnapshots struct {
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
-	logger      log.Logger
+	logger      log.LoggerI
 	// allows for pruning segments - this is the min availible segment
 	segmentsMin atomic.Uint64
 	// chain cfg
@@ -164,7 +164,7 @@ type SnapshotTypes struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, snapshotTypes SnapshotTypes, logger log.Logger) *CaplinStateSnapshots {
+func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, snapshotTypes SnapshotTypes, logger log.LoggerI) *CaplinStateSnapshots {
 	if cfg.ChainName == "" {
 		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
@@ -590,7 +590,7 @@ func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegme
 	return nil, false
 }
 
-func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGetter, fromSlot uint64, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger, compress bool) error {
+func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGetter, fromSlot uint64, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.LoggerI, compress bool) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.SnapCaplin
 
 	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
@@ -641,7 +641,7 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 	return simpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
 
-func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.LoggerI) (err error) {
 	num := make([]byte, binary.MaxVarintLen64)
 	cfg := recsplit.RecSplitArgs{
 		Enums:      true,
@@ -668,7 +668,7 @@ func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir st
 	return nil
 }
 
-func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
+func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.LoggerI) error {
 	fromSlot = (fromSlot / blocksPerFile) * blocksPerFile
 	toSlot = (toSlot / blocksPerFile) * blocksPerFile
 	for snapName, kvGetter := range s.snapshotTypes.KeyValueGetters {
@@ -687,7 +687,7 @@ func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, to
 	return nil
 }
 
-func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger log.Logger) error {
+func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger log.LoggerI) error {
 	if s == nil {
 		return nil
 	}

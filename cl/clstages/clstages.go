@@ -32,11 +32,11 @@ type StageGraph[CONFIG any, ARGUMENTS any] struct {
 
 type Stage[CONFIG any, ARGUMENTS any] struct {
 	Description    string
-	ActionFunc     func(ctx context.Context, logger log.Logger, cfg CONFIG, args ARGUMENTS) error
+	ActionFunc     func(ctx context.Context, logger log.LoggerI, cfg CONFIG, args ARGUMENTS) error
 	TransitionFunc func(cfg CONFIG, args ARGUMENTS, err error) string
 }
 
-func (s *StageGraph[CONFIG, ARGUMENTS]) StartWithStage(ctx context.Context, startStage string, logger log.Logger, cfg CONFIG) error {
+func (s *StageGraph[CONFIG, ARGUMENTS]) StartWithStage(ctx context.Context, startStage string, logger log.LoggerI, cfg CONFIG) error {
 	stageName := startStage
 	args := s.ArgsFunc(ctx, cfg)
 	for {

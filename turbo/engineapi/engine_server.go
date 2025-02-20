@@ -71,7 +71,7 @@ type EngineServer struct {
 
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
 	lock    sync.Mutex
-	logger  log.Logger
+	logger  log.LoggerI
 
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
 	// TODO Remove this on next release
@@ -80,7 +80,7 @@ type EngineServer struct {
 
 const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 
-func NewEngineServer(logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
+func NewEngineServer(logger log.LoggerI, config *chain.Config, executionService execution.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
 	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, consuming bool) *EngineServer {
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)

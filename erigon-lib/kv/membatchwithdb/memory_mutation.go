@@ -49,7 +49,7 @@ type MemoryMutation struct {
 // defer batch.Close()
 // ... some calculations on `batch`
 // batch.Commit()
-func NewMemoryBatch(tx kv.Tx, tmpDir string, logger log.Logger) *MemoryMutation {
+func NewMemoryBatch(tx kv.Tx, tmpDir string, logger log.LoggerI) *MemoryMutation {
 	tmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
 	memTx, err := tmpDB.BeginRw(context.Background()) // nolint:gocritic
 	if err != nil {

@@ -23,6 +23,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-lib/log/logger"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -58,20 +59,21 @@ func main() {
 }
 
 func runErigon(cliCtx *cli.Context) error {
-	var logger log.Logger
+	var _logger log.LoggerI
 	var err error
 	var metricsMux *http.ServeMux
 	var pprofMux *http.ServeMux
 
-	if logger, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if _logger, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
+	logger.SetLogger(_logger) // set global logger instance
 
 	// initializing the node and providing the current git commit there
 
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 	if params.VersionMajor == 3 {
-		logger.Info(`
+		_logger.Info(`
 	########b          oo                               d####b. 
 	##                                                      '## 
 	##aaaa    ##d###b. dP .d####b. .d####b. ##d###b.     aaad#' 
@@ -85,7 +87,7 @@ func runErigon(cliCtx *cli.Context) error {
 	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
 	erigonInfoGauge.Set(1)
 
-	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, logger)
+	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, _logger)
 	if err != nil {
 		return err
 	}
@@ -93,9 +95,9 @@ func runErigon(cliCtx *cli.Context) error {
 		return err
 	}
 
-	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
+	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, _logger)
 
-	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger)
+	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, _logger)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err

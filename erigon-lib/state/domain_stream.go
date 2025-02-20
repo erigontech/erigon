@@ -108,7 +108,7 @@ type DomainLatestIterFile struct {
 	nextKey, nextVal       []byte
 	k, v, kBackup, vBackup []byte
 
-	logger log.Logger
+	logger log.LoggerI
 }
 
 func (hi *DomainLatestIterFile) Close() {

@@ -70,7 +70,7 @@ func (c *testTransport) close(err error) {
 	c.closeErr = err
 }
 
-func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer), logger log.Logger) *Server {
+func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer), logger log.LoggerI) *Server {
 	config := Config{
 		Name:            "test",
 		MaxPeers:        10,
@@ -92,7 +92,7 @@ func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer), l
 	return server
 }
 
-func (srv *Server) TestStart(logger log.Logger) error {
+func (srv *Server) TestStart(logger log.LoggerI) error {
 	return srv.Start(context.Background(), logger)
 }
 

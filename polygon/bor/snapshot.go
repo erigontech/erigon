@@ -61,7 +61,7 @@ func NewSnapshot(
 	number uint64,
 	hash common.Hash,
 	validators []*valset.Validator,
-	logger log.Logger,
+	logger log.LoggerI,
 ) *Snapshot {
 	snap := &Snapshot{
 		config:       config,
@@ -152,7 +152,7 @@ func (s *Snapshot) copy() *Snapshot {
 	return cpy
 }
 
-func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger log.Logger) (*Snapshot, error) {
+func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger log.LoggerI) (*Snapshot, error) {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return s, nil

@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/params"
 )
 
-func mainWithFlags(ctx context.Context, flags observer.CommandFlags, logger log.Logger) error {
+func mainWithFlags(ctx context.Context, flags observer.CommandFlags, logger log.LoggerI) error {
 	server, err := observer.NewServer(ctx, flags, logger)
 	if err != nil {
 		return err

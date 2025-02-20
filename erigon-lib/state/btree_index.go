@@ -601,7 +601,7 @@ type BtIndexWriter struct {
 
 	built   bool
 	lvl     log.Lvl
-	logger  log.Logger
+	logger  log.LoggerI
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
@@ -618,7 +618,7 @@ type BtIndexWriterArgs struct {
 // Typical bucket size is 100 - 2048, larger bucket sizes result in smaller representations of hash functions, at a cost of slower access
 // salt parameters is used to randomise the hash function construction, to ensure that different Erigon instances (nodes)
 // are likely to use different hash function, to collision attacks are unlikely to slow down any meaningful number of nodes at the same time
-func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter, error) {
+func NewBtIndexWriter(args BtIndexWriterArgs, logger log.LoggerI) (*BtIndexWriter, error) {
 	if args.EtlBufLimit == 0 {
 		args.EtlBufLimit = etl.BufferOptimalSize / 2
 	}
@@ -773,7 +773,7 @@ type BtIndex struct {
 }
 
 // Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Decompressor, compressed seg.FileCompression, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool) (*BtIndex, error) {
+func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Decompressor, compressed seg.FileCompression, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.LoggerI, noFsync bool) (*BtIndex, error) {
 	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, ps, tmpdir, seed, logger, noFsync)
 	if err != nil {
 		return nil, err
@@ -796,7 +796,7 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed 
 	return kv, bt, nil
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, compression seg.FileCompression, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, compression seg.FileCompression, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.LoggerI, noFsync bool) error {
 	_, indexFileName := filepath.Split(indexPath)
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)

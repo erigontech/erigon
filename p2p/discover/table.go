@@ -80,7 +80,7 @@ type Table struct {
 
 	revalidateInterval time.Duration
 
-	log        log.Logger
+	log        log.LoggerI
 	db         *enode.DB // database of known nodes
 	net        transport
 	refreshReq chan chan struct{}
@@ -123,7 +123,7 @@ func newTable(
 	db *enode.DB,
 	bootnodes []*enode.Node,
 	revalidateInterval time.Duration,
-	logger log.Logger,
+	logger log.LoggerI,
 ) (*Table, error) {
 	tab := &Table{
 		net:                t,

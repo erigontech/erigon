@@ -36,10 +36,10 @@ type Reader struct {
 	config      *chain.Config
 	tx          kv.Tx
 	blockReader services.FullBlockReader
-	logger      log.Logger
+	logger      log.LoggerI
 }
 
-func NewReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader, logger log.Logger) *Reader {
+func NewReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader, logger log.LoggerI) *Reader {
 	return &Reader{config, tx, blockReader, logger}
 }
 

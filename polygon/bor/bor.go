@@ -336,7 +336,7 @@ type Bor struct {
 	fakeDiff bool // Skip difficulty verifications
 
 	closeOnce           sync.Once
-	logger              log.Logger
+	logger              log.LoggerI
 	closeCh             chan struct{} // Channel to signal the background processes to exit
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
@@ -356,7 +356,7 @@ func New(
 	spanner Spanner,
 	heimdallClient heimdall.Client,
 	genesisContracts StateReceiver,
-	logger log.Logger,
+	logger log.LoggerI,
 	bridgeReader bridgeReader,
 	spanReader spanReader,
 ) *Bor {
@@ -410,7 +410,7 @@ func New(
 }
 
 // NewRo is used by the rpcdaemon and tests which need read only access to the provided data services
-func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, logger log.Logger) *Bor {
+func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, logger log.LoggerI) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 
@@ -1019,7 +1019,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.LoggerI,
 ) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	headerNumber := header.Number.Uint64()
 
@@ -1084,7 +1084,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 // nor block rewards given, and returns the final block.
 func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.LoggerI,
 ) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	// stateSyncData := []*types.StateSyncData{}
 
@@ -1134,7 +1134,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 }
 
 func (c *Bor) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.LoggerI, tracer *tracing.Hooks) {
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -1544,7 +1544,7 @@ func (c *Bor) CommitStates(
 	header *types.Header,
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
-	logger log.Logger,
+	logger log.LoggerI,
 ) error {
 	blockNum := header.Number.Uint64()
 

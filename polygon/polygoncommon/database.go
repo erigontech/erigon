@@ -36,12 +36,12 @@ type Database struct {
 	label     kv.Label
 	tableCfg  kv.TableCfg
 	openOnce  sync.Once
-	logger    log.Logger
+	logger    log.LoggerI
 	accede    bool
 	roTxLimit int64
 }
 
-func NewDatabase(dataDir string, label kv.Label, tableCfg kv.TableCfg, logger log.Logger, accede bool, roTxLimit int64) *Database {
+func NewDatabase(dataDir string, label kv.Label, tableCfg kv.TableCfg, logger log.LoggerI, accede bool, roTxLimit int64) *Database {
 	return &Database{
 		dataDir:   dataDir,
 		label:     label,

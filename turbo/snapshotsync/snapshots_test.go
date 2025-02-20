@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/turbo/testlog"
 )
 
-func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, version snaptype.Version, logger log.Logger) {
+func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, version snaptype.Version, logger log.LoggerI) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
 	c, err := seg.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(version, from, to, name)), dir, compressCfg, log.LvlDebug, logger)

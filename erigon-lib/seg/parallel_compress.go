@@ -235,7 +235,7 @@ func (cq *CompressionQueue) Pop() interface{} {
 	return x
 }
 
-func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
+func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.LoggerI) error {
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
 
@@ -741,7 +741,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
 // No error channels for now
-func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, cfg Cfg, completion *sync.WaitGroup, logger log.Logger) {
+func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, cfg Cfg, completion *sync.WaitGroup, logger log.LoggerI) {
 	minPatternScore, minPatternLen, maxPatternLen := cfg.MinPatternScore, cfg.MinPatternLen, cfg.MaxPatternLen
 	defer completion.Done()
 	dictVal := make([]byte, 8)
@@ -913,7 +913,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	}
 }
 
-func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
+func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.LoggerI) (*DictionaryBuilder, error) {
 	t := time.Now()
 	dictCollector := etl.NewCollector(logPrefix+"_collectDict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), logger)
 	defer dictCollector.Close()

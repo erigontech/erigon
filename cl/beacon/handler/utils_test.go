@@ -52,7 +52,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 )
 
-func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger, useRealSyncDataMgr bool) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData synced_data.SyncedData, fcu *mock_services2.ForkChoiceStorageMock, vp *validator_params.ValidatorParams) {
+func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.LoggerI, useRealSyncDataMgr bool) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData synced_data.SyncedData, fcu *mock_services2.ForkChoiceStorageMock, vp *validator_params.ValidatorParams) {
 	ctrl := gomock.NewController(t)
 	bcfg := clparams.MainnetBeaconConfig
 	if v == clparams.Phase0Version {

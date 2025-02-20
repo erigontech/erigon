@@ -48,51 +48,51 @@ func MiningStages(
 		{
 			ID:          stages.MiningCreateBlock,
 			Description: "Mining: construct new block from txn pool",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				return SpawnMiningCreateBlockStage(s, txc, createBlockCfg, ctx.Done(), logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				return nil
 			},
-			Prune: func(u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
+			Prune: func(u *PruneState, tx kv.RwTx, logger log.LoggerI) error { return nil },
 		},
 		{
 			ID:          stages.MiningBorHeimdall,
 			Description: "Download Bor-specific data from Heimdall",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				if badBlockUnwind {
 					return nil
 				}
 				return MiningBorHeimdallForward(ctx, borHeimdallCfg, s, u, txc.Tx, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				return BorHeimdallUnwind(u, ctx, s, txc.Tx, borHeimdallCfg)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+			Prune: func(p *PruneState, tx kv.RwTx, logger log.LoggerI) error {
 				return nil
 			},
 		},
 		{
 			ID:          stages.MiningExecution,
 			Description: "Mining: execute new block from txn pool",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				return SpawnMiningExecStage(s, txc, execCfg, sendersCfg, executeBlockCfg, ctx, logger, nil)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				return nil
 			},
-			Prune: func(u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
+			Prune: func(u *PruneState, tx kv.RwTx, logger log.LoggerI) error { return nil },
 		},
 		{
 			ID:          stages.MiningFinish,
 			Description: "Mining: create and propagate valid block",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.LoggerI) error {
 				return SpawnMiningFinishStage(s, txc.Tx, finish, ctx.Done(), logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.LoggerI) error {
 				return nil
 			},
-			Prune: func(u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
+			Prune: func(u *PruneState, tx kv.RwTx, logger log.LoggerI) error { return nil },
 		},
 	}
 }

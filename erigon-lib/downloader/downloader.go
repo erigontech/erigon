@@ -87,7 +87,7 @@ type Downloader struct {
 	webseeds         *WebSeeds
 	webseedsDiscover bool
 
-	logger    log.Logger
+	logger    log.LoggerI
 	verbosity log.Lvl
 
 	torrentFS       *AtomicTorrentFS
@@ -292,7 +292,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 	return resp, err
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl, discover bool) (*Downloader, error) {
+func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.LoggerI, verbosity log.Lvl, discover bool) (*Downloader, error) {
 	requestHandler := &requestHandler{
 		Transport: http.Transport{
 			Proxy:       cfg.ClientConfig.HTTPProxy,
@@ -420,7 +420,7 @@ type snapshotLock struct {
 	Downloads snapcfg.Preverified `json:"downloads"`
 }
 
-func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, stats *AggStats, statsLock *sync.RWMutex, logger log.Logger) (*snapshotLock, error) {
+func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, stats *AggStats, statsLock *sync.RWMutex, logger log.LoggerI) (*snapshotLock, error) {
 	//TODO: snapshots-lock.json must be created after 1-st download done
 	//TODO: snapshots-lock.json is not compatible with E3 .kv files - because they are not immutable (merging to infinity)
 	return initSnapshotLock(ctx, cfg, db, stats, statsLock, logger)
@@ -516,7 +516,7 @@ func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, st
 	*/
 }
 
-func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, stats *AggStats, statsLock *sync.RWMutex, logger log.Logger) (*snapshotLock, error) {
+func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, stats *AggStats, statsLock *sync.RWMutex, logger log.LoggerI) (*snapshotLock, error) {
 	lock := &snapshotLock{
 		Chain: cfg.ChainName,
 	}
@@ -1446,7 +1446,7 @@ func localHashCompletionCheck(ctx context.Context, t *torrent.Torrent, fileInfo 
 	return localHash, false
 }
 
-func logSeedHashMismatches(torrentHash infohash.T, name string, seedHashMismatches map[infohash.T][]*seedHash, logger log.Logger) {
+func logSeedHashMismatches(torrentHash infohash.T, name string, seedHashMismatches map[infohash.T][]*seedHash, logger log.LoggerI) {
 	var nohash []*seedHash
 	var mismatch []*seedHash
 
@@ -2723,7 +2723,7 @@ func (d *Downloader) StopSeeding(hash metainfo.Hash) error {
 
 func (d *Downloader) TorrentClient() *torrent.Client { return d.torrentClient }
 
-func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientConfig, writeMap bool, logger log.Logger) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
+func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientConfig, writeMap bool, logger log.LoggerI) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
 	dbCfg := mdbx.New(kv.DownloaderDB, log.New()).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		GrowthStep(16 * datasize.MB).

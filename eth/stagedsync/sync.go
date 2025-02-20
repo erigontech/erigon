@@ -47,7 +47,7 @@ type Sync struct {
 	currentStage  uint
 	timings       []Timing
 	logPrefixes   []string
-	logger        log.Logger
+	logger        log.LoggerI
 	stagesIdsList []string
 	mode          stages.Mode
 }
@@ -208,7 +208,7 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	return fmt.Errorf("stage not found with id: %v", id)
 }
 
-func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger, mode stages.Mode) *Sync {
+func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.LoggerI, mode stages.Mode) *Sync {
 	unwindStages := make([]*Stage, len(stagesList))
 	for i, stageIndex := range unwindOrder {
 		for _, s := range stagesList {

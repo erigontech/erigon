@@ -67,7 +67,7 @@ type EngineAPISwitcher interface {
 
 func NewSync(
 	config *ethconfig.Config,
-	logger log.Logger,
+	logger log.LoggerI,
 	store Store,
 	execution ExecutionClient,
 	milestoneVerifier WaypointHeadersVerifier,
@@ -109,7 +109,7 @@ func NewSync(
 
 type Sync struct {
 	config            *ethconfig.Config
-	logger            log.Logger
+	logger            log.LoggerI
 	store             Store
 	execution         ExecutionClient
 	milestoneVerifier WaypointHeadersVerifier

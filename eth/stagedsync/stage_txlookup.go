@@ -67,7 +67,7 @@ func StageTxLookupCfg(
 	}
 }
 
-func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
+func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, ctx context.Context, logger log.LoggerI) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -134,7 +134,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 }
 
 // txnLookupTransform - [startKey, endKey)
-func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
+func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.LoggerI) (err error) {
 	data := make([]byte, 16)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
@@ -173,7 +173,7 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 }
 
 // txnLookupTransform - [startKey, endKey)
-func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, quitCh <-chan struct{}, cfg TxLookupCfg, logger log.Logger) error {
+func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, quitCh <-chan struct{}, cfg TxLookupCfg, logger log.LoggerI) error {
 	bigNum := new(big.Int)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
@@ -198,7 +198,7 @@ func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint
 	}, logger)
 }
 
-func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
+func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.LoggerI) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
 
 	if s.BlockNumber <= u.UnwindPoint {
@@ -239,7 +239,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	return nil
 }
 
-func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
+func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.LoggerI) (err error) {
 	logPrefix := s.LogPrefix()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -325,7 +325,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 }
 
 // deleteTxLookupRange - [blockFrom, blockTo)
-func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
+func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.LoggerI) (err error) {
 	err = etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
@@ -359,7 +359,7 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 }
 
 // deleteTxLookupRange - [blockFrom, blockTo)
-func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) error {
+func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.LoggerI) error {
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 

@@ -174,7 +174,7 @@ func SpawnStageSnapshots(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg SnapshotsCfg,
-	logger log.Logger,
+	logger log.LoggerI,
 ) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -225,7 +225,7 @@ func SpawnStageSnapshots(
 	return nil
 }
 
-func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) error {
+func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.LoggerI) error {
 	if cfg.snapshotUploader != nil {
 		u := cfg.snapshotUploader
 
@@ -367,7 +367,7 @@ func getPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
 	return snapProgress - pruneMarkerSafeThreshold
 }
 
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.Aggregator, logger log.Logger) error {
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.Aggregator, logger log.LoggerI) error {
 	startTime := time.Now()
 	blocksAvailable := blockReader.FrozenBlocks()
 	logEvery := time.NewTicker(logInterval)
@@ -568,7 +568,7 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 /* ====== PRUNING ====== */
 // snapshots pruning sections works more as a retiring of blocks
 // retiring blocks means moving block data from db into snapshots
-func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
+func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.LoggerI) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -667,7 +667,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	return nil
 }
 
-func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) (bool, error) {
+func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.LoggerI) (bool, error) {
 	tx, err := cfg.db.BeginRo(ctx)
 	if err != nil {
 		return false, err
@@ -749,7 +749,7 @@ type snapshotUploader struct {
 	torrentFiles    *downloader.AtomicTorrentFS
 }
 
-func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
+func (u *snapshotUploader) init(ctx context.Context, logger log.LoggerI) {
 	if u.files == nil {
 		freezingCfg := u.cfg.blockReader.FreezingCfg()
 
@@ -1135,7 +1135,7 @@ func isLocalFs(ctx context.Context, rclient *downloader.RCloneClient, fs string)
 	return true
 }
 
-func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
+func (u *snapshotUploader) start(ctx context.Context, logger log.LoggerI) {
 	var err error
 
 	u.rclone, err = downloader.NewRCloneClient(logger)
@@ -1215,7 +1215,7 @@ func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 	}()
 }
 
-func (u *snapshotUploader) scheduleUpload(ctx context.Context, logger log.Logger) {
+func (u *snapshotUploader) scheduleUpload(ctx context.Context, logger log.LoggerI) {
 	if !u.uploadScheduled.CompareAndSwap(false, true) {
 		return
 	}
@@ -1284,7 +1284,7 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 	}
 }
 
-func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
+func (u *snapshotUploader) upload(ctx context.Context, logger log.LoggerI) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("[snapshot uploader] snapshot upload failed", "err", r, "stack", dbg.Stack())

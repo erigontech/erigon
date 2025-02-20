@@ -89,10 +89,10 @@ type RecordKeyNames struct {
 	Lvl  string
 }
 
-// A Logger writes key/value pairs to a Handler
-type Logger interface {
+// A LoggerI writes key/value pairs to a Handler
+type LoggerI interface {
 	// New returns a new Logger that has this logger's context plus the given context
-	New(ctx ...interface{}) Logger
+	New(ctx ...interface{}) LoggerI
 
 	// GetHandler gets the handler associated with the logger.
 	GetHandler() Handler
@@ -130,7 +130,7 @@ func (l *logger) write(msg string, lvl Lvl, ctx []interface{}) {
 	})
 }
 
-func (l *logger) New(ctx ...interface{}) Logger {
+func (l *logger) New(ctx ...interface{}) LoggerI {
 	child := &logger{newContext(l.ctx, ctx), new(swapHandler)}
 	child.SetHandler(l.h)
 	return child

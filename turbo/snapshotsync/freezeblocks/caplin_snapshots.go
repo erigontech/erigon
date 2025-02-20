@@ -70,7 +70,7 @@ type CaplinSnapshots struct {
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
-	logger      log.Logger
+	logger      log.LoggerI
 	// allows for pruning segments - this is the min availible segment
 	segmentsMin atomic.Uint64
 	// chain cfg
@@ -82,7 +82,7 @@ type CaplinSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, logger log.Logger) *CaplinSnapshots {
+func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, logger log.LoggerI) *CaplinSnapshots {
 	if cfg.ChainName == "" {
 		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
@@ -419,7 +419,7 @@ func (v *CaplinView) BlobSidecarsSegment(slot uint64) (*snapshotsync.VisibleSegm
 	return nil, false
 }
 
-func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
+func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.LoggerI) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.Snap
 
 	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
@@ -493,7 +493,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 	return snapshotsync.BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
 
-func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage.BlobStorage, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.Logger) error {
+func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage.BlobStorage, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.LoggerI) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.Snap
 
 	segName := snaptype.BlobSidecars.FileName(0, fromSlot, toSlot)
@@ -580,7 +580,7 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 	return snapshotsync.BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
 
-func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
+func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.LoggerI) error {
 	cfg := snapcfg.KnownCfg("")
 	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, snaptype.CaplinEnums.BeaconBlocks, nil) {
 		blocksPerFile := snapcfg.MergeLimitFromCfg(cfg, snaptype.CaplinEnums.BeaconBlocks, i)
@@ -599,7 +599,7 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, 
 
 type BlobCountBySlotFn func(slot uint64) (uint64, error)
 
-func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, compressWorkers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.Logger) error {
+func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, compressWorkers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.LoggerI) error {
 	cfg := snapcfg.KnownCfg("")
 	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, snaptype.CaplinEnums.BlobSidecars, nil) {
 		blocksPerFile := snapcfg.MergeLimitFromCfg(cfg, snaptype.CaplinEnums.BlobSidecars, i)
@@ -616,7 +616,7 @@ func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage,
 	return nil
 }
 
-func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Logger) error {
+func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.LoggerI) error {
 	if s == nil {
 		return nil
 	}

@@ -32,12 +32,12 @@ type BlockEvent struct {
 }
 
 type BlockListener struct {
-	logger             log.Logger
+	logger             log.LoggerI
 	stateChangesClient stateChangesClient
 	events             *event.Observers[BlockEvent]
 }
 
-func NewBlockListener(logger log.Logger, stateChangesClient stateChangesClient) BlockListener {
+func NewBlockListener(logger log.LoggerI, stateChangesClient stateChangesClient) BlockListener {
 	return BlockListener{
 		logger:             logger,
 		stateChangesClient: stateChangesClient,

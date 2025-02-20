@@ -39,7 +39,7 @@ func NewBorDevnetWithoutHeimdall(
 	baseRpcHost string,
 	baseRpcPort int,
 	gasLimit uint64,
-	logger log.Logger,
+	logger log.LoggerI,
 	consoleLogLevel log.Lvl,
 	dirLogLevel log.Lvl,
 ) devnet.Devnet {
@@ -95,7 +95,7 @@ func NewBorDevnetWithHeimdall(
 	producerCount int,
 	gasLimit uint64,
 	withMilestones bool,
-	logger log.Logger,
+	logger log.LoggerI,
 	consoleLogLevel log.Lvl,
 	dirLogLevel log.Lvl,
 ) devnet.Devnet {
@@ -197,7 +197,7 @@ func NewBorDevnetWithRemoteHeimdall(
 	baseRpcPort int,
 	producerCount int,
 	gasLimit uint64,
-	logger log.Logger,
+	logger log.LoggerI,
 	consoleLogLevel log.Lvl,
 	dirLogLevel log.Lvl,
 ) devnet.Devnet {
@@ -227,7 +227,7 @@ func NewBorDevnetWithLocalHeimdall(
 	sprintSize uint64,
 	producerCount int,
 	gasLimit uint64,
-	logger log.Logger,
+	logger log.LoggerI,
 	consoleLogLevel log.Lvl,
 	dirLogLevel log.Lvl,
 ) devnet.Devnet {

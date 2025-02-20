@@ -31,7 +31,7 @@ import (
 
 type MiningService struct {
 	txpool.MiningClient
-	log     log.Logger
+	log     log.LoggerI
 	version gointerfaces.Version
 }
 

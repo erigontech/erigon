@@ -151,7 +151,7 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.LoggerI,
 ) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, logger)
@@ -219,7 +219,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 }
 
 func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.LoggerI,
 ) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, call, logger)
@@ -350,7 +350,7 @@ func (s *Merge) IsServiceTransaction(sender libcommon.Address, syscall consensus
 }
 
 func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
+	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.LoggerI, tracer *tracing.Hooks,
 ) {
 	if !misc.IsPoSHeader(header) {
 		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)

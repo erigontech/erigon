@@ -96,7 +96,7 @@ type Heimdall struct {
 	ackWaiter          *sync.Cond
 	currentSpan        *heimdall.Span
 	spans              map[heimdall.SpanId]*heimdall.Span
-	logger             log.Logger
+	logger             log.LoggerI
 	cancelFunc         context.CancelFunc
 	syncSenderAddress  libcommon.Address
 	syncSenderBinding  *contracts.TestStateSender
@@ -114,7 +114,7 @@ func NewHeimdall(
 	chainConfig *chain.Config,
 	serverURL string,
 	checkpointConfig *CheckpointConfig,
-	logger log.Logger,
+	logger log.LoggerI,
 ) *Heimdall {
 	heimdall := &Heimdall{
 		chainConfig:        chainConfig,
@@ -572,7 +572,7 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.Client) *chi.Mux {
 	return router
 }
 
-func startHTTPServer(ctx context.Context, server *http.Server, serverName string, logger log.Logger) error {
+func startHTTPServer(ctx context.Context, server *http.Server, serverName string, logger log.LoggerI) error {
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
 		return err

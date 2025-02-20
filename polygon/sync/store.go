@@ -54,7 +54,7 @@ type bridgeStore interface {
 	ReplayInitialBlock(ctx context.Context, block *types.Block) error
 }
 
-func NewStore(logger log.Logger, executionStore executionStore, bridgeStore bridgeStore) *ExecutionClientStore {
+func NewStore(logger log.LoggerI, executionStore executionStore, bridgeStore bridgeStore) *ExecutionClientStore {
 	return &ExecutionClientStore{
 		logger:          logger,
 		executionStore:  executionStore,
@@ -65,7 +65,7 @@ func NewStore(logger log.Logger, executionStore executionStore, bridgeStore brid
 }
 
 type ExecutionClientStore struct {
-	logger         log.Logger
+	logger         log.LoggerI
 	executionStore executionStore
 	bridgeStore    bridgeStore
 	queue          chan []*types.Block

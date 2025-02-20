@@ -95,7 +95,7 @@ var Flags = []cli.Flag{
 }
 
 // SetupCobra sets up logging, profiling and tracing for cobra commands
-func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
+func SetupCobra(cmd *cobra.Command, filePrefix string) log.LoggerI {
 	// ensure we've read in config file details before setting up metrics etc.
 	if err := SetCobraFlagsFromConfigFile(cmd); err != nil {
 		log.Warn("failed setting config flags from yaml/toml file", "err", err)
@@ -188,7 +188,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
-func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, *http.ServeMux, error) {
+func Setup(ctx *cli.Context, rootLogger bool) (log.LoggerI, *http.ServeMux, *http.ServeMux, error) {
 	// ensure we've read in config file details before setting up metrics etc.
 	if err := SetFlagsFromConfigFile(ctx); err != nil {
 		log.Warn("failed setting config flags from yaml/toml file", "err", err)

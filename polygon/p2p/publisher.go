@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/eth/protocols/eth"
 )
 
-func NewPublisher(logger log.Logger, messageSender *MessageSender, peerTracker *PeerTracker) *Publisher {
+func NewPublisher(logger log.LoggerI, messageSender *MessageSender, peerTracker *PeerTracker) *Publisher {
 	return &Publisher{
 		logger:        logger,
 		messageSender: messageSender,
@@ -51,7 +51,7 @@ func NewPublisher(logger log.Logger, messageSender *MessageSender, peerTracker *
 // All publish tasks are done asynchronously by putting them on a queue. If the publisher is struggling to keep up
 // then newly enqueued publish tasks will get dropped.
 type Publisher struct {
-	logger        log.Logger
+	logger        log.LoggerI
 	messageSender *MessageSender
 	peerTracker   *PeerTracker
 	tasks         chan publishTask

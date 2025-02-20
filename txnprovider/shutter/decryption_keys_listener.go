@@ -41,13 +41,13 @@ const (
 )
 
 type DecryptionKeysListener struct {
-	logger    log.Logger
+	logger    log.LoggerI
 	config    Config
 	validator pubsub.ValidatorEx
 	observers *event.Observers[*proto.DecryptionKeys]
 }
 
-func NewDecryptionKeysListener(logger log.Logger, config Config, validator pubsub.ValidatorEx) DecryptionKeysListener {
+func NewDecryptionKeysListener(logger log.LoggerI, config Config, validator pubsub.ValidatorEx) DecryptionKeysListener {
 	return DecryptionKeysListener{
 		logger:    logger,
 		config:    config,

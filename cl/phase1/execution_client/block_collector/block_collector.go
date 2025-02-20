@@ -48,7 +48,7 @@ type blockCollector struct {
 	tmpdir         string
 	beaconChainCfg *clparams.BeaconChainConfig
 	size           uint64
-	logger         log.Logger
+	logger         log.LoggerI
 	engine         execution_client.ExecutionEngine
 	syncBackLoop   uint64
 
@@ -56,7 +56,7 @@ type blockCollector struct {
 }
 
 // NewBlockCollector creates a new block collector
-func NewBlockCollector(logger log.Logger, engine execution_client.ExecutionEngine, beaconChainCfg *clparams.BeaconChainConfig, syncBackLoopAmount uint64, tmpdir string) BlockCollector {
+func NewBlockCollector(logger log.LoggerI, engine execution_client.ExecutionEngine, beaconChainCfg *clparams.BeaconChainConfig, syncBackLoopAmount uint64, tmpdir string) BlockCollector {
 	return &blockCollector{
 		collector:      etl.NewCollector(etlPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger),
 		tmpdir:         tmpdir,

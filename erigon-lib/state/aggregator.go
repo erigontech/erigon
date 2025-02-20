@@ -88,7 +88,7 @@ type Aggregator struct {
 
 	// next fields are set only if agg.doTraceCtx is true. can enable by env: TRACE_AGG=true
 	leakDetector *dbg.LeakDetector
-	logger       log.Logger
+	logger       log.LoggerI
 
 	aggRoTxAutoIncrement atomic.Uint64
 
@@ -126,7 +126,7 @@ func domainIntegrityCheck(name kv.Domain, dirs datadir.Dirs, fromStep, toStep ui
 	}
 }
 
-func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.LoggerI) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
 		ctx:                    ctx,
@@ -192,7 +192,7 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	return salt, nil
 }
 
-func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, logger log.Logger) (err error) {
+func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, logger log.LoggerI) (err error) {
 	cfg := Schema[name]
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
@@ -206,7 +206,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	return nil
 }
 
-func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
+func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.LoggerI) error {
 	idxCfg := iiCfg{
 		salt: salt, dirs: dirs,
 		aggregationStep: aggregationStep,

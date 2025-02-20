@@ -1412,7 +1412,7 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 }
 
-func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, logger log.Logger) {
+func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, logger log.LoggerI) {
 	cfg.Name = nodeName
 	setNodeKey(ctx, cfg, datadir)
 	setNAT(ctx, cfg)
@@ -1464,7 +1464,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, l
 }
 
 // SetNodeConfig applies node-related command line flags to the config.
-func SetNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) error {
+func SetNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.LoggerI) error {
 	if err := setDataDir(ctx, cfg); err != nil {
 		return err
 	}
@@ -1703,7 +1703,7 @@ func setClique(ctx *cli.Context, cfg *params.ConsensusSnapshotConfig, datadir st
 	}
 }
 
-func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.Config, logger log.Logger) {
+func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.Config, logger log.LoggerI) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
@@ -1874,7 +1874,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 }
 
 // SetEthConfig applies eth-related command line flags to the config.
-func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
+func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config, logger log.LoggerI) {
 	cfg.CaplinConfig.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)

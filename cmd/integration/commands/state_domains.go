@@ -185,7 +185,7 @@ var purifyDomains = &cobra.Command{
 	},
 }
 
-func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain string) error {
+func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.LoggerI, domain string) error {
 	var tbl string
 	switch domain {
 	case "account":
@@ -289,7 +289,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	return tx.Commit()
 }
 
-func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domainName string) error {
+func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.LoggerI, domainName string) error {
 	domain, err := kv.String2Domain(domainName)
 	if err != nil {
 		return err
@@ -456,7 +456,7 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 	return nil
 }
 
-func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
+func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.LoggerI) error {
 	sn, bsn, agg, _, _, _, err := allSnapshots(ctx, chainDb, logger)
 	if err != nil {
 		return err

@@ -57,7 +57,7 @@ var errBreakPolygonSyncStage = errors.New("break polygon sync stage")
 
 func NewPolygonSyncStageCfg(
 	config *ethconfig.Config,
-	logger log.Logger,
+	logger log.LoggerI,
 	chainConfig *chain.Config,
 	db kv.RwDB,
 	heimdallClient heimdall.Client,
@@ -300,7 +300,7 @@ type polygonSyncStageTxAction struct {
 }
 
 type polygonSyncStageService struct {
-	logger          log.Logger
+	logger          log.LoggerI
 	sync            *polygonsync.Sync
 	syncStore       polygonsync.Store
 	events          *polygonsync.TipEvents
@@ -1188,7 +1188,7 @@ type chainNode struct {
 type polygonSyncStageExecutionEngine struct {
 	blockReader    services.FullBlockReader
 	txActionStream chan<- polygonSyncStageTxAction
-	logger         log.Logger
+	logger         log.LoggerI
 	// internal
 	appendLogPrefix  func(string) string
 	stageState       *StageState

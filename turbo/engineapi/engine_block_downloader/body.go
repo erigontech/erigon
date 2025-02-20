@@ -227,7 +227,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 }
 
 func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDelivered uint64, prevDeliveredCount, deliveredCount,
-	prevWastedCount, wastedCount float64, bodyCacheSize int, logger log.Logger) {
+	prevWastedCount, wastedCount float64, bodyCacheSize int, logger log.LoggerI) {
 	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
 	if speed == 0 && wastedSpeed == 0 {
@@ -249,7 +249,7 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 	)
 }
 
-func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger log.Logger) {
+func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger log.LoggerI) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	remaining := headerProgress - committed

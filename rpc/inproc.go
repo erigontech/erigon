@@ -27,7 +27,7 @@ import (
 )
 
 // DialInProc attaches an in-process connection to the given RPC server.
-func DialInProc(handler *Server, logger log.Logger) *Client {
+func DialInProc(handler *Server, logger log.LoggerI) *Client {
 	initctx := context.Background()
 	c, _ := newClient(initctx, func(context.Context) (ServerCodec, error) {
 		p1, p2 := net.Pipe()

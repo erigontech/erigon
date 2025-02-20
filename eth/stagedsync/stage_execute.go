@@ -139,7 +139,7 @@ func StageExecuteBlocksCfg(
 
 // ================ Erigon3 ================
 
-func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger, isMining bool) (err error) {
+func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.LoggerI, isMining bool) (err error) {
 	workersCount := cfg.syncCfg.ExecWorkerCount
 	if !initialCycle {
 		workersCount = 1
@@ -167,7 +167,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
-func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, br services.FullBlockReader, accumulator *shards.Accumulator, logger log.Logger) (err error) {
+func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, br services.FullBlockReader, accumulator *shards.Accumulator, logger log.LoggerI) (err error) {
 	var domains *libstate.SharedDomains
 	if txc.Doms == nil {
 		domains, err = libstate.NewSharedDomains(txc.Tx, logger)
@@ -249,7 +249,7 @@ func BorHeimdallStageProgress(tx kv.Tx, cfg BorHeimdallCfg) (prevStageProgress u
 
 // ================ Erigon3 End ================
 
-func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.LoggerI) (err error) {
 	if dbg.StagesOnlyBlocks {
 		return nil
 	}
@@ -320,7 +320,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 	return nil
 }
 
-func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.LoggerI) (err error) {
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
@@ -360,7 +360,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	return nil
 }
 
-func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) error {
+func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.LoggerI) error {
 	var accumulator *shards.Accumulator
 	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.notifications.Accumulator
@@ -389,7 +389,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	return unwindExec3(u, s, txc, ctx, cfg.blockReader, accumulator, logger)
 }
 
-func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, logger log.Logger) (err error) {
+func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, logger log.LoggerI) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

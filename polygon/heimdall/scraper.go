@@ -36,7 +36,7 @@ type Scraper[TEntity Entity] struct {
 	observers       *event.Observers[[]TEntity]
 	syncEvent       *event.Notifier
 	transientErrors []error
-	logger          log.Logger
+	logger          log.LoggerI
 }
 
 func NewScraper[TEntity Entity](
@@ -45,7 +45,7 @@ func NewScraper[TEntity Entity](
 	fetcher entityFetcher[TEntity],
 	pollDelay time.Duration,
 	transientErrors []error,
-	logger log.Logger,
+	logger log.LoggerI,
 ) *Scraper[TEntity] {
 	return &Scraper[TEntity]{
 		name:            name,

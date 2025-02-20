@@ -24,7 +24,7 @@ import (
 )
 
 // DoNat can mutate `cfg` parameter
-func DoNat(natif nat.Interface, cfg *torrent.ClientConfig, logger log.Logger) {
+func DoNat(natif nat.Interface, cfg *torrent.ClientConfig, logger log.LoggerI) {
 	switch natif.(type) {
 	case nil:
 		// No NAT interface, do nothing.

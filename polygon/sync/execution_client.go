@@ -47,7 +47,7 @@ type ExecutionClient interface {
 	GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*big.Int, error)
 }
 
-func newExecutionClient(logger log.Logger, client executionproto.ExecutionClient) *executionClient {
+func newExecutionClient(logger log.LoggerI, client executionproto.ExecutionClient) *executionClient {
 	return &executionClient{
 		logger: logger,
 		client: client,
@@ -55,7 +55,7 @@ func newExecutionClient(logger log.Logger, client executionproto.ExecutionClient
 }
 
 type executionClient struct {
-	logger log.Logger
+	logger log.LoggerI
 	client executionproto.ExecutionClient
 }
 

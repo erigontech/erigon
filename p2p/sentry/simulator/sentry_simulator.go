@@ -52,7 +52,7 @@ type server struct {
 	ctx              context.Context
 	peers            map[[64]byte]*p2p.Peer
 	messageReceivers map[isentry.MessageId][]isentry.Sentry_MessagesServer
-	logger           log.Logger
+	logger           log.LoggerI
 	knownSnapshots   *freezeblocks.RoSnapshots
 	activeSnapshots  *freezeblocks.RoSnapshots
 	blockReader      *freezeblocks.BlockReader
@@ -70,7 +70,7 @@ func newPeer(name string, caps []p2p.Cap) (*p2p.Peer, error) {
 	return p2p.NewPeer(enode.PubkeyToIDV4(&key.PublicKey), v4wire.EncodePubkey(&key.PublicKey), name, caps, true), nil
 }
 
-func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerCount int, logger log.Logger) (isentry.SentryServer, error) {
+func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerCount int, logger log.LoggerI) (isentry.SentryServer, error) {
 	peers := map[[64]byte]*p2p.Peer{}
 
 	for i := 0; i < peerCount; i++ {

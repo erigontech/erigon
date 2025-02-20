@@ -43,7 +43,7 @@ type Mapmutation struct {
 	size   int
 	count  uint64
 	tmpdir string
-	logger log.Logger
+	logger log.LoggerI
 }
 
 func (m *Mapmutation) Count(bucket string) (uint64, error) {
@@ -144,7 +144,7 @@ func (m *Mapmutation) CHandle() unsafe.Pointer { return m.db.CHandle() }
 // defer batch.Close()
 // ... some calculations on `batch`
 // batch.Commit()
-func NewHashBatch(tx kv.Tx, quit <-chan struct{}, tmpdir string, logger log.Logger) *Mapmutation {
+func NewHashBatch(tx kv.Tx, quit <-chan struct{}, tmpdir string, logger log.LoggerI) *Mapmutation {
 	clean := func() {}
 	if quit == nil {
 		ch := make(chan struct{})

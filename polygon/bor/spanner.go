@@ -49,11 +49,11 @@ type ChainSpanner struct {
 	validatorSet    ABI
 	chainConfig     *chain.Config
 	borConfig       *borcfg.BorConfig
-	logger          log.Logger
+	logger          log.LoggerI
 	withoutHeimdall bool
 }
 
-func NewChainSpanner(validatorSet ABI, chainConfig *chain.Config, withoutHeimdall bool, logger log.Logger) *ChainSpanner {
+func NewChainSpanner(validatorSet ABI, chainConfig *chain.Config, withoutHeimdall bool, logger log.LoggerI) *ChainSpanner {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	return &ChainSpanner{
 		validatorSet:    validatorSet,

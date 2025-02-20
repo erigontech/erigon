@@ -167,7 +167,7 @@ func (i *filesItem) closeFilesAndRemove() {
 	}
 }
 
-func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*filesItem) {
+func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.LoggerI) (res []*filesItem) {
 	re := regexp.MustCompile("^v([0-9]+)-" + filenameBase + ".([0-9]+)-([0-9]+)." + ext + "$")
 	var err error
 
@@ -222,7 +222,7 @@ func ParseStepsFromFileName(fileName string) (from, to uint64, err error) {
 	return from, to, nil
 }
 
-func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, filenameBase string, logger log.Logger) {
+func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, filenameBase string, logger log.LoggerI) {
 	for _, out := range outs {
 		if out == nil {
 			panic("must not happen: " + filenameBase)

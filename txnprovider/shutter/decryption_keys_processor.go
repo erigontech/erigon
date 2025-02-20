@@ -38,7 +38,7 @@ import (
 )
 
 type DecryptionKeysProcessor struct {
-	logger            log.Logger
+	logger            log.LoggerI
 	config            Config
 	encryptedTxnsPool *EncryptedTxnsPool
 	decryptedTxnsPool *DecryptedTxnsPool
@@ -50,7 +50,7 @@ type DecryptionKeysProcessor struct {
 }
 
 func NewDecryptionKeysProcessor(
-	logger log.Logger,
+	logger log.LoggerI,
 	config Config,
 	encryptedTxnsPool *EncryptedTxnsPool,
 	decryptedTxnsPool *DecryptedTxnsPool,

@@ -263,7 +263,7 @@ func (v DecryptionKeysValidator) validateEonIndex(msg *proto.DecryptionKeys) (Eo
 	return eon, nil
 }
 
-func NewDecryptionKeysExtendedValidator(logger log.Logger, config Config, sc SlotCalculator, et EonTracker) pubsub.ValidatorEx {
+func NewDecryptionKeysExtendedValidator(logger log.LoggerI, config Config, sc SlotCalculator, et EonTracker) pubsub.ValidatorEx {
 	dkv := NewDecryptionKeysValidator(config, sc, et)
 	return func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		if topic := msg.GetTopic(); topic != DecryptionKeysTopic {

@@ -35,7 +35,7 @@ func MiningBorHeimdallForward(
 	stageStage *StageState,
 	unwinder Unwinder,
 	tx kv.RwTx,
-	logger log.Logger,
+	logger log.LoggerI,
 ) error {
 	if cfg.borConfig == nil || cfg.heimdallClient == nil {
 		return nil

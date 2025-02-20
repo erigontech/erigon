@@ -648,7 +648,7 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 }
 
 func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
+	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.LoggerI, tracer *tracing.Hooks,
 ) {
 	blockNum := header.Number.Uint64()
 
@@ -717,7 +717,7 @@ func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, 
 // word `signal epoch` == word `pending epoch`
 func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions,
 	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.LoggerI,
 ) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	if err := c.applyRewards(header, state, syscall); err != nil {
 		return nil, nil, nil, err
@@ -855,7 +855,7 @@ func allHeadersUntil(chain consensus.ChainHeaderReader, from *types.Header, to l
 //}
 
 // FinalizeAndAssemble implements consensus.Engine
-func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
+func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.LoggerI) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	outTxs, outReceipts, _, err := c.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err

@@ -45,7 +45,7 @@ var (
 type serviceRegistry struct {
 	mu       sync.Mutex
 	services map[string]service
-	logger   log.Logger
+	logger   log.LoggerI
 }
 
 // service represents a registered object.
@@ -64,7 +64,7 @@ type callback struct {
 	errPos      int            // err return idx, of -1 when method cannot return error
 	isSubscribe bool           // true if this is a subscription callback
 	streamable  bool           // support JSON streaming (more efficient for large responses)
-	logger      log.Logger
+	logger      log.LoggerI
 }
 
 func (r *serviceRegistry) registerName(name string, rcvr interface{}) error {
@@ -122,7 +122,7 @@ func (r *serviceRegistry) subscription(service, name string) *callback {
 // suitableCallbacks iterates over the methods of the given type. It determines if a method
 // satisfies the criteria for a RPC callback or a subscription callback and adds it to the
 // collection of callbacks. See server documentation for a summary of these criteria.
-func suitableCallbacks(receiver reflect.Value, logger log.Logger) map[string]*callback {
+func suitableCallbacks(receiver reflect.Value, logger log.LoggerI) map[string]*callback {
 	typ := receiver.Type()
 	callbacks := make(map[string]*callback)
 	for m := 0; m < typ.NumMethod(); m++ {
@@ -142,7 +142,7 @@ func suitableCallbacks(receiver reflect.Value, logger log.Logger) map[string]*ca
 
 // newCallback turns fn (a function) into a callback object. It returns nil if the function
 // is unsuitable as an RPC callback.
-func newCallback(receiver, fn reflect.Value, name string, logger log.Logger) *callback {
+func newCallback(receiver, fn reflect.Value, name string, logger log.LoggerI) *callback {
 	fntype := fn.Type()
 	c := &callback{fn: fn, rcvr: receiver, errPos: -1, isSubscribe: isPubSub(fntype), logger: logger}
 	// Determine parameter types. They must all be exported or builtin types.

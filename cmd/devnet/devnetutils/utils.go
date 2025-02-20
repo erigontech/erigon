@@ -36,7 +36,7 @@ import (
 var ErrInvalidEnodeString = errors.New("invalid enode string")
 
 // ClearDevDB cleans up the dev folder used for the operations
-func ClearDevDB(dataDir string, logger log.Logger) error {
+func ClearDevDB(dataDir string, logger log.LoggerI) error {
 	logger.Info("Deleting nodes' data folders")
 
 	files, err := dir.ReadDir(dataDir)

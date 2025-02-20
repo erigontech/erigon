@@ -159,7 +159,7 @@ type CreateNewTorrentClientConfig struct {
 	DisableIPv6  bool
 	DisableIPv4  bool
 	NatFlag      string
-	Logger       log.Logger
+	Logger       log.LoggerI
 	TempDir      string
 	CleanDir     bool
 }
@@ -182,7 +182,7 @@ func NewTorrentClientConfigFromCobra(cliCtx *cli.Context, chain string) CreateNe
 	}
 }
 
-func NewDefaultTorrentClientConfig(chain string, torrentDir string, logger log.Logger) CreateNewTorrentClientConfig {
+func NewDefaultTorrentClientConfig(chain string, torrentDir string, logger log.LoggerI) CreateNewTorrentClientConfig {
 	return CreateNewTorrentClientConfig{
 		Chain:        chain,
 		WebSeeds:     utils.WebSeedsFlag.Value,

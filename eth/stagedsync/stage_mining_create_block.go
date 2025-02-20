@@ -104,7 +104,7 @@ func StageMiningCreateBlockCfg(
 // SpawnMiningCreateBlockStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
+func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.LoggerI) (err error) {
 	current := cfg.miner.MiningBlock
 	var txPoolLocals []libcommon.Address //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := cfg.miner.MiningConfig.Etherbase

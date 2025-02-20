@@ -54,7 +54,7 @@ It expects the genesis file as argument.`,
 // initGenesis will initialise the given JSON format genesis file and writes it as
 // the zero'd block (i.e. genesis) or will fail hard if it can't succeed.
 func initGenesis(cliCtx *cli.Context) error {
-	var logger log.Logger
+	var logger log.LoggerI
 	var err error
 	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err

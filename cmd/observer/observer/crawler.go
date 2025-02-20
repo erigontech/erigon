@@ -51,7 +51,7 @@ type Crawler struct {
 
 	sentryCandidatesIntake *sentry_candidates.Intake
 
-	log log.Logger
+	log log.LoggerI
 }
 
 type CrawlerConfig struct {
@@ -77,7 +77,7 @@ func NewCrawler(
 	transport DiscV4Transport,
 	db database.DB,
 	config CrawlerConfig,
-	logger log.Logger,
+	logger log.LoggerI,
 ) (*Crawler, error) {
 	saveQueueLogFuncProvider := func(err error) func(msg string, ctx ...interface{}) {
 		if db.IsConflictError(err) {

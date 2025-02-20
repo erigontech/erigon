@@ -1200,7 +1200,7 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 }
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
-func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int, timeout time.Duration, logger log.Logger, logPrefix string) error {
+func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int, timeout time.Duration, logger log.LoggerI, logPrefix string) error {
 	t := time.Now()
 	c, err := tx.RwCursor(table)
 	if err != nil {

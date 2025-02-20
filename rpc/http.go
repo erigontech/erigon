@@ -92,7 +92,7 @@ func (hc *httpConn) closed() <-chan interface{} {
 
 // DialHTTPWithClient creates a new RPC client that connects to an RPC server over HTTP
 // using the provided HTTP Client.
-func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger) (*Client, error) {
+func DialHTTPWithClient(endpoint string, client *http.Client, logger log.LoggerI) (*Client, error) {
 	// Sanity check URL so we don't end up with a client that will fail every request.
 	_, err := url.Parse(endpoint)
 	if err != nil {
@@ -115,7 +115,7 @@ func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger)
 }
 
 // DialHTTP creates a new RPC client that connects to an RPC server over HTTP.
-func DialHTTP(endpoint string, logger log.Logger) (*Client, error) {
+func DialHTTP(endpoint string, logger log.LoggerI) (*Client, error) {
 	return DialHTTPWithClient(endpoint, new(http.Client), logger)
 }
 
