@@ -176,7 +176,7 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 	}
 	logger.SetLogger(_logger)
 
-	_logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
 	nodeConf, err := enode.NewNodConfigUrfave(ctx, _logger)
 	if err != nil {
@@ -203,7 +203,7 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 
 	if n.network.BorStateSyncDelay > 0 {
 		stateSyncConfirmationDelay := map[string]uint64{"0": uint64(n.network.BorStateSyncDelay.Seconds())}
-		_logger.Warn("TODO: custom BorStateSyncDelay is not applied to BorConfig.StateSyncConfirmationDelay", "delay", stateSyncConfirmationDelay)
+		logger.Warn("TODO: custom BorStateSyncDelay is not applied to BorConfig.StateSyncConfirmationDelay", "delay", stateSyncConfirmationDelay)
 	}
 
 	n.ethNode, err = enode.New(ctx.Context, n.nodeCfg, n.ethCfg, _logger)
@@ -219,14 +219,14 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 	n.Unlock()
 
 	if err != nil {
-		_logger.Error("Node startup", "err", err)
+		logger.Error("Node startup", "err", err)
 		return err
 	}
 
 	err = n.ethNode.Serve()
 
 	if err != nil {
-		_logger.Error("error while serving Devnet node", "err", err)
+		logger.Error("error while serving Devnet node", "err", err)
 	}
 
 	return err
