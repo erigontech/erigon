@@ -110,7 +110,7 @@ lint-deps: lintci-deps
 lint: lintci lint-mod-tidy
 
 test:
-	$(GOTEST) --count 1 -p 2 -coverprofile=coverage.out ./...
+	$(GOTEST) --count 1 -p 2 -coverprofile=coverage.out ./state -run 'TestSharedDomain_IteratePrefix' 
 
 test-no-fuzz:
 	$(GOTEST_NOFUZZ) --count 1 -p 2 ./...

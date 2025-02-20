@@ -23,13 +23,14 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/trie"
@@ -1483,10 +1484,25 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 			}
 			fmt.Printf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash)
 		}
-	} else {
-		return 0, 0, errors.New("state storing is only supported hex patricia trie")
+		return cs.blockNum, cs.txNum, nil
 	}
-	return cs.blockNum, cs.txNum, nil
+
+	if hext, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok {
+		if err := hext.SetState(cs.trieState); err != nil {
+			return 0, 0, fmt.Errorf("failed restore state : %w", err)
+		}
+		sdc.justRestored.Store(true) // to prevent double reset
+		if sdc.sharedDomains.trace {
+			rootHash, err := hext.RootHash()
+			if err != nil {
+				return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
+			}
+			fmt.Printf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash)
+		}
+		return cs.blockNum, cs.txNum, nil
+	}
+
+	return 0, 0, errors.New("state storing is only supported hex patricia trie or parallel hex patricia trie")
 }
 
 func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
