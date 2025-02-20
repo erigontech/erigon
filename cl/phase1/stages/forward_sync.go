@@ -198,16 +198,16 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 // forwardSync (MAIN ROUTINE FOR ForwardSync) performs the forward synchronization of beacon blocks.
 func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	var (
-		shouldInsert        = cfg.executionClient != nil && cfg.executionClient.SupportInsertion() // Check if the execution client supports insertion
-		finalizedCheckpoint = cfg.forkChoice.FinalizedCheckpoint()                                 // Get the finalized checkpoint from fork choice
-		secsPerLog          = 30                                                                   // Interval in seconds for logging progress
-		logTicker           = time.NewTicker(time.Duration(secsPerLog) * time.Second)              // Ticker for logging progress
-		downloader          = network2.NewForwardBeaconDownloader(ctx, cfg.rpc)                    // Initialize a new forward beacon downloader
-		currentSlot         atomic.Uint64                                                          // Atomic variable to track the current slot
+		shouldInsert = cfg.executionClient != nil && cfg.executionClient.SupportInsertion() // Check if the execution client supports insertion
+		startSlot    = cfg.forkChoice.HighestSeen() - 8                                     // Start forwardsync a little bit behind the highest seen slot (account for potential reorgs)
+		secsPerLog   = 30                                                                   // Interval in seconds for logging progress
+		logTicker    = time.NewTicker(time.Duration(secsPerLog) * time.Second)              // Ticker for logging progress
+		downloader   = network2.NewForwardBeaconDownloader(ctx, cfg.rpc)                    // Initialize a new forward beacon downloader
+		currentSlot  atomic.Uint64                                                          // Atomic variable to track the current slot
 	)
 
 	// Initialize the slot to download from the finalized checkpoint
-	currentSlot.Store(finalizedCheckpoint.Epoch * cfg.beaconCfg.SlotsPerEpoch)
+	currentSlot.Store(startSlot)
 
 	// Always start from the current finalized checkpoint
 	downloader.SetHighestProcessedSlot(currentSlot.Load())
