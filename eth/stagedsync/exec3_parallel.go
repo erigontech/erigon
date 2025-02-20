@@ -756,6 +756,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 			be.cntValidationFail++
 			be.execFailed[tx]++
+
+			if be.execFailed[tx] > 10 {
+				fmt.Println("FAIL", tx, be.execFailed[tx])
+			}
+
 			be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), false)
 			// 'create validation tasks for all transactions > tx ...'
 			be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
@@ -890,6 +895,10 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 
 	maxValidated := be.validateTasks.maxComplete()
 	for i := 0; i < len(toExecute); i++ {
+		if be.execFailed[i] > 10 {
+			fmt.Println("EXEC", i)
+		}
+
 		nextTx := toExecute[i]
 
 		execTask := be.tasks[nextTx]
