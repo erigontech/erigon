@@ -1073,7 +1073,6 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 		if err := json.NewDecoder(r.Body).Decode(block); err != nil {
 			return nil, err
 		}
-		block.SignedBlock.Block.SetVersion(version)
 		return block, nil
 	case "application/octet-stream":
 		octect, err := io.ReadAll(r.Body)
@@ -1083,7 +1082,6 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 		if err := block.DecodeSSZ(octect, int(version)); err != nil {
 			return nil, err
 		}
-		block.SignedBlock.Block.SetVersion(version)
 		return block, nil
 	}
 	return nil, errors.New("invalid content type")

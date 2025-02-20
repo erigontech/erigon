@@ -110,10 +110,6 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, be
 	return block
 }
 
-func (b *Eth1Block) SetVersion(version clparams.StateVersion) {
-	b.version = version
-}
-
 func (*Eth1Block) Static() bool {
 	return false
 }
