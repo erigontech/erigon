@@ -902,7 +902,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 		nextTx := toExecute[i]
 
 		if be.execFailed[nextTx] > 10 || be.txIncarnations[nextTx] > 10 {
-			fmt.Println("EXEC", nextTx, be.txIncarnations[nextTx])
+			fmt.Println("EXEC", nextTx, be.txIncarnations[nextTx], "max val", maxValidated, "aborted", be.execAborted[nextTx])
 		}
 
 		execTask := be.tasks[nextTx]
