@@ -37,6 +37,7 @@ jobs:
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
     - name: Save Erigon Chaindata Directory
+      id: save_chaindata_step
       run: |
         mv $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
 
@@ -116,7 +117,7 @@ jobs:
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Restore Erigon Chaindata Directory
-      if: always()
+      if: steps.save_chaindata_step.outcome == 'success'
       run: |
         rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
         mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
