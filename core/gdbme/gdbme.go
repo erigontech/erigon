@@ -1,30 +1,52 @@
 package gdbme
 
-/*
-#cgo CFLAGS: -g -O0 -fno-omit-frame-pointer
-#include <stdlib.h>
-#include "crashhelper.h"
-*/
-import "C"
-
 import (
 	"fmt"
-	"unsafe"
+	"github.com/erigontech/erigon/cmd/utils"
+	"os"
+	"os/exec"
 )
 
-func RestartWithGDB(argc int, argv []string) {
-	fmt.Println("Restarting with gdb...")
+const gdbPath = "/usr/bin/gdb"
 
-	cArgv := make([]*C.char, len(argv))
-	for i, arg := range argv {
-		cArgv[i] = C.CString(arg)
-		defer C.free(unsafe.Pointer(cArgv[i]))
+// restartUnderGDB relaunches the current process under GDB for debugging purposes.
+func RestartUnderGDB() {
+	exePath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error: could not determine executable path:", err)
+		os.Exit(1)
 	}
 
-	var cArgvPtr **C.char
-	if len(cArgv) > 0 {
-		cArgvPtr = &cArgv[0]
+	args := os.Args[1:]
+	filteredArgs := []string{}
+	for _, arg := range args {
+		if arg != "--"+utils.GDBMeFlag.Name {
+			filteredArgs = append(filteredArgs, arg)
+		}
 	}
 
-	C.check_and_restart(C.int(argc), cArgvPtr)
+	gdbArgs := []string{
+		"-q",
+		"-batch",
+		"-nx",
+		"-nh",
+		"-return-child-result",
+		"-ex", "run",
+		"-ex", "bt full",
+		"--args",
+		exePath,
+	}
+	gdbArgs = append(gdbArgs, filteredArgs...)
+
+	fmt.Fprintln(os.Stderr, "Restarting under GDB for crash diagnostics...")
+	cmd := exec.Command(gdbPath, gdbArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	err = cmd.Run()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to restart under GDB:", err)
+		os.Exit(1)
+	}
 }
