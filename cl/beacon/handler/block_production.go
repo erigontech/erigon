@@ -329,7 +329,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		log.Warn("Failed to produce block", "err", err, "slot", targetSlot)
 		return nil, err
 	}
-	log.Debug("[Block Production] Before ProcessBlock", "slot", targetSlot, "attestations", block.BeaconBody.Attestations.Len())
+
 	startConsensusProcessing := time.Now()
 
 	blockBuldingMachine := &eth2.Impl{}
