@@ -19,15 +19,34 @@ package diagnostics
 import (
 	"context"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/holiman/uint256"
 )
 
 type DiagTxn struct {
-	Hash []byte `json:"hash"`
+	IDHash              [32]byte      `json:"hash"`
+	SenderID            uint64        `json:"senderID"`
+	Nonce               uint64        `json:"nonce"`
+	Value               uint256.Int   `json:"value"`
+	Gas                 uint64        `json:"gas"`
+	FeeCap              uint256.Int   `json:"feeCap"`
+	Tip                 uint256.Int   `json:"tip"`
+	Size                uint32        `json:"size"`
+	Type                byte          `json:"type"`
+	Creation            bool          `json:"creation"`
+	DataLen             int           `json:"dataLen"`
+	AccessListAddrCount int           `json:"accessListAddrCount"`
+	AccessListStorCount int           `json:"accessListStorCount"`
+	BlobHashes          []common.Hash `json:"blobHashes"`
+	Blobs               [][]byte      `json:"blobs"`
 }
 
 type IncommingTxnUpdate struct {
-	Txn DiagTxn `json:"txns"`
+	Txns      []DiagTxn `json:"txns"`
+	Senders   []byte    `json:"senders"`
+	IsLocal   []bool    `json:"isLocal"`
+	KnownTxns [][]byte  `json:"knownTxns"` //hashes of incomming transactions from p2p network which are already in the pool
 }
 
 func (ti IncommingTxnUpdate) Type() Type {
@@ -52,7 +71,7 @@ func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 			case info := <-ch:
 				d.Notify(DiagMessages{
 					MessageType: "txpool",
-					Message:     string(info.Txn.Hash),
+					Message:     info,
 				})
 			}
 		}
