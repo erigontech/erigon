@@ -193,6 +193,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	vmconfig.ExtraEips = eips
 	block, _, err := core.GenesisToBlock(t.genesis(config), dirs, log.Root())
 	if err != nil {
+		fmt.Println("THIS ERR")
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
@@ -240,7 +241,6 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 			return nil, libcommon.Hash{}, err
 		}
 	}
-
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
 	header := block.HeaderNoCopy()

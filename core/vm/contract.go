@@ -62,10 +62,11 @@ type Contract struct {
 	analysis      bitvec         // Locally cached result of JUMPDEST analysis
 	skipAnalysis  bool
 
-	Code     []byte
-	CodeHash libcommon.Hash
-	CodeAddr *libcommon.Address
-	Input    []byte
+	Code      []byte
+	Container *Container
+	CodeHash  libcommon.Hash
+	CodeAddr  *libcommon.Address
+	Input     []byte
 
 	Gas   uint64
 	value *uint256.Int
@@ -225,10 +226,42 @@ func (c *Contract) Value() *uint256.Int {
 	return c.value
 }
 
+// IsEOF returns whether the contract is EOF.
+func (c *Contract) IsEOF() bool {
+	return c.Container != nil
+}
+
+func (c *Contract) CodeAt(section uint64) []byte {
+	if c.Container == nil {
+		return c.Code
+	}
+	return c.Container.Code[section]
+}
+
+func (c *Contract) SubcontainerAt(idx int) []byte {
+	if c.Container.SubContainers == nil {
+		fmt.Errorf("Contract.SubcontainerAt: Container.SubContainers == nil") // TODO(racytech): handle errors better, maybe return error, []byte?
+		return nil
+	}
+	if idx >= len(c.Container.SubContainers) {
+		fmt.Errorf("Contract.SetSubcontainer: idx out of range: idx: %v, subcontainer_size: %v", idx, len(c.Container.SubContainers))
+		return nil
+	}
+	return c.Container.SubContainers[idx]
+}
+
+func (c *Contract) Data() []byte {
+	// if c.Container == nil {
+	// 	return nil
+	// }
+	return c.Container.Data
+}
+
 // SetCallCode sets the code of the contract and address of the backing data
 // object
-func (c *Contract) SetCallCode(addr *libcommon.Address, hash libcommon.Hash, code []byte) {
+func (c *Contract) SetCallCode(addr *libcommon.Address, hash libcommon.Hash, code []byte, container *Container) {
 	c.Code = code
+	c.Container = container
 	c.CodeHash = hash
 	c.CodeAddr = addr
 }

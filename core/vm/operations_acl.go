@@ -21,6 +21,7 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -34,6 +35,7 @@ import (
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 	return func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+		fmt.Println("CALLING makeGasSStoreFunc")
 		// If we fail the minimum gas availability invariant, fail (0)
 		if contract.Gas <= params.SstoreSentryGasEIP2200 {
 			return 0, errors.New("not enough gas for reentrancy sentry")
@@ -45,7 +47,6 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			current uint256.Int
 			cost    = uint64(0)
 		)
-
 		evm.IntraBlockState().GetState(contract.Address(), &slot, &current)
 		// If the caller cannot afford the cost, this change will be rolled back
 		if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(contract.Address(), slot); slotMod {
@@ -53,7 +54,8 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		}
 		var value uint256.Int
 		value.Set(y)
-
+		fmt.Printf("x: 0x%x, y: 0x%x\n", x.Bytes32(), y.Bytes32())
+		fmt.Printf("address: 0x%x, current: 0x%x, value: 0x%x\n", contract.Address(), current.Bytes32(), value.Bytes32())
 		if current.Eq(&value) { // noop (1)
 			// EIP 2200 original clause:
 			//		return params.SloadGasEIP2200, nil
@@ -217,6 +219,8 @@ var (
 	// gasSStoreEIP2539 implements gas cost for SSTORE according to EPI-2539
 	// Replace `SSTORE_CLEARS_SCHEDULE` with `SSTORE_RESET_GAS + ACCESS_LIST_STORAGE_KEY_COST` (4,800)
 	gasSStoreEIP3529 = makeGasSStoreFunc(params.SstoreClearsScheduleRefundEIP3529)
+
+	// gasDataCopyEIP7480 = makeGasDataCopyFunc() // TODO(racytech): make sure this one is correct
 )
 
 // makeSelfdestructGasFn can create the selfdestruct dynamic gas function for EIP-2929 and EIP-2539
@@ -316,4 +320,16 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		}
 		return gas, nil
 	}
+}
+
+func makeEOFCreateGasFunc() gasFunc {
+	gasFunc := func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+		// var (
+		// 	code             = contract.CodeAt(scope.CodeSection)
+		// 	initContainerIdx = code[*pc+1]
+		// 	initContainer = scope.Contract.SubContainerAt(int(initContainerIdx))
+		// )
+		return 0, nil
+	}
+	return gasFunc
 }
