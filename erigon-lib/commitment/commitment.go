@@ -22,11 +22,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"math/bits"
 	"sort"
 	"strings"
 	"unsafe"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/holiman/uint256"
 
@@ -120,6 +121,8 @@ type TrieVariant string
 const (
 	// VariantHexPatriciaTrie used as default commitment approach
 	VariantHexPatriciaTrie TrieVariant = "hex-patricia-hashed"
+	// VariantHexPatriciaTrieReader used as read only commitment trie
+	VariantHexPatriciaTrieReader TrieVariant = "hex-patricia-hashed-reader"
 	// VariantBinPatriciaTrie - Experimental mode with binary key representation
 	VariantBinPatriciaTrie TrieVariant = "bin-patricia-hashed"
 )
@@ -922,6 +925,13 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 	return stat
 }
 
+type ReadOrUpdate int
+
+const (
+	ReadTouch   ReadOrUpdate = 0
+	UpdateTouch ReadOrUpdate = 1
+)
+
 // Defines how to evaluate commitments
 type Mode uint
 
@@ -967,6 +977,8 @@ type Updates struct {
 	tmpdir string
 }
 
+type Reads = Updates
+
 type keyHasher func(key []byte) []byte
 
 func keyHasherNoop(key []byte) []byte { return key }
@@ -986,6 +998,9 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	}
 	return t
 }
+
+var NewReads = NewUpdates
+
 func (t *Updates) SetMode(m Mode) {
 	t.mode = m
 	if t.mode == ModeDirect && t.keys == nil {
