@@ -671,14 +671,17 @@ func opExchange(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 
 func opDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		index  = scope.Stack.Peek()
-		data   = scope.Contract.Data()
-		offset = int(index.Uint64()) // with overflow maybe?
+		index = scope.Stack.Peek()
+		data  = scope.Contract.Data()
+		// with overflow maybe?
 	)
+
+	dataLen := uint256.NewInt(uint64(len(data)))
 	b := [32]byte{}
-	if len(data) < offset {
+	if index.Gt(dataLen) {
 		index.SetBytes32(b[:])
 	} else {
+		offset := int(index.Uint64())
 		end := min(offset+32, len(data))
 		for i := 0; i < end-offset; i++ {
 			b[i] = data[offset+i]
@@ -714,24 +717,25 @@ func opDataSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 
 func opDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		memOffset256 = scope.Stack.Pop()
+		memIndex256  = scope.Stack.Pop()
 		dataIndex256 = scope.Stack.Pop()
 		size256      = scope.Stack.Pop()
 
-		data               = scope.Contract.Data()
-		dataLen            = uint64(len(data))
-		dataIndex          = dataIndex256.Uint64()
+		data        = scope.Contract.Data()
+		dataSize256 = uint256.NewInt(uint64(len(data)))
+		// dataLen            = uint64(len(data))
+		// dataIndex          = dataIndex256.Uint64()
 		dst, src, copySize uint64
 	)
-	fmt.Println("DATACOPY CALLED")
-	dst = memOffset256.Uint64()
-	if dataLen < dataIndex {
-		src = dataLen
+	dst = memIndex256.Uint64()
+	if dataSize256.Lt(&dataIndex256) {
+		src = uint64(len(data))
 	} else {
-		src = dataIndex
+		src = dataIndex256.Uint64()
 	}
 	s := size256.Uint64()
-	copySize = min(s, dataLen-src)
+	copySize = min(s, uint64(len(data))-src)
+	fmt.Printf("src: %d, s: %d, copySize: %d\n", src, s, copySize)
 
 	if copySize > 0 {
 		fmt.Println("CopyFromData")

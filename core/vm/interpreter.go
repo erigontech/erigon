@@ -316,6 +316,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 		operation := jt[op]
 		cost = operation.constantGas // For tracing
+
 		// Validate stack
 		if sLen := locStack.Len(); sLen < operation.numPop {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
