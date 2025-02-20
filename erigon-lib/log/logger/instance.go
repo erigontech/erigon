@@ -2,7 +2,6 @@ package logger
 
 import (
 	"sync"
-	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -10,27 +9,26 @@ import (
 var Logger log.Logger
 
 func SetLogger(logger log.Logger) {
-	onceError.Do(func() {
+	onceExec.Do(func() {
 		Logger = logger
 	})
 }
 
-type OnceError struct {
-	once sync.Once
-	done atomic.Bool // or sync.Mutex + bool
+type OnceExec struct {
+	done       sync.Mutex
+	statusDone bool
 }
 
-var onceError OnceError
+var onceExec OnceExec
 
-func (o *OnceError) Do(f func()) {
-	if o.done.Load() {
+func (o *OnceExec) Do(f func()) {
+	o.done.Lock()
+	defer o.done.Unlock()
+	if o.statusDone {
 		panic("already called")
 	}
-
-	o.once.Do(func() {
-		f()
-		o.done.Store(true)
-	})
+	o.statusDone = true
+	f()
 }
 
 func Trace(msg string, ctx ...interface{}) {
