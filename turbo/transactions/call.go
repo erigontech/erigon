@@ -98,7 +98,7 @@ func DoCall(
 		return nil, err
 	}
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
-	txCtx := core.NewEVMTxContext(&msg)
+	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
 
@@ -110,7 +110,7 @@ func DoCall(
 	}()
 
 	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-	result, err := core.ApplyMessage(evm, &msg, gp, true /* refunds */, false /* gasBailout */, engine)
+	result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func NewReusableCaller(
 	}
 
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
-	txCtx := core.NewEVMTxContext(&msg)
+	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
 
@@ -244,6 +244,6 @@ func NewReusableCaller(
 		gasCap:          gasCap,
 		callTimeout:     callTimeout,
 		stateReader:     stateReader,
-		message:         &msg,
+		message:         msg,
 	}, nil
 }

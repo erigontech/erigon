@@ -789,7 +789,7 @@ func (api *TraceAPIImpl) callBlock(
 		return nil, nil, err
 	}
 
-	msgs := make([]types.Message, len(txs))
+	msgs := make([]*types.Message, len(txs))
 	for i, txn := range txs {
 		isBorStateSyncTxn := txn == borStateSyncTxn
 		var txnHash common.Hash
@@ -812,7 +812,7 @@ func (api *TraceAPIImpl) callBlock(
 			isBorStateSyncTxn: isBorStateSyncTxn,
 		})
 
-		msgs[i] = msg
+		msgs[i] = &msg
 	}
 
 	traces, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msgs, callParams,
