@@ -213,7 +213,7 @@ type Server struct {
 	ourHandshake *protoHandshake
 	loopWG       sync.WaitGroup // loop, listenLoop
 	peerFeed     event.Feed
-	logger       log.LoggerI
+	logger       log.Logger
 
 	nodedb             *enode.DB
 	localnode          *enode.LocalNode
@@ -482,7 +482,7 @@ func (s *sharedUDPConn) Close() error {
 
 // Start starts running the server.
 // Servers can not be re-used after stopping.
-func (srv *Server) Start(ctx context.Context, logger log.LoggerI) error {
+func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
 	if srv.running.Load() {
 		return errors.New("server already running")
 	}

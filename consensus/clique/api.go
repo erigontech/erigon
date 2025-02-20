@@ -39,7 +39,7 @@ type API struct {
 	// chain  consensus.ChainHeaderReader
 	db          kv.RoDB
 	clique      *Clique
-	logger      log.LoggerI
+	logger      log.Logger
 	blockReader services.FullBlockReader
 }
 

@@ -40,12 +40,12 @@ type mdbxPieceCompletion struct {
 	mu        sync.RWMutex
 	completed map[infohash.T]*roaring.Bitmap
 	flushed   map[infohash.T]*roaring.Bitmap
-	logger    log.LoggerI
+	logger    log.Logger
 }
 
 var _ storage.PieceCompletion = (*mdbxPieceCompletion)(nil)
 
-func NewMdbxPieceCompletion(db kv.RwDB, logger log.LoggerI) (ret storage.PieceCompletion, err error) {
+func NewMdbxPieceCompletion(db kv.RwDB, logger log.Logger) (ret storage.PieceCompletion, err error) {
 	ret = &mdbxPieceCompletion{
 		db:        db.(*mdbx.MdbxKV),
 		logger:    logger,

@@ -48,7 +48,7 @@ func (h *handler) Log(r *log.Record) error {
 // which emitted the log message.
 type logger struct {
 	t   *testing.T
-	log log.LoggerI
+	log log.Logger
 	mu  *sync.Mutex
 	h   *bufHandler
 }
@@ -64,7 +64,7 @@ func (h *bufHandler) Log(r *log.Record) error {
 }
 
 // Logger returns a logger which logs to the unit test log of t.
-func Logger(t *testing.T, level log.Lvl) log.LoggerI {
+func Logger(t *testing.T, level log.Lvl) log.Logger {
 	l := &logger{
 		t:   t,
 		log: log.New(),
@@ -131,7 +131,7 @@ func (l *logger) Log(level log.Lvl, msg string, ctx ...interface{}) {
 	l.flush()
 }
 
-func (l *logger) New(ctx ...interface{}) log.LoggerI {
+func (l *logger) New(ctx ...interface{}) log.Logger {
 	return &logger{l.t, l.log.New(ctx...), l.mu, l.h}
 }
 

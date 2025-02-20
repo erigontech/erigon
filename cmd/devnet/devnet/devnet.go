@@ -37,7 +37,7 @@ func (f NetworkSelectorFunc) Test(ctx context.Context, network *Network) bool {
 	return f(ctx, network)
 }
 
-func (d Devnet) Start(logger log.LoggerI) (Context, error) {
+func (d Devnet) Start(logger log.Logger) (Context, error) {
 	var wg sync.WaitGroup
 
 	errors := make(chan error, len(d))

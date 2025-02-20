@@ -185,7 +185,7 @@ func must(err error) {
 	}
 }
 
-var logger log.LoggerI
+var logger log.Logger
 var rootCmd = &cobra.Command{
 	Use:     "",
 	Short:   "snapshot downloader",
@@ -209,7 +209,7 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func Downloader(ctx context.Context, logger log.LoggerI) error {
+func Downloader(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
@@ -438,7 +438,7 @@ var torrentMagnet = &cobra.Command{
 	},
 }
 
-func manifestVerify(ctx context.Context, logger log.LoggerI) error {
+func manifestVerify(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(webseeds)
 	if len(webseedsList) == 0 { // fallback to default if exact list not passed
 		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
@@ -496,7 +496,7 @@ func manifestVerify(ctx context.Context, logger log.LoggerI) error {
 	return wseed.VerifyManifestedBuckets(ctx, verifyFailfast)
 }
 
-func manifest(ctx context.Context, logger log.LoggerI) error {
+func manifest(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 
 	files, err := downloader.SeedableFiles(dirs, chain, all)
@@ -546,7 +546,7 @@ func manifest(ctx context.Context, logger log.LoggerI) error {
 	return nil
 }
 
-func doPrintTorrentHashes(ctx context.Context, logger log.LoggerI) error {
+func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
@@ -616,7 +616,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.LoggerI) error {
 	return nil
 }
 
-func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.TransportCredentials, logger log.LoggerI) (*grpc.Server, error) {
+func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)

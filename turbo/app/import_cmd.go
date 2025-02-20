@@ -109,7 +109,7 @@ func importChain(cliCtx *cli.Context) error {
 	return nil
 }
 
-func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.LoggerI) error {
+func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.Logger) error {
 	// Watch for Ctrl-C while the import is running.
 	// If a signal is received, the import will stop at the next batch.
 	interrupt := make(chan os.Signal, 1)
@@ -236,7 +236,7 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.
 	return nil
 }
 
-func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.LoggerI) error {
+func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logger) error {
 	sentryControlServer := ethereum.SentryControlServer()
 	initialCycle, firstCycle := false, false
 	for _, b := range chain.Blocks {
@@ -255,7 +255,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logge
 	return insertPosChain(ethereum, chain, logger)
 }
 
-func insertPosChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.LoggerI) error {
+func insertPosChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logger) error {
 	posBlockStart := 0
 	for i, b := range chain.Blocks {
 		if b.Header().Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {

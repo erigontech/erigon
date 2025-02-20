@@ -64,7 +64,7 @@ var migrations = map[kv.Label][]Migration{
 type Callback func(tx kv.RwTx, progress []byte, isDone bool) error
 type Migration struct {
 	Name string
-	Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.LoggerI) error
+	Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error
 }
 
 var (
@@ -169,7 +169,7 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 	return nil
 }
 
-func (m *Migrator) Apply(db kv.RwDB, dataDir, chaindata string, logger log.LoggerI) error {
+func (m *Migrator) Apply(db kv.RwDB, dataDir, chaindata string, logger log.Logger) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}

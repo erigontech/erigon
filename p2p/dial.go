@@ -142,7 +142,7 @@ type dialConfig struct {
 	netRestrict    *netutil.Netlist // IP whitelist, disabled if nil
 	resolver       nodeResolver
 	dialer         NodeDialer
-	log            log.LoggerI
+	log            log.Logger
 	clock          mclock.Clock
 	rand           *mrand.Rand
 }

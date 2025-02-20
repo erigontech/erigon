@@ -104,7 +104,7 @@ func StageHeadersCfg(
 	}
 }
 
-func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, logger log.LoggerI) error {
+func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, logger log.Logger) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -125,7 +125,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
-func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, useExternalTx bool, logger log.LoggerI) error {
+func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, useExternalTx bool, logger log.Logger) error {
 	var err error
 
 	startTime := time.Now()
@@ -369,7 +369,7 @@ Loop:
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash libcommon.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader, logger log.LoggerI) error {
+func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash libcommon.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader, logger log.Logger) error {
 	if height == 0 {
 		return nil
 	}
@@ -532,7 +532,7 @@ func logProgressHeaders(
 	prev uint64,
 	now uint64,
 	stats headerdownload.Stats,
-	logger log.LoggerI,
+	logger log.Logger,
 ) uint64 {
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 
@@ -571,10 +571,10 @@ type ChainReaderImpl struct {
 	config      *chain.Config
 	tx          kv.Tx
 	blockReader services.FullBlockReader
-	logger      log.LoggerI
+	logger      log.Logger
 }
 
-func NewChainReaderImpl(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader, logger log.LoggerI) *ChainReaderImpl {
+func NewChainReaderImpl(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader, logger log.Logger) *ChainReaderImpl {
 	return &ChainReaderImpl{config, tx, blockReader, logger}
 }
 

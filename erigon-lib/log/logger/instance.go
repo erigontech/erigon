@@ -7,9 +7,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-var Logger log.LoggerI
+var Logger log.Logger
 
-func SetLogger(logger log.LoggerI) {
+func SetLogger(logger log.Logger) {
 	onceError.Do(func() {
 		Logger = logger
 	})

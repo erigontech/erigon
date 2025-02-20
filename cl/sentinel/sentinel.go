@@ -98,7 +98,7 @@ type Sentinel struct {
 	pubsub           *pubsub.PubSub
 	subManager       *GossipManager
 	metrics          bool
-	logger           log.LoggerI
+	logger           log.Logger
 	forkChoiceReader forkchoice.ForkChoiceStorageReader
 	pidToEnr         sync.Map
 	ethClock         eth_clock.EthereumClock
@@ -191,7 +191,7 @@ func New(
 	blockReader freezeblocks.BeaconSnapshotReader,
 	blobStorage blob_storage.BlobStorage,
 	indiciesDB kv.RoDB,
-	logger log.LoggerI,
+	logger log.Logger,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 ) (*Sentinel, error) {
 	s := &Sentinel{

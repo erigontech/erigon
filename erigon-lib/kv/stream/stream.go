@@ -455,11 +455,11 @@ func (it *PaginatedDuo[K, V]) Next() (k K, v V, err error) {
 // Traced - does `log.Warn` every .Next() call
 type Traced[T any] struct {
 	it     Uno[T]
-	logger log.LoggerI
+	logger log.Logger
 	prefix string
 }
 
-func Trace[T any](it Uno[T], logger log.LoggerI, prefix string) *Traced[T] {
+func Trace[T any](it Uno[T], logger log.Logger, prefix string) *Traced[T] {
 	return &Traced[T]{it: it, logger: logger, prefix: prefix}
 }
 func (m *Traced[T]) HasNext() bool {
@@ -481,11 +481,11 @@ func (m *Traced[T]) Close() {
 // TracedDuo - does `log.Warn` every .Next() call
 type TracedDuo[K, V any] struct {
 	it     Duo[K, V]
-	logger log.LoggerI
+	logger log.Logger
 	prefix string
 }
 
-func TraceDuo[K, V any](it Duo[K, V], logger log.LoggerI, prefix string) *TracedDuo[K, V] {
+func TraceDuo[K, V any](it Duo[K, V], logger log.Logger, prefix string) *TracedDuo[K, V] {
 	return &TracedDuo[K, V]{it: it, logger: logger, prefix: prefix}
 }
 func (m *TracedDuo[K, V]) HasNext() bool {

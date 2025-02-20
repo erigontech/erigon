@@ -332,7 +332,7 @@ func TestRemoteKvRange(t *testing.T) {
 	require.NoError(err)
 }
 
-func setupDatabases(t *testing.T, logger log.LoggerI, f mdbx.TableCfgFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {
+func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {
 	t.Helper()
 	ctx := context.Background()
 	writeDBs = []kv.RwDB{

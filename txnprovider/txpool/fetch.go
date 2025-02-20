@@ -51,7 +51,7 @@ type Fetch struct {
 	sentryClients            []sentry.SentryClient // sentry clients that will be used for accessing the network
 	stateChangesParseCtxLock sync.Mutex
 	pooledTxnsParseCtxLock   sync.Mutex
-	logger                   log.LoggerI
+	logger                   log.Logger
 }
 
 type StateChangesClient interface {
@@ -68,7 +68,7 @@ func NewFetch(
 	stateChangesClient StateChangesClient,
 	db kv.RwDB,
 	chainID uint256.Int,
-	logger log.LoggerI,
+	logger log.Logger,
 	opts ...Option,
 ) *Fetch {
 	options := applyOpts(opts...)

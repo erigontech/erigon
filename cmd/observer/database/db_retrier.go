@@ -27,10 +27,10 @@ import (
 
 type DBRetrier struct {
 	db  DB
-	log log.LoggerI
+	log log.Logger
 }
 
-func NewDBRetrier(db DB, logger log.LoggerI) DBRetrier {
+func NewDBRetrier(db DB, logger log.Logger) DBRetrier {
 	return DBRetrier{db, logger}
 }
 

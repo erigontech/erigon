@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-func newTestServer(logger log.LoggerI) *Server {
+func newTestServer(logger log.Logger) *Server {
 	server := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
 	server.idgen = sequentialIDGenerator()
 	if err := server.RegisterName("test", new(testService)); err != nil {

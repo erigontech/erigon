@@ -148,7 +148,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 
 // listenToIncomingBlocksUntilANewBlockIsReceived listens for incoming blocks until a new block with a slot greater than or equal to the target slot is received.
 // It processes blocks, checks their validity, and publishes them. It also handles context cancellation and logs progress periodically.
-func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger log.LoggerI, cfg *Cfg, args Args, respCh <-chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) error {
+func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger log.Logger, cfg *Cfg, args Args, respCh <-chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) error {
 	// Timer to log progress every 30 seconds
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
@@ -221,7 +221,7 @@ MainLoop:
 
 // chainTipSync synchronizes the chain tip by fetching blocks from the highest seen block up to the target slot by listening to incoming blocks.
 // or by fetching blocks that might have been missed by gossip after a delay.
-func chainTipSync(ctx context.Context, logger log.LoggerI, cfg *Cfg, args Args) error {
+func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	totalRequest := args.targetSlot - args.seenSlot
 	// If the execution engine is not ready, wait for it to be ready.
 	ready, err := waitForExecutionEngineToBeFinished(ctx, cfg)

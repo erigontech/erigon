@@ -166,7 +166,7 @@ func doMigrateFlags(ctx *cli.Context) {
 	}
 }
 
-func NewNodeConfig(ctx *cli.Context, logger log.LoggerI) (*nodecfg.Config, error) {
+func NewNodeConfig(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, error) {
 	nodeConfig, err := enode.NewNodConfigUrfave(ctx, logger)
 	if err != nil {
 		return nil, err
@@ -189,7 +189,7 @@ func NewNodeConfig(ctx *cli.Context, logger log.LoggerI) (*nodecfg.Config, error
 	return nodeConfig, nil
 }
 
-func MakeNodeWithDefaultConfig(cliCtx *cli.Context, logger log.LoggerI) (*node.Node, error) {
+func MakeNodeWithDefaultConfig(cliCtx *cli.Context, logger log.Logger) (*node.Node, error) {
 	conf, err := NewNodeConfig(cliCtx, logger)
 	if err != nil {
 		return nil, err
@@ -197,7 +197,7 @@ func MakeNodeWithDefaultConfig(cliCtx *cli.Context, logger log.LoggerI) (*node.N
 	return makeConfigNode(cliCtx.Context, conf, logger), nil
 }
 
-func makeConfigNode(ctx context.Context, config *nodecfg.Config, logger log.LoggerI) *node.Node {
+func makeConfigNode(ctx context.Context, config *nodecfg.Config, logger log.Logger) *node.Node {
 	stack, err := node.New(ctx, config, logger)
 	if err != nil {
 		utils.Fatalf("Failed to create Erigon node: %v", err)

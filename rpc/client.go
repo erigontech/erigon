@@ -102,7 +102,7 @@ type Client struct {
 	reqInit     chan *requestOp  // register response IDs, takes write lock
 	reqSent     chan error       // signals write completion, releases write lock
 	reqTimeout  chan *requestOp  // removes response IDs when call timeout expires
-	logger      log.LoggerI
+	logger      log.Logger
 }
 
 type reconnectFunc func(ctx context.Context) (ServerCodec, error)
@@ -164,7 +164,7 @@ func (op *requestOp) wait(ctx context.Context, c *Client) (*jsonrpcMessage, erro
 // For websocket connections, the origin is set to the local host name.
 //
 // The client reconnects automatically if the connection is lost.
-func Dial(rawurl string, logger log.LoggerI) (*Client, error) {
+func Dial(rawurl string, logger log.Logger) (*Client, error) {
 	return DialContext(context.Background(), rawurl, logger)
 }
 
@@ -172,7 +172,7 @@ func Dial(rawurl string, logger log.LoggerI) (*Client, error) {
 //
 // The context is used to cancel or time out the initial connection establishment. It does
 // not affect subsequent interactions with the client.
-func DialContext(ctx context.Context, rawurl string, logger log.LoggerI) (*Client, error) {
+func DialContext(ctx context.Context, rawurl string, logger log.Logger) (*Client, error) {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return nil, err
@@ -191,13 +191,13 @@ func DialContext(ctx context.Context, rawurl string, logger log.LoggerI) (*Clien
 
 // Client retrieves the client from the context, if any. This can be used to perform
 // 'reverse calls' in a handler method.
-func ClientFromContext(ctx context.Context, logger log.LoggerI) (*Client, bool) {
+func ClientFromContext(ctx context.Context, logger log.Logger) (*Client, bool) {
 	client, ok := ctx.Value(clientContextKey{}).(*Client)
 	client.logger = logger
 	return client, ok
 }
 
-func newClient(initctx context.Context, connect reconnectFunc, logger log.LoggerI) (*Client, error) {
+func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger) (*Client, error) {
 	conn, err := connect(initctx)
 	if err != nil {
 		return nil, err
@@ -207,7 +207,7 @@ func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger
 	return c, nil
 }
 
-func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, logger log.LoggerI) *Client {
+func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, logger log.Logger) *Client {
 	_, isHTTP := conn.(*httpConn)
 	c := &Client{
 		idgen:       idgen,

@@ -34,7 +34,7 @@ type Config struct {
 	// be block header JSON objects instead of work package arrays.
 	NotifyFull bool
 
-	Log log.LoggerI `toml:"-"`
+	Log log.Logger `toml:"-"`
 }
 
 // Mode defines the type and amount of PoW verification an ethash engine makes.

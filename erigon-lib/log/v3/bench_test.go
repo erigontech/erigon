@@ -132,7 +132,7 @@ func BenchmarkDescendant8(b *testing.B) {
 
 // Copied from https://github.com/uber-go/zap/blob/master/benchmarks/log15_bench_test.go
 // (MIT License)
-func newLog15() LoggerI {
+func newLog15() Logger {
 	logger := New()
 	logger.SetHandler(StreamHandler(io.Discard, JsonFormat()))
 	return logger

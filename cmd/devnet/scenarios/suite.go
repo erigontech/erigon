@@ -86,7 +86,7 @@ func (s *suite) runSteps(ctx context.Context, scenario *Scenario, steps []*Step)
 	return ctx, results, err
 }
 
-func (s *suite) runStep(ctx context.Context, scenario *Scenario, step *Step, prevStepErr error, isFirst, isLast bool, logger log.LoggerI) (rctx context.Context, sr StepResult) {
+func (s *suite) runStep(ctx context.Context, scenario *Scenario, step *Step, prevStepErr error, isFirst, isLast bool, logger log.Logger) (rctx context.Context, sr StepResult) {
 	var match *stepRunner
 
 	sr = StepResult{Status: Undefined}
@@ -162,7 +162,7 @@ func (s *suite) runStep(ctx context.Context, scenario *Scenario, step *Step, pre
 	return ctx, sr
 }
 
-func (s *suite) maybeUndefined(ctx context.Context, text string, args []interface{}, logger log.LoggerI) (context.Context, []string, *stepRunner, error) {
+func (s *suite) maybeUndefined(ctx context.Context, text string, args []interface{}, logger log.Logger) (context.Context, []string, *stepRunner, error) {
 	step := s.matchStep(text)
 
 	if nil == step {
@@ -234,7 +234,7 @@ func (s *suite) matchStep(text string) *stepRunner {
 	return nil
 }
 
-func (s *suite) maybeSubSteps(ctx context.Context, result interface{}, logger log.LoggerI) (context.Context, []interface{}, error) {
+func (s *suite) maybeSubSteps(ctx context.Context, result interface{}, logger log.Logger) (context.Context, []interface{}, error) {
 	if nil == result {
 		return ctx, nil, nil
 	}

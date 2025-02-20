@@ -68,7 +68,7 @@ func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
-func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg BodiesCfg, test bool, logger log.LoggerI) error {
+func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg BodiesCfg, test bool, logger log.Logger) error {
 	var doUpdate bool
 
 	startTime := time.Now()
@@ -347,7 +347,7 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 }
 
 func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDelivered uint64, prevDeliveredCount, deliveredCount,
-	prevWastedCount, wastedCount float64, bodyCacheSize int, logger log.LoggerI) {
+	prevWastedCount, wastedCount float64, bodyCacheSize int, logger log.Logger) {
 	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
 	if speed == 0 && wastedSpeed == 0 {
@@ -383,7 +383,7 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 	)
 }
 
-func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger log.LoggerI) {
+func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger log.Logger) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	remaining := headerProgress - committed

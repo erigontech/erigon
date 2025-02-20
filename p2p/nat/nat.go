@@ -113,7 +113,7 @@ const (
 
 // Map adds a port mapping on m and keeps it alive until c is closed.
 // This function is typically invoked in its own goroutine.
-func Map(m Interface, c <-chan struct{}, protocol string, extport, intport int, name string, logger log.LoggerI) {
+func Map(m Interface, c <-chan struct{}, protocol string, extport, intport int, name string, logger log.Logger) {
 	if !m.SupportsMapping() {
 		panic("Port mapping is not supported")
 	}

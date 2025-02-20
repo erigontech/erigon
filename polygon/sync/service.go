@@ -40,7 +40,7 @@ import (
 
 func NewService(
 	config *ethconfig.Config,
-	logger log.LoggerI,
+	logger log.Logger,
 	chainConfig *chain.Config,
 	sentryClient sentryproto.SentryClient,
 	maxPeers int,
@@ -107,7 +107,7 @@ func NewService(
 }
 
 type Service struct {
-	logger          log.LoggerI
+	logger          log.Logger
 	sync            *Sync
 	p2pService      *p2p.Service
 	store           Store

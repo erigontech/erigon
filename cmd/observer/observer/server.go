@@ -46,10 +46,10 @@ type Server struct {
 	natInterface nat.Interface
 	discConfig   discover.Config
 
-	logger log.LoggerI
+	logger log.Logger
 }
 
-func NewServer(ctx context.Context, flags CommandFlags, logger log.LoggerI) (*Server, error) {
+func NewServer(ctx context.Context, flags CommandFlags, logger log.Logger) (*Server, error) {
 	nodeDBPath := filepath.Join(flags.DataDir, "nodes", "eth67")
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}
@@ -100,7 +100,7 @@ func NewServer(ctx context.Context, flags CommandFlags, logger log.LoggerI) (*Se
 	return &instance, nil
 }
 
-func makeLocalNode(ctx context.Context, nodeDBPath string, privateKey *ecdsa.PrivateKey, chain string, logger log.LoggerI) (*enode.LocalNode, error) {
+func makeLocalNode(ctx context.Context, nodeDBPath string, privateKey *ecdsa.PrivateKey, chain string, logger log.Logger) (*enode.LocalNode, error) {
 	db, err := enode.OpenDB(ctx, nodeDBPath, "", logger)
 	if err != nil {
 		return nil, err

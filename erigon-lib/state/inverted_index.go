@@ -71,7 +71,7 @@ type InvertedIndex struct {
 	// `_visible.files` - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visible *iiVisible
-	logger   log.LoggerI
+	logger   log.Logger
 }
 
 type iiCfg struct {
@@ -99,7 +99,7 @@ type iiVisible struct {
 	caches *sync.Pool
 }
 
-func NewInvertedIndex(cfg iiCfg, logger log.LoggerI) (*InvertedIndex, error) {
+func NewInvertedIndex(cfg iiCfg, logger log.Logger) (*InvertedIndex, error) {
 	if cfg.dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}

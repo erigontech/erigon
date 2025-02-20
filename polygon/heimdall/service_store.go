@@ -36,7 +36,7 @@ type Store interface {
 	Close()
 }
 
-func NewMdbxStore(logger log.LoggerI, dataDir string, accede bool, roTxLimit int64) *MdbxStore {
+func NewMdbxStore(logger log.Logger, dataDir string, accede bool, roTxLimit int64) *MdbxStore {
 	return newMdbxStore(polygoncommon.NewDatabase(dataDir, kv.HeimdallDB, databaseTablesCfg, logger, accede, roTxLimit))
 }
 

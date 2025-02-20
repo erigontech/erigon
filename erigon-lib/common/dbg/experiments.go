@@ -147,7 +147,7 @@ func LogHashMismatchReason() bool {
 
 type saveHeapOptions struct {
 	memStats *runtime.MemStats
-	logger   *log.LoggerI
+	logger   *log.Logger
 }
 
 type SaveHeapOption func(options *saveHeapOptions)
@@ -158,7 +158,7 @@ func SaveHeapWithMemStats(memStats *runtime.MemStats) SaveHeapOption {
 	}
 }
 
-func SaveHeapWithLogger(logger *log.LoggerI) SaveHeapOption {
+func SaveHeapWithLogger(logger *log.Logger) SaveHeapOption {
 	return func(options *saveHeapOptions) {
 		options.logger = logger
 	}
@@ -174,7 +174,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 		opt(&options)
 	}
 
-	var logger log.LoggerI
+	var logger log.Logger
 	if options.logger != nil {
 		logger = *options.logger
 	}

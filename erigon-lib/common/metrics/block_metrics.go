@@ -42,7 +42,7 @@ var (
 	BlockConsumerPostExecutionDelayHistogram  = metrics.NewHistogram(`block_consumer_delay_hist{type="post_execution"}`, delayBuckets)
 )
 
-func UpdateBlockConsumerHeaderDownloadDelay(blockTime uint64, blockNumber uint64, log log.LoggerI) {
+func UpdateBlockConsumerHeaderDownloadDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
 	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerHeaderDownloadDelay.ObserveDuration(t)
 	BlockConsumerHeaderDownloadDelayHistogram.ObserveDuration(t)
@@ -52,7 +52,7 @@ func UpdateBlockConsumerHeaderDownloadDelay(blockTime uint64, blockNumber uint64
 	}
 }
 
-func UpdateBlockConsumerBodyDownloadDelay(blockTime uint64, blockNumber uint64, log log.LoggerI) {
+func UpdateBlockConsumerBodyDownloadDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
 	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerBodyDownloadDelay.ObserveDuration(t)
 	BlockConsumerBodyDownloadDelayHistogram.ObserveDuration(t)
@@ -62,7 +62,7 @@ func UpdateBlockConsumerBodyDownloadDelay(blockTime uint64, blockNumber uint64, 
 	}
 }
 
-func UpdateBlockConsumerPreExecutionDelay(blockTime uint64, blockNumber uint64, log log.LoggerI) {
+func UpdateBlockConsumerPreExecutionDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
 	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerPreExecutionDelay.ObserveDuration(t)
 	BlockConsumerPreExecutionDelayHistogram.ObserveDuration(t)
@@ -72,7 +72,7 @@ func UpdateBlockConsumerPreExecutionDelay(blockTime uint64, blockNumber uint64, 
 	}
 }
 
-func UpdateBlockConsumerPostExecutionDelay(blockTime uint64, blockNumber uint64, log log.LoggerI) {
+func UpdateBlockConsumerPostExecutionDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
 	t := time.Unix(int64(blockTime), 0)
 	BlockConsumerPostExecutionDelay.ObserveDuration(t)
 	BlockConsumerPostExecutionDelayHistogram.ObserveDuration(t)
@@ -82,7 +82,7 @@ func UpdateBlockConsumerPostExecutionDelay(blockTime uint64, blockNumber uint64,
 	}
 }
 
-func UpdateBlockProducerProductionDelay(parentBlockTime uint64, producedBlockNum uint64, log log.LoggerI) {
+func UpdateBlockProducerProductionDelay(parentBlockTime uint64, producedBlockNum uint64, log log.Logger) {
 	t := time.Unix(int64(parentBlockTime), 0)
 	BlockProducerProductionDelay.ObserveDuration(t)
 

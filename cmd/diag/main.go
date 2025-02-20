@@ -97,7 +97,7 @@ func main() {
 	}
 }
 
-func setupLogger(ctx *cli.Context) (log.LoggerI, error) {
+func setupLogger(ctx *cli.Context) (log.Logger, error) {
 	dataDir := ctx.String(utils.DataDirFlag.Name)
 
 	if len(dataDir) > 0 {
@@ -113,7 +113,7 @@ func setupLogger(ctx *cli.Context) (log.LoggerI, error) {
 	return logger, nil
 }
 
-func handleTerminationSignals(stopFunc func(), logger log.LoggerI) {
+func handleTerminationSignals(stopFunc func(), logger log.Logger) {
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
 

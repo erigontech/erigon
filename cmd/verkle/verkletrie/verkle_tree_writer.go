@@ -44,7 +44,7 @@ func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
 	}
 }
 
-func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticker, key []byte, logger log.LoggerI) error {
+func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticker, key []byte, logger log.Logger) error {
 	var err error
 	totalInserted := 0
 	node.(*verkle.InternalNode).Flush(func(node verkle.VerkleNode) {
@@ -66,7 +66,7 @@ func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticke
 	return err
 }
 
-func collectVerkleNode(collector *etl.Collector, node verkle.VerkleNode, logInterval *time.Ticker, key []byte, logger log.LoggerI) error {
+func collectVerkleNode(collector *etl.Collector, node verkle.VerkleNode, logInterval *time.Ticker, key []byte, logger log.Logger) error {
 	var err error
 	totalInserted := 0
 	node.(*verkle.InternalNode).Flush(func(node verkle.VerkleNode) {
@@ -96,10 +96,10 @@ type VerkleTreeWriter struct {
 	collector *etl.Collector
 	mu        sync.Mutex
 	tmpdir    string
-	logger    log.LoggerI
+	logger    log.Logger
 }
 
-func NewVerkleTreeWriter(db kv.RwTx, tmpdir string, logger log.LoggerI) *VerkleTreeWriter {
+func NewVerkleTreeWriter(db kv.RwTx, tmpdir string, logger log.Logger) *VerkleTreeWriter {
 	return &VerkleTreeWriter{
 		db:        db,
 		collector: etl.NewCollector("verkleTreeWriterLogPrefix", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*8), logger),

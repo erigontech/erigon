@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-func UpdateDiskStats(ctx context.Context, logger log.LoggerI) {
+func UpdateDiskStats(ctx context.Context, logger log.Logger) {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 

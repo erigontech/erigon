@@ -89,7 +89,7 @@ type ApiHandler struct {
 	emitters                 *beaconevents.EventEmitter
 
 	routerCfg *beacon_router_configuration.RouterConfiguration
-	logger    log.LoggerI
+	logger    log.Logger
 
 	// Validator data structures
 	validatorParams                    *validator_params.ValidatorParams
@@ -115,7 +115,7 @@ type ApiHandler struct {
 }
 
 func NewApiHandler(
-	logger log.LoggerI,
+	logger log.Logger,
 	netConfig *clparams.NetworkConfig,
 	ethClock eth_clock.EthereumClock,
 	beaconChainConfig *clparams.BeaconChainConfig,

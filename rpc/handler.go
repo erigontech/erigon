@@ -66,7 +66,7 @@ type handler struct {
 	rootCtx        context.Context                // canceled by close()
 	cancelRoot     func()                         // cancel function for rootCtx
 	conn           jsonWriter                     // where responses will be sent
-	logger         log.LoggerI
+	logger         log.Logger
 	allowSubscribe bool
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
@@ -118,7 +118,7 @@ func HandleError(err error, stream *jsoniter.Stream) {
 	}
 }
 
-func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool, logger log.LoggerI, rpcSlowLogThreshold time.Duration) *handler {
+func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	forbiddenList := newForbiddenList()
 

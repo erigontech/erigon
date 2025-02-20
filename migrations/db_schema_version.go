@@ -26,7 +26,7 @@ import (
 
 var dbSchemaVersion5 = Migration{
 	Name: "db_schema_version5",
-	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.LoggerI) (err error) {
+	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			return err

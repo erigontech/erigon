@@ -135,7 +135,7 @@ func ValidateBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 	return nil
 }
 
-func ValidateBorSpans(logger log.LoggerI, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
+func ValidateBorSpans(logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
 	baseStore := heimdall.NewMdbxStore(logger, dirs.DataDir, true, 32)
 	snapshotStore := heimdall.NewSpanSnapshotStore(baseStore.Spans(), snaps)
 	err := snapshotStore.ValidateSnapshots(logger, failFast)
@@ -143,7 +143,7 @@ func ValidateBorSpans(logger log.LoggerI, dirs datadir.Dirs, snaps *heimdall.RoS
 	return err
 }
 
-func ValidateBorCheckpoints(logger log.LoggerI, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
+func ValidateBorCheckpoints(logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
 	baseStore := heimdall.NewMdbxStore(logger, dirs.DataDir, true, 32)
 	snapshotStore := heimdall.NewCheckpointSnapshotStore(baseStore.Checkpoints(), snaps)
 	err := snapshotStore.ValidateSnapshots(logger, failFast)
@@ -151,7 +151,7 @@ func ValidateBorCheckpoints(logger log.LoggerI, dirs datadir.Dirs, snaps *heimda
 	return err
 }
 
-func ValidateBorMilestones(logger log.LoggerI, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
+func ValidateBorMilestones(logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
 	baseStore := heimdall.NewMdbxStore(logger, dirs.DataDir, true, 32)
 	snapshotStore := heimdall.NewMilestoneSnapshotStore(baseStore.Milestones(), snaps)
 	err := snapshotStore.ValidateSnapshots(logger, failFast)

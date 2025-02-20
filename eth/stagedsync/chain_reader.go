@@ -37,7 +37,7 @@ type ChainReader struct {
 	Cfg         chain.Config
 	Db          kv.Tx
 	BlockReader services.FullBlockReader
-	Logger      log.LoggerI
+	Logger      log.Logger
 }
 
 // Config retrieves the blockchain's chain configuration.

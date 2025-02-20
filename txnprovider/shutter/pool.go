@@ -36,7 +36,7 @@ import (
 var _ txnprovider.TxnProvider = (*Pool)(nil)
 
 type Pool struct {
-	logger                  log.LoggerI
+	logger                  log.Logger
 	config                  Config
 	secondaryTxnProvider    txnprovider.TxnProvider
 	blockListener           BlockListener
@@ -50,7 +50,7 @@ type Pool struct {
 }
 
 func NewPool(
-	logger log.LoggerI,
+	logger log.Logger,
 	config Config,
 	secondaryTxnProvider txnprovider.TxnProvider,
 	contractBackend bind.ContractBackend,

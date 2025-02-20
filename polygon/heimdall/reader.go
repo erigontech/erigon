@@ -15,7 +15,7 @@ import (
 )
 
 type Reader struct {
-	logger                    log.LoggerI
+	logger                    log.Logger
 	store                     Store
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
@@ -24,7 +24,7 @@ type ReaderConfig struct {
 	Store     Store
 	BorConfig *borcfg.BorConfig
 	DataDir   string
-	Logger    log.LoggerI
+	Logger    log.Logger
 }
 
 // AssembleReader creates and opens the MDBX store. For use cases where the store is only being read from. Must call Close.
@@ -39,7 +39,7 @@ func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
 	return reader, nil
 }
 
-func NewReader(borConfig *borcfg.BorConfig, store Store, logger log.LoggerI) *Reader {
+func NewReader(borConfig *borcfg.BorConfig, store Store, logger log.Logger) *Reader {
 	return &Reader{
 		logger:                    logger,
 		store:                     store,
@@ -73,7 +73,7 @@ func (r *Reader) Close() {
 
 type RemoteReader struct {
 	client  remote.HeimdallBackendClient
-	logger  log.LoggerI
+	logger  log.Logger
 	version gointerfaces.Version
 }
 

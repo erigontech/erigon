@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-func ListenSignals(stack io.Closer, logger log.LoggerI) {
+func ListenSignals(stack io.Closer, logger log.Logger) {
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, unix.SIGINT, unix.SIGTERM)
 	_debug.GetSigC(&sigc)

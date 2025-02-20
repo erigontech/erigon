@@ -45,7 +45,7 @@ type Diplomacy struct {
 	maxHandshakeTries uint
 
 	statusLogPeriod time.Duration
-	log             log.LoggerI
+	log             log.Logger
 }
 
 func NewDiplomacy(
@@ -57,7 +57,7 @@ func NewDiplomacy(
 	retryDelay time.Duration,
 	maxHandshakeTries uint,
 	statusLogPeriod time.Duration,
-	logger log.LoggerI,
+	logger log.Logger,
 ) *Diplomacy {
 	instance := Diplomacy{
 		db,

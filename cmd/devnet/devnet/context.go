@@ -67,8 +67,8 @@ func AsContext(ctx context.Context) Context {
 	return devnetContext{ctx}
 }
 
-func Logger(ctx context.Context) log.LoggerI {
-	if logger, ok := ctx.Value(ckLogger).(log.LoggerI); ok {
+func Logger(ctx context.Context) log.Logger {
+	if logger, ok := ctx.Value(ckLogger).(log.Logger); ok {
 		return logger
 	}
 
@@ -85,7 +85,7 @@ type cnet struct {
 	network  *Network
 }
 
-func WithDevnet(ctx context.Context, devnet Devnet, logger log.LoggerI) Context {
+func WithDevnet(ctx context.Context, devnet Devnet, logger log.Logger) Context {
 	ctx = context.WithValue(ctx, ckDevnet, devnet)
 	ctx = context.WithValue(ctx, ckLogger, logger)
 	return devnetContext{ctx}

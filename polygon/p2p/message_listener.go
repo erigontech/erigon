@@ -40,7 +40,7 @@ type DecodedInboundMessage[TPacket any] struct {
 type UnregisterFunc = event.UnregisterFunc
 
 func NewMessageListener(
-	logger log.LoggerI,
+	logger log.Logger,
 	sentryClient sentryproto.SentryClient,
 	statusDataFactory sentry.StatusDataFactory,
 	peerPenalizer *PeerPenalizer,
@@ -59,7 +59,7 @@ func NewMessageListener(
 }
 
 type MessageListener struct {
-	logger                  log.LoggerI
+	logger                  log.Logger
 	sentryClient            sentryproto.SentryClient
 	statusDataFactory       sentry.StatusDataFactory
 	peerPenalizer           *PeerPenalizer
@@ -190,7 +190,7 @@ func streamMessages[TMessage any](
 
 func notifyInboundMessageObservers[TPacket any](
 	ctx context.Context,
-	logger log.LoggerI,
+	logger log.Logger,
 	peerPenalizer *PeerPenalizer,
 	observers *event.Observers[*DecodedInboundMessage[TPacket]],
 	message *sentryproto.InboundMessage,

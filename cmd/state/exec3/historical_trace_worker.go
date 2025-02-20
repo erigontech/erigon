@@ -60,7 +60,7 @@ type HistoricalTraceWorker struct {
 	ctx         context.Context
 	stateWriter state.StateWriter
 	chain       consensus.ChainReader
-	logger      log.LoggerI
+	logger      log.Logger
 
 	execArgs *ExecArgs
 
@@ -90,7 +90,7 @@ func NewHistoricalTraceWorker(
 
 	ctx context.Context,
 	execArgs *ExecArgs,
-	logger log.LoggerI,
+	logger log.Logger,
 ) *HistoricalTraceWorker {
 	stateReader := state.NewHistoryReaderV3()
 	ie := &HistoricalTraceWorker{
@@ -246,7 +246,7 @@ type ExecArgs struct {
 	Workers     int
 }
 
-func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.LoggerI) *errgroup.Group {
+func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {
 	g, ctx := errgroup.WithContext(ctx)
 
 	// can afford big limits - because historical execution doesn't need conflicts-resolution
@@ -300,7 +300,7 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 	//}
 	return nil
 }
-func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in *state.QueueWithRetry, workerCount int, rws *state.ResultsQueue, logger log.LoggerI) error {
+func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in *state.QueueWithRetry, workerCount int, rws *state.ResultsQueue, logger log.Logger) error {
 	workers := make([]*HistoricalTraceWorker, workerCount)
 	mapGroup, ctx := errgroup.WithContext(ctx)
 	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
@@ -347,7 +347,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 	return
 }
 
-func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx context.Context, tx kv.TemporalTx, cfg *ExecArgs, logger log.LoggerI) (err error) {
+func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx context.Context, tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
 	if chainConfig.ChainName == networkname.Gnosis {

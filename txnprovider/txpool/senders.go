@@ -125,7 +125,7 @@ func (b *BySenderAndNonce) has(mt *metaTxn) bool {
 	return b.tree.Has(mt)
 }
 
-func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, logger log.LoggerI) {
+func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, logger log.Logger) {
 	if _, ok := b.tree.Delete(mt); ok {
 		if mt.TxnSlot.Traced {
 			logger.Info("TX TRACING: Deleted txn by nonce", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "sender", mt.TxnSlot.SenderID, "nonce", mt.TxnSlot.Nonce, "reason", reason)
@@ -151,7 +151,7 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 	}
 }
 
-func (b *BySenderAndNonce) replaceOrInsert(mt *metaTxn, logger log.LoggerI) *metaTxn {
+func (b *BySenderAndNonce) replaceOrInsert(mt *metaTxn, logger log.Logger) *metaTxn {
 	it, ok := b.tree.ReplaceOrInsert(mt)
 
 	if ok {
@@ -202,7 +202,7 @@ func (sc *sendersBatch) getAddr(id uint64) (common.Address, bool) {
 
 var traceAllSenders = false
 
-func (sc *sendersBatch) getOrCreateID(addr common.Address, logger log.LoggerI) (uint64, bool) {
+func (sc *sendersBatch) getOrCreateID(addr common.Address, logger log.Logger) (uint64, bool) {
 	_, traced := sc.tracedSenders[addr]
 
 	if !traced {
@@ -243,14 +243,14 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, ui
 	return acc.Nonce, acc.Balance, nil
 }
 
-func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.LoggerI) (err error) {
+func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger) (err error) {
 	for i, txn := range newTxns.Txns {
 		txn.SenderID, txn.Traced = sc.getOrCreateID(newTxns.Senders.AddressAt(i), logger)
 	}
 	return nil
 }
 
-func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwindTxns, minedTxns TxnSlots, logger log.LoggerI) error {
+func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
 	for _, diff := range stateChanges.ChangeBatch {
 		for _, change := range diff.Changes { // merge state changes
 			addrB := gointerfaces.ConvertH160toAddress(change.Address)

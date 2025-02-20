@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/params"
 )
 
-func apply(tx kv.RwTx, logger log.LoggerI) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
+func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
 	domains, err := libstate.NewSharedDomains(tx, logger)
 	if err != nil {
 		panic(err)

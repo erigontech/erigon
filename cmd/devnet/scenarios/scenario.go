@@ -119,7 +119,7 @@ var typeOfBytes = reflect.TypeOf([]byte(nil))
 
 var typeOfContext = reflect.TypeOf((*context.Context)(nil)).Elem()
 
-func (c *stepRunner) Run(ctx context.Context, text string, args []interface{}, logger log.LoggerI) (context.Context, interface{}) {
+func (c *stepRunner) Run(ctx context.Context, text string, args []interface{}, logger log.Logger) (context.Context, interface{}) {
 	var values = make([]reflect.Value, 0, len(args))
 
 	typ := c.Handler.Type()

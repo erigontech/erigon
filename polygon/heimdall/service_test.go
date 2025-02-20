@@ -139,7 +139,7 @@ type ServiceTestSuite struct {
 	// test suite internals
 	suite.Suite
 	ctx                          context.Context
-	logger                       log.LoggerI
+	logger                       log.Logger
 	cancel                       context.CancelFunc
 	eg                           errgroup.Group
 	client                       *MockClient

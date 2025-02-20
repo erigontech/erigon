@@ -46,7 +46,7 @@ import (
 
 func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
 	heimdallClient heimdall.Client, withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
-	logger log.LoggerI, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
+	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
 ) consensus.Engine {
 	var eng consensus.Engine
 
@@ -143,7 +143,7 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 	}
 }
 
-func CreateConsensusEngineBareBones(ctx context.Context, chainConfig *chain.Config, logger log.LoggerI) consensus.Engine {
+func CreateConsensusEngineBareBones(ctx context.Context, chainConfig *chain.Config, logger log.Logger) consensus.Engine {
 	var consensusConfig interface{}
 
 	if chainConfig.Clique != nil {

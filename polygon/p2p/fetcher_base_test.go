@@ -798,7 +798,7 @@ type fetcherTest struct {
 	ctxCancel            context.CancelFunc
 	t                    *testing.T
 	fetcher              *FetcherBase
-	logger               log.LoggerI
+	logger               log.Logger
 	sentryClient         *direct.MockSentryClient
 	messageListener      *MessageListener
 	requestResponseMocks map[uint64]requestResponseMock

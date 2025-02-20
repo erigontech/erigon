@@ -125,7 +125,7 @@ func BorHeimdallForward(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg BorHeimdallCfg,
-	logger log.LoggerI,
+	logger log.Logger,
 ) (err error) {
 	processStart := time.Now()
 	if cfg.borConfig == nil || cfg.heimdallClient == nil {
@@ -484,7 +484,7 @@ func loadSnapshot(
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	snapDb kv.RwDB,
-	logger log.LoggerI,
+	logger log.Logger,
 ) *bor.Snapshot {
 
 	if s, ok := recents.Get(hash); ok {
@@ -512,7 +512,7 @@ func persistValidatorSets(
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	snapDb kv.RwDB,
-	logger log.LoggerI,
+	logger log.Logger,
 	logPrefix string,
 ) error {
 
@@ -677,7 +677,7 @@ func initValidatorSets(
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	snapDb kv.RwDB,
-	logger log.LoggerI,
+	logger log.Logger,
 	logPrefix string,
 ) (*bor.Snapshot, error) {
 

@@ -85,7 +85,7 @@ type DB struct {
 
 // OpenDB opens a node database for storing and retrieving infos about known peers in the
 // network. If no path is given an in-memory, temporary database is constructed.
-func OpenDB(ctx context.Context, path string, tmpDir string, logger log.LoggerI) (*DB, error) {
+func OpenDB(ctx context.Context, path string, tmpDir string, logger log.Logger) (*DB, error) {
 	if path == "" {
 		return newMemoryDB(ctx, logger, tmpDir)
 	}
@@ -100,7 +100,7 @@ func bucketsConfig(_ kv.TableCfg) kv.TableCfg {
 }
 
 // newMemoryDB creates a new in-memory node database without a persistent backend.
-func newMemoryDB(ctx context.Context, logger log.LoggerI, tmpDir string) (*DB, error) {
+func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, error) {
 	db, err := mdbx.New(kv.SentryDB, logger).
 		InMem(tmpDir).
 		WithTableCfg(bucketsConfig).
@@ -118,7 +118,7 @@ func newMemoryDB(ctx context.Context, logger log.LoggerI, tmpDir string) (*DB, e
 
 // newPersistentDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
-func newPersistentDB(ctx context.Context, logger log.LoggerI, path string) (*DB, error) {
+func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, error) {
 	db, err := mdbx.New(kv.SentryDB, logger).
 		Path(path).
 		WithTableCfg(bucketsConfig).

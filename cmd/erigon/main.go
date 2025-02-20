@@ -59,7 +59,7 @@ func main() {
 }
 
 func runErigon(cliCtx *cli.Context) error {
-	var _logger log.LoggerI
+	var _logger log.Logger
 	var err error
 	var metricsMux *http.ServeMux
 	var pprofMux *http.ServeMux

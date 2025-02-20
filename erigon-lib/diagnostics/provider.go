@@ -95,7 +95,7 @@ type registry struct {
 var providers = map[Type]*registry{}
 var providerMutex sync.RWMutex
 
-func StartProviders(ctx context.Context, infoType Type, logger log.LoggerI) {
+func StartProviders(ctx context.Context, infoType Type, logger log.Logger) {
 	providerMutex.Lock()
 
 	reg := providers[infoType]
@@ -116,7 +116,7 @@ func StartProviders(ctx context.Context, infoType Type, logger log.LoggerI) {
 	}
 }
 
-func startProvider(ctx context.Context, infoType Type, provider Provider, logger log.LoggerI) {
+func startProvider(ctx context.Context, infoType Type, provider Provider, logger log.Logger) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err := fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())

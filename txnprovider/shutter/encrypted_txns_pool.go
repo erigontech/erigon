@@ -34,7 +34,7 @@ import (
 )
 
 type EncryptedTxnsPool struct {
-	logger            log.LoggerI
+	logger            log.Logger
 	config            Config
 	sequencerContract *contracts.Sequencer
 	blockListener     BlockListener
@@ -43,7 +43,7 @@ type EncryptedTxnsPool struct {
 	initialLoadDone   chan struct{}
 }
 
-func NewEncryptedTxnsPool(logger log.LoggerI, config Config, cb bind.ContractBackend, bl BlockListener) *EncryptedTxnsPool {
+func NewEncryptedTxnsPool(logger log.Logger, config Config, cb bind.ContractBackend, bl BlockListener) *EncryptedTxnsPool {
 	sequencerContractAddress := libcommon.HexToAddress(config.SequencerContractAddress)
 	sequencerContract, err := contracts.NewSequencer(sequencerContractAddress, cb)
 	if err != nil {

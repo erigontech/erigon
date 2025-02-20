@@ -50,7 +50,7 @@ type Config struct {
 	NetRestrict  *netutil.Netlist   // network whitelist
 	Bootnodes    []*enode.Node      // list of bootstrap nodes
 	Unhandled    chan<- ReadPacket  // unhandled packets are sent on this channel
-	Log          log.LoggerI        // if set, log messages go here
+	Log          log.Logger         // if set, log messages go here
 	ValidSchemes enr.IdentityScheme // allowed identity schemes
 	Clock        mclock.Clock
 	ReplyTimeout time.Duration

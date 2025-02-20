@@ -52,7 +52,7 @@ type blockWaiter struct {
 	waitHashes map[libcommon.Hash]struct{}
 	headersSub ethereum.Subscription
 	handler    BlockHandler
-	logger     log.LoggerI
+	logger     log.Logger
 }
 
 type Waiter interface {

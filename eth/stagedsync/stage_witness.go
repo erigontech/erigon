@@ -57,7 +57,7 @@ func StageWitnessCfg(enableWitnessGeneration bool, maxWitnessLimit uint64, chain
 
 // PrepareForWitness abstracts the process of initialising bunch of necessary things required for witness
 // generation and puts them in a WitnessStore.
-func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot libcommon.Hash, cfg *WitnessCfg, ctx context.Context, logger log.LoggerI) (*WitnessStore, error) {
+func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot libcommon.Hash, cfg *WitnessCfg, ctx context.Context, logger log.Logger) (*WitnessStore, error) {
 	blockNr := block.NumberU64()
 	txNumsReader := rawdbv3.TxNums
 	reader, err := rpchelper.CreateHistoryStateReader(tx, txNumsReader, blockNr, 0, cfg.chainConfig.ChainName)
@@ -95,7 +95,7 @@ func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot libcommon.
 }
 
 // RewindStagesForWitness rewinds the Execution stage to previous block.
-func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, latestBlockNr uint64, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.LoggerI) error {
+func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, latestBlockNr uint64, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) error {
 	// Rewind the Execution stage to previous block
 	unwindState := &UnwindState{ID: stages.Execution, UnwindPoint: blockNr - 1, CurrentBlockNumber: latestBlockNr}
 	stageState := &StageState{ID: stages.Execution, BlockNumber: blockNr}
@@ -126,7 +126,7 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 	return nil
 }
 
-func ExecuteBlockStatelessly(block *types.Block, prevHeader *types.Header, chainReader consensus.ChainReader, tds *state.TrieDbState, cfg *WitnessCfg, buf *bytes.Buffer, getHashFn func(n uint64) libcommon.Hash, logger log.LoggerI) (libcommon.Hash, error) {
+func ExecuteBlockStatelessly(block *types.Block, prevHeader *types.Header, chainReader consensus.ChainReader, tds *state.TrieDbState, cfg *WitnessCfg, buf *bytes.Buffer, getHashFn func(n uint64) libcommon.Hash, logger log.Logger) (libcommon.Hash, error) {
 	blockNr := block.NumberU64()
 	nw, err := trie.NewWitnessFromReader(bytes.NewReader(buf.Bytes()), false)
 	if err != nil {

@@ -31,12 +31,12 @@ import (
 )
 
 // DialStdIO creates a client on stdin/stdout.
-func DialStdIO(ctx context.Context, logger log.LoggerI) (*Client, error) {
+func DialStdIO(ctx context.Context, logger log.Logger) (*Client, error) {
 	return DialIO(ctx, os.Stdin, os.Stdout, logger)
 }
 
 // DialIO creates a client which uses the given IO channels
-func DialIO(ctx context.Context, in io.Reader, out io.Writer, logger log.LoggerI) (*Client, error) {
+func DialIO(ctx context.Context, in io.Reader, out io.Writer, logger log.Logger) (*Client, error) {
 	return newClient(ctx, func(_ context.Context) (ServerCodec, error) {
 		return NewCodec(stdioConn{
 			in:  in,

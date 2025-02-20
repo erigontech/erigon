@@ -11,11 +11,11 @@ import (
 
 type EngineLogsSpammer struct {
 	lastRequestTime atomic.Value
-	logger          log.LoggerI
+	logger          log.Logger
 	chainConfig     *chain.Config
 }
 
-func NewEngineLogsSpammer(logger log.LoggerI, chainConfig *chain.Config) *EngineLogsSpammer {
+func NewEngineLogsSpammer(logger log.Logger, chainConfig *chain.Config) *EngineLogsSpammer {
 	lastRequestTimeAtomic := atomic.Value{}
 	lastRequestTimeAtomic.Store(time.Now())
 	return &EngineLogsSpammer{

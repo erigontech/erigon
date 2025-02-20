@@ -78,7 +78,7 @@ func TestServer(t *testing.T) {
 	}
 }
 
-func runTestScript(t *testing.T, file string, logger log.LoggerI) {
+func runTestScript(t *testing.T, file string, logger log.Logger) {
 	server := newTestServer(logger)
 	content, err := os.ReadFile(file)
 	if err != nil {

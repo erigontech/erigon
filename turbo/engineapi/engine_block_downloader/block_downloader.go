@@ -83,10 +83,10 @@ type EngineBlockDownloader struct {
 	lock sync.Mutex
 
 	// logs
-	logger log.LoggerI
+	logger log.Logger
 }
 
-func NewEngineBlockDownloader(ctx context.Context, logger log.LoggerI, hd *headerdownload.HeaderDownload, executionClient execution.ExecutionClient,
+func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient execution.ExecutionClient,
 	bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
 	bodyReqSend RequestBodyFunction, blockReader services.FullBlockReader, db kv.RoDB, config *chain.Config,
 	tmpdir string, syncCfg ethconfig.Sync) *EngineBlockDownloader {

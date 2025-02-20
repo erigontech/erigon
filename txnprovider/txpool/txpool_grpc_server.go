@@ -106,10 +106,10 @@ type GrpcServer struct {
 	newSlotsStreams *NewSlotsStreams
 
 	chainID uint256.Int
-	logger  log.LoggerI
+	logger  log.Logger
 }
 
-func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, newSlotsStreams *NewSlotsStreams, chainID uint256.Int, logger log.LoggerI) *GrpcServer {
+func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, newSlotsStreams *NewSlotsStreams, chainID uint256.Int, logger log.Logger) *GrpcServer {
 	return &GrpcServer{ctx: ctx, txPool: txPool, db: db, newSlotsStreams: newSlotsStreams, chainID: chainID, logger: logger}
 }
 
@@ -320,7 +320,7 @@ func (s *NewSlotsStreams) Add(stream txpool_proto.Txpool_OnAddServer) (remove fu
 	return func() { s.remove(id) }
 }
 
-func (s *NewSlotsStreams) Broadcast(reply *txpool_proto.OnAddReply, logger log.LoggerI) {
+func (s *NewSlotsStreams) Broadcast(reply *txpool_proto.OnAddReply, logger log.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, stream := range s.chans {
@@ -346,7 +346,7 @@ func (s *NewSlotsStreams) remove(id uint) {
 	delete(s.chans, id)
 }
 
-func StartGrpc(txPoolServer txpool_proto.TxpoolServer, miningServer txpool_proto.MiningServer, addr string, creds *credentials.TransportCredentials, logger log.LoggerI) (*grpc.Server, error) {
+func StartGrpc(txPoolServer txpool_proto.TxpoolServer, miningServer txpool_proto.MiningServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)

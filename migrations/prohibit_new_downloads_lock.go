@@ -31,7 +31,7 @@ import (
 
 var ProhibitNewDownloadsLock = Migration{
 	Name: "prohibit_new_downloads_lock",
-	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.LoggerI) (err error) {
+	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			return err

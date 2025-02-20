@@ -34,7 +34,7 @@ func NewDevDevnet(
 	baseRpcPort int,
 	producerCount int,
 	gasLimit uint64,
-	logger log.LoggerI,
+	logger log.Logger,
 	consoleLogLevel log.Lvl,
 	dirLogLevel log.Lvl,
 ) devnet.Devnet {

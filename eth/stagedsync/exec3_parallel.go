@@ -95,7 +95,7 @@ type txExecutor struct {
 	applyWorker    *exec3.Worker
 	outputTxNum    *atomic.Uint64
 	outputBlockNum metrics.Gauge
-	logger         log.LoggerI
+	logger         log.Logger
 }
 
 func (te *txExecutor) tx() kv.RwTx {
@@ -207,7 +207,7 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, maxTxNum uint64, bloc
 // Now rwLoop closing both (because applyLoop we completely restart)
 // Maybe need split channels? Maybe don't exit from ApplyLoop? Maybe current way is also ok?
 
-func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger log.LoggerI) error {
+func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger log.Logger) error {
 	//fmt.Println("rwLoop started", maxTxNum)
 	//defer fmt.Println("rwLoop done")
 
@@ -452,7 +452,7 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 	return
 }
 
-func (pe *parallelExecutor) run(ctx context.Context, maxTxNum uint64, logger log.LoggerI) context.CancelFunc {
+func (pe *parallelExecutor) run(ctx context.Context, maxTxNum uint64, logger log.Logger) context.CancelFunc {
 	pe.slowDownLimit = time.NewTicker(time.Second)
 	pe.rwsConsumed = make(chan struct{}, 1)
 	pe.rwLoopErrCh = make(chan error)

@@ -351,7 +351,7 @@ func torrentHashes(ctx context.Context, srcSession *downloader.RCloneSession, fr
 	return nil
 }
 
-func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, from uint64, to uint64, logger log.LoggerI) error {
+func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, from uint64, to uint64, logger log.Logger) error {
 	entries, err := manifest.DownloadManifest(ctx, srcSession)
 
 	if err != nil {
@@ -408,7 +408,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 	return g.Wait()
 }
 
-func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, from uint64, to uint64, logger log.LoggerI) error {
+func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, from uint64, to uint64, logger log.Logger) error {
 	entries, err := manifest.DownloadManifest(ctx, srcSession)
 
 	if err != nil {

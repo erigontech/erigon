@@ -211,13 +211,13 @@ type FixedSizeBitmapsWriter struct {
 	size          int
 	bitsPerBitmap uint64
 
-	logger  log.LoggerI
+	logger  log.Logger
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
 const MetaHeaderSize = 64
 
-func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, baseDataID, amount uint64, logger log.LoggerI) (*FixedSizeBitmapsWriter, error) {
+func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, baseDataID, amount uint64, logger log.Logger) (*FixedSizeBitmapsWriter, error) {
 	pageSize := os.Getpagesize()
 	_, fileName := filepath.Split(indexFile)
 	//TODO: use math.SafeMul()

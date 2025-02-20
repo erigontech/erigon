@@ -113,7 +113,7 @@ type PeerEvent struct {
 type Peer struct {
 	rw      *conn
 	running map[string]*protoRW
-	log     log.LoggerI
+	log     log.Logger
 	created mclock.AbsTime
 
 	wg       sync.WaitGroup
@@ -216,7 +216,7 @@ func (p *Peer) Inbound() bool {
 	return p.rw.is(inboundConn)
 }
 
-func newPeer(logger log.LoggerI, conn *conn, protocols []Protocol, pubkey [64]byte, metricsEnabled bool) *Peer {
+func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byte, metricsEnabled bool) *Peer {
 	log := logger.New("id", conn.node.ID(), "conn", conn.flags)
 
 	protomap := matchProtocols(protocols, conn.caps, conn, log)
@@ -235,7 +235,7 @@ func newPeer(logger log.LoggerI, conn *conn, protocols []Protocol, pubkey [64]by
 	return p
 }
 
-func (p *Peer) Log() log.LoggerI {
+func (p *Peer) Log() log.Logger {
 	return p.log
 }
 
@@ -404,7 +404,7 @@ func countMatchingProtocols(protocols []Protocol, caps []Cap) int {
 }
 
 // matchProtocols creates structures for matching named subprotocols.
-func matchProtocols(protocols []Protocol, caps []Cap, rw MsgReadWriter, logger log.LoggerI) map[string]*protoRW {
+func matchProtocols(protocols []Protocol, caps []Cap, rw MsgReadWriter, logger log.Logger) map[string]*protoRW {
 	sort.Sort(capsByNameAndVersion(caps))
 	offset := baseProtocolLength
 	result := make(map[string]*protoRW)
@@ -472,7 +472,7 @@ type protoRW struct {
 	werr   chan<- error    // for write results
 	offset uint64
 	w      MsgWriter
-	logger log.LoggerI
+	logger log.Logger
 }
 
 var traceMsg = false

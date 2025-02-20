@@ -40,7 +40,7 @@ func Assemble(
 	sentryClients []sentryproto.SentryClient,
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
-	logger log.LoggerI,
+	logger log.Logger,
 	opts ...Option,
 ) (*TxPool, txpoolproto.TxpoolServer, error) {
 	options := applyOpts(opts...)
@@ -97,9 +97,9 @@ func Assemble(
 	return pool, grpcServer, nil
 }
 
-type poolDBInitializer func(ctx context.Context, cfg txpoolcfg.Config, logger log.LoggerI) (kv.RwDB, error)
+type poolDBInitializer func(ctx context.Context, cfg txpoolcfg.Config, logger log.Logger) (kv.RwDB, error)
 
-var defaultPoolDBInitializer = func(ctx context.Context, cfg txpoolcfg.Config, logger log.LoggerI) (kv.RwDB, error) {
+var defaultPoolDBInitializer = func(ctx context.Context, cfg txpoolcfg.Config, logger log.Logger) (kv.RwDB, error) {
 	opts := mdbx.New(kv.TxPoolDB, logger).
 		Path(cfg.DBDir).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).

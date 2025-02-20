@@ -82,7 +82,7 @@ type KvServer struct {
 
 	trace     bool
 	rangeStep int // make sure `s.with` has limited time
-	logger    log.LoggerI
+	logger    log.Logger
 }
 
 type threadSafeTx struct {
@@ -95,7 +95,7 @@ type Snapshots interface {
 	Files() []string
 }
 
-func NewKvServer(ctx context.Context, db kv.RoDB, snapshots Snapshots, borSnapshots Snapshots, historySnapshots Snapshots, logger log.LoggerI) *KvServer {
+func NewKvServer(ctx context.Context, db kv.RoDB, snapshots Snapshots, borSnapshots Snapshots, historySnapshots Snapshots, logger log.Logger) *KvServer {
 	return &KvServer{
 		trace:              false,
 		rangeStep:          1024,

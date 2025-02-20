@@ -31,7 +31,7 @@ func keygen(
 	targetKey *ecdsa.PublicKey,
 	timeout time.Duration,
 	concurrencyLimit uint,
-	logger log.LoggerI,
+	logger log.Logger,
 ) []*ecdsa.PublicKey {
 	ctx, cancel := context.WithTimeout(parentContext, timeout)
 	defer cancel()

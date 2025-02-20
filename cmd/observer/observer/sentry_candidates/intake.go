@@ -40,7 +40,7 @@ type Intake struct {
 	handshakeRefreshTimeout time.Duration
 
 	statusLogPeriod time.Duration
-	log             log.LoggerI
+	log             log.Logger
 }
 
 func NewIntake(
@@ -50,7 +50,7 @@ func NewIntake(
 	chain string,
 	handshakeRefreshTimeout time.Duration,
 	statusLogPeriod time.Duration,
-	logger log.LoggerI,
+	logger log.Logger,
 ) *Intake {
 	instance := Intake{
 		logPath,

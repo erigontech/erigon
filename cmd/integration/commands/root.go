@@ -86,7 +86,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.LoggerI) (tdb kv.TemporalRwDB, err error) {
+func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
 	if opts.GetLabel() != kv.ChainDB {
 		panic(opts.GetLabel())
 	}

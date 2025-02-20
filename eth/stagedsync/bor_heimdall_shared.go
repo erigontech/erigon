@@ -44,7 +44,7 @@ func FetchSpanZeroForMiningIfNeeded(
 	blockReader services.FullBlockReader,
 	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
-	logger log.LoggerI,
+	logger log.Logger,
 ) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		_, _, err := blockReader.Span(ctx, tx, 0)
@@ -67,7 +67,7 @@ func fetchRequiredHeimdallSpansIfNeeded(
 	tx kv.RwTx,
 	cfg BorHeimdallCfg,
 	logPrefix string,
-	logger log.LoggerI,
+	logger log.Logger,
 ) (uint64, error) {
 	requiredSpanID := heimdall.SpanIdAt(toBlockNum)
 	if requiredSpanID == 0 && toBlockNum >= cfg.borConfig.CalculateSprintLength(toBlockNum) {
@@ -109,7 +109,7 @@ func fetchAndWriteHeimdallSpan(
 	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	logPrefix string,
-	logger log.LoggerI,
+	logger log.Logger,
 ) (uint64, error) {
 	response, err := heimdallClient.FetchSpan(ctx, spanID)
 	if err != nil {
@@ -134,7 +134,7 @@ func fetchAndWriteHeimdallCheckpointsIfNeeded(
 	tx kv.RwTx,
 	cfg BorHeimdallCfg,
 	logPrefix string,
-	logger log.LoggerI,
+	logger log.Logger,
 ) (uint64, error) {
 
 	lastId, exists, err := cfg.blockReader.LastCheckpointId(ctx, tx)
@@ -204,7 +204,7 @@ func fetchAndWriteHeimdallCheckpoint(
 	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	logPrefix string,
-	logger log.LoggerI,
+	logger log.Logger,
 ) (uint64, *heimdall.Checkpoint, error) {
 	response, err := heimdallClient.FetchCheckpoint(ctx, int64(checkpointId))
 	if err != nil {
@@ -227,7 +227,7 @@ func fetchAndWriteHeimdallMilestonesIfNeeded(
 	tx kv.RwTx,
 	cfg BorHeimdallCfg,
 	logPrefix string,
-	logger log.LoggerI,
+	logger log.Logger,
 ) (uint64, error) {
 
 	lastId, exists, err := cfg.blockReader.LastMilestoneId(ctx, tx)
@@ -308,7 +308,7 @@ func fetchAndWriteHeimdallMilestone(
 	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	logPrefix string,
-	logger log.LoggerI,
+	logger log.Logger,
 ) (uint64, *heimdall.Milestone, error) {
 	response, err := heimdallClient.FetchMilestone(ctx, int64(milestoneId))
 
@@ -336,7 +336,7 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 	bridgeStore bridge.Store,
 	chainID string,
 	logPrefix string,
-	logger log.LoggerI,
+	logger log.Logger,
 	lastStateSyncEventID uint64,
 	skipCount int,
 ) (uint64, int, int, time.Duration, error) {
@@ -375,7 +375,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	bridgeStore bridge.Store,
 	chainID string,
 	logPrefix string,
-	logger log.LoggerI) (uint64, int, int, time.Duration, error) {
+	logger log.Logger) (uint64, int, int, time.Duration, error) {
 	fetchStart := time.Now()
 	// Find out the latest eventId
 	var fromId uint64

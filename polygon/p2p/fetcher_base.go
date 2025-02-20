@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/eth/protocols/eth"
 )
 
-func NewFetcher(logger log.LoggerI, ml *MessageListener, ms *MessageSender, opts ...FetcherOption) *FetcherBase {
+func NewFetcher(logger log.Logger, ml *MessageListener, ms *MessageSender, opts ...FetcherOption) *FetcherBase {
 	return &FetcherBase{
 		logger:          logger,
 		config:          defaultFetcherConfig.CopyWithOptions(opts...),
@@ -43,7 +43,7 @@ func NewFetcher(logger log.LoggerI, ml *MessageListener, ms *MessageSender, opts
 }
 
 type FetcherBase struct {
-	logger          log.LoggerI
+	logger          log.Logger
 	config          FetcherConfig
 	messageListener *MessageListener
 	messageSender   *MessageSender

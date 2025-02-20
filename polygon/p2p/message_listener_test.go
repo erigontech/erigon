@@ -256,7 +256,7 @@ type messageListenerTest struct {
 	ctx                   context.Context
 	ctxCancel             context.CancelFunc
 	t                     *testing.T
-	logger                log.LoggerI
+	logger                log.Logger
 	sentryClient          *direct.MockSentryClient
 	messageListener       *MessageListener
 	inboundMessagesStream chan *delayedMessage[*sentryproto.InboundMessage]

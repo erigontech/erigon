@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/eth/protocols/eth"
 )
 
-func NewService(logger log.LoggerI, maxPeers int, sc sentryproto.SentryClient, sdf sentry.StatusDataFactory) *Service {
+func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sdf sentry.StatusDataFactory) *Service {
 	peerPenalizer := NewPeerPenalizer(sc)
 	messageListener := NewMessageListener(logger, sc, sdf, peerPenalizer)
 	peerTracker := NewPeerTracker(logger, sc, messageListener)
@@ -54,7 +54,7 @@ func NewService(logger log.LoggerI, maxPeers int, sc sentryproto.SentryClient, s
 }
 
 type Service struct {
-	logger          log.LoggerI
+	logger          log.Logger
 	fetcher         Fetcher
 	messageListener *MessageListener
 	peerPenalizer   *PeerPenalizer

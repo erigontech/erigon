@@ -69,7 +69,7 @@ type BodyDownload struct {
 	bodyCacheLimit   int // Limit of body Cache size
 	blockBufferSize  int
 	br               services.FullBlockReader
-	logger           log.LoggerI
+	logger           log.Logger
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
@@ -81,7 +81,7 @@ type BodyRequest struct {
 }
 
 // NewBodyDownload create a new body download state object
-func NewBodyDownload(engine consensus.Engine, blockBufferSize, bodyCacheLimit int, br services.FullBlockReader, logger log.LoggerI) *BodyDownload {
+func NewBodyDownload(engine consensus.Engine, blockBufferSize, bodyCacheLimit int, br services.FullBlockReader, logger log.Logger) *BodyDownload {
 	bd := &BodyDownload{
 		requestedMap:     make(map[BodyHashes]uint64),
 		bodyCacheLimit:   bodyCacheLimit,

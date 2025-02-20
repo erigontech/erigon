@@ -56,7 +56,7 @@ func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
 // downloadAndProcessEip4844DA handles downloading and processing of EIP-4844 data availability blobs.
 // It takes highest slot processed, and a list of signed beacon blocks as input.
 // It returns the highest blob slot processed and an error if any.
-func downloadAndProcessEip4844DA(ctx context.Context, logger log.LoggerI, cfg *Cfg, highestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (highestBlobSlotProcessed uint64, err error) {
+func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cfg, highestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (highestBlobSlotProcessed uint64, err error) {
 	var (
 		ids   *solid.ListSSZ[*cltypes.BlobIdentifier]
 		blobs *network2.PeerAndSidecars
@@ -128,7 +128,7 @@ func filterUnneededBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlo
 // processDownloadedBlockBatches processes a batch of downloaded blocks.
 // It takes the highest block processed, a flag to determine if insertion is needed, and a list of signed beacon blocks as input.
 // It returns the new highest block processed and an error if any.
-func processDownloadedBlockBatches(ctx context.Context, logger log.LoggerI, cfg *Cfg, highestBlockProcessed uint64, shouldInsert bool, blocks []*cltypes.SignedBeaconBlock) (newHighestBlockProcessed uint64, err error) {
+func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *Cfg, highestBlockProcessed uint64, shouldInsert bool, blocks []*cltypes.SignedBeaconBlock) (newHighestBlockProcessed uint64, err error) {
 	// Pre-process the block batch to ensure that the blocks are sorted by slot in ascending order
 	sort.Slice(blocks, func(i, j int) bool {
 		return blocks[i].Block.Slot < blocks[j].Block.Slot
@@ -226,7 +226,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.LoggerI, cfg 
 }
 
 // forwardSync (MAIN ROUTINE FOR ForwardSync) performs the forward synchronization of beacon blocks.
-func forwardSync(ctx context.Context, logger log.LoggerI, cfg *Cfg, args Args) error {
+func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	var (
 		shouldInsert        = cfg.executionClient != nil && cfg.executionClient.SupportInsertion() // Check if the execution client supports insertion
 		finalizedCheckpoint = cfg.forkChoice.FinalizedCheckpoint()                                 // Get the finalized checkpoint from fork choice

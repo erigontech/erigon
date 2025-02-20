@@ -121,7 +121,7 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func doTxpool(ctx context.Context, logger log.LoggerI) error {
+func doTxpool(ctx context.Context, logger log.Logger) error {
 	creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
 	if err != nil {
 		return fmt.Errorf("could not connect to remoteKv: %w", err)

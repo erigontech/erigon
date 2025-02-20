@@ -202,7 +202,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 }
 
 // Opens .kv at dataPath and generates index over it to file 'indexPath'
-func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.FileCompression, seed uint32, logger log.LoggerI, noFsync bool) {
+func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.FileCompression, seed uint32, logger log.Logger, noFsync bool) {
 	tb.Helper()
 	decomp, err := seg.NewDecompressor(dataPath)
 	require.NoError(tb, err)

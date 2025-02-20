@@ -56,14 +56,14 @@ type WebSeeds struct {
 	torrentsWhitelist   snapcfg.Preverified
 	seeds               []*url.URL
 
-	logger    log.LoggerI
+	logger    log.Logger
 	verbosity log.Lvl
 
 	torrentFiles *AtomicTorrentFS
 	client       *http.Client
 }
 
-func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.LoggerI) *WebSeeds {
+func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSeeds {
 	ws := &WebSeeds{
 		seeds:     seeds,
 		logger:    logger,

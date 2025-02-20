@@ -288,20 +288,20 @@ func (c *Config) ResolvePath(path string) string {
 }
 
 // StaticNodes returns a list of node enode URLs configured as static nodes.
-func (c *Config) StaticNodes(logger log.LoggerI) ([]*enode.Node, error) {
+func (c *Config) StaticNodes(logger log.Logger) ([]*enode.Node, error) {
 	dbPath := c.ResolvePath(datadirStaticNodes)
 	return c.parsePersistentNodes(&c.staticNodesWarning, dbPath, logger), nil
 }
 
 // TrustedNodes returns a list of node enode URLs configured as trusted nodes.
-func (c *Config) TrustedNodes(logger log.LoggerI) ([]*enode.Node, error) {
+func (c *Config) TrustedNodes(logger log.Logger) ([]*enode.Node, error) {
 	dbPath := c.ResolvePath(datadirTrustedNodes)
 	return c.parsePersistentNodes(&c.trustedNodesWarning, dbPath, logger), nil
 }
 
 // parsePersistentNodes parses a list of discovery node URLs loaded from a .json
 // file from within the data directory.
-func (c *Config) parsePersistentNodes(w *bool, path string, logger log.LoggerI) []*enode.Node {
+func (c *Config) parsePersistentNodes(w *bool, path string, logger log.Logger) []*enode.Node {
 	// Short circuit if no node config is present
 	if c.Dirs.DataDir == "" {
 		return nil
@@ -335,7 +335,7 @@ func (c *Config) parsePersistentNodes(w *bool, path string, logger log.LoggerI) 
 
 var warnLock sync.Mutex
 
-func (c *Config) warnOnce(logger log.LoggerI, w *bool, format string, args ...interface{}) {
+func (c *Config) warnOnce(logger log.Logger, w *bool, format string, args ...interface{}) {
 	warnLock.Lock()
 	defer warnLock.Unlock()
 

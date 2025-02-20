@@ -29,12 +29,12 @@ const (
 	ckTempDir
 )
 
-func WithLogger(ctx context.Context, logger log.LoggerI) context.Context {
+func WithLogger(ctx context.Context, logger log.Logger) context.Context {
 	return context.WithValue(ctx, ckLogger, logger)
 }
 
-func Logger(ctx context.Context) log.LoggerI {
-	if logger, ok := ctx.Value(ckLogger).(log.LoggerI); ok {
+func Logger(ctx context.Context) log.Logger {
+	if logger, ok := ctx.Value(ckLogger).(log.Logger); ok {
 		return logger
 	}
 

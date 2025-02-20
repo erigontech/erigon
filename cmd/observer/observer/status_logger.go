@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/cmd/observer/database"
 )
 
-func StatusLoggerLoop(ctx context.Context, db database.DB, networkID uint, period time.Duration, logger log.LoggerI) {
+func StatusLoggerLoop(ctx context.Context, db database.DB, networkID uint, period time.Duration, logger log.Logger) {
 	var maxPingTries uint = 1000000 // unlimited (include dead nodes)
 	var prevTotalCount uint
 	var prevDistinctIPCount uint

@@ -54,7 +54,7 @@ type StatusDataProvider struct {
 	heightForks []uint64
 	timeForks   []uint64
 
-	logger log.LoggerI
+	logger log.Logger
 }
 
 func NewStatusDataProvider(
@@ -62,7 +62,7 @@ func NewStatusDataProvider(
 	chainConfig *chain.Config,
 	genesis *types.Block,
 	networkId uint64,
-	logger log.LoggerI,
+	logger log.Logger,
 ) *StatusDataProvider {
 	s := &StatusDataProvider{
 		db:          db,

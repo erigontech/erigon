@@ -100,7 +100,7 @@ const MockInsertAsInitialCycle = false
 type MockSentry struct {
 	proto_sentry.UnimplementedSentryServer
 	Ctx                  context.Context
-	Log                  log.LoggerI
+	Log                  log.Logger
 	tb                   testing.TB
 	cancel               context.CancelFunc
 	DB                   kv.TemporalRwDB
@@ -357,7 +357,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			txpool.WithP2PFetcherWg(&mock.ReceiveWg),
 			txpool.WithP2PSenderWg(nil),
 			txpool.WithFeeCalculator(nil),
-			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.LoggerI) (kv.RwDB, error) {
+			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
 				return memdb.NewWithLabel(tmpdir, kv.TxPoolDB), nil
 			}),
 		)

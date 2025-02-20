@@ -230,7 +230,7 @@ func (pi *PeerInfo) Remove(reason *p2p.PeerError) {
 	})
 }
 
-func (pi *PeerInfo) Async(f func(), logger log.LoggerI) {
+func (pi *PeerInfo) Async(f func(), logger log.Logger) {
 	pi.lock.Lock()
 	defer pi.lock.Unlock()
 	if pi.tasks == nil {
@@ -368,7 +368,7 @@ func runPeer(
 	peerInfo *PeerInfo,
 	send func(msgId proto_sentry.MessageId, peerID [64]byte, b []byte),
 	hasSubscribers func(msgId proto_sentry.MessageId) bool,
-	logger log.LoggerI,
+	logger log.Logger,
 ) *p2p.PeerError {
 	protocol := cap.Version
 	printTime := time.Now().Add(time.Minute)
@@ -599,7 +599,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, he
 	return grpcServer, nil
 }
 
-func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint, logger log.LoggerI) *GrpcServer {
+func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint, logger log.Logger) *GrpcServer {
 	ss := &GrpcServer{
 		ctx:          ctx,
 		p2p:          cfg,
@@ -682,7 +682,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool, logger log.LoggerI) error {
+func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool, logger log.Logger) error {
 	dir.MustExist(dirs.DataDir)
 
 	discovery := func() enode.Iterator {
@@ -721,7 +721,7 @@ type GrpcServer struct {
 	messageStreamsLock   sync.RWMutex
 	peersStreams         *PeersStreams
 	p2p                  *p2p.Config
-	logger               log.LoggerI
+	logger               log.Logger
 }
 
 func (ss *GrpcServer) rangePeers(f func(peerInfo *PeerInfo) bool) {

@@ -36,13 +36,13 @@ import (
 
 type Reader struct {
 	store              Store
-	logger             log.LoggerI
+	logger             log.Logger
 	stateClientAddress libcommon.Address
 }
 
 type ReaderConfig struct {
 	Store                        Store
-	Logger                       log.LoggerI
+	Logger                       log.Logger
 	StateReceiverContractAddress libcommon.Address
 	RoTxLimit                    int64
 }
@@ -58,7 +58,7 @@ func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
 	return reader, nil
 }
 
-func NewReader(store Store, logger log.LoggerI, stateReceiverContractAddress libcommon.Address) *Reader {
+func NewReader(store Store, logger log.Logger, stateReceiverContractAddress libcommon.Address) *Reader {
 	return &Reader{
 		store:              store,
 		logger:             logger,
@@ -121,7 +121,7 @@ func (r *Reader) Close() {
 
 type RemoteReader struct {
 	client  remote.BridgeBackendClient
-	logger  log.LoggerI
+	logger  log.Logger
 	version gointerfaces.Version
 }
 

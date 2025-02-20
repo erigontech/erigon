@@ -45,7 +45,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testDbAndHistory(tb testing.TB, largeValues bool, logger log.LoggerI) (kv.RwDB, *History) {
+func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
@@ -691,7 +691,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 	defer icc.Close()
 }
 
-func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]upd, logger log.LoggerI) (kv.RwDB, *History) {
+func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]upd, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
 
 	for key, upds := range values {
@@ -749,7 +749,7 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 	return db, h
 }
 
-func filledHistory(tb testing.TB, largeValues bool, logger log.LoggerI) (kv.RwDB, *History, uint64) {
+func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History, uint64) {
 	tb.Helper()
 	db, h := testDbAndHistory(tb, largeValues, logger)
 	ctx := context.Background()
@@ -1396,7 +1396,7 @@ func TestScanStaticFilesH(t *testing.T) {
 
 }
 
-func writeSomeHistory(tb testing.TB, largeValues bool, logger log.LoggerI) (kv.RwDB, *History, [][]byte, uint64) {
+func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History, [][]byte, uint64) {
 	tb.Helper()
 	db, h := testDbAndHistory(tb, largeValues, logger)
 	ctx := context.Background()

@@ -57,7 +57,7 @@ func sendForkchoiceReceiptWithoutWaiting(ch chan forkchoiceOutcome, receipt *exe
 	}
 }
 
-func sendForkchoiceErrorWithoutWaiting(logger log.LoggerI, ch chan forkchoiceOutcome, err error, alreadySent bool) {
+func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutcome, err error, alreadySent bool) {
 	if alreadySent {
 		logger.Warn("forkchoice: error received after result was sent", "error", err)
 		return

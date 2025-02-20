@@ -92,7 +92,7 @@ func StageMiningExecCfg(
 // SpawnMiningExecStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg, sendersCfg SendersCfg, execCfg ExecuteBlockCfg, ctx context.Context, logger log.LoggerI, u Unwinder) error {
+func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg, sendersCfg SendersCfg, execCfg ExecuteBlockCfg, ctx context.Context, logger log.Logger, u Unwinder) error {
 	cfg.vmConfig.NoReceipts = false
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
@@ -258,7 +258,7 @@ func getNextTransactions(
 	alreadyYielded mapset.Set[[32]byte],
 	simStateReader state.StateReader,
 	simStateWriter state.StateWriter,
-	logger log.LoggerI,
+	logger log.Logger,
 ) ([]types.Transaction, error) {
 	remainingGas := header.GasLimit - header.GasUsed
 	remainingBlobGas := uint64(0)
@@ -289,7 +289,7 @@ func getNextTransactions(
 	return txns, nil
 }
 
-func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.LoggerI) ([]types.Transaction, error) {
+func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger) ([]types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	gasBailout := false
@@ -440,7 +440,7 @@ func addTransactionsToMiningBlock(
 	ibs *state.IntraBlockState,
 	interrupt *int32,
 	payloadId uint64,
-	logger log.LoggerI,
+	logger log.Logger,
 ) (types.Logs, bool, error) {
 	header := current.Header
 	txnIdx := ibs.TxnIndex() + 1
@@ -555,7 +555,7 @@ LOOP:
 
 }
 
-func NotifyPendingLogs(logPrefix string, notifier ChainEventNotifier, logs types.Logs, logger log.LoggerI) {
+func NotifyPendingLogs(logPrefix string, notifier ChainEventNotifier, logs types.Logs, logger log.Logger) {
 	if len(logs) == 0 {
 		return
 	}

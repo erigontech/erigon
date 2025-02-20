@@ -42,7 +42,7 @@ import (
 // generate the messages and services
 type remoteOpts struct {
 	remoteKV    remote.KVClient
-	log         log.LoggerI
+	log         log.Logger
 	bucketsCfg  kv.TableCfg
 	DialAddress string
 	version     gointerfaces.Version
@@ -52,7 +52,7 @@ var _ kv.TemporalTx = (*tx)(nil)
 
 type DB struct {
 	remoteKV     remote.KVClient
-	log          log.LoggerI
+	log          log.Logger
 	buckets      kv.TableCfg
 	roTxsLimiter *semaphore.Weighted
 	opts         remoteOpts
@@ -124,7 +124,7 @@ func (opts remoteOpts) MustOpen() kv.RwDB {
 // NewRemote defines new remove KV connection (without actually opening it)
 // version parameters represent the version the KV client is expecting,
 // compatibility check will be performed when the KV connection opens
-func NewRemote(v gointerfaces.Version, logger log.LoggerI, remoteKV remote.KVClient) remoteOpts {
+func NewRemote(v gointerfaces.Version, logger log.Logger, remoteKV remote.KVClient) remoteOpts {
 	return remoteOpts{bucketsCfg: kv.ChaindataTablesCfg, version: v, log: logger, remoteKV: remoteKV}
 }
 

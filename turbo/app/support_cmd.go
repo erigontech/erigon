@@ -142,7 +142,7 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 // by creating a tunnel between the diagnostics system and the debug endpoints
 // (Erigon node)  <-------->  (  Support cmd  )  <--->  (diagnostics system)
 // (debug.addrs)  (wss,http)  (current program)  (wss)  ( diagnostics.addr )
-func ConnectDiagnostics(cliCtx *cli.Context, logger log.LoggerI) error {
+func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
@@ -180,7 +180,7 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.LoggerI) error {
 // and send nodes info to diagnostics to notify about connection and nodes details like: enode, enr, ports, listener_addr
 //
 // Listen for incoming requests from diagnostics system and send them to the incommitg request channel
-func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.LoggerI) error {
+func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
 	ctx1, cancel1 := context.WithCancel(ctx)
 	defer cancel1()
 

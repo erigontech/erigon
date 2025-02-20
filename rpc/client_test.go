@@ -168,7 +168,7 @@ func TestClientCancelHTTP(t *testing.T)      { testClientCancel("http", t, log.N
 
 // This test checks that requests made through CallContext can be canceled by canceling
 // the context.
-func testClientCancel(transport string, t *testing.T, logger log.LoggerI) {
+func testClientCancel(transport string, t *testing.T, logger log.Logger) {
 	// These tests take a lot of time, run them all at once.
 	// You probably want to run with -parallel 1 or comment out
 	// the call to t.Parallel if you enable the logging.

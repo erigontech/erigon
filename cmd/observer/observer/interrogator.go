@@ -54,7 +54,7 @@ type Interrogator struct {
 	keygenSemaphore   *semaphore.Weighted
 	keygenCachedKeys  []*ecdsa.PublicKey
 
-	log log.LoggerI
+	log log.Logger
 }
 
 type InterrogationResult struct {
@@ -76,7 +76,7 @@ func NewInterrogator(
 	keygenConcurrency uint,
 	keygenSemaphore *semaphore.Weighted,
 	keygenCachedKeys []*ecdsa.PublicKey,
-	logger log.LoggerI,
+	logger log.Logger,
 ) (*Interrogator, error) {
 	instance := Interrogator{
 		node,

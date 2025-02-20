@@ -82,7 +82,7 @@ func doSqueeze(cliCtx *cli.Context) error {
 	}
 }
 
-func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.LoggerI) error {
+func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
@@ -111,7 +111,7 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 	return nil
 }
 
-func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.LoggerI) error {
+func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
@@ -175,7 +175,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.LoggerI) 
 	log.Info("[sqeeze] success", "please_remove", dirs.SnapDomain+"_backup")
 	return nil
 }
-func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.LoggerI) error {
+func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	agg, err := state.NewAggregator2(ctx, dirs, config3.DefaultStepSize, db, logger)
@@ -198,7 +198,7 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.LoggerI) err
 	return nil
 }
 
-func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.LoggerI) error {
+func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	for _, f := range ls(dirs.Snap, ".seg") {
 		good := strings.Contains(f, snaptype2.Transactions.Name()) ||
 			strings.Contains(f, snaptype2.Headers.Name())

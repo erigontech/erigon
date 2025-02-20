@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize, logger log.LoggerI) (kv.RoDB, kv.RwDB) {
+func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize, logger log.Logger) (kv.RoDB, kv.RwDB) {
 	const ThreadsHardLimit = 9_000
 	src := mdbx2.New(label, logger).Path(from).
 		RoTxsLimiter(semaphore.NewWeighted(ThreadsHardLimit)).
@@ -62,7 +62,7 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 	return src, dst
 }
 
-func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readAheadThreads int, logger log.LoggerI) error {
+func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readAheadThreads int, logger log.Logger) error {
 	srcTx, err1 := src.BeginRo(ctx)
 	if err1 != nil {
 		return err1
@@ -95,7 +95,7 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readA
 	return nil
 }
 
-func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, table string, readAheadThreads int, logEvery *time.Ticker, logger log.LoggerI) error {
+func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, table string, readAheadThreads int, logEvery *time.Ticker, logger log.Logger) error {
 	var total uint64
 	wg := sync.WaitGroup{}
 	defer wg.Wait()

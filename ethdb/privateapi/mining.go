@@ -48,14 +48,14 @@ type MiningServer struct {
 	minedBlockStreams   MinedBlockStreams
 	ethash              *ethash.API
 	isMining            IsMining
-	logger              log.LoggerI
+	logger              log.Logger
 }
 
 type IsMining interface {
 	IsMining() bool
 }
 
-func NewMiningServer(ctx context.Context, isMining IsMining, ethashApi *ethash.API, logger log.LoggerI) *MiningServer {
+func NewMiningServer(ctx context.Context, isMining IsMining, ethashApi *ethash.API, logger log.Logger) *MiningServer {
 	return &MiningServer{ctx: ctx, isMining: isMining, ethash: ethashApi, logger: logger}
 }
 
@@ -167,7 +167,7 @@ type MinedBlockStreams struct {
 	chans  map[uint]proto_txpool.Mining_OnMinedBlockServer
 	id     uint
 	mu     sync.Mutex
-	logger log.LoggerI
+	logger log.Logger
 }
 
 func (s *MinedBlockStreams) Add(stream proto_txpool.Mining_OnMinedBlockServer) (remove func()) {
@@ -182,7 +182,7 @@ func (s *MinedBlockStreams) Add(stream proto_txpool.Mining_OnMinedBlockServer) (
 	return func() { s.remove(id) }
 }
 
-func (s *MinedBlockStreams) Broadcast(reply *proto_txpool.OnMinedBlockReply, logger log.LoggerI) {
+func (s *MinedBlockStreams) Broadcast(reply *proto_txpool.OnMinedBlockReply, logger log.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, stream := range s.chans {
@@ -227,7 +227,7 @@ func (s *PendingBlockStreams) Add(stream proto_txpool.Mining_OnPendingBlockServe
 	return func() { s.remove(id) }
 }
 
-func (s *PendingBlockStreams) Broadcast(reply *proto_txpool.OnPendingBlockReply, logger log.LoggerI) {
+func (s *PendingBlockStreams) Broadcast(reply *proto_txpool.OnPendingBlockReply, logger log.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, stream := range s.chans {
@@ -272,7 +272,7 @@ func (s *PendingLogsStreams) Add(stream proto_txpool.Mining_OnPendingLogsServer)
 	return func() { s.remove(id) }
 }
 
-func (s *PendingLogsStreams) Broadcast(reply *proto_txpool.OnPendingLogsReply, logger log.LoggerI) {
+func (s *PendingLogsStreams) Broadcast(reply *proto_txpool.OnPendingLogsReply, logger log.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, stream := range s.chans {

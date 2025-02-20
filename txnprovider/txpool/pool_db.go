@@ -106,7 +106,7 @@ func SaveChainConfigIfNeed(
 	coreDB kv.RoDB,
 	poolDB kv.RwDB,
 	force bool,
-	logger log.LoggerI,
+	logger log.Logger,
 ) (cc *chain.Config, blockNum uint64, err error) {
 	if err = poolDB.View(ctx, func(tx kv.Tx) error {
 		cc, err = ChainConfig(tx)

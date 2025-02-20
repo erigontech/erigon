@@ -55,7 +55,7 @@ func LogDirPath(ctx *cli.Context) string {
 // Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
 // and it would make sense to choose one over another
 func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
-	consoleDefaultLevel log.Lvl, dirDefaultLevel log.Lvl, rootHandler bool) log.LoggerI {
+	consoleDefaultLevel log.Lvl, dirDefaultLevel log.Lvl, rootHandler bool) log.Logger {
 	var consoleJson = ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
 	var dirJson = ctx.Bool(LogDirJsonFlag.Name)
 
@@ -89,7 +89,7 @@ func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
 		}
 	}
 
-	var logger log.LoggerI
+	var logger log.Logger
 	if rootHandler {
 		logger = log.Root()
 	} else {
@@ -105,7 +105,7 @@ func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
 // for example, rpcdaemon or integration.
 // Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
 // and it would make sense to choose one over another
-func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.LoggerI {
+func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 
 	logJsonVal, ljerr := cmd.Flags().GetBool(LogJsonFlag.Name)
 	if ljerr != nil {
@@ -164,7 +164,7 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.LoggerI {
 
 // SetupLoggerCmd perform the logging using parametrs specifying by `flag` package, and sets it to the root logger
 // This is the function which is NOT used by Erigon itself, but instead by utility commands
-func SetupLogger(filePrefix string) log.LoggerI {
+func SetupLogger(filePrefix string) log.Logger {
 	var logConsoleVerbosity = flag.String(LogConsoleVerbosityFlag.Name, "", LogConsoleVerbosityFlag.Usage)
 	var logDirVerbosity = flag.String(LogDirVerbosityFlag.Name, "", LogDirVerbosityFlag.Usage)
 	var logDirPath = flag.String(LogDirPathFlag.Name, "", LogDirPathFlag.Usage)
@@ -204,7 +204,7 @@ func SetupLogger(filePrefix string) log.LoggerI {
 // and sets the constructed handler to be the handler of the given logger. It then uses that logger
 // to report the status of this initialisation
 func initSeparatedLogging(
-	logger log.LoggerI,
+	logger log.Logger,
 	filePrefix string,
 	dirPath string,
 	consoleLevel log.Lvl,

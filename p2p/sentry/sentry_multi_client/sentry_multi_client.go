@@ -156,7 +156,7 @@ type MultiClient struct {
 	// decouple sentry multi client from header and body downloading logic is done
 	disableBlockDownload bool
 
-	logger                           log.LoggerI
+	logger                           log.Logger
 	getReceiptsActiveGoroutineNumber *semaphore.Weighted
 	ethApiWrapper                    eth.ReceiptsGetter
 }
@@ -175,7 +175,7 @@ func NewMultiClient(
 	logPeerInfo bool,
 	maxBlockBroadcastPeers func(*types.Header) uint,
 	disableBlockDownload bool,
-	logger log.LoggerI,
+	logger log.Logger,
 ) (*MultiClient, error) {
 	// header downloader
 	var hd *headerdownload.HeaderDownload

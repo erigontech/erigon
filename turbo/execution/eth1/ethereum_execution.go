@@ -64,7 +64,7 @@ type EthereumExecutionModule struct {
 	executionPipeline *stagedsync.Sync
 	forkValidator     *engine_helpers.ForkValidator
 
-	logger log.LoggerI
+	logger log.Logger
 	// Block building
 	nextPayloadId  uint64
 	lastParameters *core.BlockBuilderParameters
@@ -96,7 +96,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 	config *chain.Config, builderFunc builder.BlockBuilderFunc,
 	hook *stages.Hook, accumulator *shards.Accumulator,
 	stateChangeConsumer shards.StateChangeConsumer,
-	logger log.LoggerI, engine consensus.Engine,
+	logger log.Logger, engine consensus.Engine,
 	syncCfg ethconfig.Sync,
 	ctx context.Context,
 ) *EthereumExecutionModule {

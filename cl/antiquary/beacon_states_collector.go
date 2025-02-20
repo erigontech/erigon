@@ -83,10 +83,10 @@ type beaconStatesCollector struct {
 	compressor *zstd.Encoder
 
 	beaconCfg *clparams.BeaconChainConfig
-	logger    log.LoggerI
+	logger    log.Logger
 }
 
-func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir string, logger log.LoggerI) *beaconStatesCollector {
+func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir string, logger log.Logger) *beaconStatesCollector {
 	buf := &bytes.Buffer{}
 	compressor, err := zstd.NewWriter(buf)
 	if err != nil {

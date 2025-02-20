@@ -31,7 +31,7 @@ import (
 )
 
 func NewPeerTracker(
-	logger log.LoggerI,
+	logger log.Logger,
 	peerProvider peerProvider,
 	peerEventRegistrar peerEventRegistrar,
 	opts ...PeerTrackerOption,
@@ -53,7 +53,7 @@ func NewPeerTracker(
 }
 
 type PeerTracker struct {
-	logger                  log.LoggerI
+	logger                  log.Logger
 	peerProvider            peerProvider
 	peerEventRegistrar      peerEventRegistrar
 	mu                      sync.Mutex

@@ -87,7 +87,7 @@ type SharedDomains struct {
 	aggTx  *AggregatorRoTx
 	sdCtx  *SharedDomainsCommitmentContext
 	roTx   kv.Tx
-	logger log.LoggerI
+	logger log.Logger
 
 	txNum    uint64
 	blockNum atomic.Uint64
@@ -113,7 +113,7 @@ type HasAgg interface {
 	Agg() any
 }
 
-func NewSharedDomains(tx kv.Tx, logger log.LoggerI) (*SharedDomains, error) {
+func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
 	sd := &SharedDomains{
 		logger:  logger,

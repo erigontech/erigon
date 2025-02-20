@@ -203,7 +203,7 @@ func main() {
 	}
 }
 
-func setupLogger(ctx *cli.Context) (log.LoggerI, error) {
+func setupLogger(ctx *cli.Context) (log.Logger, error) {
 	dataDir := ctx.String(DataDirFlag.Name)
 	logsDir := filepath.Join(dataDir, "logs")
 
@@ -219,7 +219,7 @@ func setupLogger(ctx *cli.Context) (log.LoggerI, error) {
 	return logger, nil
 }
 
-func handleTerminationSignals(stopFunc func(), logger log.LoggerI) {
+func handleTerminationSignals(stopFunc func(), logger log.Logger) {
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
 
@@ -233,7 +233,7 @@ func handleTerminationSignals(stopFunc func(), logger log.LoggerI) {
 	}
 }
 
-func connectDiagnosticsIfEnabled(ctx *cli.Context, logger log.LoggerI) {
+func connectDiagnosticsIfEnabled(ctx *cli.Context, logger log.Logger) {
 	metricsEnabled := ctx.Bool(MetricsEnabledFlag.Name)
 	diagnosticsUrl := ctx.String(DiagnosticsURLFlag.Name)
 	if metricsEnabled && len(diagnosticsUrl) > 0 {
@@ -358,7 +358,7 @@ func allScenarios(cliCtx *cli.Context, runCtx devnet.Context) scenarios.Scenario
 	}
 }
 
-func initDevnet(ctx *cli.Context, logger log.LoggerI) (devnet.Devnet, error) {
+func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 	dataDir := ctx.String(DataDirFlag.Name)
 	chainName := ctx.String(ChainFlag.Name)
 	baseRpcHost := ctx.String(BaseRpcHostFlag.Name)

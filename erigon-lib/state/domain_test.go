@@ -66,12 +66,12 @@ func newRnd(seed uint64) *rndGen {
 func (r *rndGen) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
 func (r *rndGen) Read(p []byte) (n int, err error) { return r.oldGen.Read(p) } // seems `go1.22` doesn't have `Read` method on `math/v2` generator
 
-func testDbAndDomain(t *testing.T, logger log.LoggerI) (kv.RwDB, *Domain) {
+func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	return testDbAndDomainOfStep(t, 16, logger)
 }
 
-func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.LoggerI) (kv.RwDB, *Domain) {
+func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
 	cfg := Schema[kv.AccountsDomain]
@@ -367,7 +367,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.Equal(t, p2, v)
 }
 
-func filledDomain(t *testing.T, logger log.LoggerI) (kv.RwDB, *Domain, uint64) {
+func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	t.Helper()
 	require := require.New(t)
 	db, d := testDbAndDomain(t, logger)
@@ -1267,7 +1267,7 @@ type upd struct {
 	value []byte
 }
 
-func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, logger log.LoggerI) (kv.RwDB, *Domain, map[uint64][]bool) {
+func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain, map[uint64][]bool) {
 	t.Helper()
 	db, d := testDbAndDomainOfStep(t, aggStep, logger)
 	ctx := context.Background()

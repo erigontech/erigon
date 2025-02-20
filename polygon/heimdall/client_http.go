@@ -74,7 +74,7 @@ type HttpClient struct {
 	retryBackOff time.Duration
 	maxRetries   int
 	closeCh      chan struct{}
-	logger       log.LoggerI
+	logger       log.Logger
 }
 
 type HttpRequest struct {
@@ -103,7 +103,7 @@ func WithHttpMaxRetries(maxRetries int) HttpClientOption {
 	}
 }
 
-func NewHttpClient(urlString string, logger log.LoggerI, opts ...HttpClientOption) *HttpClient {
+func NewHttpClient(urlString string, logger log.Logger, opts ...HttpClientOption) *HttpClient {
 	c := &HttpClient{
 		urlString:    urlString,
 		logger:       logger,
@@ -483,7 +483,7 @@ func (c *HttpClient) FetchMilestoneID(ctx context.Context, milestoneID string) e
 }
 
 // FetchWithRetry returns data from heimdall with retry
-func FetchWithRetry[T any](ctx context.Context, client *HttpClient, url *url.URL, logger log.LoggerI) (*T, error) {
+func FetchWithRetry[T any](ctx context.Context, client *HttpClient, url *url.URL, logger log.Logger) (*T, error) {
 	return FetchWithRetryEx[T](ctx, client, url, nil, logger)
 }
 
@@ -493,7 +493,7 @@ func FetchWithRetryEx[T any](
 	client *HttpClient,
 	url *url.URL,
 	isRecoverableError func(error) bool,
-	logger log.LoggerI,
+	logger log.Logger,
 ) (result *T, err error) {
 	attempt := 0
 	// create a new ticker for retrying the request
@@ -539,7 +539,7 @@ func FetchWithRetryEx[T any](
 }
 
 // Fetch fetches response from heimdall
-func Fetch[T any](ctx context.Context, request *HttpRequest, logger log.LoggerI) (*T, error) {
+func Fetch[T any](ctx context.Context, request *HttpRequest, logger log.Logger) (*T, error) {
 	isSuccessful := false
 
 	defer func() {
@@ -649,7 +649,7 @@ func makeURL(urlString, rawPath, rawQuery string) (*url.URL, error) {
 }
 
 // internal fetch method
-func internalFetch(ctx context.Context, handler httpRequestHandler, u *url.URL, logger log.LoggerI) ([]byte, error) {
+func internalFetch(ctx context.Context, handler httpRequestHandler, u *url.URL, logger log.Logger) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
@@ -698,7 +698,7 @@ func internalFetch(ctx context.Context, handler httpRequestHandler, u *url.URL, 
 	return body, nil
 }
 
-func internalFetchWithTimeout(ctx context.Context, handler httpRequestHandler, url *url.URL, logger log.LoggerI) ([]byte, error) {
+func internalFetchWithTimeout(ctx context.Context, handler httpRequestHandler, url *url.URL, logger log.Logger) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, apiHeimdallTimeout)
 	defer cancel()
 

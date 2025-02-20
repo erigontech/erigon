@@ -54,7 +54,7 @@ import (
 // Node is a container on which services can be registered.
 type Node struct {
 	config        *nodecfg.Config
-	logger        log.LoggerI
+	logger        log.Logger
 	dirLock       *flock.Flock  // prevents concurrent use of instance directory
 	stop          chan struct{} // Channel to wait for termination notifications
 	startStopLock sync.Mutex    // Start/Stop are protected by an additional lock
@@ -73,7 +73,7 @@ const (
 )
 
 // New creates a new P2P node, ready for protocol registration.
-func New(ctx context.Context, conf *nodecfg.Config, logger log.LoggerI) (*Node, error) {
+func New(ctx context.Context, conf *nodecfg.Config, logger log.Logger) (*Node, error) {
 	// Copy config and resolve the datadir so future changes to the current
 	// working directory don't affect the node.
 	confCopy := *conf
@@ -294,7 +294,7 @@ func (n *Node) DataDir() string {
 	return n.config.Dirs.DataDir
 }
 
-func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.LoggerI) (kv.RwDB, error) {
+func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
 	case kv.ChainDB:
 		name = "chaindata"

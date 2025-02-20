@@ -37,7 +37,7 @@ type Diplomat struct {
 	handshakeRetryDelay     time.Duration
 	handshakeMaxTries       uint
 
-	log log.LoggerI
+	log log.Logger
 }
 
 type DiplomatResult struct {
@@ -55,7 +55,7 @@ func NewDiplomat(
 	handshakeRefreshTimeout time.Duration,
 	handshakeRetryDelay time.Duration,
 	handshakeMaxTries uint,
-	logger log.LoggerI,
+	logger log.Logger,
 ) *Diplomat {
 	instance := Diplomat{
 		node,

@@ -85,7 +85,7 @@ type entityFetcherFetchEntitiesRangeTest struct {
 	testRange        ClosedRange
 	expectedEntities []*Checkpoint
 	ctx              context.Context
-	logger           log.LoggerI
+	logger           log.Logger
 }
 
 func newEntityFetcherFetchEntitiesRangeTest(count uint64, withPaging bool, testRange *ClosedRange) entityFetcherFetchEntitiesRangeTest {

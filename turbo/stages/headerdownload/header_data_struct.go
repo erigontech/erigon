@@ -313,7 +313,7 @@ type HeaderDownload struct {
 	pendingPayloadHash  common.Hash                 // Header whose status we still should send to PayloadStatusCh
 	unsettledHeadHeight uint64                      // Height of unsettledForkChoice.headBlockHash
 	badPoSHeaders       map[common.Hash]common.Hash // Invalid Tip -> Last Valid Ancestor
-	logger              log.LoggerI
+	logger              log.Logger
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -327,7 +327,7 @@ func NewHeaderDownload(
 	linkLimit int,
 	engine consensus.Engine,
 	headerReader services.HeaderAndCanonicalReader,
-	logger log.LoggerI,
+	logger log.Logger,
 ) *HeaderDownload {
 	persistentLinkLimit := linkLimit / 16
 	hd := &HeaderDownload{

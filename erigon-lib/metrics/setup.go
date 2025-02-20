@@ -30,7 +30,7 @@ var EnabledExpensive = false
 
 // Setup starts a dedicated metrics server at the given address.
 // This function enables metrics reporting separate from pprof.
-func Setup(address string, logger log.LoggerI) *http.ServeMux {
+func Setup(address string, logger log.Logger) *http.ServeMux {
 	prometheus.DefaultRegisterer.MustRegister(defaultSet)
 
 	prometheusMux := http.NewServeMux()
