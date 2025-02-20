@@ -36,9 +36,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/urfave/cli/v2"
+
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/urfave/cli/v2"
 
 	"golang.org/x/sync/semaphore"
 
@@ -536,7 +537,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	_, _, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	_, borSnaps, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -548,8 +549,16 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 	defer db.Close()
 
+	checks := append([]integrity.Check{}, integrity.AllChecks...)
+	nonDefaultCheck := requestedCheck != "" &&
+		!slices.Contains(integrity.AllChecks, requestedCheck) &&
+		slices.Contains(integrity.NonDefaultChecks, requestedCheck)
+	if nonDefaultCheck {
+		checks = append(checks, integrity.NonDefaultChecks...)
+	}
+
 	blockReader, _ := blockRetire.IO()
-	for _, chk := range integrity.AllChecks {
+	for _, chk := range checks {
 		if requestedCheck != "" && requestedCheck != chk {
 			continue
 		}
@@ -570,15 +579,26 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.E3HistoryNoSystemTxs(ctx, db, blockReader, agg); err != nil {
 				return err
 			}
-		case integrity.NoBorEventGaps:
-			if err := integrity.NoGapsInBorEvents(ctx, db, blockReader, 0, 0, failFast); err != nil {
+		case integrity.BorEvents:
+			if err := integrity.ValidateBorEvents(ctx, db, blockReader, 0, 0, failFast); err != nil {
+				return err
+			}
+		case integrity.BorSpans:
+			if err := integrity.ValidateBorSpans(logger, dirs, borSnaps, failFast); err != nil {
+				return err
+			}
+		case integrity.BorCheckpoints:
+			if err := integrity.ValidateBorCheckpoints(logger, dirs, borSnaps, failFast); err != nil {
+				return err
+			}
+		case integrity.BorMilestones:
+			if err := integrity.ValidateBorMilestones(logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.ReceiptsNoDups:
 			if err := integrity.ReceiptsNoDuplicates(ctx, db, blockReader, failFast); err != nil {
 				return err
 			}
-
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
@@ -1127,6 +1147,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	}
 	blockSnaps.LogStat("block")
 
+	heimdall.RecordWayPoints(true) // needed to load checkpoints and milestones snapshots
 	borSnaps = heimdall.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = borSnaps.OpenFolder(); err != nil {
 		return
@@ -1146,10 +1167,10 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	var bridgeStore bridge.Store
 	var heimdallStore heimdall.Store
 	if chainConfig.Bor != nil {
-		const PolygonSync = false
+		const PolygonSync = true
 		if PolygonSync {
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, 0), borSnaps, chainConfig.Bor)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, 0), borSnaps)
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), borSnaps, chainConfig.Bor)
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
 		} else {
 			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(chainDB), borSnaps, chainConfig.Bor)
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(chainDB), borSnaps)

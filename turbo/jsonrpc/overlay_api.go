@@ -29,7 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -49,7 +49,7 @@ import (
 
 type OverlayAPI interface {
 	GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides) ([]*types.Log, error)
-	CallConstructor(ctx context.Context, address common.Address, code *hexutility.Bytes) (*CreationCode, error)
+	CallConstructor(ctx context.Context, address common.Address, code *hexutil.Bytes) (*CreationCode, error)
 }
 
 // OverlayAPIImpl is implementation of the OverlayAPIImpl interface based on remote Db access
@@ -63,7 +63,7 @@ type OverlayAPIImpl struct {
 }
 
 type CreationCode struct {
-	Code *hexutility.Bytes `json:"code"`
+	Code *hexutil.Bytes `json:"code"`
 }
 
 type blockReplayTask struct {
@@ -89,7 +89,7 @@ func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64, overlayGetL
 	}
 }
 
-func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code *hexutility.Bytes) (*CreationCode, error) {
+func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code *hexutil.Bytes) (*CreationCode, error) {
 	var (
 		replayTransactions types.Transactions
 		evm                *vm.EVM
@@ -229,7 +229,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	resultCode := &CreationCode{}
 	if ct.resultCode != nil && len(ct.resultCode) > 0 {
-		c := hexutility.Bytes(ct.resultCode)
+		c := hexutil.Bytes(ct.resultCode)
 		resultCode.Code = &c
 		return resultCode, nil
 	} else {
@@ -242,7 +242,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 			return nil, err
 		}
 		if len(code) > 0 {
-			c := hexutility.Bytes(code)
+			c := hexutil.Bytes(code)
 			resultCode.Code = &c
 			return resultCode, nil
 		}

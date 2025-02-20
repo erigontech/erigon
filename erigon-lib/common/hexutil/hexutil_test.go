@@ -190,3 +190,12 @@ func TestDecodeUint64(t *testing.T) {
 		})
 	}
 }
+
+func TestEncode(t *testing.T) {
+	for _, test := range encodeBytesTests {
+		enc := Encode(test.input.([]byte))
+		if enc != test.want {
+			t.Errorf("input %x: wrong encoding %s", test.input, enc)
+		}
+	}
+}

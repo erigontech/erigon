@@ -230,7 +230,7 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, e *NonTransactionalEp
 type AuRa struct {
 	e           *NonTransactionalEpochReader
 	exitCh      chan struct{}
-	signerMutex sync.RWMutex // Protects the signer fields
+	signerMutex sync.Mutex // Protects the signer fields
 
 	step PermissionedStep
 	// History of step hashes recently received from peers.
@@ -241,7 +241,7 @@ type AuRa struct {
 	EpochManager  *EpochManager // Mutex<EpochManager>,
 
 	certifier     *libcommon.Address // certifies service transactions
-	certifierLock sync.RWMutex
+	certifierLock sync.Mutex
 }
 
 func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
@@ -1008,8 +1008,11 @@ func (c *AuRa) SealHash(header *types.Header) libcommon.Hash {
 // See https://openethereum.github.io/Permissioning.html#gas-price
 // This is thread-safe: it only accesses the `certifier` which is used behind a RWLock
 func (c *AuRa) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
-	c.certifierLock.RLock()
-	defer c.certifierLock.RUnlock()
+	c.certifierLock.Lock()
+	defer c.certifierLock.Unlock()
+	if c.certifier == nil && c.cfg.Registrar != nil {
+		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
+	}
 	if c.certifier == nil {
 		return false
 	}

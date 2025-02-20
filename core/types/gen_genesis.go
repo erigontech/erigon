@@ -9,7 +9,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 )
 
@@ -21,7 +21,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 		Config                *chain.Config                               `json:"config"`
 		Nonce                 math.HexOrDecimal64                         `json:"nonce"`
 		Timestamp             math.HexOrDecimal64                         `json:"timestamp"`
-		ExtraData             hexutility.Bytes                            `json:"extraData"`
+		ExtraData             hexutil.Bytes                               `json:"extraData"`
 		GasLimit              math.HexOrDecimal64                         `json:"gasLimit"   gencodec:"required"`
 		Difficulty            *math.HexOrDecimal256                       `json:"difficulty" gencodec:"required"`
 		Mixhash               common.Hash                                 `json:"mixHash"`
@@ -70,7 +70,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		Config                *chain.Config                               `json:"config"`
 		Nonce                 *math.HexOrDecimal64                        `json:"nonce"`
 		Timestamp             *math.HexOrDecimal64                        `json:"timestamp"`
-		ExtraData             *hexutility.Bytes                           `json:"extraData"`
+		ExtraData             *hexutil.Bytes                              `json:"extraData"`
 		GasLimit              *math.HexOrDecimal64                        `json:"gasLimit"   gencodec:"required"`
 		Difficulty            *math.HexOrDecimal256                       `json:"difficulty" gencodec:"required"`
 		Mixhash               *common.Hash                                `json:"mixHash"`

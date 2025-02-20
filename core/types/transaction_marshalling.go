@@ -30,7 +30,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -44,7 +43,7 @@ type txJSON struct {
 	Tip      *hexutil.Big       `json:"maxPriorityFeePerGas"`
 	Gas      *hexutil.Uint64    `json:"gas"`
 	Value    *hexutil.Big       `json:"value"`
-	Data     *hexutility.Bytes  `json:"input"`
+	Data     *hexutil.Bytes     `json:"input"`
 	V        *hexutil.Big       `json:"v"`
 	R        *hexutil.Big       `json:"r"`
 	S        *hexutil.Big       `json:"s"`
@@ -124,7 +123,7 @@ func (tx *LegacyTx) MarshalJSON() ([]byte, error) {
 	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
 	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutility.Bytes)(&tx.Data)
+	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -146,7 +145,7 @@ func (tx *AccessListTx) MarshalJSON() ([]byte, error) {
 	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
 	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutility.Bytes)(&tx.Data)
+	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -166,7 +165,7 @@ func (tx *DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	enc.FeeCap = (*hexutil.Big)(tx.FeeCap.ToBig())
 	enc.Tip = (*hexutil.Big)(tx.Tip.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutility.Bytes)(&tx.Data)
+	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -186,7 +185,7 @@ func toBlobTxJSON(tx *BlobTx) *txJSON {
 	enc.FeeCap = (*hexutil.Big)(tx.FeeCap.ToBig())
 	enc.Tip = (*hexutil.Big)(tx.Tip.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutility.Bytes)(&tx.Data)
+	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())

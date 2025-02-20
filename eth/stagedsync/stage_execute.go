@@ -372,11 +372,18 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		if !ok {
 			return fmt.Errorf("canonical hash not found %d", u.UnwindPoint)
 		}
+		header, err := cfg.blockReader.HeaderByHash(ctx, txc.Tx, hash)
+		if err != nil {
+			return fmt.Errorf("read canonical header of unwind point: %w", err)
+		}
+		if header == nil {
+			return fmt.Errorf("canonical header for unwind point not found: %s", hash)
+		}
 		txs, err := cfg.blockReader.RawTransactions(ctx, txc.Tx, u.UnwindPoint, s.BlockNumber)
 		if err != nil {
 			return err
 		}
-		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
+		accumulator.StartChange(header, txs, true)
 	}
 
 	return unwindExec3(u, s, txc, ctx, cfg.blockReader, accumulator, logger)

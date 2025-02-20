@@ -48,33 +48,28 @@ type ServiceConfig struct {
 
 func NewService(config ServiceConfig) *Service {
 	return &Service{
-		store:                        config.Store,
-		logger:                       config.Logger,
-		borConfig:                    config.BorConfig,
-		eventFetcher:                 config.EventFetcher,
-		stateReceiverContractAddress: libcommon.HexToAddress(config.BorConfig.StateReceiverContract),
-		reader:                       NewReader(config.Store, config.Logger, config.BorConfig.StateReceiverContractAddress()),
-		transientErrors:              heimdall.TransientErrors,
-		fetchedEventsSignal:          make(chan struct{}),
-		processedBlocksSignal:        make(chan struct{}),
+		store:               config.Store,
+		logger:              config.Logger,
+		borConfig:           config.BorConfig,
+		eventFetcher:        config.EventFetcher,
+		reader:              NewReader(config.Store, config.Logger, config.BorConfig.StateReceiverContractAddress()),
+		transientErrors:     heimdall.TransientErrors,
+		fetchedEventsSignal: make(chan struct{}),
 	}
 }
 
 type Service struct {
-	store                        Store
-	logger                       log.Logger
-	borConfig                    *borcfg.BorConfig
-	eventFetcher                 eventFetcher
-	stateReceiverContractAddress libcommon.Address
-	reader                       *Reader
-	transientErrors              []error
+	store           Store
+	logger          log.Logger
+	borConfig       *borcfg.BorConfig
+	eventFetcher    eventFetcher
+	reader          *Reader
+	transientErrors []error
 	// internal state
 	reachedTip             atomic.Bool
 	fetchedEventsSignal    chan struct{}
 	lastFetchedEventTime   atomic.Uint64
-	processedBlocksSignal  chan struct{}
 	lastProcessedBlockInfo atomic.Pointer[ProcessedBlockInfo]
-	synchronizeMu          sync.Mutex
 	unwindMu               sync.Mutex
 	ready                  ready
 }
@@ -134,11 +129,6 @@ func (s *Service) Run(ctx context.Context) error {
 		if s.fetchedEventsSignal != nil {
 			close(s.fetchedEventsSignal)
 			s.fetchedEventsSignal = nil
-		}
-
-		if s.processedBlocksSignal != nil {
-			close(s.processedBlocksSignal)
-			s.processedBlocksSignal = nil
 		}
 	}()
 
@@ -398,24 +388,7 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 	}
 
 	s.lastProcessedBlockInfo.Store(&lastProcessedBlockInfo)
-	s.signalProcessedBlocks()
 	return nil
-}
-
-// Synchronize blocks until events up to a given block are processed.
-func (s *Service) Synchronize(ctx context.Context, blockNum uint64) error {
-	// make Synchronize safe if unintentionally called by more than 1 goroutine at a time by using a lock
-	// waitForProcessedBlock relies on signal channel which is safe if 1 goroutine waits on it at a time
-	s.synchronizeMu.Lock()
-	defer s.synchronizeMu.Unlock()
-
-	s.logger.Debug(
-		bridgeLogPrefix("synchronizing events..."),
-		"blockNum", blockNum,
-		"lastProcessedBlockNum", s.lastProcessedBlockInfo.Load().BlockNum,
-	)
-
-	return s.waitForProcessedBlock(ctx, blockNum)
 }
 
 // Unwind delete unwindable bridge data.
@@ -501,40 +474,6 @@ func (s *Service) waitForScraper(ctx context.Context, toTime uint64) error {
 	return nil
 }
 
-func (s *Service) waitForProcessedBlock(ctx context.Context, blockNum uint64) error {
-	logTicker := time.NewTicker(5 * time.Second)
-	defer logTicker.Stop()
-
-	sprintLen := s.borConfig.CalculateSprintLength(blockNum)
-	blockNum -= blockNum % sprintLen // we only process events at sprint start
-	shouldLog := true
-	lastProcessedBlockNum := s.lastProcessedBlockInfo.Load().BlockNum
-	for blockNum > lastProcessedBlockNum {
-		if shouldLog {
-			s.logger.Debug(
-				bridgeLogPrefix("waiting for block processing to catch up"),
-				"blockNum", blockNum,
-				"lastProcessedBlockNum", lastProcessedBlockNum,
-			)
-		}
-
-		if err := s.waitProcessedBlocksSignal(ctx); err != nil {
-			return err
-		}
-
-		lastProcessedBlockNum = s.lastProcessedBlockInfo.Load().BlockNum
-
-		select {
-		case <-logTicker.C:
-			shouldLog = true
-		default:
-			shouldLog = false
-		}
-	}
-
-	return nil
-}
-
 func (s *Service) signalFetchedEvents() {
 	select {
 	case s.fetchedEventsSignal <- struct{}{}:
@@ -549,25 +488,6 @@ func (s *Service) waitFetchedEventsSignal(ctx context.Context) error {
 	case _, ok := <-s.fetchedEventsSignal:
 		if !ok {
 			return errors.New("fetchedEventsSignal channel closed")
-		}
-		return nil
-	}
-}
-
-func (s *Service) signalProcessedBlocks() {
-	select {
-	case s.processedBlocksSignal <- struct{}{}:
-	default: // no-op, signal already queued
-	}
-}
-
-func (s *Service) waitProcessedBlocksSignal(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case _, ok := <-s.processedBlocksSignal:
-		if !ok {
-			return errors.New("processedBlocksSignal channel closed")
 		}
 		return nil
 	}

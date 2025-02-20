@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
@@ -16,9 +17,9 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
-func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) (err error) {
+func ValidateBorEvents(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) (err error) {
 	defer func() {
-		log.Info("[integrity] NoGapsInBorEvents: done", "err", err)
+		log.Info("[integrity] ValidateBorEvents: done", "err", err)
 	}()
 
 	var cc *chain.Config
@@ -132,4 +133,28 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 	log.Info("[integrity] done checking bor events", "event", prevEventId)
 
 	return nil
+}
+
+func ValidateBorSpans(logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
+	baseStore := heimdall.NewMdbxStore(logger, dirs.DataDir, true, 32)
+	snapshotStore := heimdall.NewSpanSnapshotStore(baseStore.Spans(), snaps)
+	err := snapshotStore.ValidateSnapshots(logger, failFast)
+	logger.Info("[integrity] ValidateBorSpans: done", "err", err)
+	return err
+}
+
+func ValidateBorCheckpoints(logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
+	baseStore := heimdall.NewMdbxStore(logger, dirs.DataDir, true, 32)
+	snapshotStore := heimdall.NewCheckpointSnapshotStore(baseStore.Checkpoints(), snaps)
+	err := snapshotStore.ValidateSnapshots(logger, failFast)
+	logger.Info("[integrity] ValidateBorCheckpoints: done", "err", err)
+	return err
+}
+
+func ValidateBorMilestones(logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
+	baseStore := heimdall.NewMdbxStore(logger, dirs.DataDir, true, 32)
+	snapshotStore := heimdall.NewMilestoneSnapshotStore(baseStore.Milestones(), snaps)
+	err := snapshotStore.ValidateSnapshots(logger, failFast)
+	logger.Info("[integrity] ValidateBorMilestones: done", "err", err)
+	return err
 }

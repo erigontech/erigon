@@ -95,10 +95,27 @@ func TestCreation(t *testing.T) {
 				{2990907, 1677557076, ID{Hash: checksumToBytes(0xb96cbd13), Next: 1677557088}}, // Last pre-Shanghai block
 				{2990908, 1677557088, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 1706655072}}, // First Shanghai block
 				{5187022, 1706655060, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 1706655072}}, // Last Shanghai block
-				{5187023, 1706655072, ID{Hash: checksumToBytes(0x88cf81d9), Next: 0}},          // First Cancun block
-				{8000000, 1800000000, ID{Hash: checksumToBytes(0x88cf81d9), Next: 0}},          // Future Cancun block (mock)
+				{5187023, 1706655072, ID{Hash: checksumToBytes(0x88cf81d9), Next: 1741159776}}, // First Cancun block
+				{7844466, 1741159764, ID{Hash: checksumToBytes(0x88cf81d9), Next: 1741159776}}, // Last Cancun block (approx)
+				{7844467, 1741159776, ID{Hash: checksumToBytes(0xed88b5fd), Next: 0}},          // First Prague block (approx)
+				{12000000, 1800000000, ID{Hash: checksumToBytes(0xed88b5fd), Next: 0}},         // Future Prague block (mock)
 			},
 		},
+
+		// Holesky test cases
+		{
+			params.HoleskyChainConfig,
+			params.HoleskyGenesisHash,
+			[]testcase{
+				{0, 1696000704, ID{Hash: checksumToBytes(0xfd4f016b), Next: 1707305664}},       // First Shanghai block
+				{0, 1707305652, ID{Hash: checksumToBytes(0xfd4f016b), Next: 1707305664}},       // Last Shanghai block
+				{894733, 1707305676, ID{Hash: checksumToBytes(0x9b192ad0), Next: 1740434112}},  // First Cancun block
+				{3655435, 1740434100, ID{Hash: checksumToBytes(0x9b192ad0), Next: 1740434112}}, // Last Cancun block (approx)
+				{3655436, 1740434112, ID{Hash: checksumToBytes(0xdfbd9bed), Next: 0}},          // First Prague block (approx)
+				{8000000, 1800000000, ID{Hash: checksumToBytes(0xdfbd9bed), Next: 0}},          // Future Prague block (mock)
+			},
+		},
+
 		// Gnosis test cases
 		{
 			params.GnosisChainConfig,
