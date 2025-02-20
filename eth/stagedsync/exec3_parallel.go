@@ -639,6 +639,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 				addedDependencies = be.execTasks.addDependencies(execErr.Dependency, tx)
 				be.execFailed[tx]++
+				if be.execFailed[tx] > 10 {
+					fmt.Println("FAIL", tx, be.txIncarnations[tx], be.execFailed[tx], execErr.Dependency)
+				}
 			} else {
 				estimate := 0
 
@@ -652,10 +655,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 				}
 				be.estimateDeps[tx] = append(be.estimateDeps[tx], newEstimate)
 				be.execAborted[tx]++
-			}
 
-			if be.execFailed[tx] > 10 {
-				fmt.Println("ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], execErr.Dependency)
+				if be.execFailed[tx] > 10 {
+					fmt.Println("ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], execErr.Dependency)
+				}
 			}
 
 			be.execTasks.clearInProgress(tx)
