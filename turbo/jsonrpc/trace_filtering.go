@@ -608,13 +608,13 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
-		txCtx := core.NewEVMTxContext(msg)
+		txCtx := core.NewEVMTxContext(&msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(txIndex)
 		var execResult *evmtypes.ExecutionResult
-		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut)
+		execResult, err = core.ApplyMessage(evm, &msg, gp, true /* refunds */, gasBailOut, engine)
 		if err != nil {
 			if first {
 				first = false
@@ -804,14 +804,6 @@ func (api *TraceAPIImpl) callBlock(
 			if err != nil {
 				return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
 			}
-
-			// gnosis might have a fee free account here
-			if msg.FeeCap().IsZero() && engine != nil {
-				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					return core.SysCallContract(contract, data, cfg, ibs, header, engine, true /* constCall */)
-				}
-				msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
-			}
 		}
 
 		callParams = append(callParams, TraceCallParam{
@@ -925,14 +917,6 @@ func (api *TraceAPIImpl) callTransaction(
 		msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
 			return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
-		}
-
-		// gnosis might have a fee free account here
-		if msg.FeeCap().IsZero() && engine != nil {
-			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, cfg, ibs, header, engine, true /* constCall */)
-			}
-			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
 	}
 

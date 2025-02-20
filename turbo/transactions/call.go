@@ -98,7 +98,7 @@ func DoCall(
 		return nil, err
 	}
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
-	txCtx := core.NewEVMTxContext(msg)
+	txCtx := core.NewEVMTxContext(&msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
 
@@ -110,7 +110,7 @@ func DoCall(
 	}()
 
 	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-	result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	result, err := core.ApplyMessage(evm, &msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
 	}
@@ -156,6 +156,7 @@ type ReusableCaller struct {
 func (r *ReusableCaller) DoCallWithNewGas(
 	ctx context.Context,
 	newGas uint64,
+	engine consensus.EngineReader,
 ) (*evmtypes.ExecutionResult, error) {
 	var cancel context.CancelFunc
 	if r.callTimeout > 0 {
@@ -183,7 +184,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	gp := new(core.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
 
-	result, err := core.ApplyMessage(r.evm, r.message, gp, true /* refunds */, false /* gasBailout */)
+	result, err := core.ApplyMessage(r.evm, r.message, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +233,7 @@ func NewReusableCaller(
 	}
 
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
-	txCtx := core.NewEVMTxContext(msg)
+	txCtx := core.NewEVMTxContext(&msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
 

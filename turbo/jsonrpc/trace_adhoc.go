@@ -22,8 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"math"
 	"strings"
 
@@ -33,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	math2 "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core"
@@ -45,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -240,7 +240,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 		accessList = *args.AccessList
 	}
 	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerBlobGas)
-	return msg, nil
+	return *msg, nil
 }
 
 func parseOeTracerConfig(traceConfig *config.TraceConfig) (OeTracerConfig, error) {
@@ -1076,7 +1076,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
-	txCtx := core.NewEVMTxContext(msg)
+	txCtx := core.NewEVMTxContext(&msg)
 
 	blockCtx.GasLimit = math.MaxUint64
 	blockCtx.MaxGasLimit = true
@@ -1093,7 +1093,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
 	ibs.SetTxContext(0)
-	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
+	execResult, err = core.ApplyMessage(evm, &msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
 	}
@@ -1373,11 +1373,11 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			)
 		} else {
 			ibs.SetTxContext(txIndex)
-			txCtx := core.NewEVMTxContext(msg)
+			txCtx := core.NewEVMTxContext(&msg)
 			evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 			gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
-			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/)
+			execResult, err = core.ApplyMessage(evm, &msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
@@ -1571,11 +1571,11 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		)
 	} else {
 		ibs.SetTxContext(txIndex)
-		txCtx := core.NewEVMTxContext(msg)
+		txCtx := core.NewEVMTxContext(&msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
-		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/)
+		execResult, err = core.ApplyMessage(evm, &msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
