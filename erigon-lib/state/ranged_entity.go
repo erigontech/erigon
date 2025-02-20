@@ -29,13 +29,13 @@ type RAOpts func(a *RangedEntity)
 
 // making this a method on RelationalAppendableOption to allow namespacing; since MarkedAppendableOptions
 // have same functions.
-func (r *RAOpts) WithFreezer(freezer Freezer) RAOpts {
+func RA_WithFreezer(freezer Freezer) RAOpts {
 	return func(a *RangedEntity) {
 		a.freezer = freezer
 	}
 }
 
-func (r *RAOpts) WithIndexBuilders(builders ...AccessorIndexBuilder) RAOpts {
+func RA_WithIndexBuilders(builders ...AccessorIndexBuilder) RAOpts {
 	return func(a *RangedEntity) {
 		a.builders = builders
 	}

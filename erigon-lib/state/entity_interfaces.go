@@ -23,7 +23,7 @@ type Freezer interface {
 	// baseNumFrom/To represent num which the snapshot should range
 	// this doesn't check if the snapshot can be created or not. It's the responsibilty of the caller
 	// to ensure this.
-	Freeze(ctx context.Context, from, to RootNum, tx kv.Tx) error
+	Freeze(ctx context.Context, from, to RootNum, db kv.RoDB) error
 	SetCollector(coll Collector)
 }
 

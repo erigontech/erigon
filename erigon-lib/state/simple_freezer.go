@@ -16,7 +16,12 @@ type SimpleRelationalFreezer struct {
 	coll    Collector
 }
 
-func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to RootNum, tx kv.Tx) error {
+func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to RootNum, db kv.RoDB) error {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	_entityIdFrom, err := sf.rel.RootNum2Num(from, tx)
 	if err != nil {
 		return err

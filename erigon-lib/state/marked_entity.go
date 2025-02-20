@@ -43,31 +43,31 @@ type MarkedEntity struct {
 
 type MAOpts func(*MarkedEntity)
 
-func (r *MAOpts) WithFreezer(freezer Freezer) MAOpts {
+func MA_WithFreezer(freezer Freezer) MAOpts {
 	return func(a *MarkedEntity) {
 		a.freezer = freezer
 	}
 }
 
-func (r *MAOpts) WithIndexBuilders(builders ...AccessorIndexBuilder) MAOpts {
+func MA_WithIndexBuilders(builders ...AccessorIndexBuilder) MAOpts {
 	return func(a *MarkedEntity) {
 		a.builders = builders
 	}
 }
 
-func (r *MAOpts) WithTs8Bytes(ts8Bytes bool) MAOpts {
+func MA_WithTs8Bytes(ts8Bytes bool) MAOpts {
 	return func(a *MarkedEntity) {
 		a.ts8Bytes = ts8Bytes
 	}
 }
 
-func (r *MAOpts) WithPruneFrom(pruneFrom Num) MAOpts {
+func MA_WithPruneFrom(pruneFrom Num) MAOpts {
 	return func(a *MarkedEntity) {
 		a.pruneFrom = pruneFrom
 	}
 }
 
-func NewMarkedAppendable(id EntityId, canonicalTbl, valsTbl string, logger log.Logger, options ...MAOpts) (*MarkedEntity, error) {
+func NewMarkedEntity(id EntityId, canonicalTbl, valsTbl string, logger log.Logger, options ...MAOpts) (*MarkedEntity, error) {
 	m := &MarkedEntity{
 		ProtoEntity:  NewProto(id, nil, nil, logger),
 		canonicalTbl: canonicalTbl,

@@ -86,16 +86,9 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 			a.freezer.SetCollector(func(values []byte) error {
 				return sn.AddWord(values)
 			})
-			tx, err := db.BeginRo(ctx)
-			if err != nil {
+			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, db); err != nil {
 				return err
 			}
-
-			defer tx.Rollback()
-			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, tx); err != nil {
-				return err
-			}
-			tx.Rollback()
 		}
 
 		{
