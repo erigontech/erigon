@@ -1276,7 +1276,6 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 				}
 				mergedCommitteeBits, err := curAtt.CommitteeBits.Union(candidate.CommitteeBits)
 				if err != nil {
-					log.Debug("[Block Production] Cannot merge committee bits", "err", err)
 					continue
 				}
 				// merge signatures
@@ -1300,18 +1299,14 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	}
 
 	attestationCandidates := []attestationCandidate{}
-	count := 0
-	candCount := 0
 	for _, atts := range hashToAtts {
 		for _, att := range atts {
-			candCount++
 			expectedReward, err := computeAttestationReward(s, att)
 			if err != nil {
 				log.Debug("[Block Production] Could not compute expected attestation reward", "reason", err)
 				continue
 			}
 			if expectedReward == 0 {
-				count++
 				continue
 			}
 			attestationCandidates = append(attestationCandidates, attestationCandidate{

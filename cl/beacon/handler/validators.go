@@ -823,6 +823,7 @@ func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))
 	}
 	if slotNum != att.Data.Slot {
+		log.Debug("attestation slot does not match", "attestation_data_root", attDataRoot, "slot_inquire", slot)
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation slot mismatch"))
 	}
 
