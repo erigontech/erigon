@@ -475,10 +475,6 @@ func (a *ApiHandler) produceBlock(
 		block.Blobs = blobs
 		block.KzgProofs = kzgProofs
 		block.ExecutionValue = new(big.Int).SetUint64(localExecValue)
-		bytes, _ := json.Marshal(beaconBody)
-		log.Debug("[Block Production] Produced block", "slot", targetSlot, "beacon_body", string(bytes))
-		bytes, _ = json.Marshal(blobs)
-		log.Debug("[Block Production] Produced block", "slot", targetSlot, "blobs", string(bytes))
 		return block, nil
 	}
 
@@ -656,8 +652,7 @@ func (a *ApiHandler) produceBeaconBody(
 			},
 		)
 		if err != nil {
-			withdrawalsBytes, _ := json.Marshal(withdrawals)
-			log.Error("BlockProduction: Failed to get payload id", "err", err, "withdrawals", string(withdrawalsBytes))
+			log.Error("BlockProduction: Failed to get payload id", "err", err)
 			return
 		}
 		// Keep requesting block until it's ready
@@ -1329,7 +1324,6 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		return attestationCandidates[i].reward > attestationCandidates[j].reward
 	})
 
-	log.Debug("[Block Production] # of zero Attestation reward", "count", count, "total", candCount)
 	// decide the max attestation length based on the version
 	var maxAttLen int
 	if s.Version().BeforeOrEqual(clparams.DenebVersion) {
@@ -1344,8 +1338,6 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 			break
 		}
 	}
-	bytes, _ := json.Marshal(ret)
-	log.Debug("[Block Production] Attestations", "attestations", string(bytes), "len", ret.Len())
 	return ret
 }
 

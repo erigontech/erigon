@@ -24,6 +24,7 @@ import (
 
 	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -153,6 +154,7 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation) err
 	// It's fine to directly merge aggregation bits here, because the attestation is from the same committee
 	mergedAggrBits, err := att.AggregationBits.Merge(inAtt.AggregationBits)
 	if err != nil {
+		log.Debug("failed to merge aggregation bits", "err", err)
 		return err
 	}
 	merged, err := blsAggregate([][]byte{att.Signature[:], inAtt.Signature[:]})
