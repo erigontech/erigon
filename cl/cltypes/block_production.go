@@ -69,7 +69,6 @@ func (b *BlindOrExecutionBeaconBlock) ToExecution() *DenebBeaconBlock {
 	}
 	DenebBeaconBlock := NewDenebBeaconBlock(b.Cfg, b.Version())
 	DenebBeaconBlock.Block = beaconBlock
-	DenebBeaconBlock.Block.SetVersion(b.Version())
 	for _, kzgProof := range b.KzgProofs {
 		proof := KZGProof{}
 		copy(proof[:], kzgProof[:])
