@@ -26,6 +26,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-lib/log/logger"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
@@ -154,7 +155,7 @@ func (n *devnetNode) EnableMetrics(int) {
 
 // run configures, creates and serves an erigon node
 func (n *devnetNode) run(ctx *cli.Context) error {
-	var logger log.Logger
+	var _logger log.Logger
 	var err error
 	var metricsMux *http.ServeMux
 	var pprofMux *http.ServeMux
@@ -170,18 +171,19 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 		n.Unlock()
 	}()
 
-	if logger, metricsMux, pprofMux, err = debug.Setup(ctx, false /* rootLogger */); err != nil {
+	if _logger, metricsMux, pprofMux, err = debug.Setup(ctx, false /* rootLogger */); err != nil {
 		return err
 	}
+	logger.SetLogger(_logger)
 
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
-	nodeConf, err := enode.NewNodConfigUrfave(ctx, logger)
+	nodeConf, err := enode.NewNodConfigUrfave(ctx, _logger)
 	if err != nil {
 		return err
 	}
 	n.nodeCfg = nodeConf
-	n.ethCfg = enode.NewEthConfigUrfave(ctx, n.nodeCfg, logger)
+	n.ethCfg = enode.NewEthConfigUrfave(ctx, n.nodeCfg)
 
 	// These are set to prevent disk and page size churn which can be excessive
 	// when running multiple nodes
@@ -204,7 +206,7 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 		logger.Warn("TODO: custom BorStateSyncDelay is not applied to BorConfig.StateSyncConfirmationDelay", "delay", stateSyncConfirmationDelay)
 	}
 
-	n.ethNode, err = enode.New(ctx.Context, n.nodeCfg, n.ethCfg, logger)
+	n.ethNode, err = enode.New(ctx.Context, n.nodeCfg, n.ethCfg, _logger)
 
 	diagnostics.Setup(ctx, n.ethNode, metricsMux, pprofMux)
 
