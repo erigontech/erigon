@@ -35,6 +35,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-lib/log/logger"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/etl"
@@ -268,7 +269,7 @@ var (
 	}
 )
 
-func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.LoggerI) {
+func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {
 		chainId = cfg.Genesis.Config.ChainID.Uint64()

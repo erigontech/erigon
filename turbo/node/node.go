@@ -116,10 +116,10 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.LoggerI) (*nodecfg.Config, 
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig, logger)
 	return nodeConfig, nil
 }
-func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.LoggerI) *ethconfig.Config {
+func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config) *ethconfig.Config {
 	ethConfig := ethconfig.Defaults // Needs to be a copy, not pointer
-	utils.SetEthConfig(ctx, nodeConfig, &ethConfig, logger)
-	erigoncli.ApplyFlagsForEthConfig(ctx, &ethConfig, logger)
+	utils.SetEthConfig(ctx, nodeConfig, &ethConfig)
+	erigoncli.ApplyFlagsForEthConfig(ctx, &ethConfig)
 
 	return &ethConfig
 }

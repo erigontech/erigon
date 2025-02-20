@@ -67,13 +67,13 @@ func runErigon(cliCtx *cli.Context) error {
 	if _logger, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
-	logger.SetLogger(_logger) // set global logger instance
+	logger.SetLogger(_logger)
 
 	// initializing the node and providing the current git commit there
 
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 	if params.VersionMajor == 3 {
-		_logger.Info(`
+		logger.Info(`
 	########b          oo                               d####b. 
 	##                                                      '## 
 	##aaaa    ##d###b. dP .d####b. .d####b. ##d###b.     aaad#' 
@@ -87,7 +87,7 @@ func runErigon(cliCtx *cli.Context) error {
 	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
 	erigonInfoGauge.Set(1)
 
-	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, _logger)
+	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, logger.Logger)
 	if err != nil {
 		return err
 	}
@@ -95,9 +95,9 @@ func runErigon(cliCtx *cli.Context) error {
 		return err
 	}
 
-	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, _logger)
+	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg)
 
-	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, _logger)
+	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger.Logger)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err

@@ -30,6 +30,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-lib/log/logger"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/direct"
@@ -77,21 +78,22 @@ func importChain(cliCtx *cli.Context) error {
 	if cliCtx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	_logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
+	logger.SetLogger(_logger)
 
-	nodeCfg, err := turboNode.NewNodConfigUrfave(cliCtx, logger)
+	nodeCfg, err := turboNode.NewNodConfigUrfave(cliCtx, _logger)
 	if err != nil {
 		return err
 	}
-	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
+	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg)
 
-	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
+	stack := makeConfigNode(cliCtx.Context, nodeCfg, _logger)
 	defer stack.Close()
 
-	ethereum, err := eth.New(cliCtx.Context, stack, ethCfg, logger)
+	ethereum, err := eth.New(cliCtx.Context, stack, ethCfg, _logger)
 	if err != nil {
 		return err
 	}
@@ -100,7 +102,7 @@ func importChain(cliCtx *cli.Context) error {
 		return err
 	}
 
-	if err := ImportChain(ethereum, ethereum.ChainDB(), cliCtx.Args().First(), logger); err != nil {
+	if err := ImportChain(ethereum, ethereum.ChainDB(), cliCtx.Args().First(), _logger); err != nil {
 		return err
 	}
 
