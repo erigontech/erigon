@@ -45,14 +45,14 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
 
-	txContext := NewEVMTxContext(&msg)
+	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {
 		txContext.TxHash = txn.Hash()
 	}
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
-	result, err := ApplyMessage(evm, &msg, gp, true /* refunds */, false /* gasBailout */, engine)
+	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, nil, err
 	}

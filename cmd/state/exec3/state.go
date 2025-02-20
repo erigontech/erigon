@@ -269,10 +269,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
-		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(&msg), ibs, rw.vmCfg, rules)
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
 		// MA applytx
-		applyRes, err := core.ApplyMessage(rw.evm, &msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.engine)
+		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.engine)
 		if err != nil {
 			txTask.Error = err
 		} else {

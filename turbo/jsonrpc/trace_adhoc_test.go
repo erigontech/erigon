@@ -414,7 +414,7 @@ func TestOeTracer(t *testing.T) {
 			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
 			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
 			require.NoError(t, err)
-			txContext := core.NewEVMTxContext(&msg)
+			txContext := core.NewEVMTxContext(msg)
 
 			traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 			tracer := OeTracer{}
@@ -423,7 +423,7 @@ func TestOeTracer(t *testing.T) {
 			require.NoError(t, err)
 			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: &tracer})
 
-			st := core.NewStateTransition(evm, &msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()))
+			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()))
 			_, err = st.TransitionDb(true /* refunds */, false /* gasBailout */)
 			require.NoError(t, err)
 

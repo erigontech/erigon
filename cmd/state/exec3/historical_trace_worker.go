@@ -195,14 +195,14 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		msg := txTask.TxAsMessage
 		msg.SetCheckNonce(!rw.vmConfig.StatelessExec)
 
-		txContext := core.NewEVMTxContext(&msg)
+		txContext := core.NewEVMTxContext(msg)
 		if rw.vmConfig.TraceJumpDest {
 			txContext.TxHash = txTask.Tx.Hash()
 		}
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
 
 		// MA applytx
-		applyRes, err := core.ApplyMessage(rw.evm, &msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
+		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
 		if err != nil {
 			txTask.Error = err
 		} else {

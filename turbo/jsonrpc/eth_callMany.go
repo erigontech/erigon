@@ -214,10 +214,10 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		if err != nil {
 			return nil, err
 		}
-		txCtx = core.NewEVMTxContext(&msg)
+		txCtx = core.NewEVMTxContext(msg)
 		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})
 		// Execute the transaction message
-		_, err = core.ApplyMessage(evm, &msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
+		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
 			return nil, err
 		}

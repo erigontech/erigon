@@ -137,7 +137,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
-	txCtx := core.NewEVMTxContext(&firstMsg)
+	txCtx := core.NewEVMTxContext(firstMsg)
 	// Get a new instance of the EVM
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: false})
 
@@ -180,7 +180,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 		// Execute the transaction message
-		result, err := core.ApplyMessage(evm, &msg, gp, true /* refunds */, false /* gasBailout */, engine)
+		result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			return nil, err
 		}

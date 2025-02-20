@@ -83,8 +83,8 @@ func ComputeTxContext(statedb *state.IntraBlockState, engine consensus.EngineRea
 	txn := block.Transactions()[txIndex]
 	statedb.SetTxContext(txIndex)
 	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
-	TxContext := core.NewEVMTxContext(&msg)
-	return &msg, TxContext, nil
+	txContext := core.NewEVMTxContext(msg)
+	return msg, txContext, nil
 }
 
 // TraceTx configures a new tracer according to the provided configuration, and

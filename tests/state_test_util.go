@@ -234,11 +234,10 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		if err != nil {
 			return nil, libcommon.Hash{}, err
 		}
-		msg2, err := txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, config.Rules(0, 0))
+		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, config.Rules(0, 0))
 		if err != nil {
 			return nil, libcommon.Hash{}, err
 		}
-		msg = &msg2
 	}
 
 	// Prepare the EVM.

@@ -608,13 +608,13 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
-		txCtx := core.NewEVMTxContext(&msg)
+		txCtx := core.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(txIndex)
 		var execResult *evmtypes.ExecutionResult
-		execResult, err = core.ApplyMessage(evm, &msg, gp, true /* refunds */, gasBailOut, engine)
+		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
 		if err != nil {
 			if first {
 				first = false
@@ -793,7 +793,7 @@ func (api *TraceAPIImpl) callBlock(
 	for i, txn := range txs {
 		isBorStateSyncTxn := txn == borStateSyncTxn
 		var txnHash common.Hash
-		var msg types.Message
+		var msg *types.Message
 		var err error
 		if isBorStateSyncTxn {
 			txnHash = borStateSyncTxnHash
@@ -812,7 +812,7 @@ func (api *TraceAPIImpl) callBlock(
 			isBorStateSyncTxn: isBorStateSyncTxn,
 		})
 
-		msgs[i] = &msg
+		msgs[i] = msg
 	}
 
 	traces, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msgs, callParams,
@@ -908,7 +908,7 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	var txnHash common.Hash
-	var msg types.Message
+	var msg *types.Message
 	if cfg.Bor != nil {
 		txnHash = borStateSyncTxnHash
 		// we use an empty message for bor state sync txn since it gets handled differently
