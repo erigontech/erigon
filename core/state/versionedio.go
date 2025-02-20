@@ -473,6 +473,8 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 			fmt.Printf("%d (%d.%d) RD %s (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key})
 		}
 
+		vr.Source = MapRead
+
 		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 			if pr.Version == vr.Version {
 				return pr.Val.(T), MapRead, nil
@@ -487,12 +489,16 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 					fmt.Printf("%d (%d.%d) DEP (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
 				}
 
+				if s.versionedReads == nil {
+					s.versionedReads = ReadSet{}
+				}
+				s.versionedReads.Set(vr)
+
 				panic(ErrDependency)
 			}
 		}
 
 		var ok bool
-		vr.Source = MapRead
 		if v, ok = res.Value().(T); !ok {
 			return defaultV, MapRead, fmt.Errorf("unexpected type: %T", res.Value())
 		}
@@ -509,6 +515,13 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 		}
 
 		s.dep = res.DepIdx()
+		vr.Source = MapRead
+
+		if s.versionedReads == nil {
+			s.versionedReads = ReadSet{}
+		}
+		s.versionedReads.Set(vr)
+
 		panic(ErrDependency)
 
 	case MVReadResultNone:
@@ -552,7 +565,6 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 	if s.versionedReads == nil {
 		s.versionedReads = ReadSet{}
 	}
-
 	s.versionedReads.Set(vr)
 
 	return v, vr.Source, nil
