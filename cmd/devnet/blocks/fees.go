@@ -31,5 +31,5 @@ func BaseFeeFromBlock(ctx context.Context) (uint64, error) {
 		return 0, fmt.Errorf("failed to get base fee from block: %v\n", err)
 	}
 
-	return res.BaseFee.Uint64(), err
+	return res.BaseFee.Uint64(), nil
 }
