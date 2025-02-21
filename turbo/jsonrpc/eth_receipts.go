@@ -419,7 +419,7 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 			return nil, err
 		}
 		cnt, _ := stream.Count(it)
-		log.Warn("[dbg] dbg idx", "cnt1", cnt)
+		log.Warn("[dbg] dbg idx", "cnt1", cnt, "addr", fmt.Sprintf("%x", addr))
 		res = stream.Union[uint64](res, it, order.Asc, -1)
 	}
 	return res, nil
