@@ -2,7 +2,6 @@ package receipts
 
 import (
 	"context"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
@@ -82,7 +82,7 @@ func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, i
 		txContext := core.NewEVMTxContext(msg)
 		evm.Reset(txContext, ibs)
 
-		_, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		_, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, nil /* engine */)
 		if err != nil {
 			return nil, err
 		}

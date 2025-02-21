@@ -193,7 +193,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		txCtx = core.NewEVMTxContext(msg)
 		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})
 		// Execute the transaction message
-		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
 			return nil, err
 		}
@@ -222,7 +222,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: true, Tracer: &ct})
 
 	// Execute the transaction message
-	_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
+	_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
 	if ct.err != nil {
 		return nil, err
 	}
@@ -528,7 +528,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		evm.TxContext = txCtx
 
 		// Execute the transaction message
-		res, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
+		res, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
 		if err != nil {
 			log.Error(err.Error())
 			return nil, err
