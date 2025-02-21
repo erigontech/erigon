@@ -138,10 +138,8 @@ func TestCreation(t *testing.T) {
 				{29242931, 1690889650, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // Last pre-Shanghai block
 				{29242932, 1690889660, ID{Hash: checksumToBytes(0x2efe91ba), Next: 1710181820}}, // First Shanghai block
 				{32880679, 1710181810, ID{Hash: checksumToBytes(0x2efe91ba), Next: 1710181820}}, // Last Shanghai block
-				{32880680, 1710181820, ID{Hash: checksumToBytes(0x1384dfc1), Next: 1743523260}}, // First Cancun block
-				{39351824, 1743523255, ID{Hash: checksumToBytes(0x1384dfc1), Next: 1743523260}}, // Last Cancun block (approx)
-				{39351825, 1743523260, ID{Hash: checksumToBytes(0x5db43764), Next: 0}},          // First Prague block (approx)
-				{40000000, 1800000000, ID{Hash: checksumToBytes(0x5db43764), Next: 0}},          // Future Prague block (mock)
+				{32880680, 1710181820, ID{Hash: checksumToBytes(0x1384dfc1), Next: 0}},          // First Cancun block
+				{40000000, 1800000000, ID{Hash: checksumToBytes(0x1384dfc1), Next: 0}},          // Future Cancun block (mock)
 			},
 		},
 		// Chiado test cases
