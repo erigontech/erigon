@@ -137,11 +137,6 @@ func InitMDBXMGauges() *DBGauges {
 
 // initialize summaries for a particular MDBX instance
 func InitSummaries(dbLabel Label) {
-	// just in case the global singleton map is not already initialized
-	// if MDBXSummaries == nil {
-	// 	MDBXSummaries = make(map[Label]*DBSummaries)
-	// }
-
 	_, ok := MDBXSummaries.Load(dbLabel)
 	if !ok {
 		dbName := string(dbLabel)
