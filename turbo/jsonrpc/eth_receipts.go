@@ -526,10 +526,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, fmt.Errorf("getReceipt error: %w", err)
 	}
 
-	for i, l := range receipt.Logs {
-		fmt.Printf("[dbg] dbg21: txIdx=%d, idx=%d, %x\n", i, l.Index, l.Address)
-	}
-
 	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txnHash, true), nil
 }
 
@@ -567,6 +563,12 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
 		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true))
+	}
+
+	for _, receipt := range receipts {
+		for i, l := range receipt.Logs {
+			fmt.Printf("[dbg] dbg21: txIdx=%d, idx=%d, %x\n", i, l.Index, l.Address)
+		}
 	}
 
 	if chainConfig.Bor != nil {
