@@ -101,9 +101,6 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 	if label == kv.ChainDB {
 		opts = opts.RemoveFlags(mdbx.NoReadahead) // enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (doesen GB)
 	}
-	if opts.metrics {
-		kv.InitSummaries(label)
-	}
 	return opts
 }
 
@@ -188,6 +185,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 	if dbg.MergeTr() > 0 {
 		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
+	}
+
+	if opts.metrics {
+		kv.InitSummaries(opts.label)
 	}
 	if opts.HasFlag(mdbx.Accede) || opts.HasFlag(mdbx.Readonly) {
 		for retry := 0; ; retry++ {

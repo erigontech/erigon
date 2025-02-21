@@ -156,7 +156,7 @@ func InitSummaries(dbLabel Label) {
 }
 
 func RecordSummaries(dbLabel Label, latency mdbx.CommitLatency) error {
-	_summaries, ok := MDBXSummaries.Load(dbLabel)
+	_summaries, ok := MDBXSummaries.Load(string(dbLabel))
 	if !ok {
 		return fmt.Errorf("MDBX summaries not initialized yet for db=%s", string(dbLabel))
 	}
