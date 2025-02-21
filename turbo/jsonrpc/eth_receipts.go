@@ -328,6 +328,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		if txn == nil {
+			log.Warn(fmt.Sprintf("[dbg] dbg11: skip blk=%d, %d\n", blockNum, txIndex))
 			continue
 		}
 
