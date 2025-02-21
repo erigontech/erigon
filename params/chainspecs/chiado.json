@@ -15,6 +15,7 @@
   "terminalTotalDifficultyPassed": true,
   "shanghaiTime": 1684934220,
   "cancunTime": 1706724940,
+  "pragueTime": 1741254220,
   "minBlobGasPrice": 1000000000,
   "blobSchedule": {
     "cancun": {
