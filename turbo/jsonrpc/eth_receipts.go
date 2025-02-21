@@ -354,6 +354,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		for _, filteredLog := range filtered {
+			fmt.Printf("[dbg] dbg20: idx=%d, %x\n", filteredLog.Index, filteredLog.Address)
 			logs = append(logs, &types.ErigonLog{
 				Address:     filteredLog.Address,
 				Topics:      filteredLog.Topics,
