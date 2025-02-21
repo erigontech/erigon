@@ -915,7 +915,7 @@ func (tx *MdbxTx) Commit() error {
 		dbLabel := tx.db.opts.label
 		err = kv.RecordSummaries(dbLabel, latency)
 		if err != nil {
-			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
+			//tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
 		}
 
 		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
