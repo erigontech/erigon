@@ -2,6 +2,10 @@ package jsonrpc
 
 import (
 	"context"
+	"fmt"
+	"math/big"
+	"testing"
+
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
@@ -9,9 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/log/v3"
-	"math/big"
-	"testing"
-	"fmt"
 )
 
 func TestGetLogsWithRange(t *testing.T) {

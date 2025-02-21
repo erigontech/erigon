@@ -3,12 +3,12 @@ on:
   push:
     branches:
       - main
-      - stable
+      - stable/**
       - alpha
   pull_request:
     branches:
       - main
-      - stable
+      - stable/**
       - alpha
 env:
   CGO_ENABLED: "1"

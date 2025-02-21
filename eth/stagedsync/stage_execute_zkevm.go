@@ -210,7 +210,10 @@ Loop:
 		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
-	if err = batch.Flush(ctx, tx); err != nil {
+	// use a separate flush context so we don't immediately cancel if the node is shutting down
+	flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := batch.Flush(flushCtx, tx); err != nil {
 		return fmt.Errorf("batch.Flush: %w", err)
 	}
 

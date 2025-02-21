@@ -368,7 +368,7 @@ func sequencingBatchStep(
 
 			select {
 			case <-blockTimer.C:
-				if len(batchState.blockState.builtBlockElements.transactions) > 0 && !batchState.isAnyRecovery() {
+				if !batchState.isAnyRecovery() {
 					break OuterLoopTransactions
 				}
 			default:
@@ -566,9 +566,6 @@ func sequencingBatchStep(
 							cfg.txPool.MarkForDiscardFromPendingBest(txHash)
 							counter, err := handleBadTxHashCounter(sdb.hermezDb, txHash)
 							if err != nil {
-								return err
-							}
-							if err = sdb.hermezDb.TruncateBadTxHashCounterBelow(cfg.zk.BadTxStoreValue); err != nil {
 								return err
 							}
 							log.Info(fmt.Sprintf("[%s] single transaction %s cannot fit into batch - overflow", logPrefix, txHash), "context", ocs, "times_seen", counter)
