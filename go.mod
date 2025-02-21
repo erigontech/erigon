@@ -63,9 +63,8 @@ require (
 	github.com/hashicorp/golang-lru/arc/v2 v2.0.6
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/holiman/uint256 v1.3.1
-	github.com/huandu/xstrings v1.4.0
 	github.com/huin/goupnp v1.2.0
-	github.com/iden3/go-iden3-crypto v0.0.15
+	github.com/iden3/go-iden3-crypto v0.0.17
 	github.com/jackc/pgx/v4 v4.18.2
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/jedib0t/go-pretty/v6 v6.5.9
@@ -81,6 +80,7 @@ require (
 	github.com/multiformats/go-multiaddr v0.12.1
 	github.com/nsf/jsondiff v0.0.0-20230430225905-43f6cf3098c1
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
+	github.com/okx/poseidongold v0.0.3
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.2.1
 	github.com/pion/randutil v0.1.0
@@ -186,6 +186,7 @@ require (
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/pprof v0.0.0-20240409012703-83162a5b38cd // indirect
 	github.com/hermeznetwork/tracerr v0.3.2 // indirect
+	github.com/huandu/xstrings v1.4.0 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20220405231054-a1ae3e4bba26 // indirect
 	github.com/imdario/mergo v0.3.11 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
