@@ -286,14 +286,12 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return logs, err
 	}
 
-	//cnt, _ := stream.Count(txNumbers)
-	//log.Warn(fmt.Sprintf("[dbg] dbg10: it1.count=%d\n", cnt))
-
 	it := rawdbv3.TxNums2BlockNums(tx,
 		txNumsReader,
 		txNumbers, order.Asc)
 	defer it.Close()
 
+	log.Warn(fmt.Sprintf("[dbg] dbg15: %t\n", it.HasNext()))
 	i := 0
 	for it.HasNext() {
 		i++
@@ -370,7 +368,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			})
 		}
 	}
-	log.Warn(fmt.Sprintf("[dbg] dbg10: it2.count=%d\n", i))
+	log.Warn(fmt.Sprintf("[dbg] dbg16: it2.count=%d, len(logs)=%d\n", i, len(logs)))
 
 	return logs, nil
 }
