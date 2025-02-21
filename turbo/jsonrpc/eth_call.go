@@ -178,6 +178,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	if block == nil {
 		return 0, errors.New(fmt.Sprintf("could not find the block %s in cache or db", blockNrOrHash.String()))
 	}
+	header := block.HeaderNoCopy()
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, txNumsReader, blockNum, isLatest, 0, api.stateCache, chainConfig.ChainName)
@@ -201,7 +202,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
-		hi = block.Header().GasLimit
+		hi = header.GasLimit
 	}
 
 	var feeCap *big.Int
@@ -253,7 +254,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	gasCap = hi
 
-	header := block.HeaderNoCopy()
 	caller, err := transactions.NewReusableCaller(engine, stateReader, overrides, header, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
 	if err != nil {
 		return 0, err
