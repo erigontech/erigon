@@ -286,14 +286,17 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return logs, err
 	}
 
-	cnt, _ := stream.Count(txNumbers)
-	log.Warn(fmt.Sprintf("[dbg] dbg10: it1.count=%d\n", cnt))
+	//cnt, _ := stream.Count(txNumbers)
+	//log.Warn(fmt.Sprintf("[dbg] dbg10: it1.count=%d\n", cnt))
 
 	it := rawdbv3.TxNums2BlockNums(tx,
 		txNumsReader,
 		txNumbers, order.Asc)
 	defer it.Close()
+
+	i := 0
 	for it.HasNext() {
+		i++
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -366,6 +369,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			})
 		}
 	}
+	log.Warn(fmt.Sprintf("[dbg] dbg10: it2.count=%d\n", i))
 
 	return logs, nil
 }
