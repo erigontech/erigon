@@ -21,7 +21,7 @@ import (
 	"strconv"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
@@ -66,10 +66,10 @@ func (m *Metadata) DecodeSSZ(buf []byte, _ int) error {
 func (m *Metadata) MarshalJSON() ([]byte, error) {
 	out := map[string]interface{}{
 		"seq_number": strconv.FormatUint(m.SeqNumber, 10),
-		"attnets":    hexutility.Bytes(m.Attnets[:]),
+		"attnets":    hexutil.Bytes(m.Attnets[:]),
 	}
 	if m.Syncnets != nil {
-		out["syncnets"] = hexutility.Bytes(m.Syncnets[:])
+		out["syncnets"] = hexutil.Bytes(m.Syncnets[:])
 	}
 	// Attnets and syncnets are hex encoded
 	return json.Marshal(out)

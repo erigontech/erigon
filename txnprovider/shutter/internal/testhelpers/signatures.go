@@ -1,4 +1,4 @@
-// Copyright 2021 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,14 +14,23 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package hexutility
+package testhelpers
 
-var (
-	ErrMissingPrefix = &decError{"hex string without 0x prefix"}
-	ErrOddLength     = &decError{"hex string of odd length"}
-	ErrSyntax        = &decError{"invalid hex string"}
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/txnprovider/shutter"
 )
 
-type decError struct{ msg string }
+func Signatures(t *testing.T, signers []Keyper, data shutter.DecryptionKeysSignatureData) [][]byte {
+	sigs := make([][]byte, len(signers))
+	for i, signer := range signers {
+		var err error
+		sigs[i], err = data.Sign(signer.PrivateKey)
+		require.NoError(t, err)
+	}
 
-func (err decError) Error() string { return err.msg }
+	return sigs
+}

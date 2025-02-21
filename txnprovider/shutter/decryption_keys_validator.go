@@ -28,23 +28,31 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 )
 
 var (
-	ErrInstanceIdMismatch     = errors.New("instance id mismatch")
-	ErrMissingGnosisExtraData = errors.New("missing gnosis extra data")
-	ErrSlotTooLarge           = errors.New("slot too large")
-	ErrSlotInThePast          = errors.New("slot in the past")
-	ErrSlotInTheFuture        = errors.New("slot in the future")
-	ErrTxPointerTooLarge      = errors.New("tx pointer too large")
-	ErrEonTooLarge            = errors.New("eon too large")
-	ErrCurrentEonUnavailable  = errors.New("current eon unavailable")
-	ErrEonInThePast           = errors.New("eon in the past")
-	ErrEonInTheFuture         = errors.New("eon in the future")
-	ErrEmptyKeys              = errors.New("empty keys")
-	ErrTooManyKeys            = errors.New("too many keys")
-	ErrIgnoreMsg              = errors.New("ignoring msg")
+	ErrInstanceIdMismatch       = errors.New("instance id mismatch")
+	ErrMissingGnosisExtraData   = errors.New("missing gnosis extra data")
+	ErrSlotTooLarge             = errors.New("slot too large")
+	ErrSlotInThePast            = errors.New("slot in the past")
+	ErrSlotInTheFuture          = errors.New("slot in the future")
+	ErrTxnPointerTooLarge       = errors.New("txn pointer too large")
+	ErrEonTooLarge              = errors.New("eon too large")
+	ErrCurrentEonUnavailable    = errors.New("current eon unavailable")
+	ErrEonInThePast             = errors.New("eon in the past")
+	ErrEonInTheFuture           = errors.New("eon in the future")
+	ErrEonNotInRecent           = errors.New("eon not in recent")
+	ErrEmptyKeys                = errors.New("empty keys")
+	ErrTooManyKeys              = errors.New("too many keys")
+	ErrIgnoreMsg                = errors.New("ignoring msg")
+	ErrInvalidSignature         = errors.New("invalid signature")
+	ErrInvalidKey               = errors.New("invalid key")
+	ErrSignersThresholdMismatch = errors.New("signers threshold mismatch")
+	ErrDuplicateSigners         = errors.New("duplicate signers")
+	ErrUnorderedSigners         = errors.New("unordered signers")
+	ErrSignaturesLenMismatch    = errors.New("signatures len mismatch")
 )
 
 type DecryptionKeysValidator struct {
@@ -63,35 +71,40 @@ func NewDecryptionKeysValidator(config Config, sc SlotCalculator, et EonTracker)
 
 func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 	if msg.InstanceId != v.config.InstanceId {
-		return fmt.Errorf("%w: %d", ErrInstanceIdMismatch, msg.InstanceId)
+		return fmt.Errorf("%w: %d != %d", ErrInstanceIdMismatch, msg.InstanceId, v.config.InstanceId)
 	}
 
-	if err := v.validateExtraData(msg); err != nil {
+	eon, err := v.validateEonIndex(msg)
+	if err != nil {
 		return err
 	}
 
-	if err := v.validateEonIndex(msg); err != nil {
+	if err := v.validateKeys(msg, eon); err != nil {
 		return err
 	}
 
-	return v.validateKeys(msg)
+	return v.validateExtraData(msg, eon)
 }
 
-func (v DecryptionKeysValidator) validateExtraData(msg *proto.DecryptionKeys) error {
-	gnosisExtraData := msg.GetGnosis()
-	if gnosisExtraData == nil {
+func (v DecryptionKeysValidator) validateExtraData(msg *proto.DecryptionKeys, eon Eon) error {
+	extraData := msg.GetGnosis()
+	if extraData == nil {
 		return ErrMissingGnosisExtraData
+	}
+
+	if extraData.TxPointer > math.MaxInt32 {
+		return fmt.Errorf("%w: %d", ErrTxnPointerTooLarge, extraData.TxPointer)
 	}
 
 	if err := v.validateSlot(msg); err != nil {
 		return err
 	}
 
-	if gnosisExtraData.TxPointer > math.MaxInt32 {
-		return fmt.Errorf("%w: %d", ErrTxPointerTooLarge, gnosisExtraData.TxPointer)
+	if err := v.validateSigners(msg, eon); err != nil {
+		return err
 	}
 
-	return nil
+	return v.validateSignatures(msg, eon)
 }
 
 func (v DecryptionKeysValidator) validateSlot(msg *proto.DecryptionKeys) error {
@@ -100,8 +113,14 @@ func (v DecryptionKeysValidator) validateSlot(msg *proto.DecryptionKeys) error {
 		return fmt.Errorf("%w: %d", ErrSlotTooLarge, msgSlot)
 	}
 
+	// we are ok with a buffer of +/- 1 slot
 	currentSlot := v.slotCalculator.CalcCurrentSlot()
-	if msgSlot < currentSlot {
+	var slotBeforeCurrent uint64
+	if currentSlot > 0 {
+		slotBeforeCurrent = currentSlot - 1
+	}
+
+	if msgSlot < slotBeforeCurrent {
 		return fmt.Errorf("%w: msgSlot=%d, currentSlot=%d", ErrSlotInThePast, msgSlot, currentSlot)
 	}
 
@@ -113,7 +132,70 @@ func (v DecryptionKeysValidator) validateSlot(msg *proto.DecryptionKeys) error {
 	return nil
 }
 
-func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys) error {
+func (v DecryptionKeysValidator) validateSigners(msg *proto.DecryptionKeys, eon Eon) error {
+	extraData := msg.GetGnosis()
+	if uint64(len(extraData.SignerIndices)) != eon.Threshold {
+		return fmt.Errorf("%w: %d != %d", ErrSignersThresholdMismatch, len(extraData.SignerIndices), eon.Threshold)
+	}
+
+	for i := 1; i < len(extraData.SignerIndices); i++ {
+		// note: check whether signerIndex is within >= 0 and < len(eon.Members) is covered by eon.KeyperAt(signerIndex)
+		prev, curr := extraData.SignerIndices[i-1], extraData.SignerIndices[i]
+		if curr == prev {
+			return fmt.Errorf("%w: %d", ErrDuplicateSigners, curr)
+		}
+		if curr < prev {
+			return fmt.Errorf("%w: %d < %d", ErrUnorderedSigners, curr, prev)
+		}
+	}
+
+	return nil
+}
+
+func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, eon Eon) error {
+	extraData := msg.GetGnosis()
+	if len(extraData.Signatures) != len(extraData.SignerIndices) {
+		return fmt.Errorf("%w: %d != %d", ErrSignaturesLenMismatch, len(extraData.Signatures), len(extraData.SignerIndices))
+	}
+
+	identityPreimages := make(IdentityPreimages, len(msg.Keys))
+	for i, k := range msg.Keys {
+		ip, err := IdentityPreimageFromBytes(k.IdentityPreimage)
+		if err != nil {
+			return err
+		}
+
+		identityPreimages[i] = ip
+	}
+
+	for i, sig := range extraData.Signatures {
+		signerIdx := extraData.SignerIndices[i]
+		signer, err := eon.KeyperAt(signerIdx)
+		if err != nil {
+			return err
+		}
+
+		signatureData := DecryptionKeysSignatureData{
+			InstanceId:        msg.InstanceId,
+			Eon:               EonIndex(msg.Eon),
+			Slot:              extraData.Slot,
+			TxnPointer:        extraData.TxPointer,
+			IdentityPreimages: identityPreimages.ToListSSZ(),
+		}
+
+		ok, err := signatureData.Verify(sig, signer)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("%w: i=%d, slot=%d, eon=%d", ErrInvalidSignature, i, extraData.Slot, msg.Eon)
+		}
+	}
+
+	return nil
+}
+
+func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys, eon Eon) error {
 	if len(msg.Keys) == 0 {
 		return ErrEmptyKeys
 	}
@@ -122,42 +204,66 @@ func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys) error {
 		return fmt.Errorf("%w: %d", ErrTooManyKeys, len(msg.Keys))
 	}
 
-	//
-	// TODO when we add the shcrypto library and smart contract state accessors:
-	//      - add validation for signers and signatures based on keyper set and currentEon infos
-	//      - add DecryptionKeys.Validate() equivalent which checks the Key unmarshalling into shcrypto.EpochSecretKey
-	//      - add validation forVerifyEpochSecretKey: check if we should be doing this validation
-	//
+	eonPublicKey, err := eon.PublicKey()
+	if err != nil {
+		return err
+	}
+
+	for _, key := range msg.Keys {
+		epochSecretKey, err := EpochSecretKeyFromBytes(key.Key)
+		if err != nil {
+			return fmt.Errorf("issue converting eon secret key for identity: %w: %d", err, key.IdentityPreimage)
+		}
+		ok, err := crypto.VerifyEpochSecretKey(epochSecretKey, eonPublicKey, key.IdentityPreimage)
+		if err != nil {
+			return err
+		}
+		if ok {
+			continue
+		}
+
+		// not valid
+		fullErr := fmt.Errorf("verification of eon secret key failed: %w", ErrInvalidKey)
+		ip, err := IdentityPreimageFromBytes(key.IdentityPreimage)
+		if err != nil {
+			return fmt.Errorf("%w: %w", fullErr, err)
+		}
+
+		return fmt.Errorf("%w: ip=%s", fullErr, ip)
+	}
 
 	return nil
 }
 
-func (v DecryptionKeysValidator) validateEonIndex(msg *proto.DecryptionKeys) error {
+func (v DecryptionKeysValidator) validateEonIndex(msg *proto.DecryptionKeys) (Eon, error) {
 	if msg.Eon > math.MaxInt64 {
-		return fmt.Errorf("%w: %d", ErrEonTooLarge, msg.Eon)
+		return Eon{}, fmt.Errorf("%w: %d", ErrEonTooLarge, msg.Eon)
 	}
 
 	msgEonIndex := EonIndex(msg.Eon)
 	currentEon, ok := v.eonTracker.CurrentEon()
 	if !ok {
 		// we're still syncing and are behind - ignore msg, without penalizing peer
-		return fmt.Errorf("%w: %w", ErrIgnoreMsg, ErrCurrentEonUnavailable)
+		return Eon{}, fmt.Errorf("%w: %w: likely still syncing to tip", ErrIgnoreMsg, ErrCurrentEonUnavailable)
 	}
 
-	_, inRecent := v.eonTracker.RecentEon(msgEonIndex)
+	eon, inRecent := v.eonTracker.RecentEon(msgEonIndex)
 	if msgEonIndex < currentEon.Index && !inRecent {
-		return fmt.Errorf("%w: msgEonIndex=%d, currentEonIndex=%d", ErrEonInThePast, msgEonIndex, currentEon.Index)
+		return Eon{}, fmt.Errorf("%w: msgEonIndex=%d, currentEonIndex=%d", ErrEonInThePast, msgEonIndex, currentEon.Index)
 	}
-
 	if msgEonIndex > currentEon.Index && !inRecent {
 		// we may be lagging behind - ignore msg, without penalizing peer
-		return fmt.Errorf("%w: %w: msgEonIndex=%d, currentEonIndex=%d", ErrIgnoreMsg, ErrEonInTheFuture, msgEonIndex, currentEon.Index)
+		return Eon{}, fmt.Errorf("%w: %w: msgEonIndex=%d, currentEonIndex=%d", ErrIgnoreMsg, ErrEonInTheFuture, msgEonIndex, currentEon.Index)
+	}
+	if !inRecent {
+		// this should not ever happen because current eon should be always in recent, but guarding just in case of bugs
+		return Eon{}, fmt.Errorf("%w: msgEonIndex=%d, currentEonIndex=%d", ErrEonNotInRecent, msgEonIndex, currentEon.Index)
 	}
 
-	return nil
+	return eon, nil
 }
 
-func NewDecryptionKeysP2pValidatorEx(logger log.Logger, config Config, sc SlotCalculator, et EonTracker) pubsub.ValidatorEx {
+func NewDecryptionKeysExtendedValidator(logger log.Logger, config Config, sc SlotCalculator, et EonTracker) pubsub.ValidatorEx {
 	dkv := NewDecryptionKeysValidator(config, sc, et)
 	return func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		if topic := msg.GetTopic(); topic != DecryptionKeysTopic {

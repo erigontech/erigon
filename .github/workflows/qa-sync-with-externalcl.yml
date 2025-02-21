@@ -2,19 +2,26 @@ name: QA - Sync with external CL
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # Run every night at 00:00 AM UTC
+    - cron: '0 8 * * 0'  # Run on Sunday at 08:00 AM UTC
   workflow_dispatch:     # Run manually
 
 jobs:
-  prysm-minimal-node-sync-from-scratch-test:
-    runs-on: self-hosted
-    timeout-minutes: 360 # 6 hours
+  sync-with-externalcl:
+    runs-on: [self-hosted, linux, X64]
+    timeout-minutes: 500 # 8+ hours
+    strategy:
+      matrix:
+        client: [lighthouse, prysm]
+        chain: [mainnet, gnosis]
+        exclude:
+          - client: prysm
+            chain: gnosis
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
+      CL_DATA_DIR: ${{ github.workspace }}/consensus
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 18000 # 5 hours
-      CHAIN: mainnet
+      TRACKING_TIME_SECONDS: 3600 # 1 hour
+      TOTAL_TIME_SECONDS: 25200 # 7 hours
 
     steps:
       - name: Check out repository
@@ -24,6 +31,19 @@ jobs:
         run: |
           make clean
           rm -rf $ERIGON_DATA_DIR
+
+      - name: Install ${{ matrix.client }} and generate JWT secret
+        run: |
+          mkdir -p $CL_DATA_DIR
+          if [ "${{ matrix.client }}" == "lighthouse" ]; then
+            curl -LO https://github.com/sigp/lighthouse/releases/download/v7.0.0-beta.0/lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz
+            tar -xvf lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz -C $CL_DATA_DIR
+            rm lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz
+          elif [ "${{ matrix.client }}" == "prysm" ]; then
+            curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o $CL_DATA_DIR/prysm.sh
+            chmod +x $CL_DATA_DIR/prysm.sh
+          fi
+          openssl rand -hex 32 > $CL_DATA_DIR/jwt.hex
 
       - name: Build Erigon
         run: |
@@ -41,7 +61,7 @@ jobs:
           
           # Run Erigon, wait sync and check ability to maintain sync
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-            ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN minimal_node no_statistics prysm
+            ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 ${{ matrix.chain }} minimal_node no_statistics ${{ matrix.client }} $CL_DATA_DIR
           
           # Capture monitoring script exit status
           test_exit_status=$?
@@ -67,25 +87,32 @@ jobs:
             --repo erigon \
             --commit $(git rev-parse HEAD) \
             --branch ${{ github.ref_name }} \
-            --test_name sync-from-scratch-prysm-minimal-node \
-            --chain $CHAIN \
+            --test_name sync-from-scratch-${{ matrix.client }}-minimal-node \
+            --chain ${{ matrix.chain }} \
             --runner ${{ runner.name }} \
             --outcome $TEST_RESULT \
-            --result_file ${{ github.workspace }}/result-$CHAIN.json
+            --result_file ${{ github.workspace }}/result-${{ matrix.chain }}.json
 
       - name: Upload test results
         if: steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-${{ matrix.client }}-${{ matrix.chain }}
           path: |
-            ${{ github.workspace }}/result-${{ env.CHAIN }}.json
+            ${{ github.workspace }}/result-${{ matrix.chain }}.json
             ${{ github.workspace }}/erigon_data/logs/erigon.log
+            ${{ matrix.client == 'lighthouse' && '$CL_DATA_DIR/data/beacon/logs/beacon.log' || '' }}
+            ${{ matrix.client == 'prysm' && '$CL_DATA_DIR/data/beacon.log' || '' }}
 
       - name: Clean up Erigon data directory
         if: always()
         run: |
           rm -rf $ERIGON_DATA_DIR
+
+      - name: Cleanup consensus runner directory
+        if: always()
+        run: |
+          rm -rf $CL_DATA_DIR
 
       - name: Resume the Erigon instance dedicated to db maintenance
         run: |

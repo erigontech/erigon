@@ -300,12 +300,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if cfg.silkworm != nil {
-		if err := cfg.blockReader.Snapshots().(silkworm.CanAddSnapshotsToSilkwarm).AddSnapshotsToSilkworm(cfg.silkworm); err != nil {
-			return err
-		}
-	}
-
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
 	if err := agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
@@ -319,6 +313,18 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
 	if cfg.notifier.Events != nil {
 		cfg.notifier.Events.OnNewSnapshot()
+	}
+
+	if cfg.silkworm != nil {
+		repository := silkworm.NewSnapshotsRepository(
+			cfg.silkworm,
+			cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots),
+			agg,
+			logger,
+		)
+		if err := repository.Update(); err != nil {
+			return err
+		}
 	}
 
 	frozenBlocks := cfg.blockReader.FrozenBlocks()
@@ -459,8 +465,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 
 		case stages.Bodies:
 			firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
-			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-			if err := rawdb.ResetSequence(tx, kv.EthTx, firstTxNum); err != nil {
+			if err := tx.ResetSequence(kv.EthTx, firstTxNum); err != nil {
 				return err
 			}
 

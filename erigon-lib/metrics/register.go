@@ -18,8 +18,6 @@ package metrics
 
 import (
 	"fmt"
-
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // NewCounter registers and returns new counter with the given name.
@@ -117,13 +115,13 @@ func GetOrCreateGauge(name string) Gauge {
 //   - foo, with labels []string{"bar", "baz"}
 //
 // The returned GaugeVec is safe to use from concurrent goroutines.
-func GetOrCreateGaugeVec(name string, labels []string, help ...string) *prometheus.GaugeVec {
+func GetOrCreateGaugeVec(name string, labels []string, help ...string) *GaugeVec {
 	gv, err := defaultSet.GetOrCreateGaugeVec(name, labels, help...)
 	if err != nil {
 		panic(fmt.Errorf("could not get or create new gaugevec: %w", err))
 	}
 
-	return gv
+	return &GaugeVec{gv}
 }
 
 // NewSummary creates and returns new summary with the given name.
@@ -166,6 +164,26 @@ func GetOrCreateSummary(name string) Summary {
 	}
 
 	return &summary{s}
+}
+
+// add labels to metric name
+func buildLabeledName(baseName string, labelNames, labelValues []string) string {
+	if len(labelNames) == 0 {
+		return baseName
+	}
+	baseName += "{"
+	baseName += fmt.Sprintf(`%s="%s"`, labelNames[0], labelValues[0])
+
+	for i := 1; i < len(labelNames); i++ {
+		baseName += fmt.Sprintf(`,%s="%s"`, labelNames[i], labelValues[i])
+	}
+	baseName += "}"
+	return baseName
+}
+
+func GetOrCreateSummaryWithLabels(name string, labelNames, labelValues []string) Summary {
+	labeledName := buildLabeledName(name, labelNames, labelValues)
+	return GetOrCreateSummary(labeledName)
 }
 
 // NewHistogram creates and returns new histogram with the given name.

@@ -22,7 +22,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -215,7 +215,7 @@ type rawProofElement struct {
 }
 
 // proofMap creates a map from hash to proof node
-func proofMap(proof []hexutility.Bytes) (map[libcommon.Hash]Node, map[libcommon.Hash]rawProofElement, error) {
+func proofMap(proof []hexutil.Bytes) (map[libcommon.Hash]Node, map[libcommon.Hash]rawProofElement, error) {
 	res := map[libcommon.Hash]Node{}
 	raw := map[libcommon.Hash]rawProofElement{}
 	for i, proofB := range proof {
@@ -339,7 +339,7 @@ func VerifyAccountProofByHash(stateRoot libcommon.Hash, accountKey libcommon.Has
 
 func VerifyStorageProof(storageRoot libcommon.Hash, proof accounts.StorProofResult) error {
 	keyhash := &libcommon.Hash{}
-	keyhash.SetBytes(hexutility.FromHex(proof.Key))
+	keyhash.SetBytes(hexutil.FromHex(proof.Key))
 	storageKey := crypto.Keccak256Hash(keyhash[:])
 	return VerifyStorageProofByHash(storageRoot, storageKey, proof)
 }

@@ -221,6 +221,10 @@ func (h *Heimdall) getSpanOverrideHeight() uint64 {
 	//MainChain: 8664000
 }
 
+func (h *Heimdall) FetchStatus(ctx context.Context) (*heimdall.Status, error) {
+	return nil, errors.New("TODO")
+}
+
 func (h *Heimdall) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
 	return nil, errors.New("TODO")
 }

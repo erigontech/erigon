@@ -25,8 +25,10 @@ import (
 )
 
 type BlockEvent struct {
-	BlockNum uint64
-	Unwind   bool
+	LatestBlockNum  uint64
+	LatestBlockTime uint64
+	BlocksBatchLen  uint64
+	Unwind          bool
 }
 
 type BlockListener struct {
@@ -48,6 +50,7 @@ func (bl BlockListener) RegisterObserver(o event.Observer[BlockEvent]) event.Unr
 }
 
 func (bl BlockListener) Run(ctx context.Context) error {
+	defer bl.logger.Info("block listener stopped")
 	bl.logger.Info("running block listener")
 
 	sub, err := bl.stateChangesClient.StateChanges(ctx, &remoteproto.StateChangeRequest{})
@@ -57,15 +60,17 @@ func (bl BlockListener) Run(ctx context.Context) error {
 
 	// note the changes stream is ctx-aware so Recv should terminate with err if ctx gets done
 	var batch *remoteproto.StateChangeBatch
-	for batch, err = sub.Recv(); err != nil; batch, err = sub.Recv() {
+	for batch, err = sub.Recv(); err == nil; batch, err = sub.Recv() {
 		if batch == nil || len(batch.ChangeBatch) == 0 {
 			continue
 		}
 
 		latestChange := batch.ChangeBatch[len(batch.ChangeBatch)-1]
 		blockEvent := BlockEvent{
-			BlockNum: latestChange.BlockHeight,
-			Unwind:   latestChange.Direction == remoteproto.Direction_UNWIND,
+			LatestBlockNum:  latestChange.BlockHeight,
+			LatestBlockTime: latestChange.BlockTime,
+			BlocksBatchLen:  uint64(len(batch.ChangeBatch)),
+			Unwind:          latestChange.Direction == remoteproto.Direction_UNWIND,
 		}
 
 		bl.events.NotifySync(blockEvent)

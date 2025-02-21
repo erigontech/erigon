@@ -34,6 +34,7 @@ type (
 )
 
 const (
+	statusRequest             requestType = "status"
 	stateSyncRequest          requestType = "state-sync"
 	spanRequest               requestType = "span"
 	checkpointRequest         requestType = "checkpoint"

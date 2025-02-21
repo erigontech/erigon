@@ -18,6 +18,7 @@ package shutter
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -27,6 +28,7 @@ type SlotCalculator interface {
 	CalcSlot(timestamp uint64) (uint64, error)
 	CalcSlotAge(slot uint64) time.Duration
 	CalcCurrentSlot() uint64
+	SecondsPerSlot() uint64
 }
 
 type BeaconChainSlotCalculator struct {
@@ -42,8 +44,8 @@ func NewBeaconChainSlotCalculator(genesisTimestamp uint64, secondsPerSlot uint64
 }
 
 func (sc BeaconChainSlotCalculator) CalcSlot(timestamp uint64) (uint64, error) {
-	if sc.genesisTimestamp < timestamp {
-		return 0, ErrTimestampBeforeGenesis
+	if timestamp < sc.genesisTimestamp {
+		return 0, fmt.Errorf("%w: %d < %d", ErrTimestampBeforeGenesis, timestamp, sc.genesisTimestamp)
 	}
 
 	return (timestamp - sc.genesisTimestamp) / sc.secondsPerSlot, nil
@@ -61,4 +63,8 @@ func (sc BeaconChainSlotCalculator) CalcCurrentSlot() uint64 {
 	}
 
 	return slot
+}
+
+func (sc BeaconChainSlotCalculator) SecondsPerSlot() uint64 {
+	return sc.secondsPerSlot
 }
