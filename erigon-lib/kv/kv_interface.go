@@ -293,6 +293,8 @@ type Putter interface {
 	// CollectMetrics - does collect all DB-related and Tx-related metrics
 	// this method exists only in RwTx to avoid concurrency
 	CollectMetrics()
+	EnvInfo() (*mdbx.EnvInfo, error)
+	TxInfo() (*mdbx.TxInfo, error)
 }
 
 type Closer interface {
