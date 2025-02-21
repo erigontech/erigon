@@ -233,14 +233,14 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		return out, err
 	}
 	toTxNum++
-	fmt.Printf("[dbg] dbg1 blk: %d-%d, txNums: %d-%d\n", begin, end, fromTxNum, toTxNum)
+	log.Warn(fmt.Sprintf("[dbg] dbg1 blk: %d-%d, txNums: %d-%d\n", begin, end, fromTxNum, toTxNum))
 
 	topicsBitmap, err := getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum)
 	if err != nil {
 		return out, err
 	}
 	if topicsBitmap != nil {
-		fmt.Printf("[dbg] dbg2\n")
+		log.Warn(fmt.Sprintf("[dbg] dbg2\n"))
 		out = topicsBitmap
 	}
 	addrBitmap, err := getAddrsBitmapV3(tx, crit.Addresses, fromTxNum, toTxNum)
@@ -249,14 +249,14 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	}
 	if addrBitmap != nil {
 		if out == nil {
-			fmt.Printf("[dbg] dbg3\n")
+			log.Warn(fmt.Sprintf("[dbg] dbg3\n"))
 			out = addrBitmap
 		} else {
 			out = stream.Intersect[uint64](out, addrBitmap, -1)
 		}
 	}
 	if out == nil {
-		fmt.Printf("[dbg] dbg4\n")
+		log.Warn(fmt.Sprintf("[dbg] dbg4\n"))
 		out = stream.Range[uint64](fromTxNum, toTxNum)
 	}
 	return out, nil
@@ -287,7 +287,8 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	}
 
 	cnt, _ := stream.Count(txNumbers)
-	fmt.Printf("[dbg] dbg10: it1.count=%d\n", cnt)
+	log.Warn(fmt.Sprintf("[dbg] dbg10: it1.count=%d\n", cnt))
+
 	it := rawdbv3.TxNums2BlockNums(tx,
 		txNumsReader,
 		txNumbers, order.Asc)
