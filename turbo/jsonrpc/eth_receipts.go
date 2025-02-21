@@ -583,7 +583,11 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 				return nil, err
 			}
 
-			result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
+			for i, l := range borReceipt.Logs {
+				fmt.Printf("[dbg] dbg22 bor: txIdx=%d, idx=%d, %x\n", i, l.Index, l.Address)
+			}
+			rr := ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false)
+			result = append(result, rr)
 		}
 	}
 
