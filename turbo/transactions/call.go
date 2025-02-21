@@ -157,7 +157,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	ctx context.Context,
 	newGas uint64,
 	engine consensus.EngineReader,
-  overrides *ethapi2.StateOverrides,
+	overrides *ethapi2.StateOverrides,
 ) (*evmtypes.ExecutionResult, error) {
 	var cancel context.CancelFunc
 	if r.callTimeout > 0 {
