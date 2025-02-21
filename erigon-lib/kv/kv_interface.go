@@ -137,11 +137,6 @@ func InitMDBXMGauges() *DBGauges {
 
 // initialize summaries for a particular MDBX instance
 func InitSummaries(dbLabel Label) {
-	// just in case the global singleton map is not already initialized
-	// if MDBXSummaries == nil {
-	// 	MDBXSummaries = make(map[Label]*DBSummaries)
-	// }
-
 	_, ok := MDBXSummaries.Load(dbLabel)
 	if !ok {
 		dbName := string(dbLabel)
@@ -156,7 +151,7 @@ func InitSummaries(dbLabel Label) {
 }
 
 func RecordSummaries(dbLabel Label, latency mdbx.CommitLatency) error {
-	_summaries, ok := MDBXSummaries.Load(dbLabel)
+	_summaries, ok := MDBXSummaries.Load(string(dbLabel))
 	if !ok {
 		return fmt.Errorf("MDBX summaries not initialized yet for db=%s", string(dbLabel))
 	}
