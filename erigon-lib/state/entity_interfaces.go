@@ -5,7 +5,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	ae "github.com/erigontech/erigon-lib/state/entity_extras"
 )
@@ -32,7 +31,7 @@ type Collector func(values []byte) error
 /** index building **/
 
 type AccessorIndexBuilder interface {
-	Build(ctx context.Context, from, to RootNum, tmpDir string, p *background.ProgressSet, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error)
+	Build(ctx context.Context, from, to RootNum, p *background.Progress) (*recsplit.Index, error)
 	AllowsOrdinalLookupByNum() bool
 }
 

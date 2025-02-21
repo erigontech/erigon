@@ -30,24 +30,28 @@ type IndexKeyFactory interface {
 	// IndexInputDataQuery elements passed here to create key for index
 	// `value` is snapshot element;
 	// `index` is the corresponding sequence number in the file.
+	Refresh()
 	Make(value []byte, index uint64) []byte
+	Close()
 }
 
 type AccessorArgs struct {
-	enums              bool
-	lessFalsePositives bool
-	salt               uint32
-	nofsync            bool
+	Enums              bool
+	LessFalsePositives bool
+	Nofsync            bool
+
+	BucketSize int
+	LeafSize   uint16
 
 	// other config options for recsplit
 }
 
-func NewAccessorArgs(enums, lessFalsePositives, nofsync bool, salt uint32) *AccessorArgs {
+func NewAccessorArgs(enums, lessFalsePositives bool) *AccessorArgs {
 	return &AccessorArgs{
-		enums:              enums,
-		lessFalsePositives: lessFalsePositives,
-		salt:               salt,
-		nofsync:            nofsync,
+		Enums:              enums,
+		LessFalsePositives: lessFalsePositives,
+		BucketSize:         recsplit.DefaultBucketSize,
+		LeafSize:           recsplit.DefaultLeafSize,
 	}
 }
 
@@ -61,17 +65,23 @@ type SimpleAccessorBuilder struct {
 	indexPos uint64
 	id       EntityId
 	kf       IndexKeyFactory
+	logger   log.Logger
 }
+
+var _ AccessorIndexBuilder = (*SimpleAccessorBuilder)(nil)
 
 func NewSimpleAccessorBuilder(args *AccessorArgs, id EntityId, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
 	b := &SimpleAccessorBuilder{
 		args: args,
 		id:   id,
-		kf:   simpleIndexKeyFactoryInstance,
 	}
 
 	for _, opt := range options {
 		opt(b)
+	}
+
+	if b.kf == nil {
+		b.kf = simpleIndexKeyFactoryInstance
 	}
 
 	return b
@@ -85,6 +95,12 @@ func WithIndexPos(indexPos uint64) AccessorBuilderOptions {
 			panic("indexPos greater than indexPrefix length")
 		}
 		s.indexPos = indexPos
+	}
+}
+
+func WithIndexKeyFactory(factory IndexKeyFactory) AccessorBuilderOptions {
+	return func(s *SimpleAccessorBuilder) {
+		s.kf = factory
 	}
 }
 
@@ -104,10 +120,10 @@ func (s *SimpleAccessorBuilder) SetIndexKeyFactory(factory IndexKeyFactory) {
 }
 
 func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
-	return s.args.enums
+	return s.args.Enums
 }
 
-func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmpDir string, ps *background.ProgressSet, lvl log.Lvl, logger log.Logger) (i *recsplit.Index, err error) {
+func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *background.Progress) (i *recsplit.Index, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%s: at=%d-%d, %v, %s", s.id.IndexPrefix()[s.indexPos], from, to, rec, dbg.Stack())
@@ -117,19 +133,27 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmp
 	idxFile := ae.IdxName(s.id, snaptype.Version(1), from, to, s.indexPos)
 
 	keyCount := iidq.GetCount()
-	p := ps.AddNew(idxFile, keyCount)
-	defer ps.Delete(p)
+	if p != nil {
+		p.Name.Store(&idxFile)
+		p.Total.Store(uint64(keyCount))
+	}
+	salt, err := s.id.Salt()
+	if err != nil {
+		return nil, err
+	}
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:           int(keyCount),
-		Enums:              true,
-		BucketSize:         2000,
+		Enums:              s.args.Enums,
+		BucketSize:         s.args.BucketSize,
+		LeafSize:           s.args.LeafSize,
 		IndexFile:          idxFile,
-		Salt:               &s.args.salt,
-		NoFsync:            s.args.nofsync,
-		LessFalsePositives: s.args.lessFalsePositives,
+		Salt:               &salt,
+		NoFsync:            s.args.Nofsync,
+		TmpDir:             s.id.Dirs().Tmp,
+		LessFalsePositives: s.args.LessFalsePositives,
 		BaseDataID:         iidq.GetBaseDataId(),
-	}, logger)
+	}, s.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -144,11 +168,13 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, tmp
 			if err != nil {
 				return nil, err
 			}
+			if p != nil {
+				p.Processed.Add(1)
+			}
 			key := s.kf.Make(word, index)
 			if err = rs.AddKey(key, offset); err != nil {
 				return nil, err
 			}
-			p.Processed.Add(1)
 			select {
 			case <-ctx.Done():
 				stream.Close()
@@ -234,8 +260,14 @@ type SimpleIndexKeyFactory struct {
 	num []byte
 }
 
+func (n *SimpleIndexKeyFactory) Refresh() {}
+
 func (n *SimpleIndexKeyFactory) Make(_ []byte, index uint64) []byte {
 	// everywhere except heimdall indexes, which use BigIndian format
 	nm := binary.PutUvarint(n.num, index)
 	return n.num[:nm]
+}
+
+func (n *SimpleIndexKeyFactory) Close() {
+	n.num = []byte{}
 }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	ae "github.com/erigontech/erigon-lib/state/entity_extras"
@@ -34,7 +33,7 @@ type MarkedEntity struct {
 	canonicalTbl string
 	valsTbl      string
 
-	ts8Bytes bool // slots are encoded in 4 bytes; everything else in 8 bytes
+	ts4Bytes bool // slots are encoded in 4 bytes; everything else in 8 bytes
 
 	// pruning happens from this entity number
 	// e.g. might not want to prune genesis block, in which case pruneFrom = 1
@@ -55,9 +54,9 @@ func MA_WithIndexBuilders(builders ...AccessorIndexBuilder) MAOpts {
 	}
 }
 
-func MA_WithTs8Bytes(ts8Bytes bool) MAOpts {
+func MA_WithTs4Bytes(ts4Bytes bool) MAOpts {
 	return func(a *MarkedEntity) {
-		a.ts8Bytes = ts8Bytes
+		a.ts4Bytes = ts4Bytes
 	}
 }
 
@@ -84,11 +83,7 @@ func NewMarkedEntity(id EntityId, canonicalTbl, valsTbl string, logger log.Logge
 
 	if m.builders == nil {
 		// mapping num -> offset (ordinal map)
-		salt, err := snaptype.GetIndexSalt(m.a.Dirs().Snap)
-		if err != nil {
-			return nil, err
-		}
-		builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false, false, salt), id)
+		builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), id)
 		m.builders = []AccessorIndexBuilder{builder}
 	}
 
@@ -96,7 +91,7 @@ func NewMarkedEntity(id EntityId, canonicalTbl, valsTbl string, logger log.Logge
 }
 
 func (a *MarkedEntity) encTs(ts Num) []byte {
-	return ts.EncToBytes(a.ts8Bytes)
+	return ts.EncToBytes(!a.ts4Bytes)
 }
 
 func (a *MarkedEntity) combK(ts Num, hash []byte) []byte {

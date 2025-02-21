@@ -112,7 +112,9 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 
 		indexes := make([]*recsplit.Index, len(a.builders))
 		for i, ib := range a.builders {
-			recsplitIdx, err := ib.Build(ctx, from, to, "sometmpdir", ps, log.LvlInfo, nil)
+			p := &background.Progress{}
+			ps.Add(p)
+			recsplitIdx, err := ib.Build(ctx, from, to, p)
 			if err != nil {
 				return err
 			}

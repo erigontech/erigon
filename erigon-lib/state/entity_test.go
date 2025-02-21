@@ -46,7 +46,13 @@ func TestPutToDb(t *testing.T) {
 	// create marked appendable
 	freezer := snaptype.NewHeaderFreezer(kv.HeaderCanonical, kv.Headers, log)
 
-	ma, err := state.NewMarkedEntity(headerId, kv.HeaderCanonical, kv.Headers, log, state.MA_WithFreezer(freezer), state.MA_WithPruneFrom(state.Num(1)))
+	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true), headerId,
+		state.WithIndexKeyFactory(&snaptype.HeaderAccessorIndexKeyFactory{}))
+
+	ma, err := state.NewMarkedEntity(headerId, kv.HeaderCanonical, kv.Headers, log,
+		state.MA_WithFreezer(freezer),
+		state.MA_WithPruneFrom(state.Num(1)),
+		state.MA_WithIndexBuilders(builder))
 	require.NoError(t, err)
 	require.NotNil(t, ma)
 }

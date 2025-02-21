@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 )
 
@@ -37,6 +36,8 @@ type SnapshotCreationConfig struct {
 	// must be divisible by `EntitiesPerStep`
 	MinimumSize uint64
 
+	// SeedableSize uint64 // TODO: minimum size of file for it to be seedable.
+
 	// preverified can have larger files than that indicated by `MergeSteps.last`.
 	// This is because previously, different values might have been used.
 	//Preverified       snapcfg.Preverified
@@ -55,13 +56,13 @@ func (s *SnapshotConfig) StepsInFrozenFile() uint64 {
 	return s.MergeStages[len(s.MergeStages)-1] / s.EntitiesPerStep
 }
 
-func (s *SnapshotConfig) SetupConfig(id EntityId, dirs datadir.Dirs, pre snapcfg.Preverified) {
+func (s *SnapshotConfig) SetupConfig(id EntityId, snapshotDir string, pre snapcfg.Preverified) {
 	if s.preverifiedParsed != nil {
 		return
 	}
 	s.preverifiedParsed = make([]*FileInfo, 0, len(pre))
 	for _, item := range []snapcfg.PreverifiedItem(pre) {
-		res, ok := parseFileName(id, dirs.Snap, item.Name)
+		res, ok := ParseFileName(id, item.Name)
 		if !ok {
 			continue
 		}
@@ -69,7 +70,44 @@ func (s *SnapshotConfig) SetupConfig(id EntityId, dirs datadir.Dirs, pre snapcfg
 	}
 }
 
-func parseFileName(id EntityId, dir, fileName string) (res *FileInfo, ok bool) {
+// parse snapshot file info
+type FileInfo struct {
+	Version  snaptype.Version
+	From, To uint64
+	Name     string // filename
+	Path     string // full path
+	Ext      string // extenstion
+	Id       EntityId
+}
+
+func (f *FileInfo) IsIndex() bool { return strings.Compare(f.Ext, ".idx") == 0 }
+
+func (f *FileInfo) IsSeg() bool { return strings.Compare(f.Ext, ".seg") == 0 }
+
+func (f *FileInfo) Len() uint64 { return f.To - f.From }
+
+func (f *FileInfo) Dir() string { return filepath.Dir(f.Path) }
+
+// TODO: snaptype.Version should be replaced??
+
+func fileName(baseName string, version snaptype.Version, from, to uint64) string {
+	// from, to are in units of steps and not in number of entities
+	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from, to, baseName)
+}
+
+func SegName(id EntityId, version snaptype.Version, from, to RootNum) string {
+	return fileName(id.Name(), version, from.Step(id), to.Step(id)) + ".seg"
+}
+
+func IdxName(id EntityId, version snaptype.Version, from, to RootNum, idxNum uint64) string {
+	return fileName(id.IndexPrefix()[idxNum], version, from.Step(id), to.Step(id)) + ".idx"
+}
+
+func ParseFileName(id EntityId, fileName string) (res *FileInfo, ok bool) {
+	return ParseFileNameInDir(id, id.SnapshotDir(), fileName)
+}
+
+func ParseFileNameInDir(id EntityId, dir, fileName string) (res *FileInfo, ok bool) {
 	//	'v1-000000-000500-transactions.seg'
 	// 'v1-017000-017500-transactions-to-block.idx'
 	ext := filepath.Ext(fileName)
@@ -117,37 +155,6 @@ func parseFileName(id EntityId, dir, fileName string) (res *FileInfo, ok bool) {
 	}
 
 	return nil, false
-}
-
-// parse snapshot file info
-type FileInfo struct {
-	Version  snaptype.Version
-	From, To uint64
-	Name     string // filename
-	Path     string // full path
-	Ext      string // extenstion
-	Id       EntityId
-}
-
-func (f *FileInfo) IsIndex() bool { return strings.Compare(f.Ext, ".idx") == 0 }
-
-func (f *FileInfo) IsSeg() bool { return strings.Compare(f.Ext, ".seg") == 0 }
-
-func (f *FileInfo) Len() uint64 { return f.To - f.From }
-
-// TODO: snaptype.Version should be replaced??
-
-func fileName(baseName string, version snaptype.Version, from, to uint64) string {
-	// from, to are in units of steps and not in number of entities
-	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from, to, baseName)
-}
-
-func SegName(id EntityId, version snaptype.Version, from, to RootNum) string {
-	return fileName(id.Name(), version, from.Step(id), to.Step(id)) + ".seg"
-}
-
-func IdxName(id EntityId, version snaptype.Version, from, to RootNum, idxNum uint64) string {
-	return fileName(id.IndexPrefix()[idxNum], version, from.Step(id), to.Step(id)) + ".idx"
 }
 
 // determine freezing ranges, given snapshot creation config

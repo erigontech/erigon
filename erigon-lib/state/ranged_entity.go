@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -60,11 +59,7 @@ func NewRangedEntity(id EntityId, relation RootRelationI, valsTbl string, logger
 
 	if a.builders == nil {
 		// mapping num -> offset (ordinal map)
-		salt, err := snaptype.GetIndexSalt(a.a.Dirs().Snap)
-		if err != nil {
-			return nil, err
-		}
-		builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false, false, salt), id)
+		builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), id)
 		a.builders = []AccessorIndexBuilder{builder}
 	}
 

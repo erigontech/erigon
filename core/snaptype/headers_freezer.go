@@ -7,15 +7,18 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/state"
-	ae "github.com/erigontech/erigon-lib/state/entity_extras"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -31,7 +34,7 @@ func NewHeaderFreezer(canonicalTbl, valsTbl string, logger log.Logger) *HeaderFr
 	return &HeaderFreezer{canonicalTbl, valsTbl, nil, logger}
 }
 
-func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo ae.RootNum, db kv.RoDB) error {
+func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo ee.RootNum, db kv.RoDB) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -82,14 +85,79 @@ func (f *HeaderFreezer) SetCollector(coll state.Collector) {
 	f.coll = coll
 }
 
+var _ state.IndexKeyFactory = (*HeaderAccessorIndexKeyFactory)(nil)
+
+type HeaderAccessorIndexKeyFactory struct {
+	s crypto.KeccakState
+	h common.Hash
+}
+
+func (f *HeaderAccessorIndexKeyFactory) Refresh() {
+	f.s = crypto.NewKeccakState()
+}
+
+func (f *HeaderAccessorIndexKeyFactory) Make(word []byte, _ uint64) []byte {
+	headerRlp := word[1:]
+	f.s.Reset()
+	f.s.Write(headerRlp)
+	f.s.Read(f.h[:])
+	return f.h[:]
+}
+
+func (f *HeaderAccessorIndexKeyFactory) Close() {
+	cryptopool.ReturnToPoolKeccak256(f.s)
+}
+
 // index builder
 // type AccessorIndexBuilder interface {
 // 	Build(ctx context.Context, from, to RootNum, tmpDir string, p *background.ProgressSet, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error)
 // 	AllowsOrdinalLookupByNum() bool
 // }
 
+// var _ state.AccessorIndexBuilder = (*HeaderIndexBuilder)(nil)
 
+// type HeaderIndexBuilder struct {
+// 	logger log.Logger
+// 	id     ee.EntityId
+// }
 
-type HeaderIndexBuilder struct {
-	logger log.Logger
-}
+// func (b *HeaderIndexBuilder) Build(ctx context.Context, from, to state.RootNum, tmpDir string, p *background.ProgressSet) (*recsplit.Index, error) {
+// 	hasher := crypto.NewKeccakState()
+// 	defer cryptopool.ReturnToPoolKeccak256(hasher)
+// 	var h common.Hash
+
+// 	salt, err := b.id.Salt()
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	info, ok := ee.ParseFileName(b.id, ee.SegName(b.id, snaptype.Version(1), from, to))
+// 	if !ok {
+// 		return nil, fmt.Errorf("failed to parse: %s", b.id)
+// 	}
+
+// 	cfg := recsplit.RecSplitArgs{
+// 		Enums:              true,
+// 		BucketSize:         recsplit.DefaultBucketSize,
+// 		LeafSize:           recsplit.DefaultLeafSize,
+// 		TmpDir:             tmpDir,
+// 		Salt:               &salt,
+// 		BaseDataID:         uint64(from),
+// 		LessFalsePositives: true,
+// 	}
+// 	if err := snaptype.BuildIndex(ctx, info, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+// 		if p != nil {
+// 			p.Processed.Add(1)
+// 		}
+
+// 		headerRlp := word[1:]
+// 		hasher.Reset()
+// 		hasher.Write(headerRlp)
+// 		hasher.Read(h[:])
+// 		if err := idx.AddKey(h[:], offset); err != nil {
+// 			return err
+// 		}
+// 		return nil
+// 	}, logger); err != nil {
+// 		return fmt.Errorf("HeadersIdx: %w", err)
+// 	}
+// }
