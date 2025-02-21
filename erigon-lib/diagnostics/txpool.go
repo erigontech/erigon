@@ -42,14 +42,14 @@ type DiagTxn struct {
 	Blobs               [][]byte      `json:"blobs"`
 }
 
-type IncommingTxnUpdate struct {
+type IncomingTxnUpdate struct {
 	Txns      []DiagTxn `json:"txns"`
 	Senders   []byte    `json:"senders"`
 	IsLocal   []bool    `json:"isLocal"`
 	KnownTxns [][]byte  `json:"knownTxns"` //hashes of incomming transactions from p2p network which are already in the pool
 }
 
-func (ti IncommingTxnUpdate) Type() Type {
+func (ti IncomingTxnUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
@@ -60,10 +60,10 @@ func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 
 func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, closeChannel := Context[IncommingTxnUpdate](rootCtx, 1)
+		ctx, ch, closeChannel := Context[IncomingTxnUpdate](rootCtx, 1)
 		defer closeChannel()
 
-		StartProviders(ctx, TypeOf(IncommingTxnUpdate{}), log.Root())
+		StartProviders(ctx, TypeOf(IncomingTxnUpdate{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():

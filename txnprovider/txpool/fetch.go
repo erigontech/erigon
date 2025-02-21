@@ -398,7 +398,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			}
 		}
 
-		diagnostics.Send(diagnostics.IncommingTxnUpdate{
+		diagnostics.Send(diagnostics.IncomingTxnUpdate{
 			Txns:      diagTxns,
 			Senders:   txns.Senders,
 			IsLocal:   txns.IsLocal,
