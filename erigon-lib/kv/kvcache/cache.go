@@ -334,40 +334,37 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 }
 
 func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
-	idBytes, err := tx.GetOne(kv.Sequence, kv.PlainStateVersion)
+	id, err := tx.ReadSequence(string(kv.PlainStateVersion))
 	if err != nil {
 		return nil, err
 	}
-	var id uint64
-	if len(idBytes) == 0 {
-		id = 0
-	} else {
-		id = binary.BigEndian.Uint64(idBytes)
-	}
+
+	c.lock.Lock() 
 	r := c.selectOrCreateRoot(id)
+	isReady := r.readyChanClosed.Load()
+	c.lock.Unlock()
 
 	if !c.cfg.WaitForNewBlock || c.waitExceededCount.Load() >= MAX_WAITS {
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	}
 
-	select { // fast non-blocking path
-	case <-r.ready:
-		//fmt.Printf("recv broadcast: %d\n", id)
+	if isReady {
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
-	default:
 	}
 
-	select { // slow blocking path
+	timer := time.NewTimer(c.cfg.NewBlockWait)
+	defer timer.Stop()
+
+	select {
 	case <-r.ready:
-		//fmt.Printf("recv broadcast2: %d\n", tx.ViewID())
+		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	case <-ctx.Done():
 		return nil, fmt.Errorf("kvcache rootNum=%x, %w", tx.ViewID(), ctx.Err())
-	case <-time.After(c.cfg.NewBlockWait): //TODO: switch to timer to save resources
+	case <-timer.C:
 		c.timeout.Inc()
 		c.waitExceededCount.Add(1)
-		//log.Info("timeout", "db_id", id, "has_btree", r.cache != nil)
+		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	}
-	return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 }
 
 func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *CoherentRoot, error) {
@@ -524,11 +521,11 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.Tx) (*CacheVal
 	default:
 	}
 
-	idBytes, err := tx.GetOne(kv.Sequence, kv.PlainStateVersion)
+	stateID, err := tx.ReadSequence(string(kv.PlainStateVersion))
 	if err != nil {
 		return nil, err
 	}
-	stateID := binary.BigEndian.Uint64(idBytes)
+
 	result.LatestStateID = stateID
 
 	// if the latest view id in the cache is not the same as the tx or one below it
