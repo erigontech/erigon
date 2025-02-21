@@ -549,6 +549,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		SenderInitBalance:   senderInitBalance,
 		CoinbaseInitBalance: coinbaseInitBalance,
 		FeeTipped:           amount,
+		EvmRefund:           st.state.GetRefund(),
+		EvmGasUsed:          st.gasUsed(),
 	}
 
 	if st.evm.Context.PostApplyMessage != nil {
