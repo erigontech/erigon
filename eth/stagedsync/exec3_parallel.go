@@ -291,7 +291,11 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 			if ibs.DepTxIndex() < 0 {
 				err = fmt.Errorf("EVM failure: %s at: %s", r, dbg.Stack())
 			}
-			result = &exec.Result{Err: exec.ErrExecAbortError{Dependency: ibs.DepTxIndex(), OriginError: err}}
+			result = &exec.Result{
+				TxIn: ev.VersionedReads(ibs),
+				Err: exec.ErrExecAbortError{
+					Dependency:  ibs.DepTxIndex(),
+					OriginError: err}}
 		}
 	}()
 
@@ -626,6 +630,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: too many incarnations: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), res.Version().Incarnation)
 				}
 			}
+
+			be.blockIO.RecordReads(res.Version().TxIndex, res.TxIn)
 
 			addedDependencies := false
 
