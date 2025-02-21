@@ -44,7 +44,7 @@ type aggregationPoolImpl struct {
 	netConfig      *clparams.NetworkConfig
 	ethClock       eth_clock.EthereumClock
 	aggregatesLock sync.RWMutex
-	aggregates     map[common.Hash]*solid.Attestation
+	aggregates     map[common.Hash]*solid.Attestation // don't need this anymore after electra upgrade
 	// aggregationInCommittee is a cache for aggregation in committee, which is used after electra upgrade
 	aggregatesInCommittee *lru.CacheWithTTL[keyAggrInCommittee, *solid.Attestation]
 }
