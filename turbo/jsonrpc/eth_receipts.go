@@ -341,6 +341,10 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
+		for _, l := range r.Logs {
+			fmt.Printf("[dbg] dbg20: txIdx=%d, idx=%d, %x\n", txIndex, l.Index, l.Address)
+		}
+
 		var filtered types.Logs
 		if r == nil { // if receipt data is not released yet. fallback to manual field filling. can remove in future.
 			filtered = rawLogs.Filter(addrMap, crit.Topics, 0)
@@ -354,7 +358,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		for _, filteredLog := range filtered {
-			fmt.Printf("[dbg] dbg20: idx=%d, %x\n", filteredLog.Index, filteredLog.Address)
 			logs = append(logs, &types.ErigonLog{
 				Address:     filteredLog.Address,
 				Topics:      filteredLog.Topics,
