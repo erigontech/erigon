@@ -187,7 +187,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	// Binary search the gas requirement, as it may be higher than the amount used
 	var (
-		lo = params.TxGas - 1
+		lo uint64
 		hi uint64
 	)
 	// Use zero address if sender unspecified.
@@ -260,7 +260,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	if err != nil || result == nil {
 		return 0, err
 	}
-	if result != nil && result.Failed() {
+	if result.Failed() {
 		if !errors.Is(result.Err, vm.ErrOutOfGas) {
 			if len(result.Revert()) > 0 {
 				return 0, ethapi2.NewRevertError(result)
@@ -274,7 +274,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// the true amount of gas it wants to consume to execute fully.
 	// We want to ensure that the gas used doesn't fall below this
 	trueGas := result.EvmGasUsed // Must not fall below this
-	lo = trueGas + result.EvmRefund - 1
+	lo = min(trueGas + result.EvmRefund - 1, params.TxGas - 1)
 
 	i := 0
 	// Execute the binary search and hone in on an executable gas limit
