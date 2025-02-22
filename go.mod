@@ -14,13 +14,13 @@ require (
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
 	github.com/erigontech/mdbx-go v0.38.6-0.20250205222432-e4dd01978d7f
 	github.com/erigontech/secp256k1 v1.1.0
-	github.com/erigontech/silkworm-go v0.18.0
+	github.com/erigontech/silkworm-go v0.24.0
 )
 
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.63
-	github.com/Giulio2002/bls v0.0.0-20241116091023-2ddcc8954ec0
+	github.com/Giulio2002/bls v0.0.0-20250218151206-daa74641714d
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.4.3
 	github.com/alecthomas/kong v0.8.1

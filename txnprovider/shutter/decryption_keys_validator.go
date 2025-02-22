@@ -160,7 +160,7 @@ func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, e
 
 	identityPreimages := make(IdentityPreimages, len(msg.Keys))
 	for i, k := range msg.Keys {
-		ip, err := IdentityPreimageFromSSZ(k.IdentityPreimage)
+		ip, err := IdentityPreimageFromBytes(k.IdentityPreimage)
 		if err != nil {
 			return err
 		}
@@ -210,11 +210,11 @@ func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys, eon Eon
 	}
 
 	for _, key := range msg.Keys {
-		eonSecretKey, err := EonSecretKeyFromBytes(key.Key)
+		epochSecretKey, err := EpochSecretKeyFromBytes(key.Key)
 		if err != nil {
 			return fmt.Errorf("issue converting eon secret key for identity: %w: %d", err, key.IdentityPreimage)
 		}
-		ok, err := crypto.VerifyEpochSecretKey(eonSecretKey, &eonPublicKey, key.IdentityPreimage)
+		ok, err := crypto.VerifyEpochSecretKey(epochSecretKey, eonPublicKey, key.IdentityPreimage)
 		if err != nil {
 			return err
 		}
@@ -224,7 +224,7 @@ func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys, eon Eon
 
 		// not valid
 		fullErr := fmt.Errorf("verification of eon secret key failed: %w", ErrInvalidKey)
-		ip, err := IdentityPreimageFromSSZ(key.IdentityPreimage)
+		ip, err := IdentityPreimageFromBytes(key.IdentityPreimage)
 		if err != nil {
 			return fmt.Errorf("%w: %w", fullErr, err)
 		}

@@ -37,16 +37,18 @@ func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
 	}
 	// Check if the requested blocks are too old to request blobs
 	// https://github.com/ethereum/consensus-specs/blob/dev/specs/deneb/p2p-interface.md#the-reqresp-domain
-	highestEpoch := highestSlot / cfg.beaconCfg.SlotsPerEpoch
-	currentEpoch := cfg.ethClock.GetCurrentEpoch()
-	minEpochDist := uint64(0)
-	if currentEpoch > cfg.beaconCfg.MinEpochsForBlobSidecarsRequests {
-		minEpochDist = currentEpoch - cfg.beaconCfg.MinEpochsForBlobSidecarsRequests
-	}
-	finalizedEpoch := currentEpoch - 2
-	if highestEpoch < max(cfg.beaconCfg.DenebForkEpoch, minEpochDist, finalizedEpoch) {
-		return false
-	}
+
+	// this is bad
+	// highestEpoch := highestSlot / cfg.beaconCfg.SlotsPerEpoch
+	// currentEpoch := cfg.ethClock.GetCurrentEpoch()
+	// minEpochDist := uint64(0)
+	// if currentEpoch > cfg.beaconCfg.MinEpochsForBlobSidecarsRequests {
+	// 	minEpochDist = currentEpoch - cfg.beaconCfg.MinEpochsForBlobSidecarsRequests
+	// }
+	// finalizedEpoch := currentEpoch - 2
+	// if highestEpoch < max(cfg.beaconCfg.DenebForkEpoch, minEpochDist, finalizedEpoch) {
+	// 	return false
+	// }
 
 	return blobsExist
 }
@@ -67,6 +69,7 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 		err = fmt.Errorf("failed to get blob identifiers: %w", err)
 		return
 	}
+
 	// If there are no blobs to retrieve, return the highest slot processed
 	if ids.Len() == 0 {
 		return highestSlotProcessed, nil
@@ -141,10 +144,14 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 
 		// Process the block
 		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, true); err != nil {
+			fmt.Println("EIP-4844 data not available", err, block.Block.Slot)
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) {
 				// Return an error if EIP-4844 data is not available
 				logger.Trace("[Caplin] forward sync EIP-4844 data not available", "blockSlot", block.Block.Slot)
-				return highestBlockProcessed, nil
+				if newHighestBlockProcessed == 0 {
+					return 0, nil
+				}
+				return newHighestBlockProcessed - 1, nil
 			}
 			// Return an error if block processing fails
 			err = fmt.Errorf("bad blocks segment received: %w", err)
@@ -191,16 +198,16 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 // forwardSync (MAIN ROUTINE FOR ForwardSync) performs the forward synchronization of beacon blocks.
 func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	var (
-		shouldInsert        = cfg.executionClient != nil && cfg.executionClient.SupportInsertion() // Check if the execution client supports insertion
-		finalizedCheckpoint = cfg.forkChoice.FinalizedCheckpoint()                                 // Get the finalized checkpoint from fork choice
-		secsPerLog          = 30                                                                   // Interval in seconds for logging progress
-		logTicker           = time.NewTicker(time.Duration(secsPerLog) * time.Second)              // Ticker for logging progress
-		downloader          = network2.NewForwardBeaconDownloader(ctx, cfg.rpc)                    // Initialize a new forward beacon downloader
-		currentSlot         atomic.Uint64                                                          // Atomic variable to track the current slot
+		shouldInsert = cfg.executionClient != nil && cfg.executionClient.SupportInsertion() // Check if the execution client supports insertion
+		startSlot    = cfg.forkChoice.HighestSeen() - 8                                     // Start forwardsync a little bit behind the highest seen slot (account for potential reorgs)
+		secsPerLog   = 30                                                                   // Interval in seconds for logging progress
+		logTicker    = time.NewTicker(time.Duration(secsPerLog) * time.Second)              // Ticker for logging progress
+		downloader   = network2.NewForwardBeaconDownloader(ctx, cfg.rpc)                    // Initialize a new forward beacon downloader
+		currentSlot  atomic.Uint64                                                          // Atomic variable to track the current slot
 	)
 
 	// Initialize the slot to download from the finalized checkpoint
-	currentSlot.Store(finalizedCheckpoint.Epoch * cfg.beaconCfg.SlotsPerEpoch)
+	currentSlot.Store(startSlot)
 
 	// Always start from the current finalized checkpoint
 	downloader.SetHighestProcessedSlot(currentSlot.Load())

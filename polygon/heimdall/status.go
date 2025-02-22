@@ -14,22 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package blocks
+package heimdall
 
-import (
-	"context"
-	"fmt"
+type Status struct {
+	LatestBlockHash   string `json:"latest_block_hash"`
+	LatestAppHash     string `json:"latest_app_hash"`
+	LatestBlockHeight string `json:"latest_block_height"`
+	LatestBlockTime   string `json:"latest_block_time"`
+	CatchingUp        bool   `json:"catching_up"`
+}
 
-	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/rpc"
-)
-
-func BaseFeeFromBlock(ctx context.Context) (uint64, error) {
-	res, err := devnet.SelectNode(ctx).GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
-
-	if err != nil {
-		return 0, fmt.Errorf("failed to get base fee from block: %v\n", err)
-	}
-
-	return res.BaseFee.Uint64(), nil
+type StatusResponse struct {
+	Height string `json:"height"`
+	Result Status `json:"result"`
 }

@@ -4,6 +4,8 @@ set +e # Disable exit on error
 
 # Array of disabled tests
 disabled_tests=(
+    # Failing after the PR https://github.com/erigontech/erigon/pull/13903 - diff is only an error message in the result
+    eth_estimateGas/test_14.json
     # Failing after the PR https://github.com/erigontech/erigon/pull/13617 that fixed this incompatibility
     # issues https://hive.pectra-devnet-5.ethpandaops.io/suite.html?suiteid=1738266984-51ae1a2f376e5de5e9ba68f034f80e32.json&suitename=rpc-compat
     net_listening/test_1.json
@@ -15,11 +17,6 @@ disabled_tests=(
     engine_exchangeTransitionConfigurationV1/test_01.json
     engine_getClientVersionV1/test_1.json
     # these tests require Fix on erigon DM on repeipts domain
-    eth_getLogs/test_16
-    eth_getLogs/test_17
-    eth_getLogs/test_18
-    eth_getLogs/test_19
-    eth_getLogs/test_20
     # these tests requires Erigon active
     admin_nodeInfo/test_01.json
     admin_peers/test_01.json
@@ -42,6 +39,6 @@ disabled_tests=(
 # Transform the array into a comma-separated string
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
 
-python3 ./run_tests.py -p 8545 --continue -f --json-diff -x "$disabled_test_list"
+python3 ./run_tests.py -p 8545 --continue -f --json-diff --serial -x "$disabled_test_list"
 
 exit $?

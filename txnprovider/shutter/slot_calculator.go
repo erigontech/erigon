@@ -28,6 +28,7 @@ type SlotCalculator interface {
 	CalcSlot(timestamp uint64) (uint64, error)
 	CalcSlotAge(slot uint64) time.Duration
 	CalcCurrentSlot() uint64
+	SecondsPerSlot() uint64
 }
 
 type BeaconChainSlotCalculator struct {
@@ -62,4 +63,8 @@ func (sc BeaconChainSlotCalculator) CalcCurrentSlot() uint64 {
 	}
 
 	return slot
+}
+
+func (sc BeaconChainSlotCalculator) SecondsPerSlot() uint64 {
+	return sc.secondsPerSlot
 }

@@ -115,7 +115,7 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -130,12 +130,12 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		l1CostGas:  tx.RollupCostData(),
 	}
 	if !rules.IsPrague {
-		return msg, errors.New("SetCodeTransaction is only supported in Prague")
+		return nil, errors.New("SetCodeTransaction is only supported in Prague")
 	}
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
-			return msg, errors.New("gasPrice higher than 2^256-1")
+			return nil, errors.New("gasPrice higher than 2^256-1")
 		}
 	}
 	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
@@ -144,13 +144,13 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 	}
 
 	if len(tx.Authorizations) == 0 {
-		return msg, errors.New("SetCodeTransaction without authorizations is invalid")
+		return nil, errors.New("SetCodeTransaction without authorizations is invalid")
 	}
 	msg.authorizations = tx.Authorizations
 
 	var err error
 	msg.from, err = tx.Sender(s)
-	return msg, err
+	return &msg, err
 }
 
 func (tx *SetCodeTransaction) Sender(signer Signer) (libcommon.Address, error) {
