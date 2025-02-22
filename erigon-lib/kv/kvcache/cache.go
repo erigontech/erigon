@@ -122,15 +122,10 @@ type Coherent struct {
 }
 
 type CoherentRoot struct {
-	cache           *btree2.BTreeG[*Element]
-	codeCache       *btree2.BTreeG[*Element]
-	ready           chan struct{} // close when ready
-	readyChanClosed atomic.Bool   // protecting `ready` field from double-close (on unwind). Consumers don't need check this field.
-
-	// Views marked as `Canonical` if it received onNewBlock message
-	// we may drop `Non-Canonical` views even if they had fresh keys
-	// keys added to `Non-Canonical` views SHOULD NOT be added to stateEvict
-	// cache.latestStateView is always `Canonical`
+	cache     *btree2.BTreeG[*Element]
+	codeCache *btree2.BTreeG[*Element]
+	ready     chan struct{} // close when ready
+	closeOnce sync.Once    // protecting `ready` field from double-close
 	isCanonical bool
 }
 
@@ -326,10 +321,9 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 		}
 	}
 
-	switched := r.readyChanClosed.CompareAndSwap(false, true)
-	if switched {
+	r.closeOnce.Do(func() {
 		close(r.ready) //broadcast
-	}
+	})
 	//log.Info("on new block handled", "viewID", stateChanges.StateVersionID)
 }
 
@@ -339,16 +333,9 @@ func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
 		return nil, err
 	}
 
-	c.lock.Lock() 
 	r := c.selectOrCreateRoot(id)
-	isReady := r.readyChanClosed.Load()
-	c.lock.Unlock()
 
 	if !c.cfg.WaitForNewBlock || c.waitExceededCount.Load() >= MAX_WAITS {
-		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
-	}
-
-	if isReady {
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	}
 
