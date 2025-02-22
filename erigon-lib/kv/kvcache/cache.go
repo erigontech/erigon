@@ -352,15 +352,12 @@ func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	}
 
-	timer := time.NewTimer(c.cfg.NewBlockWait)
-	defer timer.Stop()
-
 	select {
 	case <-r.ready:
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	case <-ctx.Done():
 		return nil, fmt.Errorf("kvcache rootNum=%x, %w", tx.ViewID(), ctx.Err())
-	case <-timer.C:
+	case <-time.After(c.cfg.NewBlockWait):
 		c.timeout.Inc()
 		c.waitExceededCount.Add(1)
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
