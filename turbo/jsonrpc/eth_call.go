@@ -276,9 +276,8 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// We want to ensure that the gas used doesn't fall below this
 	trueGas := result.EvmGasUsed // Must not fall below this
 	lo = trueGas + result.EvmRefund - 1
-	bestGuess := ((result.UsedGas + result.EvmRefund + params.CallStipend) * 64) / 63
-	i := 0
 
+	i := 0
 	// Execute the binary search and hone in on an executable gas limit
 	for lo+1 < hi {
 		mid := (hi + lo) / 2
@@ -293,14 +292,8 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			lo = mid
 		} else {
 			hi = mid
-			if mid < bestGuess {
-				bestGuess = mid
-			}
 		}
 		i++
-		if i > 1000 {
-			return hexutil.Uint64(bestGuess), nil
-		}
 	}
 	return hexutil.Uint64(hi), nil
 }
