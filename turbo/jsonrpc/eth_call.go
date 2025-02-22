@@ -274,7 +274,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// the true amount of gas it wants to consume to execute fully.
 	// We want to ensure that the gas used doesn't fall below this
 	trueGas := result.EvmGasUsed // Must not fall below this
-	lo = min(trueGas + result.EvmRefund - 1, params.TxGas - 1)
+	lo = min(trueGas+result.EvmRefund-1, params.TxGas-1)
 
 	i := 0
 	// Execute the binary search and hone in on an executable gas limit
