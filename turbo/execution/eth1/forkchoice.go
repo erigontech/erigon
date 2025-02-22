@@ -305,6 +305,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 					sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 					return
 				}
+				if err := rawdb.TruncateCanonicalChain(ctx, tx, fcuHeader.Number.Uint64()+1); err != nil {
+					sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+					return
+				}
 				if err := tx.Commit(); err != nil {
 					sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 					return
