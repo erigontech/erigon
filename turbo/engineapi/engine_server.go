@@ -884,7 +884,7 @@ func (e *EngineServer) HandlesForkChoice(
 
 	headerHash := forkChoice.HeadHash
 
-	e.logger.Debug(fmt.Sprintf("[%s] Handling fork choice", logPrefix), "headerHash", headerHash)
+	e.logger.Info(fmt.Sprintf("[%s] Handling fork choice", logPrefix), "headerHash", headerHash)
 	headerNumber, err := e.chainRW.HeaderNumber(ctx, headerHash)
 	if err != nil {
 		return nil, err
