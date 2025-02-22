@@ -400,7 +400,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
 
-		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
+		if err := rawdbv3.TxNums.Truncate(tx, unwindTarget+1); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
 		}
