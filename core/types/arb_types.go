@@ -2368,9 +2368,8 @@ func (tx *ArbitrumInternalTx) GetSender() (common.Address, bool) {
 	return ArbosAddress, true
 }
 
-func (tx *ArbitrumInternalTx) SetSender(address common.Address) {
-	panic("not supported in ArbitrumInternalTx")
-}
+// not supported in ArbitrumInternalTx
+func (tx *ArbitrumInternalTx) SetSender(address common.Address) {}
 
 func (tx *ArbitrumInternalTx) IsContractDeploy() bool {
 	return false
