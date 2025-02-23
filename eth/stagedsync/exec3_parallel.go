@@ -909,11 +909,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 	for i := 0; i < len(toExecute); i++ {
 
 		nextTx := toExecute[i]
-
-		if be.execFailed[nextTx] > 4 || be.txIncarnations[nextTx] > 4 {
-			fmt.Println("EXEC", nextTx, be.txIncarnations[nextTx], "max val", maxValidated, be.blockIO.HasReads(nextTx), "aborted", be.execAborted[nextTx], "failed", be.execFailed[nextTx])
-		}
-
 		execTask := be.tasks[nextTx]
 
 		if nextTx == maxValidated+1 {
@@ -935,6 +930,10 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 				continue
 			}
 			be.cntSpecExec++
+		}
+
+		if be.execFailed[nextTx] > 4 || be.txIncarnations[nextTx] > 4 {
+			fmt.Println("EXEC", nextTx, be.txIncarnations[nextTx], "max val", maxValidated, be.blockIO.HasReads(nextTx), "aborted", be.execAborted[nextTx], "failed", be.execFailed[nextTx])
 		}
 
 		be.cntExec++
