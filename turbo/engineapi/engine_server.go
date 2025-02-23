@@ -74,6 +74,8 @@ type EngineServer struct {
 	logger  log.Logger
 
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
+	// TODO Remove this on next release
+	printPectraBanner bool
 }
 
 const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
@@ -83,15 +85,16 @@ func NewEngineServer(logger log.Logger, config *chain.Config, executionService e
 	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, consuming bool) *EngineServer {
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
-		logger:           logger,
-		config:           config,
-		executionService: executionService,
-		blockDownloader:  blockDownloader,
-		chainRW:          chainRW,
-		proposing:        proposing,
-		hd:               hd,
-		caplin:           caplin,
-		engineLogSpamer:  engine_logs_spammer.NewEngineLogsSpammer(logger, config),
+		logger:            logger,
+		config:            config,
+		executionService:  executionService,
+		blockDownloader:   blockDownloader,
+		chainRW:           chainRW,
+		proposing:         proposing,
+		hd:                hd,
+		caplin:            caplin,
+		engineLogSpamer:   engine_logs_spammer.NewEngineLogsSpammer(logger, config),
+		printPectraBanner: true,
 	}
 
 	srv.consuming.Store(consuming)
@@ -338,6 +341,11 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, payloadStatus.CriticalError
 	}
 
+	if version == clparams.ElectraVersion && s.printPectraBanner && payloadStatus.Status == engine_types.ValidStatus {
+		s.printPectraBanner = false
+		log.Info(engine_helpers.PectraBanner)
+	}
+
 	return payloadStatus, nil
 }
 
@@ -429,14 +437,14 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		if header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
-		if shouldWait, _ := waitForStuff(func() (bool, error) {
+		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
 			return parent == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
 		}); shouldWait {
 			s.logger.Info(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
-		if shouldWait, _ := waitForStuff(func() (bool, error) {
+		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
 			return header == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
 		}); shouldWait {
 			s.logger.Info(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
@@ -450,7 +458,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-	waitingForExecutionReady, err := waitForStuff(func() (bool, error) {
+	waitingForExecutionReady, err := waitForStuff(500*time.Millisecond, func() (bool, error) {
 		isReady, err := s.chainRW.Ready(ctx)
 		return !isReady, err
 	})
@@ -615,7 +623,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 
 	var resp *execution.AssembleBlockResponse
 
-	execBusy, err := waitForStuff(func() (bool, error) {
+	execBusy, err := waitForStuff(500*time.Millisecond, func() (bool, error) {
 		resp, err = s.executionService.AssembleBlock(ctx, req)
 		if err != nil {
 			return false, err
@@ -745,15 +753,9 @@ func (e *EngineServer) HandleNewPayload(
 		if currentHeadNumber != nil {
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
-			success := false
-			for i := 0; i < 100; i++ {
-				time.Sleep(10 * time.Millisecond)
-				if e.blockDownloader.Status() == headerdownload.Synced {
-					success = true
-					break
-				}
-			}
-			if !success {
+			if stillSyncing, _ := waitForStuff(500*time.Millisecond, func() (bool, error) {
+				return e.blockDownloader.Status() != headerdownload.Synced, nil
+			}); stillSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
 			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
@@ -883,15 +885,15 @@ func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
 }
 
-func waitForStuff(waitCondnF func() (bool, error)) (bool, error) {
+func waitForStuff(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
 	shouldWait, err := waitCondnF()
 	if err != nil || !shouldWait {
 		return false, err
 	}
-	// Times out after 8s - loosely based on timeouts of FCU and NewPayload for Ethereum specs
-	// Look for "timeout" in, for instance, https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md
-	for i := 0; i < 800; i++ {
-		time.Sleep(10 * time.Millisecond)
+	checkInterval := 10 * time.Millisecond
+	maxChecks := int64(maxWait) / int64(checkInterval)
+	for i := int64(0); i < maxChecks; i++ {
+		time.Sleep(checkInterval)
 		shouldWait, err = waitCondnF()
 		if err != nil || !shouldWait {
 			return shouldWait, err

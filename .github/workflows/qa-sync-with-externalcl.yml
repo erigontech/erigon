@@ -2,13 +2,13 @@ name: QA - Sync with external CL
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # Run every night at 00:00 AM UTC
+    - cron: '0 8 * * 0'  # Run on Sunday at 08:00 AM UTC
   workflow_dispatch:     # Run manually
 
 jobs:
   sync-with-externalcl:
     runs-on: [self-hosted, linux, X64]
-    timeout-minutes: 360 # 6 hours
+    timeout-minutes: 500 # 8+ hours
     strategy:
       matrix:
         client: [lighthouse, prysm]
@@ -20,8 +20,8 @@ jobs:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       CL_DATA_DIR: ${{ github.workspace }}/consensus
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 18000 # 5 hours
+      TRACKING_TIME_SECONDS: 3600 # 1 hour
+      TOTAL_TIME_SECONDS: 25200 # 7 hours
 
     steps:
       - name: Check out repository
@@ -36,9 +36,9 @@ jobs:
         run: |
           mkdir -p $CL_DATA_DIR
           if [ "${{ matrix.client }}" == "lighthouse" ]; then
-            curl -LO https://github.com/sigp/lighthouse/releases/download/v5.3.0/lighthouse-v5.3.0-x86_64-unknown-linux-gnu.tar.gz
-            tar -xvf lighthouse-v5.3.0-x86_64-unknown-linux-gnu.tar.gz -C $CL_DATA_DIR
-            rm lighthouse-v5.3.0-x86_64-unknown-linux-gnu.tar.gz
+            curl -LO https://github.com/sigp/lighthouse/releases/download/v7.0.0-beta.0/lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz
+            tar -xvf lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz -C $CL_DATA_DIR
+            rm lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz
           elif [ "${{ matrix.client }}" == "prysm" ]; then
             curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o $CL_DATA_DIR/prysm.sh
             chmod +x $CL_DATA_DIR/prysm.sh
@@ -97,7 +97,7 @@ jobs:
         if: steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.client }}
+          name: test-results-${{ matrix.client }}-${{ matrix.chain }}
           path: |
             ${{ github.workspace }}/result-${{ matrix.chain }}.json
             ${{ github.workspace }}/erigon_data/logs/erigon.log
