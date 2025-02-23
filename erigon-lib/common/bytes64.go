@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 )
 
@@ -34,16 +34,16 @@ var (
 type Bytes64 [length.Bytes64]byte
 
 // Hex converts a hash to a hex string.
-func (b Bytes64) Hex() string { return hexutility.Encode(b[:]) }
+func (b Bytes64) Hex() string { return hexutil.Encode(b[:]) }
 
 // UnmarshalJSON parses a hash in hex syntax.
 func (b *Bytes64) UnmarshalJSON(input []byte) error {
-	return hexutility.UnmarshalFixedJSON(bytes64T, input, b[:])
+	return hexutil.UnmarshalFixedJSON(bytes64T, input, b[:])
 }
 
 // UnmarshalText parses a hash in hex syntax.
 func (b *Bytes64) UnmarshalText(input []byte) error {
-	return hexutility.UnmarshalFixedText("Bytes64", input, b[:])
+	return hexutil.UnmarshalFixedText("Bytes64", input, b[:])
 }
 
 // MarshalText returns the hex representation of a.

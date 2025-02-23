@@ -76,7 +76,7 @@ type peerAndBlocks struct {
 }
 
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
-	count := uint64(32)
+	count := uint64(16)
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
 	reqInterval := time.NewTicker(300 * time.Millisecond)
@@ -96,14 +96,17 @@ Loop:
 				}
 				// double the request count every 10 seconds. This is inspired by the mekong network, which has many consecutive missing blocks.
 				reqCount := count
-				if !f.highestSlotUpdateTime.IsZero() {
-					multiplier := int(time.Since(f.highestSlotUpdateTime).Seconds()) / 10
-					multiplier = min(multiplier, 6)
-					reqCount *= uint64(1 << uint(multiplier))
-				}
+				// NEED TO COMMENT THIS BC IT CAUSES ISSUES ON MAINNET
+
+				// if !f.highestSlotUpdateTime.IsZero() {
+				// 	multiplier := int(time.Since(f.highestSlotUpdateTime).Seconds()) / 10
+				// 	multiplier = min(multiplier, 6)
+				// 	reqCount *= uint64(1 << uint(multiplier))
+				// }
+
 				// leave a warning if we are stuck for more than 90 seconds
 				if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
-					log.Debug("Forward beacon downloader gets stuck", "time", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
+					log.Trace("Forward beacon downloader gets stuck", "time", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
 				}
 				// this is so we do not get stuck on a side-fork
 				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount)

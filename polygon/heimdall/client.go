@@ -30,6 +30,8 @@ type Client interface {
 	FetchSpan(ctx context.Context, spanID uint64) (*Span, error)
 	FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*Span, error)
 
+	FetchStatus(ctx context.Context) (*Status, error)
+
 	FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint, error)
 	FetchCheckpointCount(ctx context.Context) (int64, error)
 	FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*Checkpoint, error)

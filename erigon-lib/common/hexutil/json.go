@@ -213,25 +213,6 @@ func isString(input []byte) bool {
 	return len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"'
 }
 
-func bytesHave0xPrefix(input []byte) bool {
-	return len(input) >= 2 && input[0] == '0' && (input[1] == 'x' || input[1] == 'X')
-}
-
-func checkText(input []byte, wantPrefix bool) ([]byte, error) {
-	if len(input) == 0 {
-		return nil, nil // empty strings are allowed
-	}
-	if bytesHave0xPrefix(input) {
-		input = input[2:]
-	} else if wantPrefix {
-		return nil, ErrMissingPrefix
-	}
-	if len(input)%2 != 0 {
-		return nil, ErrOddLength
-	}
-	return input, nil
-}
-
 func checkNumberText(input []byte) (raw []byte, err error) {
 	if len(input) == 0 {
 		return nil, nil // empty strings are allowed
@@ -252,7 +233,11 @@ func checkNumberText(input []byte) (raw []byte, err error) {
 func wrapTypeError(err error, typ reflect.Type) error {
 	// keeping compatiblity with go ethereum tests
 	// nolint:errorlint
-	if _, ok := err.(*decError); ok {
+	//if _, ok := err.(*decError); ok {
+	//	return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
+	//}
+	var dec *decError
+	if errors.As(err, &dec) {
 		return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
 	}
 	return err
@@ -260,4 +245,14 @@ func wrapTypeError(err error, typ reflect.Type) error {
 
 func errNonString(typ reflect.Type) error {
 	return &json.UnmarshalTypeError{Value: "non-string", Type: typ}
+}
+
+// UnmarshalFixedJSON decodes the input as a string with 0x prefix. The length of out
+// determines the required input length. This function is commonly used to implement the
+// UnmarshalJSON method for fixed-size types.
+func UnmarshalFixedJSON(typ reflect.Type, input, out []byte) error {
+	if !isString(input) {
+		return &json.UnmarshalTypeError{Value: "non-string", Type: typ}
+	}
+	return wrapTypeError(UnmarshalFixedText(typ.String(), input[1:len(input)-1], out), typ)
 }

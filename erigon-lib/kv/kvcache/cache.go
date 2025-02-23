@@ -332,7 +332,6 @@ func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	r := c.selectOrCreateRoot(id)
 
 	if !c.cfg.WaitForNewBlock || c.waitExceededCount.Load() >= MAX_WAITS {

@@ -22,8 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"math"
 	"strings"
 
@@ -31,9 +29,9 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	math2 "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core"
@@ -46,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -72,7 +71,7 @@ type TraceCallParam struct {
 	MaxFeePerGas         *hexutil.Big       `json:"maxFeePerGas"`
 	MaxFeePerBlobGas     *hexutil.Big       `json:"maxFeePerBlobGas"`
 	Value                *hexutil.Big       `json:"value"`
-	Data                 hexutility.Bytes   `json:"data"`
+	Data                 hexutil.Bytes      `json:"data"`
 	AccessList           *types.AccessList  `json:"accessList"`
 	txHash               *libcommon.Hash
 	traceTypes           []string
@@ -81,7 +80,7 @@ type TraceCallParam struct {
 
 // TraceCallResult is the response to `trace_call` method
 type TraceCallResult struct {
-	Output          hexutility.Bytes                        `json:"output"`
+	Output          hexutil.Bytes                           `json:"output"`
 	StateDiff       map[libcommon.Address]*StateDiffAccount `json:"stateDiff"`
 	Trace           []*ParityTrace                          `json:"trace"`
 	VmTrace         *VmTrace                                `json:"vmTrace"`
@@ -102,8 +101,8 @@ type StateDiffBalance struct {
 }
 
 type StateDiffCode struct {
-	From hexutility.Bytes `json:"from"`
-	To   hexutility.Bytes `json:"to"`
+	From hexutil.Bytes `json:"from"`
+	To   hexutil.Bytes `json:"to"`
 }
 
 type StateDiffNonce struct {
@@ -118,8 +117,8 @@ type StateDiffStorage struct {
 
 // VmTrace is the part of `trace_call` response that is under "vmTrace" tag
 type VmTrace struct {
-	Code hexutility.Bytes `json:"code"`
-	Ops  []*VmTraceOp     `json:"ops"`
+	Code hexutil.Bytes `json:"code"`
+	Ops  []*VmTraceOp  `json:"ops"`
 }
 
 // VmTraceOp is one element of the vmTrace ops trace
@@ -150,7 +149,7 @@ type VmTraceStore struct {
 }
 
 // ToMessage converts CallArgs to the Message type used by the core evm
-func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (types.Message, error) {
+func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*types.Message, error) {
 	// Set sender address or use zero address if none specified.
 	var addr libcommon.Address
 	if args.From != nil {
@@ -181,7 +180,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 		if args.GasPrice != nil {
 			overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
 			if overflow {
-				return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
+				return nil, errors.New("args.GasPrice higher than 2^256-1")
 			}
 		}
 		gasFeeCap, gasTipCap = gasPrice, gasPrice
@@ -192,7 +191,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			// User specified the legacy gas field, convert to 1559 gas typing
 			gasPrice, overflow = uint256.FromBig(args.GasPrice.ToInt())
 			if overflow {
-				return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
+				return nil, errors.New("args.GasPrice higher than 2^256-1")
 			}
 			gasFeeCap, gasTipCap = gasPrice, gasPrice
 		} else {
@@ -201,14 +200,14 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			if args.MaxFeePerGas != nil {
 				overflow := gasFeeCap.SetFromBig(args.MaxFeePerGas.ToInt())
 				if overflow {
-					return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
+					return nil, errors.New("args.GasPrice higher than 2^256-1")
 				}
 			}
 			gasTipCap = new(uint256.Int)
 			if args.MaxPriorityFeePerGas != nil {
 				overflow := gasTipCap.SetFromBig(args.MaxPriorityFeePerGas.ToInt())
 				if overflow {
-					return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
+					return nil, errors.New("args.GasPrice higher than 2^256-1")
 				}
 			}
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
@@ -229,7 +228,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	if args.Value != nil {
 		overflow := value.SetFromBig(args.Value.ToInt())
 		if overflow {
-			return types.Message{}, errors.New("args.Value higher than 2^256-1")
+			return nil, errors.New("args.Value higher than 2^256-1")
 		}
 	}
 	var data []byte
@@ -746,7 +745,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					if err != nil {
 						return err
 					}
-					m := make(map[string]hexutility.Bytes)
+					m := make(map[string]hexutil.Bytes)
 					m["-"] = code
 					accountDiff.Code = m
 				}
@@ -775,7 +774,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 				if err != nil {
 					return err
 				}
-				m := make(map[string]hexutility.Bytes)
+				m := make(map[string]hexutil.Bytes)
 				m["+"] = code
 				accountDiff.Code = m
 			}
@@ -823,6 +822,9 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 	if err != nil {
 		return nil, err
 	}
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
 	if !ok {
 		if chainConfig.Bor == nil {
 			return nil, nil
@@ -831,6 +833,13 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		// otherwise this may be a bor state sync transaction - check
 		if api.useBridgeReader {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
+			if ok {
+				txNumNextBlock, err := txNumsReader.Min(tx, blockNum+1)
+				if err != nil {
+					return nil, err
+				}
+				txNum = txNumNextBlock - 1
+			}
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
 		}
@@ -849,8 +858,6 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 	if err != nil {
 		return nil, err
 	}
-
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
 	txNumMin, err := txNumsReader.Min(tx, blockNum)
 	if err != nil {
@@ -1086,7 +1093,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
 	ibs.SetTxContext(0)
-	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
+	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
 	}
@@ -1185,7 +1192,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 			return nil, errors.New("header.BaseFee uint256 overflow")
 		}
 	}
-	msgs := make([]types.Message, len(callParams))
+	msgs := make([]*types.Message, len(callParams))
 	for i, args := range callParams {
 		msgs[i], err = args.ToMessage(api.gasCap, baseFee)
 		if err != nil {
@@ -1214,7 +1221,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 
 func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
-	msgs []types.Message, callParams []TraceCallParam,
+	msgs []*types.Message, callParams []TraceCallParam,
 	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, error) {
@@ -1370,7 +1377,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 			gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
-			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/)
+			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
@@ -1414,7 +1421,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 
 func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
-	msg types.Message, callParam TraceCallParam,
+	msg *types.Message, callParam TraceCallParam,
 	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndex int,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
@@ -1568,7 +1575,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
-		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/)
+		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)

@@ -14,6 +14,7 @@ ChangeLog
   - `pos sync failed: fork choice update failure: status=5, validationErr=''` - should be fixed
   - `external rpc daemon getting stuck` - should be fixed
   - `process not exiting in a clean way (getting stuck) upon astrid errs` - should be fixed
+  - `very rare chance of bridge deadlock while at chain tip due to forking` - should be fixed
 
 ### TODO
 

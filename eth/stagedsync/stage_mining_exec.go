@@ -110,7 +110,16 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	//}
 	execCfg.author = &cfg.miningState.MiningConfig.Etherbase
 
-	getHeader := func(hash libcommon.Hash, number uint64) *types.Header { return rawdb.ReadHeader(txc.Tx, hash, number) }
+	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
+		if execCfg.blockReader == nil {
+			return rawdb.ReadHeader(txc.Tx, hash, number)
+		}
+		header, err := execCfg.blockReader.Header(ctx, txc.Tx, hash, number)
+		if err != nil {
+			panic(fmt.Sprintf("cannot read header: %s", err))
+		}
+		return header
+	}
 
 	if len(preparedTxns) > 0 {
 		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
@@ -260,6 +269,7 @@ func getNextTransactions(
 	provideOpts := []txnprovider.ProvideOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
+		txnprovider.WithBlockTime(header.Time),
 		txnprovider.WithGasTarget(remainingGas),
 		txnprovider.WithBlobGasTarget(remainingBlobGas),
 		txnprovider.WithTxnIdsFilter(alreadyYielded),

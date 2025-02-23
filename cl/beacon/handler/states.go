@@ -269,7 +269,6 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read checkpoints: %x, %d", blockRoot, a.beaconChainCfg.RoundSlotToEpoch(*slot)))
 		}
 	}
-	version := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
 	if err != nil {
 		return nil, err
@@ -279,8 +278,7 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 		FinalizedCheckpoint:         finalizedCheckpoint,
 		CurrentJustifiedCheckpoint:  currentJustifiedCheckpoint,
 		PreviousJustifiedCheckpoint: previousJustifiedCheckpoint,
-	}).WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).
-		WithVersion(version).WithOptimistic(isOptimistic), nil
+	}).WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).WithOptimistic(isOptimistic), nil
 }
 
 type syncCommitteesResponse struct {

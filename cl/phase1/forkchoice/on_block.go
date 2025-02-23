@@ -23,7 +23,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -125,7 +125,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 
-	var executionRequestsList []hexutility.Bytes = nil
+	var executionRequestsList []hexutil.Bytes = nil
 	if block.Version() >= clparams.ElectraVersion {
 		executionRequestsList = block.Block.Body.GetExecutionRequestsList()
 	}

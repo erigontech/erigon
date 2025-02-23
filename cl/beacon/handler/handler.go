@@ -279,7 +279,7 @@ func (a *ApiHandler) init() {
 						r.Get("/bls_to_execution_changes", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolBLSExecutionChanges))
 						r.Post("/bls_to_execution_changes", a.PostEthV1BeaconPoolBlsToExecutionChanges)
 						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttestations))
-						r.Post("/attestations", a.PostEthV1BeaconPoolAttestations)
+						r.Post("/attestations", a.PostEthV1BeaconPoolAttestations) // deprecate after electra fork
 						r.Post("/sync_committees", a.PostEthV1BeaconPoolSyncCommittees)
 					})
 					r.Route("/light_client", func(r chi.Router) {
@@ -349,7 +349,7 @@ func (a *ApiHandler) init() {
 					})
 					r.Route("/pool", func(r chi.Router) {
 						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV2BeaconPoolAttestations))
-						r.Post("/attestations", a.PostEthV1BeaconPoolAttestations)                                         // reuse
+						r.Post("/attestations", a.PostEthV2BeaconPoolAttestations)
 						r.Get("/attester_slashings", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttesterSlashings)) // reuse
 						r.Post("/attester_slashings", a.PostEthV1BeaconPoolAttesterSlashings)                              // resue
 					})
