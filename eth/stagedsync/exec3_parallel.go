@@ -646,7 +646,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 				addedDependencies = be.execTasks.addDependencies(execErr.Dependency, tx)
 				be.execFailed[tx]++
 				if be.execFailed[tx] > 4 {
-					fmt.Println("FAIL", tx, be.txIncarnations[tx], be.execFailed[tx], execErr.Dependency)
+					fmt.Println("FAIL", tx, be.txIncarnations[tx], be.execFailed[tx], "dep", execErr.Dependency)
 				}
 			} else {
 				estimate := 0
@@ -926,7 +926,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
 						func(_ state.ReadSource, _, writtenVersion state.Version) bool {
 							if be.execFailed[nextTx] > 4 || be.txIncarnations[nextTx] > 4 {
-								fmt.Println("VAL", writtenVersion.TxIndex, writtenVersion.TxIndex < maxValidated, writtenVersion.Incarnation, be.txIncarnations[writtenVersion.TxIndex+1])
+								fmt.Println("VAL", nextTx, writtenVersion.TxIndex, writtenVersion.TxIndex < maxValidated, writtenVersion.Incarnation, be.txIncarnations[writtenVersion.TxIndex+1])
 							}
 							return writtenVersion.TxIndex < maxValidated &&
 								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
