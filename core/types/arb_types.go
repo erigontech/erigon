@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -1941,8 +1942,33 @@ func (tx *ArbitrumDepositTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *
 }
 
 func (d *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	//TODO implement me
-	panic("implement me")
+	msg := Message{
+		// gasLimit:   stx.Gas,
+		// gasPrice:   *stx.FeeCap,
+		// tip:        *stx.Tip,
+		// feeCap:     *stx.FeeCap,
+		from:   d.From,
+		to:     &d.To,
+		amount: *uint256.MustFromBig(d.Value),
+	}
+	if !rules.IsCancun {
+		return msg, errors.New("BlobTx transactions require Cancun")
+	}
+	if baseFee != nil {
+		overflow := msg.gasPrice.SetFromBig(baseFee)
+		if overflow {
+			return msg, errors.New("gasPrice higher than 2^256-1")
+		}
+	}
+	// msg.gasPrice.Add(&msg.gasPrice, stx.Tip)
+	// if msg.gasPrice.Gt(stx.FeeCap) {
+	// 	msg.gasPrice.Set(stx.FeeCap)
+	// }
+	// var err error
+	// msg.from, err = d.Sender(s)
+	// msg.maxFeePerBlobGas = *stx.MaxFeePerBlobGas
+	// msg.blobHashes = stx.BlobVersionedHashes
+	return msg, nil
 }
 
 func (d *ArbitrumDepositTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
