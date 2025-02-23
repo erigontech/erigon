@@ -645,7 +645,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 				addedDependencies = be.execTasks.addDependencies(execErr.Dependency, tx)
 				be.execFailed[tx]++
-				if be.execFailed[tx] > 10 {
+				if be.execFailed[tx] > 4 {
 					fmt.Println("FAIL", tx, be.txIncarnations[tx], be.execFailed[tx], execErr.Dependency)
 				}
 			} else {
@@ -662,7 +662,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 				be.estimateDeps[tx] = append(be.estimateDeps[tx], newEstimate)
 				be.execAborted[tx]++
 
-				if be.execFailed[tx] > 10 {
+				if be.execFailed[tx] > 4 {
 					fmt.Println("ABORT", tx, be.txIncarnations[tx], be.execAborted[tx], execErr.Dependency)
 				}
 			}
@@ -769,7 +769,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			be.cntValidationFail++
 			be.execFailed[tx]++
 
-			if be.execFailed[tx] > 10 {
+			if be.execFailed[tx] > 4 {
 				fmt.Println("FAIL", tx, be.txIncarnations[tx], be.execFailed[tx])
 			}
 
@@ -910,7 +910,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 
 		nextTx := toExecute[i]
 
-		if be.execFailed[nextTx] > 10 || be.txIncarnations[nextTx] > 10 {
+		if be.execFailed[nextTx] > 4 || be.txIncarnations[nextTx] > 4 {
 			fmt.Println("EXEC", nextTx, be.txIncarnations[nextTx], "max val", maxValidated, be.blockIO.HasReads(nextTx), "aborted", be.execAborted[nextTx], "failed", be.execFailed[nextTx])
 		}
 
@@ -925,7 +925,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 					!be.blockIO.HasReads(txIndex) ||
 					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
 						func(_ state.ReadSource, _, writtenVersion state.Version) bool {
-							if be.execFailed[nextTx] > 10 || be.txIncarnations[nextTx] > 10 {
+							if be.execFailed[nextTx] > 4 || be.txIncarnations[nextTx] > 4 {
 								fmt.Println("VAL", writtenVersion.TxIndex, writtenVersion.TxIndex < maxValidated, writtenVersion.Incarnation, be.txIncarnations[writtenVersion.TxIndex+1])
 							}
 							return writtenVersion.TxIndex < maxValidated &&
