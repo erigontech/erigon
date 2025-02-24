@@ -122,9 +122,6 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	var empty []byte
 	indexBytes := hexutility.FromHex(index)
-	if len(indexBytes) < 32 {
-		return "", errors.New("unable to decode storage key: hex string invalid")
-	}
 	if len(indexBytes) > 32 {
 		return "", errors.New("unable to decode storage key: hex string too long, want at most 32 bytes")
 	}
