@@ -1442,10 +1442,14 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 
 	for i := uint64(0); i < keyTxsLimit; i++ {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
-		value := make([]byte, 10)
-		r.Read(value)
+		up := upd{txNum: txNum, value: []byte{}}
 
-		updates = append(updates, upd{txNum: txNum, value: value})
+		if r.Rand.IntN(100) < 85 || i == keyTxsLimit-1 { // 15% rate for delete, last tx is never a deletion
+			up.value = make([]byte, 10)
+			r.Read(up.value)
+		}
+
+		updates = append(updates, up)
 		usedTxNums[txNum] = true
 	}
 	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
@@ -1519,6 +1523,11 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		for i := 1; i < len(updates); i++ {
 			v, ok, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
 			require.NoError(err)
+			if len(updates[i-1].value) == 0 {
+				require.False(ok)
+				require.Empty(v, "value was deleted, expected empty slice, got %x", v)
+				continue
+			}
 			require.True(ok)
 			require.EqualValuesf(updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}
@@ -1533,7 +1542,8 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 }
 
 func TestDomainRange(t *testing.T) {
-	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	stepSize := uint64(25)
+	db, d := testDbAndDomainOfStep(t, stepSize, log.New())
 	require, ctx := require.New(t), context.Background()
 
 	tx, err := db.BeginRw(ctx)
@@ -1553,18 +1563,33 @@ func TestDomainRange(t *testing.T) {
 	keySize1 := uint64(2)
 	keySize2 := uint64(2)
 	totalTx := uint64(300)
-	keyTxsLimit := uint64(2)
+	keyTxsLimit := uint64(3)
 	keyLimit := uint64(10)
 
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	cutoffTxnum := uint64(190)
+	keysLeftAfterCutoff := make(map[string]struct{})
+	keysLatest := make(map[string]struct{})
+
 	for key, updates := range data {
 		p := []byte{}
+		ps := uint64(0)
 		for i := 0; i < len(updates); i++ {
 			writer.SetTxNum(updates[i].txNum)
-			err = writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
+
+			if updates[i].txNum >= cutoffTxnum && len(updates[i].value) > 0 {
+				keysLeftAfterCutoff[key] = struct{}{}
+			}
+			keysLatest[key] = struct{}{}
+			if len(updates[i].value) == 0 {
+				delete(keysLatest, key)
+			}
+
+			err = writer.PutWithPrev([]byte(key), nil, updates[i].value, p, ps)
 			require.NoError(err)
 			p = common.Copy(updates[i].value)
+			ps = updates[i].txNum / stepSize
 		}
 	}
 	writer.SetTxNum(totalTx)
@@ -1585,13 +1610,13 @@ func TestDomainRange(t *testing.T) {
 	defer dc.Close()
 
 	{
-		it, err := dc.ht.RangeAsOf(ctx, 190, nil, nil, order.Asc, -1, tx)
+		it, err := dc.ht.RangeAsOf(ctx, cutoffTxnum, nil, nil, order.Asc, -1, tx)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(3, len(keys))
-		require.Equal(3, len(vals))
+		require.Equal(len(keysLeftAfterCutoff), len(keys))
+		require.Equal(len(keysLeftAfterCutoff), len(vals))
 	}
 
 	{
@@ -1600,28 +1625,31 @@ func TestDomainRange(t *testing.T) {
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(5, len(keys))
-		require.Equal(5, len(vals))
+		require.Equal(len(keysLatest), len(keys))
+		require.Equal(len(keysLatest), len(vals))
 	}
 
 	{
-		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, 190, order.Asc, -1)
+		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, cutoffTxnum, order.Asc, -1)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(5, len(keys))
-		require.Equal(5, len(vals))
+
+		// we expect here more keys than len(keysLeftAfterCutoff) because we are query Domain here, not History
+		require.Equal(len(keysLatest), len(keys))
+		require.Equal(len(keysLatest), len(vals))
 	}
 
 	{
-		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, 190, order.Asc, 4)
+		lim := len(keysLatest) - 1
+		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, cutoffTxnum, order.Asc, lim)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(4, len(keys))
-		require.Equal(4, len(vals))
+		require.Equal(lim, len(keys))
+		require.Equal(lim, len(vals))
 	}
 }
 
@@ -1781,8 +1809,14 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	for key, updates := range data {
 		kc++
 		for i := 1; i < len(updates); i++ {
-			v, _, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
+			v, ok, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
 			require.NoError(t, err)
+			if len(updates[i-1].value) == 0 { // was deleted
+				require.False(t, ok)
+				require.Empty(t, v, "value was deleted, expected empty slice, got %x", v)
+				continue
+			}
+			require.True(t, ok)
 			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}
 		if len(updates) == 0 {
