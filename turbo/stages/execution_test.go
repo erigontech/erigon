@@ -149,11 +149,9 @@ func TestBlockExecutionClique(t *testing.T) {
 	// Check the balance of the account to ensure the transaction was applied
 	expectedBalance := uint256.Int{0x235ac4090ade2d, 0x0, 0x0, 0x0} // Initial balance - 1 (transaction value)
 	require.Equal(t, expectedBalance, acc.Balance)
-
-	require.Equal(t, 1, 0)
 }
 
-func TestBlockExecutionWithStorage(t *testing.T) {
+func TestBlockExecutionEthash(t *testing.T) {
 	var (
 		signer      = types.LatestSignerForChainID(nil)
 		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -163,14 +161,14 @@ func TestBlockExecutionWithStorage(t *testing.T) {
 		input       = hexutil.MustDecode("0xadbd8465")
 		kill        = hexutil.MustDecode("0x41c0e1b5")
 		gspec       = &types.Genesis{
-			Config:  params.AllProtocolChanges,
+			Config:  params.TestChainConfig,
 			Alloc:   types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 			BaseFee: big.NewInt(1),
 		}
 	)
 
 	m := mock.MockWithEverything(t, gspec, bankKey, prune.DefaultMode, ethash.NewFaker(), 128 /*blockBufferSize*/, false, /*withTxPool*/
-		false /*withPosDownloader*/, true /*checkStateRoot*/, false /*useSilkworm*/)
+		false /*withPosDownloader*/, true /*checkStateRoot*/, true /*useSilkworm*/)
 
 	var theAddr libcommon.Address
 	var gasFeeCap uint256.Int
@@ -231,11 +229,9 @@ func TestBlockExecutionWithStorage(t *testing.T) {
 	exist, err = st.Exist(theAddr)
 	assert.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
-
-	assert.Equal(t, 1, 0)
 }
 
-func TestBlockExecutionMultipleCalls(t *testing.T) {
+func createChainWithStorageContract(t testing.TB, useSilkworm bool, subAccountsCount int) (*mock.MockSentry, *types.Block, []*ecdsa.PrivateKey, libcommon.Address) {
 	var (
 		signer      = types.LatestSignerForChainID(big.NewInt(1337))
 		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -248,10 +244,9 @@ func TestBlockExecutionMultipleCalls(t *testing.T) {
 			Alloc:   types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 			BaseFee: big.NewInt(1),
 		}
+		gasFeeCap = uint256.NewInt(1)
 	)
 
-	const subAccountsCount = 10
-	crypto.GenerateKey()
 	subPrivateKeys := make([]*ecdsa.PrivateKey, subAccountsCount)
 	subAddresses := make([]libcommon.Address, subAccountsCount)
 	for i := 0; i < subAccountsCount; i++ {
@@ -260,32 +255,30 @@ func TestBlockExecutionMultipleCalls(t *testing.T) {
 	}
 
 	m := mock.MockWithEverything(t, gspec, bankKey, prune.DefaultMode, ethash.NewFaker(), 128 /*blockBufferSize*/, false, /*withTxPool*/
-		false /*withPosDownloader*/, true /*checkStateRoot*/, true /*useSilkworm*/)
+		false /*withPosDownloader*/, true /*checkStateRoot*/, useSilkworm)
 
-	var theAddr libcommon.Address
-
-	var gasFeeCap uint256.Int
-	gasFeeCap.SetUint64(1)
+	var storageContractAddress libcommon.Address
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
 		switch i {
 		case 0:
-			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 1e6, &gasFeeCap, contract), *signer, bankKey)
+			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 1e6, gasFeeCap, contract), *signer, bankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
-			theAddr = crypto.CreateAddress(bankAddress, nonce)
+			storageContractAddress = crypto.CreateAddress(bankAddress, nonce)
 		case 1:
-			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, &gasFeeCap, input), *signer, bankKey)
+			txn, err := types.SignTx(types.NewTransaction(nonce, storageContractAddress, new(uint256.Int), 90000, gasFeeCap, input), *signer, bankKey)
 			assert.NoError(t, err)
 			block.AddTx(txn)
 		case 2:
-			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, &gasFeeCap, input), *signer, bankKey)
+			txn, err := types.SignTx(types.NewTransaction(nonce, storageContractAddress, new(uint256.Int), 90000, gasFeeCap, input), *signer, bankKey)
 			assert.NoError(t, err)
 			block.AddTx(txn)
 		case 3:
+			// Send some funds to subAccounts
 			for i := 0; i < subAccountsCount; i++ {
-				txn, err := types.SignTx(types.NewTransaction(nonce+uint64(i), subAddresses[i], uint256.NewInt(1e7), 90000, &gasFeeCap, nil), *signer, bankKey)
+				txn, err := types.SignTx(types.NewTransaction(nonce+uint64(i), subAddresses[i], uint256.NewInt(1e5), 90000, gasFeeCap, nil), *signer, bankKey)
 				assert.NoError(t, err)
 				block.AddTx(txn)
 			}
@@ -296,48 +289,60 @@ func TestBlockExecutionMultipleCalls(t *testing.T) {
 	err = m.InsertChain(chain)
 	assert.NoError(t, err)
 
-	ch, err := m.Eth1ExecutionService.CurrentHeader(context.Background(), nil)
-	assert.NoError(t, err)
-	assert.NotNil(t, ch)
+	return m, chain.Blocks[3], subPrivateKeys, storageContractAddress
+}
 
-	newBlock := types.NewBlock(&types.Header{
-		Number:     new(big.Int).Add(new(big.Int).SetUint64(ch.Header.BlockNumber), big.NewInt(1)),
-		Difficulty: clique.DiffInTurn,
-		ParentHash: gointerfaces.ConvertH256ToHash(ch.Header.BlockHash),
-		//Beneficiary: crypto.PubkeyToAddress(crypto.MustGenerateKey().PublicKey),
-		TxHash:      types.EmptyRootHash,
-		ReceiptHash: types.EmptyRootHash,
-		GasLimit:    10000000,
-		GasUsed:     0,
-		Time:        ch.Header.Timestamp + 12,
-		Extra:       make([]byte, clique.ExtraVanity+clique.ExtraSeal),
-		UncleHash:   types.EmptyUncleHash,
-		Root:        libcommon.HexToHash("0x9ef8929c6fdb3807eeac8e842c77ac8420a747eae87da0ce1f075c624a25b33f"),
-	},
-		[]types.Transaction{},
-		[]*types.Header{},
-		[]*types.Receipt{},
-		nil, /* withdrawals */
+func TestBlockExecutionStorageContract(t *testing.T) {
+	var (
+		signer           = types.LatestSignerForChainID(big.NewInt(1337))
+		gasFeeCap        = uint256.NewInt(1)
+		subAccountsCount = 100
 	)
-	request := &execution.InsertBlocksRequest{
-		Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{newBlock}),
-	}
-	result, err := m.Eth1ExecutionService.InsertBlocks(m.Ctx, request)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, result.Result, execution.ExecutionStatus_Success)
 
-	fmt.Println("newBlock  ", newBlock.Hash().String())
-	validationRequest := &execution.ValidationRequest{
-		Hash:   gointerfaces.ConvertHashToH256(newBlock.Hash()),
-		Number: newBlock.Number().Uint64(),
+	tests := []struct {
+		name        string
+		useSilkworm bool
+	}{
+		{"useSilkworm = false", false},
+		{"useSilkworm = true", true},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, headBlock, subPrivateKeys, storageContractAddress := createChainWithStorageContract(t, tt.useSilkworm, subAccountsCount)
 
-	validationResult, err := m.Eth1ExecutionService.ValidateChain(m.Ctx, validationRequest)
-	require.NoError(t, err)
-	require.NotNil(t, validationResult)
-	require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
-	fmt.Println("validationResult  ", validationResult)
+			chain, err := core.GenerateChain(m.ChainConfig, headBlock, m.Engine, m.DB, 1, func(_ int, block *core.BlockGen) {
+				for j := uint64(0); j < uint64(subAccountsCount); j++ {
+					txn, err := types.SignTx(types.NewTransaction(0, storageContractAddress, uint256.NewInt(0), 90000, gasFeeCap, hexutil.EncodeTs(j)), *signer, subPrivateKeys[j])
+					assert.NoError(t, err)
+					block.AddTx(txn)
+				}
+			})
+			assert.NoError(t, err)
+
+			newBlock := chain.Blocks[0]
+
+			request := &execution.InsertBlocksRequest{
+				Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{newBlock}),
+			}
+			result, err := m.Eth1ExecutionService.InsertBlocks(m.Ctx, request)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, result.Result, execution.ExecutionStatus_Success)
+
+			fmt.Println("newBlock  ", newBlock.Hash().String())
+			validationRequest := &execution.ValidationRequest{
+				Hash:   gointerfaces.ConvertHashToH256(newBlock.Hash()),
+				Number: newBlock.Number().Uint64(),
+			}
+
+			validationResult, err := m.Eth1ExecutionService.ValidateChain(m.Ctx, validationRequest)
+			require.NoError(t, err)
+			require.NotNil(t, validationResult)
+			require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
+			fmt.Println("validationResult  ", validationResult)
+			m.Close()
+		})
+	}
 
 	// ready := false
 	// for !ready {
@@ -363,105 +368,114 @@ func TestBlockExecutionMultipleCalls(t *testing.T) {
 	// assert.Equal(t, -1, 0)
 }
 
-func TestBlockExecution2(t *testing.T) {
-	// Initialize a Clique chain with a single signer
-	logger := log.Root()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StdoutHandler))
+/*
+Chain setup:
+
+				Genesis Block
+				      |
+				      |
+				Block 1 (Contract Creation)
+				      |
+				      |
+				Block 2 (Contract Call)
+				      |
+				      |
+				Block 3 (Contract Call)
+				      |
+				      |
+				Block 4 (Funds Transfer)
+				      |
+				(fork validation benchmark)
+					 /  \
+                    /	 \
+              Block A    Block B
+
+Test setup:
+- Blocks A and B contain N transactions each, where N is the number of subAccounts.
+- Each transaction does Contract Call with different input data. The contract calculates Keccak256 of the input data and stores it in the storage.
+- For each iteration:
+  - validate and execute Block A
+  - validate and execute Block B
+  - clear validation cache
+*/
+
+func BenchmarkBlockExecution(b *testing.B) {
 	var (
-		cliqueDB = memdb.NewTestDB(t, kv.ConsensusDB)
-		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		addr     = crypto.PubkeyToAddress(key.PublicKey)
-		engine   = clique.New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB, logger)
-		signer   = types.LatestSignerForChainID(nil)
+		signer           = types.LatestSignerForChainID(big.NewInt(1337))
+		gasFeeCap        = uint256.NewInt(1)
+		subAccountsCount = 100
 	)
-	genspec := &types.Genesis{
-		ExtraData: make([]byte, clique.ExtraVanity+length.Addr+clique.ExtraSeal),
-		Alloc: map[libcommon.Address]types.GenesisAccount{
-			addr: {Balance: big.NewInt(10000000000000000)},
-		},
-		Config: params.AllCliqueProtocolChanges,
+
+	tests := []struct {
+		name        string
+		useSilkworm bool
+	}{
+		{"useSilkworm = false", false},
+		{"useSilkworm = true", true},
 	}
+	for _, bm := range tests {
+		b.Run(bm.name, func(b *testing.B) {
+			m, headBlock, subPrivateKeys, storageContractAddress := createChainWithStorageContract(b, bm.useSilkworm, subAccountsCount)
 
-	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
-	checkStateRoot := true
-
-	m := mock.MockWithGenesisEngine(t, genspec, engine, false, checkStateRoot, false)
-
-	// Generate a batch of blocks, each properly signed
-	getHeader := func(hash libcommon.Hash, number uint64) (h *types.Header) {
-		response, err := m.Eth1ExecutionService.GetHeader(m.Ctx,
-			&execution.GetSegmentRequest{
-				BlockHash:   gointerfaces.ConvertHashToH256(hash),
-				BlockNumber: &number,
+			chainA, err := core.GenerateChain(m.ChainConfig, headBlock, m.Engine, m.DB, 1, func(_ int, block *core.BlockGen) {
+				for j := uint64(0); j < uint64(subAccountsCount); j++ {
+					txn, err := types.SignTx(types.NewTransaction(0, storageContractAddress, uint256.NewInt(0), 90000, gasFeeCap, hexutil.EncodeTs(j)), *signer, subPrivateKeys[j])
+					assert.NoError(b, err)
+					block.AddTx(txn)
+				}
 			})
-		require.NoError(t, err)
-		require.NotNil(t, response)
-		require.NotNil(t, response.Header)
+			assert.NoError(b, err)
+			newBlockA := chainA.Blocks[0]
+			request := &execution.InsertBlocksRequest{
+				Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{newBlockA}),
+			}
+			result, err := m.Eth1ExecutionService.InsertBlocks(m.Ctx, request)
+			require.NoError(b, err)
+			require.NotNil(b, result)
+			require.Equal(b, result.Result, execution.ExecutionStatus_Success)
 
-		h, err = eth1_utils.HeaderRpcToHeader(response.Header)
-		require.NoError(t, err)
-		return h
+			chainB, err := core.GenerateChain(m.ChainConfig, headBlock, m.Engine, m.DB, 1, func(_ int, block *core.BlockGen) {
+				for j := uint64(0); j < uint64(subAccountsCount); j++ {
+					txn, err := types.SignTx(types.NewTransaction(0, storageContractAddress, uint256.NewInt(0), 90000, gasFeeCap, hexutil.EncodeTs(j+1000)), *signer, subPrivateKeys[j])
+					assert.NoError(b, err)
+					block.AddTx(txn)
+				}
+			})
+			assert.NoError(b, err)
+			newBlockB := chainB.Blocks[0]
+			request = &execution.InsertBlocksRequest{
+				Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{newBlockB}),
+			}
+			result, err = m.Eth1ExecutionService.InsertBlocks(m.Ctx, request)
+			require.NoError(b, err)
+			require.NotNil(b, result)
+			require.Equal(b, result.Result, execution.ExecutionStatus_Success)
+
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				validationRequest := &execution.ValidationRequest{
+					Hash:   gointerfaces.ConvertHashToH256(newBlockA.Hash()),
+					Number: newBlockA.Number().Uint64(),
+				}
+				validationResult, err := m.Eth1ExecutionService.ValidateChain(m.Ctx, validationRequest)
+				require.NoError(b, err)
+				require.NotNil(b, validationResult)
+				require.Equal(b, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
+
+				validationRequest = &execution.ValidationRequest{
+					Hash:   gointerfaces.ConvertHashToH256(newBlockB.Hash()),
+					Number: newBlockA.Number().Uint64(),
+				}
+				validationResult, err = m.Eth1ExecutionService.ValidateChain(m.Ctx, validationRequest)
+				require.NoError(b, err)
+				require.NotNil(b, validationResult)
+				require.Equal(b, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
+
+				m.ForkValidator.ClearValidation()
+			}
+
+			m.Close()
+		})
 	}
-
-	currentHeadBlock := m.Genesis
-
-	chain, err := core.GenerateChain(m.ChainConfig, currentHeadBlock, m.Engine, m.DB, 1, func(i int, block *core.BlockGen) {
-		block.SetDifficulty(clique.DiffInTurn)
-
-		baseFee, _ := uint256.FromBig(block.GetHeader().BaseFee)
-		tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), libcommon.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
-		if err != nil {
-			panic(err)
-		}
-		block.AddTxWithChain(getHeader, engine, tx)
-	})
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
-	for i, block := range chain.Blocks {
-		header := block.Header()
-		if i > 0 {
-			header.ParentHash = chain.Blocks[i-1].Hash()
-		}
-		header.Extra = make([]byte, clique.ExtraVanity+clique.ExtraSeal)
-		header.Difficulty = clique.DiffInTurn
-
-		sig, _ := crypto.Sign(clique.SealHash(header).Bytes(), key)
-		copy(header.Extra[len(header.Extra)-clique.ExtraSeal:], sig)
-		chain.Headers[i] = header
-		chain.Blocks[i] = block.WithSeal(header)
-	}
-
-	insertBlocksRequest := &execution.InsertBlocksRequest{
-		Blocks: eth1_utils.ConvertBlocksToRPC(chain.Blocks),
-	}
-
-	newBlock := chain.Blocks[0]
-
-	result, err := m.Eth1ExecutionService.InsertBlocks(context.Background(), insertBlocksRequest)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, result.Result, execution.ExecutionStatus_Success)
-
-	validationRequest := &execution.ValidationRequest{
-		Hash:   gointerfaces.ConvertHashToH256(newBlock.Hash()),
-		Number: newBlock.Number().Uint64(),
-	}
-
-	validationResult, err := m.Eth1ExecutionService.ValidateChain(context.Background(), validationRequest)
-	require.NoError(t, err)
-	require.NotNil(t, validationResult)
-	require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
-
-	forkchoiceRequest := &execution.ForkChoice{
-		HeadBlockHash:      gointerfaces.ConvertHashToH256(newBlock.Hash()),
-		Timeout:            0,
-		FinalizedBlockHash: gointerfaces.ConvertHashToH256(m.Genesis.Hash()),
-		SafeBlockHash:      gointerfaces.ConvertHashToH256(m.Genesis.Hash()),
-	}
-
-	fcuReceipt, err := m.Eth1ExecutionService.UpdateForkChoice(m.Ctx, forkchoiceRequest)
-	require.NoError(t, err)
-	require.NotNil(t, fcuReceipt)
-	require.Equal(t, execution.ExecutionStatus_Success, fcuReceipt.Status)
 }

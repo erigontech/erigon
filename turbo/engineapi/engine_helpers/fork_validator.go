@@ -365,3 +365,10 @@ func (fv *ForkValidator) GetTimings(hash libcommon.Hash) BlockTimings {
 	}
 	return BlockTimings{}
 }
+
+// GetTimings returns the timings of the last block validation.
+func (fv *ForkValidator) ClearValidation() {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	fv.validHashes.Purge()
+}

@@ -18,7 +18,6 @@ package silkworm
 
 import (
 	"errors"
-	"fmt"
 	"math/big"
 	"unsafe"
 
@@ -26,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	silkworm_go "github.com/erigontech/silkworm-go"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -141,8 +139,8 @@ func ExecuteTx(s *Silkworm, txn kv.Tx, txTask *state.TxTask) error {
 		txnHandle = txn.CHandle()
 	}
 
-	fmt.Println("JG silkworm.ExecuteTx", "BlockNum", txTask.BlockNum, "BlockHash", hexutil.Encode(txTask.BlockHash.Bytes()),
-		"TxIndex", txTask.TxIndex, "TxNum", txTask.TxNum, "Transactions in block", len(txTask.Txs))
+	// fmt.Println("JG silkworm.ExecuteTx", "BlockNum", txTask.BlockNum, "BlockHash", hexutil.Encode(txTask.BlockHash.Bytes()),
+	// "TxIndex", txTask.TxIndex, "TxNum", txTask.TxNum, "Transactions in block", len(txTask.Txs))
 
 	gasUsed, blobGasUsed, err := s.ExecuteTxn(txnHandle, txTask.BlockNum, silkworm_go.Hash(txTask.BlockHash), uint64(txTask.TxIndex), txTask.TxNum)
 
@@ -150,7 +148,7 @@ func ExecuteTx(s *Silkworm, txn kv.Tx, txTask *state.TxTask) error {
 	txTask.UsedBlobGas = blobGasUsed
 	txTask.Error = err
 
-	fmt.Println("JG silkworm.ExecuteTx", "UsedGas", gasUsed, "UsedBlobGas", blobGasUsed, "Error", err)
+	// fmt.Println("JG silkworm.ExecuteTx", "UsedGas", gasUsed, "UsedBlobGas", blobGasUsed, "Error", err)
 
 	return err
 }

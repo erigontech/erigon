@@ -377,7 +377,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err != nil {
 			return nil, err
 		}
-		backend.silkworm, err = silkworm.New(config.Dirs.DataDir, mdbx.Version(), config.SilkwormNumContexts, logLevel)
+
+		logger.Info("Initialising Silkworm", "dataDir", config.Dirs.DataDir, "logLevel", logLevel)
+		backend.silkworm, err = silkworm.New(config.Dirs.DataDir, mdbx.Version(), config.SilkwormNumContexts, log.LvlInfo)
 		if err != nil {
 			return nil, err
 		}

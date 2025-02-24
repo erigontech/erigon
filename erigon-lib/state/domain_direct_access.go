@@ -46,7 +46,7 @@ func (sd *DirectAccessDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, 
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
-	fmt.Println("JG", sd.ObjectInfo(), "GetLatest", domain.String(), hexutil.Encode(k), hexutil.Encode(v), step)
+	// // fmt.Println("JG", sd.ObjectInfo(), "GetLatest", domain.String(), hexutil.Encode(k), hexutil.Encode(v), step)
 	return v, step, nil
 }
 
@@ -54,7 +54,7 @@ func (sd *DirectAccessDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, p
 	if domain != kv.AccountsDomain && domain != kv.CodeDomain && domain != kv.StorageDomain {
 		return sd.BufferedSharedDomains.DomainPut(domain, k1, k2, val, prevVal, prevStep)
 	}
-	fmt.Println("JG", sd.ObjectInfo(), "DomainPut", domain.String(), hexutil.Encode(k1), hexutil.Encode(k2), hexutil.Encode(val), hexutil.Encode(prevVal), prevStep)
+	// // fmt.Println("JG", sd.ObjectInfo(), "DomainPut", domain.String(), hexutil.Encode(k1), hexutil.Encode(k2), hexutil.Encode(val), hexutil.Encode(prevVal), prevStep)
 	if val == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
@@ -92,7 +92,7 @@ func (sd *DirectAccessDomains) updateValue(k1 []byte, k2 []byte, val []byte, dom
 		k = append(append(k1, k2...), histStepPrefix[:]...)
 		v = val
 		if err := sd.rwTx.Put(sd.aggTx.d[domain].d.valuesTable, k, v); err != nil {
-			fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "Put large value", err)
+			// // fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "Put large value", err)
 			return err
 		}
 		return nil
@@ -101,28 +101,28 @@ func (sd *DirectAccessDomains) updateValue(k1 []byte, k2 []byte, val []byte, dom
 	v = append(histStepPrefix[:], val...)
 	valuesCursor, err := sd.rwTx.RwCursorDupSort(sd.aggTx.d[domain].d.valuesTable)
 	if err != nil {
-		fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "RwCursorDupSort", err)
+		// // fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "RwCursorDupSort", err)
 		return err
 	}
 	defer valuesCursor.Close()
 	foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 	if err != nil {
-		fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "SeekBothRange", err)
+		// fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "SeekBothRange", err)
 		return err
 	}
 	if len(foundVal) == 0 || !bytes.Equal(foundVal[:8], v[:8]) {
 		if err := valuesCursor.Put(k, v); err != nil {
-			fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "Put", err)
+			// fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "Put", err)
 			return err
 		}
 		return nil
 	}
 	if err := valuesCursor.DeleteCurrent(); err != nil {
-		fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "DeleteCurrent", err)
+		// fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "DeleteCurrent", err)
 		return err
 	}
 	if err := valuesCursor.Put(k, v); err != nil {
-		fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "Put2", err)
+		// fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "Put2", err)
 		return err
 	}
 	return nil
@@ -141,6 +141,11 @@ func (sd *DirectAccessDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVa
 		if err != nil {
 			return err
 		}
+	}
+
+	if v == nil || len(v) == 0 {
+		fmt.Println("JG", sd.ObjectInfo(), "DomainDel", "value not found", hexutil.Encode(k))
+		return nil
 	}
 	if sd.aggTx.d[domain].d.largeValues {
 		valuesCursor, err := sd.rwTx.RwCursor(sd.aggTx.d[domain].d.valuesTable)
@@ -189,14 +194,14 @@ func (sd *DirectAccessDomains) touchHistory(historyTableName string) error {
 		if binary.BigEndian.Uint64(hk[:]) > sd.txNum {
 			break
 		}
-		fmt.Println("JG", historyTableName, "seek", hexutil.Encode(hk), hexutil.Encode(hv))
+		// fmt.Println("JG", historyTableName, "seek", hexutil.Encode(hk), hexutil.Encode(hv))
 		sd.TouchKey(kv.AccountsDomain, string(hv), nil)
 	}
 	return nil
 }
 
 func (sd *DirectAccessDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	fmt.Println("JG", sd.ObjectInfo(), "ComputeCommitment for block", blockNum)
+	// fmt.Println("JG", sd.ObjectInfo(), "ComputeCommitment for block", blockNum)
 	if err := sd.touchHistory(kv.TblAccountHistoryKeys); err != nil {
 		return nil, err
 	}

@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/trie"
@@ -210,7 +209,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		}
 	}
 
-	fmt.Println("evm.go: call: from: ", caller.Address().String(), " to: ", addr.String(), " value: ", value.String(), " gas: ", gas, " depth: ", depth, " type: ", typ.String(), " isPrecompile: ", isPrecompile, " code: ", hexutil.Encode(code), " input: ", hexutil.Encode(input))
+	// fmt.Println("JG evm.go: call: from: ", caller.Address().String(), " to: ", addr.String(), " value: ", value.String(), " gas: ", gas, " depth: ", depth, " type: ", typ.String(), " isPrecompile: ", isPrecompile, " code: ", hexutil.Encode(code), " input: ", hexutil.Encode(input))
 
 	snapshot := evm.intraBlockState.Snapshot()
 
@@ -304,9 +303,9 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			readOnly = true
 		}
 		ret, err = run(evm, contract, input, readOnly)
-		if err != nil {
-			fmt.Println("evm.go: call: run: err: ", err)
-		}
+		// if err != nil {
+		// 	fmt.Println("evm.go: call: run: err: ", err)
+		// }
 		gas = contract.Gas
 	}
 	// When an error was returned by the EVM or when setting the creation code

@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -207,7 +206,7 @@ func ExecV3(ctx context.Context,
 	initialCycle bool,
 	isMining bool,
 ) error {
-	fmt.Println("JG ExecV3 start", maxBlockNum)
+	// fmt.Println("JG ExecV3 start", maxBlockNum)
 	execV3start := time.Now()
 
 	inMemExec := txc.Doms != nil
@@ -293,7 +292,7 @@ func ExecV3(ctx context.Context,
 	outputTxNum.Store(doms.TxNum())
 
 	defer func() {
-		logger.Info(fmt.Sprintf("[%s] ExecV3 done", execStage.LogPrefix()), "fromBlock", fromBlock, "toBlock", maxBlockNum, "time", time.Since(execV3start))
+		logger.Info(fmt.Sprintf("[%s] ExecV3 done", execStage.LogPrefix()), "fromBlock", fromBlock, "toBlock", maxBlockNum, "time", time.Since(execV3start), "useSilkworm", cfg.silkworm != nil, "inMem", inMemExec)
 	}()
 
 	if maxBlockNum < blockNum {
@@ -303,11 +302,6 @@ func ExecV3(ctx context.Context,
 	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.syncCfg.AlwaysGenerateChangesets
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
-	}
-
-	if maxBlockNum > blockNum+16 {
-		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
@@ -442,7 +436,7 @@ func ExecV3(ctx context.Context,
 
 	if maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", executor.domains().TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
+			"from", blockNum, "to", maxBlockNum, "fromTxNum", executor.domains().TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "useSilkworm", cfg.silkworm != nil, "inMem", inMemExec)
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
@@ -465,7 +459,7 @@ func ExecV3(ctx context.Context,
 	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
 
-	fmt.Println("JG ExecV3 Loop start", blockNum, "to", maxBlockNum)
+	// fmt.Println("JG ExecV3 Loop start", blockNum, "to", maxBlockNum)
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -498,7 +492,7 @@ Loop:
 		executor.domains().SetBlockNum(blockNum)
 
 		b, err = blockWithSenders(ctx, cfg.db, executor.tx(), blockReader, blockNum)
-		fmt.Println("JG block received", blockNum, b.Hash())
+		// fmt.Println("JG block received", blockNum, b.Hash())
 		if err != nil {
 			return err
 		}
@@ -668,7 +662,7 @@ Loop:
 				}
 
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(executor.tx())
-				progress.Log("", executor.readState(), nil, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+				progress.Log("progress", executor.readState(), nil, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 
 				//TODO: https://github.com/erigontech/erigon/issues/10724
 				//if executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {
@@ -684,6 +678,7 @@ Loop:
 					skipPostEvaluation || // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 					aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
 				if !needCalcRoot {
+					logger.Info("No need to calculate root hash", "size", executor.readState().SizeEstimate(), "threshold", commitThreshold)
 					break
 				}
 
@@ -885,7 +880,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		header.Root = common.BytesToHash(computedRootHash)
 		return true, nil
 	}
-	fmt.Println("JG computedRootHash", hexutil.Encode(computedRootHash), "header.Root", header.Root.Hex())
+	// fmt.Println("JG computedRootHash", hexutil.Encode(computedRootHash), "header.Root", header.Root.Hex())
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
 		return handleIncorrectRootHashError(header, applyTx, cfg, e, maxBlockNum, logger, u)

@@ -36,7 +36,6 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	btree2 "github.com/tidwall/btree"
@@ -185,7 +184,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*BufferedSharedDomains, erro
 		return nil, err
 	}
 
-	fmt.Println("JG Create", sd.ObjectInfo())
+	// fmt.Println("JG Create", sd.ObjectInfo())
 
 	return sd, nil
 }
@@ -778,11 +777,11 @@ func (sd *BufferedSharedDomains) SetTrace(b bool) {
 }
 
 func (sd *BufferedSharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	fmt.Println("JG ComputeCommitment", "calculate")
-	uSize := sd.sdCtx.updates.Size()
+	// fmt.Println("JG ComputeCommitment", "calculate")
+	// uSize := sd.sdCtx.updates.Size()
 	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
-	fmt.Println("JG ComputeCommitment", "updates", uSize, "rootHash", hexutil.Encode(rootHash))
-	return
+	// fmt.Println("JG ComputeCommitment", "updates", uSize, "rootHash", hexutil.Encode(rootHash))
+	return rootHash, err
 }
 
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
@@ -934,7 +933,7 @@ func (sd *BufferedSharedDomains) IterateStoragePrefix(prefix []byte, it func(k [
 }
 
 func (sd *BufferedSharedDomains) Close() {
-	fmt.Println("JG", sd.ObjectInfo(), "Close")
+	// fmt.Println("JG", sd.ObjectInfo(), "Close")
 	sd.SetBlockNum(0)
 	if sd.aggTx != nil {
 		sd.SetTxNum(0)
@@ -955,7 +954,7 @@ func (sd *BufferedSharedDomains) Close() {
 }
 
 func (sd *BufferedSharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
-	fmt.Println("JG", sd.ObjectInfo(), "Flush")
+	// fmt.Println("JG", sd.ObjectInfo(), "Flush")
 	for key, changeset := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
 		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
@@ -1016,19 +1015,19 @@ func (sd *BufferedSharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 // TemporalDomain satisfaction
 func (sd *BufferedSharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
-		fmt.Println("JG", sd.ObjectInfo(), "GetLatest", domain.String(), "LatestCommitment")
+		// fmt.Println("JG", sd.ObjectInfo(), "GetLatest", domain.String(), "LatestCommitment")
 		return sd.LatestCommitment(k)
 	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
-		fmt.Println("JG", sd.ObjectInfo(), "GetLatest cached", domain.String(), hexutil.Encode(k), hexutil.Encode(v), prevStep)
+		// fmt.Println("JG", sd.ObjectInfo(), "GetLatest cached", domain.String(), hexutil.Encode(k), hexutil.Encode(v), prevStep)
 		return v, prevStep, nil
 	}
 	v, step, _, err = sd.aggTx.GetLatest(domain, k, sd.roTx)
 	if err != nil {
-		fmt.Println("JG", sd.ObjectInfo(), "GetLatest error", domain.String(), err)
+		// fmt.Println("JG", sd.ObjectInfo(), "GetLatest error", domain.String(), err)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
-	fmt.Println("JG", sd.ObjectInfo(), "GetLatest", domain.String(), hexutil.Encode(k), hexutil.Encode(v), step)
+	// fmt.Println("JG", sd.ObjectInfo(), "GetLatest", domain.String(), hexutil.Encode(k), hexutil.Encode(v), step)
 	return v, step, nil
 }
 
@@ -1057,7 +1056,7 @@ func (sd *BufferedSharedDomains) GetAsOfFile(domain kv.Domain, k, k2 []byte, ofM
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *BufferedSharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
-	fmt.Println("JG", sd.ObjectInfo(), "DomainPut", domain.String(), hexutil.Encode(k1), hexutil.Encode(k2), hexutil.Encode(val), hexutil.Encode(prevVal), prevStep)
+	// fmt.Println("JG", sd.ObjectInfo(), "DomainPut", domain.String(), hexutil.Encode(k1), hexutil.Encode(k2), hexutil.Encode(val), hexutil.Encode(prevVal), prevStep)
 	if val == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
@@ -1384,7 +1383,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 		return
 	}
 
-	fmt.Println("JG TouchKey", d, hexutil.Encode(toBytesZeroCopy(key)), hexutil.Encode(val))
+	// fmt.Println("JG TouchKey", d, hexutil.Encode(toBytesZeroCopy(key)), hexutil.Encode(val))
 
 	switch d {
 	case kv.AccountsDomain:
