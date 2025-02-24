@@ -1493,11 +1493,13 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
-		var p []byte
+		pv, ps := []byte{}, uint64(0)
 		for i := 0; i < len(updates); i++ {
 			writer.SetTxNum(updates[i].txNum)
-			writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
-			p = common.Copy(updates[i].value)
+			if i > 0 {
+				pv, ps = updates[i-1].value, updates[i-1].txNum/d.aggregationStep
+			}
+			writer.PutWithPrev([]byte(key), nil, updates[i].value, pv, ps)
 		}
 	}
 	writer.SetTxNum(totalTx)
@@ -1542,8 +1544,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 }
 
 func TestDomainRange(t *testing.T) {
-	stepSize := uint64(25)
-	db, d := testDbAndDomainOfStep(t, stepSize, log.New())
+	db, d := testDbAndDomainOfStep(t, 25, log.New())
 	require, ctx := require.New(t), context.Background()
 
 	tx, err := db.BeginRw(ctx)
@@ -1573,10 +1574,14 @@ func TestDomainRange(t *testing.T) {
 	keysLatest := make(map[string]struct{})
 
 	for key, updates := range data {
-		p := []byte{}
-		ps := uint64(0)
+		pv, ps := []byte{}, uint64(0)
 		for i := 0; i < len(updates); i++ {
 			writer.SetTxNum(updates[i].txNum)
+			if i > 0 {
+				pv, ps = updates[i-1].value, updates[i-1].txNum/d.aggregationStep
+			}
+			err = writer.PutWithPrev([]byte(key), nil, updates[i].value, pv, ps)
+			require.NoError(err)
 
 			if updates[i].txNum >= cutoffTxnum && len(updates[i].value) > 0 {
 				keysLeftAfterCutoff[key] = struct{}{}
@@ -1585,11 +1590,6 @@ func TestDomainRange(t *testing.T) {
 			if len(updates[i].value) == 0 {
 				delete(keysLatest, key)
 			}
-
-			err = writer.PutWithPrev([]byte(key), nil, updates[i].value, p, ps)
-			require.NoError(err)
-			p = common.Copy(updates[i].value)
-			ps = updates[i].txNum / stepSize
 		}
 	}
 	writer.SetTxNum(totalTx)
