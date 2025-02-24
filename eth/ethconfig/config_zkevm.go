@@ -48,6 +48,8 @@ type Zk struct {
 	SequencerResequence                    bool
 	SequencerResequenceStrict              bool
 	SequencerResequenceReuseL1InfoIndex    bool
+	SequencerDecodedTxCacheSize            int
+	SequencerDecodedTxCacheTTL             time.Duration
 	ExecutorUrls                           []string
 	ExecutorStrictMode                     bool
 	ExecutorRequestTimeout                 time.Duration
