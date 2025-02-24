@@ -104,19 +104,19 @@ Fetch the devnet logger - which can be used for logging step processing.
 func SelectNode(ctx context.Context, selector ...interface{}) 
 ```
 
-This method selects a node on the network the selector argument can be either an `int` index or an implementation of the `network.NodeSelector` interface.  If no selector is specified a either the `current node` will be returned or a node will be selected at random from the network.
+This method selects a node on the network the selector argument can be either an `int` index or an implementation of the `network.NodeSelector` interface.  If no selector is specified an either the `current node` will be returned or a node will be selected at random from the network.
 
 ```go
 func SelectMiner(ctx context.Context, selector ...interface{})
 ```
 
-This method selects a mining node on the network the selector argument can be either an `int` index or an implementation of the `network.NodeSelector` interface.  If no selector is specified a either the `current node` will be returned or a miner will be selected at random from the network.
+This method selects a mining node on the network the selector argument can be either an `int` index or an implementation of the `network.NodeSelector` interface.  If no selector is specified an either the `current node` will be returned or a miner will be selected at random from the network.
 
 ```go
 func SelectNonMiner(ctx context.Context, selector ...interface{})
 ```
 
-This method selects a non mining node on the network the selector argument can be either an `int` index or an implementation of the `network.NodeSelector` interface.  If no selector is specified a either the `current node` will be returned or a non-miner will be selected at random from the network.
+This method selects a non mining node on the network the selector argument can be either an `int` index or an implementation of the `network.NodeSelector` interface.  If no selector is specified an either the `current node` will be returned or a non-miner will be selected at random from the network.
 
 ```go
 func WithCurrentNode(ctx context.Context, selector interface{}) Context

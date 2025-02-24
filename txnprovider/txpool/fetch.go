@@ -33,7 +33,7 @@ import (
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	rlp "github.com/erigontech/erigon-lib/rlp2"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
@@ -43,7 +43,6 @@ import (
 type Fetch struct {
 	ctx                      context.Context // Context used for cancellation and closing of the fetcher
 	pool                     Pool            // Transaction pool implementation
-	coreDB                   kv.RoDB
 	db                       kv.RwDB
 	stateChangesClient       StateChangesClient
 	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
@@ -62,27 +61,32 @@ type StateChangesClient interface {
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
 // SentryClient here is an interface, it is suitable for mocking in tests (mock will need
 // to implement all the functions of the SentryClient interface).
-func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool, stateChangesClient StateChangesClient, coreDB kv.RoDB, db kv.RwDB,
-	chainID uint256.Int, logger log.Logger) *Fetch {
+func NewFetch(
+	ctx context.Context,
+	sentryClients []sentry.SentryClient,
+	pool Pool,
+	stateChangesClient StateChangesClient,
+	db kv.RwDB,
+	chainID uint256.Int,
+	logger log.Logger,
+	opts ...Option,
+) *Fetch {
+	options := applyOpts(opts...)
 	f := &Fetch{
 		ctx:                  ctx,
 		sentryClients:        sentryClients,
 		pool:                 pool,
-		coreDB:               coreDB,
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
 		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), //TODO: change ctx if rules changed
 		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
+		wg:                   options.p2pFetcherWg,
 		logger:               logger,
 	}
 	f.pooledTxnsParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
 	f.stateChangesParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
 
 	return f
-}
-
-func (f *Fetch) SetWaitGroup(wg *sync.WaitGroup) {
-	f.wg = wg
 }
 
 func (f *Fetch) threadSafeParsePooledTxn(cb func(*TxnParseContext) error) error {

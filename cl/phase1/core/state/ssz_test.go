@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	_ "embed"
 	"testing"
 
@@ -53,17 +52,4 @@ func TestBeaconStatePhase0EncodingDecoding(t *testing.T) {
 	root, err := state.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash(root), libcommon.HexToHash("0xf23b6266af40567516afeee250c1f8c06e9800f34a990a210604c380b506e053"))
-	// Lets test the caches too
-	var w bytes.Buffer
-	require.NoError(t, state.EncodeCaches(&w))
-	values1 := state.activeValidatorsCache.Values()
-	keys1 := state.activeValidatorsCache.Keys()
-	values2 := state.shuffledSetsCache.Values()
-	keys2 := state.shuffledSetsCache.Keys()
-
-	require.NoError(t, state.DecodeCaches(&w))
-	require.Equal(t, values1, state.activeValidatorsCache.Values())
-	require.Equal(t, keys1, state.activeValidatorsCache.Keys())
-	require.Equal(t, values2, state.shuffledSetsCache.Values())
-	require.Equal(t, keys2, state.shuffledSetsCache.Keys())
 }

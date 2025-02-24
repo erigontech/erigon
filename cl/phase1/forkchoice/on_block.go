@@ -23,6 +23,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -66,7 +67,8 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 		return err
 	}
 
-	return ethutils.ValidateBlobs(block.BlobGasUsed, cfg.MaxBlobGasPerBlock, cfg.MaxBlobsPerBlock, expectedBlobHashes, &transactions)
+	maxBlobsPerBlock := cfg.MaxBlobsPerBlockByVersion(block.Version())
+	return ethutils.ValidateBlobs(block.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
 }
 
 func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint64) {
@@ -113,7 +115,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Check if blob data is available
 	if block.Version() >= clparams.DenebVersion && checkDataAvaiability {
 		if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
-			if err == ErrEIP4844DataNotAvailable {
+			if errors.Is(err, ErrEIP4844DataNotAvailable) {
 				return err
 			}
 			return fmt.Errorf("OnBlock: data is not available for block %x: %v", libcommon.Hash(blockRoot), err)
@@ -123,15 +125,23 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 
+	var executionRequestsList []hexutil.Bytes = nil
+	if block.Version() >= clparams.ElectraVersion {
+		executionRequestsList = block.Block.Body.GetExecutionRequestsList()
+	}
+
+	isVerifiedExecutionPayload := f.verifiedExecutionPayload.Contains(blockRoot)
 	startEngine := time.Now()
-	if newPayload && f.engine != nil {
+	if newPayload && f.engine != nil && !isVerifiedExecutionPayload {
 		if block.Version() >= clparams.DenebVersion {
 			if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block.Body.ExecutionPayload, block.Block.Body.BlobKzgCommitments); err != nil {
 				return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
 			}
 		}
 		timeStartExec := time.Now()
-		payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes)
+		payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+		monitor.ObserveNewPayloadTime(timeStartExec)
+		log.Debug("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 		switch payloadStatus {
 		case execution_client.PayloadStatusNotValidated:
 			log.Debug("OnBlock: block is not validated yet", "block", libcommon.Hash(blockRoot))
@@ -141,7 +151,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 		case execution_client.PayloadStatusInvalidated:
 			log.Warn("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot), "err", err)
-			log.Debug("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot))
 			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			// remove from optimistic candidate
 			if err := f.optimisticStore.InvalidateBlock(block.Block); err != nil {
@@ -154,11 +163,11 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
 				return fmt.Errorf("failed to validate block in optimistic store: %v", err)
 			}
+			f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
 		}
 		if err != nil {
 			return fmt.Errorf("newPayload failed: %v", err)
 		}
-		monitor.ObserveExecutionTime(timeStartExec)
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
 	startStateProcess := time.Now()
@@ -260,11 +269,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		Block:               blockRoot,
 		ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
 	})
-	if f.validatorMonitor != nil {
-		f.validatorMonitor.OnNewBlock(lastProcessedState, block.Block)
-	}
 
-	log.Debug("OnBlock", "elapsed", time.Since(start))
+	if !isVerifiedExecutionPayload {
+		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
+	}
 	return nil
 }
 

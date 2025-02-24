@@ -17,8 +17,6 @@
 package statechange
 
 import (
-	"runtime"
-
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -34,7 +32,7 @@ func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint
 		flagsUnslashedIndiciesSet[i] = make([]bool, validatorSet.Length())
 	}
 
-	threading.ParallellForLoop(runtime.NumCPU(), 0, validatorSet.Length(), func(validatorIndex int) error {
+	threading.ParallellForLoop(1, 0, validatorSet.Length(), func(validatorIndex int) error {
 		for i := range weights {
 			flagsUnslashedIndiciesSet[i][validatorIndex] = state.IsUnslashedParticipatingIndex(validatorSet, previousEpochParticipation, previousEpoch, uint64(validatorIndex), i)
 		}
@@ -75,6 +73,11 @@ func ProcessEpoch(s abstract.BeaconState) error {
 	}
 
 	ProcessEth1DataReset(s)
+	if s.Version() >= clparams.ElectraVersion {
+		ProcessPendingDeposits(s)
+		ProcessPendingConsolidations(s)
+	}
+
 	if err := ProcessEffectiveBalanceUpdates(s); err != nil {
 		return err
 	}

@@ -95,7 +95,10 @@ func enable1884(jt *JumpTable) {
 }
 
 func opSelfBalance(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
-	balance := interpreter.evm.IntraBlockState().GetBalance(callContext.Contract.Address())
+	balance, err := interpreter.evm.IntraBlockState().GetBalance(callContext.Contract.Address())
+	if err != nil {
+		return nil, err
+	}
 	callContext.Stack.Push(balance)
 	return nil, nil
 }
@@ -323,9 +326,6 @@ func enable7516(jt *JumpTable) {
 }
 
 func enable7702(jt *JumpTable) {
-	jt[EXTCODECOPY].dynamicGas = gasExtCodeCopyEIP7702
-	jt[EXTCODESIZE].dynamicGas = gasEip7702CodeCheck
-	jt[EXTCODEHASH].dynamicGas = gasEip7702CodeCheck
 	jt[CALL].dynamicGas = gasCallEIP7702
 	jt[CALLCODE].dynamicGas = gasCallCodeEIP7702
 	jt[STATICCALL].dynamicGas = gasStaticCallEIP7702

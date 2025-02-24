@@ -152,14 +152,14 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	}
 
 	// [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer -- i.e. validate that len(body.signed_beacon_block.message.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
-	if msg.Block.Body.BlobKzgCommitments.Len() > int(b.beaconCfg.MaxBlobsPerBlock) {
+	blockVersion := b.beaconCfg.GetCurrentStateVersion(msg.Block.Slot / b.beaconCfg.SlotsPerEpoch)
+	if msg.Block.Body.BlobKzgCommitments.Len() > int(b.beaconCfg.MaxBlobsPerBlockByVersion(blockVersion)) {
 		return ErrInvalidCommitmentsCount
 	}
-
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
-		if err == forkchoice.ErrEIP4844DataNotAvailable {
+		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) {
 			b.scheduleBlockForLaterProcessing(msg)
 			return ErrIgnore
 		}
@@ -202,20 +202,22 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 
 // processAndStoreBlock processes and stores a block
 func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+
+	if _, ok := b.forkchoiceStore.GetHeader(blockRoot); ok {
+		return nil
+	}
+
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
 	}); err != nil {
 		return err
 	}
-	isNewPayload := true
-	blockRoot, err := block.Block.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if _, exist := b.forkchoiceStore.GetHeader(blockRoot); exist {
-		isNewPayload = false
-	}
-	if err := b.forkchoiceStore.OnBlock(ctx, block, isNewPayload, true, true); err != nil {
+
+	if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
 		return err
 	}
 	go b.importBlockOperations(block)

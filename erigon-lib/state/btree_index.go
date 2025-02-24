@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
@@ -992,6 +993,10 @@ func (b *BtIndex) newCursor(k, v []byte, d uint64, g *seg.Reader) *Cursor {
 	c.key = append(c.key[:0], k...)
 	c.value = append(c.value[:0], v...)
 	return c
+}
+
+func (b *BtIndex) DataHandle() unsafe.Pointer {
+	return unsafe.Pointer(&b.data[0])
 }
 
 func (b *BtIndex) Size() int64 { return b.size }

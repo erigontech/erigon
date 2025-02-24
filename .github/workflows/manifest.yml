@@ -31,9 +31,9 @@ jobs:
           go-version: '1.23'
       - run: make downloader
       - run: echo $ModModified
-      - run: ./build/bin/downloader manifest-verify --chain mainnet
-      - run: ./build/bin/downloader manifest-verify --chain bor-mainnet
-      - run: ./build/bin/downloader manifest-verify --chain gnosis
-      - run: ./build/bin/downloader manifest-verify --chain chiado
-      - run: ./build/bin/downloader manifest-verify --chain sepolia
-      - run: ./build/bin/downloader manifest-verify --chain amoy
+      - run: ./build/bin/downloader manifest-verify --chain mainnet     --webseed 'https://erigon3-v1-snapshots-mainnet.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain bor-mainnet --webseed 'https://erigon3-v1-snapshots-bor-mainnet.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain gnosis      --webseed 'https://erigon3-v1-snapshots-gnosis.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain chiado      --webseed 'https://erigon3-v1-snapshots-chiado.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain sepolia     --webseed 'https://erigon3-v1-snapshots-sepolia.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain amoy        --webseed 'https://erigon3-v1-snapshots-amoy.erigon.network'

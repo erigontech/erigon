@@ -29,12 +29,12 @@ import (
 	"go.uber.org/mock/gomock"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 	"github.com/erigontech/erigon/turbo/testlog"
 )
 
@@ -286,7 +286,7 @@ func (ptt *peerTrackerTest) mockPeerProvider(peerReply *sentryproto.PeersReply) 
 func (ptt *peerTrackerTest) mockPeerEvents(events <-chan *sentryproto.PeerEvent) {
 	ptt.peerEventRegistrar.EXPECT().
 		RegisterPeerEventObserver(gomock.Any()).
-		DoAndReturn(func(observer polygoncommon.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
+		DoAndReturn(func(observer event.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
 			ctx, cancel := context.WithCancel(context.Background())
 			go func() {
 				for {
@@ -308,7 +308,7 @@ func (ptt *peerTrackerTest) mockNewBlockHashesEvents(events <-chan *DecodedInbou
 	ptt.peerEventRegistrar.EXPECT().
 		RegisterNewBlockHashesObserver(gomock.Any()).
 		DoAndReturn(
-			func(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc {
+			func(observer event.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc {
 				ctx, cancel := context.WithCancel(context.Background())
 				go func() {
 					for {
@@ -331,7 +331,7 @@ func (ptt *peerTrackerTest) mockNewBlockEvents(events <-chan *DecodedInboundMess
 	ptt.peerEventRegistrar.EXPECT().
 		RegisterNewBlockObserver(gomock.Any()).
 		DoAndReturn(
-			func(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc {
+			func(observer event.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc {
 				ctx, cancel := context.WithCancel(context.Background())
 				go func() {
 					for {

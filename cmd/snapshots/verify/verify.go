@@ -124,12 +124,10 @@ func verify(cliCtx *cli.Context) error {
 		}
 
 	case sync.RemoteFs:
-		if rcCli == nil {
-			rcCli, err = downloader.NewRCloneClient(logger)
+		rcCli, err = downloader.NewRCloneClient(logger)
 
-			if err != nil {
-				return err
-			}
+		if err != nil {
+			return err
 		}
 
 		if err = sync.CheckRemote(rcCli, src.Src); err != nil {

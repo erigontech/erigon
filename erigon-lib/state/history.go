@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -69,7 +70,7 @@ type History struct {
 	_visibleFiles []visibleFile
 }
 
-type rangeDomainIntegrityChecker func(d kv.Domain, fromStep, toStep uint64) bool
+type rangeDomainIntegrityChecker func(d kv.Domain, dirs datadir.Dirs, fromStep, toStep uint64) bool
 type rangeIntegrityChecker func(fromStep, toStep uint64) bool
 
 type histCfg struct {
@@ -93,12 +94,12 @@ type histCfg struct {
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	historyLargeValues bool
 	snapshotsDisabled  bool // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
-	withLocalityIndex  bool
 	historyDisabled    bool // skip all write operations to this History (even in DB)
 
-	indexList     idxList
+	indexList     Accessors
 	compressorCfg seg.Cfg             // compression settings for history files
 	compression   seg.FileCompression // defines type of compression for history files
+	historyIdx    kv.InvertedIdx
 
 	//TODO: re-visit this check - maybe we don't need it. It's about kill in the middle of merge
 	integrity rangeIntegrityChecker
@@ -108,7 +109,7 @@ func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
-		cfg.indexList = withHashMap
+		cfg.indexList = AccessorHashMap
 	}
 	if cfg.iiCfg.filenameBase == "" {
 		cfg.iiCfg.filenameBase = cfg.filenameBase
@@ -137,8 +138,11 @@ func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
 	return &h, nil
 }
 
+func (h *History) vFileName(fromStep, toStep uint64) string {
+	return fmt.Sprintf("v1-%s.%d-%d.v", h.filenameBase, fromStep, toStep)
+}
 func (h *History) vFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(h.dirs.SnapHistory, fmt.Sprintf("v1-%s.%d-%d.v", h.filenameBase, fromStep, toStep))
+	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
 }
 func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
@@ -170,6 +174,12 @@ func (h *History) openFolder() error {
 }
 
 func (h *History) scanDirtyFiles(fileNames []string) {
+	if h.filenameBase == "" {
+		panic("assert: empty `filenameBase`")
+	}
+	if h.aggregationStep == 0 {
+		panic("assert: empty `aggregationStep`")
+	}
 	for _, dirtyFile := range scanDirtyFiles(fileNames, h.aggregationStep, h.filenameBase, "v", h.logger) {
 		startStep, endStep := dirtyFile.startTxNum/h.aggregationStep, dirtyFile.endTxNum/h.aggregationStep
 		if h.integrity != nil && !h.integrity(startStep, endStep) {
@@ -284,6 +294,10 @@ func (h *History) closeWhatNotInList(fNames []string) {
 	}
 }
 
+func (h *History) Tables() []string {
+	return append([]string{h.keysTable, h.valuesTable}, h.InvertedIndex.Tables()...)
+}
+
 func (h *History) Close() {
 	if h == nil {
 		return
@@ -301,22 +315,15 @@ func (ht *HistoryRoTx) Files() (res []string) {
 	return append(res, ht.iit.Files()...)
 }
 
-func (h *History) missedAccessors() (l []*filesItem) {
-	h.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
-		for _, item := range items {
-			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-			exists, err := dir.FileExist(h.vAccessorFilePath(fromStep, toStep))
-			if err != nil {
-				_, fName := filepath.Split(h.vAccessorFilePath(fromStep, toStep))
-				h.logger.Warn("[agg] History.missedAccessors", "err", err, "f", fName)
-			}
-			if !exists {
-				l = append(l, item)
-			}
+func (h *History) missedMapAccessors() (l []*filesItem) {
+	if !h.indexList.Has(AccessorHashMap) {
+		return nil
+	}
+	return fileItemsWithMissingAccessors(h.dirtyFiles, h.aggregationStep, func(fromStep, toStep uint64) []string {
+		return []string{
+			h.vAccessorFilePath(fromStep, toStep),
 		}
-		return true
 	})
-	return l
 }
 
 func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
@@ -347,8 +354,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   hist.Count(),
 		Enums:      false,
-		BucketSize: 2000,
-		LeafSize:   8,
+		BucketSize: recsplit.DefaultBucketSize,
+		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     h.dirs.Tmp,
 		IndexFile:  historyIdxPath,
 		Salt:       h.salt,
@@ -425,8 +432,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps)
-	missedFiles := h.missedAccessors()
-	for _, item := range missedFiles {
+	for _, item := range h.missedMapAccessors() {
 		item := item
 		g.Go(func() error {
 			return h.buildVi(ctx, item, ps)
@@ -1075,7 +1081,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		}
 
 		if ht.h.historyLargeValues {
-			seek = append(append(seek[:0], k...), txnm...)
+			seek = append(bytes.Clone(k), txnm...)
 			if err := valsC.Delete(seek); err != nil {
 				return err
 			}
@@ -1195,7 +1201,7 @@ func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	v, ok, err := ht.historySeekInFiles(key, txNum)
 	if err != nil {
-		return nil, ok, err
+		return nil, false, err
 	}
 	if ok {
 		return v, true, nil
@@ -1208,7 +1214,7 @@ func (ht *HistoryRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if ht.valsC != nil {
 		return ht.valsC, nil
 	}
-	ht.valsC, err = tx.Cursor(ht.h.valuesTable)
+	ht.valsC, err = tx.Cursor(ht.h.valuesTable) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
@@ -1218,7 +1224,7 @@ func (ht *HistoryRoTx) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
 	if ht.valsCDup != nil {
 		return ht.valsCDup, nil
 	}
-	ht.valsCDup, err = tx.CursorDupSort(ht.h.valuesTable)
+	ht.valsCDup, err = tx.CursorDupSort(ht.h.valuesTable) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}

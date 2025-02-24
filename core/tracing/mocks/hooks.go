@@ -12,11 +12,11 @@ package mocks
 import (
 	reflect "reflect"
 
-	uint256 "github.com/holiman/uint256"
 	chain "github.com/erigontech/erigon-lib/chain"
 	common "github.com/erigontech/erigon-lib/common"
 	tracing "github.com/erigontech/erigon/core/tracing"
 	types "github.com/erigontech/erigon/core/types"
+	uint256 "github.com/holiman/uint256"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -280,7 +280,7 @@ func NewMocktracer(ctrl *gomock.Controller) *Mocktracer {
 
 func (m *Mocktracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnTxStart: m.TxStartHook,
+		OnTxStart:   m.TxStartHook,
 		OnTxEnd:     m.TxEndHook,
 		OnEnter:     m.EnterHook,
 		OnExit:      m.ExitHook,

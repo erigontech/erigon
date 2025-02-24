@@ -110,10 +110,6 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, be
 	return block
 }
 
-func (b *Eth1Block) SetVersion(version clparams.StateVersion) {
-	b.version = version
-}
-
 func (*Eth1Block) Static() bool {
 	return false
 }
@@ -310,7 +306,7 @@ func (b *Eth1Block) getSchema() []interface{} {
 }
 
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.
-func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash) (*types.Header, error) {
+func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash, executionReqHash libcommon.Hash) (*types.Header, error) {
 	// Reverse the order of the bytes in the BaseFeePerGas array and convert it to a big integer.
 	reversedBaseFeePerGas := libcommon.Copy(b.BaseFeePerGas[:])
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
@@ -330,7 +326,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash) (*types.Header, error)
 		*withdrawalsHash = types.DeriveSha(types.Withdrawals(withdrawals))
 	}
 	if b.version < clparams.DenebVersion {
-		log.Warn("ParentRoot is nil", "parentRoot", parentRoot, "version", b.version)
+		log.Debug("ParentRoot is nil", "parentRoot", parentRoot, "version", b.version)
 		parentRoot = nil
 	}
 
@@ -360,6 +356,10 @@ func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash) (*types.Header, error)
 		header.BlobGasUsed = &blobGasUsed
 		excessBlobGas := b.ExcessBlobGas
 		header.ExcessBlobGas = &excessBlobGas
+	}
+
+	if b.version >= clparams.ElectraVersion {
+		header.RequestsHash = &executionReqHash
 	}
 
 	// If the header hash does not match the block hash, return an error.

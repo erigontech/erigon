@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
@@ -87,14 +86,15 @@ type ForkChoiceStore struct {
 	unrealizedJustifiedCheckpoint atomic.Value
 	unrealizedFinalizedCheckpoint atomic.Value
 
-	proposerBoostRoot     atomic.Value
-	headHash              libcommon.Hash
-	headSlot              uint64
-	genesisTime           uint64
-	genesisValidatorsRoot libcommon.Hash
-	weights               map[libcommon.Hash]uint64
-	headSet               map[libcommon.Hash]struct{}
-	hotSidecars           map[libcommon.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
+	proposerBoostRoot        atomic.Value
+	headHash                 libcommon.Hash
+	headSlot                 uint64
+	genesisTime              uint64
+	genesisValidatorsRoot    libcommon.Hash
+	weights                  map[libcommon.Hash]uint64
+	headSet                  map[libcommon.Hash]struct{}
+	hotSidecars              map[libcommon.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
+	verifiedExecutionPayload *lru.Cache[libcommon.Hash, struct{}]
 	// childrens
 	childrens sync.Map
 
@@ -135,7 +135,6 @@ type ForkChoiceStore struct {
 
 	ethClock                eth_clock.EthereumClock
 	optimisticStore         optimistic.OptimisticStore
-	validatorMonitor        monitor.ValidatorMonitor
 	probabilisticHeadGetter bool
 }
 
@@ -159,7 +158,6 @@ func NewForkChoiceStore(
 	emitters *beaconevents.EventEmitter,
 	syncedDataManager *synced_data.SyncedDataManager,
 	blobStorage blob_storage.BlobStorage,
-	validatorMonitor monitor.ValidatorMonitor,
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry,
 	probabilisticHeadGetter bool,
 ) (*ForkChoiceStore, error) {
@@ -171,6 +169,11 @@ func NewForkChoiceStore(
 	anchorCheckpoint := solid.Checkpoint{
 		Root:  anchorRoot,
 		Epoch: state2.Epoch(anchorState.BeaconState),
+	}
+
+	verifiedExecutionPayload, err := lru.New[libcommon.Hash, struct{}](1024)
+	if err != nil {
+		return nil, err
 	}
 
 	eth2Roots, err := lru.New[libcommon.Hash, libcommon.Hash](checkpointsPerCache)
@@ -227,33 +230,33 @@ func NewForkChoiceStore(
 	headSet := make(map[libcommon.Hash]struct{})
 	headSet[anchorRoot] = struct{}{}
 	f := &ForkChoiceStore{
-		forkGraph:               forkGraph,
-		equivocatingIndicies:    make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		latestMessages:          newLatestMessagesStore(anchorState.ValidatorLength()),
-		eth2Roots:               eth2Roots,
-		engine:                  engine,
-		operationsPool:          operationsPool,
-		beaconCfg:               anchorState.BeaconConfig(),
-		preverifiedSizes:        preverifiedSizes,
-		finalityCheckpoints:     finalityCheckpoints,
-		totalActiveBalances:     totalActiveBalances,
-		randaoMixesLists:        randaoMixesLists,
-		randaoDeltas:            randaoDeltas,
-		headSet:                 headSet,
-		weights:                 make(map[libcommon.Hash]uint64),
-		participation:           participation,
-		emitters:                emitters,
-		genesisTime:             anchorState.GenesisTime(),
-		syncedDataManager:       syncedDataManager,
-		nextBlockProposers:      nextBlockProposers,
-		genesisValidatorsRoot:   anchorState.GenesisValidatorsRoot(),
-		hotSidecars:             make(map[libcommon.Hash][]*cltypes.BlobSidecar),
-		blobStorage:             blobStorage,
-		ethClock:                ethClock,
-		optimisticStore:         optimistic.NewOptimisticStore(),
-		validatorMonitor:        validatorMonitor,
-		probabilisticHeadGetter: probabilisticHeadGetter,
-		publicKeysRegistry:      publicKeysRegistry,
+		forkGraph:                forkGraph,
+		equivocatingIndicies:     make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		latestMessages:           newLatestMessagesStore(anchorState.ValidatorLength()),
+		eth2Roots:                eth2Roots,
+		engine:                   engine,
+		operationsPool:           operationsPool,
+		beaconCfg:                anchorState.BeaconConfig(),
+		preverifiedSizes:         preverifiedSizes,
+		finalityCheckpoints:      finalityCheckpoints,
+		totalActiveBalances:      totalActiveBalances,
+		randaoMixesLists:         randaoMixesLists,
+		randaoDeltas:             randaoDeltas,
+		headSet:                  headSet,
+		weights:                  make(map[libcommon.Hash]uint64),
+		participation:            participation,
+		emitters:                 emitters,
+		genesisTime:              anchorState.GenesisTime(),
+		syncedDataManager:        syncedDataManager,
+		nextBlockProposers:       nextBlockProposers,
+		genesisValidatorsRoot:    anchorState.GenesisValidatorsRoot(),
+		hotSidecars:              make(map[libcommon.Hash][]*cltypes.BlobSidecar),
+		blobStorage:              blobStorage,
+		ethClock:                 ethClock,
+		optimisticStore:          optimistic.NewOptimisticStore(),
+		probabilisticHeadGetter:  probabilisticHeadGetter,
+		publicKeysRegistry:       publicKeysRegistry,
+		verifiedExecutionPayload: verifiedExecutionPayload,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)

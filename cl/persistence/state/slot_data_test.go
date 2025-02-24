@@ -21,25 +21,38 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/stretchr/testify/require"
 )
 
 func TestSlotData(t *testing.T) {
+	s, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	require.NoError(t, err)
 	m := &SlotData{
-		Version:                      clparams.CapellaVersion,
-		Eth1Data:                     &cltypes.Eth1Data{},
-		Eth1DepositIndex:             0,
-		NextWithdrawalIndex:          0,
-		NextWithdrawalValidatorIndex: 0,
-		Fork:                         &cltypes.Fork{Epoch: 12},
+		Version:                       clparams.ElectraVersion,
+		Eth1Data:                      &cltypes.Eth1Data{},
+		Eth1DepositIndex:              1,
+		NextWithdrawalIndex:           2,
+		NextWithdrawalValidatorIndex:  3,
+		DepositRequestsStartIndex:     4,
+		DepositBalanceToConsume:       5,
+		ExitBalanceToConsume:          6,
+		EarliestExitEpoch:             7,
+		ConsolidationBalanceToConsume: 8,
+		EarliestConsolidationEpoch:    9,
+		PendingDeposits:               solid.NewPendingDepositList(s.BeaconConfig()),
+		PendingPartialWithdrawals:     solid.NewPendingWithdrawalList(s.BeaconConfig()),
+		PendingConsolidations:         solid.NewPendingConsolidationList(s.BeaconConfig()),
+		Fork:                          &cltypes.Fork{Epoch: 12},
 	}
 	var b bytes.Buffer
 	if err := m.WriteTo(&b); err != nil {
 		t.Fatal(err)
 	}
 	m2 := &SlotData{}
-	if err := m2.ReadFrom(&b); err != nil {
+	if err := m2.ReadFrom(&b, s.BeaconConfig()); err != nil {
 		t.Fatal(err)
 	}
 

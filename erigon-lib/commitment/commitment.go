@@ -22,9 +22,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"math/bits"
 	"sort"
 	"strings"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 
@@ -33,12 +35,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 var (
@@ -137,7 +137,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 	default:
 
 		trie := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
-		tree := NewUpdates(mode, tmpdir, trie.hashAndNibblizeKey)
+		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	}
 }
@@ -347,11 +347,8 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 		}
 		bitset ^= bit
 	}
-	res := make([]byte, be.buf.Len())
-	copy(res, be.buf.Bytes())
-
 	//fmt.Printf("EncodeBranch [%x] size: %d\n", be.buf.Bytes(), be.buf.Len())
-	return res, lastNibble, nil
+	return be.buf.Bytes(), lastNibble, nil
 }
 
 func RetrieveCellNoop(nibble int, skip bool) (*cell, error) { return nil, nil }
@@ -1025,29 +1022,30 @@ func (t *Updates) Size() (updates uint64) {
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
-func (t *Updates) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []byte)) {
+func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, val []byte)) {
 	switch t.mode {
 	case ModeUpdate:
 		pivot, updated := &KeyUpdate{plainKey: key, update: new(Update)}, false
 
 		t.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
-			if bytes.Equal(item.plainKey, pivot.plainKey) {
+			if item.plainKey == pivot.plainKey {
 				fn(item, val)
 				updated = true
 			}
 			return false
 		})
 		if !updated {
-			pivot.hashedKey = t.hasher(pivot.plainKey)
+			pivot.hashedKey = t.hasher(toBytesZeroCopy(pivot.plainKey))
 			fn(pivot, val)
 			t.tree.ReplaceOrInsert(pivot)
 		}
 	case ModeDirect:
-		if _, ok := t.keys[string(key)]; !ok {
-			if err := t.etl.Collect(t.hasher(key), key); err != nil {
+		if _, ok := t.keys[key]; !ok {
+			keyBytes := toBytesZeroCopy(key)
+			if err := t.etl.Collect(t.hasher(keyBytes), keyBytes); err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
-			t.keys[string(key)] = struct{}{}
+			t.keys[key] = struct{}{}
 		}
 	default:
 	}
@@ -1061,21 +1059,26 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	if c.update.Flags&DeleteUpdate != 0 {
 		c.update.Flags = 0 // also could invert with ^ but 0 is just a reset
 	}
-	nonce, balance, chash := types.DecodeAccountBytesV3(val)
-	if c.update.Nonce != nonce {
-		c.update.Nonce = nonce
+
+	acc := accounts.Account{}
+	err := accounts.DeserialiseV3(&acc, val)
+	if err != nil {
+		panic(err)
+	}
+	if c.update.Nonce != acc.Nonce {
+		c.update.Nonce = acc.Nonce
 		c.update.Flags |= NonceUpdate
 	}
-	if !c.update.Balance.Eq(balance) {
-		c.update.Balance.Set(balance)
+	if !c.update.Balance.Eq(&acc.Balance) {
+		c.update.Balance.Set(&acc.Balance)
 		c.update.Flags |= BalanceUpdate
 	}
-	if !bytes.Equal(chash, c.update.CodeHash[:]) {
-		if len(chash) == 0 {
+	if !bytes.Equal(acc.CodeHash.Bytes(), c.update.CodeHash[:]) {
+		if len(acc.CodeHash.Bytes()) == 0 {
 			copy(c.update.CodeHash[:], EmptyCodeHash)
 		} else {
 			c.update.Flags |= CodeUpdate
-			copy(c.update.CodeHash[:], chash)
+			copy(c.update.CodeHash[:], acc.CodeHash.Bytes())
 		}
 	}
 }
@@ -1139,7 +1142,7 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 			default:
 			}
 
-			if err := fn(item.hashedKey, item.plainKey, item.update); err != nil {
+			if err := fn(item.hashedKey, toBytesZeroCopy(item.plainKey), item.update); err != nil {
 				return false
 			}
 			return true
@@ -1165,13 +1168,13 @@ func (t *Updates) Reset() {
 }
 
 type KeyUpdate struct {
-	plainKey  []byte
+	plainKey  string
 	hashedKey []byte
 	update    *Update
 }
 
 func keyUpdateLessFn(i, j *KeyUpdate) bool {
-	return bytes.Compare(i.plainKey, j.plainKey) < 0
+	return i.plainKey < j.plainKey
 }
 
 type UpdateFlags uint8
@@ -1218,7 +1221,7 @@ func (u *Update) Reset() {
 	u.Balance.Clear()
 	u.Nonce = 0
 	u.StorageLen = 0
-	copy(u.CodeHash[:], EmptyCodeHash)
+	u.CodeHash = EmptyCodeHashArray
 }
 
 func (u *Update) Merge(b *Update) {
@@ -1349,3 +1352,6 @@ func (u *Update) String() string {
 	}
 	return sb.String()
 }
+
+func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) } //nolint
+func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }

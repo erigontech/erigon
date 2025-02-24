@@ -49,7 +49,7 @@ type Snapshot struct {
 func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	// init chain db
 	ctx := context.Background()
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 	}
 
 	ctx := context.Background()
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +146,7 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 	// init chain db
 	ctx := context.Background()
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +195,7 @@ func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error) {
 	// init chain db
 	ctx := context.Background()
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -329,12 +329,6 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	}
 	defer tx.Rollback()
 
-	service := whitelist.GetWhitelistingService()
-
-	if service == nil {
-		return false, errors.New("only available in Bor engine")
-	}
-
 	//Confirmation of 16 blocks on the endblock
 	tipConfirmationBlockNr := endBlockNr + uint64(16)
 
@@ -352,21 +346,26 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 
 	localEndBlockHash := localEndBlock.Hash().String()
 
-	isLocked := service.LockMutex(endBlockNr)
+	// TODO whitelisting service is pending removal - https://github.com/erigontech/erigon/issues/12855
+	if service := whitelist.GetWhitelistingService(); service != nil {
+		isLocked := service.LockMutex(endBlockNr)
 
-	if !isLocked {
-		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
-		return false, errors.New("whitelisted number or locked sprint number is more than the received end block number")
+		if !isLocked {
+			service.UnlockMutex(false, "", endBlockNr, common.Hash{})
+			return false, errors.New("whitelisted number or locked sprint number is more than the received end block number")
+		}
+
+		if localEndBlockHash != hash {
+			service.UnlockMutex(false, "", endBlockNr, common.Hash{})
+			return false, fmt.Errorf("hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
+		}
+
+		service.UnlockMutex(true, milestoneId, endBlockNr, localEndBlock.Hash())
+
+		return true, nil
 	}
 
-	if localEndBlockHash != hash {
-		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
-		return false, fmt.Errorf("hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
-	}
-
-	service.UnlockMutex(true, milestoneId, endBlockNr, localEndBlock.Hash())
-
-	return true, nil
+	return localEndBlockHash == hash, nil
 }
 
 type BlockSigners struct {
@@ -656,7 +655,7 @@ func snapshot(ctx context.Context, api *BorImpl, db kv.Tx, borDb kv.Tx, header *
 	number := header.Number.Uint64()
 	hash := header.Hash()
 
-	for snap == nil {
+	for snap == nil { //nolint:govet
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%checkpointInterval == 0 {
 			if s, err := loadSnapshot(api, db, borDb, hash); err == nil {

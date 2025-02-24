@@ -49,6 +49,10 @@ var (
 	// errStopToken is an internal token indicating interpreter loop termination,
 	// never returned to outside callers.
 	errStopToken = errors.New("stop token")
+	//
+	// ErrIntraBlockStateFailed indicates a fatal error when processing IBS
+	// requests
+	ErrIntraBlockStateFailed = errors.New("ibs fatal error")
 )
 
 // ErrStackUnderflow wraps an evm error when the items on the stack less

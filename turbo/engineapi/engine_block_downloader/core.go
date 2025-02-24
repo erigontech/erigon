@@ -88,7 +88,7 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload lib
 			return
 		}
 	}
-	startBlock, endBlock, startHash, err := e.loadDownloadedHeaders(memoryMutation)
+	startBlock, endBlock, err := e.loadDownloadedHeaders(memoryMutation)
 	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] Could not load headers", "err", err)
 		e.status.Store(headerdownload.Idle)
@@ -102,11 +102,6 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload lib
 		return
 	}
 	tx.Rollback() // Discard the original db tx
-	if err := e.insertHeadersAndBodies(ctx, tmpTx, startBlock, startHash, endBlock); err != nil {
-		e.logger.Warn("[EngineBlockDownloader] Could not insert headers and bodies", "err", err)
-		e.status.Store(headerdownload.Idle)
-		return
-	}
 	e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
 	if block == nil {
 		e.status.Store(headerdownload.Idle)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -57,14 +58,9 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 			strings.ReplaceAll(to, ".kv", ".bt"),
 			strings.ReplaceAll(to, ".kv", ".bt.torrent"),
 			strings.ReplaceAll(to, ".kv", ".kvei"),
-			strings.ReplaceAll(to, ".kv", ".kvei.torrent"))
-
-		// _ = os.Remove(tempFileCopy)
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt"))
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt.torrent"))
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei"))
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei.torrent"))
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".kv.torrent"))
+			strings.ReplaceAll(to, ".kv", ".kvei.torrent"),
+			strings.ReplaceAll(to, ".kv", ".kvi"),
+			strings.ReplaceAll(to, ".kv", ".kvi.torrent"))
 	}
 
 	for _, f := range filesToRemove {
@@ -80,8 +76,8 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 		panic("please use SqueezeCommitmentFiles func")
 	}
 
-	compression := a.d[domain].compression
-	compressCfg := a.d[domain].compressCfg
+	compression := a.d[domain].Compression
+	compressCfg := a.d[domain].CompressCfg
 
 	a.logger.Info("[sqeeze] file", "f", to, "cfg", compressCfg, "c", compression)
 	decompressor, err := seg.NewDecompressor(from)
@@ -115,30 +111,29 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		return nil
 	}
 
-	rng := RangesV3{
+	rng := &RangesV3{
 		domain: [5]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
-				values:  MergeRange{true, 0, math.MaxUint64},
+				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
 				aggStep: ac.a.StepSize(),
 			},
 			kv.StorageDomain: {
 				name:    kv.StorageDomain,
-				values:  MergeRange{true, 0, math.MaxUint64},
+				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
 				aggStep: ac.a.StepSize(),
 			},
 			kv.CommitmentDomain: {
 				name:    kv.CommitmentDomain,
-				values:  MergeRange{true, 0, math.MaxUint64},
+				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
 				aggStep: ac.a.StepSize(),
 			},
 		},
-		invertedIndex: [4]*MergeRange{},
 	}
-	sf, err := ac.staticFilesInRange(rng)
+	sf, err := ac.StaticFilesInRange(rng)
 	if err != nil {
 		return err
 	}
@@ -152,14 +147,6 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 			return 0, 0, err
 		}
 		return datasize.ByteSize(ai.Size()) - datasize.ByteSize(bi.Size()), 100.0 * (float32(ai.Size()-bi.Size()) / float32(ai.Size())), nil
-	}
-
-	getFile := func(d *DomainRoTx, fromTx, toTx uint64) *filesItem {
-		fi := d.lookupVisibleFileByItsRange(fromTx, toTx)
-		if fi != nil {
-			return fi
-		}
-		return d.lookupDirtyFileByItsRange(fromTx, toTx)
 	}
 
 	ranges := make([]MergeRange, 0)
@@ -194,43 +181,43 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 	defer logEvery.Stop()
 
 	for ri, r := range ranges {
-		af := getFile(accounts, r.from, r.to)
-		if af == nil {
-			return fmt.Errorf("no account file for range %s", r.String("", ac.a.StepSize()))
+		af, err := accounts.rawLookupFileByRange(r.from, r.to)
+		if err != nil {
+			return err
 		}
-		sf := getFile(storage, r.from, r.to)
-		if af == nil {
-			return fmt.Errorf("no storage file for range %s", r.String("", ac.a.StepSize()))
+		sf, err := storage.rawLookupFileByRange(r.from, r.to)
+		if err != nil {
+			return err
 		}
-		cf := getFile(commitment, r.from, r.to)
-		if af == nil {
-			return fmt.Errorf("no account file for range %s", r.String("", ac.a.StepSize()))
+		cf, err := commitment.rawLookupFileByRange(r.from, r.to)
+		if err != nil {
+			return err
 		}
 
 		af.decompressor.EnableMadvNormal()
 		sf.decompressor.EnableMadvNormal()
 		cf.decompressor.EnableMadvNormal()
 
-		err := func() error {
+		err = func() error {
 			steps := cf.endTxNum/ac.a.aggregationStep - cf.startTxNum/ac.a.aggregationStep
-			compression := commitment.d.compression
+			compression := commitment.d.Compression
 			if steps < DomainMinStepsToCompress {
 				compression = seg.CompressNone
 			}
 			ac.a.logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
-				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.compressCfg, "compress", compression)
+				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg, "compress", compression)
 
 			originalPath := cf.decompressor.FilePath()
 			squeezedTmpPath := originalPath + sqExt + ".tmp"
 
 			squeezedCompr, err := seg.NewCompressor(context.Background(), "squeeze", squeezedTmpPath, ac.a.dirs.Tmp,
-				commitment.d.compressCfg, log.LvlInfo, commitment.d.logger)
+				commitment.d.CompressCfg, log.LvlInfo, commitment.d.logger)
 			if err != nil {
 				return err
 			}
 			defer squeezedCompr.Close()
 
-			writer := seg.NewWriter(squeezedCompr, commitment.d.compression)
+			writer := seg.NewWriter(squeezedCompr, commitment.d.Compression)
 			reader := seg.NewReader(cf.decompressor.MakeGetter(), compression)
 			reader.Reset(0)
 
@@ -335,18 +322,17 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
 
-	rng := RangesV3{
+	rng := &RangesV3{
 		domain: [5]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
-				values:  MergeRange{true, 0, math.MaxUint64},
+				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
 				aggStep: a.StepSize(),
 			},
 		},
-		invertedIndex: [4]*MergeRange{},
 	}
-	sf, err := acRo.staticFilesInRange(rng)
+	sf, err := acRo.StaticFilesInRange(rng)
 	if err != nil {
 		return nil, err
 	}
@@ -388,7 +374,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 
 		fromTxNumRange, toTxNumRange := r.FromTo()
 		lastTxnumInShard := toTxNumRange
-		if acRo.minimaxTxNumInDomainFiles() >= toTxNumRange {
+		if acRo.TxNumsInFiles(kv.StateDomains...) >= toTxNumRange {
 			a.logger.Info("skipping existing range", "range", r.String("", a.StepSize()))
 			continue
 		}

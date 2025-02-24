@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -47,7 +46,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -157,21 +155,21 @@ func (f *ForkChoiceStep) GetChecks() *ForkChoiceChecks {
 
 type ForkChoiceChecks struct {
 	Head *struct {
-		Slot *int         `yaml:"slot,omitempty"`
-		Root *common.Hash `yaml:"root,omitempty"`
+		Slot *int            `yaml:"slot,omitempty"`
+		Root *libcommon.Hash `yaml:"root,omitempty"`
 	} `yaml:"head,omitempty"`
 	Time                *int `yaml:"time,omitempty"`
 	GenesisTime         *int `yaml:"genesis_time,omitempty"`
 	JustifiedCheckpoint *struct {
-		Epoch *int         `yaml:"epoch,omitempty"`
-		Root  *common.Hash `yaml:"root,omitempty"`
+		Epoch *int            `yaml:"epoch,omitempty"`
+		Root  *libcommon.Hash `yaml:"root,omitempty"`
 	} `yaml:"justified_checkpoint,omitempty"`
 
 	FinalizedCheckpoint *struct {
-		Epoch *int         `yaml:"epoch,omitempty"`
-		Root  *common.Hash `yaml:"root,omitempty"`
+		Epoch *int            `yaml:"epoch,omitempty"`
+		Root  *libcommon.Hash `yaml:"root,omitempty"`
 	} `yaml:"finalized_checkpoint,omitempty"`
-	ProposerBoostRoot *common.Hash `yaml:"proposer_boost_root,omitempty"`
+	ProposerBoostRoot *libcommon.Hash `yaml:"proposer_boost_root,omitempty"`
 }
 
 type ForkChoicePayloadStatus struct {
@@ -207,11 +205,10 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), beaconConfig)
 	blobStorage := blob_storage.NewBlobStore(memdb.New("/tmp", kv.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
 
-	validatorMonitor := monitor.NewValidatorMonitor(false, nil, nil, nil)
 	forkStore, err := forkchoice.NewForkChoiceStore(
 		ethClock, anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
-		fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters),
-		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true), blobStorage, validatorMonitor, public_keys_registry.NewInMemoryPublicKeysRegistry(), false)
+		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters),
+		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true), blobStorage, public_keys_registry.NewInMemoryPublicKeysRegistry(), false)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 
@@ -238,7 +235,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 		case "on_merge_block":
 			return nil
 		case "on_block":
-			blk := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig(), clparams.DenebVersion)
+			blk := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig(), c.Version())
 			err := spectest.ReadSsz(root, c.Version(), step.GetBlock()+".ssz_snappy", blk)
 			require.NoError(t, err, stepstr)
 			blobs := solid.NewStaticListSSZ[*cltypes.Blob](6, len(cltypes.Blob{}))
@@ -257,13 +254,13 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				blobs.Range(func(index int, value *cltypes.Blob, length int) bool {
 					var proof libcommon.Bytes48
 					proofStr := step.Proofs[index]
-					proofBytes := common.Hex2Bytes(proofStr[2:])
+					proofBytes := libcommon.Hex2Bytes(proofStr[2:])
 					copy(proof[:], proofBytes)
 					err = blobSidecarService.ProcessMessage(ctx, nil, &cltypes.BlobSidecar{
 						Index:             uint64(index),
 						SignedBlockHeader: blk.SignedBeaconBlockHeader(),
 						Blob:              *value,
-						KzgCommitment:     common.Bytes48(*blk.Block.Body.BlobKzgCommitments.Get(index)),
+						KzgCommitment:     libcommon.Bytes48(*blk.Block.Body.BlobKzgCommitments.Get(index)),
 						KzgProof:          proof,
 					})
 					return true

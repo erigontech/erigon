@@ -44,8 +44,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/metrics"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/antiquary"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -146,11 +146,14 @@ func (c *Chain) Run(ctx *Context) error {
 
 	dirs := datadir.New(c.Datadir)
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, networkType).GetLatestBeaconState(ctx)
 	if err != nil {
 		return err
 	}
+
 	ethClock := eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconConfig)
 	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
@@ -181,7 +184,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -300,7 +303,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		}
 		defer tx.Rollback()
 
-		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
+		stringifiedRoot := libcommon.Bytes2Hex(currentRoot[:])
 		// Let's fetch the head first
 		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
 		if err != nil {
@@ -434,7 +437,9 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -519,7 +524,9 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -562,7 +569,9 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = r.Chain
+	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.Root())
 	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
@@ -573,7 +582,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil, nil, nil)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
 	eth1Getter.SetBeaconChainConfig(beaconConfig)
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -584,7 +593,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	}
 
 	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
-	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snTypes, log.Root())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
@@ -592,8 +601,15 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 
+	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, t).GetLatestBeaconState(ctx)
+	if err != nil {
+		return err
+	}
+	sn := synced_data.NewSyncedDataManager(beaconConfig, true)
+	sn.OnHeadState(bs)
+
 	r.withPPROF.withProfile()
-	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot, stateSn)
+	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot, stateSn, sn)
 	start := time.Now()
 	haveState, err := hr.ReadHistoricalState(ctx, tx, r.CompareSlot)
 	if err != nil {
@@ -914,7 +930,9 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 	}
 	defer db.Close()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = b.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1029,7 +1047,9 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1090,7 +1110,9 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1157,7 +1179,9 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1218,13 +1242,16 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 		return
 	})
 
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+
 	salt, err := snaptype.GetIndexSalt(dirs.Snap)
 
 	if err != nil {
 		return err
 	}
 	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
-	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snTypes, log.Root())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}

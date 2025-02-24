@@ -39,10 +39,10 @@ type GraphQLAPI interface {
 
 type GraphQLAPIImpl struct {
 	*BaseAPI
-	db kv.RoDB
+	db kv.TemporalRoDB
 }
 
-func NewGraphQLAPI(base *BaseAPI, db kv.RoDB) *GraphQLAPIImpl {
+func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB) *GraphQLAPIImpl {
 	return &GraphQLAPIImpl{
 		BaseAPI: base,
 		db:      db,
@@ -50,7 +50,7 @@ func NewGraphQLAPI(base *BaseAPI, db kv.RoDB) *GraphQLAPIImpl {
 }
 
 func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*big.Int, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*big.Int, error) {
 }
 
 func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]interface{}, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}

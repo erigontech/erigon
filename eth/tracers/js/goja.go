@@ -28,9 +28,8 @@ import (
 	"github.com/dop251/goja"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -75,7 +74,7 @@ func fromBuf(vm *goja.Runtime, bufType goja.Value, buf goja.Value, allowString b
 		if !allowString {
 			break
 		}
-		return common.FromHex(obj.String()), nil
+		return libcommon.FromHex(obj.String()), nil
 
 	case "Array":
 		var b []byte
@@ -388,7 +387,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return ""
 		}
-		return hexutility.Encode(b)
+		return hexutil.Encode(b)
 	})
 	vm.Set("toWord", func(v goja.Value) goja.Value {
 		// TODO: add test with []byte len < 32 or > 32
@@ -537,7 +536,7 @@ func (o *opObj) ToString() string {
 }
 
 func (o *opObj) IsPush() bool {
-	return o.op.IsPush()
+	return o.op == vm.PUSH0 || o.op.IsPushWithImmediateArgs()
 }
 
 func (o *opObj) setupObject() *goja.Object {
@@ -676,8 +675,12 @@ func (do *dbObj) GetBalance(addrSlice goja.Value) goja.Value {
 		return nil
 	}
 	addr := libcommon.BytesToAddress(a)
-	value := do.ibs.GetBalance(addr).ToBig()
-	res, err := do.toBig(do.vm, value.String())
+	value, err := do.ibs.GetBalance(addr)
+	if err != nil {
+		do.vm.Interrupt(err)
+		return nil
+	}
+	res, err := do.toBig(do.vm, value.ToBig().String())
 	if err != nil {
 		do.vm.Interrupt(err)
 		return nil
@@ -692,7 +695,12 @@ func (do *dbObj) GetNonce(addrSlice goja.Value) uint64 {
 		return 0
 	}
 	addr := libcommon.BytesToAddress(a)
-	return do.ibs.GetNonce(addr)
+	nonce, err := do.ibs.GetNonce(addr)
+	if err != nil {
+		do.vm.Interrupt(err)
+		return 0
+	}
+	return nonce
 }
 
 func (do *dbObj) GetCode(addrSlice goja.Value) goja.Value {
@@ -702,7 +710,11 @@ func (do *dbObj) GetCode(addrSlice goja.Value) goja.Value {
 		return nil
 	}
 	addr := libcommon.BytesToAddress(a)
-	code := do.ibs.GetCode(addr)
+	code, err := do.ibs.GetCode(addr)
+	if err != nil {
+		do.vm.Interrupt(err)
+		return nil
+	}
 	res, err := do.toBuf(do.vm, code)
 	if err != nil {
 		do.vm.Interrupt(err)
@@ -741,7 +753,12 @@ func (do *dbObj) Exists(addrSlice goja.Value) bool {
 		return false
 	}
 	addr := libcommon.BytesToAddress(a)
-	return do.ibs.Exist(addr)
+	exists, err := do.ibs.Exist(addr)
+	if err != nil {
+		do.vm.Interrupt(err)
+		return false
+	}
+	return exists
 }
 
 func (do *dbObj) setupObject() *goja.Object {

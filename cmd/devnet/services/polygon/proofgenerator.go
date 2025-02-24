@@ -30,9 +30,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
@@ -40,8 +41,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
 var ErrTokenIndexOutOfRange = errors.New("index is grater than the number of tokens in transaction")
@@ -122,7 +122,7 @@ func (pg *ProofGenerator) getChainBlockInfo(ctx context.Context, burnTxHash libc
 	var wg sync.WaitGroup
 
 	var lastChild *big.Int
-	var burnTransaction *jsonrpc.RPCTransaction
+	var burnTransaction *ethapi.RPCTransaction
 	var err [2]error
 
 	// err group
@@ -260,14 +260,14 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	return rlp.EncodeToBytes(
 		[]interface{}{
 			rootBlockNumber,
-			hexutility.Encode(bytes.Join(blockProofs, []byte{})),
+			hexutil.Encode(bytes.Join(blockProofs, []byte{})),
 			block.Number.Uint64(),
 			block.Time,
-			hexutility.Encode(block.TxHash[:]),
-			hexutility.Encode(block.ReceiptHash[:]),
-			hexutility.Encode(getReceiptBytes(receipt)), //rpl encoded
-			hexutility.Encode(parentNodesBytes),
-			hexutility.Encode(append([]byte{0}, receiptProof.path...)),
+			hexutil.Encode(block.TxHash[:]),
+			hexutil.Encode(block.ReceiptHash[:]),
+			hexutil.Encode(getReceiptBytes(receipt)), //rpl encoded
+			hexutil.Encode(parentNodesBytes),
+			hexutil.Encode(append([]byte{0}, receiptProof.path...)),
 			logIndex,
 		})
 }
@@ -487,7 +487,7 @@ func getAllLogIndices(logEventSig libcommon.Hash, receipt *types.Receipt) []int 
 
 	case "0xf871896b17e9cb7a64941c62c188a4f5c621b86800e3d15452ece01ce56073df":
 		for index, log := range receipt.Logs {
-			if strings.EqualFold(hexutility.Encode(log.Topics[0][:]), "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef") &&
+			if strings.EqualFold(hexutil.Encode(log.Topics[0][:]), "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef") &&
 				log.Topics[2] == zeroHash {
 				logIndices = append(logIndices, index)
 			}

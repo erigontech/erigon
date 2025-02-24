@@ -33,12 +33,13 @@ import (
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -62,6 +63,9 @@ The state transitioning model does all the necessary work to work out a valid ne
 5) Run Script section
 6) Derive new state root
 */
+
+var ErrStateTransitionFailed = errors.New("state transitaion failed")
+
 type StateTransition struct {
 	gp           *GasPool
 	msg          Message
@@ -100,26 +104,8 @@ type Message interface {
 	BlobHashes() []libcommon.Hash
 	Authorizations() []types.Authorization
 
-	IsFree() bool
-}
-
-// IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-// TODO: convert the input to a struct
-func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool, authorizationsLen uint64) (uint64, error) {
-	// Zero and non-zero bytes are priced differently
-	dataLen := uint64(len(data))
-	dataNonZeroLen := uint64(0)
-	for _, byt := range data {
-		if byt != 0 {
-			dataNonZeroLen++
-		}
-	}
-
-	gas, status := txpoolcfg.CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessList, isContractCreation, isHomestead, isEIP2028, isEIP3860)
-	if status != txpoolcfg.Success {
-		return 0, ErrGasUintOverflow
-	}
-	return gas, nil
+	IsFree() bool // service transactions on Gnosis are exempt from EIP-1559 mandatory fees
+	SetIsFree(bool)
 }
 
 // NewStateTransition initialises and returns a new state transition object.
@@ -150,7 +136,17 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 // `refunds` is false when it is not required to apply gas refunds
 // `gasBailout` is true when it is not required to fail transaction if the balance is not enough to pay gas.
 // for trace_call to replicate OE/Parity behaviour
-func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
+func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine consensus.EngineReader) (
+	*evmtypes.ExecutionResult, error) {
+	// Only zero-gas transactions may be service ones
+	if msg.FeeCap().IsZero() && !msg.IsFree() && engine != nil {
+		blockContext := evm.Context
+		blockContext.Coinbase = state.SystemAddress
+		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+			return SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, engine, true /* constCall */)
+		}
+		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+	}
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
 }
 
@@ -209,7 +205,11 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 				}
 			}
 		}
-		if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
+		balance, err := st.state.GetBalance(st.msg.From())
+		if err != nil {
+			return err
+		}
+		if have, want := balance, balanceCheck; have.Cmp(want) < 0 {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 		}
 		st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy)
@@ -241,7 +241,10 @@ func CheckEip1559TxGasFeeCap(from libcommon.Address, gasFeeCap, tip, baseFee *ui
 func (st *StateTransition) preCheck(gasBailout bool) error {
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {
-		stNonce := st.state.GetNonce(st.msg.From())
+		stNonce, err := st.state.GetNonce(st.msg.From())
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+		}
 		if msgNonce := st.msg.Nonce(); stNonce < msgNonce {
 			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
 				st.msg.From().Hex(), msgNonce, stNonce)
@@ -254,13 +257,21 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 
 		// Make sure the sender is an EOA (EIP-3607)
-		if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
+		codeHash, err := st.state.GetCodeHash(st.msg.From())
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+		}
+		if codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
 			// libcommon.Hash{} means that the sender is not in the state.
 			// Historically there were transactions with 0 gas price and non-existing sender,
 			// so we have to allow that.
 
 			// eip-7702 allows tx origination from accounts having delegated designation code.
-			if _, ok := st.state.GetDelegatedDesignation(st.msg.From()); !ok {
+			_, ok, err := st.state.GetDelegatedDesignation(st.msg.From())
+			if err != nil {
+				return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
+			if !ok {
 				return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
 					st.msg.From().Hex(), codeHash)
 			}
@@ -307,8 +318,16 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	coinbase := st.evm.Context.Coinbase
-	senderInitBalance := st.state.GetBalance(st.msg.From()).Clone()
-	coinbaseInitBalance := st.state.GetBalance(coinbase).Clone()
+	senderInitBalance, err := st.state.GetBalance(st.msg.From())
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+	}
+	senderInitBalance = senderInitBalance.Clone()
+	coinbaseInitBalance, err := st.state.GetBalance(coinbase)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+	}
+	coinbaseInitBalance = coinbaseInitBalance.Clone()
 
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
@@ -341,7 +360,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 
 	if !contractCreation {
 		// Increment the nonce for the next transaction
-		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
+		nonce, err := st.state.GetNonce(sender.Address())
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+		}
+		st.state.SetNonce(msg.From(), nonce+1)
 	}
 
 	// set code tx
@@ -351,13 +374,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		if contractCreation {
 			return nil, errors.New("contract creation not allowed with type4 txs")
 		}
-		var b [33]byte
+		var b [32]byte
 		data := bytes.NewBuffer(nil)
 		for i, auth := range auths {
 			data.Reset()
 
 			// 1. chainId check
-			if auth.ChainID != 0 && (!rules.ChainID.IsUint64() || rules.ChainID.Uint64() != auth.ChainID) {
+			if !auth.ChainID.IsZero() && rules.ChainID.String() != auth.ChainID.String() {
 				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
 				continue
 			}
@@ -375,54 +398,78 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			// authority is added to accessed_address in prepare step
 
 			// 4. authority code should be empty or already delegated
-			if codeHash := st.state.GetCodeHash(authority); codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
+			codeHash, err := st.state.GetCodeHash(authority)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
+			if codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
 				// check for delegation
-				if _, ok := st.state.GetDelegatedDesignation(authority); ok {
-					// noop: has delegated designation
-				} else {
+				_, ok, err := st.state.GetDelegatedDesignation(authority)
+				if err != nil {
+					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+				}
+				if !ok {
 					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
 					continue
 				}
+				// noop: has delegated designation
 			}
 
 			// 5. nonce check
-			authorityNonce := st.state.GetNonce(authority)
+			authorityNonce, err := st.state.GetNonce(authority)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
 			if authorityNonce != auth.Nonce {
 				log.Debug("invalid nonce, skipping", "auth index", i)
 				continue
 			}
 
 			// 6. Add PER_EMPTY_ACCOUNT_COST - PER_AUTH_BASE_COST gas to the global refund counter if authority exists in the trie.
-			if st.state.Exist(authority) {
+			exists, err := st.state.Exist(authority)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
+			if exists {
 				st.state.AddRefund(fixedgas.PerEmptyAccountCost - fixedgas.PerAuthBaseCost)
 			}
 
 			// 7. set authority code
 			if auth.Address == (libcommon.Address{}) {
-				st.state.SetCode(authority, nil)
+				if err := st.state.SetCode(authority, nil); err != nil {
+					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+				}
 			} else {
-				st.state.SetCode(authority, types.AddressToDelegation(auth.Address))
+				if err := st.state.SetCode(authority, types.AddressToDelegation(auth.Address)); err != nil {
+					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+				}
 			}
 
 			// 8. increase the nonce of authority
-			st.state.SetNonce(authority, authorityNonce+1)
+			if err := st.state.SetNonce(authority, authorityNonce+1); err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
 		}
 	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, err := IntrinsicGas(st.data, accessTuples, contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, uint64(len(auths)))
-	if err != nil {
-		return nil, err
+	gas, floorGas7623, overflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, uint64(len(auths)))
+	if overflow {
+		return nil, ErrGasUintOverflow
 	}
-	if st.gasRemaining < gas {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, gas)
+	if st.gasRemaining < gas || st.gasRemaining < floorGas7623 {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(gas, floorGas7623))
 	}
 	st.gasRemaining -= gas
 
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
 	if gasBailout {
-		if !msg.Value().IsZero() && !st.evm.Context.CanTransfer(st.state, msg.From(), msg.Value()) {
+		canTransfer, err := st.evm.Context.CanTransfer(st.state, msg.From(), msg.Value())
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+		}
+		if !msg.Value().IsZero() && !canTransfer {
 			bailout = true
 		}
 	}
@@ -435,8 +482,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	// Execute the preparatory steps for state transition which includes:
 	// - prepare accessList(post-berlin; eip-7702)
 	// - reset transient storage(eip 1153)
-	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples, verifiedAuthorities)
-
+	if err = st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples, verifiedAuthorities); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+	}
 	var (
 		ret   []byte
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
@@ -450,15 +498,24 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	} else {
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
+
 	if refunds && !gasBailout {
+		refundQuotient := params.RefundQuotient
 		if rules.IsLondon {
-			// After EIP-3529: refunds are capped to gasUsed / 5
-			st.refundGas(params.RefundQuotientEIP3529)
-		} else {
-			// Before EIP-3529: refunds were capped to gasUsed / 2
-			st.refundGas(params.RefundQuotient)
+			refundQuotient = params.RefundQuotientEIP3529
 		}
+		gasUsed := st.gasUsed()
+		refund := min(gasUsed/refundQuotient, st.state.GetRefund())
+		gasUsed = gasUsed - refund
+		if rules.IsPrague {
+			gasUsed = max(floorGas7623, gasUsed)
+		}
+		st.gasRemaining = st.initialGas - gasUsed
+		st.refundGas()
+	} else if rules.IsPrague {
+		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
 	}
+
 	effectiveTip := st.gasPrice
 	if rules.IsLondon {
 		if st.gasFeeCap.Gt(st.evm.Context.BaseFee) {
@@ -469,7 +526,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-	st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee)
+	if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+	}
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if burntContractAddress != nil {
@@ -490,6 +549,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		SenderInitBalance:   senderInitBalance,
 		CoinbaseInitBalance: coinbaseInitBalance,
 		FeeTipped:           amount,
+		EvmRefund:           st.state.GetRefund(),
+		EvmGasUsed:          st.gasUsed(),
 	}
 
 	if st.evm.Context.PostApplyMessage != nil {
@@ -499,14 +560,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	return result, nil
 }
 
-func (st *StateTransition) refundGas(refundQuotient uint64) {
-	// Apply refund counter, capped to half of the used gas.
-	refund := st.gasUsed() / refundQuotient
-	if refund > st.state.GetRefund() {
-		refund = st.state.GetRefund()
-	}
-	st.gasRemaining += refund
-
+func (st *StateTransition) refundGas() {
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)

@@ -111,9 +111,9 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		code := make([]byte, 1)
 		// we have 5 seconds to read the next byte. this is the 5 TTFB_TIMEOUT in the spec
 		stream.SetReadDeadline(time.Now().Add(5 * time.Second))
-		_, err = io.ReadFull(stream, code)
+		n, err := io.ReadFull(stream, code)
 		if err != nil {
-			http.Error(w, "Read Code: "+err.Error(), http.StatusBadRequest)
+			http.Error(w, "Read Code: "+err.Error()+", readBytes="+strconv.Itoa(n), http.StatusBadRequest)
 			return
 		}
 		// this is not necessary, but seems like the right thing to do

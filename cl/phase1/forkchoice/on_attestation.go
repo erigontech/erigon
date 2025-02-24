@@ -56,7 +56,6 @@ func (f *ForkChoiceStore) OnAttestation(
 			return err
 		}
 	}
-
 	var attestationIndicies []uint64
 	var err error
 	target := data.Target
@@ -117,10 +116,6 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 	}
 	if !fromBlock {
 		indexedAttestation := state.GetIndexedAttestation(attestation, attestationIndicies)
-		if err != nil {
-			return nil, err
-		}
-
 		valid, err := targetState.isValidIndexedAttestation(indexedAttestation)
 		if err != nil {
 			return nil, err
@@ -143,9 +138,6 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 	}
 	if !fromBlock {
 		indexedAttestation := state.GetIndexedAttestation(attestation, attestationIndicies)
-		if err != nil {
-			return nil, err
-		}
 		valid, err := state.IsValidIndexedAttestation(s, indexedAttestation)
 		if err != nil {
 			return nil, err

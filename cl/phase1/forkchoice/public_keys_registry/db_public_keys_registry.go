@@ -1,22 +1,19 @@
 package public_keys_registry
 
 import (
-	"context"
-
 	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 )
 
 type DBPublicKeysRegistry struct {
-	db kv.RoDB
+	headView synced_data.SyncedData
 }
 
-func NewDBPublicKeysRegistry(db kv.RoDB) *DBPublicKeysRegistry {
-	return &DBPublicKeysRegistry{db: db}
+func NewHeadViewPublicKeysRegistry(headView synced_data.SyncedData) *DBPublicKeysRegistry {
+	return &DBPublicKeysRegistry{headView: headView}
 }
 
 // ResetAnchor resets the public keys registry to the anchor state
@@ -28,19 +25,14 @@ func (r *DBPublicKeysRegistry) ResetAnchor(s abstract.BeaconState) {
 func (r *DBPublicKeysRegistry) VerifyAggregateSignature(checkpoint solid.Checkpoint, pubkeysIdxs *solid.RawUint64List, message []byte, signature common.Bytes96) (bool, error) {
 	pks := make([][]byte, 0, pubkeysIdxs.Length())
 
-	if err := r.db.View(context.TODO(), func(tx kv.Tx) error {
-		pubkeysIdxs.Range(func(_ int, value uint64, length int) bool {
-			pk, err := state_accessors.ReadPublicKeyByIndexNoCopy(tx, value)
-			if err != nil {
-				return false
-			}
-			pks = append(pks, pk)
-			return true
-		})
-		return nil
-	}); err != nil {
-		return false, err
-	}
+	pubkeysIdxs.Range(func(_ int, value uint64, length int) bool {
+		pk, err := r.headView.ValidatorPublicKeyByIndex(int(value))
+		if err != nil {
+			return false
+		}
+		pks = append(pks, pk[:])
+		return true
+	})
 
 	return bls.VerifyAggregate(signature[:], message, pks)
 }

@@ -48,7 +48,7 @@ var decompressorPool = sync.Pool{
 }
 
 type BeaconSnapshotReader interface {
-	// ReadBlock reads the block at the given slot.
+	// ReadBlockBySlot reads the block at the given slot.
 	// If the block is not present, it returns nil.
 	ReadBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error)
 	ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlock, error)

@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
-func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
+func ResetState(db kv.RwDB, agg *state.Aggregator, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
 	// don't reset senders here
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
 		return err
@@ -45,13 +45,13 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, lo
 		return err
 	}
 
-	if err := ResetExec(ctx, db, chain, tmpDir, logger); err != nil {
+	if err := ResetExec(ctx, db, agg, chain, tmpDir, logger); err != nil {
 		return err
 	}
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -67,7 +67,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.Full
 	}
 
 	// remove all canonical markers from this point
-	if err := rawdb.TruncateCanonicalHash(tx, 1, false); err != nil {
+	if err := rawdb.TruncateCanonicalHash(tx, 1, false /* markChainAsBad */); err != nil {
 		return err
 	}
 	if err := rawdb.TruncateTd(tx, 1); err != nil {
@@ -144,7 +144,7 @@ func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services
 		}
 	}
 
-	if err := ResetBlocks(tx, db, agg, br, bw, dirs, cc, logger); err != nil {
+	if err := ResetBlocks(tx, db, agg, br, bw, dirs, logger); err != nil {
 		return err
 	}
 
@@ -158,22 +158,12 @@ func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
 	return clearStageProgress(tx, stages.Senders)
 }
 
-func WarmupExec(ctx context.Context, db kv.RwDB) (err error) {
-	for _, tbl := range stateBuckets {
-		backup.WarmupTable(ctx, db, tbl, log.LvlInfo, backup.ReadAheadThreads)
-	}
-	for _, tbl := range stateHistoryV3Buckets {
-		backup.WarmupTable(ctx, db, tbl, log.LvlInfo, backup.ReadAheadThreads)
-	}
-	return
-}
-
-func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, logger log.Logger) (err error) {
+func ResetExec(ctx context.Context, db kv.RwDB, agg *state.Aggregator, chain string, tmpDir string, logger log.Logger) (err error) {
 	cleanupList := make([]string, 0)
 	cleanupList = append(cleanupList, stateBuckets...)
 	cleanupList = append(cleanupList, stateHistoryBuckets...)
-	cleanupList = append(cleanupList, stateHistoryV3Buckets...)
-	cleanupList = append(cleanupList, stateV3Buckets...)
+	cleanupList = append(cleanupList, agg.DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain)...)
+	cleanupList = append(cleanupList, agg.InvertedIndexTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
@@ -212,21 +202,6 @@ var stateBuckets = []string{
 	kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
 }
 var stateHistoryBuckets = []string{
-	kv.Receipts,
-}
-var stateHistoryV3Buckets = []string{
-	kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx,
-	kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx,
-	kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx,
-	kv.TblLogAddressKeys, kv.TblLogAddressIdx,
-	kv.TblLogTopicsKeys, kv.TblLogTopicsIdx,
-	kv.TblTracesFromKeys, kv.TblTracesFromIdx,
-	kv.TblTracesToKeys, kv.TblTracesToIdx,
-}
-var stateV3Buckets = []string{
-	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals, kv.TblReceiptVals,
-	kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
-	kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx,
 	kv.TblPruningProgress,
 	kv.ChangeSets3,
 }

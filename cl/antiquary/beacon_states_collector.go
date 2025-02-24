@@ -20,7 +20,9 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"sync"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/klauspost/compress/zstd"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -36,7 +38,20 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 )
 
-var stateAntiquaryBufSz = etl.BufferOptimalSize / 8 // 18 collectors * 256mb / 8 = 512mb in worst case
+var stateAntiquaryBufSz = etl.BufferOptimalSize / 16 // 18 collectors * 256mb / 16 = 256mb in worst case
+
+const EnabledPreAllocate = true
+
+var etlBufferPool = &sync.Pool{
+	New: func() interface{} {
+		buf := etl.NewSortableBuffer(stateAntiquaryBufSz)
+		// preallocate 20_000 items with a 2MB overflow buffer
+		if EnabledPreAllocate {
+			buf.Prealloc(20_000, int(stateAntiquaryBufSz+2*datasize.MB))
+		}
+		return buf
+	},
+}
 
 // RATIONALE: MDBX locks the entire database when writing to it, so we need to minimize the time spent in the write lock.
 // so instead of writing the historical states on write transactions, we accumulate them in memory and write them in a single  write transaction.
@@ -48,7 +63,6 @@ type beaconStatesCollector struct {
 	balancesCollector                *etl.Collector
 	randaoMixesCollector             *etl.Collector
 	intraRandaoMixesCollector        *etl.Collector
-	proposersCollector               *etl.Collector
 	slashingsCollector               *etl.Collector
 	blockRootsCollector              *etl.Collector
 	stateRootsCollector              *etl.Collector
@@ -63,6 +77,8 @@ type beaconStatesCollector struct {
 	balancesDumpsCollector           *etl.Collector
 	effectiveBalancesDumpCollector   *etl.Collector
 
+	buffers []etl.Buffer
+
 	buf        *bytes.Buffer
 	compressor *zstd.Encoder
 
@@ -76,30 +92,39 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 	if err != nil {
 		panic(err)
 	}
+
+	var buffers []etl.Buffer
+	makeETLBuffer := func() etl.Buffer {
+		b := etlBufferPool.Get().(etl.Buffer)
+		b.Reset()
+		buffers = append(buffers, b)
+		return b
+	}
+
 	return &beaconStatesCollector{
-		effectiveBalanceCollector:        etl.NewCollector(kv.ValidatorEffectiveBalance, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		balancesCollector:                etl.NewCollector(kv.ValidatorBalance, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		randaoMixesCollector:             etl.NewCollector(kv.RandaoMixes, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		intraRandaoMixesCollector:        etl.NewCollector(kv.IntraRandaoMixes, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		proposersCollector:               etl.NewCollector(kv.Proposers, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		slashingsCollector:               etl.NewCollector(kv.ValidatorSlashings, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		blockRootsCollector:              etl.NewCollector(kv.BlockRoot, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		stateRootsCollector:              etl.NewCollector(kv.StateRoot, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		slotDataCollector:                etl.NewCollector(kv.SlotData, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		epochDataCollector:               etl.NewCollector(kv.EpochData, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		inactivityScoresCollector:        etl.NewCollector(kv.InactivityScores, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		nextSyncCommitteeCollector:       etl.NewCollector(kv.NextSyncCommittee, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		currentSyncCommitteeCollector:    etl.NewCollector(kv.CurrentSyncCommittee, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		eth1DataVotesCollector:           etl.NewCollector(kv.Eth1DataVotes, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		stateEventsCollector:             etl.NewCollector(kv.StateEvents, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		activeValidatorIndiciesCollector: etl.NewCollector(kv.ActiveValidatorIndicies, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		balancesDumpsCollector:           etl.NewCollector(kv.BalancesDump, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
-		effectiveBalancesDumpCollector:   etl.NewCollector(kv.EffectiveBalancesDump, tmpdir, etl.NewSortableBuffer(stateAntiquaryBufSz), logger).LogLvl(log.LvlTrace),
+		effectiveBalanceCollector:        etl.NewCollector(kv.ValidatorEffectiveBalance, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		balancesCollector:                etl.NewCollector(kv.ValidatorBalance, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		randaoMixesCollector:             etl.NewCollector(kv.RandaoMixes, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		intraRandaoMixesCollector:        etl.NewCollector(kv.IntraRandaoMixes, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		slashingsCollector:               etl.NewCollector(kv.ValidatorSlashings, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		blockRootsCollector:              etl.NewCollector(kv.BlockRoot, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		stateRootsCollector:              etl.NewCollector(kv.StateRoot, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		slotDataCollector:                etl.NewCollector(kv.SlotData, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		epochDataCollector:               etl.NewCollector(kv.EpochData, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		inactivityScoresCollector:        etl.NewCollector(kv.InactivityScores, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		nextSyncCommitteeCollector:       etl.NewCollector(kv.NextSyncCommittee, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		currentSyncCommitteeCollector:    etl.NewCollector(kv.CurrentSyncCommittee, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		eth1DataVotesCollector:           etl.NewCollector(kv.Eth1DataVotes, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		stateEventsCollector:             etl.NewCollector(kv.StateEvents, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		activeValidatorIndiciesCollector: etl.NewCollector(kv.ActiveValidatorIndicies, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		balancesDumpsCollector:           etl.NewCollector(kv.BalancesDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		effectiveBalancesDumpCollector:   etl.NewCollector(kv.EffectiveBalancesDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		logger:                           logger,
 		beaconCfg:                        beaconCfg,
 
 		buf:        buf,
 		compressor: compressor,
+		buffers:    buffers,
 	}
 }
 
@@ -107,13 +132,7 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
 
-	var err error
 	slot := state.Slot()
-	epoch := slot / i.beaconCfg.SlotsPerEpoch
-	// Setup state events handlers
-	if err := i.proposersCollector.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(state)); err != nil {
-		return err
-	}
 
 	events := state_accessors.NewStateEvents()
 
@@ -121,9 +140,6 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 		events.AddValidator(uint64(index), v)
 		return true
 	})
-	if err != nil {
-		return err
-	}
 	roundedSlotToDump := slot - (slot % clparams.SlotsPerDump)
 
 	if err := antiquateField(ctx, roundedSlotToDump, state.RawBalances(), i.buf, i.compressor, i.balancesDumpsCollector); err != nil {
@@ -242,10 +258,6 @@ func (i *beaconStatesCollector) collectActiveIndices(epoch uint64, activeIndices
 	return i.activeValidatorIndiciesCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
 }
 
-func (i *beaconStatesCollector) collectFlattenedProposers(epoch uint64, proposers []byte) error {
-	return i.proposersCollector.Collect(base_encoding.Encode64ToBytes4(epoch), proposers)
-}
-
 func (i *beaconStatesCollector) collectCurrentSyncCommittee(slot uint64, committee *solid.SyncCommittee) error {
 	roundedSlot := i.beaconCfg.RoundSlotToSyncCommitteePeriod(slot)
 	return i.currentSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), committee[:])
@@ -300,9 +312,7 @@ func (i *beaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := i.balancesCollector.Load(tx, kv.ValidatorBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.proposersCollector.Load(tx, kv.Proposers, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
+
 	if err := i.slashingsCollector.Load(tx, kv.ValidatorSlashings, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
@@ -351,7 +361,6 @@ func (i *beaconStatesCollector) close() {
 	i.balancesCollector.Close()
 	i.randaoMixesCollector.Close()
 	i.intraRandaoMixesCollector.Close()
-	i.proposersCollector.Close()
 	i.slashingsCollector.Close()
 	i.blockRootsCollector.Close()
 	i.stateRootsCollector.Close()
@@ -365,6 +374,12 @@ func (i *beaconStatesCollector) close() {
 	i.activeValidatorIndiciesCollector.Close()
 	i.balancesDumpsCollector.Close()
 	i.effectiveBalancesDumpCollector.Close()
+	for _, b := range i.buffers {
+		b.Reset()
+	}
+	for _, b := range i.buffers {
+		etlBufferPool.Put(b)
+	}
 }
 
 // antiquateFullUint64List goes on mdbx as it is full of common repeated patter always and thus fits with 16KB pages.

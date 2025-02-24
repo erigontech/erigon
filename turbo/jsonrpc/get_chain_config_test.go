@@ -29,7 +29,7 @@ func TestGetChainConfig(t *testing.T) {
 	api := newBaseApiForTest(m)
 	config := m.ChainConfig
 
-	tx, txErr := db.BeginRo(context.Background())
+	tx, txErr := db.BeginTemporalRo(context.Background())
 	if txErr != nil {
 		t.Fatalf("error starting tx: %v", txErr)
 	}

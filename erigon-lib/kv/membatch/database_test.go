@@ -35,7 +35,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var testBucket = kv.HashedAccounts
+var testBucket = kv.HashedAccountsDeprecated
 var testValues = []string{"a", "1251", "\x00123\x00"}
 
 func TestPutGet(t *testing.T) {

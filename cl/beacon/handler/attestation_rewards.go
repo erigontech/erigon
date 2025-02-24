@@ -88,7 +88,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		}
 	}
 
-	filterIndicies, err := parseQueryValidatorIndicies(tx, req)
+	filterIndicies, err := parseQueryValidatorIndicies(a.syncedData, req)
 	if err != nil {
 		return nil, err
 	}

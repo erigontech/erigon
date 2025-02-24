@@ -30,7 +30,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -44,7 +43,7 @@ type txJSON struct {
 	Tip      *hexutil.Big       `json:"maxPriorityFeePerGas"`
 	Gas      *hexutil.Uint64    `json:"gas"`
 	Value    *hexutil.Big       `json:"value"`
-	Data     *hexutility.Bytes  `json:"input"`
+	Data     *hexutil.Bytes     `json:"input"`
 	V        *hexutil.Big       `json:"v"`
 	R        *hexutil.Big       `json:"r"`
 	S        *hexutil.Big       `json:"s"`
@@ -68,20 +67,20 @@ type txJSON struct {
 }
 
 type JsonAuthorization struct {
-	ChainID hexutil.Uint64    `json:"chainId"`
+	ChainID hexutil.Big       `json:"chainId"`
 	Address libcommon.Address `json:"address"`
 	Nonce   hexutil.Uint64    `json:"nonce"`
-	V       hexutil.Uint64    `json:"v"`
+	YParity hexutil.Uint64    `json:"yParity"`
 	R       hexutil.Big       `json:"r"`
 	S       hexutil.Big       `json:"s"`
 }
 
 func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAuthorization {
-	a.ChainID = (hexutil.Uint64)(authorization.ChainID)
+	a.ChainID = hexutil.Big(*authorization.ChainID.ToBig())
 	a.Address = authorization.Address
 	a.Nonce = (hexutil.Uint64)(authorization.Nonce)
 
-	a.V = (hexutil.Uint64)(authorization.YParity)
+	a.YParity = (hexutil.Uint64)(authorization.YParity)
 	a.R = hexutil.Big(*authorization.R.ToBig())
 	a.S = hexutil.Big(*authorization.S.ToBig())
 	return a
@@ -89,11 +88,15 @@ func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAu
 
 func (a JsonAuthorization) ToAuthorization() (Authorization, error) {
 	auth := Authorization{
-		ChainID: a.ChainID.Uint64(),
 		Address: a.Address,
 		Nonce:   a.Nonce.Uint64(),
 	}
-	yParity := a.V.Uint64()
+	chainId, overflow := uint256.FromBig((*big.Int)(&a.ChainID))
+	if overflow {
+		return auth, errors.New("chainId in authorization does not fit in 256 bits")
+	}
+	auth.ChainID = *chainId
+	yParity := a.YParity.Uint64()
 	if yParity >= 1<<8 {
 		return auth, errors.New("y parity in authorization does not fit in 8 bits")
 	}
@@ -120,7 +123,7 @@ func (tx *LegacyTx) MarshalJSON() ([]byte, error) {
 	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
 	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutility.Bytes)(&tx.Data)
+	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -142,7 +145,7 @@ func (tx *AccessListTx) MarshalJSON() ([]byte, error) {
 	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
 	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutility.Bytes)(&tx.Data)
+	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -162,7 +165,7 @@ func (tx *DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	enc.FeeCap = (*hexutil.Big)(tx.FeeCap.ToBig())
 	enc.Tip = (*hexutil.Big)(tx.Tip.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutility.Bytes)(&tx.Data)
+	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -182,7 +185,7 @@ func toBlobTxJSON(tx *BlobTx) *txJSON {
 	enc.FeeCap = (*hexutil.Big)(tx.FeeCap.ToBig())
 	enc.Tip = (*hexutil.Big)(tx.Tip.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutility.Bytes)(&tx.Data)
+	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())

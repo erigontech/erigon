@@ -20,17 +20,16 @@ import (
 	"context"
 	"fmt"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
-
-	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type EventType string
@@ -107,12 +106,12 @@ func (e Event) AsNewMilestone() EventNewMilestone {
 }
 
 type p2pObserverRegistrar interface {
-	RegisterNewBlockObserver(polygoncommon.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockPacket]]) polygoncommon.UnregisterFunc
-	RegisterNewBlockHashesObserver(polygoncommon.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]) polygoncommon.UnregisterFunc
+	RegisterNewBlockObserver(event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockPacket]]) event.UnregisterFunc
+	RegisterNewBlockHashesObserver(event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]) event.UnregisterFunc
 }
 
 type heimdallObserverRegistrar interface {
-	RegisterMilestoneObserver(callback func(*heimdall.Milestone), opts ...heimdall.ObserverOption) polygoncommon.UnregisterFunc
+	RegisterMilestoneObserver(callback func(*heimdall.Milestone), opts ...heimdall.ObserverOption) event.UnregisterFunc
 }
 
 func NewTipEvents(logger log.Logger, p2pReg p2pObserverRegistrar, heimdallReg heimdallObserverRegistrar) *TipEvents {

@@ -40,7 +40,7 @@ type Forks struct {
 
 // Forks implements erigon_forks. Returns the genesis block hash and a sorted list of all forks block numbers
 func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return Forks{}, err
 	}
@@ -58,7 +58,7 @@ func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
 // Post the merge eth_blockNumber will return latest forkChoiceHead block number
 // erigon_blockNumber will return latest executed block number or any block number requested
 func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.BlockNumber) (hexutil.Uint64, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0, err
 	}

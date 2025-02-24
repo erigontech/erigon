@@ -32,20 +32,19 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 	hackdb "github.com/erigontech/erigon/cmd/hack/db"
 	"github.com/erigontech/erigon/cmd/hack/flow"
@@ -136,7 +135,10 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, "", 0, log.New()), nil, nil, nil)
+	cc := tool.ChainConfigFromDB(db)
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.ChainName = cc.ChainName
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, "", 0, log.New()), nil, nil, nil)
 	bw := blockio.NewBlockWriter()
 	return br, bw
 }
@@ -258,7 +260,7 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 		return err
 	}
 	defer c.Close()
-	blockEncoded := hexutility.EncodeTs(block)
+	blockEncoded := hexutil.EncodeTs(block)
 	blockTotal := getBlockTotal(tx, block, blockTotalOrOffset)
 	for k, v, err := c.Seek(blockEncoded); k != nil && blockTotal > 0; k, v, err = c.Next() {
 		if err != nil {
@@ -277,10 +279,12 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 }
 
 func extractBodies(datadir string) error {
-	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		KeepBlocks: true,
-		ProduceE2:  false,
-	}, filepath.Join(datadir, "snapshots"), 0, log.New())
+	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
+	defer db.Close()
+	cc := tool.ChainConfigFromDB(db)
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.ChainName = cc.ChainName
+	snaps := freezeblocks.NewRoSnapshots(freezeCfg, filepath.Join(datadir, "snapshots"), 0, log.New())
 	snaps.OpenFolder()
 
 	/* method Iterate was removed, need re-implement
@@ -317,8 +321,6 @@ func extractBodies(datadir string) error {
 		return nil
 	})
 	*/
-	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
-	defer db.Close()
 	br, _ := blocksIO(db)
 
 	tx, err := db.BeginRo(context.Background())
@@ -700,7 +702,7 @@ func keybytesToHex(str []byte) []byte {
 }
 
 func iterate(filename string, prefix string) error {
-	pBytes := common.FromHex(prefix)
+	pBytes := libcommon.FromHex(prefix)
 	efFilename := filename + ".ef"
 	viFilename := filename + ".vi"
 	vFilename := filename + ".v"
@@ -800,7 +802,7 @@ func main() {
 		printBucket(*chaindata)
 
 	case "slice":
-		dbSlice(*chaindata, *bucket, common.FromHex(*hash))
+		dbSlice(*chaindata, *bucket, libcommon.FromHex(*hash))
 
 	case "extractHeaders":
 		err = extractHeaders(*chaindata, uint64(*block), int64(*blockTotal))

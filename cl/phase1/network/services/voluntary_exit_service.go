@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -42,6 +43,13 @@ type voluntaryExitService struct {
 	batchSignatureVerifier *BatchSignatureVerifier
 }
 
+// SignedVoluntaryExitForGossip type represents SignedVoluntaryExit with the gossip data where it's coming from.
+type SignedVoluntaryExitForGossip struct {
+	SignedVoluntaryExit   *cltypes.SignedVoluntaryExit
+	Receiver              *sentinel.Peer
+	ImmediateVerification bool
+}
+
 func NewVoluntaryExitService(
 	operationsPool pool.OperationsPool,
 	emitters *beaconevents.EventEmitter,
@@ -60,7 +68,7 @@ func NewVoluntaryExitService(
 	}
 }
 
-func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedVoluntaryExitWithGossipData) error {
+func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint64, msg *SignedVoluntaryExitForGossip) error {
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#voluntary_exit
 	voluntaryExit := msg.SignedVoluntaryExit.VoluntaryExit
 
@@ -133,10 +141,10 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	}
 
 	aggregateVerificationData := &AggregateVerificationData{
-		Signatures: [][]byte{msg.SignedVoluntaryExit.Signature[:]},
-		SignRoots:  [][]byte{signingRoot[:]},
-		Pks:        [][]byte{pk[:]},
-		GossipData: msg.GossipData,
+		Signatures:  [][]byte{msg.SignedVoluntaryExit.Signature[:]},
+		SignRoots:   [][]byte{signingRoot[:]},
+		Pks:         [][]byte{pk[:]},
+		SendingPeer: msg.Receiver,
 		F: func() {
 			s.operationsPool.VoluntaryExitsPool.Insert(voluntaryExit.ValidatorIndex, msg.SignedVoluntaryExit)
 			s.emitters.Operation().SendVoluntaryExit(msg.SignedVoluntaryExit)

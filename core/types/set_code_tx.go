@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -71,14 +70,14 @@ func (tx *SetCodeTransaction) copy() *SetCodeTransaction {
 func (tx *SetCodeTransaction) EncodingSize() int {
 	payloadSize, _, _, _, _ := tx.payloadSize()
 	// Add envelope size and type size
-	return 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (tx *SetCodeTransaction) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen int) {
 	payloadSize, nonceLen, gasLen, accessListLen = tx.DynamicFeeTransaction.payloadSize()
 	// size of Authorizations
 	authorizationsLen = authorizationsSize(tx.Authorizations)
-	payloadSize += rlp2.ListPrefixLen(authorizationsLen) + authorizationsLen
+	payloadSize += rlp.ListPrefixLen(authorizationsLen) + authorizationsLen
 
 	return
 }
@@ -98,8 +97,12 @@ func (tx *SetCodeTransaction) WithSignature(signer Signer, sig []byte) (Transact
 }
 
 func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
+	if tx.To == nil {
+		return ErrNilToFieldTx
+	}
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize()
-	var b [33]byte
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// encode TxType
 	b[0] = SetCodeTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -111,7 +114,7 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -125,12 +128,12 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		checkNonce: true,
 	}
 	if !rules.IsPrague {
-		return msg, errors.New("SetCodeTransaction is only supported in Prague")
+		return nil, errors.New("SetCodeTransaction is only supported in Prague")
 	}
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
-			return msg, errors.New("gasPrice higher than 2^256-1")
+			return nil, errors.New("gasPrice higher than 2^256-1")
 		}
 	}
 	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
@@ -139,13 +142,13 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 	}
 
 	if len(tx.Authorizations) == 0 {
-		return msg, errors.New("SetCodeTransaction without authorizations is invalid")
+		return nil, errors.New("SetCodeTransaction without authorizations is invalid")
 	}
 	msg.authorizations = tx.Authorizations
 
 	var err error
 	msg.from, err = tx.Sender(s)
-	return msg, err
+	return &msg, err
 }
 
 func (tx *SetCodeTransaction) Sender(signer Signer) (libcommon.Address, error) {
@@ -201,9 +204,13 @@ func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 }
 
 func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
+	if tx.To == nil {
+		return ErrNilToFieldTx
+	}
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize()
-	envelopSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
-	var b [33]byte
+	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// encode envelope size
 	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
 		return err
@@ -286,11 +293,11 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, _, _, accessListLen, authorizationsLen int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
-	if err := tx.ChainID.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(tx.ChainID, w, b); err != nil {
 		return err
 	}
 	// encode Nonce
@@ -298,11 +305,11 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode MaxPriorityFeePerGas
-	if err := tx.Tip.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(tx.Tip, w, b); err != nil {
 		return err
 	}
 	// encode MaxFeePerGas
-	if err := tx.FeeCap.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(tx.FeeCap, w, b); err != nil {
 		return err
 	}
 	// encode Gas
@@ -314,7 +321,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode Value
-	if err := tx.Value.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
 		return err
 	}
 	// encode Data
@@ -322,7 +329,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// prefix
-	if err := EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -330,7 +337,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// prefix
-	if err := EncodeStructSizePrefix(authorizationsLen, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(authorizationsLen, w, b); err != nil {
 		return err
 	}
 	// encode Authorizations
@@ -338,15 +345,15 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode V
-	if err := tx.V.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(&tx.V, w, b); err != nil {
 		return err
 	}
 	// encode R
-	if err := tx.R.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(&tx.R, w, b); err != nil {
 		return err
 	}
 	// encode S
-	if err := tx.S.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
 		return err
 	}
 	return nil

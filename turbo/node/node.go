@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package node contains classes for running a Erigon node.
+// Package node contains classes for running an Erigon node.
 package node
 
 import (

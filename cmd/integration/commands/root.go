@@ -23,17 +23,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/erigontech/erigon/migrations"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/kv/temporal"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/kv"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
-
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/migrations"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 )
@@ -88,34 +86,32 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
-	db := opts.MustOpen()
-	if opts.GetLabel() == kv.ChainDB {
-		if applyMigrations {
-			migrator := migrations.NewMigrator(opts.GetLabel())
-			has, err := migrator.HasPendingMigrations(db)
-			if err != nil {
-				return nil, err
-			}
-			if has {
-				logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
-				db.Close()
-				db = opts.Exclusive(true).MustOpen()
-				if err := migrator.Apply(db, datadirCli, "", logger); err != nil {
-					return nil, err
-				}
-				db.Close()
-				db = opts.MustOpen()
-			}
-		}
-
-		_, _, agg, _, _, _ := allSnapshots(context.Background(), db, logger)
-		tdb, err := temporal.New(db, agg)
+func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
+	if opts.GetLabel() != kv.ChainDB {
+		panic(opts.GetLabel())
+	}
+	rawDB := opts.MustOpen()
+	if applyMigrations {
+		migrator := migrations.NewMigrator(opts.GetLabel())
+		has, err := migrator.HasPendingMigrations(rawDB)
 		if err != nil {
 			return nil, err
 		}
-		db = tdb
+		if has {
+			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
+			rawDB.Close()
+			rawDB = opts.Exclusive(true).MustOpen()
+			if err := migrator.Apply(rawDB, datadirCli, "", logger); err != nil {
+				return nil, err
+			}
+			rawDB.Close()
+			rawDB = opts.MustOpen()
+		}
 	}
 
-	return db, nil
+	_, _, agg, _, _, _, err := allSnapshots(context.Background(), rawDB, logger)
+	if err != nil {
+		return nil, err
+	}
+	return temporal.New(rawDB, agg)
 }

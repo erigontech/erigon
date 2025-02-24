@@ -26,6 +26,7 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -50,8 +51,8 @@ type filesItem struct {
 	existence            *ExistenceFilter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
-	// Frozen: file of size StepsInColdFile. Completely immutable.
-	// Cold: file of size < StepsInColdFile. Immutable, but can be closed/removed after merge to bigger file.
+	// Frozen: file of size StepsInFrozenFile. Completely immutable.
+	// Cold: file of size < StepsInFrozenFile. Immutable, but can be closed/removed after merge to bigger file.
 	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
 	frozen   bool         // immutable, don't need atomic
 	refcount atomic.Int32 // only for `frozen=false`
@@ -61,12 +62,29 @@ type filesItem struct {
 	canDelete atomic.Bool
 }
 
+type FilesItem interface {
+	Segment() *seg.Decompressor
+	AccessorIndex() *recsplit.Index
+	BtIndex() *BtIndex
+	ExistenceFilter() *ExistenceFilter
+}
+
+var _ FilesItem = (*filesItem)(nil)
+
 func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
-	frozen := endStep-startStep == StepsInColdFile
+	frozen := endStep-startStep == config3.StepsInFrozenFile
 	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
+
+func (i *filesItem) Segment() *seg.Decompressor { return i.decompressor }
+
+func (i *filesItem) AccessorIndex() *recsplit.Index { return i.index }
+
+func (i *filesItem) BtIndex() *BtIndex { return i.bindex }
+
+func (i *filesItem) ExistenceFilter() *ExistenceFilter { return i.existence }
 
 // isSubsetOf - when `j` covers `i` but not equal `i`
 func (i *filesItem) isSubsetOf(j *filesItem) bool {
@@ -243,7 +261,7 @@ type visibleFile struct {
 func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
 func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
 
-func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool, toTxNum uint64) (roItems []visibleFile) {
+func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
 	// trace = true
 	if trace {
@@ -271,21 +289,21 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool, t
 				}
 				continue
 			}
-			if (l&withBTree != 0) && item.bindex == nil {
+			if (l&AccessorBTree != 0) && item.bindex == nil {
 				if trace {
 					log.Warn("[dbg] calcVisibleFiles: BTindex not opened", "f", item.decompressor.FileName())
 				}
 				//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 				continue
 			}
-			if (l&withHashMap != 0) && item.index == nil {
+			if (l&AccessorHashMap != 0) && item.index == nil {
 				if trace {
 					log.Warn("[dbg] calcVisibleFiles: RecSplit not opened", "f", item.decompressor.FileName())
 				}
 				//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
 				continue
 			}
-			if (l&withExistence != 0) && item.existence == nil {
+			if (l&AccessorExistence != 0) && item.existence == nil {
 				if trace {
 					log.Warn("[dbg] calcVisibleFiles: Existence not opened", "f", item.decompressor.FileName())
 				}
@@ -353,4 +371,26 @@ func (files visibleFiles) MergedRanges() []MergeRange {
 		res[i] = MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
 	}
 	return res
+}
+
+// fileItemsWithMissingAccessors returns list of files with missing accessors
+// here "accessors" are generated dynamically by `accessorsFor`
+func fileItemsWithMissingAccessors(dirtyFiles *btree2.BTreeG[*filesItem], aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*filesItem) {
+	dirtyFiles.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			fromStep, toStep := item.startTxNum/aggregationStep, item.endTxNum/aggregationStep
+			for _, fName := range accessorsFor(fromStep, toStep) {
+				exists, err := dir.FileExist(fName)
+				if err != nil {
+					panic(err)
+				}
+				if !exists {
+					l = append(l, item)
+					break
+				}
+			}
+		}
+		return true
+	})
+	return
 }

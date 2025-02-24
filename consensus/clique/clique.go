@@ -44,11 +44,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
@@ -418,6 +418,8 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 	// For 0-period chains, refuse to seal empty blocks (no reward but would spin sealing)
 	if c.config.Period == 0 && len(block.Transactions()) == 0 {
 		c.logger.Info("Sealing paused, waiting for transactions")
+		results <- nil
+
 		return nil
 	}
 	// Don't hold the signer fields for the entire sealing procedure

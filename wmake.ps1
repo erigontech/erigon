@@ -160,7 +160,7 @@ function Get-Uninstall-Item {
     param ([string]$pattern = $(throw "A search pattern must be provided"))    
     
     # Trying to get the enumerable of all installed programs using Get-ItemProperty may cause 
-    # exceptions due to possible garbage values insterted into the registry by installers.
+    # exceptions due to possible garbage values inserted into the registry by installers.
     # Specifically an invalid cast exception throws when registry keys contain invalid DWORD data. 
     # See https://github.com/PowerShell/PowerShell/issues/9552
     # Due to this all items must be parsed one by one

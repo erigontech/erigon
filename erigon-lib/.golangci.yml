@@ -23,6 +23,7 @@ linters:
     - perfsprint #TODO: enable me
     - protogetter
     - typecheck
+    - recvcheck #TODO: enable me
   enable:
     - unconvert
     - predeclared

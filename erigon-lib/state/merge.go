@@ -81,6 +81,10 @@ type DomainRanges struct {
 	aggStep uint64
 }
 
+func NewDomainRanges(name kv.Domain, values MergeRange, history HistoryRanges, aggStep uint64) DomainRanges {
+	return DomainRanges{name: name, values: values, history: history, aggStep: aggStep}
+}
+
 func (r DomainRanges) String() string {
 	var b strings.Builder
 	if r.values.needMerge {
@@ -132,7 +136,7 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		fromTxNum := item.endTxNum - span
 		if fromTxNum < item.startTxNum {
 			if !r.values.needMerge || fromTxNum < r.values.from {
-				r.values = MergeRange{true, fromTxNum, item.endTxNum}
+				r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
 			}
 		}
 	}
@@ -155,10 +159,10 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 
 		foundSuperSet := r.history.from == item.startTxNum && item.endTxNum >= r.history.to
 		if foundSuperSet {
-			r.history = MergeRange{false, startTxNum, item.endTxNum}
+			r.history = MergeRange{from: startTxNum, to: item.endTxNum}
 		} else if startTxNum < item.startTxNum {
 			if !r.history.needMerge || startTxNum < r.history.from {
-				r.history = MergeRange{true, startTxNum, item.endTxNum}
+				r.history = MergeRange{"", true, startTxNum, item.endTxNum}
 			}
 		}
 	}
@@ -211,12 +215,16 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 			}
 		}
 	}
-	return &MergeRange{minFound, startTxNum, endTxNum}
+	return &MergeRange{string(iit.name), minFound, startTxNum, endTxNum}
 }
 
 type HistoryRanges struct {
 	history MergeRange
 	index   MergeRange
+}
+
+func NewHistoryRanges(history MergeRange, index MergeRange) HistoryRanges {
+	return HistoryRanges{history: history, index: index}
 }
 
 func (r HistoryRanges) String(aggStep uint64) string {
@@ -234,17 +242,6 @@ func (r HistoryRanges) String(aggStep uint64) string {
 }
 func (r HistoryRanges) any() bool {
 	return r.history.needMerge || r.index.needMerge
-}
-
-func (dt *DomainRoTx) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
-	if err := dt.ht.iit.BuildOptionalMissedIndices(ctx, ps); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (iit *InvertedIndexRoTx) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
-	return nil
 }
 
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)
@@ -417,12 +414,12 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	fromStep, toStep := r.values.from/r.aggStep, r.values.to/r.aggStep
 	kvFilePath := dt.d.kvFilePath(fromStep, toStep)
 
-	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.compressCfg, log.LvlTrace, dt.d.logger)
+	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.CompressCfg, log.LvlTrace, dt.d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.filenameBase, err)
 	}
 
-	compression := dt.d.compression
+	compression := dt.d.Compression
 	if toStep-fromStep < DomainMinStepsToCompress {
 		compression = seg.CompressNone
 	}
@@ -436,7 +433,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, item := range domainFiles {
-		g := seg.NewReader(item.decompressor.MakeGetter(), dt.d.compression)
+		g := seg.NewReader(item.decompressor.MakeGetter(), dt.d.Compression)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -526,18 +523,18 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 	}
 
-	if dt.d.indexList&withBTree != 0 {
+	if dt.d.AccessorList&AccessorBTree != 0 {
 		btPath := dt.d.kvBtFilePath(fromStep, toStep)
 		btM := DefaultBtreeM
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
 			btM = 128
 		}
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync)
+		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
-	if dt.d.indexList&withHashMap != 0 {
+	if dt.d.AccessorList&AccessorHashMap != 0 {
 		if err = dt.d.buildAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
@@ -546,7 +543,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
-	if dt.d.indexList&withExistence != 0 {
+	if dt.d.AccessorList&AccessorExistence != 0 {
 		bloomIndexPath := dt.d.kvExistenceIdxFilePath(fromStep, toStep)
 		exists, err := dir.FileExist(bloomIndexPath)
 		if err != nil {
@@ -836,8 +833,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
 			KeyCount:   keyCount,
 			Enums:      false,
-			BucketSize: 2000,
-			LeafSize:   8,
+			BucketSize: recsplit.DefaultBucketSize,
+			LeafSize:   recsplit.DefaultLeafSize,
 			TmpDir:     ht.h.dirs.Tmp,
 			IndexFile:  idxPath,
 			Salt:       ht.h.salt,
@@ -1092,5 +1089,13 @@ func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
 	return false
 }
 
-func (ac *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx            { return ac.d[idx] }
-func (ac *AggregatorRoTx) DbgII(idx kv.InvertedIdxPos) *InvertedIndexRoTx { return ac.iis[idx] }
+func (ac *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return ac.d[idx] }
+func (ac *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return ac.searchII(idx) }
+func (ac *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
+	for _, iit := range ac.iis {
+		if iit.name == idx {
+			return iit
+		}
+	}
+	return nil
+}

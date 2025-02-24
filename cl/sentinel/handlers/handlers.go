@@ -19,12 +19,9 @@ package handlers
 import (
 	"context"
 	"errors"
-	"math"
 	"strings"
 	"sync"
 	"time"
-
-	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
@@ -57,26 +54,6 @@ type RateLimits struct {
 	blobSidecarsLimit        int
 }
 
-const (
-	punishmentPeriod      = time.Minute
-	heartBeatRateLimit    = math.MaxInt
-	blockHandlerRateLimit = 200
-	lightClientRateLimit  = 500
-	blobHandlerRateLimit  = 50 // very generous here.
-)
-
-var rateLimits = RateLimits{
-	pingLimit:                heartBeatRateLimit,
-	goodbyeLimit:             heartBeatRateLimit,
-	metadataV1Limit:          heartBeatRateLimit,
-	metadataV2Limit:          heartBeatRateLimit,
-	statusLimit:              heartBeatRateLimit,
-	beaconBlocksByRangeLimit: blockHandlerRateLimit,
-	beaconBlocksByRootLimit:  blockHandlerRateLimit,
-	lightClientLimit:         lightClientRateLimit,
-	blobSidecarsLimit:        blobHandlerRateLimit,
-}
-
 type ConsensusHandlers struct {
 	handlers     map[protocol.ID]network.StreamHandler
 	hs           *handshake.HandShaker
@@ -86,7 +63,6 @@ type ConsensusHandlers struct {
 	beaconDB     freezeblocks.BeaconSnapshotReader
 
 	indiciesDB         kv.RoDB
-	peerRateLimits     sync.Map
 	punishmentEndTimes sync.Map
 	forkChoiceReader   forkchoice.ForkChoiceStorageReader
 	host               host.Host
@@ -113,7 +89,6 @@ func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotRea
 		ethClock:           ethClock,
 		beaconConfig:       beaconConfig,
 		ctx:                ctx,
-		peerRateLimits:     sync.Map{},
 		punishmentEndTimes: sync.Map{},
 		enableBlocks:       enabledBlocks,
 		forkChoiceReader:   forkChoiceReader,
@@ -137,8 +112,10 @@ func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotRea
 	if c.enableBlocks {
 		hm[communication.BeaconBlocksByRangeProtocolV2] = c.beaconBlocksByRangeHandler
 		hm[communication.BeaconBlocksByRootProtocolV2] = c.beaconBlocksByRootHandler
-		hm[communication.BlobSidecarByRangeProtocolV1] = c.blobsSidecarsByRangeHandler
-		hm[communication.BlobSidecarByRootProtocolV1] = c.blobsSidecarsByIdsHandler
+		hm[communication.BlobSidecarByRangeProtocolV1] = c.blobsSidecarsByRangeHandlerDeneb
+		hm[communication.BlobSidecarByRootProtocolV1] = c.blobsSidecarsByIdsHandlerDeneb
+		hm[communication.BlobSidecarByRangeProtocolV2] = c.blobsSidecarsByRangeHandlerElectra
+		hm[communication.BlobSidecarByRootProtocolV2] = c.blobsSidecarsByIdsHandlerElectra
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}
@@ -156,20 +133,6 @@ func (c *ConsensusHandlers) checkRateLimit(peerId string, method string, limit, 
 			return errors.New("rate limit exceeded, punishment period in effect")
 		}
 		c.punishmentEndTimes.Delete(keyHash)
-	}
-
-	value, ok := c.peerRateLimits.Load(keyHash)
-	if !ok {
-		value = rate.NewLimiter(rate.Every(time.Minute), limit)
-		c.peerRateLimits.Store(keyHash, value)
-	}
-
-	limiter := value.(*rate.Limiter)
-
-	if !limiter.AllowN(time.Now(), n) {
-		c.punishmentEndTimes.Store(keyHash, time.Now().Add(punishmentPeriod))
-		c.peerRateLimits.Delete(keyHash)
-		return errors.New("rate limit exceeded")
 	}
 
 	return nil

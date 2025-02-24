@@ -39,7 +39,9 @@ import (
 	"github.com/spf13/afero"
 )
 
-const subdivisionSlot = 10_000
+const (
+	subdivisionSlot = 10_000
+)
 
 type BlobStorage interface {
 	WriteBlobSidecars(ctx context.Context, blockRoot libcommon.Hash, blobSidecars []*cltypes.BlobSidecar) error
@@ -160,8 +162,9 @@ func (bs *BlobStore) Prune() error {
 	currentSlot -= bs.slotsKept
 	currentSlot = (currentSlot / subdivisionSlot) * subdivisionSlot
 	var startPrune uint64
-	if currentSlot >= 1_000_000 {
-		startPrune = currentSlot - 1_000_000
+	minSlotsForBlobSidecarRequest := bs.beaconChainConfig.MinSlotsForBlobsSidecarsRequest()
+	if currentSlot >= minSlotsForBlobSidecarRequest {
+		startPrune = currentSlot - minSlotsForBlobSidecarRequest
 	}
 	// delete all the folders that are older than slotsKept
 	for i := startPrune; i < currentSlot; i += subdivisionSlot {
@@ -265,7 +268,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		}
 		if verifySignatureFn != nil {
 			// verify the signature of the sidecar head, we leave this step up to the caller to define
-			if verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
+			if err := verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
 				return 0, 0, err
 			}
 		}
@@ -292,9 +295,9 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		wg.Add(1)
 		go func(sds *sidecarsPayload) {
 			defer wg.Done()
-			blobs := make([]gokzg4844.Blob, len(sds.sidecars))
+			blobs := make([]gokzg4844.BlobRef, len(sds.sidecars))
 			for i, sidecar := range sds.sidecars {
-				blobs[i] = gokzg4844.Blob(sidecar.Blob)
+				blobs[i] = sidecar.Blob[:]
 			}
 			kzgCommitments := make([]gokzg4844.KZGCommitment, len(sds.sidecars))
 			for i, sidecar := range sds.sidecars {

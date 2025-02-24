@@ -47,13 +47,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/params"
@@ -409,26 +409,6 @@ func New(
 	return c
 }
 
-type rwWrapper struct {
-	kv.RoDB
-}
-
-func (w rwWrapper) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return errors.New("Update not implemented")
-}
-
-func (w rwWrapper) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return errors.New("UpdateNosync not implemented")
-}
-
-func (w rwWrapper) BeginRw(ctx context.Context) (kv.RwTx, error) {
-	return nil, errors.New("BeginRw not implemented")
-}
-
-func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
-	return nil, errors.New("BeginRwNosync not implemented")
-}
-
 // NewRo is used by the rpcdaemon and tests which need read only access to the provided data services
 func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, logger log.Logger) *Bor {
 	// get bor config
@@ -445,7 +425,7 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 	return &Bor{
 		chainConfig: chainConfig,
 		config:      borConfig,
-		DB:          rwWrapper{db},
+		DB:          kv.RwWrapper{RoDB: db},
 		blockReader: blockReader,
 		logger:      logger,
 		Recents:     recents,
@@ -1673,22 +1653,42 @@ func (c *Bor) getNextHeimdallSpanForTest(
 }
 
 // BorTransfer transfer in Bor
-func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) error {
 	// get inputs before
-	input1 := db.GetBalance(sender).Clone()
-	input2 := db.GetBalance(recipient).Clone()
-
-	if !bailout {
-		db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+	input1, err := db.GetBalance(sender)
+	if err != nil {
+		return err
 	}
-	db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
-
+	input1 = input1.Clone()
+	input2, err := db.GetBalance(recipient)
+	if err != nil {
+		return err
+	}
+	input2 = input2.Clone()
+	if !bailout {
+		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+		if err != nil {
+			return err
+		}
+	}
+	err = db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
+	if err != nil {
+		return err
+	}
 	// get outputs after
-	output1 := db.GetBalance(sender).Clone()
-	output2 := db.GetBalance(recipient).Clone()
-
+	output1, err := db.GetBalance(sender)
+	if err != nil {
+		return err
+	}
+	output1 = output1.Clone()
+	output2, err := db.GetBalance(recipient)
+	if err != nil {
+		return err
+	}
+	output2 = output2.Clone()
 	// add transfer log into state
 	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
+	return nil
 }
 
 func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {

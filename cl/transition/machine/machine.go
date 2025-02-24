@@ -47,7 +47,7 @@ type SlotProcessor interface {
 type BlockHeaderProcessor interface {
 	ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex uint64, parentRoot common.Hash, bodyRoot [32]byte) error
 	ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error
-	ProcessExecutionPayload(s abstract.BeaconState, parentHash, prevRandao common.Hash, time uint64, payloadHeader *cltypes.Eth1Header) error
+	ProcessExecutionPayload(s abstract.BeaconState, body cltypes.GenericBeaconBody) error
 	ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error
 	ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error
 	ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) error
@@ -60,5 +60,8 @@ type BlockOperationProcessor interface {
 	ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) error
 	ProcessVoluntaryExit(s abstract.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit) error
 	ProcessBlsToExecutionChange(state abstract.BeaconState, signedChange *cltypes.SignedBLSToExecutionChange) error
+	ProcessDepositRequest(s abstract.BeaconState, depositRequest *solid.DepositRequest) error
+	ProcessWithdrawalRequest(s abstract.BeaconState, withdrawalRequest *solid.WithdrawalRequest) error
+	ProcessConsolidationRequest(s abstract.BeaconState, consolidationRequest *solid.ConsolidationRequest) error
 	FullValidate() bool
 }

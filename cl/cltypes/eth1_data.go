@@ -35,8 +35,11 @@ func NewEth1Data() *Eth1Data {
 }
 
 func (e *Eth1Data) Copy() *Eth1Data {
-	copied := *e
-	return &copied
+	return &Eth1Data{
+		Root:         e.Root,
+		DepositCount: e.DepositCount,
+		BlockHash:    e.BlockHash,
+	}
 }
 
 func (e *Eth1Data) Equal(b *Eth1Data) bool {

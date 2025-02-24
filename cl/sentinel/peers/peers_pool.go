@@ -68,7 +68,7 @@ func NewPool() *Pool {
 	return &Pool{
 		peerData:    make(map[peer.ID]*Item),
 		queue:       ring.NewBuffer[*Item](0, 1024),
-		bannedPeers: lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 100_000, 5*time.Minute),
+		bannedPeers: lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 100_000, 30*time.Minute),
 	}
 }
 

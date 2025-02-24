@@ -28,30 +28,26 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
-	rlp "github.com/erigontech/erigon-lib/rlp2"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 // Send - does send concrete P2P messages to Sentry. Same as Fetch but for outbound traffic
 // does not initiate any messages by self
 type Send struct {
 	ctx           context.Context
-	pool          Pool
 	wg            *sync.WaitGroup
 	sentryClients []sentryproto.SentryClient // sentry clients that will be used for accessing the network
 	logger        log.Logger
 }
 
-func NewSend(ctx context.Context, sentryClients []sentryproto.SentryClient, pool Pool, logger log.Logger) *Send {
+func NewSend(ctx context.Context, sentryClients []sentryproto.SentryClient, logger log.Logger, opts ...Option) *Send {
+	options := applyOpts(opts...)
 	return &Send{
 		ctx:           ctx,
-		pool:          pool,
 		sentryClients: sentryClients,
 		logger:        logger,
+		wg:            options.p2pSenderWg,
 	}
-}
-
-func (f *Send) SetWaitGroup(wg *sync.WaitGroup) {
-	f.wg = wg
 }
 
 const (
@@ -157,7 +153,7 @@ func (f *Send) AnnouncePooledTxns(types []byte, sizes []uint32, hashes Hashes, m
 			}
 
 			switch protocols[protocolIndex] {
-			case 66, 67:
+			case 67:
 				if i > prevI {
 					req := &sentryproto.SendMessageToRandomPeersRequest{
 						Data: &sentryproto.OutboundMessageData{

@@ -14,6 +14,7 @@ import (
 
 	common "github.com/erigontech/erigon-lib/common"
 	synced_data "github.com/erigontech/erigon/cl/beacon/synced_data"
+	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	state "github.com/erigontech/erigon/cl/phase1/core/state"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -156,6 +157,84 @@ func (c *MockSyncedDataHeadSlotCall) DoAndReturn(f func() uint64) *MockSyncedDat
 	return c
 }
 
+// HistoricalRootElementAtIndex mocks base method.
+func (m *MockSyncedData) HistoricalRootElementAtIndex(index int) (common.Hash, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HistoricalRootElementAtIndex", index)
+	ret0, _ := ret[0].(common.Hash)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// HistoricalRootElementAtIndex indicates an expected call of HistoricalRootElementAtIndex.
+func (mr *MockSyncedDataMockRecorder) HistoricalRootElementAtIndex(index any) *MockSyncedDataHistoricalRootElementAtIndexCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HistoricalRootElementAtIndex", reflect.TypeOf((*MockSyncedData)(nil).HistoricalRootElementAtIndex), index)
+	return &MockSyncedDataHistoricalRootElementAtIndexCall{Call: call}
+}
+
+// MockSyncedDataHistoricalRootElementAtIndexCall wrap *gomock.Call
+type MockSyncedDataHistoricalRootElementAtIndexCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncedDataHistoricalRootElementAtIndexCall) Return(arg0 common.Hash, arg1 error) *MockSyncedDataHistoricalRootElementAtIndexCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncedDataHistoricalRootElementAtIndexCall) Do(f func(int) (common.Hash, error)) *MockSyncedDataHistoricalRootElementAtIndexCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncedDataHistoricalRootElementAtIndexCall) DoAndReturn(f func(int) (common.Hash, error)) *MockSyncedDataHistoricalRootElementAtIndexCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// HistoricalSummaryElementAtIndex mocks base method.
+func (m *MockSyncedData) HistoricalSummaryElementAtIndex(index int) (*cltypes.HistoricalSummary, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HistoricalSummaryElementAtIndex", index)
+	ret0, _ := ret[0].(*cltypes.HistoricalSummary)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// HistoricalSummaryElementAtIndex indicates an expected call of HistoricalSummaryElementAtIndex.
+func (mr *MockSyncedDataMockRecorder) HistoricalSummaryElementAtIndex(index any) *MockSyncedDataHistoricalSummaryElementAtIndexCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HistoricalSummaryElementAtIndex", reflect.TypeOf((*MockSyncedData)(nil).HistoricalSummaryElementAtIndex), index)
+	return &MockSyncedDataHistoricalSummaryElementAtIndexCall{Call: call}
+}
+
+// MockSyncedDataHistoricalSummaryElementAtIndexCall wrap *gomock.Call
+type MockSyncedDataHistoricalSummaryElementAtIndexCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncedDataHistoricalSummaryElementAtIndexCall) Return(arg0 *cltypes.HistoricalSummary, arg1 error) *MockSyncedDataHistoricalSummaryElementAtIndexCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncedDataHistoricalSummaryElementAtIndexCall) Do(f func(int) (*cltypes.HistoricalSummary, error)) *MockSyncedDataHistoricalSummaryElementAtIndexCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncedDataHistoricalSummaryElementAtIndexCall) DoAndReturn(f func(int) (*cltypes.HistoricalSummary, error)) *MockSyncedDataHistoricalSummaryElementAtIndexCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // OnHeadState mocks base method.
 func (m *MockSyncedData) OnHeadState(newState *state.CachingBeaconState) error {
 	m.ctrl.T.Helper()
@@ -268,6 +347,85 @@ func (c *MockSyncedDataUnsetHeadStateCall) DoAndReturn(f func()) *MockSyncedData
 	return c
 }
 
+// ValidatorIndexByPublicKey mocks base method.
+func (m *MockSyncedData) ValidatorIndexByPublicKey(pubkey common.Bytes48) (uint64, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ValidatorIndexByPublicKey", pubkey)
+	ret0, _ := ret[0].(uint64)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ValidatorIndexByPublicKey indicates an expected call of ValidatorIndexByPublicKey.
+func (mr *MockSyncedDataMockRecorder) ValidatorIndexByPublicKey(pubkey any) *MockSyncedDataValidatorIndexByPublicKeyCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ValidatorIndexByPublicKey", reflect.TypeOf((*MockSyncedData)(nil).ValidatorIndexByPublicKey), pubkey)
+	return &MockSyncedDataValidatorIndexByPublicKeyCall{Call: call}
+}
+
+// MockSyncedDataValidatorIndexByPublicKeyCall wrap *gomock.Call
+type MockSyncedDataValidatorIndexByPublicKeyCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncedDataValidatorIndexByPublicKeyCall) Return(arg0 uint64, arg1 bool, arg2 error) *MockSyncedDataValidatorIndexByPublicKeyCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncedDataValidatorIndexByPublicKeyCall) Do(f func(common.Bytes48) (uint64, bool, error)) *MockSyncedDataValidatorIndexByPublicKeyCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncedDataValidatorIndexByPublicKeyCall) DoAndReturn(f func(common.Bytes48) (uint64, bool, error)) *MockSyncedDataValidatorIndexByPublicKeyCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// ValidatorPublicKeyByIndex mocks base method.
+func (m *MockSyncedData) ValidatorPublicKeyByIndex(index int) (common.Bytes48, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ValidatorPublicKeyByIndex", index)
+	ret0, _ := ret[0].(common.Bytes48)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ValidatorPublicKeyByIndex indicates an expected call of ValidatorPublicKeyByIndex.
+func (mr *MockSyncedDataMockRecorder) ValidatorPublicKeyByIndex(index any) *MockSyncedDataValidatorPublicKeyByIndexCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ValidatorPublicKeyByIndex", reflect.TypeOf((*MockSyncedData)(nil).ValidatorPublicKeyByIndex), index)
+	return &MockSyncedDataValidatorPublicKeyByIndexCall{Call: call}
+}
+
+// MockSyncedDataValidatorPublicKeyByIndexCall wrap *gomock.Call
+type MockSyncedDataValidatorPublicKeyByIndexCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncedDataValidatorPublicKeyByIndexCall) Return(arg0 common.Bytes48, arg1 error) *MockSyncedDataValidatorPublicKeyByIndexCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncedDataValidatorPublicKeyByIndexCall) Do(f func(int) (common.Bytes48, error)) *MockSyncedDataValidatorPublicKeyByIndexCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncedDataValidatorPublicKeyByIndexCall) DoAndReturn(f func(int) (common.Bytes48, error)) *MockSyncedDataValidatorPublicKeyByIndexCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // ViewHeadState mocks base method.
 func (m *MockSyncedData) ViewHeadState(fn synced_data.ViewHeadStateFn) error {
 	m.ctrl.T.Helper()
@@ -302,6 +460,44 @@ func (c *MockSyncedDataViewHeadStateCall) Do(f func(synced_data.ViewHeadStateFn)
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockSyncedDataViewHeadStateCall) DoAndReturn(f func(synced_data.ViewHeadStateFn) error) *MockSyncedDataViewHeadStateCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// ViewPreviousHeadState mocks base method.
+func (m *MockSyncedData) ViewPreviousHeadState(arg0 synced_data.ViewHeadStateFn) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ViewPreviousHeadState", arg0)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ViewPreviousHeadState indicates an expected call of ViewPreviousHeadState.
+func (mr *MockSyncedDataMockRecorder) ViewPreviousHeadState(arg0 any) *MockSyncedDataViewPreviousHeadStateCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ViewPreviousHeadState", reflect.TypeOf((*MockSyncedData)(nil).ViewPreviousHeadState), arg0)
+	return &MockSyncedDataViewPreviousHeadStateCall{Call: call}
+}
+
+// MockSyncedDataViewPreviousHeadStateCall wrap *gomock.Call
+type MockSyncedDataViewPreviousHeadStateCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncedDataViewPreviousHeadStateCall) Return(arg0 error) *MockSyncedDataViewPreviousHeadStateCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncedDataViewPreviousHeadStateCall) Do(f func(synced_data.ViewHeadStateFn) error) *MockSyncedDataViewPreviousHeadStateCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncedDataViewPreviousHeadStateCall) DoAndReturn(f func(synced_data.ViewHeadStateFn) error) *MockSyncedDataViewPreviousHeadStateCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

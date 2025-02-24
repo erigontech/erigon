@@ -189,6 +189,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		if err != nil {
 			return err
 		}
+		defer cursor.Close()
 		var errLast error
 		lastKey, _, errLast = cursor.Last()
 		if errLast != nil {

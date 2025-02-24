@@ -18,7 +18,6 @@ package bridge
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"google.golang.org/grpc"
@@ -73,13 +72,12 @@ func (r *Reader) Prepare(ctx context.Context) error {
 
 // Events returns all sync events at blockNum
 func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, err := r.store.BlockEventIdsRange(ctx, blockNum)
+	start, end, ok, err := r.store.BlockEventIdsRange(ctx, blockNum)
 	if err != nil {
-		if errors.Is(err, ErrEventIdRangeNotFound) {
-			return nil, nil
-		}
-
 		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 
 	eventsRaw := make([]*types.Message, 0, end-start+1)
@@ -107,7 +105,7 @@ func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 			nil,
 		)
 
-		eventsRaw = append(eventsRaw, &msg)
+		eventsRaw = append(eventsRaw, msg)
 	}
 
 	return eventsRaw, nil
@@ -198,7 +196,7 @@ func messageFromData(to libcommon.Address, data []byte) *types.Message {
 		nil,
 	)
 
-	return &msg
+	return msg
 }
 
 // NewStateSyncEventMessages creates a corresponding message that can be passed to EVM for multiple state sync events
@@ -221,7 +219,7 @@ func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverCont
 			nil,   // maxFeePerBlobGas
 		)
 
-		msgs[i] = &msg
+		msgs[i] = msg
 	}
 
 	return msgs

@@ -21,12 +21,10 @@ package types
 
 import (
 	"io"
+	"slices"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -37,9 +35,9 @@ import (
 type Log struct {
 	// Consensus fields:
 	// address of the contract that generated the event
-	Address libcommon.Address `json:"address" gencodec:"required" codec:"1"`
+	Address common.Address `json:"address" gencodec:"required" codec:"1"`
 	// list of topics provided by the contract.
-	Topics []libcommon.Hash `json:"topics" gencodec:"required" codec:"2"`
+	Topics []common.Hash `json:"topics" gencodec:"required" codec:"2"`
 	// supplied by the contract, usually ABI-encoded
 	Data []byte `json:"data" gencodec:"required" codec:"3"`
 
@@ -49,11 +47,11 @@ type Log struct {
 	BlockNumber uint64 `json:"blockNumber" codec:"-"`
 
 	// hash of the transaction
-	TxHash libcommon.Hash `json:"transactionHash" gencodec:"required" codec:"-"`
+	TxHash common.Hash `json:"transactionHash" gencodec:"required" codec:"-"`
 	// index of the transaction in the block
 	TxIndex uint `json:"transactionIndex" codec:"-"`
 	// hash of the block in which the transaction was included
-	BlockHash libcommon.Hash `json:"blockHash" codec:"-"`
+	BlockHash common.Hash `json:"blockHash" codec:"-"`
 	// index of the log in the block
 	Index uint `json:"logIndex" codec:"-"`
 
@@ -63,30 +61,41 @@ type Log struct {
 }
 
 type ErigonLog struct {
-	Address     libcommon.Address `json:"address" gencodec:"required" codec:"1"`
-	Topics      []libcommon.Hash  `json:"topics" gencodec:"required" codec:"2"`
-	Data        []byte            `json:"data" gencodec:"required" codec:"3"`
-	BlockNumber uint64            `json:"blockNumber" codec:"-"`
-	TxHash      libcommon.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
-	TxIndex     uint              `json:"transactionIndex" codec:"-"`
-	BlockHash   libcommon.Hash    `json:"blockHash" codec:"-"`
-	Index       uint              `json:"logIndex" codec:"-"`
-	Removed     bool              `json:"removed" codec:"-"`
-	Timestamp   uint64            `json:"timestamp" codec:"-"`
+	Address     common.Address `json:"address" gencodec:"required" codec:"1"`
+	Topics      []common.Hash  `json:"topics" gencodec:"required" codec:"2"`
+	Data        []byte         `json:"data" gencodec:"required" codec:"3"`
+	BlockNumber uint64         `json:"blockNumber" codec:"-"`
+	TxHash      common.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
+	TxIndex     uint           `json:"transactionIndex" codec:"-"`
+	BlockHash   common.Hash    `json:"blockHash" codec:"-"`
+	Index       uint           `json:"logIndex" codec:"-"`
+	Removed     bool           `json:"removed" codec:"-"`
+	Timestamp   uint64         `json:"timestamp" codec:"-"`
 }
 
 type ErigonLogs []*ErigonLog
 
 type Logs []*Log
 
-func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libcommon.Hash, maxLogs uint64) Logs {
-	topicMap := make(map[int]map[libcommon.Hash]struct{}, 7)
+func (logs Logs) Copy() Logs {
+	if logs == nil {
+		return nil
+	}
+	logsCopy := make(Logs, len(logs))
+	for i, log := range logs {
+		logsCopy[i] = log.Copy()
+	}
+	return logsCopy
+}
+
+func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash, maxLogs uint64) Logs {
+	topicMap := make(map[int]map[common.Hash]struct{}, 7)
 
 	//populate topic map
 	for idx, v := range topics {
 		for _, vv := range v {
 			if _, ok := topicMap[idx]; !ok {
-				topicMap[idx] = map[libcommon.Hash]struct{}{}
+				topicMap[idx] = map[common.Hash]struct{}{}
 			}
 			topicMap[idx][vv] = struct{}{}
 		}
@@ -135,7 +144,7 @@ func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libco
 	return o
 }
 
-func (logs Logs) CointainTopics(addrMap map[libcommon.Address]struct{}, topicsMap map[libcommon.Hash]struct{}, maxLogs uint64) Logs {
+func (logs Logs) CointainTopics(addrMap map[common.Address]struct{}, topicsMap map[common.Hash]struct{}, maxLogs uint64) Logs {
 	o := make(Logs, 0, len(logs))
 	var logCount uint64
 	logCount = 0
@@ -171,7 +180,7 @@ func (logs Logs) CointainTopics(addrMap map[libcommon.Address]struct{}, topicsMa
 	return o
 }
 
-func (logs Logs) FilterOld(addresses map[libcommon.Address]struct{}, topics [][]libcommon.Hash) Logs {
+func (logs Logs) FilterOld(addresses map[common.Address]struct{}, topics [][]common.Hash) Logs {
 	result := make(Logs, 0, len(logs))
 	// populate a set of addresses
 Logs:
@@ -207,15 +216,15 @@ Logs:
 }
 
 type logMarshaling struct {
-	Data        hexutility.Bytes
+	Data        hexutil.Bytes
 	BlockNumber hexutil.Uint64
 	TxIndex     hexutil.Uint
 	Index       hexutil.Uint
 }
 
 type rlpLog struct {
-	Address libcommon.Address
-	Topics  []libcommon.Hash
+	Address common.Address
+	Topics  []common.Hash
 	Data    []byte
 }
 
@@ -224,13 +233,13 @@ type rlpStorageLog rlpLog
 
 // legacyRlpStorageLog is the previous storage encoding of a log including some redundant fields.
 type legacyRlpStorageLog struct {
-	Address libcommon.Address
-	Topics  []libcommon.Hash
+	Address common.Address
+	Topics  []common.Hash
 	Data    []byte
 	//BlockNumber uint64
-	//TxHash      libcommon.Hash
+	//TxHash      common.Hash
 	//TxIndex     uint
-	//BlockHash   libcommon.Hash
+	//BlockHash   common.Hash
 	//Index       uint
 }
 
@@ -251,23 +260,17 @@ func (l *Log) DecodeRLP(s *rlp.Stream) error {
 
 // Copy creates a deep copy of the Log.
 func (l *Log) Copy() *Log {
-	topics := make([]libcommon.Hash, 0, len(l.Topics))
-	for _, topic := range l.Topics {
-		topicCopy := libcommon.BytesToHash(topic.Bytes())
-		topics = append(topics, topicCopy)
+	if l == nil {
+		return nil
 	}
-
-	data := make([]byte, len(l.Data))
-	copy(data, l.Data)
-
 	return &Log{
-		Address:     libcommon.BytesToAddress(l.Address.Bytes()),
-		Topics:      topics,
-		Data:        data,
+		Address:     common.BytesToAddress(l.Address.Bytes()),
+		Topics:      slices.Clone(l.Topics),
+		Data:        slices.Clone(l.Data),
 		BlockNumber: l.BlockNumber,
-		TxHash:      libcommon.BytesToHash(l.TxHash.Bytes()),
+		TxHash:      common.BytesToHash(l.TxHash.Bytes()),
 		TxIndex:     l.TxIndex,
-		BlockHash:   libcommon.BytesToHash(l.BlockHash.Bytes()),
+		BlockHash:   common.BytesToHash(l.BlockHash.Bytes()),
 		Index:       l.Index,
 		Removed:     l.Removed,
 	}

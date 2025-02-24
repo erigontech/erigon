@@ -18,9 +18,8 @@ package cltypes
 
 import (
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -60,13 +59,6 @@ func (a *ContributionAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.AggregatorIndex, a.Contribution, a.SelectionProof[:])
 }
 
-// SignedContributionAndProofWithGossipData type represents SignedContributionAndProof with the gossip data where it's coming from.
-type SignedContributionAndProofWithGossipData struct {
-	SignedContributionAndProof *SignedContributionAndProof
-	GossipData                 *sentinel.GossipData
-	ImmediateVerification      bool
-}
-
 type SignedContributionAndProof struct {
 	Message   *ContributionAndProof `json:"message"`
 	Signature libcommon.Bytes96     `json:"signature"`
@@ -97,7 +89,7 @@ type Contribution struct {
 	Slot              uint64            `json:"slot,string"`
 	BeaconBlockRoot   libcommon.Hash    `json:"beacon_block_root"`
 	SubcommitteeIndex uint64            `json:"subcommittee_index,string"`
-	AggregationBits   hexutility.Bytes  `json:"aggregation_bits"`
+	AggregationBits   hexutil.Bytes     `json:"aggregation_bits"`
 	Signature         libcommon.Bytes96 `json:"signature"`
 }
 
@@ -185,12 +177,6 @@ func (agg *SyncContribution) EncodingSizeSSZ() int {
 func (agg *SyncContribution) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 
-}
-
-type SyncCommitteeMessageWithGossipData struct {
-	SyncCommitteeMessage  *SyncCommitteeMessage
-	GossipData            *sentinel.GossipData
-	ImmediateVerification bool
 }
 
 type SyncCommitteeMessage struct {

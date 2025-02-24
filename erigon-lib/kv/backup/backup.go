@@ -111,6 +111,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	if err != nil {
 		return err
 	}
+	defer srcC.Close()
 	total, _ = srcTx.Count(table)
 
 	if err := dst.Update(ctx, func(tx kv.RwTx) error {
@@ -128,6 +129,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	if err != nil {
 		return err
 	}
+	defer c.Close()
 	casted, isDupsort := c.(kv.RwCursorDupSort)
 	i := uint64(0)
 

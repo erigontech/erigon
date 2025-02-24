@@ -17,13 +17,11 @@
 package state
 
 import (
-	"bytes"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 // CachedReader3 is a wrapper for an instance of type StateReader
@@ -83,10 +81,7 @@ func (r *CachedReader3) ReadAccountStorage(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (r *CachedReader3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	if bytes.Equal(codeHash.Bytes(), emptyCodeHash) {
-		return nil, nil
-	}
+func (r *CachedReader3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
 	code, err := r.cache.GetCode(address[:])
 	if len(code) == 0 {
 		return nil, nil
@@ -94,8 +89,8 @@ func (r *CachedReader3) ReadAccountCode(address common.Address, incarnation uint
 	return code, err
 }
 
-func (r *CachedReader3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	code, err := r.ReadAccountCode(address, incarnation, codeHash)
+func (r *CachedReader3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+	code, err := r.ReadAccountCode(address, incarnation)
 	return len(code), err
 }
 

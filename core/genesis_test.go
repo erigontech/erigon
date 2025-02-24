@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -133,7 +132,7 @@ func TestAllocConstructor(t *testing.T) {
 
 	// This deployment code initially sets contract's 0th storage to 0x2a
 	// and its 1st storage to 0x01c9.
-	deploymentCode := common.FromHex("602a5f556101c960015560048060135f395ff35f355f55")
+	deploymentCode := libcommon.FromHex("602a5f556101c960015560048060135f395ff35f355f55")
 
 	funds := big.NewInt(1000000000)
 	address := libcommon.HexToAddress("0x1000000000000000000000000000000000000001")
@@ -147,7 +146,7 @@ func TestAllocConstructor(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := mock.MockWithGenesis(t, genSpec, key, false)
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginTemporalRo(context.Background())
 	require.NoError(err)
 	defer tx.Rollback()
 
@@ -155,10 +154,12 @@ func TestAllocConstructor(t *testing.T) {
 	reader, err := rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 1, 0, genSpec.Config.ChainName)
 	require.NoError(err)
 	state := state.New(reader)
-	balance := state.GetBalance(address)
+	balance, err := state.GetBalance(address)
+	assert.NoError(err)
 	assert.Equal(funds, balance.ToBig())
-	code := state.GetCode(address)
-	assert.Equal(common.FromHex("5f355f55"), code)
+	code, err := state.GetCode(address)
+	assert.NoError(err)
+	assert.Equal(libcommon.FromHex("5f355f55"), code)
 
 	key0 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
 	storage0 := &uint256.Int{}

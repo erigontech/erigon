@@ -28,11 +28,10 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 
-	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -45,36 +44,36 @@ var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 // Genesis specifies the header fields, state of a genesis block. It also defines hard
 // fork switch-over blocks through the chain configuration.
 type Genesis struct {
-	Config     *chain.Config  `json:"config"`
-	Nonce      uint64         `json:"nonce"`
-	Timestamp  uint64         `json:"timestamp"`
-	ExtraData  []byte         `json:"extraData"`
-	GasLimit   uint64         `json:"gasLimit"   gencodec:"required"`
-	Difficulty *big.Int       `json:"difficulty" gencodec:"required"`
-	Mixhash    common.Hash    `json:"mixHash"`
-	Coinbase   common.Address `json:"coinbase"`
-	Alloc      GenesisAlloc   `json:"alloc"      gencodec:"required"`
+	Config     *chain.Config     `json:"config"`
+	Nonce      uint64            `json:"nonce"`
+	Timestamp  uint64            `json:"timestamp"`
+	ExtraData  []byte            `json:"extraData"`
+	GasLimit   uint64            `json:"gasLimit"   gencodec:"required"`
+	Difficulty *big.Int          `json:"difficulty" gencodec:"required"`
+	Mixhash    libcommon.Hash    `json:"mixHash"`
+	Coinbase   libcommon.Address `json:"coinbase"`
+	Alloc      GenesisAlloc      `json:"alloc"      gencodec:"required"`
 
 	AuRaSeal *AuRaSeal `json:"seal"`
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
-	Number     uint64      `json:"number"`
-	GasUsed    uint64      `json:"gasUsed"`
-	ParentHash common.Hash `json:"parentHash"`
+	Number     uint64         `json:"number"`
+	GasUsed    uint64         `json:"gasUsed"`
+	ParentHash libcommon.Hash `json:"parentHash"`
 
 	// Header fields added in London and later hard forks
-	BaseFee               *big.Int     `json:"baseFeePerGas"`         // EIP-1559
-	BlobGasUsed           *uint64      `json:"blobGasUsed"`           // EIP-4844
-	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
-	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
-	RequestsHash          *common.Hash `json:"requestsHash"`          // EIP-7685
+	BaseFee               *big.Int        `json:"baseFeePerGas"`         // EIP-1559
+	BlobGasUsed           *uint64         `json:"blobGasUsed"`           // EIP-4844
+	ExcessBlobGas         *uint64         `json:"excessBlobGas"`         // EIP-4844
+	ParentBeaconBlockRoot *libcommon.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
+	RequestsHash          *libcommon.Hash `json:"requestsHash"`          // EIP-7685
 }
 
 type AuRaSeal struct {
 	AuthorityRound struct {
 		Step      math.HexOrDecimal64 `json:"step"`
-		Signature hexutility.Bytes    `json:"signature"`
+		Signature hexutil.Bytes       `json:"signature"`
 	} `json:"authorityRound"`
 }
 
@@ -86,16 +85,16 @@ func NewAuraSeal(step uint64, signature []byte) *AuRaSeal {
 }
 
 // GenesisAlloc specifies the initial state that is part of the genesis block.
-type GenesisAlloc map[common.Address]GenesisAccount
+type GenesisAlloc map[libcommon.Address]GenesisAccount
 
 func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
-	m := make(map[common2.UnprefixedAddress]GenesisAccount)
+	m := make(map[libcommon.UnprefixedAddress]GenesisAccount)
 	if err := json.Unmarshal(data, &m); err != nil {
 		return err
 	}
 	*ga = make(GenesisAlloc)
 	for addr, a := range m {
-		(*ga)[common.Address(addr)] = a
+		(*ga)[libcommon.Address(addr)] = a
 	}
 	return nil
 }
@@ -118,19 +117,19 @@ func DecodeGenesisAlloc(i interface{}) (GenesisAlloc, error) {
 // GenesisAccount is an account in the state of the genesis block.
 // Either use "constructor" for deployment code or "code" directly for the final code.
 type GenesisAccount struct {
-	Constructor []byte                      `json:"constructor,omitempty"` // deployment code
-	Code        []byte                      `json:"code,omitempty"`        // final contract code
-	Storage     map[common.Hash]common.Hash `json:"storage,omitempty"`
-	Balance     *big.Int                    `json:"balance" gencodec:"required"`
-	Nonce       uint64                      `json:"nonce,omitempty"`
-	PrivateKey  []byte                      `json:"secretKey,omitempty"` // for tests
+	Constructor []byte                            `json:"constructor,omitempty"` // deployment code
+	Code        []byte                            `json:"code,omitempty"`        // final contract code
+	Storage     map[libcommon.Hash]libcommon.Hash `json:"storage,omitempty"`
+	Balance     *big.Int                          `json:"balance" gencodec:"required"`
+	Nonce       uint64                            `json:"nonce,omitempty"`
+	PrivateKey  []byte                            `json:"secretKey,omitempty"` // for tests
 }
 
 // field type overrides for gencodec
 type genesisSpecMarshaling struct {
 	Nonce         math.HexOrDecimal64
 	Timestamp     math.HexOrDecimal64
-	ExtraData     hexutility.Bytes
+	ExtraData     hexutil.Bytes
 	GasLimit      math.HexOrDecimal64
 	GasUsed       math.HexOrDecimal64
 	Number        math.HexOrDecimal64
@@ -138,21 +137,21 @@ type genesisSpecMarshaling struct {
 	BaseFee       *math.HexOrDecimal256
 	BlobGasUsed   *math.HexOrDecimal64
 	ExcessBlobGas *math.HexOrDecimal64
-	Alloc         map[common2.UnprefixedAddress]GenesisAccount
+	Alloc         map[libcommon.UnprefixedAddress]GenesisAccount
 }
 
 type genesisAccountMarshaling struct {
-	Constructor hexutility.Bytes
-	Code        hexutility.Bytes
+	Constructor hexutil.Bytes
+	Code        hexutil.Bytes
 	Balance     *math.HexOrDecimal256
 	Nonce       math.HexOrDecimal64
 	Storage     map[storageJSON]storageJSON
-	PrivateKey  hexutility.Bytes
+	PrivateKey  hexutil.Bytes
 }
 
 // storageJSON represents a 256 bit byte array, but allows less than 256 bits when
 // unmarshaling from hex.
-type storageJSON common.Hash
+type storageJSON libcommon.Hash
 
 func (h *storageJSON) UnmarshalText(text []byte) error {
 	text = bytes.TrimPrefix(text, []byte("0x"))
@@ -167,13 +166,13 @@ func (h *storageJSON) UnmarshalText(text []byte) error {
 }
 
 func (h storageJSON) MarshalText() ([]byte, error) {
-	return hexutility.Bytes(h[:]).MarshalText()
+	return hexutil.Bytes(h[:]).MarshalText()
 }
 
 // GenesisMismatchError is raised when trying to overwrite an existing
 // genesis block with an incompatible one.
 type GenesisMismatchError struct {
-	Stored, New common.Hash
+	Stored, New libcommon.Hash
 }
 
 func (e *GenesisMismatchError) Error() string {
@@ -183,7 +182,7 @@ func (e *GenesisMismatchError) Error() string {
 	}
 	return fmt.Sprintf("database contains incompatible genesis (try with --chain=%s)", config.ChainName)
 }
-func (g *Genesis) ConfigOrDefault(genesisHash common.Hash) *chain.Config {
+func (g *Genesis) ConfigOrDefault(genesisHash libcommon.Hash) *chain.Config {
 	if g != nil {
 		return g.Config
 	}

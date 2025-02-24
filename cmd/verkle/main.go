@@ -35,9 +35,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/cmd/verkle/verkletrie"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
@@ -197,7 +196,7 @@ func GenerateVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) 
 		return err
 	}
 
-	logger.Info("Verkle Tree Generation completed", "elapsed", time.Since(start), "root", common.Bytes2Hex(root[:]))
+	logger.Info("Verkle Tree Generation completed", "elapsed", time.Since(start), "root", libcommon.Bytes2Hex(root[:]))
 
 	var progress uint64
 	if progress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
@@ -260,6 +259,7 @@ func dump(ctx context.Context, cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
+	defer verkleCursor.Close()
 	for k, v, err := verkleCursor.First(); k != nil; k, v, err = verkleCursor.Next() {
 		if err != nil {
 			return err
@@ -295,7 +295,7 @@ func dump(ctx context.Context, cfg optionsCfg) error {
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("Dumping verkle tree to plain text", "key", common.Bytes2Hex(k))
+			log.Info("Dumping verkle tree to plain text", "key", libcommon.Bytes2Hex(k))
 		default:
 		}
 	}
@@ -325,6 +325,7 @@ func dump_acc_preimages(ctx context.Context, cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
+	defer stateCursor.Close()
 	num, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err
@@ -349,7 +350,7 @@ func dump_acc_preimages(ctx context.Context, cfg optionsCfg) error {
 
 		select {
 		case <-logInterval.C:
-			log.Info("Dumping preimages to plain text", "key", common.Bytes2Hex(k))
+			log.Info("Dumping preimages to plain text", "key", libcommon.Bytes2Hex(k))
 		default:
 		}
 	}
@@ -381,6 +382,7 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 	if err != nil {
 		return err
 	}
+	defer stateCursor.Close()
 	num, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err
@@ -423,7 +425,7 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 
 		select {
 		case <-logInterval.C:
-			logger.Info("Computing preimages to plain text", "key", common.Bytes2Hex(k))
+			logger.Info("Computing preimages to plain text", "key", libcommon.Bytes2Hex(k))
 		default:
 		}
 	}
