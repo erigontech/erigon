@@ -950,7 +950,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
-	cfg.MaxWithdrawalsPerPayload = 8
+	cfg.MaxBlobsPerBlock = 2
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.InitializeForkSchedule()
