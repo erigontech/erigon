@@ -904,18 +904,20 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.BellatrixForkVersion = 0x02000064
 	cfg.CapellaForkEpoch = 648704
 	cfg.CapellaForkVersion = 0x03000064
+	cfg.DenebForkEpoch = 889856
+	cfg.DenebForkVersion = 0x04000064
 	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
 	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
-	cfg.DenebForkEpoch = 889856
-	cfg.DenebForkVersion = 0x04000064
 	cfg.InactivityScoreRecoveryRate = 16
 	cfg.InactivityScoreBias = 4
 	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
+	cfg.MaxBlobsPerBlock = 2
 	cfg.MaxPerEpochActivationChurnLimit = 2
+	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -941,12 +943,16 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.CapellaForkVersion = 0x0300006f
 	cfg.DenebForkEpoch = 516608
 	cfg.DenebForkVersion = 0x0400006f
+	cfg.ElectraForkEpoch = 948224
+	cfg.ElectraForkVersion = 0x0500006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
+	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.MaxPerEpochActivationChurnLimit = 2
+	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.InitializeForkSchedule()
 	return cfg
 }
