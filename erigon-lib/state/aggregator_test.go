@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/rand"
 	"os"
@@ -32,6 +31,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/c2h5oh/datasize"
 
