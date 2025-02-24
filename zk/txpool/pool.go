@@ -24,7 +24,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon/zk/acl"
 	"math"
 	"math/big"
 	"runtime"
@@ -32,6 +31,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ledgerwatch/erigon/zk/acl"
 
 	"github.com/VictoriaMetrics/metrics"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -343,6 +344,10 @@ type TxPool struct {
 	limbo *Limbo
 
 	logLevel log.Lvl
+
+	// PoolMetrics contains metrics for tx/s in and out of the pool
+	// and a median wait time of tx/s waiting in the pool
+	metrics *Metrics
 }
 
 func CreateTxPoolBuckets(tx kv.RwTx) error {
@@ -416,6 +421,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		limbo:                   newLimbo(),
 		logLevel:                logLevel,
 		policyValidator:         policyValidator,
+		metrics:                 &Metrics{},
 	}, nil
 }
 
@@ -1424,6 +1430,8 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 	defer logEvery.Stop()
 	purgeEvery := time.NewTicker(p.cfg.PurgeEvery)
 	defer purgeEvery.Stop()
+	txIoTicker := time.NewTicker(MetricsRunTime)
+	defer txIoTicker.Stop()
 
 	for {
 		select {
@@ -1441,6 +1449,8 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 			return
 		case <-logEvery.C:
 			p.logStats()
+		case <-txIoTicker.C:
+			p.metrics.Update(p)
 		case <-processRemoteTxsEvery.C:
 			if !p.Started() {
 				continue
@@ -1468,6 +1478,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				log.Debug("[txpool] Commit", "written_kb", written/1024, "in", time.Since(t))
 			}
 		case announcements := <-newTxs:
+			p.metrics.IncrementCounter()
 			go func() {
 				for i := 0; i < 16; i++ { // drain more events from channel, then merge and dedup them
 					select {
@@ -1839,6 +1850,9 @@ func (p *TxPool) logStats() {
 		"pending", p.pending.Len(),
 		"baseFee", p.baseFee.Len(),
 		"queued", p.queued.Len(),
+		"tx-in/1m", p.metrics.TxIn,
+		"tx-out/1m", p.metrics.TxIn,
+		"median-wait/1m", fmt.Sprintf("%v/s", p.metrics.MedianWaitTimeSeconds),
 	}
 	cacheKeys := p._stateCache.Len()
 	if cacheKeys > 0 {
