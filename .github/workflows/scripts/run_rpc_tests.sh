@@ -11,7 +11,6 @@ disabled_tests=(
     net_listening/test_1.json
     # Erigon2 and Erigon3 never supported this api methods
     trace_rawTransaction
-    debug_getRawTransaction
     # to investigate
     engine_exchangeCapabilities/test_1.json
     engine_exchangeTransitionConfigurationV1/test_01.json
@@ -39,6 +38,6 @@ disabled_tests=(
 # Transform the array into a comma-separated string
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
 
-python3 ./run_tests.py -p 8545 --continue -f --json-diff --serial -x "$disabled_test_list"
+python3 ./run_tests.py --port 8545 --engine-port 8545 --continue -f --json-diff --serial -x "$disabled_test_list" 
 
 exit $?
