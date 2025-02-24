@@ -19,12 +19,12 @@ package state
 import (
 	"sort"
 
-	"github.com/Giulio2002/bls"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
 func (b *CachingBeaconState) UpgradeToAltair() error {
