@@ -772,6 +772,9 @@ func (sdb *IntraBlockState) GetIncarnation(addr libcommon.Address) (uint64, erro
 // The account's state object is still available until the state is committed,
 // getStateObject will return a non-nil account after Suicide.
 func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) (bool, error) {
+	if sdb.trace || traceAccount(addr) {
+		fmt.Printf("%d (%d.%d) SelfDestruct %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
+	}
 	stateObject, err := sdb.getStateObject(addr)
 	if err != nil {
 		return false, err
@@ -1084,6 +1087,9 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 		balance := stateObject.Balance()
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
 			tracingHooks.OnBalanceChange(stateObject.address, &balance, uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)
+		}
+		if dbg.TraceTransactionIO && (trace || traceAccount(addr)) {
+			fmt.Printf("%d (%d.%d) Delete Account: %x selfdestructed=%v\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed)
 		}
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 			return err
