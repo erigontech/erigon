@@ -158,7 +158,7 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 		return err
 	}
 
-	if et.currentEon.Index != eon.Index {
+	if et.currentEon == nil || et.currentEon.Index != eon.Index {
 		et.logger.Debug("current eon at block", "blockNum", blockEvent.LatestBlockNum, "eonIndex", eon.Index)
 	}
 
