@@ -489,3 +489,47 @@ type difficultiesKV struct {
 	Signer     common.Address
 	Difficulty uint64
 }
+
+func TestIsCatchingUp(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := NewMockClient(ctrl)
+
+	s := Service{
+		client: mockClient,
+	}
+
+	mockClient.EXPECT().
+		FetchStatus(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (*Status, error) {
+			return &Status{
+				LatestBlockTime: "",
+				CatchingUp:      true,
+			}, nil
+		})
+
+	isCatchingUp, err := s.IsCatchingUp(context.TODO())
+	require.NoError(t, err)
+	require.True(t, isCatchingUp)
+}
+
+func TestIsCatchingUpLateBlock(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := NewMockClient(ctrl)
+
+	s := Service{
+		client: mockClient,
+	}
+
+	mockClient.EXPECT().
+		FetchStatus(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (*Status, error) {
+			return &Status{
+				LatestBlockTime: "2025-02-14T11:45:00.764588Z",
+				CatchingUp:      false,
+			}, nil
+		})
+
+	isCatchingUp, err := s.IsCatchingUp(context.TODO())
+	require.NoError(t, err)
+	require.True(t, isCatchingUp)
+}
