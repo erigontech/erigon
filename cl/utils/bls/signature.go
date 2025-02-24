@@ -133,7 +133,7 @@ func VerifyMultipleSignatures(sigs [][]byte, msgs [][]byte, pubKeys [][]byte) (b
 			return false, err
 		}
 		mulP1Aff[i] = pk
-		rawMsgs[i] = msgs[i][:]
+		rawMsgs[i] = msgs[i]
 	}
 	// Secure source of RNG
 	randLock := new(sync.Mutex)
