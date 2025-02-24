@@ -1529,7 +1529,7 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 
 		if val != nil {
 			if path == StatePath {
-				if _, isDestructed := destructed[addr]; !isDesctructed {
+				if _, isDestructed := destructed[addr]; !isDestructed {
 					stateKey := writes[i].Key
 					state := val.(uint256.Int)
 					s.setState(addr, stateKey, state, true)
@@ -1545,7 +1545,7 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 					nonce := val.(uint64)
 					s.SetNonce(addr, nonce)
 				case CodePath:
-					if _, isDestructed := destructed[addr]; !isDesctructed {
+					if _, isDestructed := destructed[addr]; !isDestructed {
 						code := val.([]byte)
 						s.SetCode(addr, code)
 					}
