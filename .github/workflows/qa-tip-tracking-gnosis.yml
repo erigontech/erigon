@@ -8,6 +8,10 @@ on:
     - cron: '0 0 * * 1-6'  # Run every night at 00:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   tip-tracking-test:
     runs-on: [self-hosted, Gnosis]
