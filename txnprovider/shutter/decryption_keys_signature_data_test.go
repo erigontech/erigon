@@ -14,17 +14,17 @@ func TestIdentityPreimageEncodeDecodeSSZ(t *testing.T) {
 	ip := testhelpers.Uint64ToIdentityPreimage(t, 123)
 	buf, err := ip.EncodeSSZ(nil)
 	require.NoError(t, err)
-	ip2, err := shutter.IdentityPreimageFromSSZ(buf)
+	ip2, err := shutter.IdentityPreimageFromBytes(buf)
 	require.NoError(t, err)
 	require.Equal(t, ip, ip2)
 }
 
 func TestIdentityPreimageDecodeSSZWithInvalidLength(t *testing.T) {
 	buf := make([]byte, 39)
-	_, err := shutter.IdentityPreimageFromSSZ(buf)
+	_, err := shutter.IdentityPreimageFromBytes(buf)
 	require.ErrorIs(t, err, shutter.ErrIncorrectIdentityPreimageSize)
 	buf = make([]byte, 64)
-	_, err = shutter.IdentityPreimageFromSSZ(buf)
+	_, err = shutter.IdentityPreimageFromBytes(buf)
 	require.ErrorIs(t, err, shutter.ErrIncorrectIdentityPreimageSize)
 }
 

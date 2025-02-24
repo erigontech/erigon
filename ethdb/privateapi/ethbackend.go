@@ -90,14 +90,11 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifi
 	go func() {
 		var err error
 		defer clean()
-		logger.Info("new subscription to logs established")
 		defer func() {
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
-					logger.Warn("subscription to logs closed", "reason", err)
+					logger.Warn("[rpc] terminted subscription to `logs` events", "reason", err)
 				}
-			} else {
-				logger.Warn("subscription to logs closed")
 			}
 		}()
 		for {
@@ -221,19 +218,16 @@ func (s *EthBackendServer) NetPeerCount(_ context.Context, _ *remote.NetPeerCoun
 }
 
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) (err error) {
-	s.logger.Debug("Establishing event subscription channel with the RPC daemon ...")
+	s.logger.Debug("[rpc] new subscription to `newHeaders` events")
 	ch, clean := s.notifications.Events.AddHeaderSubscription()
 	defer clean()
 	newSnCh, newSnClean := s.notifications.Events.AddNewSnapshotSubscription()
 	defer newSnClean()
-	s.logger.Info("new subscription to newHeaders established")
 	defer func() {
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
-				s.logger.Warn("subscription to newHeaders closed", "reason", err)
+				s.logger.Warn("[rpc] terminted subscription to `newHeaders` events", "reason", err)
 			}
-		} else {
-			s.logger.Warn("subscription to newHeaders closed")
 		}
 	}()
 	_ = subscribeServer.Send(&remote.SubscribeReply{Type: remote.Event_NEW_SNAPSHOT})
