@@ -162,7 +162,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		return nil, err
 	}
 	if (epoch)*a.beaconChainCfg.SlotsPerEpoch >= stageStateProgress {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: slot is not yet reconstructed", epoch))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is not yet reconstructed", epoch))
 	}
 
 	snRoTx := a.caplinStateSnapshots.View()
