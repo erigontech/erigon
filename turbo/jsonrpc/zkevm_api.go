@@ -72,7 +72,7 @@ type ZkEvmAPI interface {
 	GetL2BlockInfoTree(ctx context.Context, blockNum rpc.BlockNumberOrHash) (json.RawMessage, error)
 	EstimateCounters(ctx context.Context, argsOrNil *zkevmRPCTransaction) (json.RawMessage, error)
 	GetBatchCountersByNumber(ctx context.Context, batchNumRpc rpc.BlockNumber) (res json.RawMessage, err error)
-	GetExitRootTable(ctx context.Context) ([]l1InfoTreeData, error)
+	GetExitRootTable(ctx context.Context, argsOrNil *zkevmRPCExitRootTableArgs) ([]l1InfoTreeData, error)
 	GetVersionHistory(ctx context.Context) (json.RawMessage, error)
 	GetForkId(ctx context.Context) (hexutil.Uint64, error)
 	GetForkById(ctx context.Context, forkId hexutil.Uint64) (res json.RawMessage, err error)
@@ -1246,6 +1246,11 @@ func (api *ZkEvmAPIImpl) GetVersionHistory(ctx context.Context) (json.RawMessage
 	return versionsJson, nil
 }
 
+type zkevmRPCExitRootTableArgs struct {
+	From *uint64 `json:"from"`
+	To   *uint64 `json:"to"`
+}
+
 type l1InfoTreeData struct {
 	Index           uint64      `json:"index"`
 	Ger             common.Hash `json:"ger"`
@@ -1257,7 +1262,7 @@ type l1InfoTreeData struct {
 	BlockNumber     uint64      `json:"block_number"`
 }
 
-func (api *ZkEvmAPIImpl) GetExitRootTable(ctx context.Context) ([]l1InfoTreeData, error) {
+func (api *ZkEvmAPIImpl) GetExitRootTable(ctx context.Context, argsOrNil *zkevmRPCExitRootTableArgs) ([]l1InfoTreeData, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1274,6 +1279,9 @@ func (api *ZkEvmAPIImpl) GetExitRootTable(ctx context.Context) ([]l1InfoTreeData
 	var result []l1InfoTreeData
 
 	var idx uint64 = 1
+	if argsOrNil != nil && argsOrNil.From != nil {
+		idx = *argsOrNil.From
+	}
 	for {
 		info, err := hermezDb.GetL1InfoTreeUpdate(idx)
 		if err != nil {
@@ -1294,6 +1302,9 @@ func (api *ZkEvmAPIImpl) GetExitRootTable(ctx context.Context) ([]l1InfoTreeData
 		}
 		result = append(result, data)
 		idx++
+		if argsOrNil != nil && argsOrNil.To != nil && idx > *argsOrNil.To {
+			break
+		}
 	}
 
 	return result, nil

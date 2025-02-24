@@ -882,7 +882,7 @@ func TestGetExitRootTable(t *testing.T) {
 	}
 	tx.Commit()
 
-	exitRootEntries, err := zkEvmImpl.GetExitRootTable(ctx)
+	exitRootEntries, err := zkEvmImpl.GetExitRootTable(ctx, nil)
 	assert.NoError(err)
 	t.Logf("exitRootEntries: %+v", exitRootEntries)
 	for i, er := range exitRootEntries {

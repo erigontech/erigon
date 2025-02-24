@@ -255,6 +255,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.PanicOnReorg,
 	&utils.ShadowSequencer,
 	&utils.ZKGenesisConfigPathFlag,
+	&utils.L2InfoTreeUpdatesBatchSize,
+	&utils.L2InfoTreeUpdatesEnabled,
 
 	&utils.SilkwormExecutionFlag,
 	&utils.SilkwormRpcDaemonFlag,

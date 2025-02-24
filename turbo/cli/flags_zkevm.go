@@ -281,6 +281,8 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		BadTxAllowance:                         ctx.Uint64(utils.BadTxAllowance.Name),
 		BadTxStoreValue:                        ctx.Uint64(utils.BadTxStoreValue.Name),
 		BadTxPurge:                             ctx.Bool(utils.BadTxPurge.Name),
+		L2InfoTreeUpdatesBatchSize:             ctx.Uint64(utils.L2InfoTreeUpdatesBatchSize.Name),
+		L2InfoTreeUpdatesEnabled:               ctx.Bool(utils.L2InfoTreeUpdatesEnabled.Name),
 	}
 
 	utils2.EnableTimer(cfg.DebugTimers)

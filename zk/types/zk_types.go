@@ -45,13 +45,13 @@ type Batch struct {
 }
 
 type L1InfoTreeUpdate struct {
-	Index           uint64
-	GER             common.Hash
-	MainnetExitRoot common.Hash
-	RollupExitRoot  common.Hash
-	ParentHash      common.Hash
-	Timestamp       uint64
-	BlockNumber     uint64
+	Index           uint64      `json:"index,omitempty"`
+	GER             common.Hash `json:"ger,omitempty"`
+	MainnetExitRoot common.Hash `json:"mainnet_exit_root,omitempty"`
+	RollupExitRoot  common.Hash `json:"rollup_exit_root,omitempty"`
+	ParentHash      common.Hash `json:"parent_hash,omitempty"`
+	Timestamp       uint64      `json:"min_timestamp,omitempty"`
+	BlockNumber     uint64      `json:"block_number,omitempty"`
 }
 
 func (l *L1InfoTreeUpdate) Marshall() []byte {

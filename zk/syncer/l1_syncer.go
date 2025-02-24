@@ -563,3 +563,37 @@ func (s *L1Syncer) CheckL1BlockFinalized(blockNo uint64) (finalized bool, finali
 
 	return block.NumberU64() >= blockNo, block.NumberU64(), nil
 }
+
+func (s *L1Syncer) QueryForRootLog(to uint64) (*ethTypes.Log, error) {
+	var logs []ethTypes.Log
+	var err error
+	retry := 0
+	for {
+		em := s.getNextEtherman()
+		query := ethereum.FilterQuery{
+			FromBlock: new(big.Int).SetUint64(0),
+			ToBlock:   new(big.Int).SetUint64(to),
+			Addresses: s.l1ContractAddresses,
+			Topics:    s.topics,
+		}
+		logs, err = em.FilterLogs(context.Background(), query)
+		if err != nil {
+			log.Debug("QueryForRootLog retry error", "err", err)
+			retry++
+			if retry > 5 {
+				return nil, err
+			}
+			time.Sleep(time.Duration(retry*2) * time.Second)
+			continue
+		}
+		break
+	}
+
+	if len(logs) != 2 {
+		// There should only be 2 logs, the root log and the log from the to block
+		// this is called from index 1 on the info tree so we need the root to make index 0
+		return nil, fmt.Errorf("did not find the expected number of logs")
+	}
+
+	return &logs[0], nil
+}

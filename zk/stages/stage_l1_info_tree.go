@@ -6,7 +6,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/l1infotree"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -46,7 +48,40 @@ func SpawnL1InfoTreeStage(
 		defer tx.Rollback()
 	}
 
-	if err := cfg.updater.WarmUp(tx); err != nil {
+	progress, err := stages.GetStageProgress(tx, stages.L1InfoTree)
+	if err != nil {
+		return err
+	}
+	// L2InfoTreeUpdatesEnabled must be enabled, this method uses an updated rpc method that uses to and from.
+	if progress == 0 && !sequencer.IsSequencer() && cfg.zkCfg.L2InfoTreeUpdatesEnabled {
+		select {
+		default:
+			// If we are a rpc node, and we are starting from the beginning, we need to check for updates from the L2
+			infoTrees, err := cfg.updater.CheckL2RpcForInfoTreeUpdates(logPrefix, tx)
+			if err != nil {
+				log.Warn(fmt.Sprintf("[%s] L2 Info Tree sync failed, getting Info Tree from L1", logPrefix), "err", err)
+				break
+			}
+
+			var latestIndex uint64
+			latestUpdate := cfg.updater.GetLatestUpdate()
+			if latestUpdate != nil {
+				latestIndex = latestUpdate.Index
+			}
+
+			log.Info(fmt.Sprintf("[%s] Synced Info Tree updates from L2 Sequencer RPC", logPrefix), "count", len(infoTrees), "latestIndex", latestIndex)
+
+			if freshTx {
+				if funcErr = tx.Commit(); funcErr != nil {
+					return fmt.Errorf("tx.Commit: %w", funcErr)
+				}
+			}
+
+			return nil
+		}
+	}
+
+	if err = cfg.updater.WarmUp(tx); err != nil {
 		return fmt.Errorf("cfg.updater.WarmUp: %w", err)
 	}
 
@@ -60,6 +95,7 @@ func SpawnL1InfoTreeStage(
 	if latestUpdate != nil {
 		latestIndex = latestUpdate.Index
 	}
+
 	log.Info(fmt.Sprintf("[%s] Info tree updates", logPrefix), "count", len(allLogs), "latestIndex", latestIndex)
 
 	if freshTx {
