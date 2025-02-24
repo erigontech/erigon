@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/opstack"
 )
 
 type DynamicFeeTransaction struct {
@@ -63,6 +64,10 @@ func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint2
 
 func (tx *DynamicFeeTransaction) Unwrap() Transaction {
 	return tx
+}
+
+func (tx *DynamicFeeTransaction) RollupCostData() opstack.RollupCostData {
+	return tx.computeRollupGas(tx)
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -341,6 +346,7 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 		data:       tx.Data,
 		accessList: tx.AccessList,
 		checkNonce: true,
+		l1CostGas:  tx.RollupCostData(),
 	}
 	if !rules.IsLondon {
 		return nil, errors.New("eip-1559 transactions require London")

@@ -80,7 +80,7 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Temp
 		return nil, err
 	}
 
-	getBlockRes, err := delegateGetBlockByNumber(tx, b, number, false)
+	getBlockRes, err := api.delegateGetBlockByNumber(tx, b, number, false)
 	if err != nil {
 		return nil, err
 	}

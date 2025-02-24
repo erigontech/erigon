@@ -37,6 +37,7 @@ import (
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/opstack"
 )
 
 var (
@@ -53,6 +54,7 @@ const (
 	DynamicFeeTxType
 	BlobTxType
 	SetCodeTxType
+	OptimismDepositTxType = 0x7E
 )
 
 // Transaction is an Ethereum transaction.
@@ -93,7 +95,26 @@ type Transaction interface {
 	GetSender() (libcommon.Address, bool)
 	SetSender(libcommon.Address)
 	IsContractDeploy() bool
+	RollupCostData() opstack.RollupCostData
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
+}
+
+type rollupGasCounter struct {
+	zeroes     uint64
+	ones       uint64
+	fastLzSize uint64
+}
+
+func (r *rollupGasCounter) Write(p []byte) (int, error) {
+	for _, byt := range p {
+		if byt == 0 {
+			r.zeroes++
+		} else {
+			r.ones++
+		}
+	}
+	r.fastLzSize = uint64(opstack.FlzCompressLen(p))
+	return len(p), nil
 }
 
 // TransactionMisc is collection of miscellaneous fields for transaction that is supposed to be embedded into concrete
@@ -102,6 +123,35 @@ type TransactionMisc struct {
 	// caches
 	hash atomic.Pointer[libcommon.Hash]
 	from atomic.Pointer[libcommon.Address]
+
+	// cache how much gas the tx takes on L1 for its share of rollup data (Optimism only)
+	rollupGas atomic.Pointer[opstack.RollupCostData]
+}
+
+// computeRollupGas is a helper method to compute and cache the rollup gas cost for any tx type
+func (tm *TransactionMisc) computeRollupGas(tx interface {
+	MarshalBinary(w io.Writer) error
+	Type() byte
+}) opstack.RollupCostData {
+	if tx.Type() == OptimismDepositTxType {
+		return opstack.RollupCostData{}
+	}
+	if v := tm.rollupGas.Load(); v != nil {
+		return *v
+	}
+	var c rollupGasCounter
+	var buf bytes.Buffer
+	err := tx.MarshalBinary(&buf)
+	if err != nil { // Silent error, invalid txs will not be marshalled/unmarshalled for batch submission anyway.
+		log.Error("failed to encode tx for L1 cost computation", "err", err)
+	}
+	_, err = c.Write(buf.Bytes())
+	if err != nil {
+		log.Error("failed to compute rollup cost data", "err", err)
+	}
+	total := opstack.RollupCostData{Zeroes: c.zeroes, Ones: c.ones, FastLzSize: c.fastLzSize}
+	tm.rollupGas.Store(&total)
+	return total
 }
 
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
@@ -196,6 +246,13 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		}
 	case SetCodeTxType:
 		t = &SetCodeTransaction{}
+	case OptimismDepositTxType:
+		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
+		t := &OptimismDepositTx{}
+		if err := t.DecodeRLP(s); err != nil {
+			return nil, err
+		}
+		return t, nil
 	default:
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded
@@ -371,6 +428,12 @@ type Message struct {
 	isFree           bool
 	blobHashes       []libcommon.Hash
 	authorizations   []Authorization
+
+	// Optimism
+	isOptimismSystemTx  bool
+	isOptimismDepositTx bool
+	mint                *uint256.Int
+	l1CostGas           opstack.RollupCostData
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -424,6 +487,13 @@ func (m *Message) SetCheckNonce(checkNonce bool) {
 func (m *Message) IsFree() bool { return m.isFree }
 func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
+}
+
+func (m Message) IsOptimismSystemTx() bool  { return m.isOptimismSystemTx }
+func (m Message) IsOptimismDepositTx() bool { return m.isOptimismDepositTx }
+func (m Message) Mint() *uint256.Int        { return m.mint }
+func (m Message) RollupCostData() opstack.RollupCostData {
+	return m.l1CostGas
 }
 
 func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
