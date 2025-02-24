@@ -209,6 +209,7 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *stack.Stack, mem *Mem
 			return params.SstoreSetGasEIP2200, nil
 		}
 		if value.IsZero() { // delete slot (2.1.2b)
+			fmt.Println("1")
 			evm.IntraBlockState().AddRefund(params.SstoreClearsScheduleRefundEIP2200)
 		}
 		return params.SstoreResetGasEIP2200, nil // write existing slot (2.1.2)
@@ -217,13 +218,16 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *stack.Stack, mem *Mem
 		if current.IsZero() { // recreate slot (2.2.1.1)
 			evm.IntraBlockState().SubRefund(params.SstoreClearsScheduleRefundEIP2200)
 		} else if value.IsZero() { // delete slot (2.2.1.2)
+			fmt.Println("2")
 			evm.IntraBlockState().AddRefund(params.SstoreClearsScheduleRefundEIP2200)
 		}
 	}
 	if original.Eq(value) {
 		if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
+			fmt.Println("3")
 			evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP2200 - params.SloadGasEIP2200)
 		} else { // reset to original existing slot (2.2.2.2)
+			fmt.Println("4")
 			evm.IntraBlockState().AddRefund(params.SstoreResetGasEIP2200 - params.SloadGasEIP2200)
 		}
 	}
@@ -549,10 +553,6 @@ func gasExtCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, m
 		address        = libcommon.Address(stack.Back(0).Bytes20())
 	)
 
-	// if evm.interpreter.readOnly && !value.IsZero() {
-	// 	return nil, ErrWriteProtection
-	// }
-
 	fmt.Printf("address: 0x%x\n", address)
 	addrMod := evm.IntraBlockState().AddAddressToAccessList(address)
 	if addrMod {
@@ -560,15 +560,13 @@ func gasExtCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, m
 	}
 	fmt.Println("GAS 1: ", gas)
 	if transfersValue {
-		if exists, err := evm.IntraBlockState().Exist(address); err != nil {
+		if empty, err := evm.IntraBlockState().Empty(address); err != nil {
 			return 0, ErrIntraBlockStateFailed
-		} else if !exists {
-			fmt.Println("GAS 1:.5 ", gas)
+		} else if empty {
 			gas += params.CallNewAccountGas
 		}
 		gas += params.CallValueTransferGas
 	}
-	fmt.Println("GAS 2:", gas)
 	memoryGas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
