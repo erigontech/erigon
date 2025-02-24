@@ -2,6 +2,7 @@ package receipts
 
 import (
 	"context"
+
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -77,7 +78,19 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 	return receipt, nil
 }
 
-func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state.IntraBlockState, block *types.Block, cumulativeGasUsed uint64) (*types.Receipt, error) {
+func (g *BorGenerator) GenerateBorLogs(ctx context.Context, msgs []*types.Message, txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, header *types.Header, chainConfig *chain.Config, txIndex int) (types.Logs, error) {
+	ibs, blockContext, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, chainConfig, g.blockReader, txNumsReader, tx, txIndex)
+	if err != nil {
+		return nil, err
+	}
+
+	gp := new(core.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
+
+	return getBorLogs(msgs, evm, gp, ibs, header.Number.Uint64(), header.Hash())
+}
+
+func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state.IntraBlockState, blockNum uint64, blockHash libcommon.Hash) (types.Logs, error) {
 	for _, msg := range msgs {
 		txContext := core.NewEVMTxContext(msg)
 		evm.Reset(txContext, ibs)
@@ -88,9 +101,17 @@ func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, i
 		}
 	}
 
-	numReceipts := len(block.Transactions())
+	receiptLogs := ibs.GetLogs(0, bortypes.ComputeBorTxHash(blockNum, blockHash), blockNum, blockHash)
+	return receiptLogs, nil
+}
 
-	receiptLogs := ibs.GetLogs(0, bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash()), block.NumberU64(), block.Hash())
+func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state.IntraBlockState, block *types.Block, cumulativeGasUsed uint64) (*types.Receipt, error) {
+	receiptLogs, err := getBorLogs(msgs, evm, gp, ibs, block.Number().Uint64(), block.Hash())
+	if err != nil {
+		return nil, err
+	}
+
+	numReceipts := len(block.Transactions())
 	receipt := types.Receipt{
 		Type:              0,
 		CumulativeGasUsed: cumulativeGasUsed,
