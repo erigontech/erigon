@@ -141,6 +141,24 @@ func has0xPrefix(input string) bool {
 	return len(input) >= 2 && input[0] == '0' && (input[1] == 'x' || input[1] == 'X')
 }
 
+// IsValidQuantity checks if input is a valid hex-encoded quantity as per JSON-RPC spec.
+// It returns nil if the input is valid, otherwise an error.
+func IsValidQuantity(input string) error {
+	input, err := checkNumber(input)
+	if err != nil {
+		return err
+	}
+	if len(input) > 64 {
+		return ErrTooBigHexString
+	}
+	if input[0] != '0' {
+		if _, err = hex.DecodeString(input); err != nil {
+			return ErrHexStringInvalid
+		}
+	}
+	return nil
+}
+
 func checkNumber(input string) (raw string, err error) {
 	if len(input) == 0 {
 		return "", ErrEmptyString
