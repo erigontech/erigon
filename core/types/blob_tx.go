@@ -62,7 +62,7 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 	return fixedgas.BlobGasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
 
-func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      stx.Nonce,
 		gasLimit:   stx.Gas,
@@ -76,12 +76,12 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 		checkNonce: true,
 	}
 	if !rules.IsCancun {
-		return msg, errors.New("BlobTx transactions require Cancun")
+		return nil, errors.New("BlobTx transactions require Cancun")
 	}
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
-			return msg, errors.New("gasPrice higher than 2^256-1")
+			return nil, errors.New("gasPrice higher than 2^256-1")
 		}
 	}
 	msg.gasPrice.Add(&msg.gasPrice, stx.Tip)
@@ -92,7 +92,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 	msg.from, err = stx.Sender(s)
 	msg.maxFeePerBlobGas = *stx.MaxFeePerBlobGas
 	msg.blobHashes = stx.BlobVersionedHashes
-	return msg, err
+	return &msg, err
 }
 
 func (stx *BlobTx) cachedSender() (sender libcommon.Address, ok bool) {

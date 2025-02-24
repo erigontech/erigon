@@ -19,12 +19,15 @@ package kv
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 //Variables Naming:
@@ -134,26 +137,41 @@ func InitMDBXMGauges() *DBGauges {
 
 // initialize summaries for a particular MDBX instance
 func InitSummaries(dbLabel Label) {
-	// just in case the global singleton map is not already initialized
-	if MDBXSummaries == nil {
-		MDBXSummaries = make(map[Label]*DBSummaries)
-	}
-
-	_, ok := MDBXSummaries[dbLabel]
+	_, ok := MDBXSummaries.Load(dbLabel)
 	if !ok {
 		dbName := string(dbLabel)
-		MDBXSummaries[dbLabel] = &DBSummaries{
+		MDBXSummaries.Store(dbName, &DBSummaries{
 			DbCommitPreparation: metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "preparation"}),
 			DbCommitWrite:       metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "write"}),
 			DbCommitSync:        metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "sync"}),
 			DbCommitEnding:      metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "ending"}),
 			DbCommitTotal:       metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "total"}),
-		}
+		})
 	}
 }
 
-var MDBXGauges *DBGauges = InitMDBXMGauges()                            // global mdbx gauges. each gauge can be filtered by db name
-var MDBXSummaries map[Label]*DBSummaries = make(map[Label]*DBSummaries) // dbName => Summaries mapping
+func RecordSummaries(dbLabel Label, latency mdbx.CommitLatency) error {
+	_summaries, ok := MDBXSummaries.Load(string(dbLabel))
+	if !ok {
+		return fmt.Errorf("MDBX summaries not initialized yet for db=%s", string(dbLabel))
+	}
+	// cast to *DBSummaries
+	summaries, ok := _summaries.(*DBSummaries)
+	if !ok {
+		return fmt.Errorf("type casting to *DBSummaries failed")
+	}
+
+	summaries.DbCommitPreparation.Observe(latency.Preparation.Seconds())
+	summaries.DbCommitWrite.Observe(latency.Write.Seconds())
+	summaries.DbCommitSync.Observe(latency.Sync.Seconds())
+	summaries.DbCommitEnding.Observe(latency.Ending.Seconds())
+	summaries.DbCommitTotal.Observe(latency.Whole.Seconds())
+	return nil
+
+}
+
+var MDBXGauges *DBGauges = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name
+var MDBXSummaries sync.Map                   // dbName => Summaries mapping
 
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")

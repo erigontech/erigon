@@ -63,7 +63,6 @@ type MdbxOpts struct {
 	// must be in the range from 12.5% (almost empty) to 50% (half empty)
 	// which corresponds to the range from 8192 and to 32768 in units respectively
 	log             log.Logger
-	roTxsLimiter    *semaphore.Weighted
 	bucketsCfg      TableCfgFunc
 	path            string
 	syncPeriod      time.Duration
@@ -77,6 +76,11 @@ type MdbxOpts struct {
 	verbosity       kv.DBVerbosityLvl
 	label           kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
 	inMem           bool
+
+	// roTxsLimiter - without this limiter - it's possible to reach 10K threads (if 10K rotx will wait for IO) - and golang will crush https://groups.google.com/g/golang-dev/c/igMoDruWNwo
+	// most of db must set explicit `roTxsLimiter <= 9K`.
+	// There is way to increase the 10,000 thread limit: https://golang.org/pkg/runtime/debug/#SetMaxThreads
+	roTxsLimiter *semaphore.Weighted
 
 	metrics bool
 }
@@ -100,9 +104,6 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 	}
 	if label == kv.ChainDB {
 		opts = opts.RemoveFlags(mdbx.NoReadahead) // enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (doesen GB)
-	}
-	if opts.metrics {
-		kv.InitSummaries(label)
 	}
 	return opts
 }
@@ -188,6 +189,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 	if dbg.MergeTr() > 0 {
 		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
+	}
+
+	if opts.metrics {
+		kv.InitSummaries(opts.label)
 	}
 	if opts.HasFlag(mdbx.Accede) || opts.HasFlag(mdbx.Readonly) {
 		for retry := 0; ; retry++ {
@@ -913,11 +918,10 @@ func (tx *MdbxTx) Commit() error {
 
 	if tx.db.opts.metrics {
 		dbLabel := tx.db.opts.label
-		kv.MDBXSummaries[dbLabel].DbCommitPreparation.Observe(latency.Preparation.Seconds())
-		kv.MDBXSummaries[dbLabel].DbCommitWrite.Observe(latency.Write.Seconds())
-		kv.MDBXSummaries[dbLabel].DbCommitSync.Observe(latency.Sync.Seconds())
-		kv.MDBXSummaries[dbLabel].DbCommitEnding.Observe(latency.Ending.Seconds())
-		kv.MDBXSummaries[dbLabel].DbCommitTotal.Observe(latency.Whole.Seconds())
+		err = kv.RecordSummaries(dbLabel, latency)
+		if err != nil {
+			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
+		}
 
 		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
 		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
