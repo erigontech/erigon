@@ -1454,14 +1454,6 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	}
 	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
 
-	for i := 1; i < len(updates); i++ {
-		if updates[i].value == nil && updates[i-1].value == nil {
-			value := make([]byte, 10)
-			r.Read(value)
-			updates[i].value = append(updates[i].value, value...)
-		}
-	}
-
 	return updates
 }
 
