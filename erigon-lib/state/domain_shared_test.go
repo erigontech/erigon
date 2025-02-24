@@ -227,7 +227,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	// 	return en(list)
 	// }
 
-	// ac := agg.BeginFilesRo()
+	// ac := agg.BeinFilesRo()
 	// defer ac.Close()
 	// ctx := context.Background()
 
