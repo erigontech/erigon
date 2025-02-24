@@ -898,6 +898,11 @@ var (
 		Usage: "Number of entries to print from the ACL history on node start up",
 		Value: 10,
 	}
+	ACLJsonLocation = cli.StringFlag{
+		Name:  "acl.json-location",
+		Usage: "Location of the ACL JSON file",
+		Value: "",
+	}
 	DebugTimers = cli.BoolFlag{
 		Name:  "debug.timers",
 		Usage: "Enable debug timers",

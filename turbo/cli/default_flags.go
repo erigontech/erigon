@@ -301,6 +301,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.InitialBatchCfgFile,
 
 	&utils.ACLPrintHistory,
+	&utils.ACLJsonLocation,
 	&utils.InfoTreeUpdateInterval,
 	&utils.SealBatchImmediatelyOnOverflow,
 	&utils.MockWitnessGeneration,

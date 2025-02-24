@@ -262,6 +262,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		IgnoreBadBatchesCheck:                  ctx.Bool(utils.IgnoreBadBatchesCheck.Name),
 		InitialBatchCfgFile:                    ctx.String(utils.InitialBatchCfgFile.Name),
 		ACLPrintHistory:                        ctx.Int(utils.ACLPrintHistory.Name),
+		ACLJsonLocation:                        ctx.String(utils.ACLJsonLocation.Name),
 		InfoTreeUpdateInterval:                 ctx.Duration(utils.InfoTreeUpdateInterval.Name),
 		SealBatchImmediatelyOnOverflow:         ctx.Bool(utils.SealBatchImmediatelyOnOverflow.Name),
 		MockWitnessGeneration:                  ctx.Bool(utils.MockWitnessGeneration.Name),

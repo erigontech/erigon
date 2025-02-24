@@ -117,7 +117,7 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, ethCfg *ethconfig.
 		return nil, nil, nil, nil, nil, err
 	}
 
-	if ethCfg.Zk.ACLPrintHistory > 0 {
+	if ethCfg.Zk.ACLPrintHistory > 0 && len(ethCfg.Zk.ACLJsonLocation) <= 0 {
 		pts, _ := txpool.LastPolicyTransactions(context.Background(), aclDB, ethCfg.Zk.ACLPrintHistory)
 		if len(pts) == 0 {
 			log.Info("[ACL] No policy transactions found")

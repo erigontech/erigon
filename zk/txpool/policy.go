@@ -168,6 +168,17 @@ func ResolvePolicy(policy string) (Policy, error) {
 	}
 }
 
+func resolvePolicyByte(policy byte) (Policy, error) {
+	switch policy {
+	case 0:
+		return SendTx, nil
+	case 1:
+		return Deploy, nil
+	default:
+		return SendTx, errUnknownPolicy
+	}
+}
+
 // containsPolicy checks if the given policy is present in the policy list
 func containsPolicy(policies []byte, policy Policy) bool {
 	return bytes.Contains(policies, policy.ToByteArray())
@@ -702,7 +713,7 @@ func resolveTable(aclType string) (string, error) {
 	return table, nil
 }
 
-// create a method to resolve policy which will decode a tx to either sendTx or deploy policy
+// resolvePolicy is a method to resolve policy which will decode a tx to either sendTx or deploy policy
 func resolvePolicy(txn *types.TxSlot) Policy {
 	if txn.Creation {
 		return Deploy
@@ -710,9 +721,22 @@ func resolvePolicy(txn *types.TxSlot) Policy {
 	return SendTx
 }
 
-// isActionAllowed checks if the given action is allowed for the given address
-func (p *TxPool) isActionAllowed(ctx context.Context, addr common.Address, policy Policy) (bool, error) {
-	hasPolicy, mode, err := checkIfAccountHasPolicy(ctx, p.aclDB, addr, policy)
+type Validator struct {
+	aclDB kv.RwDB
+}
+
+func NewPolicyValidator(aclDB kv.RwDB) *Validator {
+	return &Validator{aclDB: aclDB}
+}
+
+// IsActionAllowed checks if the given action is allowed for the given address
+func (v *Validator) IsActionAllowed(ctx context.Context, addr common.Address, policy byte) (bool, error) {
+	p, err := resolvePolicyByte(policy)
+	if err != nil {
+		return false, err
+	}
+
+	hasPolicy, mode, err := checkIfAccountHasPolicy(ctx, v.aclDB, addr, p)
 	if err != nil {
 		return false, err
 	}

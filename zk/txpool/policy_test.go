@@ -574,7 +574,7 @@ func TestIsActionAllowed(t *testing.T) {
 	db := newTestACLDB(t, "")
 	ctx := context.Background()
 
-	txPool := &TxPool{aclDB: db}
+	txPool := &TxPool{policyValidator: NewPolicyValidator(db)}
 
 	t.Run("isActionAllowed - BlocklistMode - Policy Exists", func(t *testing.T) {
 		SetMode(ctx, db, BlocklistMode)
@@ -587,7 +587,7 @@ func TestIsActionAllowed(t *testing.T) {
 		require.NoError(t, AddPolicy(ctx, db, "blocklist", addr, policy))
 
 		// Check if the action is allowed
-		allowed, err := txPool.isActionAllowed(ctx, addr, policy)
+		allowed, err := txPool.policyValidator.IsActionAllowed(ctx, addr, policy.ToByte())
 		require.NoError(t, err)
 		require.False(t, allowed) // In blocklist mode, having the policy means the action is not allowed
 	})
@@ -600,7 +600,7 @@ func TestIsActionAllowed(t *testing.T) {
 		policy := Deploy
 
 		// Check if the action is allowed
-		allowed, err := txPool.isActionAllowed(ctx, addr, policy)
+		allowed, err := txPool.policyValidator.IsActionAllowed(ctx, addr, policy.ToByte())
 		require.NoError(t, err)
 		require.True(t, allowed) // In blocklist mode, not having the policy means the action is allowed
 	})
@@ -616,7 +616,7 @@ func TestIsActionAllowed(t *testing.T) {
 		require.NoError(t, AddPolicy(ctx, db, "allowlist", addr, policy))
 
 		// Check if the action is allowed
-		allowed, err := txPool.isActionAllowed(ctx, addr, policy)
+		allowed, err := txPool.policyValidator.IsActionAllowed(ctx, addr, policy.ToByte())
 		require.NoError(t, err)
 		require.True(t, allowed) // In allowlist mode, having the policy means the action is allowed
 	})
@@ -629,7 +629,7 @@ func TestIsActionAllowed(t *testing.T) {
 		policy := Deploy
 
 		// Check if the action is allowed
-		allowed, err := txPool.isActionAllowed(ctx, addr, policy)
+		allowed, err := txPool.policyValidator.IsActionAllowed(ctx, addr, policy.ToByte())
 		require.NoError(t, err)
 		require.False(t, allowed) // In allowlist mode, not having the policy means the action is not allowed
 	})
@@ -642,7 +642,7 @@ func TestIsActionAllowed(t *testing.T) {
 		policy := SendTx
 
 		// Check if the action is allowed
-		allowed, err := txPool.isActionAllowed(ctx, addr, policy)
+		allowed, err := txPool.policyValidator.IsActionAllowed(ctx, addr, policy.ToByte())
 		require.NoError(t, err)
 		require.True(t, allowed) // In disabled mode, all actions are allowed
 	})
