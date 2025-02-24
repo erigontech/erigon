@@ -18,7 +18,6 @@ package types
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -26,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gballet/go-verkle"
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -79,27 +77,8 @@ func (tr *TRand) RandHash() libcommon.Hash {
 	return libcommon.Hash(tr.RandBytes(32))
 }
 
-func (tr *TRand) RandBoolean() bool {
-	return tr.rnd.Intn(2) == 0
-}
-
 func (tr *TRand) RandBloom() Bloom {
 	return Bloom(tr.RandBytes(BloomByteLength))
-}
-
-func (tr *TRand) RandVerkleKeyValuePairs(count int) []verkle.KeyValuePair {
-	res := make([]verkle.KeyValuePair, count)
-	for i := 0; i < count; i++ {
-		res[i] = tr.RandVerkleKeyValuePair()
-	}
-	return res
-}
-
-func (tr *TRand) RandVerkleKeyValuePair() verkle.KeyValuePair {
-	return verkle.KeyValuePair{
-		Key:   tr.RandBytes(tr.RandIntInRange(1, 32)),
-		Value: tr.RandBytes(tr.RandIntInRange(1, 32)),
-	}
 }
 
 func (tr *TRand) RandWithdrawal() *Withdrawal {
@@ -138,60 +117,6 @@ func (tr *TRand) RandHeader() *Header {
 	}
 }
 
-func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
-	skipSet := make(map[string]struct{}, len(skipFields))
-	for _, field := range skipFields {
-		skipSet[field] = struct{}{}
-	}
-
-	emptyUint64 := uint64(0)
-	h := &Header{}
-	// note unexported fields are skipped in reflection auto-assign as they are not assignable
-	h.mutable = tr.RandBoolean()
-	headerValue := reflect.ValueOf(h)
-	headerElem := headerValue.Elem()
-	numField := headerElem.Type().NumField()
-	for i := 0; i < numField; i++ {
-		field := headerElem.Field(i)
-		if !field.CanSet() {
-			continue
-		}
-
-		if _, skip := skipSet[headerElem.Type().Field(i).Name]; skip {
-			continue
-		}
-
-		switch field.Type() {
-		case reflect.TypeOf(libcommon.Hash{}):
-			field.Set(reflect.ValueOf(tr.RandHash()))
-		case reflect.TypeOf(&libcommon.Hash{}):
-			randHash := tr.RandHash()
-			field.Set(reflect.ValueOf(&randHash))
-		case reflect.TypeOf(libcommon.Address{}):
-			field.Set(reflect.ValueOf(tr.RandAddress()))
-		case reflect.TypeOf(Bloom{}):
-			field.Set(reflect.ValueOf(tr.RandBloom()))
-		case reflect.TypeOf(BlockNonce{}):
-			field.Set(reflect.ValueOf(BlockNonce(tr.RandBytes(8))))
-		case reflect.TypeOf(&big.Int{}):
-			field.Set(reflect.ValueOf(tr.RandBig()))
-		case reflect.TypeOf(uint64(0)):
-			field.Set(reflect.ValueOf(*tr.RandUint64()))
-		case reflect.TypeOf(&emptyUint64):
-			field.Set(reflect.ValueOf(tr.RandUint64()))
-		case reflect.TypeOf([]byte{}):
-			field.Set(reflect.ValueOf(tr.RandBytes(tr.RandIntInRange(128, 1024))))
-		case reflect.TypeOf(false):
-			field.Set(reflect.ValueOf(tr.RandBoolean()))
-		case reflect.TypeOf([]verkle.KeyValuePair{}):
-			field.Set(reflect.ValueOf(tr.RandVerkleKeyValuePairs(tr.RandIntInRange(1, 3))))
-		default:
-			panic(fmt.Sprintf("don't know how to generate rand value for Header field type %v - please add handler", field.Type()))
-		}
-	}
-	return h
-}
-
 func (tr *TRand) RandAccessTuple() AccessTuple {
 	n := tr.RandIntInRange(1, 5)
 	sk := make([]libcommon.Hash, n)
@@ -216,7 +141,7 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 	auths := make([]Authorization, size)
 	for i := 0; i < size; i++ {
 		auths[i] = Authorization{
-			ChainID: *tr.RandUint256(),
+			ChainID: *tr.RandUint64(),
 			Address: tr.RandAddress(),
 			Nonce:   *tr.RandUint64(),
 			YParity: uint8(*tr.RandUint64()),
@@ -230,21 +155,15 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 func (tr *TRand) RandTransaction(_type int) Transaction {
 	var txType int
 	if _type == -1 {
-		txType = tr.RandIntInRange(0, 5) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType
+		txType = tr.RandIntInRange(0, 6) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, AccountAbstractionTxType
 	} else {
 		txType = _type
 	}
-	var to *libcommon.Address
-	if tr.RandIntInRange(0, 10)%2 == 0 {
-		_to := tr.RandAddress()
-		to = &_to
-	} else {
-		to = nil
-	}
+	to := tr.RandAddress()
 	commonTx := CommonTx{
 		Nonce: *tr.RandUint64(),
 		Gas:   *tr.RandUint64(),
-		To:    to,
+		To:    &to,
 		Value: uint256.NewInt(*tr.RandUint64()), // wei amount
 		Data:  tr.RandBytes(tr.RandIntInRange(128, 1024)),
 		V:     *tr.RandUint256(),
@@ -297,6 +216,28 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 			},
 			Authorizations: tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
+		}
+	case AccountAbstractionTxType:
+		senderAddress, paymaster, deployer := tr.RandAddress(), tr.RandAddress(), tr.RandAddress()
+		return &AccountAbstractionTransaction{
+			Nonce:                       commonTx.Nonce,
+			ChainID:                     uint256.NewInt(*tr.RandUint64()),
+			Tip:                         uint256.NewInt(*tr.RandUint64()),
+			FeeCap:                      uint256.NewInt(*tr.RandUint64()),
+			Gas:                         commonTx.Gas,
+			AccessList:                  tr.RandAccessList(tr.RandIntInRange(0, 5)),
+			SenderAddress:               &senderAddress,
+			Authorizations:              tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
+			ExecutionData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
+			Paymaster:                   &paymaster,
+			PaymasterData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
+			Deployer:                    &deployer,
+			DeployerData:                tr.RandBytes(tr.RandIntInRange(128, 1024)),
+			BuilderFee:                  uint256.NewInt(*tr.RandUint64()),
+			ValidationGasLimit:          *tr.RandUint64(),
+			PaymasterValidationGasLimit: *tr.RandUint64(),
+			PostOpGasLimit:              *tr.RandUint64(),
+			NonceKey:                    uint256.NewInt(*tr.RandUint64()),
 		}
 	default:
 		fmt.Printf("unexpected txType %v", txType)
@@ -522,9 +463,6 @@ func TestTransactionEncodeDecodeRLP(t *testing.T) {
 		enc := tr.RandTransaction(-1)
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
-			if enc.Type() >= BlobTxType && errors.Is(err, ErrNilToFieldTx) {
-				continue
-			}
 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
 		}
 
@@ -536,6 +474,84 @@ func TestTransactionEncodeDecodeRLP(t *testing.T) {
 		}
 		compareTransactions(t, enc, dec)
 	}
+}
+
+func TestTransactionDecodeRLP_AA(t *testing.T) {
+	// fails - incorrect rlp from ef team
+	rlpStr := "05f85d8205390182303985174876e800830493e0c0947cd129f392c34d898035b3e3870c56537d4270fb8a6e6f20636f6e746578748461379cb694add32fafe807c8c9e814030b74a3c6313b7256e780808080831e8480830f4240830f424080"
+	bodyRlx := hexutility.MustDecodeHex(rlpStr)
+
+	dec, err := UnmarshalTransactionFromBinary(bodyRlx, false)
+	if err != nil {
+		t.Errorf("error: DecodeRLPTransaction: %v", err)
+	}
+	t.Log(dec.GetNonce())
+}
+
+func TestTransactionEncodeRLP_AAMarker(t *testing.T) {
+	marker := AccountAbstractionBatchHeaderTransaction{TransactionCount: 2, ChainID: new(uint256.Int).SetUint64(1337)}
+
+	var buf bytes.Buffer
+	if err := marker.EncodeRLP(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+	dec, err := DecodeRLPTransaction(s, false)
+	if err != nil {
+		t.Errorf("error: DecodeRLPTransaction: %v", err)
+	}
+
+	t.Log(dec)
+}
+
+func TestTransactionEncodeRLP_AA(t *testing.T) {
+	// fails - bad rlp encoding?
+	tr := NewTRand()
+	senderAddress, paymaster, deployer, to := tr.RandAddress(), tr.RandAddress(), tr.RandAddress(), tr.RandAddress()
+	commonTx := CommonTx{
+		Nonce: *tr.RandUint64(),
+		Gas:   *tr.RandUint64(),
+		To:    &to,
+		Value: uint256.NewInt(*tr.RandUint64()), // wei amount
+		Data:  tr.RandBytes(tr.RandIntInRange(128, 1024)),
+		V:     *tr.RandUint256(),
+		R:     *tr.RandUint256(),
+		S:     *tr.RandUint256(),
+	}
+	aaTxn := AccountAbstractionTransaction{
+		Nonce:                       commonTx.Nonce,
+		ChainID:                     uint256.NewInt(*tr.RandUint64()),
+		Tip:                         uint256.NewInt(*tr.RandUint64()),
+		FeeCap:                      uint256.NewInt(*tr.RandUint64()),
+		Gas:                         commonTx.Gas,
+		AccessList:                  tr.RandAccessList(tr.RandIntInRange(0, 5)),
+		SenderAddress:               &senderAddress,
+		Authorizations:              tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
+		ExecutionData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
+		Paymaster:                   &paymaster,
+		PaymasterData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
+		Deployer:                    &deployer,
+		DeployerData:                tr.RandBytes(tr.RandIntInRange(128, 1024)),
+		BuilderFee:                  uint256.NewInt(*tr.RandUint64()),
+		ValidationGasLimit:          *tr.RandUint64(),
+		PaymasterValidationGasLimit: *tr.RandUint64(),
+		PostOpGasLimit:              *tr.RandUint64(),
+		NonceKey:                    uint256.NewInt(*tr.RandUint64()),
+	}
+
+	var buf bytes.Buffer
+	if err := aaTxn.EncodeRLP(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+	dec, err := DecodeRLPTransaction(s, false)
+	if err != nil {
+		t.Errorf("error: DecodeRLPTransaction: %v", err)
+	}
+
+	t.Log(dec)
 }
 
 func TestHeaderEncodeDecodeRLP(t *testing.T) {
@@ -591,9 +607,6 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 		enc := tr.RandBody()
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
-			if errors.Is(err, ErrNilToFieldTx) {
-				continue
-			}
 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
 		}
 
