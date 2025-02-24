@@ -122,15 +122,10 @@ type Coherent struct {
 }
 
 type CoherentRoot struct {
-	cache           *btree2.BTreeG[*Element]
-	codeCache       *btree2.BTreeG[*Element]
-	ready           chan struct{} // close when ready
-	readyChanClosed atomic.Bool   // protecting `ready` field from double-close (on unwind). Consumers don't need check this field.
-
-	// Views marked as `Canonical` if it received onNewBlock message
-	// we may drop `Non-Canonical` views even if they had fresh keys
-	// keys added to `Non-Canonical` views SHOULD NOT be added to stateEvict
-	// cache.latestStateView is always `Canonical`
+	cache     *btree2.BTreeG[*Element]
+	codeCache *btree2.BTreeG[*Element]
+	ready     chan struct{} // close when ready
+	closeOnce sync.Once    // protecting `ready` field from double-close
 	isCanonical bool
 }
 
@@ -326,10 +321,9 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 		}
 	}
 
-	switched := r.readyChanClosed.CompareAndSwap(false, true)
-	if switched {
+	r.closeOnce.Do(func() {
 		close(r.ready) //broadcast
-	}
+	})
 	//log.Info("on new block handled", "viewID", stateChanges.StateVersionID)
 }
 
@@ -344,24 +338,16 @@ func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	}
 
-	select { // fast non-blocking path
+	select {
 	case <-r.ready:
-		//fmt.Printf("recv broadcast: %d\n", id)
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
-	default:
-	}
-
-	select { // slow blocking path
-	case <-r.ready:
-		//fmt.Printf("recv broadcast2: %d\n", tx.ViewID())
 	case <-ctx.Done():
 		return nil, fmt.Errorf("kvcache rootNum=%x, %w", tx.ViewID(), ctx.Err())
-	case <-time.After(c.cfg.NewBlockWait): //TODO: switch to timer to save resources
+	case <-time.After(c.cfg.NewBlockWait):
 		c.timeout.Inc()
 		c.waitExceededCount.Add(1)
-		//log.Info("timeout", "db_id", id, "has_btree", r.cache != nil)
+		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	}
-	return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 }
 
 func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *CoherentRoot, error) {
