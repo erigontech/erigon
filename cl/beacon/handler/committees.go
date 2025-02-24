@@ -91,7 +91,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	if a.forkchoiceStore.LowestAvailableSlot() <= slot {
 		// non-finality case
 		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-			if epoch > state.Epoch(s)+maxEpochLookahead {
+			if epoch > state.Epoch(s)+maxEpochsLookaheadForDuties {
 				return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("sync committees duties: epoch %d is too far in the future", epoch))
 			}
 			// get active validator indicies

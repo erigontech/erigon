@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
-const maxEpochLookahead = 32
+const maxEpochsLookaheadForDuties = 32
 
 type attesterDutyResponse struct {
 	Pubkey                  libcommon.Bytes48 `json:"pubkey"`
@@ -54,7 +54,7 @@ func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (libcommon.Ha
 			dependentRoot = a.syncedData.HeadRoot()
 			return nil
 		}
-		maxIterations := int(maxEpochLookahead * 2 * a.beaconChainCfg.SlotsPerEpoch)
+		maxIterations := int(maxEpochsLookaheadForDuties * 2 * a.beaconChainCfg.SlotsPerEpoch)
 		for i := 0; i < maxIterations; i++ {
 			if dependentRootSlot > epoch*a.beaconChainCfg.SlotsPerEpoch {
 				return nil
@@ -109,7 +109,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if a.forkchoiceStore.LowestAvailableSlot() <= epoch*a.beaconChainCfg.SlotsPerEpoch {
 		// non-finality case
 		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-			if epoch > state.Epoch(s)+maxEpochLookahead {
+			if epoch > state.Epoch(s)+maxEpochsLookaheadForDuties {
 				return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is too far in the future", epoch))
 			}
 
