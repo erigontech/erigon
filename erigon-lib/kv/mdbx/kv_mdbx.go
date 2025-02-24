@@ -122,6 +122,7 @@ func (opts MdbxOpts) DBVerbosity(v kv.DBVerbosityLvl) MdbxOpts    { opts.verbosi
 func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts       { opts.mapSize = sz; return opts }
 func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts       { opts.mergeThreshold = v; return opts }
 func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts        { opts.bucketsCfg = f; return opts }
+func (opts MdbxOpts) WithMetrics() MdbxOpts                       { opts.metrics = true; return opts }
 
 // Flags
 func (opts MdbxOpts) HasFlag(flag uint) bool           { return opts.flags&flag != 0 }
