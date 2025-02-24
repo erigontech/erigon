@@ -96,125 +96,78 @@ type HexPatriciaHashed struct {
 	accValBuf rlp.RlpEncodedBytes
 }
 
-type keyUpdate struct {
+type nibbleUpdate struct {
 	hashedKey, plainKey []byte
 	stateUpdate         *Update
 }
 
 type NibbleProcessor struct {
-	keyUpdate chan *keyUpdate
-	php       *ParallelPatriciaHashed
-}
-
-func NewNibbleProcessor(ctx context.Context, php *ParallelPatriciaHashed) *NibbleProcessor {
-	np := &NibbleProcessor{php: php, keyUpdate: make(chan *keyUpdate)}
-	go np.StartKeyProcessing(ctx, np.php.err)
-	return np
+	php *ParallelPatriciaHashed
 }
 
 type ParallelPatriciaHashed struct {
 	HexPatriciaHashed
-	rootLocker       sync.Mutex
-	err              chan error
-	nibbleProcessors [16]*NibbleProcessor
+	rootLocker sync.Mutex
 }
 
-func (np *NibbleProcessor) StartKeyProcessing(ctx context.Context, errChan chan error) {
+func (phph *ParallelPatriciaHashed) StartKeyProcessing(ctx context.Context, errChan chan error, keyUpdates []*nibbleUpdate) {
 	var (
 		update *Update
 		err    error
-		phph   = np.php
 	)
+	phph.rootLocker.Lock()
+	defer phph.rootLocker.Unlock()
 
-keyProcessing:
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case keyUpdate, ok := <-np.keyUpdate:
-			// we notify main thread we finished processing keys by
-			// sending err (in case processing failed) or nil to errChan
-			if !ok {
-				errChan <- nil
+	for _, keyUpdate := range keyUpdates {
+
+		hashedKey := keyUpdate.hashedKey
+		plainKey := keyUpdate.plainKey
+		stateUpdate := keyUpdate.stateUpdate
+		// Keep folding until the currentKey is the prefix of the key we modify
+		for phph.needFolding(hashedKey) {
+			if err = phph.fold(); err != nil {
+				errChan <- err
 				return
 			}
+		}
 
-			np.php.rootLocker.Lock()
-
-			hashedKey := keyUpdate.hashedKey
-			plainKey := keyUpdate.plainKey
-			stateUpdate := keyUpdate.stateUpdate
-			// Keep folding until the currentKey is the prefix of the key we modify
-			for phph.needFolding(hashedKey) {
-				if err = phph.fold(); err != nil {
-					break
-				}
-			}
-			if err != nil {
-				errChan <- fmt.Errorf("fold: %w", err)
-				np.php.rootLocker.Unlock()
-				break keyProcessing
-			}
-
-			// Now unfold until we step on an empty cell
-			for unfolding := phph.needUnfolding(hashedKey); unfolding > 0; unfolding = phph.needUnfolding(hashedKey) {
-				if err = phph.unfold(hashedKey, unfolding); err != nil {
-					break
-				}
-			}
-			if err != nil {
+		// Now unfold until we step on an empty cell
+		for unfolding := phph.needUnfolding(hashedKey); unfolding > 0; unfolding = phph.needUnfolding(hashedKey) {
+			if err = phph.unfold(hashedKey, unfolding); err != nil {
 				errChan <- fmt.Errorf("unfold: %w", err)
-				np.php.rootLocker.Unlock()
-				break keyProcessing
+				return
 			}
+		}
 
-			if stateUpdate == nil {
-				// Update the cell
-				if len(plainKey) == phph.accountKeyLen {
-					update, err = phph.ctx.Account(plainKey)
-					if err != nil {
-						errChan <- fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
-						np.php.rootLocker.Unlock()
-						break keyProcessing
-					}
-				} else {
-					update, err = phph.ctx.Storage(plainKey)
-					if err != nil {
-						errChan <- fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
-						np.php.rootLocker.Unlock()
-						break keyProcessing
-					}
+		if stateUpdate == nil {
+			// Update the cell
+			if len(plainKey) == phph.accountKeyLen {
+				update, err = phph.ctx.Account(plainKey)
+				if err != nil {
+					errChan <- fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
+					return
 				}
 			} else {
-				if update == nil {
-					update = stateUpdate
-				} else {
-					update.Reset()
-					update.Merge(stateUpdate)
+				update, err = phph.ctx.Storage(plainKey)
+				if err != nil {
+					errChan <- fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
+					return
 				}
 			}
-			phph.updateCell(plainKey, hashedKey, update)
-			mxTrieProcessedKeys.Inc()
-			np.php.rootLocker.Unlock()
-		}
-	}
-
-	// wait to die
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case _, ok := <-np.keyUpdate:
-			if !ok {
-				errChan <- nil
-				return
+		} else {
+			if update == nil {
+				update = stateUpdate
+			} else {
+				update.Reset()
+				update.Merge(stateUpdate)
 			}
 		}
-	}
-}
+		phph.updateCell(plainKey, hashedKey, update)
+		mxTrieProcessedKeys.Inc()
 
-func (np *NibbleProcessor) process(hashedKey, plainKey []byte, stateUpdate *Update) {
-	np.keyUpdate <- &keyUpdate{hashedKey: hashedKey, plainKey: plainKey, stateUpdate: stateUpdate}
+	}
+	errChan <- nil
+	return
 }
 
 func NewParallelHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *ParallelPatriciaHashed {
@@ -228,11 +181,7 @@ func NewParallelHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir
 		accValBuf:     make(rlp.RlpEncodedBytes, 128),
 	}
 	hph.branchEncoder = NewBranchEncoder(1024, filepath.Join(tmpdir, "branch-encoder"))
-	phph := &ParallelPatriciaHashed{HexPatriciaHashed: *hph, err: make(chan error, TotalNibbles)}
-	for i := range TotalNibbles {
-		phph.nibbleProcessors[i] = NewNibbleProcessor(context.Background(), phph)
-	}
-	return phph
+	return &ParallelPatriciaHashed{HexPatriciaHashed: *hph}
 }
 
 func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
@@ -2149,22 +2098,41 @@ func (phph *ParallelPatriciaHashed) Process(ctx context.Context, updates *Update
 	)
 	defer logEvery.Stop()
 	//hph.trace = true
+	nibbleUpdates := make([]*nibbleUpdate, 0)
+	currentNibble := 16 // invalid nibble value
+	errChan := make(chan error)
+	nibblesBeingProcessed := 0
 	updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-		phph.nibbleProcessors[hashedKey[0]].process(hashedKey, plainKey, stateUpdate)
+		if currentNibble != int(hashedKey[0]) && len(nibbleUpdates) != 0 {
+			// we must submit the nibble updates and reinitialise slice
+			passedUpdates := append([]*nibbleUpdate{}, nibbleUpdates...)
+			go phph.StartKeyProcessing(ctx, errChan, passedUpdates)
+			nibblesBeingProcessed++
+			nibbleUpdates = make([]*nibbleUpdate, 0)
+		}
+
+		currentNibble = int(hashedKey[0])
+		nibbleUpdates = append(nibbleUpdates, &nibbleUpdate{hashedKey: append([]byte{}, hashedKey...), plainKey: append([]byte{}, plainKey...), stateUpdate: stateUpdate})
 		return nil
 	})
 
-	// gracefully stop each nibble processing
-	for k := range TotalNibbles {
-		close(phph.nibbleProcessors[k].keyUpdate)
+	if len(nibbleUpdates) != 0 {
+		// we must submit the nibble updates and reinitialise slice
+		passedUpdates := append([]*nibbleUpdate{}, nibbleUpdates...)
+		go phph.StartKeyProcessing(ctx, errChan, passedUpdates)
+		nibblesBeingProcessed++
 	}
 
-	// gracefully stop each nibble processing
-	for range TotalNibbles {
-		err := <-phph.err
+	// gracefully stop each nibble processing and capture error if any
+	for range nibblesBeingProcessed {
 		if err != nil {
-			return nil, fmt.Errorf("error processing keys: %w", err)
+			<-errChan
+		} else {
+			err = <-errChan
 		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("error processing keys: %w", err)
 	}
 
 	// Folding everything up to the root

@@ -228,7 +228,7 @@ func TestAPI(t *testing.T) {
 		var txID uint64
 		require.NoError(db.Update(context.Background(), func(tx kv.RwTx) error {
 			txID = tx.ViewID()
-			d, err := state.NewSharedDomains(tx, log.New())
+			d, err := state.NewSharedDomains(db, log.New())
 			if err != nil {
 				return err
 			}

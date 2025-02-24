@@ -2,10 +2,11 @@ package state
 
 import (
 	"context"
-	"github.com/erigontech/erigon-lib/common"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -33,11 +34,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	rwTx, err := db.BeginRw(context.Background())
-	require.NoError(tb, err)
-	defer rwTx.Rollback()
-
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
 
@@ -70,11 +67,14 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 		}
 	}
 
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(tb, err)
 	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(tb, err)
 	domains.Close() // closes ac
 
 	require.NoError(tb, rwTx.Commit())
+	rwTx.Rollback()
 
 	// build files out of db
 	err = agg.BuildFiles(uint64(txCount))
@@ -95,7 +95,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -117,7 +117,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err = NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment

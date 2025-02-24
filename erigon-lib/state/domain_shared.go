@@ -113,14 +113,21 @@ type HasAgg interface {
 	Agg() any
 }
 
-func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
+func NewSharedDomains(db kv.RoDB, logger log.Logger) (*SharedDomains, error) {
 
 	sd := &SharedDomains{
 		logger:  logger,
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
 	}
-	sd.SetTx(tx)
+
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	if err := sd.SetTx(tx); err != nil {
+		return nil, err
+	}
 	sd.iiWriters = make([]*invertedIndexBufferedWriter, len(sd.aggTx.iis))
 
 	sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
@@ -676,21 +683,22 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 	panic(fmt.Errorf("unknown index %s", table))
 }
 
-func (sd *SharedDomains) SetTx(tx kv.Tx) {
+func (sd *SharedDomains) SetTx(tx kv.Tx) error {
 	if tx == nil {
-		panic("tx is nil")
+		return errors.New("tx is nil")
 	}
 	sd.roTx = tx
 
 	casted, ok := tx.(HasAggTx)
 	if !ok {
-		panic(fmt.Errorf("type %T need AggTx method", tx))
+		return fmt.Errorf("type %T need AggTx method", tx)
 	}
 
 	sd.aggTx = casted.AggTx().(*AggregatorRoTx)
 	if sd.aggTx == nil {
-		panic(errors.New("aggtx is nil"))
+		return errors.New("aggtx is nil")
 	}
+	return nil
 }
 
 func (sd *SharedDomains) StepSize() uint64 { return sd.aggTx.a.StepSize() }
@@ -877,6 +885,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 }
 
 func (sd *SharedDomains) Close() {
+	sd.roTx.Rollback()
 	sd.SetBlockNum(0)
 	if sd.aggTx != nil {
 		sd.SetTxNum(0)
@@ -1403,6 +1412,11 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 
 	switch trie := (sdc.patriciaTrie).(type) {
 	case *commitment.HexPatriciaHashed:
+		state, err = trie.EncodeCurrentState(nil)
+		if err != nil {
+			return nil, err
+		}
+	case *commitment.ParallelPatriciaHashed:
 		state, err = trie.EncodeCurrentState(nil)
 		if err != nil {
 			return nil, err
