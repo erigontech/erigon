@@ -302,7 +302,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return logs, err
 			}
 
-			borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, txNumsReader, tx, header, chainConfig, txIndex)
+			borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, txNumsReader, tx, header, chainConfig, txIndex, len(logs))
 			if err != nil {
 				return logs, err
 			}

@@ -3,7 +3,6 @@ package receipts
 import (
 	"context"
 
-
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -69,7 +68,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 	gp := new(core.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
 
-	receipt, err := applyBorTransaction(msgs, evm, gp, ibs, block, cumGasUsedInLastBlock)
+	receipt, err := applyBorTransaction(msgs, evm, gp, ibs, block, cumGasUsedInLastBlock, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +77,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 	return receipt, nil
 }
 
-func (g *BorGenerator) GenerateBorLogs(ctx context.Context, msgs []*types.Message, txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, header *types.Header, chainConfig *chain.Config, txIndex int) (types.Logs, error) {
+func (g *BorGenerator) GenerateBorLogs(ctx context.Context, msgs []*types.Message, txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, header *types.Header, chainConfig *chain.Config, txIndex, logIndex int) (types.Logs, error) {
 	ibs, blockContext, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, chainConfig, g.blockReader, txNumsReader, tx, txIndex)
 	if err != nil {
 		return nil, err
@@ -87,10 +86,10 @@ func (g *BorGenerator) GenerateBorLogs(ctx context.Context, msgs []*types.Messag
 	gp := new(core.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
 
-	return getBorLogs(msgs, evm, gp, ibs, header.Number.Uint64(), header.Hash())
+	return getBorLogs(msgs, evm, gp, ibs, header.Number.Uint64(), header.Hash(), uint(txIndex), uint(logIndex))
 }
 
-func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state.IntraBlockState, blockNum uint64, blockHash libcommon.Hash) (types.Logs, error) {
+func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state.IntraBlockState, blockNum uint64, blockHash libcommon.Hash, txIndex, logIndex uint) (types.Logs, error) {
 	for _, msg := range msgs {
 		txContext := core.NewEVMTxContext(msg)
 		evm.Reset(txContext, ibs)
@@ -102,11 +101,17 @@ func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state
 	}
 
 	receiptLogs := ibs.GetLogs(0, bortypes.ComputeBorTxHash(blockNum, blockHash), blockNum, blockHash)
+
+	// set fields
+	for i, log := range receiptLogs {
+		log.TxIndex = txIndex
+		log.Index = logIndex + uint(i)
+	}
 	return receiptLogs, nil
 }
 
-func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state.IntraBlockState, block *types.Block, cumulativeGasUsed uint64) (*types.Receipt, error) {
-	receiptLogs, err := getBorLogs(msgs, evm, gp, ibs, block.Number().Uint64(), block.Hash())
+func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state.IntraBlockState, block *types.Block, cumulativeGasUsed uint64, logIndex uint) (*types.Receipt, error) {
+	receiptLogs, err := getBorLogs(msgs, evm, gp, ibs, block.Number().Uint64(), block.Hash(), uint(len(block.Transactions())), logIndex)
 	if err != nil {
 		return nil, err
 	}
