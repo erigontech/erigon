@@ -1525,11 +1525,15 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 		val := writes[i].Val
 		addr := writes[i].Address
 
+		destructed := map[libcommon.Address]struct{}{}
+
 		if val != nil {
 			if path == StatePath {
-				stateKey := writes[i].Key
-				state := val.(uint256.Int)
-				s.setState(addr, stateKey, state, true)
+				if _, isDestructed := destructed[addr]; !isDesctructed {
+					stateKey := writes[i].Key
+					state := val.(uint256.Int)
+					s.setState(addr, stateKey, state, true)
+				}
 			} else if path == AddressPath {
 				continue
 			} else {
@@ -1541,13 +1545,16 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 					nonce := val.(uint64)
 					s.SetNonce(addr, nonce)
 				case CodePath:
-					code := val.([]byte)
-					s.SetCode(addr, code)
+					if _, isDestructed := destructed[addr]; !isDesctructed {
+						code := val.([]byte)
+						s.SetCode(addr, code)
+					}
 				case CodeHashPath, CodeSizePath:
 					// set by SetCode
 				case SelfDestructPath:
 					deleted := val.(bool)
 					if deleted {
+						destructed[addr] = struct{}{}
 						s.Selfdestruct(addr)
 					}
 				default:
