@@ -113,6 +113,14 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*proto_sentry.S
 	return s.makeStatusData(chainHead), err
 }
 
+func (s *StatusDataProvider) GetStatusDataWithTx(ctx context.Context, tx kv.Tx) (*proto_sentry.StatusData, error) {
+	chainHead, err := ReadChainHeadWithTx(tx)
+	if err != nil {
+		return nil, err
+	}
+	return s.makeStatusData(chainHead), nil
+}
+
 func ReadChainHeadWithTx(tx kv.Tx) (ChainHead, error) {
 	header := rawdb.ReadCurrentHeaderHavingBody(tx)
 	if header == nil {

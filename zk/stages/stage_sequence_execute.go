@@ -757,6 +757,17 @@ func sequencingBatchStep(
 		if err != nil || needsUnwind {
 			return err
 		}
+
+		if _, err := rawdb.IncrementStateVersionByBlockNumberIfNeeded(batchContext.sdb.tx, block.NumberU64()); err != nil {
+			return fmt.Errorf("writing plain state version: %w", err)
+		}
+
+		// notify the done hook that we have finished processing this block - will notify subscribers etc.
+		// here we -1 the block number as we know we have just created a new block so can simulate that the last block notified
+		// was the previous block created
+		if err := cfg.doneHook.AfterRun(batchContext.sdb.tx, block.NumberU64()-1, s.PrevUnwindPoint()); err != nil {
+			return err
+		}
 	}
 
 	/*
@@ -766,14 +777,6 @@ func sequencingBatchStep(
 		- it is also handled property in doCheckForBadBatch
 		- it is unwound correctly
 	*/
-
-	if block != nil { // block is nil here if no transactions mined
-		// TODO: It is 99% sure that there is no need to write this in any of processInjectedInitialBatch, alignExecutionToDatastream, doCheckForBadBatch but it is worth double checknig
-		// the unwind of this value is handed by UnwindExecutionStageDbWrites
-		if _, err := rawdb.IncrementStateVersionByBlockNumberIfNeeded(batchContext.sdb.tx, block.NumberU64()); err != nil {
-			return fmt.Errorf("writing plain state version: %w", err)
-		}
-	}
 
 	log.Info(fmt.Sprintf("[%s] Finish batch %d...", batchContext.s.LogPrefix(), batchState.batchNumber))
 

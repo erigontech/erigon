@@ -2,11 +2,12 @@ package commands
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon/zk/zk_config"
-	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_dynamic_genesis"
 	"math/big"
 	"path/filepath"
 	"strings"
+
+	"github.com/ledgerwatch/erigon/zk/zk_config"
+	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_dynamic_genesis"
 
 	"github.com/c2h5oh/datasize"
 	chain3 "github.com/ledgerwatch/erigon-lib/chain"
@@ -119,6 +120,7 @@ func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *
 			agg,
 			nil,
 			engine,
+			nil,
 			nil,
 			nil,
 			nil,

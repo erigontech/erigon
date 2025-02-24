@@ -108,6 +108,7 @@ func NewSequencerZkStages(ctx context.Context,
 	txPoolDb kv.RwDB,
 	verifier *legacy_executor_verifier.LegacyExecutorVerifier,
 	infoTreeUpdater *l1infotree.Updater,
+	hook *Hook,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
 	blockReader := freezeblocks.NewBlockReader(snapshots, nil)
@@ -147,6 +148,7 @@ func NewSequencerZkStages(ctx context.Context,
 			verifier,
 			uint16(cfg.YieldSize),
 			infoTreeUpdater,
+			hook,
 		),
 		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3, agg),
 		zkStages.StageZkInterHashesCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg, cfg.Zk),

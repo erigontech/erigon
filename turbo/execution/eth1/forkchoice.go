@@ -349,7 +349,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		}
 		if e.hook != nil {
 			if err := e.db.View(ctx, func(tx kv.Tx) error {
-				return e.hook.AfterRun(tx, finishProgressBefore)
+				return e.hook.AfterRun(tx, finishProgressBefore, e.executionPipeline.PrevUnwindPoint())
 			}); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return

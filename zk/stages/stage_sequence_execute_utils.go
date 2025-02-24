@@ -53,6 +53,12 @@ type HasChangeSetWriter interface {
 	ChangeSetWriter() *state.ChangeSetWriter
 }
 
+// Designed to be used to call the normal stage loop hook earlier in the process as we want this to be
+// done per block rather than per batch.
+type DoneHook interface {
+	AfterRun(tx kv.Tx, finishProgressBefore uint64, prevUnwindPoint *uint64) error
+}
+
 type SequenceBlockCfg struct {
 	db            kv.RwDB
 	batchSize     datasize.ByteSize
@@ -84,6 +90,7 @@ type SequenceBlockCfg struct {
 	infoTreeUpdater *l1infotree.Updater
 
 	decodedTxCache *expirable.LRU[common.Hash, *types.Transaction]
+	doneHook       DoneHook
 }
 
 func StageSequenceBlocksCfg(
@@ -113,6 +120,7 @@ func StageSequenceBlocksCfg(
 	legacyVerifier *verifier.LegacyExecutorVerifier,
 	yieldSize uint16,
 	infoTreeUpdater *l1infotree.Updater,
+	doneHook DoneHook,
 ) SequenceBlockCfg {
 
 	decodedTxCache := expirable.NewLRU[common.Hash, *types.Transaction](zk.SequencerDecodedTxCacheSize, nil, zk.SequencerDecodedTxCacheTTL)
@@ -143,6 +151,7 @@ func StageSequenceBlocksCfg(
 		yieldSize:        yieldSize,
 		infoTreeUpdater:  infoTreeUpdater,
 		decodedTxCache:   decodedTxCache,
+		doneHook:         doneHook,
 	}
 }
 
