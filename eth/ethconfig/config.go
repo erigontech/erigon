@@ -244,6 +244,7 @@ type Config struct {
 	InternalCL bool
 
 	OverridePragueTime *big.Int `toml:",omitempty"`
+	PragueEOFTime      *big.Int `toml:",omitempty"`
 
 	// Embedded Silkworm support
 	SilkwormExecution            bool

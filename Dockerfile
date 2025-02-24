@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:1.2
 FROM docker.io/library/golang:1.22-alpine3.19 AS builder
 
-RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
+RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++ cmake
 
 WORKDIR /app
 ADD go.mod go.mod
@@ -11,6 +11,11 @@ ADD erigon-lib/go.sum erigon-lib/go.sum
 
 RUN go mod download
 ADD . .
+
+RUN cmake -S . -B build -DEVMONE_TESTING=OFF
+RUN cmake --build build --parallel
+RUN mkdir -p ./core/evmone-go/lib
+RUN cp ./build/lib/libevmon* ./core/evmone-go/lib
 
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \
@@ -79,6 +84,7 @@ COPY --from=builder /app/build/bin/state /usr/local/bin/state
 COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
 COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
 COPY --from=builder /app/build/bin/caplin /usr/local/bin/caplin
+COPY --from=builder /app/build/lib/* /usr/local/lib
 
 
 EXPOSE 8545 \
