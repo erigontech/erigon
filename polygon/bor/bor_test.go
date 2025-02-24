@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
@@ -45,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -76,6 +76,10 @@ func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, 
 }
 
 func (h *test_heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
+	return nil, nil
+}
+
+func (h *test_heimdall) FetchStatus(ctx context.Context) (*heimdall.Status, error) {
 	return nil, nil
 }
 

@@ -12,7 +12,6 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/event"
 )
@@ -41,7 +40,7 @@ func DeploySubscription(auth *bind.TransactOpts, backend bind.ContractBackend) (
 		return libcommon.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(SubscriptionBin), backend)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(SubscriptionBin), backend)
 	if err != nil {
 		return libcommon.Address{}, nil, nil, err
 	}

@@ -1,12 +1,11 @@
 # Erigon
 
-Documentation: **[erigon.gitbook.io](https://erigon.gitbook.io)**
-Blog: **[erigon.substack.com](https://erigon.substack.com/)**
-Twitter: [x.com/ErigonEth](https://x.com/ErigonEth)
+Documentation: **[docs.erigon.tech](https://docs.erigon.tech)**
+Blog: **[erigon.tech/news](https://erigon.tech/news/)**
+X/Twitter: **[x.com/ErigonEth](https://x.com/ErigonEth)**
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
-frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
-by default.
+frontier.
 
 <br>
 
@@ -16,6 +15,7 @@ by default.
 
 - [Erigon](#erigon)
 - [System Requirements](#system-requirements)
+- [Sync Times](#sync-times)
 - [Usage](#usage)
     - [Getting Started](#getting-started)
     - [Datadir structure](#datadir-structure)
@@ -52,7 +52,7 @@ by default.
     - [Run local devnet](#run-local-devnet)
     - [Docker permissions error](#docker-permissions-error)
     - [Public RPC](#public-rpc)
-    - [RaspberyPI](#raspberypi)
+    - [RaspberryPI](#raspberrypi)
     - [Run all components by docker-compose](#run-all-components-by-docker-compose)
         - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
         - [Environment Variables](#environment-variables)
@@ -74,8 +74,8 @@ by default.
 
 <!--te-->
 
-**Important defaults**: Erigon is an Archive Node by default: use `--prune.mode` if need make it smaller (not allowed to
-change after first start)
+**Important defaults**: Erigon 3 is a Full Node by default. (Erigon 2 was an [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node) by default.)
+Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if you run a validator on a small disk (not allowed to change after first start).
 
 <code>In-depth links are marked by the microscope sign (🔬) </code>
 
@@ -97,6 +97,18 @@ on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-fil
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
 
 🔬 More details on what type of data stored [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)
+
+Sync Times
+==========
+
+These are the  approximate sync times syncing from scratch to the tip of the chain (results may vary depending on hardware and bandwidth).
+
+
+| Chain      | Archive         | Full           | Minimal        |
+|------------|-----------------|----------------|----------------|
+| Ethereum   | 7 Hours, 55 Minutes | 4 Hours, 23 Minutes | 1 Hour, 41 Minutes |
+| Gnosis     | 2 Hours, 10 Minutes | 1 Hour, 5 Minutes  | 33 Minutes      |
+| Polygon    | 1 Day, 21 Hours    | 21 Hours, 41 Minutes | 11 Hours, 54 Minutes |
 
 Usage
 =====
@@ -135,7 +147,7 @@ datadir
         domain    # Latest State
         history   # Historical values 
         idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
-        accessors # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
+        accessor # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
     txpool        # pending transactions. safe to remove.
     nodes         # p2p peers. safe to remove.
     temp          # used to sort data bigger than RAM. can grow to ~100gb. cleaned at startup.
@@ -156,11 +168,11 @@ datadir
         domain    # link to fast disk
         history   
         idx       
-        accessors 
+        accessor 
     temp # buffers to sort data >> RAM. sequential-buffered IO - is slow-disk-friendly   
 
 # Example: how to speedup history access: 
-#   - go step-by-step - first try store `accessors` on fast disk
+#   - go step-by-step - first try store `accessor` on fast disk
 #   - if speed is not good enough: `idx`
 #   - if still not enough: `history` 
 ```
@@ -207,7 +219,7 @@ du -hsc /erigon/snapshots/*
 - **Store most of data in immutable files (segments/snapshots):**
     - can symlink/mount latest state to fast drive and history to cheap drive
     - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
-- **`--prune` flags changed**: see `--prune.mode` (default: `archive`, full: `full`, EIP-4444: `minimal`)
+- **`--prune` flags changed**: see `--prune.mode` (default: `full`, archive: `archive`, EIP-4444: `minimal`)
 - **Other changes:**
     - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
     - Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
@@ -344,7 +356,7 @@ Caplin is be enabled by default. to disable it and enable the Engine API, use th
 on, an external Consensus Layer will not be need
 anymore.
 
-Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive`
+Caplin also has an archival mode for historical states and blocks. it can be enabled through the `--caplin.archive`
 flag.
 In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
 e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. **NOTE: Caplin is
@@ -535,7 +547,7 @@ make DIST=/opt/erigon install
 
 ### Run local devnet
 
-<code> 🔬 Detailed explanation is [here](/DEV_CHAIN.md).</code>
+<code> 🔬 Detailed explanation is [here](/docs/DEV_CHAIN.md).</code>
 
 ### Docker permissions error
 
@@ -552,7 +564,7 @@ in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-files
 - `--http.corsdomain="*"` is bad-practice: set exact hostname or IP
 - protect from DOS by reducing: `--rpc.batch.concurrency`, `--rpc.batch.limit`
 
-### RaspberyPI
+### RaspberryPI
 
 https://github.com/mathMakesArt/Erigon-on-RPi-4
 
@@ -589,7 +601,7 @@ targets `make user_linux` or `make user_macos`.
 
 #### Run
 
-Check permissions: In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker,
+Check permissions: In all cases, `XDG_DATA_HOME` (specified or default) must be writable by the user UID/GID in docker,
 which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time. If a build or service startup is failing
 due to permissions, check that all the directories, UID, and GID controlled by these environment variables are correct.
 
@@ -710,14 +722,6 @@ Getting in touch
 The main discussions are happening on our Discord server. To get an invite, send an email to `bloxster [at] proton.me`
 with your name, occupation, a brief explanation of why you want to join the Discord, and how you heard about Erigon.
 
-### Blog
-
-**[erigon.substack.com](https://erigon.substack.com/)**
-
-### Twitter
-
-[x.com/ErigonEth](https://x.com/ErigonEth)
-
 ### Reporting security issues/concerns
 
 Send an email to `security [at] torquem.ch`.
@@ -751,7 +755,7 @@ Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS page
 memory.
 
 **Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
-main Erigon optimisations: "reduce Disk random access".
+main Erigon optimizations: "reduce Disk random access".
 "Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
 running multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on
 same Disk.
@@ -769,7 +773,7 @@ What can do:
     - use latency-critical cloud-drives
     - or attached-NVMe (at least for initial sync)
 - increase RAM
-- if you throw anough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
+- if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
 - Use `--db.pagesize=64kb` (less fragmentation, more IO)
 - Or buy/download synced archive node from some 3-rd party Erigon2 snapshots provider
 - Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)

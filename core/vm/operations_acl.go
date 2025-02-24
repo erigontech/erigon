@@ -231,10 +231,22 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			gas = params.ColdAccountAccessCostEIP2929
 		}
 		// if empty and transfers value
-		if evm.IntraBlockState().Empty(address) && !evm.IntraBlockState().GetBalance(contract.Address()).IsZero() {
+		empty, err := evm.IntraBlockState().Empty(address)
+		if err != nil {
+			return 0, err
+		}
+		balance, err := evm.IntraBlockState().GetBalance(contract.Address())
+		if err != nil {
+			return 0, err
+		}
+		if empty && !balance.IsZero() {
 			gas += params.CreateBySelfdestructGas
 		}
-		if refundsEnabled && !evm.IntraBlockState().HasSelfdestructed(contract.Address()) {
+		hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(contract.Address())
+		if err != nil {
+			return 0, err
+		}
+		if refundsEnabled && !hasSelfdestructed {
 			evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
 		}
 		return gas, nil
@@ -266,7 +278,11 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		}
 
 		// Check if code is a delegation and if so, charge for resolution.
-		if dd, ok := evm.intraBlockState.GetDelegatedDesignation(addr); ok {
+		dd, ok, err := evm.intraBlockState.GetDelegatedDesignation(addr)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
 			var ddCost uint64
 			if evm.intraBlockState.AddAddressToAccessList(dd) {
 				ddCost = params.ColdAccountAccessCostEIP2929
@@ -300,57 +316,4 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		}
 		return gas, nil
 	}
-}
-
-func gasEip7702CodeCheck(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	addr := libcommon.Address(stack.Peek().Bytes20())
-	// The warm storage read cost is already charged as constantGas
-	// Check slot presence in the access list
-	var cost uint64
-	if evm.intraBlockState.AddAddressToAccessList(addr) {
-		// Check if code is a delegation and if so, charge for resolution
-		cost = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
-	}
-
-	if dd, ok := evm.intraBlockState.GetDelegatedDesignation(addr); ok {
-		if evm.intraBlockState.AddAddressToAccessList(dd) {
-			cost += params.ColdAccountAccessCostEIP2929
-		} else {
-			cost += params.WarmStorageReadCostEIP2929
-		}
-	}
-
-	return cost, nil
-}
-
-func gasExtCodeCopyEIP7702(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	// memory expansion first (dynamic part of pre-2929 implementation)
-	gas, err := gasExtCodeCopy(evm, contract, stack, mem, memorySize)
-	if err != nil {
-		return 0, err
-	}
-	addr := libcommon.Address(stack.Peek().Bytes20())
-	// Check slot presence in the access list
-	if evm.intraBlockState.AddAddressToAccessList(addr) {
-		var overflow bool
-		// We charge (cold-warm), since 'warm' is already charged as constantGas
-		if gas, overflow = math.SafeAdd(gas, params.ColdAccountAccessCostEIP2929-params.WarmStorageReadCostEIP2929); overflow {
-			return 0, ErrGasUintOverflow
-		}
-	}
-
-	// Check if addr has a delegation and if so, charge for resolution
-	if dd, ok := evm.intraBlockState.GetDelegatedDesignation(addr); ok {
-		var overflow bool
-		if evm.intraBlockState.AddAddressToAccessList(dd) {
-			if gas, overflow = math.SafeAdd(gas, params.ColdAccountAccessCostEIP2929); overflow {
-				return 0, ErrGasUintOverflow
-			}
-		} else {
-			if gas, overflow = math.SafeAdd(gas, params.WarmStorageReadCostEIP2929); overflow {
-				return 0, ErrGasUintOverflow
-			}
-		}
-	}
-	return gas, nil
 }

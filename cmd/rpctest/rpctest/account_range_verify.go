@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/state"
 )
 
@@ -176,14 +175,14 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 	tgMissed := 0
 	gethMissed := 0
 	for {
-		cmp, br := common.KeyCmp(tgKey, gethKey)
+		cmp, br := libcommon.KeyCmp(tgKey, gethKey)
 		if br {
 			break
 		}
 		if cmp == 0 {
 			if !bytes.Equal(tgVal, gethVal) {
 				errsNum++
-				fmt.Println(common.Bytes2Hex(tgKey))
+				fmt.Println(libcommon.Bytes2Hex(tgKey))
 				fmt.Println(string(tgVal))
 				fmt.Println(string(gethVal))
 			}

@@ -1,0 +1,112 @@
+# Author: Michele@DevOpsTeam.Erigon
+# Maintainers: DevOps@DevOpsTeam.Erigon
+# Description: This workflow is responsible for backing up the dashboards of the Erigon project.
+# Status: Production (further improvements are planned though)
+
+name: Dashboards backup
+
+env:
+  GREEN: '\033[0;32m'
+  RED: '\033[0;31m'
+  YELLOW: '\033[0;33m'
+  NOCOLOUR: '\033[0m'
+  ERIGON_BRANCH: main
+  
+on:
+  workflow_dispatch:
+    inputs:
+      TEMPLATE_BRANCH:
+        required: false
+        type: string
+        default: main
+        description: 'The branch to pull the backup script from (default: main)'
+  
+jobs:
+  # 
+  # NOTE: This workflow splits the backup process in 2 jobs to spot any pulling issue early on
+  #
+  preparation:
+    runs-on: ubuntu-latest
+    environment: dashboards_backups
+    steps:    
+    - name: Pull backup script from ${{ inputs.TEMPLATE_BRANCH}} branch
+      run: |
+        set +x
+        curl -L -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" -H "Accept: application/vnd.github.v3.raw" -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/repos/erigontech/scripts/contents/dashboards/dashboard-backup.sh?ref=${{ inputs.TEMPLATE_BRANCH}} -o /tmp/dashboard-backup
+    
+    - name: Upload dashboard-backup
+      uses: actions/upload-artifact@v4
+      with:
+        name: dashboard-backup
+        path: /tmp/dashboard-backup
+        retention-days: 1
+        
+
+  backup_dashboard:
+    needs: preparation
+    runs-on: ubuntu-latest
+    environment: dashboards_backups
+    strategy:
+      matrix:
+        # For each dashboard add an entry in the list here below (and add an entry in the dictionary within the backup script too!)
+        dashboard: [erigon_custom_metrics,erigonQA]
+    env:
+      DASHBOARDS_AUTH_TOKEN: ${{ secrets.DASHBOARDS_AUTH_TOKEN }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      DASHBOARDS_GIT_CONFIG: ${{ secrets.DASHBOARDS_GIT_CONFIG }}
+    steps:
+    - name: Clone erigon from ${{ env.ERIGON_BRANCH }} branch
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.ERIGON_BRANCH }}
+        fetch-depth: 1
+        path: ${{ github.workspace }}/erigon
+
+    - name: Move repository to $HOME # as the backup script expects it to be there
+      run: mv ${{ github.workspace }}/erigon $HOME/
+
+    - name: Set-up git
+      run: |
+        echo ${{ secrets.DASHBOARDS_GIT_CONFIG }} | base64 -d > $HOME/.gitconfig
+              
+    - name: Download dashboard-backup
+      uses: actions/download-artifact@v4
+      with:
+        name: dashboard-backup
+        path: /tmp
+
+    - name: Set dashboard-backup permissions
+      run: chmod +x /tmp/dashboard-backup
+
+    - name: BACKUP OF ${{ matrix.dashboard }} DASHBOARD 
+      run: |
+        set +x
+        echo -e "${{ env.GREEN }} I'm processing the ${{ matrix.dashboard }} dashboard... ${{ env.NOCOLOUR }}"
+        /tmp/dashboard-backup ${{ matrix.dashboard }}
+  
+
+  housekeeping:
+    needs: [preparation, backup_dashboard]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: cleaning up
+        uses: geekyeggo/delete-artifact@v2
+        with:
+          name: |
+            dashboard-backup
+
+      - name: Bye ${{ github.actor }}
+        if: always()
+        run: |
+          set +x 
+          if [ "${{ needs.preparation.result }}" == "success" ] && [ "${{ needs.backup_dashboard.result }}" == "success" ]; then
+            echo -e "${{ env.YELLOW }} --------------------------------------------------------------------------------------------------------------------- ${{ env.NOCOLOUR }}"       
+            echo -e "${{ env.YELLOW }}         *** It was a true pleasure to serve you ${{ github.actor }}, SEE YOU NEXT TIME!                               ${{ env.NOCOLOUR }}"      
+            echo -e "${{ env.YELLOW }} --------------------------------------------------------------------------------------------------------------------- ${{ env.NOCOLOUR }}"       
+          else
+            echo -e "${{ env.RED }} --------------------------------------------------------------------------------------------------------------------- ${{ env.RED }}"       
+            echo -e "${{ env.RED }}         *** Sorry ${{ github.actor }}, it seems there was an error this time: just fix it and COME BACK!              ${{ env.RED }}"      
+            echo -e "${{ env.RED }} --------------------------------------------------------------------------------------------------------------------- ${{ env.RED }}"       
+          fi
+          

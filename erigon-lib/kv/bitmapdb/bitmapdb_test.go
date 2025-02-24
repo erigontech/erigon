@@ -19,7 +19,7 @@ package bitmapdb_test
 import (
 	"testing"
 
-	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/roaring/v2"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/stretchr/testify/require"
 )

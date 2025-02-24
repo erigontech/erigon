@@ -32,8 +32,8 @@ jobs:
         if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.61.0
-          args: --help
+          version: v1.63.4
+          skip-cache: true
 
       - name: Lint
         if: runner.os == 'Linux'

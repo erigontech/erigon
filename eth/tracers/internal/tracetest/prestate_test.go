@@ -32,7 +32,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
@@ -96,7 +95,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			} else if err := json.Unmarshal(blob, test); err != nil {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
-			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
+			tx, err := types.UnmarshalTransactionFromBinary(libcommon.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
 			if err != nil {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}

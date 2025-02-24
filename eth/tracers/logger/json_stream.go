@@ -26,7 +26,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -42,7 +41,7 @@ type JsonStreamLogger struct {
 	hexEncodeBuf [128]byte
 	firstCapture bool
 
-	locations common.Hashes // For sorting
+	locations libcommon.Hashes // For sorting
 	storage   map[libcommon.Address]Storage
 	logs      []StructLog
 	output    []byte //nolint

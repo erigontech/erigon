@@ -47,6 +47,10 @@ import (
 	"github.com/erigontech/erigon-lib/mmap"
 )
 
+func init() {
+	mdbx.MapFullErrorMessage += " You can try remove the database files (e.g., by running rm -rf /path/to/db)"
+}
+
 const NonExistingDBI kv.DBI = 999_999_999
 
 type TableCfgFunc func(defaultBuckets kv.TableCfg) kv.TableCfg
@@ -59,7 +63,6 @@ type MdbxOpts struct {
 	// must be in the range from 12.5% (almost empty) to 50% (half empty)
 	// which corresponds to the range from 8192 and to 32768 in units respectively
 	log             log.Logger
-	roTxsLimiter    *semaphore.Weighted
 	bucketsCfg      TableCfgFunc
 	path            string
 	syncPeriod      time.Duration
@@ -73,6 +76,11 @@ type MdbxOpts struct {
 	verbosity       kv.DBVerbosityLvl
 	label           kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
 	inMem           bool
+
+	// roTxsLimiter - without this limiter - it's possible to reach 10K threads (if 10K rotx will wait for IO) - and golang will crush https://groups.google.com/g/golang-dev/c/igMoDruWNwo
+	// most of db must set explicit `roTxsLimiter <= 9K`.
+	// There is way to increase the 10,000 thread limit: https://golang.org/pkg/runtime/debug/#SetMaxThreads
+	roTxsLimiter *semaphore.Weighted
 
 	metrics bool
 }
@@ -116,9 +124,10 @@ func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts       { opts.mergeTh
 func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts        { opts.bucketsCfg = f; return opts }
 
 // Flags
-func (opts MdbxOpts) HasFlag(flag uint) bool          { return opts.flags&flag != 0 }
-func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts    { opts.flags = opts.flags | flags; return opts }
-func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts { opts.flags = opts.flags &^ flags; return opts }
+func (opts MdbxOpts) HasFlag(flag uint) bool           { return opts.flags&flag != 0 }
+func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts { opts.flags = f(opts.flags); return opts }
+func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts     { opts.flags = opts.flags | flags; return opts }
+func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts  { opts.flags = opts.flags &^ flags; return opts }
 func (opts MdbxOpts) boolToFlag(enabled bool, flag uint) MdbxOpts {
 	if enabled {
 		return opts.AddFlags(flag)
@@ -181,6 +190,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	if dbg.MergeTr() > 0 {
 		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
 	}
+
+	if opts.metrics {
+		kv.InitSummaries(opts.label)
+	}
 	if opts.HasFlag(mdbx.Accede) || opts.HasFlag(mdbx.Readonly) {
 		for retry := 0; ; retry++ {
 			exists, err := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
@@ -222,12 +235,21 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		return nil, err
 	}
 
-	if !opts.HasFlag(mdbx.Accede) {
+	exists, err := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
+	if err != nil {
+		return nil, err
+	}
+
+	if !opts.HasFlag(mdbx.Accede) && !exists {
 		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, int(opts.pageSize)); err != nil {
 			return nil, err
 		}
 		if err = os.MkdirAll(opts.path, 0744); err != nil {
 			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		}
+	} else if exists {
+		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, -1); err != nil {
+			return nil, err
 		}
 	}
 
@@ -585,7 +607,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		db:       db,
 		tx:       tx,
 		readOnly: true,
-		id:       db.leakDetector.Add(),
+		traceID:  db.leakDetector.Add(),
 	}, nil
 }
 
@@ -616,31 +638,32 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 	}
 
 	return &MdbxTx{
-		db:  db,
-		tx:  tx,
-		ctx: ctx,
-		id:  db.leakDetector.Add(),
+		db:      db,
+		tx:      tx,
+		ctx:     ctx,
+		traceID: db.leakDetector.Add(),
 	}, nil
 }
 
 type MdbxTx struct {
 	tx               *mdbx.Txn
-	id               uint64 // set only if TRACE_TX=true
+	traceID          uint64 // set only if TRACE_TX=true
 	db               *MdbxKV
 	statelessCursors map[string]kv.RwCursor
 	readOnly         bool
 	ctx              context.Context
 
 	toCloseMap map[uint64]kv.Closer
-	ID         uint64
+	cursorID   uint64
 }
 
 type MdbxCursor struct {
-	tx         *MdbxTx
+	toCloseMap map[uint64]kv.Closer
 	c          *mdbx.Cursor
 	bucketName string
-	bucketCfg  kv.TableCfgItem
+	isDupSort  bool
 	id         uint64
+	label      kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
 }
 
 func (db *MdbxKV) Env() *mdbx.Env { return db.env }
@@ -684,33 +707,35 @@ func (tx *MdbxTx) CollectMetrics() {
 		}
 	}
 
-	kv.DbSize.SetUint64(info.Geo.Current)
-	kv.DbPgopsNewly.SetUint64(info.PageOps.Newly)
-	kv.DbPgopsCow.SetUint64(info.PageOps.Cow)
-	kv.DbPgopsClone.SetUint64(info.PageOps.Clone)
-	kv.DbPgopsSplit.SetUint64(info.PageOps.Split)
-	kv.DbPgopsMerge.SetUint64(info.PageOps.Merge)
-	kv.DbPgopsSpill.SetUint64(info.PageOps.Spill)
-	kv.DbPgopsUnspill.SetUint64(info.PageOps.Unspill)
-	kv.DbPgopsWops.SetUint64(info.PageOps.Wops)
+	var dbLabel = string(tx.db.opts.label)
+	kv.MDBXGauges.DbSize.WithLabelValues(dbLabel).SetUint64(info.Geo.Current)
+	kv.MDBXGauges.DbPgopsNewly.WithLabelValues(dbLabel).SetUint64(info.PageOps.Newly)
+	kv.MDBXGauges.DbPgopsCow.WithLabelValues(dbLabel).SetUint64(info.PageOps.Cow)
+	kv.MDBXGauges.DbPgopsClone.WithLabelValues(dbLabel).SetUint64(info.PageOps.Clone)
+	kv.MDBXGauges.DbPgopsSplit.WithLabelValues(dbLabel).SetUint64(info.PageOps.Split)
+	kv.MDBXGauges.DbPgopsMerge.WithLabelValues(dbLabel).SetUint64(info.PageOps.Merge)
+	kv.MDBXGauges.DbPgopsSpill.WithLabelValues(dbLabel).SetUint64(info.PageOps.Spill)
+	kv.MDBXGauges.DbPgopsUnspill.WithLabelValues(dbLabel).SetUint64(info.PageOps.Unspill)
+	kv.MDBXGauges.DbPgopsWops.WithLabelValues(dbLabel).SetUint64(info.PageOps.Wops)
 
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
 		return
 	}
 
-	kv.TxDirty.SetUint64(txInfo.SpaceDirty)
-	kv.TxLimit.SetUint64(tx.db.txSize)
-	kv.TxSpill.SetUint64(txInfo.Spill)
-	kv.TxUnspill.SetUint64(txInfo.Unspill)
+	kv.MDBXGauges.TxDirty.WithLabelValues(dbLabel).SetUint64(txInfo.SpaceDirty)
+	kv.MDBXGauges.TxRetired.WithLabelValues(dbLabel).SetUint64(txInfo.SpaceRetired)
+	kv.MDBXGauges.TxLimit.WithLabelValues(dbLabel).SetUint64(tx.db.txSize)
+	kv.MDBXGauges.TxSpill.WithLabelValues(dbLabel).SetUint64(txInfo.Spill)
+	kv.MDBXGauges.TxUnspill.WithLabelValues(dbLabel).SetUint64(txInfo.Unspill)
 
 	gc, err := tx.BucketStat("gc")
 	if err != nil {
 		return
 	}
-	kv.GcLeafMetric.SetUint64(gc.LeafPages)
-	kv.GcOverflowMetric.SetUint64(gc.OverflowPages)
-	kv.GcPagesMetric.SetUint64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize.Bytes() / 8)
+	kv.MDBXGauges.GcLeafMetric.WithLabelValues(dbLabel).SetUint64(gc.LeafPages)
+	kv.MDBXGauges.GcOverflowMetric.WithLabelValues(dbLabel).SetUint64(gc.OverflowPages)
+	kv.MDBXGauges.GcPagesMetric.WithLabelValues(dbLabel).SetUint64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize.Bytes() / 8)
 }
 
 func (tx *MdbxTx) WarmupDB(force bool) error {
@@ -872,7 +897,7 @@ func (tx *MdbxTx) Commit() error {
 		} else {
 			runtime.UnlockOSThread()
 		}
-		tx.db.leakDetector.Del(tx.id)
+		tx.db.leakDetector.Del(tx.traceID)
 	}()
 	tx.closeCursors()
 
@@ -892,12 +917,11 @@ func (tx *MdbxTx) Commit() error {
 	}
 
 	if tx.db.opts.metrics {
-		kv.DbCommitPreparation.Observe(latency.Preparation.Seconds())
-		//kv.DbCommitAudit.Update(latency.Audit.Seconds())
-		kv.DbCommitWrite.Observe(latency.Write.Seconds())
-		kv.DbCommitSync.Observe(latency.Sync.Seconds())
-		kv.DbCommitEnding.Observe(latency.Ending.Seconds())
-		kv.DbCommitTotal.Observe(latency.Whole.Seconds())
+		dbLabel := tx.db.opts.label
+		err = kv.RecordSummaries(dbLabel, latency)
+		if err != nil {
+			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
+		}
 
 		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
 		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
@@ -923,7 +947,7 @@ func (tx *MdbxTx) Rollback() {
 		} else {
 			runtime.UnlockOSThread()
 		}
-		tx.db.leakDetector.Del(tx.id)
+		tx.db.leakDetector.Del(tx.traceID)
 	}()
 	tx.closeCursors()
 	//tx.printDebugInfo()
@@ -956,7 +980,7 @@ func (tx *MdbxTx) statelessCursor(bucket string) (kv.RwCursor, error) {
 	c, ok := tx.statelessCursors[bucket]
 	if !ok {
 		var err error
-		c, err = tx.RwCursor(bucket)
+		c, err = tx.RwCursor(bucket) //nolint:gocritic
 		if err != nil {
 			return nil, err
 		}
@@ -1039,13 +1063,24 @@ func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error
 	return currentV, nil
 }
 
+func (tx *MdbxTx) ResetSequence(bucket string, newValue uint64) error {
+	c, err := tx.statelessCursor(kv.Sequence)
+	if err != nil {
+		return err
+	}
+	newVBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(newVBytes, newValue)
+
+	return c.Put([]byte(bucket), newVBytes)
+}
+
 func (tx *MdbxTx) ReadSequence(bucket string) (uint64, error) {
 	c, err := tx.statelessCursor(kv.Sequence)
 	if err != nil {
 		return 0, err
 	}
 	_, v, err := c.SeekExact([]byte(bucket))
-	if err != nil && !mdbx.IsNotFound(err) {
+	if err != nil {
 		return 0, err
 	}
 
@@ -1105,10 +1140,12 @@ func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 }
 
 func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
-	b := tx.db.buckets[bucket]
-	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, id: tx.ID}
-	tx.ID++
+	c := &MdbxCursor{bucketName: bucket, toCloseMap: tx.toCloseMap, label: tx.db.opts.label, isDupSort: tx.db.buckets[bucket].Flags&mdbx.DupSort != 0, id: tx.cursorID}
+	tx.cursorID++
 
+	if tx.tx == nil {
+		panic("assert: tx.tx nil. seems this `tx` was Rollback'ed")
+	}
 	var err error
 	c.c, err = tx.tx.OpenCursor(mdbx.DBI(tx.db.buckets[c.bucketName].DBI))
 	if err != nil {
@@ -1119,7 +1156,7 @@ func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	if tx.toCloseMap == nil {
 		tx.toCloseMap = make(map[uint64]kv.Closer)
 	}
-	tx.toCloseMap[c.id] = c.c
+	tx.toCloseMap[c.id] = c
 	return c, nil
 }
 
@@ -1217,7 +1254,7 @@ func (c *MdbxCursor) Delete(k []byte) error {
 		return err
 	}
 
-	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
+	if c.isDupSort {
 		return c.c.Del(mdbx.AllDups)
 	}
 
@@ -1234,7 +1271,7 @@ func (c *MdbxCursor) PutNoOverwrite(k, v []byte) error { return c.c.Put(k, v, md
 
 func (c *MdbxCursor) Put(key []byte, value []byte) error {
 	if err := c.c.Put(key, value, 0); err != nil {
-		return fmt.Errorf("label: %s, table: %s, err: %w", c.tx.db.opts.label, c.bucketName, err)
+		return fmt.Errorf("label: %s, table: %s, err: %w", c.label, c.bucketName, err)
 	}
 	return nil
 }
@@ -1255,7 +1292,7 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 // Return error - if provided data will not sorted (or bucket have old records which mess with new in sorting manner).
 func (c *MdbxCursor) Append(k []byte, v []byte) error {
 	if err := c.c.Put(k, v, mdbx.Append); err != nil {
-		return fmt.Errorf("label: %s, bucket: %s, %w", c.tx.db.opts.label, c.bucketName, err)
+		return fmt.Errorf("label: %s, bucket: %s, %w", c.label, c.bucketName, err)
 	}
 	return nil
 }
@@ -1263,10 +1300,12 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 func (c *MdbxCursor) Close() {
 	if c.c != nil {
 		c.c.Close()
-		delete(c.tx.toCloseMap, c.id)
+		delete(c.toCloseMap, c.id)
 		c.c = nil
 	}
 }
+
+func (c *MdbxCursor) IsClosed() bool { return c.c == nil }
 
 type MdbxDupSortCursor struct {
 	*MdbxCursor
@@ -1376,21 +1415,21 @@ func (c *MdbxDupSortCursor) LastDup() ([]byte, error) {
 
 func (c *MdbxDupSortCursor) Append(k []byte, v []byte) error {
 	if err := c.c.Put(k, v, mdbx.Append|mdbx.AppendDup); err != nil {
-		return fmt.Errorf("label: %s, in Append: bucket=%s, %w", c.tx.db.opts.label, c.bucketName, err)
+		return fmt.Errorf("label: %s, in Append: bucket=%s, %w", c.label, c.bucketName, err)
 	}
 	return nil
 }
 
 func (c *MdbxDupSortCursor) AppendDup(k []byte, v []byte) error {
 	if err := c.c.Put(k, v, mdbx.AppendDup); err != nil {
-		return fmt.Errorf("label: %s, in AppendDup: bucket=%s, %w", c.tx.db.opts.label, c.bucketName, err)
+		return fmt.Errorf("label: %s, in AppendDup: bucket=%s, %w", c.label, c.bucketName, err)
 	}
 	return nil
 }
 
 func (c *MdbxDupSortCursor) PutNoDupData(k, v []byte) error {
 	if err := c.c.Put(k, v, mdbx.NoDupData); err != nil {
-		return fmt.Errorf("label: %s, in PutNoDupData: %w", c.tx.db.opts.label, err)
+		return fmt.Errorf("label: %s, in PutNoDupData: %w", c.label, err)
 	}
 
 	return nil
@@ -1399,7 +1438,7 @@ func (c *MdbxDupSortCursor) PutNoDupData(k, v []byte) error {
 // DeleteCurrentDuplicates - delete all of the data items for the current key.
 func (c *MdbxDupSortCursor) DeleteCurrentDuplicates() error {
 	if err := c.c.Del(mdbx.AllDups); err != nil {
-		return fmt.Errorf("label: %s,in DeleteCurrentDuplicates: %w", c.tx.db.opts.label, err)
+		return fmt.Errorf("label: %s,in DeleteCurrentDuplicates: %w", c.label, err)
 	}
 	return nil
 }
@@ -1451,8 +1490,8 @@ func (tx *MdbxTx) Prefix(table string, prefix []byte) (stream.KV, error) {
 }
 
 func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
-	s := &cursor2iter{ctx: tx.ctx, tx: tx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: asc, limit: int64(limit), id: tx.ID}
-	tx.ID++
+	s := &cursor2iter{ctx: tx.ctx, tx: tx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: asc, limit: int64(limit), id: tx.cursorID}
+	tx.cursorID++
 	if tx.toCloseMap == nil {
 		tx.toCloseMap = make(map[uint64]kv.Closer)
 	}
@@ -1482,7 +1521,7 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 	if !s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) <= 0 {
 		return fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.toPrefix, s.fromPrefix)
 	}
-	c, err := tx.Cursor(table)
+	c, err := tx.Cursor(table) //nolint:gocritic
 	if err != nil {
 		return err
 	}
@@ -1614,8 +1653,8 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 }
 
 func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
-	s := &cursorDup2iter{ctx: tx.ctx, tx: tx, key: key, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: bool(asc), limit: int64(limit), id: tx.ID}
-	tx.ID++
+	s := &cursorDup2iter{ctx: tx.ctx, tx: tx, key: key, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: bool(asc), limit: int64(limit), id: tx.cursorID}
+	tx.cursorID++
 	if tx.toCloseMap == nil {
 		tx.toCloseMap = make(map[uint64]kv.Closer)
 	}
@@ -1646,7 +1685,7 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 	if !s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) <= 0 {
 		return fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.toPrefix, s.fromPrefix)
 	}
-	c, err := tx.CursorDupSort(table)
+	c, err := tx.CursorDupSort(table) //nolint:gocritic
 	if err != nil {
 		return err
 	}

@@ -29,11 +29,11 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -205,9 +205,12 @@ type PoW interface {
 }
 
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
-func Transfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
+func Transfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) error {
 	if !bailout {
-		db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+		if err != nil {
+			return err
+		}
 	}
-	db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
+	return db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
 }

@@ -32,7 +32,7 @@ var (
 	block, pruneTo, unwind                   uint64
 	unwindEvery                              uint64
 	batchSizeStr                             string
-	reset, warmup, noCommit                  bool
+	reset, noCommit                          bool
 	resetPruneAt                             bool
 	bucket                                   string
 	datadirCli, toChaindata                  string
@@ -116,7 +116,6 @@ func withUnwindEvery(cmd *cobra.Command) {
 
 func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
-	cmd.Flags().BoolVar(&warmup, "warmup", false, "warmup relevant tables by parallel random reads")
 }
 
 func withResetPruneAt(cmd *cobra.Command) {

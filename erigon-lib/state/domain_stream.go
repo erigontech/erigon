@@ -130,7 +130,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	var key, value []byte
 
 	if dc.d.largeValues {
-		valsCursor, err := hi.roTx.Cursor(dc.d.valuesTable)
+		valsCursor, err := hi.roTx.Cursor(dc.d.valuesTable) //nolint:gocritic
 		if err != nil {
 			return err
 		}
@@ -146,7 +146,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 			heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
 		}
 	} else {
-		valsCursor, err := hi.roTx.CursorDupSort(dc.d.valuesTable)
+		valsCursor, err := hi.roTx.CursorDupSort(dc.d.valuesTable) //nolint:gocritic
 		if err != nil {
 			return err
 		}
@@ -200,6 +200,8 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 					if ci1.key != nil && (hi.to == nil || bytes.Compare(ci1.key, hi.to) < 0) {
 						heap.Push(hi.h, ci1)
 					}
+				} else {
+					ci1.btCursor.Close()
 				}
 			case DB_CURSOR:
 				if hi.largeVals {
@@ -229,6 +231,8 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 
 						ci1.val = common.Copy(v)
 						heap.Push(hi.h, ci1)
+					} else {
+						ci1.cNonDup.Close()
 					}
 				} else {
 					// start from current go to next
@@ -247,6 +251,8 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 
 						ci1.val = common.Copy(v)
 						heap.Push(hi.h, ci1)
+					} else {
+						ci1.cDup.Close()
 					}
 				}
 

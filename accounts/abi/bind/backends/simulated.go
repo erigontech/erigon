@@ -33,14 +33,14 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/consensus/misc"
@@ -127,7 +127,7 @@ func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, c
 	t.Cleanup(b.Close)
 	return b
 }
-func (b *SimulatedBackend) DB() kv.RwDB                           { return b.m.DB }
+func (b *SimulatedBackend) DB() kv.TemporalRwDB                   { return b.m.DB }
 func (b *SimulatedBackend) Agg() *state2.Aggregator               { return b.m.HistoryV3Components() }
 func (b *SimulatedBackend) HistoryV3() bool                       { return b.m.HistoryV3 }
 func (b *SimulatedBackend) Engine() consensus.Engine              { return b.m.Engine }
@@ -176,7 +176,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingBlock = blockChain.Blocks[0]
 	b.pendingReceipts = blockChain.Receipts[0]
 	b.pendingHeader = blockChain.Headers[0]
-	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit).AddBlobGas(b.m.ChainConfig.GetMaxBlobGasPerBlock())
+	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit).AddBlobGas(b.m.ChainConfig.GetMaxBlobGasPerBlock(b.pendingHeader.Time))
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
 	}
@@ -190,7 +190,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
-func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *state.IntraBlockState {
+func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
 		return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
 	}
@@ -201,47 +201,47 @@ func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *s
 func (b *SimulatedBackend) CodeAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
-	return stateDB.GetCode(contract), nil
+	return stateDB.GetCode(contract)
 }
 
 // BalanceAt returns the wei balance of a certain account in the blockchain.
 func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) (*uint256.Int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
-	return stateDB.GetBalance(contract), nil
+	return stateDB.GetBalance(contract)
 }
 
 // NonceAt returns the nonce of a certain account in the blockchain.
 func (b *SimulatedBackend) NonceAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginTemporalRo(context.Background())
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
 
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
-	return stateDB.GetNonce(contract), nil
+	return stateDB.GetNonce(contract)
 }
 
 // StorageAt returns the value of key in the storage of an account in the blockchain.
 func (b *SimulatedBackend) StorageAt(ctx context.Context, contract libcommon.Address, key libcommon.Hash, blockNumber *big.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -258,14 +258,14 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash libcom
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
 	// Retrieve the context of the receipt based on the transaction hash
-	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	blockNumber, _, err := rawdb.ReadTxLookupEntry(tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +308,7 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash libcomm
 	if txn != nil {
 		return txn, true, nil
 	}
-	blockNumber, ok, err := b.BlockReader().TxnLookup(ctx, tx, txHash)
+	blockNumber, _, ok, err := b.BlockReader().TxnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, false, err
 	}
@@ -518,7 +518,7 @@ func (b *SimulatedBackend) PendingCodeAt(ctx context.Context, contract libcommon
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	return b.pendingState.GetCode(contract), nil
+	return b.pendingState.GetCode(contract)
 }
 
 func newRevertError(result *evmtypes.ExecutionResult) *revertError {
@@ -529,7 +529,7 @@ func newRevertError(result *evmtypes.ExecutionResult) *revertError {
 	}
 	return &revertError{
 		error:  err,
-		reason: hexutility.Encode(result.Revert()),
+		reason: hexutil.Encode(result.Revert()),
 	}
 }
 
@@ -600,7 +600,7 @@ func (b *SimulatedBackend) PendingNonceAt(ctx context.Context, account libcommon
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	return b.pendingState.GetNonce(account), nil
+	return b.pendingState.GetNonce(account)
 }
 
 // SuggestGasPrice implements ContractTransactor.SuggestGasPrice. Since the simulated
@@ -628,7 +628,10 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 	}
 	// Recap the highest gas allowance with account's balance.
 	if call.GasPrice != nil && !call.GasPrice.IsZero() {
-		balance := b.pendingState.GetBalance(call.From) // from can't be nil
+		balance, err := b.pendingState.GetBalance(call.From) // from can't be nil
+		if err != nil {
+			return 0, err
+		}
 		available := balance.ToBig()
 		if call.Value != nil {
 			if call.Value.ToBig().Cmp(available) >= 0 {
@@ -724,7 +727,10 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 		call.Value = new(uint256.Int)
 	}
 	// Set infinite balance to the fake caller account.
-	from := statedb.GetOrNewStateObject(call.From)
+	from, err := statedb.GetOrNewStateObject(call.From)
+	if err != nil {
+		return nil, err
+	}
 	from.SetBalance(uint256.NewInt(0).SetAllOne(), tracing.BalanceChangeUnspecified)
 	// Execute the call.
 	msg := callMsg{call}
@@ -752,7 +758,10 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %w", senderErr)
 	}
-	nonce := b.pendingState.GetNonce(sender)
+	nonce, err := b.pendingState.GetNonce(sender)
+	if err != nil {
+		return err
+	}
 	if txn.GetNonce() != nonce {
 		return fmt.Errorf("invalid transaction nonce: got %d, want %d", txn.GetNonce(), nonce)
 	}
@@ -847,6 +856,7 @@ func (m callMsg) Data() []byte                          { return m.CallMsg.Data 
 func (m callMsg) AccessList() types.AccessList          { return m.CallMsg.AccessList }
 func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
 func (m callMsg) IsFree() bool                          { return false }
+func (m callMsg) SetIsFree(_ bool)                      {}
 
 func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
 func (m callMsg) MaxFeePerBlobGas() *uint256.Int { return m.CallMsg.MaxFeePerBlobGas }

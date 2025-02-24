@@ -32,9 +32,8 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/core/vm/stack"
@@ -551,12 +550,12 @@ func TestOpMstore(t *testing.T) {
 	v := "abcdef00000000000000abba000000000deaf000000c0de00100000000133700"
 	stack.PushN(*new(uint256.Int).SetBytes(libcommon.Hex2Bytes(v)), *new(uint256.Int))
 	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
-	if got := common.Bytes2Hex(mem.GetCopy(0, 32)); got != v {
+	if got := libcommon.Bytes2Hex(mem.GetCopy(0, 32)); got != v {
 		t.Fatalf("Mstore fail, got %v, expected %v", got, v)
 	}
 	stack.PushN(*new(uint256.Int).SetOne(), *new(uint256.Int))
 	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
-	if common.Bytes2Hex(mem.GetCopy(0, 32)) != "0000000000000000000000000000000000000000000000000000000000000001" {
+	if libcommon.Bytes2Hex(mem.GetCopy(0, 32)) != "0000000000000000000000000000000000000000000000000000000000000001" {
 		t.Fatalf("Mstore failed to overwrite previous value")
 	}
 }
@@ -695,9 +694,9 @@ func TestCreate2Addreses(t *testing.T) {
 		},
 	} {
 
-		origin := libcommon.BytesToAddress(common.FromHex(tt.origin))
-		salt := libcommon.BytesToHash(common.FromHex(tt.salt))
-		code := common.FromHex(tt.code)
+		origin := libcommon.BytesToAddress(libcommon.FromHex(tt.origin))
+		salt := libcommon.BytesToHash(libcommon.FromHex(tt.salt))
+		code := libcommon.FromHex(tt.code)
 		codeHash := crypto.Keccak256(code)
 		address := crypto.CreateAddress2(origin, salt, codeHash)
 		/*
@@ -709,7 +708,7 @@ func TestCreate2Addreses(t *testing.T) {
 			gas, _ := gasCreate2(params.GasTable{}, nil, nil, stack, nil, 0)
 			fmt.Printf("Example %d\n* address `0x%x`\n* salt `0x%x`\n* init_code `0x%x`\n* gas (assuming no mem expansion): `%v`\n* result: `%s`\n\n", i,origin, salt, code, gas, address.String())
 		*/
-		expected := libcommon.BytesToAddress(common.FromHex(tt.expected))
+		expected := libcommon.BytesToAddress(libcommon.FromHex(tt.expected))
 		if !bytes.Equal(expected.Bytes(), address.Bytes()) {
 			t.Errorf("test %d: expected %s, got %s", i, expected.String(), address.String())
 		}
@@ -804,7 +803,7 @@ func TestOpMCopy(t *testing.T) {
 			pc             = uint64(0)
 			evmInterpreter = NewEVMInterpreter(env, env.Config())
 		)
-		data := common.FromHex(strings.ReplaceAll(tc.pre, " ", ""))
+		data := libcommon.FromHex(strings.ReplaceAll(tc.pre, " ", ""))
 		// Set pre
 		mem := NewMemory()
 		mem.Resize(uint64(len(data)))
@@ -844,7 +843,7 @@ func TestOpMCopy(t *testing.T) {
 		}
 		// Do the copy
 		opMcopy(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
-		want := common.FromHex(strings.ReplaceAll(tc.want, " ", ""))
+		want := libcommon.FromHex(strings.ReplaceAll(tc.want, " ", ""))
 		if have := mem.store; !bytes.Equal(want, have) {
 			t.Errorf("case %d: \nwant: %#x\nhave: %#x\n", i, want, have)
 		}

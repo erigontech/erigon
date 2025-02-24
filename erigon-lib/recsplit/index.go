@@ -30,6 +30,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -248,7 +249,19 @@ func (idx *Index) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&idx.data[0])
 }
 
-func (idx *Index) Size() int64        { return idx.size }
+func (idx *Index) Size() int64 { return idx.size }
+func (idx *Index) Enums() bool { return idx.enums }
+func (idx *Index) Sizes() (total, offsets, ef, golombRice, existence, layer1 datasize.ByteSize) {
+	total = datasize.ByteSize(idx.size)
+	if idx.offsetEf != nil {
+		offsets = idx.offsetEf.Size()
+	}
+	ef = idx.ef.Size()
+	golombRice = datasize.ByteSize(len(idx.grData) * 8)
+	existence = datasize.ByteSize(len(idx.existence))
+	layer1 = total - offsets - golombRice - existence
+	return
+}
 func (idx *Index) ModTime() time.Time { return idx.modTime }
 func (idx *Index) BaseDataID() uint64 { return idx.baseDataID }
 func (idx *Index) FilePath() string   { return idx.filePath }
@@ -287,9 +300,9 @@ func (idx *Index) Empty() bool {
 	return idx.keyCount == 0
 }
 
-func (idx *Index) KeyCount() uint64 {
-	return idx.keyCount
-}
+func (idx *Index) KeyCount() uint64 { return idx.keyCount }
+func (idx *Index) LeafSize() uint16 { return idx.leafSize }
+func (idx *Index) BucketSize() int  { return idx.bucketSize }
 
 // Lookup is not thread-safe because it used id.hasher
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
@@ -353,6 +366,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	}
 	b := gr.ReadNext(idx.golombParam(m))
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
+
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask

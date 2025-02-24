@@ -36,18 +36,16 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -64,13 +62,13 @@ func (bt *BlockTest) UnmarshalJSON(in []byte) error {
 }
 
 type btJSON struct {
-	Blocks     []btBlock             `json:"blocks"`
-	Genesis    btHeader              `json:"genesisBlockHeader"`
-	Pre        types.GenesisAlloc    `json:"pre"`
-	Post       types.GenesisAlloc    `json:"postState"`
-	BestBlock  common.UnprefixedHash `json:"lastblockhash"`
-	Network    string                `json:"network"`
-	SealEngine string                `json:"sealEngine"`
+	Blocks     []btBlock                `json:"blocks"`
+	Genesis    btHeader                 `json:"genesisBlockHeader"`
+	Pre        types.GenesisAlloc       `json:"pre"`
+	Post       types.GenesisAlloc       `json:"postState"`
+	BestBlock  libcommon.UnprefixedHash `json:"lastblockhash"`
+	Network    string                   `json:"network"`
+	SealEngine string                   `json:"sealEngine"`
 }
 
 type btBlock struct {
@@ -108,7 +106,7 @@ type btHeader struct {
 }
 
 type btHeaderMarshaling struct {
-	ExtraData     hexutility.Bytes
+	ExtraData     hexutil.Bytes
 	Number        *math.HexOrDecimal256
 	Difficulty    *math.HexOrDecimal256
 	GasLimit      math.HexOrDecimal64
@@ -320,9 +318,18 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	// validate post state accounts in test file against what we have in state db
 	for addr, acct := range bt.json.Post {
 		// address is indirectly verified by the other fields, as it's the db key
-		code2 := statedb.GetCode(addr)
-		balance2 := statedb.GetBalance(addr)
-		nonce2 := statedb.GetNonce(addr)
+		code2, err := statedb.GetCode(addr)
+		if err != nil {
+			return err
+		}
+		balance2, err := statedb.GetBalance(addr)
+		if err != nil {
+			return err
+		}
+		nonce2, err := statedb.GetNonce(addr)
+		if err != nil {
+			return err
+		}
 		if nonce2 != acct.Nonce {
 			return fmt.Errorf("account nonce mismatch for addr: %x want: %d have: %d", addr, acct.Nonce, nonce2)
 		}

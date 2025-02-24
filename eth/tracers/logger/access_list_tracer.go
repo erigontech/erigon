@@ -222,7 +222,7 @@ func (a *AccessListTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 	if op == vm.CREATE {
 		// contract address for CREATE can only be generated with state
 		if a.state != nil {
-			nonce := a.state.GetNonce(caller)
+			nonce, _ := a.state.GetNonce(caller)
 			addr := crypto.CreateAddress(caller, nonce)
 			if _, ok := a.excl[addr]; !ok {
 				a.createdContracts[addr] = struct{}{}
@@ -240,7 +240,6 @@ func (a *AccessListTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 			a.createdContracts[addr] = struct{}{}
 		}
 	}
-
 }
 
 func (*AccessListTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {

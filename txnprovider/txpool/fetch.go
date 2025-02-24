@@ -28,6 +28,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
@@ -43,7 +44,6 @@ import (
 type Fetch struct {
 	ctx                      context.Context // Context used for cancellation and closing of the fetcher
 	pool                     Pool            // Transaction pool implementation
-	coreDB                   kv.RoDB
 	db                       kv.RwDB
 	stateChangesClient       StateChangesClient
 	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
@@ -62,27 +62,32 @@ type StateChangesClient interface {
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
 // SentryClient here is an interface, it is suitable for mocking in tests (mock will need
 // to implement all the functions of the SentryClient interface).
-func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool, stateChangesClient StateChangesClient, coreDB kv.RoDB, db kv.RwDB,
-	chainID uint256.Int, logger log.Logger) *Fetch {
+func NewFetch(
+	ctx context.Context,
+	sentryClients []sentry.SentryClient,
+	pool Pool,
+	stateChangesClient StateChangesClient,
+	db kv.RwDB,
+	chainID uint256.Int,
+	logger log.Logger,
+	opts ...Option,
+) *Fetch {
+	options := applyOpts(opts...)
 	f := &Fetch{
 		ctx:                  ctx,
 		sentryClients:        sentryClients,
 		pool:                 pool,
-		coreDB:               coreDB,
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
 		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), //TODO: change ctx if rules changed
 		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
+		wg:                   options.p2pFetcherWg,
 		logger:               logger,
 	}
 	f.pooledTxnsParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
 	f.stateChangesParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
 
 	return f
-}
-
-func (f *Fetch) SetWaitGroup(wg *sync.WaitGroup) {
-	f.wg = wg
 }
 
 func (f *Fetch) threadSafeParsePooledTxn(cb func(*TxnParseContext) error) error {
@@ -319,6 +324,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		}
 	case sentry.MessageId_POOLED_TRANSACTIONS_66, sentry.MessageId_TRANSACTIONS_66:
 		txns := TxnSlots{}
+		knownTxns := [][]byte{}
 		if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 			return nil
 		}); err != nil {
@@ -334,6 +340,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 						return err
 					}
 					if known {
+						knownTxns = append(knownTxns, hash)
 						return ErrRejected
 					}
 					return nil
@@ -352,6 +359,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 						return err
 					}
 					if known {
+						knownTxns = append(knownTxns, hash)
 						return ErrRejected
 					}
 					return nil
@@ -368,6 +376,34 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if len(txns.Txns) == 0 {
 			return nil
 		}
+
+		diagTxns := make([]diagnostics.DiagTxn, len(txns.Txns))
+		for i, txn := range txns.Txns {
+			diagTxns[i] = diagnostics.DiagTxn{
+				IDHash:              txn.IDHash,
+				SenderID:            txn.SenderID,
+				Nonce:               txn.Nonce,
+				Value:               txn.Value,
+				Gas:                 txn.Gas,
+				FeeCap:              txn.FeeCap,
+				Tip:                 txn.Tip,
+				Size:                txn.Size,
+				Type:                txn.Type,
+				Creation:            txn.Creation,
+				DataLen:             txn.DataLen,
+				AccessListAddrCount: txn.AccessListAddrCount,
+				AccessListStorCount: txn.AccessListStorCount,
+				BlobHashes:          txn.BlobHashes,
+				Blobs:               txn.Blobs,
+			}
+		}
+
+		diagnostics.Send(diagnostics.IncomingTxnUpdate{
+			Txns:      diagTxns,
+			Senders:   txns.Senders,
+			IsLocal:   txns.IsLocal,
+			KnownTxns: knownTxns,
+		})
 		f.pool.AddRemoteTxns(ctx, txns)
 	default:
 		defer f.logger.Trace("[txpool] dropped p2p message", "id", req.Id)

@@ -252,8 +252,9 @@ func PruneSignedHeaders(tx kv.RwTx, from uint64) error {
 	if err != nil {
 		return err
 	}
+	defer cursor.Close()
 	for k, _, err := cursor.Seek(base_encoding.Encode64ToBytes4(from)); err == nil && k != nil; k, _, err = cursor.Prev() {
-		if err != nil {
+		if err != nil { //nolint:govet
 			return err
 		}
 		if err := cursor.DeleteCurrent(); err != nil {
@@ -268,6 +269,7 @@ func RangeBlockRoots(ctx context.Context, tx kv.Tx, fromSlot, toSlot uint64, fn 
 	if err != nil {
 		return err
 	}
+	defer cursor.Close()
 	for k, v, err := cursor.Seek(base_encoding.Encode64ToBytes4(fromSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= toSlot; k, v, err = cursor.Next() {
 		if !fn(base_encoding.Decode64FromBytes4(k), libcommon.BytesToHash(v)) {
 			break
@@ -281,6 +283,7 @@ func PruneBlockRoots(ctx context.Context, tx kv.RwTx, fromSlot, toSlot uint64) e
 	if err != nil {
 		return err
 	}
+	defer cursor.Close()
 	for k, _, err := cursor.Seek(base_encoding.Encode64ToBytes4(fromSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= toSlot; k, _, err = cursor.Next() {
 		if err := cursor.DeleteCurrent(); err != nil {
 			return err
@@ -296,6 +299,7 @@ func ReadBeaconBlockRootsInSlotRange(ctx context.Context, tx kv.Tx, fromSlot, co
 	if err != nil {
 		return nil, nil, err
 	}
+	defer cursor.Close()
 	currentCount := uint64(0)
 	for k, v, err := cursor.Seek(base_encoding.Encode64ToBytes4(fromSlot)); err == nil && k != nil && currentCount != count; k, v, err = cursor.Next() {
 		currentCount++
@@ -373,6 +377,7 @@ func PruneBlocks(ctx context.Context, tx kv.RwTx, to uint64) error {
 	if err != nil {
 		return err
 	}
+	defer cursor.Close()
 	for k, _, err := cursor.First(); err == nil && k != nil; k, _, err = cursor.Prev() {
 		if len(k) != 40 {
 			continue

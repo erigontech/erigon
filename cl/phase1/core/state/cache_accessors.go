@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils/threading"
 
 	"github.com/Giulio2002/bls"
@@ -145,7 +144,7 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	input := shuffling2.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+	input := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, slot)
 
@@ -160,7 +159,7 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 	// Write the seed to an array.
 	seedArray := [32]byte{}
 	copy(seedArray[:], seed)
-	return shuffling2.ComputeProposerIndex(b.BeaconState, indices, seedArray)
+	return shuffling.ComputeProposerIndex(b.BeaconState, indices, seedArray)
 }
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.
@@ -189,9 +188,6 @@ func (b *CachingBeaconState) BaseReward(index uint64) (uint64, error) {
 // It grabs values from cache as needed
 func (b *CachingBeaconState) SyncRewards() (proposerReward, participantReward uint64, err error) {
 	activeBalance := b.GetTotalActiveBalance()
-	if err != nil {
-		return 0, 0, err
-	}
 	totalActiveIncrements := activeBalance / b.BeaconConfig().EffectiveBalanceIncrement
 	baseRewardPerInc := b.BaseRewardPerIncrement()
 	totalBaseRewards := baseRewardPerInc * totalActiveIncrements
@@ -316,18 +312,34 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 			return nil, err
 		}
 		candidateIndex := activeValidatorIndicies[shuffledIndex]
-		// Compute random byte.
-		buf := make([]byte, 8)
-		binary.LittleEndian.PutUint64(buf, i/32)
-		input := append(seed[:], buf...)
-		randomByte := uint64(utils.Sha256(input)[i%32])
 		// retrieve validator.
 		validator, err := b.ValidatorForValidatorIndex(int(candidateIndex))
 		if err != nil {
 			return nil, err
 		}
-		if validator.EffectiveBalance()*math.MaxUint8 >= beaconConfig.MaxEffectiveBalance*randomByte {
-			syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey())
+		if b.Version() >= clparams.ElectraVersion {
+			// electra and after
+			// random_bytes = hash(seed + uint_to_bytes(i // 16))
+			// offset = i % 16 * 2
+			// random_value = bytes_to_uint64(random_bytes[offset:offset + 2])
+			buf := make([]byte, 8)
+			binary.LittleEndian.PutUint64(buf, i/16)
+			input := append(seed[:], buf...)
+			randomBytes := utils.Sha256(input)
+			offset := (i % 16) * 2
+			randomValue := binary.LittleEndian.Uint16(randomBytes[offset : offset+2])
+			if validator.EffectiveBalance()*math.MaxUint16 >= beaconConfig.MaxEffectiveBalanceForVersion(b.Version())*uint64(randomValue) {
+				syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey())
+			}
+		} else {
+			// Compute random byte.
+			buf := make([]byte, 8)
+			binary.LittleEndian.PutUint64(buf, i/32)
+			input := append(seed[:], buf...)
+			randomByte := uint64(utils.Sha256(input)[i%32])
+			if validator.EffectiveBalance()*math.MaxUint8 >= beaconConfig.MaxEffectiveBalanceForVersion(b.Version())*randomByte {
+				syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey())
+			}
 		}
 		i++
 	}
@@ -393,6 +405,7 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 	var (
 		committeeBits   = attestation.CommitteeBits
 		aggregationBits = attestation.AggregationBits
+		aggrBitsLen     = aggregationBits.Bits()
 		attesters       = []uint64{}
 	)
 	committeeOffset := 0
@@ -402,14 +415,17 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 			return nil, err
 		}
 		for i, member := range committee {
-			if i >= aggregationBits.Bits() {
+			if i >= aggrBitsLen {
 				return nil, errors.New("GetAttestingIndicies: committee is too big")
 			}
 			if aggregationBits.GetBitAt(committeeOffset + i) {
 				attesters = append(attesters, member)
 			}
-			committeeOffset += len(committee)
 		}
+		committeeOffset += len(committee)
+	}
+	if committeeOffset != aggrBitsLen {
+		return nil, fmt.Errorf("GetAttestingIndicies: aggregation bits length does not match committee length. agg bits size: %d, committeeOffset: %d", aggrBitsLen, committeeOffset)
 	}
 	return attesters, nil
 }

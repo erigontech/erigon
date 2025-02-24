@@ -26,43 +26,55 @@ import (
 )
 
 type TxnProvider interface {
-	Priority() uint64
-	Yield(ctx context.Context, opts ...YieldOption) ([]types.Transaction, error)
+	// ProvideTxns provides transactions ready to be included in a block for block building. Available request options:
+	//   - WithParentBlockNum
+	//   - WithAmount
+	//   - WithGasTarget
+	//   - WithBlobGasTarget
+	//   - WithTxnIdsFilter
+	ProvideTxns(ctx context.Context, opts ...ProvideOption) ([]types.Transaction, error)
 }
 
-type YieldOption func(opt *yieldParams)
+type ProvideOption func(opt *ProvideOptions)
 
-func WithParentBlockNum(blockNum uint64) YieldOption {
-	return func(opt *yieldParams) {
+func WithParentBlockNum(blockNum uint64) ProvideOption {
+	return func(opt *ProvideOptions) {
 		opt.ParentBlockNum = blockNum
 	}
 }
 
-func WithAmount(amount int) YieldOption {
-	return func(opt *yieldParams) {
+func WithBlockTime(blockTime uint64) ProvideOption {
+	return func(opt *ProvideOptions) {
+		opt.BlockTime = blockTime
+	}
+}
+
+func WithAmount(amount int) ProvideOption {
+	return func(opt *ProvideOptions) {
 		opt.Amount = amount
 	}
 }
 
-func WithGasTarget(gasTarget uint64) YieldOption {
-	return func(opt *yieldParams) {
+func WithGasTarget(gasTarget uint64) ProvideOption {
+	return func(opt *ProvideOptions) {
 		opt.GasTarget = gasTarget
 	}
 }
 
-func WithBlobGasTarget(blobGasTarget uint64) YieldOption {
-	return func(opt *yieldParams) {
+func WithBlobGasTarget(blobGasTarget uint64) ProvideOption {
+	return func(opt *ProvideOptions) {
 		opt.BlobGasTarget = blobGasTarget
 	}
 }
 
-func WithTxnIdsFilter(txnIdsFilter mapset.Set[[32]byte]) YieldOption {
-	return func(opt *yieldParams) {
+func WithTxnIdsFilter(txnIdsFilter mapset.Set[[32]byte]) ProvideOption {
+	return func(opt *ProvideOptions) {
 		opt.TxnIdsFilter = txnIdsFilter
 	}
 }
 
-type yieldParams struct {
+type ProvideOptions struct {
+	BlockTime      uint64
 	ParentBlockNum uint64
 	Amount         int
 	GasTarget      uint64
@@ -70,15 +82,15 @@ type yieldParams struct {
 	TxnIdsFilter   mapset.Set[[32]byte]
 }
 
-func yieldParamsFromOptions(opts ...YieldOption) yieldParams {
-	config := defaultYieldParams
+func ApplyProvideOptions(opts ...ProvideOption) ProvideOptions {
+	config := defaultProvideOptions
 	for _, opt := range opts {
 		opt(&config)
 	}
 	return config
 }
 
-var defaultYieldParams = yieldParams{
+var defaultProvideOptions = ProvideOptions{
 	ParentBlockNum: 0,                         // no parent block to wait for by default
 	Amount:         math.MaxInt,               // all transactions by default
 	GasTarget:      math.MaxUint64,            // all transactions by default

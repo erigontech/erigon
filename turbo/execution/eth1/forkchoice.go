@@ -187,6 +187,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 	defer e.semaphore.Release(1)
 
+	defer UpdateForkChoiceDuration(time.Now())
+
 	//if err := stages2.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
 	//	sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	//	e.logger.Warn("ProcessFrozenBlocks", "error", err)
@@ -241,6 +243,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 
+	UpdateForkChoiceArrivalDelay(fcuHeader.Time)
+	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
+	defer metrics.UpdateBlockConsumerPostExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
+
 	limitedBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit-2)
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 	if limitedBigJump {
@@ -272,15 +278,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 				LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
 				Status:          execution.ExecutionStatus_Success,
-			}, false)
-			return
-		}
-
-		// If we don't have it, too bad
-		if fcuHeader == nil {
-			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
-				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-				Status:          execution.ExecutionStatus_MissingSegment,
 			}, false)
 			return
 		}
@@ -337,6 +334,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			e.logger.Info("Reorg requested too low, capping to the minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
 			unwindTarget = minUnwindableBlock
 		}
+
 		// if unwindTarget <
 		if err := e.executionPipeline.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
@@ -352,6 +350,8 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
 		}
+
+		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
 
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
@@ -521,7 +521,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		blockTimings := e.forkValidator.GetTimings(blockHash)
-		logArgs := []interface{}{"age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0)), "head", headHash, "hash", blockHash}
+		logArgs := []interface{}{"hash", blockHash, "number", fcuHeader.Number.Uint64(), "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0))}
 		if flushExtendingFork {
 			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
 			if !e.syncCfg.ParallelStateFlushing {
@@ -532,7 +532,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			metrics.ChainTipMgasPerSec.Add(mgasPerSec)
 			e.avgMgasSec = (e.avgMgasSec*float64(e.recordedMgasSec) + mgasPerSec) / float64(e.recordedMgasSec+1)
 			e.recordedMgasSec++
-			logArgs = append(logArgs, "number", fcuHeader.Number.Uint64(), "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
+			logArgs = append(logArgs, "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
 			if !e.syncCfg.ParallelStateFlushing {
 				logArgs = append(logArgs, "flushing", blockTimings[engine_helpers.BlockTimingsFlushExtendingFork])
 			}

@@ -26,11 +26,11 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon/consensus"
 )
 
-// Draws an validator nonce modulo number of validators.
+// Draws a validator nonce modulo number of validators.
 func GetFromValidatorSet(set ValidatorSet, parent libcommon.Hash, nonce uint, call consensus.Call) (libcommon.Address, error) {
 	//d, err := set.defaultCaller(parent)
 	//if err != nil {

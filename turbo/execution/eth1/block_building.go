@@ -215,21 +215,14 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		}
 	}
 
-	var requestsBundle types2.RequestsBundle
+	var requestsBundle *types2.RequestsBundle
 	if blockWithReceipts.Requests != nil {
-		requests := make([][]byte, len(types.KnownRequestTypes))
-		if len(blockWithReceipts.Requests) == len(types.KnownRequestTypes) {
-			for i, r := range blockWithReceipts.Requests {
-				requests[i] = make([]byte, 0)
-				requests[i] = append(requests[i], r.RequestData...)
-			}
-		} else {
-			e.logger.Error("Requests len SHOULD BE", "equal to", len(types.KnownRequestTypes), "got", len(blockWithReceipts.Requests))
-			for i := 0; i < len(types.KnownRequestTypes); i++ {
-				requests[i] = make([]byte, 0)
-			}
+		requestsBundle = &types2.RequestsBundle{}
+		requests := make([][]byte, 0)
+		for _, r := range blockWithReceipts.Requests {
+			requests = append(requests, r.Encode())
 		}
-		requestsBundle = types2.RequestsBundle{Requests: requests}
+		requestsBundle.Requests = requests
 	}
 
 	return &execution.GetAssembledBlockResponse{
@@ -237,7 +230,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 			ExecutionPayload: payload,
 			BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
 			BlobsBundle:      blobsBundle,
-			Requests:         &requestsBundle,
+			Requests:         requestsBundle,
 		},
 		Busy: false,
 	}, nil

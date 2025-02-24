@@ -30,7 +30,7 @@ type NewPooledTransactionHashesPacket [][length.Hash]byte
 // ParseHashesCount looks at the RLP length Prefix for list of 32-byte hashes
 // and returns number of hashes in the list to expect
 func ParseHashesCount(payload []byte, pos int) (count int, dataPos int, err error) {
-	dataPos, dataLen, err := rlp.List(payload, pos)
+	dataPos, dataLen, err := rlp.ParseList(payload, pos)
 	if err != nil {
 		return 0, 0, fmt.Errorf("%s: hashes len: %w", rlp.ParseHashErrorPrefix, err)
 	}
@@ -81,12 +81,12 @@ func EncodeGetPooledTransactions66(hashes []byte, requestID uint64, encodeBuf []
 }
 
 func ParseGetPooledTransactions66(payload []byte, pos int, hashbuf []byte) (requestID uint64, hashes []byte, newPos int, err error) {
-	pos, _, err = rlp.List(payload, pos)
+	pos, _, err = rlp.ParseList(payload, pos)
 	if err != nil {
 		return 0, hashes, 0, err
 	}
 
-	pos, requestID, err = rlp.U64(payload, pos)
+	pos, requestID, err = rlp.ParseU64(payload, pos)
 	if err != nil {
 		return 0, hashes, 0, err
 	}
@@ -134,7 +134,7 @@ func EncodePooledTransactions66(txnsRlp [][]byte, requestID uint64, encodeBuf []
 			copy(encodeBuf[pos:], txnsRlp[i])
 			pos += len(txnsRlp[i])
 		} else {
-			pos += rlp.EncodeString(txnsRlp[i], encodeBuf[pos:])
+			pos += rlp.EncodeString2(txnsRlp[i], encodeBuf[pos:])
 		}
 	}
 	_ = pos
@@ -163,7 +163,7 @@ func EncodeTransactions(txnsRlp [][]byte, encodeBuf []byte) []byte {
 			copy(encodeBuf[pos:], txnsRlp[i])
 			pos += len(txnsRlp[i])
 		} else {
-			pos += rlp.EncodeString(txnsRlp[i], encodeBuf[pos:])
+			pos += rlp.EncodeString2(txnsRlp[i], encodeBuf[pos:])
 		}
 	}
 	_ = pos
@@ -171,7 +171,7 @@ func EncodeTransactions(txnsRlp [][]byte, encodeBuf []byte) []byte {
 }
 
 func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *TxnSlots, validateHash func([]byte) error) (newPos int, err error) {
-	pos, _, err = rlp.List(payload, pos)
+	pos, _, err = rlp.ParseList(payload, pos)
 	if err != nil {
 		return 0, err
 	}
@@ -193,15 +193,15 @@ func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *
 }
 
 func ParsePooledTransactions66(payload []byte, pos int, ctx *TxnParseContext, txnSlots *TxnSlots, validateHash func([]byte) error) (requestID uint64, newPos int, err error) {
-	p, _, err := rlp.List(payload, pos)
+	p, _, err := rlp.ParseList(payload, pos)
 	if err != nil {
 		return requestID, 0, err
 	}
-	p, requestID, err = rlp.U64(payload, p)
+	p, requestID, err = rlp.ParseU64(payload, p)
 	if err != nil {
 		return requestID, 0, err
 	}
-	p, _, err = rlp.List(payload, p)
+	p, _, err = rlp.ParseList(payload, p)
 	if err != nil {
 		return requestID, 0, err
 	}

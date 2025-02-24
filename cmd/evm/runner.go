@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	common2 "github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -171,7 +171,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.HistoryV3AggregationStep, db, log.New())
+	agg, err := state2.NewAggregator2(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
 	if err != nil {
 		return err
 	}
@@ -180,7 +180,7 @@ func runCmd(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	tx, err := tdb.BeginRw(context.Background())
+	tx, err := tdb.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -233,7 +233,7 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Printf("Invalid input length for hex data (%d)\n", len(hexcode))
 			os.Exit(1)
 		}
-		code = hexutility.MustDecodeHex(string(hexcode))
+		code = hexutil.MustDecodeHex(string(hexcode))
 	} else if fn := ctx.Args().First(); len(fn) > 0 {
 		// EASM-file to compile
 		src, err := os.ReadFile(fn)
@@ -297,7 +297,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		hexInput = []byte(ctx.String(InputFlag.Name))
 	}
-	input := hexutility.MustDecodeHex(string(bytes.TrimSpace(hexInput)))
+	input := hexutil.MustDecodeHex(string(bytes.TrimSpace(hexInput)))
 
 	var execFunc func() ([]byte, uint64, error)
 	if ctx.Bool(CreateFlag.Name) {

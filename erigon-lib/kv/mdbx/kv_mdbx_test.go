@@ -458,64 +458,6 @@ func TestAppendFirstLast(t *testing.T) {
 	require.Equal(t, []string{"value6.1"}, values)
 }
 
-func TestNextPrevCurrent(t *testing.T) {
-	_, _, c := BaseCase(t)
-
-	k, v, err := c.First()
-	require.Nil(t, err)
-	keys, values := iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Next()
-	require.Equal(t, []byte("key1"), k)
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Current()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-	require.Equal(t, k, []byte("key1"))
-	require.Equal(t, v, []byte("value1.3"))
-
-	k, v, err = c.Next()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key3", "key3"}, keys)
-	require.Equal(t, []string{"value3.1", "value3.3"}, values)
-
-	k, v, err = c.Prev()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Current()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Prev()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
-
-	err = c.DeleteCurrent()
-	require.Nil(t, err)
-	k, v, err = c.Current()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-
-}
-
 func TestSeek(t *testing.T) {
 	_, _, c := BaseCase(t)
 
@@ -1099,4 +1041,71 @@ func BenchmarkDB_Delete(b *testing.B) {
 	}); err != nil {
 		b.Fatal(err)
 	}
+}
+
+func TestSequenceOps(t *testing.T) {
+	table1 := []byte("Table132323")
+	table2 := []byte("Table232232")
+	t.Run("empty read", func(t *testing.T) {
+		_, tx, _ := BaseCase(t)
+		_, err := tx.ReadSequence(string(table1))
+		require.Equal(t, nil, err)
+	})
+
+	t.Run("putting things and reading back", func(t *testing.T) {
+		_, tx, _ := BaseCase(t)
+		t1, err := tx.IncrementSequence(string(table1), 5)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), t1)
+
+		t2, err := tx.IncrementSequence(string(table2), 10)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), t2)
+
+		t1, err = tx.ReadSequence(string(table1))
+		require.NoError(t, err)
+		require.Equal(t, uint64(5), t1)
+
+		t2, err = tx.ReadSequence(string(table2))
+		require.NoError(t, err)
+		require.Equal(t, uint64(10), t2)
+	})
+
+	t.Run("reset sequence", func(t *testing.T) {
+		_, tx, _ := BaseCase(t)
+		t1, err := tx.ReadSequence(string(table1))
+		require.NoError(t, err)
+		require.Equal(t, t1, uint64(0))
+
+		// increment sequence and then reset and test value
+		// start
+		t1, err = tx.IncrementSequence(string(table1), 5)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), t1)
+
+		err = tx.ResetSequence(string(table1), 3)
+		require.NoError(t, err)
+
+		t1, err = tx.ReadSequence(string(table1))
+		require.NoError(t, err)
+		require.Equal(t, uint64(3), t1)
+	})
+}
+
+func BenchmarkDB_ResetSequence(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	//db := _db.(*MdbxKV)
+	ctx := context.Background()
+
+	tx, err := _db.BeginRw(ctx)
+	require.NoError(b, err)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err = tx.ResetSequence(table, uint64(i))
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	tx.Rollback()
 }

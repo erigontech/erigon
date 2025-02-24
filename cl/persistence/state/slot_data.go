@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
@@ -40,6 +41,16 @@ type SlotData struct {
 	// Capella
 	NextWithdrawalIndex          uint64
 	NextWithdrawalValidatorIndex uint64
+	// Electra
+	DepositRequestsStartIndex     uint64
+	DepositBalanceToConsume       uint64
+	ExitBalanceToConsume          uint64
+	EarliestExitEpoch             uint64
+	ConsolidationBalanceToConsume uint64
+	EarliestConsolidationEpoch    uint64
+	PendingDeposits               *solid.ListSSZ[*solid.PendingDeposit]
+	PendingPartialWithdrawals     *solid.ListSSZ[*solid.PendingPartialWithdrawal]
+	PendingConsolidations         *solid.ListSSZ[*solid.PendingConsolidation]
 
 	// BlockRewards for proposer
 	AttestationsRewards  uint64
@@ -56,12 +67,21 @@ func SlotDataFromBeaconState(s *state.CachingBeaconState) *SlotData {
 		ValidatorLength: uint64(s.ValidatorLength()),
 		Eth1DataLength:  uint64(s.Eth1DataVotes().Len()),
 
-		Version:                      s.Version(),
-		Eth1Data:                     s.Eth1Data(),
-		Eth1DepositIndex:             s.Eth1DepositIndex(),
-		NextWithdrawalIndex:          s.NextWithdrawalIndex(),
-		NextWithdrawalValidatorIndex: s.NextWithdrawalValidatorIndex(),
-		Fork:                         s.Fork(),
+		Version:                       s.Version(),
+		Eth1Data:                      s.Eth1Data(),
+		Eth1DepositIndex:              s.Eth1DepositIndex(),
+		NextWithdrawalIndex:           s.NextWithdrawalIndex(),
+		NextWithdrawalValidatorIndex:  s.NextWithdrawalValidatorIndex(),
+		DepositRequestsStartIndex:     s.DepositRequestsStartIndex(),
+		DepositBalanceToConsume:       s.DepositBalanceToConsume(),
+		ExitBalanceToConsume:          s.ExitBalanceToConsume(),
+		EarliestExitEpoch:             s.EarliestExitEpoch(),
+		ConsolidationBalanceToConsume: s.ConsolidationBalanceToConsume(),
+		EarliestConsolidationEpoch:    s.EarliestConsolidationEpoch(),
+		PendingDeposits:               s.PendingDeposits(),
+		PendingPartialWithdrawals:     s.PendingPartialWithdrawals(),
+		PendingConsolidations:         s.PendingConsolidations(),
+		Fork:                          s.Fork(),
 	}
 }
 
@@ -87,7 +107,7 @@ func (m *SlotData) WriteTo(w io.Writer) error {
 }
 
 // Deserialize deserializes the state from a byte slice with zstd compression.
-func (m *SlotData) ReadFrom(r io.Reader) error {
+func (m *SlotData) ReadFrom(r io.Reader, cfg *clparams.BeaconChainConfig) error {
 	m.Eth1Data = &cltypes.Eth1Data{}
 	m.Fork = &cltypes.Fork{}
 	var err error
@@ -97,6 +117,12 @@ func (m *SlotData) ReadFrom(r io.Reader) error {
 		return err
 	}
 	m.Version = clparams.StateVersion(versionByte[0])
+
+	if m.Version >= clparams.ElectraVersion {
+		m.PendingDeposits = solid.NewPendingDepositList(cfg)
+		m.PendingPartialWithdrawals = solid.NewPendingWithdrawalList(cfg)
+		m.PendingConsolidations = solid.NewPendingConsolidationList(cfg)
+	}
 
 	lenB := make([]byte, 8)
 	if _, err = r.Read(lenB); err != nil {
@@ -121,6 +147,20 @@ func (m *SlotData) getSchema() []interface{} {
 	schema := []interface{}{m.Eth1Data, m.Fork, &m.Eth1DepositIndex, &m.ValidatorLength, &m.Eth1DataLength, &m.AttestationsRewards, &m.SyncAggregateRewards, &m.ProposerSlashings, &m.AttesterSlashings}
 	if m.Version >= clparams.CapellaVersion {
 		schema = append(schema, &m.NextWithdrawalIndex, &m.NextWithdrawalValidatorIndex)
+	}
+
+	if m.Version >= clparams.ElectraVersion {
+		schema = append(schema,
+			&m.DepositRequestsStartIndex,
+			&m.DepositBalanceToConsume,
+			&m.ExitBalanceToConsume,
+			&m.EarliestExitEpoch,
+			&m.ConsolidationBalanceToConsume,
+			&m.EarliestConsolidationEpoch,
+			m.PendingDeposits,
+			m.PendingPartialWithdrawals,
+			m.PendingConsolidations,
+		)
 	}
 	return schema
 }

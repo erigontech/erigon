@@ -28,6 +28,7 @@ linters:
     - testifylint #TODO: enable me
     - gocheckcompilerdirectives
     - protogetter
+    - recvcheck #TODO: enable me
   enable:
     - unconvert
     #    - predeclared #TODO: enable me
@@ -97,6 +98,8 @@ linters-settings:
       - fieldalignment
       - shadow
       - unsafeptr
+    enable:
+      - nilness
   goconst:
     min-len: 2
     min-occurrences: 2

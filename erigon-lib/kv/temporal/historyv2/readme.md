@@ -3,7 +3,7 @@
 Storage encoding contains several blocks: Address hashes, Incarnations, Length of values, Values. AccountChangeSet is serialized in the following manner in order to facilitate binary search
 ### Address hashes
 There are a lot of address hashes duplication in storage changeset when we have multiple changes in one contract. To avoid it we can store only unique address hashes.
-First 4 bytes contains number or unique contract hashes in one changeset.
+First 4 bytes contains number of unique contract hashes in one changeset.
 Then we store address hashes with sum of key hashes from first element.
 
 For example: for `addrHash1Inc1Key1, addrHash1Inc1Key2, addrHash2Inc1Key1, addrHash2Inc1Key3` it stores
@@ -16,7 +16,7 @@ For example: for `addrHash1fffffffe..., addrHash1fffffffd...` it stores
 `1,1,fffffffd`
 
 ### Values lengths
-The default value length is 32(common.Hash), but if we remove leading 0 then average size became ~7. Because a length of value could be from 0 to 32 we need this section to be able to find quite fast value by key.
+The default value length is 32(common.Hash), but if we remove leading 0 then average size becomes ~7. Because a length of value could be from 0 to 32 we need this section to be able to find quite fast value by key.
 It is contiguous array of accumulating value indexes like `len(val0), len(val0)+len(val1), ..., len(val0)+len(val1)+...+len(val_{N-1})`
 To reduce cost of it we have three numbers: numOfUint8, numOfUint16, numOfUint32. They can answer to the question: How many lengths of values we can put to uint8, uint16, uint32.
 This number could be huge if one of the contracts was suicided during block execution. Then we could have thousands of empty values, and we are able to store them in uint8(but it depends).

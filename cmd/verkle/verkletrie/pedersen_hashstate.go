@@ -29,9 +29,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/debug"
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 func RegeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter) error {
@@ -94,7 +93,7 @@ func RegeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workers uint64, ver
 			}
 			select {
 			case <-logEvery.C:
-				log.Info("[Pedersen Account Hashing] Current progress in Collection Phase", "address", "0x"+common.Bytes2Hex(k))
+				log.Info("[Pedersen Account Hashing] Current progress in Collection Phase", "address", "0x"+libcommon.Bytes2Hex(k))
 			default:
 			}
 		}
@@ -165,7 +164,7 @@ func RegeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, workers uint64, verk
 			}
 			select {
 			case <-logInterval.C:
-				log.Info("[Pedersen Storage Hashing] Current progress in Collection Phase", "address", "0x"+common.Bytes2Hex(k[:20]))
+				log.Info("[Pedersen Storage Hashing] Current progress in Collection Phase", "address", "0x"+libcommon.Bytes2Hex(k[:20]))
 			default:
 			}
 		} else if len(k) == 20 {
@@ -255,7 +254,7 @@ func RegeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workers uint64, verkleW
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("[Pedersen Code Hashing] Current progress in Collection Phase", "address", "0x"+common.Bytes2Hex(k))
+			log.Info("[Pedersen Code Hashing] Current progress in Collection Phase", "address", "0x"+libcommon.Bytes2Hex(k))
 		default:
 		}
 	}

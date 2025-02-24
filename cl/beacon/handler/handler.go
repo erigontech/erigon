@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -110,7 +109,6 @@ type ApiHandler struct {
 	blsToExecutionChangeService      services.BLSToExecutionChangeService
 	proposerSlashingService          services.ProposerSlashingService
 	builderClient                    builder.BuilderClient
-	validatorsMonitor                monitor.ValidatorMonitor
 	enableMemoizedHeadState          bool
 }
 
@@ -145,7 +143,6 @@ func NewApiHandler(
 	blsToExecutionChangeService services.BLSToExecutionChangeService,
 	proposerSlashingService services.ProposerSlashingService,
 	builderClient builder.BuilderClient,
-	validatorMonitor monitor.ValidatorMonitor,
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots,
 	enableMemoizedHeadState bool,
 ) *ApiHandler {
@@ -195,7 +192,6 @@ func NewApiHandler(
 		blsToExecutionChangeService:      blsToExecutionChangeService,
 		proposerSlashingService:          proposerSlashingService,
 		builderClient:                    builderClient,
-		validatorsMonitor:                validatorMonitor,
 		enableMemoizedHeadState:          enableMemoizedHeadState,
 	}
 }
@@ -228,12 +224,12 @@ func (a *ApiHandler) init() {
 			if a.routerCfg.Node {
 				r.Route("/node", func(r chi.Router) {
 					r.Get("/health", a.GetEthV1NodeHealth)
-					r.Get("/version", a.GetEthV1NodeVersion)
-					r.Get("/peer_count", a.GetEthV1NodePeerCount)
-					r.Get("/peers", a.GetEthV1NodePeersInfos)
-					r.Get("/peers/{peer_id}", a.GetEthV1NodePeerInfos)
-					r.Get("/identity", a.GetEthV1NodeIdentity)
-					r.Get("/syncing", a.GetEthV1NodeSyncing)
+					r.Get("/version", beaconhttp.HandleEndpointFunc(a.GetEthV1NodeVersion))
+					r.Get("/peer_count", beaconhttp.HandleEndpointFunc(a.GetEthV1NodePeerCount))
+					r.Get("/peers", beaconhttp.HandleEndpointFunc(a.GetEthV1NodePeersInfos))
+					r.Get("/peers/{peer_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1NodePeerInfos))
+					r.Get("/identity", beaconhttp.HandleEndpointFunc(a.GetEthV1NodeIdentity))
+					r.Get("/syncing", beaconhttp.HandleEndpointFunc(a.GetEthV1NodeSyncing))
 				})
 			}
 
@@ -279,7 +275,7 @@ func (a *ApiHandler) init() {
 						r.Get("/bls_to_execution_changes", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolBLSExecutionChanges))
 						r.Post("/bls_to_execution_changes", a.PostEthV1BeaconPoolBlsToExecutionChanges)
 						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttestations))
-						r.Post("/attestations", a.PostEthV1BeaconPoolAttestations)
+						r.Post("/attestations", a.PostEthV1BeaconPoolAttestations) // deprecate after electra fork
 						r.Post("/sync_committees", a.PostEthV1BeaconPoolSyncCommittees)
 					})
 					r.Route("/light_client", func(r chi.Router) {
@@ -302,6 +298,7 @@ func (a *ApiHandler) init() {
 							r.Get("/validator_balances", a.GetEthV1BeaconValidatorsBalances)
 							r.Post("/validator_balances", a.PostEthV1BeaconValidatorsBalances)
 							r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
+							r.Get("/validator_identities", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorIdentities))
 						})
 					})
 				})
@@ -341,8 +338,17 @@ func (a *ApiHandler) init() {
 			}
 			if a.routerCfg.Beacon {
 				r.Route("/beacon", func(r chi.Router) {
-					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
-					r.Post("/blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BeaconBlocks))
+					r.Route("/blocks", func(r chi.Router) {
+						r.Post("/", beaconhttp.HandleEndpointFunc(a.PostEthV2BeaconBlocks))
+						r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
+						r.Get("/{block_id}/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlockAttestations))
+					})
+					r.Route("/pool", func(r chi.Router) {
+						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV2BeaconPoolAttestations))
+						r.Post("/attestations", a.PostEthV2BeaconPoolAttestations)
+						r.Get("/attester_slashings", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttesterSlashings)) // reuse
+						r.Post("/attester_slashings", a.PostEthV1BeaconPoolAttesterSlashings)                              // resue
+					})
 					if a.routerCfg.Builder {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BlindedBlocks))
 					}
@@ -351,6 +357,8 @@ func (a *ApiHandler) init() {
 			if a.routerCfg.Validator {
 				r.Route("/validator", func(r chi.Router) {
 					r.Get("/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock)) // deprecate
+					r.Get("/aggregate_attestation", beaconhttp.HandleEndpointFunc(a.GetEthV2ValidatorAggregateAttestation))
+					r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof) // reuse
 				})
 			}
 		})

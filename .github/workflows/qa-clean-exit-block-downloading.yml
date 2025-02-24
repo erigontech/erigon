@@ -1,6 +1,9 @@
 name: QA - Clean exit (block downloading)
 
 on:
+  push:
+    branches:
+      - 'release/3.*'
   schedule:
     - cron: '0 8 * * 1-6'  # Run every day at 08:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually

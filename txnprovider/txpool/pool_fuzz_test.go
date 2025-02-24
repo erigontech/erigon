@@ -30,7 +30,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -252,12 +251,12 @@ func fakeRlpTxn(slot *TxnSlot, data []byte) []byte {
 	bb = bytes.NewBuffer(buf[p:p])
 	_ = slot.FeeCap.EncodeRLP(bb)
 	p += rlp.U256Len(&slot.FeeCap)
-	p += rlp.EncodeU64(0, buf[p:])           //gas
-	p += rlp.EncodeString([]byte{}, buf[p:]) //destrination addr
+	p += rlp.EncodeU64(0, buf[p:])            //gas
+	p += rlp.EncodeString2([]byte{}, buf[p:]) //destrination addr
 	bb = bytes.NewBuffer(buf[p:p])
 	_ = slot.Value.EncodeRLP(bb)
 	p += rlp.U256Len(&slot.Value)
-	p += rlp.EncodeString(data, buf[p:])  //data
+	p += rlp.EncodeString2(data, buf[p:]) //data
 	p += rlp.EncodeListPrefix(0, buf[p:]) // access list
 	p += rlp.EncodeU64(1, buf[p:])        //v
 	p += rlp.EncodeU64(1, buf[p:])        //r
@@ -325,10 +324,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		cfg := txpoolcfg.DefaultConfig
 		sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-		pool, err := New(ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+		pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 		assert.NoError(err)
 
-		err = pool.Start(ctx)
+		err = pool.start(ctx)
 		assert.NoError(err)
 
 		pool.senders.senderIDs = senderIDs
@@ -551,7 +550,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(p2pReceived, TxnSlots{}, "after_flush")
 		checkNotify(p2pReceived, TxnSlots{}, "after_flush")
 
-		p2, err := New(ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+		p2, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 		assert.NoError(err)
 
 		p2.senders = pool.senders // senders are not persisted

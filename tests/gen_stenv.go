@@ -9,8 +9,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
-
-	common0 "github.com/erigontech/erigon/common"
 )
 
 var _ = (*stEnvMarshaling)(nil)
@@ -18,17 +16,17 @@ var _ = (*stEnvMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (s stEnv) MarshalJSON() ([]byte, error) {
 	type stEnv struct {
-		Coinbase      common0.UnprefixedAddress `json:"currentCoinbase"   gencodec:"required"`
-		Difficulty    *math.HexOrDecimal256     `json:"currentDifficulty" gencodec:"required"`
-		Random        *math.HexOrDecimal256     `json:"currentRandom"     gencodec:"optional"`
-		GasLimit      math.HexOrDecimal64       `json:"currentGasLimit"   gencodec:"required"`
-		Number        math.HexOrDecimal64       `json:"currentNumber"     gencodec:"required"`
-		Timestamp     math.HexOrDecimal64       `json:"currentTimestamp"  gencodec:"required"`
-		BaseFee       *math.HexOrDecimal256     `json:"currentBaseFee"    gencodec:"optional"`
-		ExcessBlobGas *math.HexOrDecimal64      `json:"currentExcessBlobGas" gencodec:"optional"`
+		Coinbase      common.UnprefixedAddress `json:"currentCoinbase"   gencodec:"required"`
+		Difficulty    *math.HexOrDecimal256    `json:"currentDifficulty" gencodec:"required"`
+		Random        *math.HexOrDecimal256    `json:"currentRandom"     gencodec:"optional"`
+		GasLimit      math.HexOrDecimal64      `json:"currentGasLimit"   gencodec:"required"`
+		Number        math.HexOrDecimal64      `json:"currentNumber"     gencodec:"required"`
+		Timestamp     math.HexOrDecimal64      `json:"currentTimestamp"  gencodec:"required"`
+		BaseFee       *math.HexOrDecimal256    `json:"currentBaseFee"    gencodec:"optional"`
+		ExcessBlobGas *math.HexOrDecimal64     `json:"currentExcessBlobGas" gencodec:"optional"`
 	}
 	var enc stEnv
-	enc.Coinbase = common0.UnprefixedAddress(s.Coinbase)
+	enc.Coinbase = common.UnprefixedAddress(s.Coinbase)
 	enc.Difficulty = (*math.HexOrDecimal256)(s.Difficulty)
 	enc.Random = (*math.HexOrDecimal256)(s.Random)
 	enc.GasLimit = math.HexOrDecimal64(s.GasLimit)
@@ -42,14 +40,14 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON unmarshals from JSON.
 func (s *stEnv) UnmarshalJSON(input []byte) error {
 	type stEnv struct {
-		Coinbase      *common0.UnprefixedAddress `json:"currentCoinbase"   gencodec:"required"`
-		Difficulty    *math.HexOrDecimal256      `json:"currentDifficulty" gencodec:"required"`
-		Random        *math.HexOrDecimal256      `json:"currentRandom"     gencodec:"optional"`
-		GasLimit      *math.HexOrDecimal64       `json:"currentGasLimit"   gencodec:"required"`
-		Number        *math.HexOrDecimal64       `json:"currentNumber"     gencodec:"required"`
-		Timestamp     *math.HexOrDecimal64       `json:"currentTimestamp"  gencodec:"required"`
-		BaseFee       *math.HexOrDecimal256      `json:"currentBaseFee"    gencodec:"optional"`
-		ExcessBlobGas *math.HexOrDecimal64       `json:"currentExcessBlobGas" gencodec:"optional"`
+		Coinbase      *common.UnprefixedAddress `json:"currentCoinbase"   gencodec:"required"`
+		Difficulty    *math.HexOrDecimal256     `json:"currentDifficulty" gencodec:"required"`
+		Random        *math.HexOrDecimal256     `json:"currentRandom"     gencodec:"optional"`
+		GasLimit      *math.HexOrDecimal64      `json:"currentGasLimit"   gencodec:"required"`
+		Number        *math.HexOrDecimal64      `json:"currentNumber"     gencodec:"required"`
+		Timestamp     *math.HexOrDecimal64      `json:"currentTimestamp"  gencodec:"required"`
+		BaseFee       *math.HexOrDecimal256     `json:"currentBaseFee"    gencodec:"optional"`
+		ExcessBlobGas *math.HexOrDecimal64      `json:"currentExcessBlobGas" gencodec:"optional"`
 	}
 	var dec stEnv
 	if err := json.Unmarshal(input, &dec); err != nil {

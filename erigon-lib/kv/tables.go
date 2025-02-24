@@ -30,83 +30,11 @@ import (
 // 6.1 - Canonical/NonCanonical/BadBlock transitions now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
 var DBSchemaVersion = types.VersionReply{Major: 7, Minor: 0, Patch: 0}
 
-// ChaindataTables
-
-// Dictionary:
-// "Plain State" - state where keys arent' hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
-// "incarnation" - uint64 number - how much times given account was SelfDestruct'ed.
-
-/*
-PlainState logical layout:
-
-	Contains Accounts:
-	  key - address (unhashed)
-	  value - account encoded for storage
-	Contains Storage:
-	  key - address (unhashed) + incarnation + storage key (unhashed)
-	  value - storage value(common.hash)
-
-Physical layout:
-
-	PlainState and HashedStorage utilises DupSort feature of MDBX (store multiple values inside 1 key).
-
--------------------------------------------------------------
-
-	key              |            value
-
--------------------------------------------------------------
-[acc_hash]              | [acc_value]
-[acc_hash]+[inc]        | [storage1_hash]+[storage1_value]
-
-	| [storage2_hash]+[storage2_value] // this value has no own key. it's 2nd value of [acc_hash]+[inc] key.
-	| [storage3_hash]+[storage3_value]
-	| ...
-
-[acc_hash]+[old_inc]    | [storage1_hash]+[storage1_value]
-
-	| ...
-
-[acc2_hash]             | [acc2_value]
-
-	...
-*/
-const PlainState = "PlainState"
-
 // PlainContractCode -
 // key - address+incarnation
 // value - code hash
 const PlainContractCode = "PlainCodeHash"
 
-/*
-AccountChangeSet and StorageChangeSet - of block N store values of state before block N changed them.
-Because values "after" change stored in PlainState.
-Logical format:
-
-	key - blockNum_u64 + key_in_plain_state
-	value - value_in_plain_state_before_blockNum_changes
-
-Example: If block N changed account A from value X to Y. Then:
-
-	AccountChangeSet has record: bigEndian(N) + A -> X
-	PlainState has record: A -> Y
-
-See also: docs/programmers_guide/db_walkthrough.MD#table-history-of-accounts
-
-As you can see if block N changes much accounts - then all records have repetitive prefix `bigEndian(N)`.
-MDBX can store such prefixes only once - by DupSort feature (see `docs/programmers_guide/dupsort.md`).
-Both buckets are DupSort-ed and have physical format:
-AccountChangeSet:
-
-	key - blockNum_u64
-	value - address + account(encoded)
-
-StorageChangeSet:
-
-	key - blockNum_u64 + address + incarnation_u64
-	value - plain_storage_key + value
-*/
-const AccountChangeSet = "AccountChangeSet"
-const StorageChangeSet = "StorageChangeSet"
 const ChangeSets3 = "ChangeSets3"
 
 const (
@@ -117,50 +45,9 @@ const (
 	// Contains Storage:
 	//key - address hash + incarnation + storage key hash
 	//value - storage value(common.hash)
-	HashedAccounts = "HashedAccount"
-	HashedStorage  = "HashedStorage"
+	HashedAccountsDeprecated = "HashedAccount"
+	HashedStorageDeprecated  = "HashedStorage"
 )
-
-/*
-AccountsHistory and StorageHistory - indices designed to serve next 2 type of requests:
-1. what is smallest block number >= X where account A changed
-2. get last shard of A - to append there new block numbers
-
-Task 1. is part of "get historical state" operation (see `core/state:DomainGetAsOf`):
-If `db.seekInFiles(A+bigEndian(X))` returns non-last shard -
-
-	then get block number from shard value Y := RoaringBitmap(shard_value).GetGte(X)
-	and with Y go to ChangeSets: db.Get(ChangeSets, Y+A)
-
-If `db.seekInFiles(A+bigEndian(X))` returns last shard -
-
-	then we go to PlainState: db.Get(PlainState, A)
-
-Format:
-  - index split to shards by 2Kb - RoaringBitmap encoded sorted list of block numbers
-    (to avoid performance degradation of popular accounts or look deep into history.
-    Also 2Kb allows avoid Overflow pages inside DB.)
-  - if shard is not last - then key has suffix 8 bytes = bigEndian(max_block_num_in_this_shard)
-  - if shard is last - then key has suffix 8 bytes = 0xFF
-
-It allows:
-  - server task 1. by 1 db operation db.seekInFiles(A+bigEndian(X))
-  - server task 2. by 1 db operation db.Get(A+0xFF)
-
-see also: docs/programmers_guide/db_walkthrough.MD#table-change-sets
-
-AccountsHistory:
-
-	key - address + shard_id_u64
-	value - roaring bitmap  - list of block where it changed
-
-StorageHistory
-
-	key - address + storage_key + shard_id_u64
-	value - roaring bitmap - list of block where it changed
-*/
-const E2AccountsHistory = "AccountHistory"
-const E2StorageHistory = "StorageHistory"
 
 const (
 
@@ -171,62 +58,9 @@ const (
 	//key - addressHash+incarnation
 	//value - code hash
 	ContractCode = "HashedCodeHash"
-
-	// IncarnationMap for deleted accounts
-	//key - address
-	//value - incarnation of account when it was last deleted
-	IncarnationMap = "IncarnationMap"
 )
 
-/*
-TrieOfAccounts and TrieOfStorage
-hasState,groups - mark prefixes existing in hashed_account table
-hasTree - mark prefixes existing in trie_account table (not related with branchNodes)
-hasHash - mark prefixes which hashes are saved in current trie_account record (actually only hashes of branchNodes can be saved)
-@see UnmarshalTrieNode
-@see integrity.Trie
-
-+-----------------------------------------------------------------------------------------------------+
-| DB record: 0x0B, hasState: 0b1011, hasTree: 0b1001, hasHash: 0b1001, hashes: [x,x]                  |
-+-----------------------------------------------------------------------------------------------------+
-
-	|                                           |                               |
-	v                                           |                               v
-
-+---------------------------------------------+             |            +--------------------------------------+
-| DB record: 0x0B00, hasState: 0b10001        |             |            | DB record: 0x0B03, hasState: 0b10010 |
-| hasTree: 0, hasHash: 0b10000, hashes: [x]   |             |            | hasTree: 0, hasHash: 0, hashes: []   |
-+---------------------------------------------+             |            +--------------------------------------+
-
-	|                    |                              |                         |                  |
-	v                    v                              v                         v                  v
-
-+------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
-| Account:         |    | BranchNode: 0x0B0004 |     | Account:      |        | Account:      |  | Account:      |
-| 0x0B0000...      |    | has no record in     |     | 0x0B01...     |        | 0x0B0301...   |  | 0x0B0304...   |
-| in HashedAccount |    |     TrieAccount      |     |               |        |               |  |               |
-+------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
-
-	                           |                |
-	                           v                v
-			           +---------------+  +---------------+
-			           | Account:      |  | Account:      |
-			           | 0x0B000400... |  | 0x0B000401... |
-			           +---------------+  +---------------+
-
-Invariants:
-- hasTree is subset of hasState
-- hasHash is subset of hasState
-- first level in account_trie always exists if hasState>0
-- TrieStorage record of account.root (length=40) must have +1 hash - it's account.root
-- each record in TrieAccount table must have parent (may be not direct) and this parent must have correct bit in hasTree bitmap
-- if hasState has bit - then HashedAccount table must have record according to this bit
-- each TrieAccount record must cover some state (means hasState is always > 0)
-- TrieAccount records with length=1 can satisfy (hasBranch==0&&hasHash==0) condition
-- Other records in TrieAccount and TrieStorage must (hasTree!=0 || hasHash!=0)
-*/
-const TrieOfAccounts = "TrieAccount"
-const TrieOfStorage = "TrieStorage"
+const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness ( see: docs/programmers_guide/witness_format.md )
 
 // Mapping [block number] => [Verkle Root]
 const VerkleRoots = "VerkleRoots"
@@ -239,8 +73,8 @@ const (
 	DatabaseInfo = "DbInfo"
 
 	// Naming:
-	//   NeaderNumber - Ethereum-specific block number. All nodes have same BlockNum.
-	//   NeaderID - auto-increment ID. Depends on order in which node see headers.
+	//   HeaderNumber - Ethereum-specific block number. All nodes have same BlockNum.
+	//   HeaderID - auto-increment ID. Depends on order in which node see headers.
 	//      Invariant: for all headers in snapshots Number == ID. It means no reason to store Num/ID for this headers in DB.
 	//   Same about: TxNum/TxID, BlockNum/BlockID
 	HeaderNumber    = "HeaderNumber"           // header_hash -> header_num_u64
@@ -295,6 +129,8 @@ const (
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigTable = "Config" // config prefix for the db
+
+	PreimagePrefix = "SecureKey" // preimagePrefix + hash -> preima
 
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
@@ -402,7 +238,7 @@ const (
 
 	// Erigon-CL Objects
 
-	// [slot] => [signature + block without execution payload]
+	// [slot + block root] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
 
 	EffectiveBalancesDump = "EffectiveBalancesDump"
@@ -455,8 +291,6 @@ const (
 	InactivityScores     = "InactivityScores"
 	NextSyncCommittee    = "NextSyncCommittee"
 	CurrentSyncCommittee = "CurrentSyncCommittee"
-	HistoricalRoots      = "HistoricalRoots"
-	HistoricalSummaries  = "HistoricalSummaries"
 	Eth1DataVotes        = "Eth1DataVotes"
 
 	IntraRandaoMixes = "IntraRandaoMixes" // [validator_index+slot] => [randao_mix]
@@ -508,8 +342,6 @@ var ChaindataTables = []string{
 	SyncStageProgress,
 	PlainState,
 	PlainContractCode,
-	AccountChangeSet,
-	StorageChangeSet,
 	ChangeSets3,
 	Senders,
 	HeadBlockKey,
@@ -526,8 +358,6 @@ var ChaindataTables = []string{
 	EthTx,
 	TrieOfAccounts,
 	TrieOfStorage,
-	HashedAccounts,
-	HashedStorage,
 	HeaderCanonical,
 	Headers,
 	HeaderTD,
@@ -602,8 +432,6 @@ var ChaindataTables = []string{
 	// Blob Storage
 	BlockRootToKzgCommitments,
 	// State Reconstitution
-	ValidatorPublicKeys,
-	InvertedValidatorPublicKeys,
 	ValidatorEffectiveBalance,
 	ValidatorBalance,
 	ValidatorSlashings,
@@ -620,13 +448,15 @@ var ChaindataTables = []string{
 	InactivityScores,
 	NextSyncCommittee,
 	CurrentSyncCommittee,
-	HistoricalRoots,
-	HistoricalSummaries,
 	Eth1DataVotes,
 	IntraRandaoMixes,
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
+	AccountChangeSetDeprecated,
+	StorageChangeSetDeprecated,
+	HashedAccountsDeprecated,
+	HashedStorageDeprecated,
 }
 
 const (
@@ -709,14 +539,12 @@ type TableCfgItem struct {
 }
 
 var ChaindataTablesCfg = TableCfg{
-	HashedStorage: {
+	HashedStorageDeprecated: {
 		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                72,
 		DupToLen:                  40,
 	},
-	AccountChangeSet: {Flags: DupSort},
-	StorageChangeSet: {Flags: DupSort},
 	PlainState: {
 		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
@@ -751,7 +579,11 @@ var ChaindataTablesCfg = TableCfg{
 	TblTracesFromIdx:         {Flags: DupSort},
 	TblTracesToKeys:          {Flags: DupSort},
 	TblTracesToIdx:           {Flags: DupSort},
-	TblPruningProgress:       {Flags: DupSort},
+}
+
+var AuRaTablesCfg = TableCfg{
+	Epoch:        {},
+	PendingEpoch: {},
 }
 
 var BorTablesCfg = TableCfg{
@@ -900,6 +732,8 @@ const (
 	DomainLen        Domain = 5
 )
 
+var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
+
 const (
 	AccountsHistoryIdx   InvertedIdx = "AccountsHistoryIdx"
 	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
@@ -911,33 +745,12 @@ const (
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
 	TracesFromIdx InvertedIdx = "TracesFromIdx"
 	TracesToIdx   InvertedIdx = "TracesToIdx"
-
-	LogAddrIdxPos    InvertedIdxPos = 0
-	LogTopicIdxPos   InvertedIdxPos = 1
-	TracesFromIdxPos InvertedIdxPos = 2
-	TracesToIdxPos   InvertedIdxPos = 3
-	StandaloneIdxLen InvertedIdxPos = 4
 )
 
 const (
 	ReceiptsAppendable Appendable = 0
 	AppendableLen      Appendable = 0
 )
-
-func (iip InvertedIdxPos) String() string {
-	switch iip {
-	case LogAddrIdxPos:
-		return "logAddr"
-	case LogTopicIdxPos:
-		return "logTopic"
-	case TracesFromIdxPos:
-		return "traceFrom"
-	case TracesToIdxPos:
-		return "traceTo"
-	default:
-		return "unknown inverted index"
-	}
-}
 
 func (d Domain) String() string {
 	switch d {
@@ -992,3 +805,176 @@ func String2Appendable(in string) (Appendable, error) {
 		return Appendable(MaxUint16), fmt.Errorf("unknown Appendable name: %s", in)
 	}
 }
+
+// --- Deprecated
+const (
+
+	// ChaindataTables
+
+	// Dictionary:
+	// "Plain State" - state where keys arent' hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
+	// "incarnation" - uint64 number - how much times given account was SelfDestruct'ed.
+
+	/*
+	   PlainState logical layout:
+
+	   	Contains Accounts:
+	   	  key - address (unhashed)
+	   	  value - account encoded for storage
+	   	Contains Storage:
+	   	  key - address (unhashed) + incarnation + storage key (unhashed)
+	   	  value - storage value(common.hash)
+
+	   Physical layout:
+
+	   	PlainState and HashedStorage utilises DupSort feature of MDBX (store multiple values inside 1 key).
+
+	   -------------------------------------------------------------
+
+	   	key              |            value
+
+	   -------------------------------------------------------------
+	   [acc_hash]              | [acc_value]
+	   [acc_hash]+[inc]        | [storage1_hash]+[storage1_value]
+
+	   	| [storage2_hash]+[storage2_value] // this value has no own key. it's 2nd value of [acc_hash]+[inc] key.
+	   	| [storage3_hash]+[storage3_value]
+	   	| ...
+
+	   [acc_hash]+[old_inc]    | [storage1_hash]+[storage1_value]
+
+	   	| ...
+
+	   [acc2_hash]             | [acc2_value]
+
+	   	...
+	*/
+	PlainState = "PlainState"
+
+	/*
+	   AccountChangeSet and StorageChangeSet - of block N store values of state before block N changed them.
+	   Because values "after" change stored in PlainState.
+	   Logical format:
+
+	   	key - blockNum_u64 + key_in_plain_state
+	   	value - value_in_plain_state_before_blockNum_changes
+
+	   Example: If block N changed account A from value X to Y. Then:
+
+	   	AccountChangeSet has record: bigEndian(N) + A -> X
+	   	PlainState has record: A -> Y
+
+	   See also: docs/programmers_guide/db_walkthrough.MD#table-history-of-accounts
+
+	   As you can see if block N changes much accounts - then all records have repetitive prefix `bigEndian(N)`.
+	   MDBX can store such prefixes only once - by DupSort feature (see `docs/programmers_guide/dupsort.md`).
+	   Both buckets are DupSort-ed and have physical format:
+	   AccountChangeSet:
+
+	   	key - blockNum_u64
+	   	value - address + account(encoded)
+
+	   StorageChangeSet:
+
+	   	key - blockNum_u64 + address + incarnation_u64
+	   	value - plain_storage_key + value
+	*/
+	AccountChangeSetDeprecated = "AccountChangeSet"
+	StorageChangeSetDeprecated = "StorageChangeSet"
+
+	/*
+	   AccountsHistory and StorageHistory - indices designed to serve next 2 type of requests:
+	   1. what is smallest block number >= X where account A changed
+	   2. get last shard of A - to append there new block numbers
+
+	   Task 1. is part of "get historical state" operation (see `core/state:DomainGetAsOf`):
+	   If `db.seekInFiles(A+bigEndian(X))` returns non-last shard -
+
+	   	then get block number from shard value Y := RoaringBitmap(shard_value).GetGte(X)
+	   	and with Y go to ChangeSets: db.Get(ChangeSets, Y+A)
+
+	   If `db.seekInFiles(A+bigEndian(X))` returns last shard -
+
+	   	then we go to PlainState: db.Get(PlainState, A)
+
+	   Format:
+	     - index split to shards by 2Kb - RoaringBitmap encoded sorted list of block numbers
+	       (to avoid performance degradation of popular accounts or look deep into history.
+	       Also 2Kb allows avoid Overflow pages inside DB.)
+	     - if shard is not last - then key has suffix 8 bytes = bigEndian(max_block_num_in_this_shard)
+	     - if shard is last - then key has suffix 8 bytes = 0xFF
+
+	   It allows:
+	     - server task 1. by 1 db operation db.seekInFiles(A+bigEndian(X))
+	     - server task 2. by 1 db operation db.Get(A+0xFF)
+
+	   see also: docs/programmers_guide/db_walkthrough.MD#table-change-sets
+
+	   AccountsHistory:
+
+	   	key - address + shard_id_u64
+	   	value - roaring bitmap  - list of block where it changed
+
+	   StorageHistory
+
+	   	key - address + storage_key + shard_id_u64
+	   	value - roaring bitmap - list of block where it changed
+	*/
+	E2AccountsHistory = "AccountHistory"
+	E2StorageHistory  = "StorageHistory"
+
+	/*
+	   TrieOfAccounts and TrieOfStorage
+	   hasState,groups - mark prefixes existing in hashed_account table
+	   hasTree - mark prefixes existing in trie_account table (not related with branchNodes)
+	   hasHash - mark prefixes which hashes are saved in current trie_account record (actually only hashes of branchNodes can be saved)
+	   @see UnmarshalTrieNode
+	   @see integrity.Trie
+
+	   +-----------------------------------------------------------------------------------------------------+
+	   | DB record: 0x0B, hasState: 0b1011, hasTree: 0b1001, hasHash: 0b1001, hashes: [x,x]                  |
+	   +-----------------------------------------------------------------------------------------------------+
+
+	   	|                                           |                               |
+	   	v                                           |                               v
+
+	   +---------------------------------------------+             |            +--------------------------------------+
+	   | DB record: 0x0B00, hasState: 0b10001        |             |            | DB record: 0x0B03, hasState: 0b10010 |
+	   | hasTree: 0, hasHash: 0b10000, hashes: [x]   |             |            | hasTree: 0, hasHash: 0, hashes: []   |
+	   +---------------------------------------------+             |            +--------------------------------------+
+
+	   	|                    |                              |                         |                  |
+	   	v                    v                              v                         v                  v
+
+	   +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
+	   | Account:         |    | BranchNode: 0x0B0004 |     | Account:      |        | Account:      |  | Account:      |
+	   | 0x0B0000...      |    | has no record in     |     | 0x0B01...     |        | 0x0B0301...   |  | 0x0B0304...   |
+	   | in HashedAccount |    |     TrieAccount      |     |               |        |               |  |               |
+	   +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
+
+	   	                           |                |
+	   	                           v                v
+	   			           +---------------+  +---------------+
+	   			           | Account:      |  | Account:      |
+	   			           | 0x0B000400... |  | 0x0B000401... |
+	   			           +---------------+  +---------------+
+
+	   Invariants:
+	   - hasTree is subset of hasState
+	   - hasHash is subset of hasState
+	   - first level in account_trie always exists if hasState>0
+	   - TrieStorage record of account.root (length=40) must have +1 hash - it's account.root
+	   - each record in TrieAccount table must have parent (may be not direct) and this parent must have correct bit in hasTree bitmap
+	   - if hasState has bit - then HashedAccount table must have record according to this bit
+	   - each TrieAccount record must cover some state (means hasState is always > 0)
+	   - TrieAccount records with length=1 can satisfy (hasBranch==0&&hasHash==0) condition
+	   - Other records in TrieAccount and TrieStorage must (hasTree!=0 || hasHash!=0)
+	*/
+	TrieOfAccounts = "TrieAccount"
+	TrieOfStorage  = "TrieStorage"
+
+	// IncarnationMap for deleted accounts
+	//key - address
+	//value - incarnation of account when it was last deleted
+	IncarnationMap = "IncarnationMap"
+)

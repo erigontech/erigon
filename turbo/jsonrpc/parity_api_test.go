@@ -26,10 +26,9 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -54,7 +53,7 @@ func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 	}
 	assert.Equal(len(answers), len(result))
 	for k, v := range result {
-		assert.Equal(answers[k], common.Bytes2Hex(v))
+		assert.Equal(answers[k], libcommon.Bytes2Hex(v))
 	}
 }
 
@@ -71,14 +70,14 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
 	}
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 	offset := libcommon.Hex2Bytes("29")
-	b := hexutility.Bytes(offset)
+	b := hexutil.Bytes(offset)
 	result, err := api.ListStorageKeys(context.Background(), addr, 5, &b, latestBlock)
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)
 	}
 	assert.Equal(len(answers), len(result))
 	for k, v := range result {
-		assert.Equal(answers[k], common.Bytes2Hex(v))
+		assert.Equal(answers[k], libcommon.Bytes2Hex(v))
 	}
 }
 
@@ -92,14 +91,14 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T
 	}
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 	offset := libcommon.Hex2Bytes("30")
-	b := hexutility.Bytes(offset)
+	b := hexutil.Bytes(offset)
 	result, err := api.ListStorageKeys(context.Background(), addr, 2, &b, latestBlock)
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)
 	}
 	assert.Equal(len(answers), len(result))
 	for k, v := range result {
-		assert.Equal(answers[k], common.Bytes2Hex(v))
+		assert.Equal(answers[k], libcommon.Bytes2Hex(v))
 	}
 }
 
@@ -109,7 +108,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_EmptyResponse(t *testing.T) {
 	api := NewParityAPIImpl(newBaseApiForTest(m), m.DB)
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 	offset := libcommon.Hex2Bytes("ff")
-	b := hexutility.Bytes(offset)
+	b := hexutil.Bytes(offset)
 	result, err := api.ListStorageKeys(context.Background(), addr, 2, &b, latestBlock)
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)

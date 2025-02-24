@@ -33,11 +33,11 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/bitutil"
+	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/common/bitutil"
-	"github.com/erigontech/erigon/common/debug"
 )
 
 const (

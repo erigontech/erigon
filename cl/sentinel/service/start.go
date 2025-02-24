@@ -115,11 +115,12 @@ func createSentinel(
 		sentinel.SyncCommitteeContributionAndProofSsz,
 		sentinel.BeaconAggregateAndProofSsz,
 	}
+
 	gossipTopics = append(
 		gossipTopics,
 		generateSubnetsTopics(
 			gossip.TopicNamePrefixBlobSidecar,
-			int(cfg.BeaconConfig.MaxBlobsPerBlock),
+			int(cfg.BeaconConfig.MaxBlobsPerBlockElectra),
 		)...)
 
 	attestationSubnetTopics := generateSubnetsTopics(

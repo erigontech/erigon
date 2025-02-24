@@ -30,14 +30,13 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -91,28 +90,29 @@ func TestGetBlockReceipts(t *testing.T) {
 	}
 	// Assemble the test environment
 	m := mockWithGenerator(t, 4, generator)
-	receiptsGetter := receipts.NewGenerator(32, m.BlockReader, m.Engine)
+	receiptsGetter := receipts.NewGenerator(m.BlockReader, m.Engine)
 	// Collect the hashes to request, and the response to expect
 	var (
 		hashes   []libcommon.Hash
 		receipts []rlp.RawValue
 	)
-	err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
-			block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, i)
-			require.NoError(t, err)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
 
-			hashes = append(hashes, block.Hash())
-			// If known, encode and queue for response packet
+	for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
+		block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, i)
+		require.NoError(t, err)
 
-			r, err := receiptsGetter.GetReceipts(m.Ctx, m.ChainConfig, tx, block)
-			require.NoError(t, err)
-			encoded, err := rlp.EncodeToBytes(r)
-			require.NoError(t, err)
-			receipts = append(receipts, encoded)
-		}
-		return nil
-	})
+		hashes = append(hashes, block.Hash())
+		// If known, encode and queue for response packet
+
+		r, err := receiptsGetter.GetReceipts(m.Ctx, m.ChainConfig, tx, block)
+		require.NoError(t, err)
+		encoded, err := rlp.EncodeToBytes(r)
+		require.NoError(t, err)
+		receipts = append(receipts, encoded)
+	}
 
 	require.NoError(t, err)
 	b, err := rlp.EncodeToBytes(eth.GetReceiptsPacket66{RequestId: 1, GetReceiptsPacket: hashes})

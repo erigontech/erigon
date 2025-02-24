@@ -32,16 +32,17 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/spf13/cobra"
 
-	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	chain2 "github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-
-	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
@@ -369,7 +370,7 @@ func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 
 		lseg := len(currentEntry.Bblocks)
 		isFirstBblock := lseg == 0
-		isContinuous := pc16 == currentEntry.lastPc16+1 || currentEntry.lastOp.IsPush()
+		isContinuous := pc16 == currentEntry.lastPc16+1 || currentEntry.lastOp.IsPushWithImmediateArgs()
 		if isFirstBblock || !isContinuous {
 			// Record the end of the past bblock, if there is one
 			if !isFirstBblock {
@@ -430,17 +431,29 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 	ot := NewOpcodeTracer(blockNum, saveOpcodes, saveBblocks)
 
-	chainDb := mdbx.MustOpen(chaindata)
-	defer chainDb.Close()
-	historyDb := chainDb
-	historyTx, err1 := historyDb.BeginRo(context.Background())
+	datadirPath := filepath.Base(chaindata)
+	dirs := datadir2.New(datadirPath)
+	rawChainDb := mdbx.MustOpen(dirs.Chaindata)
+	defer rawChainDb.Close()
+
+	agg, err := state2.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, rawChainDb, log.New())
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	historyDb, err := temporal.New(rawChainDb, agg)
+	if err != nil {
+		return err
+	}
+	historyTx, err1 := historyDb.BeginTemporalRo(context.Background())
 	if err1 != nil {
 		return err1
 	}
 	defer historyTx.Rollback()
 
-	dirs := datadir2.New(filepath.Dir(chainDb.(*mdbx.MdbxKV).Path()))
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.New()), nil, nil, nil)
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.ChainName = genesis.Config.ChainName
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil, nil, nil)
 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{Tracer: ot, Debug: true}
@@ -575,7 +588,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 	for !interrupt {
 		var block *types.Block
-		if err := chainDb.View(context.Background(), func(tx kv.Tx) (err error) {
+		if err := historyDb.View(context.Background(), func(tx kv.Tx) (err error) {
 			block, err = blockReader.BlockByNumber(context.Background(), tx, blockNum)
 			return err
 		}); err != nil {
@@ -719,11 +732,11 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	chainConfig *chain2.Config, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config, trace bool, logger log.Logger) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
 	var receipts types.Receipts
-	core.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, logger, nil)
+	core.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(i)

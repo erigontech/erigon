@@ -51,7 +51,7 @@ type attestationProducer struct {
 }
 
 func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) AttestationDataProducer {
-	ttl := time.Duration(beaconCfg.SecondsPerSlot) * time.Second
+	ttl := time.Duration(beaconCfg.SecondsPerSlot) * time.Second / 2
 	attestationsCache := lru.NewWithTTL[uint64, solid.AttestationData]("attestations", attestationsCacheSize, ttl)
 	blockRootsUsedForSlotCache, err := lru.New[uint64, libcommon.Hash]("blockRootsUsedForSlot", attestationsCacheSize)
 	if err != nil {
@@ -119,36 +119,32 @@ func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *stat
 	}, nil
 }
 
-func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot libcommon.Hash, slot uint64, committeeIndex uint64) (solid.AttestationData, error) {
+func (ap *attestationProducer) CachedAttestationData(slot uint64, committeeIndex uint64) (solid.AttestationData, bool, error) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
-	var err error
 	ap.attCacheMutex.RLock()
+	defer ap.attCacheMutex.RUnlock()
 	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
-		ap.attCacheMutex.RUnlock()
-		beaconBlockRoot, err := ap.beaconBlockRootForSlot(baseState, baseStateBlockRoot, slot)
-		if err != nil {
-			return solid.AttestationData{}, err
-		}
-		targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, baseStateBlockRoot, slot)
-		if err != nil {
-			return solid.AttestationData{}, err
+		beaconBlockRoot, ok := ap.blockRootsUsedForSlotCache.Get(slot)
+		if !ok {
+			return solid.AttestationData{}, false, nil
 		}
 		return solid.AttestationData{
 			Slot:            slot,
 			CommitteeIndex:  committeeIndex,
 			BeaconBlockRoot: beaconBlockRoot,
 			Source:          baseAttestationData.Source,
-			Target:          targetCheckpoint,
-		}, nil
+			Target:          baseAttestationData.Target,
+		}, true, nil
 	}
-	ap.attCacheMutex.RUnlock()
+	return solid.AttestationData{}, false, nil
+}
 
-	// in case the target epoch is not found, let's generate it with lock to avoid everyone trying to generate it
-	// at the same time, which would be a waste of memory resources
-	ap.attCacheMutex.Lock()
-	defer ap.attCacheMutex.Unlock()
-	// check again if the target epoch is already generated
+func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot libcommon.Hash, slot uint64, committeeIndex uint64) (solid.AttestationData, error) {
+	epoch := slot / ap.beaconCfg.SlotsPerEpoch
+	var err error
+	ap.attCacheMutex.RLock()
 	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
+		ap.attCacheMutex.RUnlock()
 		beaconBlockRoot, err := ap.beaconBlockRootForSlot(baseState, baseStateBlockRoot, slot)
 		if err != nil {
 			return solid.AttestationData{}, err
@@ -166,6 +162,12 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 			Target:          targetCheckpoint,
 		}, nil
 	}
+	ap.attCacheMutex.RUnlock()
+
+	// in case the target epoch is not found, let's generate it with lock to avoid everyone trying to generate it
+	// at the same time, which would be a waste of memory resources
+	ap.attCacheMutex.Lock()
+	defer ap.attCacheMutex.Unlock()
 
 	stateEpoch := state.Epoch(baseState)
 	if baseState.Slot() > slot {
@@ -181,10 +183,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 			log.Warn("Failed to process slots", "slot", slot, "err", err)
 			return solid.AttestationData{}, err
 		}
-		if err != nil {
-			return solid.AttestationData{}, err
-		}
-
 	}
 
 	targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, baseStateBlockRoot, slot)

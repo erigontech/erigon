@@ -36,9 +36,9 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
@@ -54,6 +54,7 @@ func init() {
 
 var Enums = struct {
 	snaptype.Enums
+	Salt,
 	Headers,
 	Bodies,
 	Transactions,
@@ -64,14 +65,15 @@ var Enums = struct {
 	Txt snaptype.Enum
 }{
 	Enums:            snaptype.Enums{},
-	Headers:          snaptype.MinCoreEnum,
-	Bodies:           snaptype.MinCoreEnum + 1,
-	Transactions:     snaptype.MinCoreEnum + 2,
-	Domains:          snaptype.MinCoreEnum + 3,
-	Histories:        snaptype.MinCoreEnum + 4,
-	InvertedIndicies: snaptype.MinCoreEnum + 5,
-	Accessor:         snaptype.MinCoreEnum + 6,
-	Txt:              snaptype.MinCoreEnum + 7,
+	Salt:             snaptype.MinCoreEnum,
+	Headers:          snaptype.MinCoreEnum + 1,
+	Bodies:           snaptype.MinCoreEnum + 2,
+	Transactions:     snaptype.MinCoreEnum + 3,
+	Domains:          snaptype.MinCoreEnum + 4,
+	Histories:        snaptype.MinCoreEnum + 5,
+	InvertedIndicies: snaptype.MinCoreEnum + 6,
+	Accessor:         snaptype.MinCoreEnum + 7,
+	Txt:              snaptype.MinCoreEnum + 8,
 }
 
 var Indexes = struct {
@@ -87,6 +89,17 @@ var Indexes = struct {
 }
 
 var (
+	Salt = snaptype.RegisterType(
+		Enums.Domains,
+		"salt",
+		snaptype.Versions{
+			Current:      0, //2,
+			MinSupported: 0,
+		},
+		nil,
+		nil,
+		nil,
+	)
 	Headers = snaptype.RegisterType(
 		Enums.Headers,
 		"headers",
@@ -104,8 +117,8 @@ var (
 
 				cfg := recsplit.RecSplitArgs{
 					Enums:              true,
-					BucketSize:         2000,
-					LeafSize:           8,
+					BucketSize:         recsplit.DefaultBucketSize,
+					LeafSize:           recsplit.DefaultLeafSize,
 					TmpDir:             tmpDir,
 					Salt:               &salt,
 					BaseDataID:         info.From,
@@ -146,8 +159,8 @@ var (
 
 				cfg := recsplit.RecSplitArgs{
 					Enums:      true,
-					BucketSize: 2000,
-					LeafSize:   8,
+					BucketSize: recsplit.DefaultBucketSize,
+					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
 					Salt:       &salt,
 					BaseDataID: info.From,
@@ -218,8 +231,8 @@ var (
 					Enums:              true,
 					LessFalsePositives: true,
 
-					BucketSize: 2000,
-					LeafSize:   8,
+					BucketSize: recsplit.DefaultBucketSize,
+					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
 					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
 					BaseDataID: baseTxnID.U64(),
@@ -231,8 +244,8 @@ var (
 				txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 					KeyCount:   d.Count(),
 					Enums:      false,
-					BucketSize: 2000,
-					LeafSize:   8,
+					BucketSize: recsplit.DefaultBucketSize,
+					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
 					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To, Indexes.TxnHash2BlockNum)),
 					BaseDataID: firstBlockNum,

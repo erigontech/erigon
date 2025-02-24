@@ -30,9 +30,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
-	"github.com/erigontech/erigon/rlp"
 )
 
 /*
@@ -40,7 +40,7 @@ import (
 
 	e.g. For block 10 with events [1,2,3], block 15 with events [4,5,6] and block 20 with events [7,8].
 	The DB will have the following.
-		10: 0 (initialized at zero, NOTE: Polygon does not have and event 0)
+		10: 0 (initialized at zero, NOTE: Polygon does not have an event 0)
 		15: 3
 		20: 6
 
@@ -54,8 +54,6 @@ var databaseTablesCfg = kv.TableCfg{
 	kv.BorEventProcessedBlocks: {},
 	kv.BorTxLookup:             {},
 }
-
-var ErrEventIdRangeNotFound = errors.New("event id range not found")
 
 type MdbxStore struct {
 	db *polygoncommon.Database
@@ -129,7 +127,7 @@ func (s *MdbxStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockI
 	return txStore{tx}.LastProcessedBlockInfo(ctx)
 }
 
-func (s *MdbxStore) PutProcessedBlockInfo(ctx context.Context, info ProcessedBlockInfo) error {
+func (s *MdbxStore) PutProcessedBlockInfo(ctx context.Context, info []ProcessedBlockInfo) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -280,18 +278,17 @@ func (s *MdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId 
 }
 
 // BlockEventIdsRange returns the [start, end] event Id for the given block number
-// ErrEventIdRangeNotFound is thrown if the block number is not found in the database.
 // If the given block number is the first in the database, then the first uint64 (representing start Id) is 0.
-func (s *MdbxStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
+func (s *MdbxStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, bool, error) {
 	return s.blockEventIdsRange(ctx, blockNum, s.LastFrozenEventId())
 }
 
-func (s *MdbxStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFrozenId uint64) (uint64, uint64, error) {
+func (s *MdbxStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFrozenId uint64) (uint64, uint64, bool, error) {
 	var start, end uint64
 
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
-		return start, end, err
+		return start, end, false, err
 	}
 	defer tx.Rollback()
 
@@ -421,14 +418,19 @@ func (s txStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockInfo
 	return info, true, nil
 }
 
-func (s txStore) PutProcessedBlockInfo(ctx context.Context, info ProcessedBlockInfo) error {
+func (s txStore) PutProcessedBlockInfo(ctx context.Context, info []ProcessedBlockInfo) error {
 	tx, ok := s.tx.(kv.RwTx)
-
 	if !ok {
 		return errors.New("expected RW tx")
 	}
 
-	return putProcessedBlockInfo(tx, info)
+	for _, i := range info {
+		if err := putProcessedBlockInfo(tx, i); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s txStore) LastFrozenEventBlockNum() uint64 {
@@ -558,14 +560,13 @@ func (s txStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map
 	return nil
 }
 
-func (s txStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
+func (s txStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, bool, error) {
 	return s.blockEventIdsRange(ctx, blockNum, 0)
 }
 
 // BlockEventIdsRange returns the [start, end] event Id for the given block number
-// ErrEventIdRangeNotFound is thrown if the block number is not found in the database.
 // If the given block number is the first in the database, then the first uint64 (representing start Id) is 0.
-func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFrozenId uint64) (uint64, uint64, error) {
+func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFrozenId uint64) (uint64, uint64, bool, error) {
 	var start, end uint64
 
 	kByte := make([]byte, 8)
@@ -573,22 +574,23 @@ func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFr
 
 	cursor, err := s.tx.Cursor(kv.BorEventNums)
 	if err != nil {
-		return start, end, err
+		return start, end, false, err
 	}
+	defer cursor.Close()
 
 	_, v, err := cursor.SeekExact(kByte)
 	if err != nil {
-		return start, end, err
+		return start, end, false, err
 	}
 	if v == nil {
-		return start, end, fmt.Errorf("%w: %d", ErrEventIdRangeNotFound, blockNum)
+		return start, end, false, nil
 	}
 
 	end = binary.BigEndian.Uint64(v)
 
 	_, v, err = cursor.Prev()
 	if err != nil {
-		return start, end, err
+		return start, end, false, err
 	}
 
 	if v == nil { // may be empty if blockNum is the first entry
@@ -599,21 +601,24 @@ func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFr
 		start = binary.BigEndian.Uint64(v) + 1
 	}
 
-	return start, end, nil
+	return start, end, true, nil
 }
 
 func (s txStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
-	startEventId, _, err := s.blockEventIdsRange(ctx, blockHeight, 0)
-	if err != nil {
+	startEventId, _, ok, err := s.blockEventIdsRange(ctx, blockHeight, 0)
+	if !ok || err != nil {
 		return 0, err
 	}
 	return startEventId, nil
 }
 
 func (s txStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	startEventId, endEventId, err := s.blockEventIdsRange(ctx, blockHeight, 0)
+	startEventId, endEventId, ok, err := s.blockEventIdsRange(ctx, blockHeight, 0)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return []rlp.RawValue{}, nil
 	}
 	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
 	if err != nil {
@@ -621,7 +626,7 @@ func (s txStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHe
 	}
 	result := make([]rlp.RawValue, len(bytevals))
 	for i, byteval := range bytevals {
-		result[i] = rlp.RawValue(byteval)
+		result[i] = byteval
 	}
 	return result, nil
 }

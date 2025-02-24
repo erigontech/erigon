@@ -23,13 +23,12 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
-	"github.com/erigontech/erigon/rlp"
 )
 
 type DecodedInboundMessage[TPacket any] struct {
@@ -38,7 +37,7 @@ type DecodedInboundMessage[TPacket any] struct {
 	PeerId  *PeerId
 }
 
-type UnregisterFunc = polygoncommon.UnregisterFunc
+type UnregisterFunc = event.UnregisterFunc
 
 func NewMessageListener(
 	logger log.Logger,
@@ -51,11 +50,11 @@ func NewMessageListener(
 		sentryClient:            sentryClient,
 		statusDataFactory:       statusDataFactory,
 		peerPenalizer:           peerPenalizer,
-		newBlockObservers:       polygoncommon.NewObservers[*DecodedInboundMessage[*eth.NewBlockPacket]](),
-		newBlockHashesObservers: polygoncommon.NewObservers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]](),
-		blockHeadersObservers:   polygoncommon.NewObservers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]](),
-		blockBodiesObservers:    polygoncommon.NewObservers[*DecodedInboundMessage[*eth.BlockBodiesPacket66]](),
-		peerEventObservers:      polygoncommon.NewObservers[*sentryproto.PeerEvent](),
+		newBlockObservers:       event.NewObservers[*DecodedInboundMessage[*eth.NewBlockPacket]](),
+		newBlockHashesObservers: event.NewObservers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]](),
+		blockHeadersObservers:   event.NewObservers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]](),
+		blockBodiesObservers:    event.NewObservers[*DecodedInboundMessage[*eth.BlockBodiesPacket66]](),
+		peerEventObservers:      event.NewObservers[*sentryproto.PeerEvent](),
 	}
 }
 
@@ -64,11 +63,11 @@ type MessageListener struct {
 	sentryClient            sentryproto.SentryClient
 	statusDataFactory       sentry.StatusDataFactory
 	peerPenalizer           *PeerPenalizer
-	newBlockObservers       *polygoncommon.Observers[*DecodedInboundMessage[*eth.NewBlockPacket]]
-	newBlockHashesObservers *polygoncommon.Observers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
-	blockHeadersObservers   *polygoncommon.Observers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
-	blockBodiesObservers    *polygoncommon.Observers[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]
-	peerEventObservers      *polygoncommon.Observers[*sentryproto.PeerEvent]
+	newBlockObservers       *event.Observers[*DecodedInboundMessage[*eth.NewBlockPacket]]
+	newBlockHashesObservers *event.Observers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
+	blockHeadersObservers   *event.Observers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
+	blockBodiesObservers    *event.Observers[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]
+	peerEventObservers      *event.Observers[*sentryproto.PeerEvent]
 	stopWg                  sync.WaitGroup
 }
 
@@ -98,23 +97,23 @@ func (ml *MessageListener) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (ml *MessageListener) RegisterNewBlockObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc {
+func (ml *MessageListener) RegisterNewBlockObserver(observer event.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc {
 	return ml.newBlockObservers.Register(observer)
 }
 
-func (ml *MessageListener) RegisterNewBlockHashesObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc {
+func (ml *MessageListener) RegisterNewBlockHashesObserver(observer event.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc {
 	return ml.newBlockHashesObservers.Register(observer)
 }
 
-func (ml *MessageListener) RegisterBlockHeadersObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]) UnregisterFunc {
+func (ml *MessageListener) RegisterBlockHeadersObserver(observer event.Observer[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]) UnregisterFunc {
 	return ml.blockHeadersObservers.Register(observer)
 }
 
-func (ml *MessageListener) RegisterBlockBodiesObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc {
+func (ml *MessageListener) RegisterBlockBodiesObserver(observer event.Observer[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc {
 	return ml.blockBodiesObservers.Register(observer)
 }
 
-func (ml *MessageListener) RegisterPeerEventObserver(observer polygoncommon.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
+func (ml *MessageListener) RegisterPeerEventObserver(observer event.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
 	return ml.peerEventObservers.Register(observer)
 }
 
@@ -193,7 +192,7 @@ func notifyInboundMessageObservers[TPacket any](
 	ctx context.Context,
 	logger log.Logger,
 	peerPenalizer *PeerPenalizer,
-	observers *polygoncommon.Observers[*DecodedInboundMessage[TPacket]],
+	observers *event.Observers[*DecodedInboundMessage[TPacket]],
 	message *sentryproto.InboundMessage,
 ) error {
 	peerId := PeerIdFromH512(message.PeerId)

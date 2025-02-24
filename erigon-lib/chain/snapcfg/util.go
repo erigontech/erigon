@@ -89,6 +89,11 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
 
 	for _, p := range p {
+		if strings.HasPrefix(p.Name, "salt") && strings.HasSuffix(p.Name, "txt") {
+			bestVersions.Set(p.Name, p)
+			continue
+		}
+
 		v, name, ok := strings.Cut(p.Name, "-")
 		if !ok {
 			continue
@@ -365,7 +370,16 @@ func doSort(in map[string]string) Preverified {
 
 func newCfg(networkName string, preverified Preverified) *Cfg {
 	maxBlockNum, _ := preverified.MaxBlock(0)
-	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
+	cfg := &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
+	cfg.PreverifiedParsed = make([]*snaptype.FileInfo, len(preverified))
+	for i, p := range cfg.Preverified {
+		info, _, ok := snaptype.ParseFileName("", p.Name)
+		if !ok {
+			continue
+		}
+		cfg.PreverifiedParsed[i] = &info
+	}
+	return cfg
 }
 
 func NewNonSeededCfg(networkName string) *Cfg {
@@ -373,9 +387,10 @@ func NewNonSeededCfg(networkName string) *Cfg {
 }
 
 type Cfg struct {
-	ExpectBlocks uint64
-	Preverified  Preverified
-	networkName  string
+	ExpectBlocks      uint64
+	Preverified       Preverified          // immutable
+	PreverifiedParsed []*snaptype.FileInfo //Preverified field after `snaptype.ParseFileName("", p.Name)`
+	networkName       string
 }
 
 // Seedable - can seed it over Bittorrent network to other nodes
@@ -393,12 +408,11 @@ func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	hasType := t == snaptype.MinCoreEnum
 
-	for _, p := range c.Preverified {
-		info, _, ok := snaptype.ParseFileName("", p.Name)
-		if !ok {
+	for _, info := range c.PreverifiedParsed {
+		if info == nil {
 			continue
 		}
-		if strings.Contains(p.Name, "caplin") {
+		if strings.Contains(info.Name(), "caplin") {
 			continue
 		}
 
@@ -460,23 +474,16 @@ func Seedable(networkName string, info snaptype.FileInfo) bool {
 	return KnownCfg(networkName).Seedable(info)
 }
 
-func IsFrozen(networkName string, info snaptype.FileInfo) bool {
-	if networkName == "" {
-		return false
-	}
-	return KnownCfg(networkName).IsFrozen(info)
-}
-
 func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {
 	return cfg.MergeLimit(snapType, fromBlock)
 }
 
 func MaxSeedableSegment(chain string, dir string) uint64 {
 	var _max uint64
-
+	segConfig := KnownCfg(chain)
 	if list, err := snaptype.Segments(dir); err == nil {
 		for _, info := range list {
-			if Seedable(chain, info) && info.Type.Enum() == snaptype.MinCoreEnum && info.To > _max {
+			if segConfig.Seedable(info) && info.Type.Enum() == snaptype.MinCoreEnum && info.To > _max {
 				_max = info.To
 			}
 		}
@@ -495,6 +502,13 @@ func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) []uin
 	}
 
 	return snaptype.MergeSteps
+}
+
+func IsFrozen(networkName string, info snaptype.FileInfo) bool {
+	if networkName == "" {
+		return false
+	}
+	return KnownCfg(networkName).IsFrozen(info)
 }
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty

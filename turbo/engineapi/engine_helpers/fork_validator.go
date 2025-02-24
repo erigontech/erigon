@@ -343,7 +343,7 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 	// If we do not have the body we can recover it from the batch.
 	if body != nil {
 		if _, criticalError = rawdb.WriteRawBodyIfNotExists(txc.Tx, header.Hash(), header.Number.Uint64(), body); criticalError != nil {
-			return
+			return //nolint:nilnesserr
 		}
 	}
 

@@ -140,6 +140,11 @@ type RecSplitArgs struct {
 	NoFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
+// DefaultLeafSize - LeafSize=8 and BucketSize=100, use abount 1.8 bits per key. Increasing the leaf and bucket
+// sizes gives more compact structures (1.56 bits per key), at the	price of a slower construction time
+const DefaultLeafSize = 8
+const DefaultBucketSize = 100 // typical from 100 to 2000, with smaller buckets giving slightly larger but faster function
+
 // NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size
 // Typical bucket size is 100 - 2000, larger bucket sizes result in smaller representations of hash functions, at a cost of slower access
 // salt parameters is used to randomise the hash function construction, to ensure that different Erigon instances (nodes)
@@ -604,7 +609,11 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
 	// Write number of bytes per index record
-	rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
+	if rs.enums {
+		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.keysAdded + 1))
+	} else {
+		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
+	}
 	if err = rs.indexW.WriteByte(byte(rs.bytesPerRec)); err != nil {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}

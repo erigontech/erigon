@@ -158,8 +158,8 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 	return blocks - blocks%snaptype.Erigon2MergeLimit
 }
 
-func shouldUseStepsForPruning(name string) bool {
-	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
+func isStateSnapshot(name string) bool {
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor") || strings.HasPrefix(name, "domain")
 }
 
 func canSnapshotBePruned(name string) bool {
@@ -182,7 +182,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 		}
 		var _, to uint64
 		var err error
-		if shouldUseStepsForPruning(name) {
+		if isStateSnapshot(name) {
 			// parse "from" (0) and "to" (64) from the name
 			// parse the snapshot "kind". e.g kind of 'idx/v1-accounts.0-64.ef' is "idx/v1-accounts"
 			rangeString := strings.Split(name, ".")[1]
@@ -228,11 +228,11 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader blockReader, minStep uint6
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
 	minStepToDownload := uint64(math.MaxUint32)
-	stateTxNum := minStep * config3.HistoryV3AggregationStep
+	stateTxNum := minStep * config3.DefaultStepSize
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if blockNum == historyPruneTo {
-			minStepToDownload = (baseTxNum - (config3.HistoryV3AggregationStep - 1)) / config3.HistoryV3AggregationStep
-			if baseTxNum < (config3.HistoryV3AggregationStep - 1) {
+			minStepToDownload = (baseTxNum - (config3.DefaultStepSize - 1)) / config3.DefaultStepSize
+			if baseTxNum < (config3.DefaultStepSize - 1) {
 				minStepToDownload = 0
 			}
 		}
@@ -337,13 +337,18 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") && !strings.Contains(p.Name, "blobsidecars") && !strings.Contains(p.Name, "caplin") {
 			continue
 		}
+
+		if isStateSnapshot(p.Name) && blockReader.FreezingCfg().DisableDownloadE3 {
+			continue
+		}
 		if !blobs && strings.Contains(p.Name, "blobsidecars") {
 			continue
 		}
 		if !caplinState && strings.Contains(p.Name, "caplin/") {
 			continue
 		}
-		if headerchain && !strings.Contains(p.Name, "headers") && !strings.Contains(p.Name, "bodies") {
+		if headerchain &&
+			!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
 			continue
 		}
 		if _, ok := blackListForPruning[p.Name]; ok {

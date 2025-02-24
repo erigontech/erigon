@@ -36,7 +36,6 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
@@ -388,7 +387,7 @@ func TestOeTracer(t *testing.T) {
 			require.NoError(t, err)
 			err = json.Unmarshal(blob, test)
 			require.NoError(t, err)
-			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
+			tx, err := types.UnmarshalTransactionFromBinary(libcommon.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
 			require.NoError(t, err)
 
 			// Configure a blockchain with the given prestate

@@ -18,6 +18,7 @@ package cltypes
 
 import (
 	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 func (s *SignedBeaconBlock) Clone() clonable.Clonable {
@@ -26,8 +27,19 @@ func (s *SignedBeaconBlock) Clone() clonable.Clonable {
 	return other
 }
 
-func (*IndexedAttestation) Clone() clonable.Clonable {
-	return &IndexedAttestation{}
+func (i *IndexedAttestation) Clone() clonable.Clonable {
+	/*
+	   var attestingIndices *solid.RawUint64List
+
+	   	if i.AttestingIndices != nil {
+	   		attestingIndices = solid.NewRawUint64List(i.AttestingIndices.Cap(), []uint64{})
+	   	}
+
+	*/
+	return &IndexedAttestation{
+		//AttestingIndices: attestingIndices,
+		Data: &solid.AttestationData{},
+	}
 }
 
 func (b *BeaconBody) Clone() clonable.Clonable {

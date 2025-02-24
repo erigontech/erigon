@@ -29,10 +29,10 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/rlp"
-	"github.com/erigontech/erigon/turbo/trie"
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
@@ -253,7 +253,6 @@ func (so *stateObject) setState(key *libcommon.Hash, value uint256.Int) {
 // updateTrie writes cached storage modifications into the object's storage trie.
 func (so *stateObject) updateTrie(stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {
-		value := value
 		original := so.blockOriginStorage[key]
 		so.originStorage[key] = value
 		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), &key, &original, &value); err != nil {
@@ -333,7 +332,7 @@ func (so *stateObject) Code() []byte {
 	if so.data.CodeHash == emptyCodeHashH {
 		return nil
 	}
-	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation, so.data.CodeHash)
+	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation)
 	if err != nil {
 		so.setError(fmt.Errorf("can't load code hash %x: %w", so.data.CodeHash, err))
 	}

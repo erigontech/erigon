@@ -22,13 +22,17 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
 )
 
 type ExecutionClientDirect struct {
@@ -41,12 +45,23 @@ func NewExecutionClientDirect(chainRW eth1_chain_reader.ChainReaderWriterEth1) (
 	}, nil
 }
 
-func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (PayloadStatus, error) {
+func (cc *ExecutionClientDirect) NewPayload(
+	ctx context.Context,
+	payload *cltypes.Eth1Block,
+	beaconParentRoot *libcommon.Hash,
+	versionedHashes []libcommon.Hash,
+	executionRequestsList []hexutil.Bytes,
+) (PayloadStatus, error) {
 	if payload == nil {
 		return PayloadStatusValidated, nil
 	}
 
-	header, err := payload.RlpHeader(beaconParentRoot)
+	var requestsHash libcommon.Hash
+	if payload.Version() >= clparams.ElectraVersion {
+		requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
+	}
+
+	header, err := payload.RlpHeader(beaconParentRoot, requestsHash)
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
@@ -59,9 +74,11 @@ func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltype
 		return PayloadStatusInvalidated, err
 	}
 
+	startInsertBlockAndWait := time.Now()
 	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
 		return PayloadStatusNone, err
 	}
+	monitor.ObserveExecutionClientInsertingBlocks(startInsertBlockAndWait)
 
 	headHeader := cc.chainRW.CurrentHeader(ctx)
 	if headHeader == nil || header.Number.Uint64() > headHeader.Number.Uint64()+1 {
@@ -69,10 +86,12 @@ func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltype
 		return PayloadStatusNotValidated, nil
 	}
 
+	startValidateChain := time.Now()
 	status, _, _, err := cc.chainRW.ValidateChain(ctx, payload.BlockHash, payload.BlockNumber)
 	if err != nil {
 		return PayloadStatusNone, err
 	}
+	monitor.ObserveExecutionClientValidateChain(startValidateChain)
 	// check status
 	switch status {
 	case execution.ExecutionStatus_BadBlock, execution.ExecutionStatus_InvalidForkchoice:

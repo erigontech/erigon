@@ -256,10 +256,6 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 	}
 
 	finalizedCheckpoint, currentJustifiedCheckpoint, previousJustifiedCheckpoint, ok := a.forkchoiceStore.GetFinalityCheckpoints(blockRoot)
-	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
-	}
-
 	snRoTx := a.caplinStateSnapshots.View()
 	defer snRoTx.Close()
 
@@ -273,7 +269,6 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read checkpoints: %x, %d", blockRoot, a.beaconChainCfg.RoundSlotToEpoch(*slot)))
 		}
 	}
-	version := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
 	if err != nil {
 		return nil, err
@@ -283,8 +278,7 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 		FinalizedCheckpoint:         finalizedCheckpoint,
 		CurrentJustifiedCheckpoint:  currentJustifiedCheckpoint,
 		PreviousJustifiedCheckpoint: previousJustifiedCheckpoint,
-	}).WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).
-		WithVersion(version).WithOptimistic(isOptimistic), nil
+	}).WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).WithOptimistic(isOptimistic), nil
 }
 
 type syncCommitteesResponse struct {
@@ -365,12 +359,9 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 	}
 	for i, publicKey := range committee {
 		// get the validator index of the committee
-		validatorIndex, ok, err := state_accessors.ReadValidatorIndexByPublicKey(tx, publicKey)
+		validatorIndex, _, err := a.syncedData.ValidatorIndexByPublicKey(publicKey)
 		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, fmt.Errorf("could not read validator index: %x", publicKey)
+			return nil, fmt.Errorf("could not read validator index: %x. %s", publicKey, err)
 		}
 		idx := strconv.FormatInt(int64(validatorIndex), 10)
 		response.Validators[i] = idx

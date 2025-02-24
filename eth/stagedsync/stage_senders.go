@@ -29,14 +29,14 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
@@ -200,7 +200,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer bodiesC.Close()
 
 Loop:
-	for k, v, err := bodiesC.Seek(hexutility.EncodeTs(startFrom)); k != nil; k, v, err = bodiesC.Next() {
+	for k, v, err := bodiesC.Seek(hexutil.EncodeTs(startFrom)); k != nil; k, v, err = bodiesC.Next() {
 		if err != nil {
 			return err
 		}
@@ -390,26 +390,6 @@ func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 	if err = u.Done(tx); err != nil {
 		return err
 	}
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	// noop. in this case senders will be deleted by BlockRetire.PruneAncientBlocks after data-freezing.
-
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err

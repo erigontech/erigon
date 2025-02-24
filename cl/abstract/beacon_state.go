@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
+//go:generate mockgen -typed=true -destination=./mock_services/beacon_state_mock.go -package=mock_services . BeaconState
 type BeaconState interface {
 	BeaconStateBasic
 	BeaconStateExtension
@@ -58,6 +59,14 @@ type BeaconStateExtension interface {
 	PreviousStateRoot() common.Hash
 	SetPreviousStateRoot(root common.Hash)
 	GetValidatorActivationChurnLimit() uint64
+	GetPendingPartialWithdrawals() *solid.ListSSZ[*solid.PendingPartialWithdrawal]
+	GetDepositBalanceToConsume() uint64
+	GetPendingDeposits() *solid.ListSSZ[*solid.PendingDeposit]
+	GetDepositRequestsStartIndex() uint64
+	GetPendingConsolidations() *solid.ListSSZ[*solid.PendingConsolidation]
+	GetEarlistConsolidationEpoch() uint64
+	ComputeExitEpochAndUpdateChurn(exitBalance uint64) uint64
+	GetConsolidationBalanceToConsume() uint64
 }
 
 type BeaconStateBasic interface {
@@ -122,7 +131,14 @@ type BeaconStateMutator interface {
 	SetValidatorInactivityScore(index int, score uint64) error
 	SetCurrentEpochParticipationFlags(flags []cltypes.ParticipationFlags)
 	SetPreviousEpochParticipationFlags(flags []cltypes.ParticipationFlags)
-	SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation]) // temporarily skip this mock
+	SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation])
+	SetPendingPartialWithdrawals(*solid.ListSSZ[*solid.PendingPartialWithdrawal])
+	SetPendingDeposits(*solid.ListSSZ[*solid.PendingDeposit])
+	SetDepositBalanceToConsume(uint64)
+	SetPendingConsolidations(consolidations *solid.ListSSZ[*solid.PendingConsolidation])
+	SetDepositRequestsStartIndex(uint64)
+	SetConsolidationBalanceToConsume(uint64)
+	SetEarlistConsolidationEpoch(uint64)
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
 	AddValidator(validator solid.Validator, balance uint64)
@@ -136,6 +152,9 @@ type BeaconStateMutator interface {
 	AddPreviousEpochAttestation(attestation *solid.PendingAttestation)
 
 	AppendValidator(in solid.Validator)
+	AppendPendingDeposit(deposit *solid.PendingDeposit)
+	AppendPendingPartialWithdrawal(withdrawal *solid.PendingPartialWithdrawal)
+	AppendPendingConsolidation(consolidation *solid.PendingConsolidation)
 
 	ResetEth1DataVotes()
 	ResetEpochParticipation()

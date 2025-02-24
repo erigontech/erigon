@@ -50,7 +50,7 @@ func TestForkGraphInDisk(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(blockC, block2, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
 	emitter := beaconevents.NewEventEmitter()
-	graph := NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitter)
+	graph := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitter)
 	_, status, err := graph.AddChainSegment(blockA, true)
 	require.NoError(t, err)
 	require.Equal(t, status, Success)

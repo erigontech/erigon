@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	state2 "github.com/erigontech/erigon-lib/state"
 
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
@@ -96,7 +97,6 @@ type SnapshotsCfg struct {
 	caplin           bool
 	blobs            bool
 	caplinState      bool
-	agg              *state.Aggregator
 	silkworm         *silkworm.Silkworm
 	snapshotUploader *snapshotUploader
 	syncConfig       ethconfig.Sync
@@ -111,7 +111,6 @@ func StageSnapshotsCfg(db kv.RwDB,
 	snapshotDownloader protodownloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,
-	agg *state.Aggregator,
 	caplin bool,
 	blobs bool,
 	caplinState bool,
@@ -127,7 +126,6 @@ func StageSnapshotsCfg(db kv.RwDB,
 		blockReader:        blockReader,
 		notifier:           notifier,
 		caplin:             caplin,
-		agg:                agg,
 		silkworm:           silkworm,
 		syncConfig:         syncConfig,
 		blobs:              blobs,
@@ -279,8 +277,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	})
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
+	agg := cfg.db.(*temporal.DB).Agg().(*state2.Aggregator)
 	// Download only the snapshots that are for the header chain.
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, true /*headerChain=*/, cfg.blobs, cfg.caplinState, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, true /*headerChain=*/, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
 	}
 
@@ -289,7 +288,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false /*headerChain=*/, cfg.blobs, cfg.caplinState, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false /*headerChain=*/, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
 	}
 	if cfg.notifier.Events != nil {
@@ -301,19 +300,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if cfg.silkworm != nil {
-		if err := cfg.blockReader.Snapshots().(silkworm.CanAddSnapshotsToSilkwarm).AddSnapshotsToSilkworm(cfg.silkworm); err != nil {
-			return err
-		}
-	}
-
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := cfg.agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
-		return err
-	}
-
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
-	if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
+	if err := agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
 
@@ -326,6 +315,18 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
+	if cfg.silkworm != nil {
+		repository := silkworm.NewSnapshotsRepository(
+			cfg.silkworm,
+			cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots),
+			agg,
+			logger,
+		)
+		if err := repository.Update(); err != nil {
+			return err
+		}
+	}
+
 	frozenBlocks := cfg.blockReader.FrozenBlocks()
 	if s.BlockNumber < frozenBlocks { // allow genesis
 		if err := s.Update(tx, frozenBlocks); err != nil {
@@ -335,8 +336,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Fill DB"})
-	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, cfg.agg, logger); err != nil {
-		return err
+	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, agg, logger); err != nil {
+		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
 
 	if temporal, ok := tx.(*temporal.Tx); ok {
@@ -464,8 +465,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 
 		case stages.Bodies:
 			firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
-			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-			if err := rawdb.ResetSequence(tx, kv.EthTx, firstTxNum); err != nil {
+			if err := tx.ResetSequence(kv.EthTx, firstTxNum); err != nil {
 				return err
 			}
 

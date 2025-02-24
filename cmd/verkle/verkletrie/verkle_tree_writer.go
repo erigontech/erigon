@@ -30,10 +30,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/trie/vtree"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/turbo/trie/vtree"
 )
 
 func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
@@ -60,7 +59,7 @@ func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticke
 		totalInserted++
 		select {
 		case <-logInterval.C:
-			logger.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
+			logger.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", libcommon.Bytes2Hex(key))
 		default:
 		}
 	})
@@ -85,7 +84,7 @@ func collectVerkleNode(collector *etl.Collector, node verkle.VerkleNode, logInte
 		totalInserted++
 		select {
 		case <-logInterval.C:
-			logger.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
+			logger.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", libcommon.Bytes2Hex(key))
 		default:
 		}
 	})
@@ -226,7 +225,7 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error)
 			}
 			select {
 			case <-logInterval.C:
-				v.logger.Info("[Verkle] Assembling Verkle Tree", "key", common.Bytes2Hex(k))
+				v.logger.Info("[Verkle] Assembling Verkle Tree", "key", libcommon.Bytes2Hex(k))
 			default:
 			}
 		}); err != nil {
@@ -245,7 +244,7 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error)
 	v.logger.Info("Started Verkle Tree Flushing")
 	return root.Commitment().Bytes(), verkleCollector.Load(v.db, kv.VerkleTrie, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"key", common.Bytes2Hex(k)}
+			return []interface{}{"key", libcommon.Bytes2Hex(k)}
 		}})
 }
 

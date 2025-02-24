@@ -81,6 +81,13 @@ func (g *Reader) MatchPrefix(prefix []byte) bool {
 	return g.Getter.MatchPrefixUncompressed(prefix)
 }
 
+func (g *Reader) MatchCmp(prefix []byte) int {
+	if g.c&CompressKeys != 0 {
+		return g.Getter.MatchCmp(prefix)
+	}
+	return g.Getter.MatchCmpUncompressed(prefix)
+}
+
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
 	fl := CompressKeys
 	if g.nextValue {
@@ -168,7 +175,7 @@ func DetectCompressType(getter *Getter) (compressed FileCompression) {
 		getter.Reset(0)
 		for i := 0; i < 100; i++ {
 			if getter.HasNext() {
-				_, _ = getter.NextUncompressed()
+				_, _ = getter.SkipUncompressed()
 			}
 			if getter.HasNext() {
 				_, _ = getter.Skip()
@@ -189,7 +196,7 @@ func DetectCompressType(getter *Getter) (compressed FileCompression) {
 				_, _ = getter.Skip()
 			}
 			if getter.HasNext() {
-				_, _ = getter.NextUncompressed()
+				_, _ = getter.SkipUncompressed()
 			}
 		}
 		return compressed

@@ -50,7 +50,7 @@ var DefaultConfig = Config{
 	P2P: p2p.Config{
 		ListenAddr:      ":30303",
 		ProtocolVersion: []uint{direct.ETH68, direct.ETH67},
-		MaxPeers:        100,
+		MaxPeers:        32,
 		MaxPendingPeers: 1000,
 		NAT:             nat.Any(),
 	},

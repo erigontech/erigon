@@ -58,7 +58,7 @@ func (api *PrivateDebugAPIImpl) TraceBlockByHash(ctx context.Context, hash commo
 }
 
 func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -137,7 +137,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	var usedGas uint64
-	for idx, txn := range txns {
+	for txnIndex, txn := range txns {
 		isBorStateSyncTxn := borStateSyncTxn == txn
 		var txnHash common.Hash
 		if isBorStateSyncTxn {
@@ -159,15 +159,8 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			stream.WriteArrayEnd()
 			return ctx.Err()
 		}
-		ibs.SetTxContext(idx)
+		ibs.SetTxContext(txnIndex)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
-
-		if msg.FeeCap().IsZero() && engine != nil {
-			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, chainConfig, ibs, block.Header(), engine, true /* constCall */)
-			}
-			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
-		}
 
 		txCtx := evmtypes.TxContext{
 			TxHash:     txnHash,
@@ -196,11 +189,12 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 				stream,
 				api.evmCallTimeout,
 				stateSyncEvents,
+				txnIndex,
 			)
 			usedGas += _usedGas
 		} else {
 			var _usedGas uint64
-			_usedGas, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+			_usedGas, err = transactions.TraceTx(ctx, engine, msg, blockCtx, txCtx, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout)
 			usedGas += _usedGas
 		}
 		if err == nil {
@@ -214,7 +208,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		stream.WriteObjectEnd()
-		if idx != len(txns)-1 {
+		if txnIndex != len(txns)-1 {
 			stream.WriteMore()
 		}
 
@@ -224,7 +218,12 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	if dbg.AssertEnabled {
-		if block.GasUsed() != usedGas {
+		var refunds = true
+		if config.NoRefunds != nil && *config.NoRefunds {
+			refunds = false
+		}
+
+		if refunds == true && block.GasUsed() != usedGas {
 			panic(fmt.Errorf("assert: block.GasUsed() %d != usedGas %d. blockNum=%d", block.GasUsed(), usedGas, blockNumber))
 		}
 	}
@@ -239,7 +238,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 
 // TraceTransaction implements debug_traceTransaction. Returns Geth style transaction traces.
 func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -252,7 +251,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	// Retrieve the transaction and assemble its EVM context
 	var isBorStateSyncTxn bool
-	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -347,6 +346,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			stream,
 			api.evmCallTimeout,
 			stateSyncEvents,
+			txnIndex,
 		)
 		return err
 	}
@@ -358,13 +358,13 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 
 	// Trace the transaction and return
-	_, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+	_, err = transactions.TraceTx(ctx, engine, msg, blockCtx, txCtx, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout)
 	return err
 }
 
 // TraceCall implements debug_traceCall. Returns Geth style call traces.
 func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
-	dbtx, err := api.db.BeginRo(ctx)
+	dbtx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return fmt.Errorf("create ro transaction: %v", err)
 	}
@@ -412,7 +412,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 
 	var baseFee *uint256.Int
-	if header != nil && header.BaseFee != nil {
+	if header.BaseFee != nil {
 		var overflow bool
 		baseFee, overflow = uint256.FromBig(header.BaseFee)
 		if overflow {
@@ -427,7 +427,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 	txCtx := core.NewEVMTxContext(msg)
 	// Trace the transaction and return
-	_, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+	_, err = transactions.TraceTx(ctx, engine, msg, blockCtx, txCtx, hash, 0, ibs, config, chainConfig, stream, api.evmCallTimeout)
 	return err
 }
 
@@ -445,7 +445,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	}
 
 	overrideBlockHash = make(map[uint64]common.Hash)
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -565,7 +565,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			}
 			txCtx = core.NewEVMTxContext(msg)
 			ibs.SetTxContext(txnIndex)
-			_, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
+			_, err = transactions.TraceTx(ctx, api.engine(), msg, blockCtx, txCtx, block.Hash(), txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 			if err != nil {
 				stream.WriteArrayEnd()
 				stream.WriteArrayEnd()

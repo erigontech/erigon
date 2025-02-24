@@ -246,7 +246,7 @@ func (v Validator) IsSlashable(epoch uint64) bool {
 
 func (v Validator) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		PublicKey                  common.Bytes48 `json:"public_key"`
+		PublicKey                  common.Bytes48 `json:"pubkey"`
 		WithdrawalCredentials      common.Hash    `json:"withdrawal_credentials"`
 		EffectiveBalance           uint64         `json:"effective_balance,string"`
 		Slashed                    bool           `json:"slashed"`
@@ -269,7 +269,7 @@ func (v Validator) MarshalJSON() ([]byte, error) {
 func (v *Validator) UnmarshalJSON(input []byte) error {
 	var err error
 	var tmp struct {
-		PublicKey                  common.Bytes48 `json:"public_key"`
+		PublicKey                  common.Bytes48 `json:"pubkey"`
 		WithdrawalCredentials      common.Hash    `json:"withdrawal_credentials"`
 		EffectiveBalance           uint64         `json:"effective_balance,string"`
 		Slashed                    bool           `json:"slashed"`

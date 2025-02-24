@@ -25,13 +25,13 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/common"
 )
 
 type CaplinCliCfg struct {

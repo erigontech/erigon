@@ -36,7 +36,6 @@ import (
 	"github.com/Giulio2002/bls"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -116,9 +115,19 @@ func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context
 func (a *ApiHandler) waitForHeadSlot(slot uint64) {
 	stopCh := time.After(time.Second)
 	for {
-		if a.syncedData.HeadSlot() >= slot {
+		headSlot := a.syncedData.HeadSlot()
+		if headSlot >= slot || a.slotWaitedForAttestationProduction.Contains(slot) {
 			return
 		}
+		_, ok, err := a.attestationProducer.CachedAttestationData(slot, 0)
+		if err != nil {
+			log.Warn("Failed to get attestation data", "err", err)
+		}
+		if ok {
+			a.slotWaitedForAttestationProduction.Add(slot, struct{}{})
+			return
+		}
+
 		time.Sleep(1 * time.Millisecond)
 		select {
 		case <-stopCh:
@@ -126,9 +135,7 @@ func (a *ApiHandler) waitForHeadSlot(slot uint64) {
 			return
 		default:
 		}
-		if a.slotWaitedForAttestationProduction.Contains(slot) {
-			return
-		}
+
 	}
 }
 
@@ -140,6 +147,8 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	start := time.Now()
+
 	// wait until the head state is at the target slot or later
 	err = a.waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(r.Context(), a.syncedData, *slot/a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
@@ -166,6 +175,22 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 
 	a.waitForHeadSlot(*slot)
+
+	attestationData, ok, err := a.attestationProducer.CachedAttestationData(*slot, *committeeIndex)
+	if err != nil {
+		log.Warn("Failed to get attestation data", "err", err)
+	}
+
+	defer func() {
+		a.logger.Debug("Produced Attestation", "slot", *slot,
+			"committee_index", *committeeIndex, "cached", ok, "beacon_block_root",
+			attestationData.BeaconBlockRoot, "duration", time.Since(start))
+	}()
+
+	if ok {
+		return newBeaconResponse(attestationData), nil
+	}
+
 	clversion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) && committeeIndex == nil {
 		return nil, beaconhttp.NewEndpointError(
@@ -178,7 +203,6 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		committeeIndex = &zero
 	}
 
-	var attestationData solid.AttestationData
 	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
 			tx,
@@ -188,7 +212,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			*committeeIndex,
 		)
 
-		if err == attestation_producer.ErrHeadStateBehind {
+		if errors.Is(err, attestation_producer.ErrHeadStateBehind) {
 			return beaconhttp.NewEndpointError(
 				http.StatusServiceUnavailable,
 				synced_data.ErrNotSynced,
@@ -211,7 +235,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	ctx := r.Context()
 	// parse request data
 	randaoRevealString := r.URL.Query().Get("randao_reveal")
-	var randaoReveal common.Bytes96
+	var randaoReveal libcommon.Bytes96
 	if err := randaoReveal.UnmarshalText([]byte(randaoRevealString)); err != nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusBadRequest,
@@ -219,7 +243,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		)
 	}
 	if r.URL.Query().Has("skip_randao_verification") {
-		randaoReveal = common.Bytes96{0xc0} // infinity bls signature
+		randaoReveal = libcommon.Bytes96{0xc0} // infinity bls signature
 	}
 	graffiti := libcommon.HexToHash(r.URL.Query().Get("graffiti"))
 	if !r.URL.Query().Has("graffiti") {
@@ -241,6 +265,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		)
 	}
 
+	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
 	// builder boost factor controls block choice between local execution node or builder
 	var builderBoostFactor uint64
 	builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
@@ -261,6 +286,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			errors.New("node is syncing"),
 		)
 	}
+
+	start := time.Now()
 	sourceBlock, err := a.blockReader.ReadBlockByRoot(ctx, tx, baseBlockRoot)
 	if err != nil {
 		log.Warn("Failed to get source block", "err", err, "root", baseBlockRoot)
@@ -272,10 +299,18 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			fmt.Errorf("block not found %x", baseBlockRoot),
 		)
 	}
-	baseState, err := a.forkchoiceStore.GetStateAtBlockRoot(
-		baseBlockRoot,
-		true,
-	) // we start the block production from this state
+
+	var baseState *state.CachingBeaconState
+	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		baseState, err = headState.Copy()
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -288,34 +323,44 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return nil, err
 	}
+	log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
 	block, err := a.produceBlock(ctx, builderBoostFactor, sourceBlock.Block, baseState, targetSlot, randaoReveal, graffiti)
 	if err != nil {
 		log.Warn("Failed to produce block", "err", err, "slot", targetSlot)
 		return nil, err
 	}
 
+	startConsensusProcessing := time.Now()
+
+	blockBuldingMachine := &eth2.Impl{}
+	blockBuldingMachine.BlockRewardsCollector = &eth2.BlockRewardsCollector{}
 	// do state transition
-	if err := machine.ProcessBlock(transition.DefaultMachine, baseState, block.ToGeneric()); err != nil {
+	if err := machine.ProcessBlock(blockBuldingMachine, baseState, block.ToGeneric()); err != nil {
 		log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
 		return nil, err
 	}
+	log.Info("[Beacon API] Built block consensus-state", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
+	startConsensusProcessing = time.Now()
 	block.StateRoot, err = baseState.HashSSZ()
 	if err != nil {
 		log.Warn("Failed to get state root", "err", err)
 		return nil, err
 	}
+	log.Info("[Beacon API] Computed state root while producing slot", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
 
 	log.Info("BlockProduction: Block produced",
 		"proposerIndex", block.ProposerIndex,
 		"slot", targetSlot,
 		"state_root", block.StateRoot,
+		"attestations", block.BeaconBody.Attestations.Len(),
 		"execution_value", block.GetExecutionValue().Uint64(),
 		"version", block.Version(),
 		"blinded", block.IsBlinded(),
+		"took", time.Since(start),
 	)
 
 	// todo: consensusValue
-	rewardsCollector := &eth2.BlockRewardsCollector{}
+	rewardsCollector := blockBuldingMachine.BlockRewardsCollector
 	consensusValue := rewardsCollector.Attestations + rewardsCollector.ProposerSlashings + rewardsCollector.AttesterSlashings + rewardsCollector.SyncAggregate
 	a.setupHeaderReponseForBlockProduction(
 		w,
@@ -342,8 +387,8 @@ func (a *ApiHandler) produceBlock(
 	baseBlock *cltypes.BeaconBlock,
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
-	randaoReveal common.Bytes96,
-	graffiti common.Hash,
+	randaoReveal libcommon.Bytes96,
+	graffiti libcommon.Hash,
 ) (*cltypes.BlindOrExecutionBeaconBlock, error) {
 	wg := sync.WaitGroup{}
 	wg.Add(2)
@@ -356,6 +401,10 @@ func (a *ApiHandler) produceBlock(
 		kzgProofs      []libcommon.Bytes48
 	)
 	go func() {
+		start := time.Now()
+		defer func() {
+			a.logger.Debug("Produced BeaconBody", "slot", targetSlot, "duration", time.Since(start))
+		}()
 		defer wg.Done()
 		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlock, baseState, targetSlot, randaoReveal, graffiti)
 		// collect blobs
@@ -383,6 +432,10 @@ func (a *ApiHandler) produceBlock(
 		builderErr    error
 	)
 	go func() {
+		start := time.Now()
+		defer func() {
+			a.logger.Debug("MevBoost", "slot", targetSlot, "duration", time.Since(start))
+		}()
 		defer wg.Done()
 		if a.routerCfg.Builder && a.builderClient != nil {
 			builderHeader, builderErr = a.getBuilderPayload(ctx, baseBlock, baseState, targetSlot)
@@ -499,7 +552,7 @@ func (a *ApiHandler) getBuilderPayload(
 		ethHeader.SetVersion(baseState.Version())
 	}
 	// check kzg commitments
-	if header != nil && baseState.Version() >= clparams.DenebVersion {
+	if baseState.Version() >= clparams.DenebVersion {
 		if header.Data.Message.BlobKzgCommitments.Len() >= cltypes.MaxBlobsCommittmentsPerBlock {
 			return nil, fmt.Errorf("too many blob kzg commitments: %d", header.Data.Message.BlobKzgCommitments.Len())
 		}
@@ -523,8 +576,8 @@ func (a *ApiHandler) produceBeaconBody(
 	baseBlock *cltypes.BeaconBlock,
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
-	randaoReveal common.Bytes96,
-	graffiti common.Hash,
+	randaoReveal libcommon.Bytes96,
+	graffiti libcommon.Hash,
 ) (*cltypes.BeaconBody, uint64, error) {
 	if targetSlot <= baseBlock.Slot {
 		return nil, 0, fmt.Errorf(
@@ -572,11 +625,11 @@ func (a *ApiHandler) produceBeaconBody(
 		retryTime := 10 * time.Millisecond
 		secsDiff := (targetSlot - baseBlock.Slot) * a.beaconChainCfg.SecondsPerSlot
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
-		var withdrawals []*types.Withdrawal
-		clWithdrawals := state.ExpectedWithdrawals(
+		clWithdrawals, _ := state.ExpectedWithdrawals(
 			baseState,
 			targetSlot/a.beaconChainCfg.SlotsPerEpoch,
 		)
+		withdrawals := []*types.Withdrawal{}
 		for _, w := range clWithdrawals {
 			withdrawals = append(withdrawals, &types.Withdrawal{
 				Index:     w.Index,
@@ -1005,11 +1058,9 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	version clparams.StateVersion,
 	r *http.Request,
 ) (*cltypes.DenebSignedBeaconBlock, error) {
-	var block *cltypes.DenebSignedBeaconBlock
-	if version.AfterOrEqual(clparams.ElectraVersion) {
-		block = cltypes.NewElectraSignedBeaconBlock(a.beaconChainCfg)
-	} else {
-		block = cltypes.NewDenebSignedBeaconBlock(a.beaconChainCfg)
+	block := cltypes.NewDenebSignedBeaconBlock(a.beaconChainCfg, version)
+	if block == nil {
+		return nil, errors.New("failed to create block")
 	}
 	// check content type
 	switch r.Header.Get("Content-Type") {
@@ -1017,7 +1068,6 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 		if err := json.NewDecoder(r.Body).Decode(block); err != nil {
 			return nil, err
 		}
-		block.SignedBlock.Block.SetVersion(version)
 		return block, nil
 	case "application/octet-stream":
 		octect, err := io.ReadAll(r.Body)
@@ -1027,7 +1077,6 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 		if err := block.DecodeSSZ(octect, int(version)); err != nil {
 			return nil, err
 		}
-		block.SignedBlock.Block.SetVersion(version)
 		return block, nil
 	}
 	return nil, errors.New("invalid content type")
@@ -1094,8 +1143,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		Name: gossip.TopicNameBeaconBlock,
 		Data: blkSSZ,
 	}); err != nil {
-		log.Error("Failed to publish block", "err", err)
-		return err
+		a.logger.Error("Failed to publish block", "err", err)
 	}
 	for idx, blob := range blobsSidecarsBytes {
 		idx64 := uint64(idx)
@@ -1104,8 +1152,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			Data:     blob,
 			SubnetId: &idx64,
 		}); err != nil {
-			log.Error("Failed to publish blob sidecar", "err", err)
-			return err
+			a.logger.Error("Failed to publish blob sidecar", "err", err)
 		}
 	}
 	return nil
@@ -1132,13 +1179,31 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		return err
 	}
 
-	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
+	if err := a.forkchoiceStore.OnBlock(ctx, block, true, true, false); err != nil {
 		return err
 	}
 	finalizedBlockRoot := a.forkchoiceStore.FinalizedCheckpoint().Root
 	if _, err := a.engine.ForkChoiceUpdate(ctx, a.forkchoiceStore.GetEth1Hash(finalizedBlockRoot), a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
 		return err
 	}
+	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, false)
+	if err != nil {
+		return err
+	}
+	if headState == nil {
+		return errors.New("failed to get head state")
+	}
+
+	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
+		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, blockRoot, block.Block.Slot, 0)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := a.syncedData.OnHeadState(headState); err != nil {
+		return fmt.Errorf("failed to update synced data: %w", err)
+	}
+
 	return nil
 }
 
@@ -1150,12 +1215,7 @@ type attestationCandidate struct {
 func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	s abstract.BeaconState,
 ) *solid.ListSSZ[*solid.Attestation] {
-	currentVersion := s.Version()
-	aggBitsSize := int(a.beaconChainCfg.MaxValidatorsPerCommittee)
-	if currentVersion.AfterOrEqual(clparams.ElectraVersion) {
-		aggBitsSize = int(a.beaconChainCfg.MaxValidatorsPerCommittee *
-			a.beaconChainCfg.MaxCommitteesPerSlot)
-	}
+	stateVersion := s.Version()
 	// Group attestations by their data root
 	hashToAtts := make(map[libcommon.Hash][]*solid.Attestation)
 	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
@@ -1164,7 +1224,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		}
 
 		attVersion := a.beaconChainCfg.GetCurrentStateVersion(candidate.Data.Slot / a.beaconChainCfg.SlotsPerEpoch)
-		if currentVersion.AfterOrEqual(clparams.ElectraVersion) &&
+		if stateVersion.AfterOrEqual(clparams.ElectraVersion) &&
 			attVersion.Before(clparams.ElectraVersion) {
 			// Because the on chain Attestation container changes, attestations from the prior fork can’t be included
 			// into post-electra blocks. Therefore the first block after the fork may have zero attestations.
@@ -1186,7 +1246,8 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		candidateAggregationBits := candidate.AggregationBits.Bytes()
 		for _, curAtt := range hashToAtts[dataRoot] {
 			currAggregationBitsBytes := curAtt.AggregationBits.Bytes()
-			if !utils.IsOverlappingSSZBitlist(currAggregationBitsBytes, candidateAggregationBits) {
+			if stateVersion <= clparams.DenebVersion &&
+				!utils.IsOverlappingSSZBitlist(currAggregationBitsBytes, candidateAggregationBits) {
 				// merge signatures
 				candidateSig := candidate.Signature
 				curSig := curAtt.Signature
@@ -1196,24 +1257,38 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 					continue
 				}
 				// merge aggregation bits
-				mergedAggBits := solid.NewBitList(0, aggBitsSize)
-				for i := 0; i < len(currAggregationBitsBytes); i++ {
-					mergedAggBits.Append(currAggregationBitsBytes[i] | candidateAggregationBits[i])
+				mergedAggBits, err := curAtt.AggregationBits.Merge(candidate.AggregationBits)
+				if err != nil {
+					log.Warn("[Block Production] Cannot merge aggregation bits", "err", err)
+					continue
 				}
 				var buf [96]byte
 				copy(buf[:], mergeSig)
 				curAtt.Signature = buf
 				curAtt.AggregationBits = mergedAggBits
-				if attVersion.AfterOrEqual(clparams.ElectraVersion) {
-					// merge committee_bits for electra
-					mergedCommitteeBits, err := curAtt.CommitteeBits.Union(candidate.CommitteeBits)
-					if err != nil {
-						log.Warn("[Block Production] Cannot merge committee bits", "err", err)
-						continue
-					}
-					curAtt.CommitteeBits = mergedCommitteeBits
+				mergeAny = true
+			}
+			if stateVersion >= clparams.ElectraVersion {
+				// merge in electra way
+				mergedAggrBits, ok := a.tryMergeAggregationBits(s, curAtt, candidate)
+				if !ok {
+					continue
 				}
-
+				mergedCommitteeBits, err := curAtt.CommitteeBits.Union(candidate.CommitteeBits)
+				if err != nil {
+					continue
+				}
+				// merge signatures
+				candidateSig := candidate.Signature
+				curSig := curAtt.Signature
+				mergeSig, err := bls.AggregateSignatures([][]byte{candidateSig[:], curSig[:]})
+				if err != nil {
+					log.Warn("[Block Production] Cannot merge signatures", "err", err)
+					continue
+				}
+				curAtt.AggregationBits = mergedAggrBits
+				curAtt.CommitteeBits = mergedCommitteeBits
+				copy(curAtt.Signature[:], mergeSig)
 				mergeAny = true
 			}
 		}
@@ -1259,6 +1334,74 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		}
 	}
 	return ret
+}
+
+func (a *ApiHandler) tryMergeAggregationBits(state abstract.BeaconState, att1, att2 *solid.Attestation) (*solid.BitList, bool) {
+	// after electra fork, aggregation_bits contains only the attester bit map of those committee appearing in committee_bits
+	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/electra/validator.md#attestations
+	slot := att1.Data.Slot
+	committees1 := att1.CommitteeBits.GetOnIndices()
+	committees2 := att2.CommitteeBits.GetOnIndices()
+	bitSlice := solid.NewBitSlice()
+	index1, index2 := 0, 0
+	committeeOffset1, committeeOffset2 := 0, 0
+
+	// appendBits is a helper func to append the aggregation bits of the committee to the bitSlice
+	appendBits := func(bitSlice *solid.BitSlice, committeeIndex int, att *solid.Attestation, offset int) (*solid.BitSlice, int) {
+		members, err := state.GetBeaconCommitee(slot, uint64(committeeIndex))
+		if err != nil {
+			log.Warn("[Block Production] Cannot get committee members", "err", err)
+			return nil, 0
+		}
+		for i := range members {
+			bitSlice.AppendBit(att.AggregationBits.GetBitAt(offset + i))
+		}
+		return bitSlice, offset + len(members)
+	}
+
+	// similar to merge sort
+	for index1 < len(committees1) || index2 < len(committees2) {
+		if index1 < len(committees1) && index2 < len(committees2) {
+			if committees1[index1] < committees2[index2] {
+				bitSlice, committeeOffset1 = appendBits(bitSlice, committees1[index1], att1, committeeOffset1)
+				index1++
+			} else if committees1[index1] > committees2[index2] {
+				bitSlice, committeeOffset2 = appendBits(bitSlice, committees2[index2], att2, committeeOffset2)
+				index2++
+			} else {
+				// check overlapping when the committee is the same
+				members, err := state.GetBeaconCommitee(slot, uint64(committees1[index1]))
+				if err != nil {
+					log.Warn("[Block Production] Cannot get committee members", "err", err)
+					return nil, false
+				}
+				bits1 := att1.AggregationBits
+				bits2 := att2.AggregationBits
+				for i := range members {
+					if bits1.GetBitAt(committeeOffset1+i) && bits2.GetBitAt(committeeOffset2+i) {
+						// overlapping
+						return nil, false
+					} else {
+						bitSlice.AppendBit(bits1.GetBitAt(committeeOffset1+i) || bits2.GetBitAt(committeeOffset2+i))
+					}
+				}
+				committeeOffset1 += len(members)
+				committeeOffset2 += len(members)
+				index1++
+				index2++
+			}
+		} else if index1 < len(committees1) {
+			bitSlice, committeeOffset1 = appendBits(bitSlice, committees1[index1], att1, committeeOffset1)
+			index1++
+		} else {
+			bitSlice, committeeOffset2 = appendBits(bitSlice, committees2[index2], att2, committeeOffset2)
+			index2++
+		}
+	}
+
+	bitSlice.AppendBit(true) // mark the end of the bitlist
+	mergedAggregationBits := solid.BitlistFromBytes(bitSlice.Bytes(), int(a.beaconChainCfg.MaxCommitteesPerSlot)*int(a.beaconChainCfg.MaxValidatorsPerCommittee))
+	return mergedAggregationBits, true
 }
 
 // computeAttestationReward computes the reward for a specific attestation.

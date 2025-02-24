@@ -34,16 +34,15 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/accounts/abi/bind/backends"
 	"github.com/erigontech/erigon/cmd/pics/contracts"
 	"github.com/erigontech/erigon/cmd/pics/visual"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/erigontech/erigon/turbo/trie"
 )
 
 /*func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
@@ -86,27 +85,23 @@ import (
 }*/
 
 var bucketLabels = map[string]string{
-	kv.Receipts:          "Receipts",
-	kv.Log:               "Event Logs",
-	kv.E2AccountsHistory: "History Of Accounts",
-	kv.E2StorageHistory:  "History Of Storage",
-	kv.Headers:           "Headers",
-	kv.HeaderCanonical:   "Canonical headers",
-	kv.HeaderTD:          "Headers TD",
-	kv.BlockBody:         "Block Bodies",
-	kv.HeaderNumber:      "Header Numbers",
-	kv.TxLookup:          "Transaction Index",
-	kv.Code:              "Code Of Contracts",
-	kv.SyncStageProgress: "Sync Progress",
-	kv.PlainState:        "Plain State",
-	kv.HashedAccounts:    "Hashed Accounts",
-	kv.HashedStorage:     "Hashed Storage",
-	kv.TrieOfAccounts:    "Intermediate Hashes Of Accounts",
-	kv.TrieOfStorage:     "Intermediate Hashes Of Storage",
-	kv.AccountChangeSet:  "Account Changes",
-	kv.StorageChangeSet:  "Storage Changes",
-	kv.IncarnationMap:    "Incarnations",
-	kv.Senders:           "Transaction Senders",
+	kv.Receipts:                 "Receipts",
+	kv.Log:                      "Event Logs",
+	kv.Headers:                  "Headers",
+	kv.HeaderCanonical:          "Canonical headers",
+	kv.HeaderTD:                 "Headers TD",
+	kv.BlockBody:                "Block Bodies",
+	kv.HeaderNumber:             "Header Numbers",
+	kv.TxLookup:                 "Transaction Index",
+	kv.Code:                     "Code Of Contracts",
+	kv.SyncStageProgress:        "Sync Progress",
+	kv.PlainState:               "Plain State",
+	kv.HashedAccountsDeprecated: "Hashed Accounts",
+	kv.HashedStorageDeprecated:  "Hashed Storage",
+	kv.TrieOfAccounts:           "Intermediate Hashes Of Accounts",
+	kv.TrieOfStorage:            "Intermediate Hashes Of Storage",
+	kv.IncarnationMap:           "Incarnations",
+	kv.Senders:                  "Transaction Senders",
 }
 
 /*dbutils.PlainContractCode,
@@ -122,7 +117,7 @@ func hexPalette() error {
 		return err
 	}
 	visual.StartGraph(f, true)
-	p := common.FromHex("0x000102030405060708090a0b0c0d0e0f")
+	p := libcommon.FromHex("0x000102030405060708090a0b0c0d0e0f")
 	visual.Horizontal(f, p, len(p), "p", visual.HexIndexColors, visual.HexFontColors, 0)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {

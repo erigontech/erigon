@@ -17,13 +17,16 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
+
+var PrunedError = errors.New("old data not available due to pruning")
 
 // HistoryReaderV3 Implements StateReader and StateWriter
 type HistoryReaderV3 struct {
@@ -39,23 +42,37 @@ func NewHistoryReaderV3() *HistoryReaderV3 {
 func (hr *HistoryReaderV3) String() string {
 	return fmt.Sprintf("txNum:%d", hr.txNum)
 }
-func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
-	if ttx, casted := tx.(kv.TemporalTx); casted {
-		hr.ttx = ttx
-	} else {
-		panic(fmt.Sprintf("type %T didn't satisfy interface", tx))
+func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx) { hr.ttx = tx }
+func (hr *HistoryReaderV3) SetTxNum(txNum uint64)  { hr.txNum = txNum }
+func (hr *HistoryReaderV3) GetTxNum() uint64       { return hr.txNum }
+func (hr *HistoryReaderV3) SetTrace(trace bool)    { hr.trace = trace }
+
+// Gets the txNum where Account, Storage and Code history begins.
+// If the node is an archive node all history will be available therefore
+// the result will be 0.
+//
+// For non-archive node old history files get deleted, so this number will vary
+// but the goal is to know where the historical data begins.
+func (hr *HistoryReaderV3) StateHistoryStartFrom() uint64 {
+	var earliestTxNum uint64 = 0
+	// get the first txnum where  accounts, storage , and code are all available in history files
+	// This is max(HistoryStart(Accounts), HistoryStart(Storage), HistoryStart(Code))
+	stateDomainNames := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+	for _, domainName := range stateDomainNames {
+		domainStartingTxNum := hr.ttx.HistoryStartFrom(domainName)
+		if domainStartingTxNum > earliestTxNum {
+			earliestTxNum = domainStartingTxNum
+		}
 	}
+	return earliestTxNum
 }
-func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
-func (hr *HistoryReaderV3) GetTxNum() uint64      { return hr.txNum }
-func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
 
 func (hr *HistoryReaderV3) ReadSet() map[string]*state.KvList { return nil }
 func (hr *HistoryReaderV3) ResetReadSet()                     {}
 func (hr *HistoryReaderV3) DiscardReadList()                  {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, address[:], nil, hr.txNum)
+	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, address[:], hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("ReadAccountData [%x] => []\n", address)
@@ -80,33 +97,30 @@ func (hr *HistoryReaderV3) ReadAccountDataForDebug(address common.Address) (*acc
 
 func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	k := append(address[:], key.Bytes()...)
-	enc, _, err := hr.ttx.GetAsOf(kv.StorageDomain, k, nil, hr.txNum)
+	enc, _, err := hr.ttx.GetAsOf(kv.StorageDomain, k, hr.txNum)
 	if hr.trace {
 		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, *key, enc)
 	}
 	return enc, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	if codeHash == emptyCodeHashH {
-		return nil, nil
-	}
+func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
 	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
-	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], nil, hr.txNum)
+	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], hr.txNum)
 	if hr.trace {
-		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, code)
+		fmt.Printf("ReadAccountCode [%x] => [%x]\n", address, code)
 	}
 	return code, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	enc, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], nil, hr.txNum)
+func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+	enc, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], hr.txNum)
 	return len(enc), err
 }
 
 func (hr *HistoryReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, address.Bytes(), nil, hr.txNum)
+	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, address.Bytes(), hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("ReadAccountIncarnation [%x] => [0]\n", address)
@@ -131,7 +145,7 @@ func (hr *HistoryReaderV3) ReadAccountIncarnation(address common.Address) (uint6
 
 type ResettableStateReader interface {
 	StateReader
-	SetTx(tx kv.Tx)
+	SetTx(tx kv.TemporalTx)
 	SetTxNum(txn uint64)
 	DiscardReadList()
 	ReadSet() map[string]*state.KvList

@@ -33,12 +33,8 @@ func NewCanonicalChainBuilderFactory(
 	chainConfig *chain.Config,
 	borConfig *borcfg.BorConfig,
 	blockProducersReader blockProducersReader,
+	signaturesCache *lru.ARCCache[common.Hash, common.Address],
 ) CanonicalChainBuilderFactory {
-	signaturesCache, err := lru.NewARC[common.Hash, common.Address](InMemorySignatures)
-	if err != nil {
-		panic(err)
-	}
-
 	difficultyCalculator := &DifficultyCalculator{
 		borConfig:            borConfig,
 		signaturesCache:      signaturesCache,
