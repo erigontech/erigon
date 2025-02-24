@@ -97,6 +97,11 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		shrinkThreshold: -1, // default
 		label:           label,
 		metrics:         label == kv.ChainDB,
+
+		// most of db must set explicit `roTxsLimiter <= 9K`.
+		// without this limiter - it's possible to reach 10K threads (if 10K rotx will wait for IO) - and golang will crush https://groups.google.com/g/golang-dev/c/igMoDruWNwo
+		// There is way to increase the 10,000 thread limit: https://golang.org/pkg/runtime/debug/#SetMaxThreads
+		roTxsLimiter: semaphore.NewWeighted(100_000_000),
 	}
 	if label == kv.ChainDB {
 		opts = opts.RemoveFlags(mdbx.NoReadahead) // enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (doesen GB)
