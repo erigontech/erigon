@@ -49,7 +49,7 @@ func TestDecryptionKeysSignatureDataWithInvalidPreimagesLength(t *testing.T) {
 	require.ErrorIs(t, err, shutter.ErrTooManyIdentityPreimages)
 }
 
-func TestDecryptionKeysSignatureDataHashSsz(t *testing.T) {
+func TestDecryptionKeysSignatureDataHashSSZ(t *testing.T) {
 	// cross-referencing the hash that is produced by github.com/shutter-network/rolling-shutter
 	// for the same signature data input
 	want := "259bf7718b7430abc238ec0ac3260574dd73d23005adec26eed1a655ccdcc1ec"
