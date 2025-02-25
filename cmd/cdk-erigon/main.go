@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/gateway-fm/vectorized-poseidon-gold/src/vectorizedposeidongold"
 	"github.com/ledgerwatch/erigon/common"
 	zkutils "github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
@@ -61,7 +60,6 @@ func runErigon(cliCtx *cli.Context) error {
 
 	// initializing the node and providing the current git commit there
 	log.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
-	log.Info("Poseidon hashing", "Accelerated", vectorizedposeidongold.UsingSimd || vectorizedposeidongold.UsingScalars)
 
 	logger := log.New()
 	nodeCfg := node.NewNodConfigUrfave(cliCtx, logger)

@@ -751,7 +751,7 @@ func HashContractBytecode(bc string) string {
 	return ConvertBigIntToHex(HashContractBytecodeBigInt(bc))
 }
 
-func HashContractBytecodeBigIntV1(bc string) *big.Int {
+func HashContractBytecodeBigInt(bc string) *big.Int {
 	bytecode := bc
 
 	if strings.HasPrefix(bc, "0x") {
@@ -807,89 +807,6 @@ func HashContractBytecodeBigIntV1(bc string) *big.Int {
 				tmpScalar, _ = scalar.SetString(tmpElem, 16)
 				elementsToHash = append(elementsToHash, tmpScalar.Uint64())
 				tmpElem = ""
-				counter = 0
-			}
-		}
-
-		copy(in[:], elementsToHash[4:12])
-		copy(capacity[:], elementsToHash[:4])
-
-		tmpHash = Hash(in, capacity)
-	}
-
-	return ArrayToScalar(tmpHash[:])
-}
-
-func charToDigit(c byte) int {
-	if c >= '0' && c <= '9' {
-		return int(c - '0')
-	}
-	if c >= 'a' && c <= 'f' {
-		return int(c - 'a' + 10)
-	}
-	if c >= 'A' && c <= 'F' {
-		return int(c - 'A' + 10)
-	}
-	// should not reach here
-	return 0
-}
-
-func HashContractBytecodeBigInt(bc string) *big.Int {
-	bytecode := bc
-
-	if strings.HasPrefix(bc, "0x") {
-		bytecode = bc[2:]
-	}
-
-	if len(bytecode)%2 != 0 {
-		bytecode = "0" + bytecode
-	}
-
-	// MT is 56 (multiplier)
-	MT := BYTECODE_ELEMENTS_HASH * BYTECODE_BYTES_ELEMENT
-	bb := make([]byte, MT*(((len(bytecode)/2+1)/MT)+1))
-	for i := 0; i < len(bytecode)/2; i++ {
-		// use strconv.ParseInt
-		// x, _ := strconv.ParseInt(bytecode[2*i:2*i+2], 16, 64)
-		// bb[i] = byte(x)
-		// simple
-		bb[i] = byte(charToDigit(bytecode[2*i])<<4 + charToDigit(bytecode[2*i+1]))
-	}
-	for i := len(bytecode) / 2; i < len(bb); i++ {
-		bb[i] = 0
-	}
-
-	bbPtr := len(bytecode) / 2
-	bb[bbPtr] = 0x01
-	bbPtr = len(bb) - 1
-	bb[bbPtr] |= 0x80
-
-	numBytes := float64(len(bb))
-	numHashes := int(math.Ceil(numBytes / (BYTECODE_ELEMENTS_HASH * BYTECODE_BYTES_ELEMENT)))
-	tmpHash := [4]uint64{0, 0, 0, 0}
-	bytesPointer := 0
-
-	maxBytesToAdd := BYTECODE_ELEMENTS_HASH * BYTECODE_BYTES_ELEMENT
-	var elementsToHash []uint64
-	var in [8]uint64
-	var capacity [4]uint64
-	for i := 0; i < numHashes; i++ {
-		elementsToHash = tmpHash[:]
-
-		subsetBytecode := bb[bytesPointer : bytesPointer+maxBytesToAdd]
-		bytesPointer += maxBytesToAdd
-
-		var tmpElem uint64
-		tmpElem = 0
-		counter := 0
-
-		for j := 0; j < maxBytesToAdd; j++ {
-			tmpElem += uint64(subsetBytecode[j]) << (8 * counter)
-			counter += 1
-
-			if counter == BYTECODE_BYTES_ELEMENT {
-				elementsToHash = append(elementsToHash, tmpElem)
-				tmpElem = 0
 				counter = 0
 			}
 		}

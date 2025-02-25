@@ -2,8 +2,6 @@ package utils
 
 import (
 	"bytes"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"math/big"
 	"reflect"
@@ -55,16 +53,10 @@ func BenchmarkConvertBigIntToHex(b *testing.B) {
 }
 
 func BenchmarkHashContractBytecode(b *testing.B) {
-	str := strings.Repeat("7e", 500)
-	h1 := HashContractBytecodeBigIntV1(str)
-	h2 := HashContractBytecodeBigInt(str)
-	if h1.Cmp(h2) != 0 {
-		panic("hashes do not match")
-	}
-	b.ResetTimer()
+	str := strings.Repeat("e", 1000)
 	b.Run("1", func(b *testing.B) {
 		for n := 0; n < b.N; n++ {
-			HashContractBytecodeBigIntV1(str)
+			HashContractBytecode(str)
 		}
 	})
 	b.Run("2", func(b *testing.B) {
@@ -72,30 +64,6 @@ func BenchmarkHashContractBytecode(b *testing.B) {
 			HashContractBytecodeBigInt(str)
 		}
 	})
-	b.Run("3", func(b *testing.B) {
-		for n := 0; n < b.N; n++ {
-			HashContractBytecode(str)
-		}
-	})
-}
-
-func TestHashContractBytecodeConsistency(t *testing.T) {
-	size := 1234 // not divisible by 56
-	data := make([]byte, size)
-	rand.Read(data)
-	strData := hex.EncodeToString(data)
-	if !strings.HasPrefix(strData, "0x") {
-		strData = "0x" + strData
-	}
-	h1 := HashContractBytecodeBigIntV1(strings.ToLower(strData))
-	h2 := HashContractBytecodeBigInt(strData)
-	if h1.Cmp(h2) != 0 {
-		t.Errorf("(lower case) Expected %v, but got %v", h1, h2)
-	}
-	h3 := HashContractBytecodeBigInt(strings.ToUpper(strData[2:]))
-	if h1.Cmp(h3) != 0 {
-		t.Errorf("(upper case) Expected %v, but got %v", h1, h3)
-	}
 }
 
 func TestConvertBigIntToHex(t *testing.T) {
