@@ -5,10 +5,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Giulio2002/bls"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
 const (
