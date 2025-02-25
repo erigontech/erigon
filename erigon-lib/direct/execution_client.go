@@ -104,3 +104,4 @@ func (s *ExecutionClientDirect) Ready(ctx context.Context, in *emptypb.Empty, op
 func (s *ExecutionClientDirect) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*execution.FrozenBlocksResponse, error) {
 	return s.server.FrozenBlocks(ctx, in)
 }
+

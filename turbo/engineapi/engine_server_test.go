@@ -20,22 +20,26 @@ import (
 	"bytes"
 	"math/big"
 	"testing"
-	"time"
 
 	// "github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/direct"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+
+	// txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/typestest"
@@ -48,7 +52,7 @@ import (
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/stages"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+	// "github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // Do 1 step to start txPool
@@ -96,21 +100,23 @@ func newBaseApiForTest(m *mock.MockSentry) *jsonrpc.BaseAPI {
 
 func TestGetBlobsV1(t *testing.T) {
 	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
-	expectedValue := uint64(1234)
 	logger := log.New()
 
 	oneBlockStep(mockSentry, require, t)
 
-	// // TODO change it to blob txn
-	// txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectedValue), params.TxGas, uint256.NewInt(10*params.GWei), nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
-
 	wrappedTxn := types.BlobTxWrapper{}
 	buf := bytes.NewBuffer(nil)
-	wrapperRlp, _ := typestest.MakeBlobTxnRlp()
+	wrapperRlp, commitments := typestest.MakeBlobTxnRlp()
 	
 	wrappedTxn.DecodeRLP(rlp.NewStream(bytes.NewReader(wrapperRlp[1:]), uint64(len(wrapperRlp) )))
+
+	wrappedTxn.Tx.BlobVersionedHashes = make([]common.Hash, 2)
+	wrappedTxn.Tx.BlobVersionedHashes[0] = common.Hash(kzg.KZGToVersionedHash(commitments[0]))
+	wrappedTxn.Tx.BlobVersionedHashes[1] = common.Hash(kzg.KZGToVersionedHash(commitments[1]))
+
 	wrappedTxn.Tx.ChainID = uint256.MustFromBig(mockSentry.ChainConfig.ChainID)
 	wrappedTxn.Tx.Gas = 100_000
+	wrappedTxn.Tx.Nonce = 0
 	txn, err := types.SignTx(&wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
 	wrappedTxn.Tx.DynamicFeeTransaction = *txn.(*types.DynamicFeeTransaction)
 
@@ -119,29 +125,29 @@ func TestGetBlobsV1(t *testing.T) {
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, logger)
 
-	err = wrappedTxn.MarshalBinary(buf)
 	require.NoError(err)
 
-	txsCh, id := ff.SubscribePendingTxs(1)
-	defer ff.UnsubscribePendingTxs(id)
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
+
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)
+	err = wrappedTxn.MarshalBinary(buf)
 	
+	// mockSentry.header
+	engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil)
+	
+	// txHash, err := api.SendRawTransaction(ctx, wrapperRlp)
 	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
 
-	select {
-	case got := <-txsCh:
-		require.Equal(expectedValue, got[0].GetValue().Uint64())
-	case <-time.After(20 * time.Second): // Sometimes the channel times out on github actions
-		t.Log("Timeout waiting for txn from channel")
-		jsonTx, err := api.GetTransactionByHash(ctx, txHash)
-		require.NoError(err)
-		require.Equal(expectedValue, jsonTx.Value.Uint64())
-	}
+	blobsResp, err := engineServer.GetBlobsV1(ctx, wrappedTxn.Tx.BlobVersionedHashes)
+	require.Equal(blobsResp[0].Blob, wrappedTxn.Blobs[0][:])
+	require.Equal(blobsResp[1].Blob, wrappedTxn.Blobs[1][:])
 
-	//send same txn second time and expect error
-	_, err = api.SendRawTransaction(ctx, buf.Bytes())
-	require.NotNil(err)
-	expectedErr := txpool_proto.ImportResult_name[int32(txpool_proto.ImportResult_ALREADY_EXISTS)] + ": " + txpoolcfg.AlreadyKnown.String()
-	require.Equal(expectedErr, err.Error())
-	mockSentry.ReceiveWg.Wait()
+	require.Equal(blobsResp[0].Proof, wrappedTxn.Proofs[0][:])
+	require.Equal(blobsResp[1].Proof, wrappedTxn.Proofs[1][:])
+	if err != nil{
+		t.Log(blobsResp)
+		t.Log(txHash)
+	}
 }
