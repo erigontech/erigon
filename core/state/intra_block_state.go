@@ -1544,8 +1544,10 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 						s.SetBalance(addr, &balance, writes[i].Reason)
 					}
 				case NoncePath:
-					nonce := val.(uint64)
-					s.SetNonce(addr, nonce)
+					if _, isDestructed := destructed[addr]; !isDestructed {
+						nonce := val.(uint64)
+						s.SetNonce(addr, nonce)
+					}
 				case CodePath:
 					if _, isDestructed := destructed[addr]; !isDestructed {
 						code := val.([]byte)
