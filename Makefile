@@ -12,7 +12,7 @@ ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
 DOCKER_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell id -g)
-DOCKER_TAG ?= thorax/erigon:latest
+DOCKER_TAG ?= local-erigon/erigon:latest
 
 # Variables below for building on host OS, and are ignored for docker
 #
@@ -76,20 +76,21 @@ validate_docker_build_args:
 	@if [ "$(UNAME)" = "Darwin" ]; then \
 		dscl . list /Users UniqueID | grep "$(DOCKER_UID)"; \
 	elif [ "$(UNAME)" = "Linux" ]; then \
-		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"; \
+		grep "$(DOCKER_UID):$(DOCKER_GID)" /etc/passwd; \
 	fi
 	@echo "✔️ host OS user exists: $(shell id -nu $(DOCKER_UID))"
 
 ## docker:                            validate, update submodules and build with docker
 docker: validate_docker_build_args git-submodules
-	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
+	DOCKER_BUILDKIT=1 $(DOCKER) build \
+		--target erigon \
 		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
-		--build-arg VERSION=${GIT_TAG} \
-		--build-arg UID=${DOCKER_UID} \
-		--build-arg GID=${DOCKER_GID} \
-		${DOCKER_FLAGS} \
-		.
+		--build-arg BINARIES="erigon downloader" \
+		--build-arg BUILD_DBTOOLS="true" \
+		--progress plain \
+		-t ${DOCKER_TAG} .
+
 
 xdg_data_home :=  ~/.local/share
 ifdef XDG_DATA_HOME
@@ -300,36 +301,14 @@ PACKAGE_NAME          := github.com/erigontech/erigon
 GOLANG_CROSS_VERSION  ?= v1.21.6
 
 .PHONY: release-dry-run
-release-dry-run: git-submodules
-	@docker run \
-		--rm \
-		--privileged \
-		-e CGO_ENABLED=1 \
-		-e GITHUB_TOKEN \
-		-e DOCKER_USERNAME \
-		-e DOCKER_PASSWORD \
-		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v `pwd`:/go/src/$(PACKAGE_NAME) \
-		-w /go/src/$(PACKAGE_NAME) \
-		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip-validate --skip-publish
+release-dry-run:
+	@echo "Release process moved to github action"
+	@exit 1
 
 .PHONY: release
-release: git-submodules
-	@docker run \
-		--rm \
-		--privileged \
-		-e CGO_ENABLED=1 \
-		-e GITHUB_TOKEN \
-		-e DOCKER_USERNAME \
-		-e DOCKER_PASSWORD \
-		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v `pwd`:/go/src/$(PACKAGE_NAME) \
-		-w /go/src/$(PACKAGE_NAME) \
-		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip-validate
-
-	@docker image push --all-tags thorax/erigon
+release:
+	@echo "Release process moved to github action"
+	@exit 1
 
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.

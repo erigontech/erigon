@@ -14,13 +14,15 @@
 ##
 ######
 
-ARG RELEASE_DOCKER_BASE_IMAGE=" Intentionally misdefined debian:12-slim" \
+ARG RELEASE_DOCKER_BASE_IMAGE="debian:12-slim" \
     BUILDER_IMAGE="golang" \
     BUILDER_TAG="1.23-bookworm" \
     TARGET_IMAGE="debian" \
     TARGET_TAG="12-slim" \
     BINARIES="erigon" \
     BUILD_DBTOOLS="false" \
+    BUILD_DATE="Not defined" \
+    VCS_REF \
     UID_ERIGON=1000 \
     GID_ERIGON=1000 \
     BUILD_SILKWORM="true" \
@@ -86,13 +88,17 @@ ARG USER=erigon \
     TARGET_IMAGE \
     TARGET_TAG \
     EXPOSED_PORTS \
+    BUILD_DATE \
+    VCS_REF \
     BINARIES
 
 LABEL \
     "org.opencontainers.image.authors"="https://github.com/erigontech/erigon/graphs/contributors" \
     "org.opencontainers.image.base.name"="${TARGET_IMAGE}:${TARGET_TAG}" \
+    "org.opencontainers.image.created"="${BUILD_DATE}" \
+    "org.opencontainers.image.revision"="${VCS_REF}" \
     "org.opencontainers.image.description"="Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier." \
-    "org.opencontainers.image.documentation"="https://github.com/erigontech/erigon/blob/main/Dockerfile.release" \
+    "org.opencontainers.image.documentation"="https://erigon.gitbook.io/erigon" \
     "org.opencontainers.image.source"="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
     "org.opencontainers.image.url"="https://github.com/erigontech/erigon/blob/main/Dockerfile"
 
