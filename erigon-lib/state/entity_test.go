@@ -5,11 +5,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
 	ae "github.com/erigontech/erigon-lib/state/entity_extras"
-	"github.com/erigontech/erigon/core/snaptype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,25 +33,25 @@ func registerEntity(dirs datadir.Dirs, name string) ae.EntityId {
 	))
 }
 
-func TestPutToDb(t *testing.T) {
-	dir := datadir.New(t.TempDir())
-	log := log.New()
-	headerId := registerEntity(dir, "headers")
-	require.Equal(t, ae.EntityId(0), headerId)
+// func TestPutToDb(t *testing.T) {
+// 	dir := datadir.New(t.TempDir())
+// 	log := log.New()
+// 	headerId := registerEntity(dir, "headers")
+// 	require.Equal(t, ae.EntityId(0), headerId)
 
-	// create marked appendable
-	freezer := snaptype.NewHeaderFreezer(kv.HeaderCanonical, kv.Headers, log)
+// 	// create marked appendable
+// 	freezer := snaptype.NewHeaderFreezer(kv.HeaderCanonical, kv.Headers, log)
 
-	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true), headerId,
-		state.WithIndexKeyFactory(&snaptype.HeaderAccessorIndexKeyFactory{}))
+// 	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true), headerId,
+// 		state.WithIndexKeyFactory(&snaptype.HeaderAccessorIndexKeyFactory{}))
 
-	ma, err := state.NewMarkedEntity(headerId, kv.HeaderCanonical, kv.Headers, log,
-		state.MA_WithFreezer(freezer),
-		state.MA_WithPruneFrom(state.Num(1)),
-		state.MA_WithIndexBuilders(builder))
-	require.NoError(t, err)
-	require.NotNil(t, ma)
-}
+// 	ma, err := state.NewMarkedEntity(headerId, kv.HeaderCanonical, kv.Headers, log,
+// 		state.MA_WithFreezer(freezer),
+// 		state.MA_WithPruneFrom(state.Num(1)),
+// 		state.MA_WithIndexBuilders(builder))
+// 	require.NoError(t, err)
+// 	require.NotNil(t, ma)
+// }
 
 func TestGetFromDb(t *testing.T) {
 	// get

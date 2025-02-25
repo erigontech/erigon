@@ -27,6 +27,7 @@ type ProtoEntity struct {
 
 	visibleLock   sync.RWMutex
 	sameKeyAsRoot bool
+	strategy      CanonicityStrategy
 
 	logger log.Logger
 }
@@ -172,6 +173,10 @@ func (a *ProtoEntityTx) Close() {
 			src.closeFilesAndRemove()
 		}
 	}
+}
+
+func (a *ProtoEntityTx) Type() CanonicityStrategy {
+	return a.a.strategy
 }
 
 func (a *ProtoEntityTx) Garbage(merged *filesItem) (outs []*filesItem) {

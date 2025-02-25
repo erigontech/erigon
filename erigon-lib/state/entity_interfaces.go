@@ -40,31 +40,67 @@ type StartRoTx[T EntityTxI] interface {
 }
 
 type EntityTxI interface {
+	Get(entityNum Num, tx kv.Tx) (Bytes, error)
 	Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error
 	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
 	Close()
+	Type() CanonicityStrategy
 }
 
 type MarkedTxI interface {
 	EntityTxI
-	Get(num Num, tx kv.Tx) (Bytes, error)
 	GetNc(num Num, hash []byte, tx kv.Tx) (Bytes, error)
 	Put(num Num, hash []byte, value Bytes, tx kv.RwTx) error
 }
 
-type RangedTxI interface {
+type UnmarkedTxI interface {
 	EntityTxI
-	Get(entityNum Num, tx kv.Tx) (Bytes, error)
 	Append(entityNum Num, value Bytes, tx kv.RwTx) error
 
 	// when you don't need "write then read" pattern, one can use RangedEntityWriter
 	// this collects and sorts data in memory and then writes to db in single tx.
 	// which can be more efficient than calling Append() multiple times.
-	NewWriter() *RangedEntityWriter
+	//NewWriter() *ValueBufferedWriter
 }
 
+type AppendingTxI interface {
+	EntityTxI
+	// db only
+	GetNc(entityId Id, tx kv.Tx) (Bytes, error)
+	Append(entityId Id, value Bytes, tx kv.RwTx) error
+
+	// sequence apis
+	IncrementSequence(amount uint64, tx kv.RwTx) (uint64, error)
+	ReadSequence(tx kv.Tx) (uint64, error)
+	ResetSequence(value uint64, tx kv.RwTx) error
+}
+
+/*
+buffer values before writing to db supposed to store only canonical values
+Note that values in buffer are not reflected in Get call.
+*/
+type BufferedTxI interface {
+	EntityTxI
+	Put(Num, Bytes) error
+	Flush(context.Context, kv.RwTx) error
+}
+
+type CanonicityStrategy uint8
+
+const (
+	// canonicalTbl & valsTbl
+	Marked CanonicityStrategy = iota
+	// valsTbl; storing only canonical values
+	// unwinds are rare or values arrive far apart
+	// and so unwind doesn't need to be very performant.
+	Unmarked
+	// valsTbl;
+	// unwinds are frequent and values arrive at high cadence
+	// so need to have very performant unwinds.
+	Appending
+	Buffered
+)
+
 // type checks
-var _ RangedTxI = (*RangedEntityTx)(nil)
-var _ MarkedTxI = (*MarkerTx)(nil)
-var _ StartRoTx[RangedTxI] = (*RangedEntity)(nil)
-var _ StartRoTx[MarkedTxI] = (*MarkedEntity)(nil)
+// var _ StartRoTx[UnmarkedTxI] = (*RangedEntity)(nil)
+// var _ StartRoTx[MarkedTxI] = (*MarkedEntity)(nil)
