@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/typestest"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -1253,7 +1252,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 
 // Todo, make the txn more realistic with good values
 func makeBlobTxn() TxnSlot {
-	wrapperRlp, commitments := typestest.MakeBlobTxnRlp()
+	wrapperRlp, commitments := types.MakeBlobTxnRlp()
 	commitment0 := commitments[0]
 	commitment1 := commitments[1]
 	tip, feeCap, blobFeeCap := uint256.NewInt(100_000), uint256.NewInt(200_000), uint256.NewInt(200_000)

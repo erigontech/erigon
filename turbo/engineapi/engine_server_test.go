@@ -23,9 +23,10 @@ import (
 
 	// "github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/crypto/kzg"
+	// "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/holiman/uint256"
+	// "github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -42,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/typestest"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 
@@ -103,21 +103,11 @@ func TestGetBlobsV1(t *testing.T) {
 	logger := log.New()
 
 	oneBlockStep(mockSentry, require, t)
-
-	wrappedTxn := types.BlobTxWrapper{}
 	buf := bytes.NewBuffer(nil)
-	wrapperRlp, commitments := typestest.MakeBlobTxnRlp()
-	
-	wrappedTxn.DecodeRLP(rlp.NewStream(bytes.NewReader(wrapperRlp[1:]), uint64(len(wrapperRlp) )))
 
-	wrappedTxn.Tx.BlobVersionedHashes = make([]common.Hash, 2)
-	wrappedTxn.Tx.BlobVersionedHashes[0] = common.Hash(kzg.KZGToVersionedHash(commitments[0]))
-	wrappedTxn.Tx.BlobVersionedHashes[1] = common.Hash(kzg.KZGToVersionedHash(commitments[1]))
-
-	wrappedTxn.Tx.ChainID = uint256.MustFromBig(mockSentry.ChainConfig.ChainID)
-	wrappedTxn.Tx.Gas = 100_000
-	wrappedTxn.Tx.Nonce = 0
-	txn, err := types.SignTx(&wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
+	wrappedTxn := types.MakeWrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
+	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
+	require.NoError(err)
 	wrappedTxn.Tx.DynamicFeeTransaction = *txn.(*types.DynamicFeeTransaction)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
@@ -129,14 +119,10 @@ func TestGetBlobsV1(t *testing.T) {
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
-
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)
-	err = wrappedTxn.MarshalBinary(buf)
-	
-	// mockSentry.header
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)	
 	engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil)
 	
-	// txHash, err := api.SendRawTransaction(ctx, wrapperRlp)
+	err = wrappedTxn.MarshalBinary(buf)
 	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
 
