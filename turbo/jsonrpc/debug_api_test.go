@@ -596,3 +596,43 @@ func TestGetBadBlocks(t *testing.T) {
 	require.Equal(data[2]["hash"], hash2)
 	require.Equal(data[3]["hash"], hash1)
 }
+
+func TestGetRawTransaction(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 5000000)
+	ctx := context.Background()
+
+	require := require.New(t)
+	tx, err := m.DB.BeginRw(ctx)
+	if err != nil {
+		t.Errorf("could not begin read transaction: %s", err)
+	}
+	number := *rawdb.ReadCurrentBlockNumber(tx)
+	tx.Commit()
+
+	if number < 1 {
+		t.Error("TestSentry doesn't have enough blocks for this test")
+	}
+	var testedOnce = false
+	for i := uint64(0); i < number; i++ {
+		tx, err := m.DB.BeginRo(ctx)
+		require.NoError(err)
+		block, err := api._blockReader.BlockByNumber(ctx, tx, i)
+		require.NoError(err)
+		tx.Rollback()
+		txns := block.Transactions()
+
+		for _, txn := range txns {
+			// Get the first txn
+			txnBinary := bytes.Buffer{}
+			err = txn.MarshalBinary(&txnBinary)
+			require.NoError(err)
+			data, err := api.GetRawTransaction(ctx, txn.Hash())
+			require.NoError(err)
+			require.NotEmpty(data)
+			require.Equal([]byte(data), txnBinary.Bytes())
+			testedOnce = true
+		}
+	}
+	require.True(testedOnce, "Test flow didn't touch the target flow")
+}

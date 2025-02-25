@@ -21,6 +21,7 @@ import (
 type MockProposerSlashingService struct {
 	ctrl     *gomock.Controller
 	recorder *MockProposerSlashingServiceMockRecorder
+	isgomock struct{}
 }
 
 // MockProposerSlashingServiceMockRecorder is the mock recorder for MockProposerSlashingService.
@@ -41,17 +42,17 @@ func (m *MockProposerSlashingService) EXPECT() *MockProposerSlashingServiceMockR
 }
 
 // ProcessMessage mocks base method.
-func (m *MockProposerSlashingService) ProcessMessage(arg0 context.Context, arg1 *uint64, arg2 *cltypes.ProposerSlashing) error {
+func (m *MockProposerSlashingService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.ProposerSlashing) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ProcessMessage", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // ProcessMessage indicates an expected call of ProcessMessage.
-func (mr *MockProposerSlashingServiceMockRecorder) ProcessMessage(arg0, arg1, arg2 any) *MockProposerSlashingServiceProcessMessageCall {
+func (mr *MockProposerSlashingServiceMockRecorder) ProcessMessage(ctx, subnet, msg any) *MockProposerSlashingServiceProcessMessageCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockProposerSlashingService)(nil).ProcessMessage), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockProposerSlashingService)(nil).ProcessMessage), ctx, subnet, msg)
 	return &MockProposerSlashingServiceProcessMessageCall{Call: call}
 }
 

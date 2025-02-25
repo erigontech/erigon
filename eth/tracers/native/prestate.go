@@ -29,7 +29,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -56,7 +55,7 @@ func (a *account) exists() bool {
 
 type accountMarshaling struct {
 	Balance *hexutil.Big
-	Code    hexutility.Bytes
+	Code    hexutil.Bytes
 }
 
 type prestateTracer struct {

@@ -33,7 +33,7 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/kv"
@@ -529,7 +529,7 @@ func newRevertError(result *evmtypes.ExecutionResult) *revertError {
 	}
 	return &revertError{
 		error:  err,
-		reason: hexutility.Encode(result.Revert()),
+		reason: hexutil.Encode(result.Revert()),
 	}
 }
 
@@ -856,6 +856,7 @@ func (m callMsg) Data() []byte                          { return m.CallMsg.Data 
 func (m callMsg) AccessList() types.AccessList          { return m.CallMsg.AccessList }
 func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
 func (m callMsg) IsFree() bool                          { return false }
+func (m callMsg) SetIsFree(_ bool)                      {}
 
 func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
 func (m callMsg) MaxFeePerBlobGas() *uint256.Int { return m.CallMsg.MaxFeePerBlobGas }

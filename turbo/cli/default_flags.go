@@ -241,4 +241,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.ShutterEnabledFlag,
 	&utils.ShutterP2pBootstrapNodesFlag,
 	&utils.ShutterP2pListenPortFlag,
+
+	&utils.PolygonPosSingleSlotFinalityFlag,
+	&utils.PolygonPosSingleSlotFinalityBlockAtFlag,
 }

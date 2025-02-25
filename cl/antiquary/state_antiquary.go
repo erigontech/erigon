@@ -321,7 +321,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			); err != nil {
 				return err
 			}
-			return stateAntiquaryCollector.collectFlattenedProposers(epoch, getProposerDutiesValue(s.currentState))
+			return nil
 		},
 		OnNewBlockRoot: func(index int, root libcommon.Hash) error {
 			return stateAntiquaryCollector.collectBlockRoot(s.currentState.Slot(), root)

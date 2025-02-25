@@ -547,7 +547,7 @@ make DIST=/opt/erigon install
 
 ### Run local devnet
 
-<code> 🔬 Detailed explanation is [here](/DEV_CHAIN.md).</code>
+<code> 🔬 Detailed explanation is [here](/docs/DEV_CHAIN.md).</code>
 
 ### Docker permissions error
 

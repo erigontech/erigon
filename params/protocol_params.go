@@ -192,13 +192,13 @@ var DelegatedCodeHash = common.HexToHash("0xeadcdba66a79ab5dce91622d1d75c8cff5cf
 var BeaconRootsAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")
 
 // EIP-2935: Historical block hashes in state
-var HistoryStorageAddress = common.HexToAddress("0x0F792be4B0c0cb4DAE440Ef133E90C0eCD48CCCC")
+var HistoryStorageAddress = common.HexToAddress("0x0000F90827F1C53a10cb7A02335B175320002935")
 
 // EIP-7002: Execution layer triggerable withdrawals
-var WithdrawalRequestAddress = common.HexToAddress("0x0c15F14308530b7CDB8460094BbB9cC28b9AaaAA")
+var WithdrawalRequestAddress = common.HexToAddress("0x00000961Ef480Eb55e80D19ad83579A64c007002")
 
 // EIP-7251
-var ConsolidationRequestAddress = common.HexToAddress("0x00431F263cE400f4455c2dCf564e53007Ca4bbBb")
+var ConsolidationRequestAddress = common.HexToAddress("0x0000BBdDc7CE488642fb579F8B00f3a590007251")
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
 var Bls12381MSMDiscountTableG1 = [128]uint64{1000, 949, 848, 797, 764, 750, 738, 728, 719, 712, 705, 698, 692, 687, 682, 677, 673, 669, 665, 661, 658, 654, 651, 648, 645, 642, 640, 637, 635, 632, 630, 627, 625, 623, 621, 619, 617, 615, 613, 611, 609, 608, 606, 604, 603, 601, 599, 598, 596, 595, 593, 592, 591, 589, 588, 586, 585, 584, 582, 581, 580, 579, 577, 576, 575, 574, 573, 572, 570, 569, 568, 567, 566, 565, 564, 563, 562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 551, 550, 549, 548, 547, 547, 546, 545, 544, 543, 542, 541, 540, 540, 539, 538, 537, 536, 536, 535, 534, 533, 532, 532, 531, 530, 529, 528, 528, 527, 526, 525, 525, 524, 523, 522, 522, 521, 520, 520, 519}

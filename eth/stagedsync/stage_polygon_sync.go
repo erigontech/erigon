@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -55,6 +56,7 @@ import (
 var errBreakPolygonSyncStage = errors.New("break polygon sync stage")
 
 func NewPolygonSyncStageCfg(
+	config *ethconfig.Config,
 	logger log.Logger,
 	chainConfig *chain.Config,
 	db kv.RwDB,
@@ -69,6 +71,7 @@ func NewPolygonSyncStageCfg(
 	blockLimit uint,
 	userUnwindTypeOverrides []string,
 	notifications *shards.Notifications,
+	engineAPISwitcher sync.EngineAPISwitcher,
 ) PolygonSyncStageCfg {
 	// using a buffered channel to preserve order of tx actions,
 	// do not expect to ever have more than 50 goroutines blocking on this channel
@@ -137,6 +140,7 @@ func NewPolygonSyncStageCfg(
 	)
 	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService)
 	sync := polygonsync.NewSync(
+		config,
 		logger,
 		syncStore,
 		executionEngine,
@@ -150,6 +154,7 @@ func NewPolygonSyncStageCfg(
 		events.Events(),
 		notifications,
 		sync.NewWiggleCalculator(borConfig, signaturesCache, heimdallService),
+		engineAPISwitcher,
 	)
 	syncService := &polygonSyncStageService{
 		logger:          logger,

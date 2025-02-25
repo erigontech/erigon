@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"io/fs"
 	"math"
 	randOld "math/rand"
@@ -35,10 +34,12 @@ import (
 	"testing"
 	"time"
 
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
@@ -2541,5 +2542,5 @@ func TestCanBuild(t *testing.T) {
 	canBuild = dc.canBuild(tx)
 	require.NoError(t, err)
 	require.True(t, canBuild)
-	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep*2+1), nil, 0)
+	_ = writer.PutWithPrev(k, nil, hexutil.EncodeTs(d.aggregationStep*2+1), nil, 0)
 }

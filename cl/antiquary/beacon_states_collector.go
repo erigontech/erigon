@@ -63,7 +63,6 @@ type beaconStatesCollector struct {
 	balancesCollector                *etl.Collector
 	randaoMixesCollector             *etl.Collector
 	intraRandaoMixesCollector        *etl.Collector
-	proposersCollector               *etl.Collector
 	slashingsCollector               *etl.Collector
 	blockRootsCollector              *etl.Collector
 	stateRootsCollector              *etl.Collector
@@ -107,7 +106,6 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		balancesCollector:                etl.NewCollector(kv.ValidatorBalance, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		randaoMixesCollector:             etl.NewCollector(kv.RandaoMixes, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		intraRandaoMixesCollector:        etl.NewCollector(kv.IntraRandaoMixes, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		proposersCollector:               etl.NewCollector(kv.Proposers, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		slashingsCollector:               etl.NewCollector(kv.ValidatorSlashings, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		blockRootsCollector:              etl.NewCollector(kv.BlockRoot, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		stateRootsCollector:              etl.NewCollector(kv.StateRoot, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
@@ -135,11 +133,6 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 	i.compressor.Reset(i.buf)
 
 	slot := state.Slot()
-	epoch := slot / i.beaconCfg.SlotsPerEpoch
-	// Setup state events handlers
-	if err := i.proposersCollector.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(state)); err != nil {
-		return err
-	}
 
 	events := state_accessors.NewStateEvents()
 
@@ -265,10 +258,6 @@ func (i *beaconStatesCollector) collectActiveIndices(epoch uint64, activeIndices
 	return i.activeValidatorIndiciesCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
 }
 
-func (i *beaconStatesCollector) collectFlattenedProposers(epoch uint64, proposers []byte) error {
-	return i.proposersCollector.Collect(base_encoding.Encode64ToBytes4(epoch), proposers)
-}
-
 func (i *beaconStatesCollector) collectCurrentSyncCommittee(slot uint64, committee *solid.SyncCommittee) error {
 	roundedSlot := i.beaconCfg.RoundSlotToSyncCommitteePeriod(slot)
 	return i.currentSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), committee[:])
@@ -323,9 +312,7 @@ func (i *beaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := i.balancesCollector.Load(tx, kv.ValidatorBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.proposersCollector.Load(tx, kv.Proposers, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
+
 	if err := i.slashingsCollector.Load(tx, kv.ValidatorSlashings, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
@@ -374,7 +361,6 @@ func (i *beaconStatesCollector) close() {
 	i.balancesCollector.Close()
 	i.randaoMixesCollector.Close()
 	i.intraRandaoMixesCollector.Close()
-	i.proposersCollector.Close()
 	i.slashingsCollector.Close()
 	i.blockRootsCollector.Close()
 	i.stateRootsCollector.Close()

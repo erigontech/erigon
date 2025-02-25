@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
@@ -37,8 +37,8 @@ import (
 
 // TransactionTest checks RLP decoding and sender derivation of transactions.
 type TransactionTest struct {
-	RLP   hexutility.Bytes `json:"txbytes"`
-	Forks ttForks          `json:"result"`
+	RLP   hexutil.Bytes `json:"txbytes"`
+	Forks ttForks       `json:"result"`
 }
 
 type ttForks struct {
@@ -62,7 +62,7 @@ type ttFork struct {
 }
 
 func (tt *TransactionTest) Run(chainID *big.Int) error {
-	validateTx := func(rlpData hexutility.Bytes, signer types.Signer, rules *chain.Rules) (*libcommon.Address, *libcommon.Hash, uint64, error) {
+	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, rules *chain.Rules) (*libcommon.Address, *libcommon.Hash, uint64, error) {
 		tx, err := types.DecodeTransaction(rlpData)
 		if err != nil {
 			return nil, nil, 0, err

@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
@@ -38,6 +39,7 @@ import (
 )
 
 func NewService(
+	config *ethconfig.Config,
 	logger log.Logger,
 	chainConfig *chain.Config,
 	sentryClient sentryproto.SentryClient,
@@ -48,6 +50,8 @@ func NewService(
 	bridgeService *bridge.Service,
 	heimdallService *heimdall.Service,
 	notifications *shards.Notifications,
+	engineAPISwitcher EngineAPISwitcher,
+
 ) *Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
@@ -75,6 +79,7 @@ func NewService(
 	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache)
 	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
+		config,
 		logger,
 		store,
 		execution,
@@ -88,6 +93,7 @@ func NewService(
 		events.Events(),
 		notifications,
 		NewWiggleCalculator(borConfig, signaturesCache, heimdallService),
+		engineAPISwitcher,
 	)
 	return &Service{
 		logger:          logger,
@@ -111,6 +117,7 @@ type Service struct {
 }
 
 func (s *Service) Run(parentCtx context.Context) error {
+	defer s.logger.Info(syncLogPrefix("sync service component stopped"))
 	s.logger.Info(syncLogPrefix("running sync service component"))
 
 	group, ctx := errgroup.WithContext(parentCtx)
