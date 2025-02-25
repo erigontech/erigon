@@ -58,7 +58,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-const DefaultBlockGasLimit = uint64(30000000)
+const DefaultBlockGasLimit = uint64(36000000)
 
 // txMaxBroadcastSize is the max size of a transaction that will be broadcast.
 // All transactions with a higher size will be announced and need to be fetched
