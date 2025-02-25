@@ -99,16 +99,20 @@ func checkTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
 	return nil
 }
 
-// checkDynamicTxFee checks if the provided gas cap exceeds the block gas limit.
-// It returns an error if the gas cap is greater than the block gas limit.
-// checkDynamicTxFee checks if the provided gas cap is within acceptable limits
-// compared to the block gas limit. It calculates a gas limit as 1.5 times the
-// block gas limit and compares it to the gas cap.
+// checkDynamicTxFee verifies whether the given gas fee cap exceeds the allowable limit
+// based on the block's gas limit.
+//
+// This function ensures that the transaction's fee cap does not exceed 1.5 times
+// the block gas limit, in accordance with Ethereum's gas fee constraints.
 func checkDynamicTxFee(gasCap *uint256.Int, blockGasLimit uint64) error {
-	gasLimit := uint256.NewInt(0)
-	gasLimit.SetUint64(blockGasLimit + (blockGasLimit / 2))
+	if gasCap == nil {
+		return errors.New("gas cap cannot be nil")
+	}
 
-	if gasLimit.Lt(gasCap) {
+	// Compute the adjusted gas limit as 1.5x the block gas limit.
+	adjustedGasLimit := uint256.NewInt(blockGasLimit + (blockGasLimit / 2))
+
+	if adjustedGasLimit.Lt(gasCap) {
 		return errors.New("fee cap is bigger than the block gas limit")
 	}
 
