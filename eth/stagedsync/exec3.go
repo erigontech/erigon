@@ -955,13 +955,17 @@ func ExecV3(ctx context.Context,
 								trace = true
 							}
 							pe.doms.SetTrace(trace)
+							comittement.Captured = []string{}
 							rh, err := pe.doms.ComputeCommitment(ctx, applyWorker.Tx(), true, applyResult.BlockNum, pe.logPrefix)
 							pe.doms.SetTrace(false)
+							captured := comittement.Captured
+							comittement.Captured = nil
 							if err != nil {
 								return err
 							}
 							if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
 								logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
+								fmt.Println(captured)
 								return errors.New("wrong trie root")
 							}
 						}
