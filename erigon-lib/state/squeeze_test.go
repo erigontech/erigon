@@ -74,7 +74,6 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	domains.Close() // closes ac
 
 	require.NoError(tb, rwTx.Commit())
-	rwTx.Rollback()
 
 	// build files out of db
 	err = agg.BuildFiles(uint64(txCount))
@@ -90,10 +89,6 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-
-	rwTx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer rwTx.Rollback()
 
 	domains, err := NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
 	require.NoError(t, err)
@@ -121,6 +116,8 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 	acit, err := ac.RangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
 	require.NoError(t, err)
 	defer acit.Close()
@@ -131,9 +128,10 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 		require.NoError(t, err)
 		domains.sdCtx.updates.TouchPlainKey(string(k), nil, domains.sdCtx.updates.TouchAccount)
 	}
-
+	rwTx.Commit()
 	// check if the commitment is the same
 	root, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), "")
+	domains.Close()
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.EqualValues(t, latestRoot, root)

@@ -116,9 +116,6 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 
 	ctx := context.Background()
-	rwTx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
@@ -135,13 +132,9 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	count := 10
 	rnd := newRnd(0)
 	ac.Close()
-	err = rwTx.Commit()
 	require.NoError(t, err)
 
 Loop:
-	rwTx, err = db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
 
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
@@ -182,6 +175,8 @@ Loop:
 		}
 	}
 
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
 
@@ -390,6 +385,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		rwTx, err = db.BeginRw(ctx)
 		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
+		rwTx.Commit()
 		require.NoError(err)
 		domains.Close()
 
@@ -412,9 +408,6 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 
 	ctx := context.Background()
-	rwTx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
@@ -478,6 +471,8 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	}
 	fmt.Printf("calling build files step %d\n", maxTx/stepSize)
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
 	domains.Close()
@@ -501,9 +496,6 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
-
-	rwTx, err = db.BeginRw(ctx)
-	require.NoError(t, err)
 
 	domains, err = NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
 	require.NoError(t, err)
@@ -547,6 +539,8 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		require.Zero(t, notRemoved)
 	}
 
+	rwTx, err = db.BeginRw(ctx)
+	require.NoError(t, err)
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
 	rwTx.Rollback()
