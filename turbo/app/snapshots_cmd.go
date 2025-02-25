@@ -576,7 +576,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.HistoryNoSystemTxs:
-			if err := integrity.E3HistoryNoSystemTxs(ctx, db, blockReader); err != nil {
+			if err := integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader); err != nil {
 				return err
 			}
 		case integrity.BorEvents:
