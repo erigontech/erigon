@@ -113,7 +113,8 @@ func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context
 }
 
 func (a *ApiHandler) waitForHeadSlot(slot uint64) {
-	stopCh := time.After(time.Second)
+	// try to produce the attestation data with a timeout up to 3 seconds (reduce missing attestations on underperforming nodes)
+	stopCh := time.After(3 * time.Second)
 	for {
 		headSlot := a.syncedData.HeadSlot()
 		if headSlot >= slot || a.slotWaitedForAttestationProduction.Contains(slot) {
