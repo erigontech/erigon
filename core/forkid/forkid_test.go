@@ -148,11 +148,13 @@ func TestCreation(t *testing.T) {
 			params.ChiadoGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}},
-				{4100418, 1684934215, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}}, // Last pre-Shanghai block
-				{4100419, 1684934220, ID{Hash: checksumToBytes(0xa15a4252), Next: 1706724940}}, // First Shanghai block
-				{8021277, 1706724930, ID{Hash: checksumToBytes(0xa15a4252), Next: 1706724940}}, // Last Shanghai block
-				{8021278, 1706724940, ID{Hash: checksumToBytes(0x5fbc16bc), Next: 0}},          // First Cancun block
-				{10000000, 1800000000, ID{Hash: checksumToBytes(0x5fbc16bc), Next: 0}},         // Future Cancun block (mock)
+				{4100418, 1684934215, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}},  // Last pre-Shanghai block
+				{4100419, 1684934220, ID{Hash: checksumToBytes(0xa15a4252), Next: 1706724940}},  // First Shanghai block
+				{8021277, 1706724930, ID{Hash: checksumToBytes(0xa15a4252), Next: 1706724940}},  // Last Shanghai block
+				{8021278, 1706724940, ID{Hash: checksumToBytes(0x5fbc16bc), Next: 1741254220}},  // First Cancun block
+				{14655798, 1741254215, ID{Hash: checksumToBytes(0x5fbc16bc), Next: 1741254220}}, // Last Cancun block (approx)
+				{14655799, 1741254220, ID{Hash: checksumToBytes(0x8ba51786), Next: 0}},          // First Prague block (approx)
+				{20000000, 1800000000, ID{Hash: checksumToBytes(0x8ba51786), Next: 0}},          // Future Prague block (mock)
 			},
 		},
 		// Amoy test cases

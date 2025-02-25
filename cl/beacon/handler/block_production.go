@@ -352,6 +352,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		"proposerIndex", block.ProposerIndex,
 		"slot", targetSlot,
 		"state_root", block.StateRoot,
+		"attestations", block.BeaconBody.Attestations.Len(),
 		"execution_value", block.GetExecutionValue().Uint64(),
 		"version", block.Version(),
 		"blinded", block.IsBlinded(),
@@ -624,11 +625,11 @@ func (a *ApiHandler) produceBeaconBody(
 		retryTime := 10 * time.Millisecond
 		secsDiff := (targetSlot - baseBlock.Slot) * a.beaconChainCfg.SecondsPerSlot
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
-		var withdrawals []*types.Withdrawal
 		clWithdrawals, _ := state.ExpectedWithdrawals(
 			baseState,
 			targetSlot/a.beaconChainCfg.SlotsPerEpoch,
 		)
+		withdrawals := []*types.Withdrawal{}
 		for _, w := range clWithdrawals {
 			withdrawals = append(withdrawals, &types.Withdrawal{
 				Index:     w.Index,
@@ -1067,7 +1068,6 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 		if err := json.NewDecoder(r.Body).Decode(block); err != nil {
 			return nil, err
 		}
-		block.SignedBlock.Block.SetVersion(version)
 		return block, nil
 	case "application/octet-stream":
 		octect, err := io.ReadAll(r.Body)
@@ -1077,7 +1077,6 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 		if err := block.DecodeSSZ(octect, int(version)); err != nil {
 			return nil, err
 		}
-		block.SignedBlock.Block.SetVersion(version)
 		return block, nil
 	}
 	return nil, errors.New("invalid content type")
@@ -1216,12 +1215,7 @@ type attestationCandidate struct {
 func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	s abstract.BeaconState,
 ) *solid.ListSSZ[*solid.Attestation] {
-	currentVersion := s.Version()
-	aggBitsSize := int(a.beaconChainCfg.MaxValidatorsPerCommittee)
-	if currentVersion.AfterOrEqual(clparams.ElectraVersion) {
-		aggBitsSize = int(a.beaconChainCfg.MaxValidatorsPerCommittee *
-			a.beaconChainCfg.MaxCommitteesPerSlot)
-	}
+	stateVersion := s.Version()
 	// Group attestations by their data root
 	hashToAtts := make(map[libcommon.Hash][]*solid.Attestation)
 	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
@@ -1230,7 +1224,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		}
 
 		attVersion := a.beaconChainCfg.GetCurrentStateVersion(candidate.Data.Slot / a.beaconChainCfg.SlotsPerEpoch)
-		if currentVersion.AfterOrEqual(clparams.ElectraVersion) &&
+		if stateVersion.AfterOrEqual(clparams.ElectraVersion) &&
 			attVersion.Before(clparams.ElectraVersion) {
 			// Because the on chain Attestation container changes, attestations from the prior fork can’t be included
 			// into post-electra blocks. Therefore the first block after the fork may have zero attestations.
@@ -1252,7 +1246,8 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		candidateAggregationBits := candidate.AggregationBits.Bytes()
 		for _, curAtt := range hashToAtts[dataRoot] {
 			currAggregationBitsBytes := curAtt.AggregationBits.Bytes()
-			if !utils.IsOverlappingSSZBitlist(currAggregationBitsBytes, candidateAggregationBits) {
+			if stateVersion <= clparams.DenebVersion &&
+				!utils.IsOverlappingSSZBitlist(currAggregationBitsBytes, candidateAggregationBits) {
 				// merge signatures
 				candidateSig := candidate.Signature
 				curSig := curAtt.Signature
@@ -1262,24 +1257,38 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 					continue
 				}
 				// merge aggregation bits
-				mergedAggBits := solid.NewBitList(0, aggBitsSize)
-				for i := 0; i < len(currAggregationBitsBytes); i++ {
-					mergedAggBits.Append(currAggregationBitsBytes[i] | candidateAggregationBits[i])
+				mergedAggBits, err := curAtt.AggregationBits.Merge(candidate.AggregationBits)
+				if err != nil {
+					log.Warn("[Block Production] Cannot merge aggregation bits", "err", err)
+					continue
 				}
 				var buf [96]byte
 				copy(buf[:], mergeSig)
 				curAtt.Signature = buf
 				curAtt.AggregationBits = mergedAggBits
-				if attVersion.AfterOrEqual(clparams.ElectraVersion) {
-					// merge committee_bits for electra
-					mergedCommitteeBits, err := curAtt.CommitteeBits.Union(candidate.CommitteeBits)
-					if err != nil {
-						log.Warn("[Block Production] Cannot merge committee bits", "err", err)
-						continue
-					}
-					curAtt.CommitteeBits = mergedCommitteeBits
+				mergeAny = true
+			}
+			if stateVersion >= clparams.ElectraVersion {
+				// merge in electra way
+				mergedAggrBits, ok := a.tryMergeAggregationBits(s, curAtt, candidate)
+				if !ok {
+					continue
 				}
-
+				mergedCommitteeBits, err := curAtt.CommitteeBits.Union(candidate.CommitteeBits)
+				if err != nil {
+					continue
+				}
+				// merge signatures
+				candidateSig := candidate.Signature
+				curSig := curAtt.Signature
+				mergeSig, err := bls.AggregateSignatures([][]byte{candidateSig[:], curSig[:]})
+				if err != nil {
+					log.Warn("[Block Production] Cannot merge signatures", "err", err)
+					continue
+				}
+				curAtt.AggregationBits = mergedAggrBits
+				curAtt.CommitteeBits = mergedCommitteeBits
+				copy(curAtt.Signature[:], mergeSig)
 				mergeAny = true
 			}
 		}
@@ -1325,6 +1334,74 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		}
 	}
 	return ret
+}
+
+func (a *ApiHandler) tryMergeAggregationBits(state abstract.BeaconState, att1, att2 *solid.Attestation) (*solid.BitList, bool) {
+	// after electra fork, aggregation_bits contains only the attester bit map of those committee appearing in committee_bits
+	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/electra/validator.md#attestations
+	slot := att1.Data.Slot
+	committees1 := att1.CommitteeBits.GetOnIndices()
+	committees2 := att2.CommitteeBits.GetOnIndices()
+	bitSlice := solid.NewBitSlice()
+	index1, index2 := 0, 0
+	committeeOffset1, committeeOffset2 := 0, 0
+
+	// appendBits is a helper func to append the aggregation bits of the committee to the bitSlice
+	appendBits := func(bitSlice *solid.BitSlice, committeeIndex int, att *solid.Attestation, offset int) (*solid.BitSlice, int) {
+		members, err := state.GetBeaconCommitee(slot, uint64(committeeIndex))
+		if err != nil {
+			log.Warn("[Block Production] Cannot get committee members", "err", err)
+			return nil, 0
+		}
+		for i := range members {
+			bitSlice.AppendBit(att.AggregationBits.GetBitAt(offset + i))
+		}
+		return bitSlice, offset + len(members)
+	}
+
+	// similar to merge sort
+	for index1 < len(committees1) || index2 < len(committees2) {
+		if index1 < len(committees1) && index2 < len(committees2) {
+			if committees1[index1] < committees2[index2] {
+				bitSlice, committeeOffset1 = appendBits(bitSlice, committees1[index1], att1, committeeOffset1)
+				index1++
+			} else if committees1[index1] > committees2[index2] {
+				bitSlice, committeeOffset2 = appendBits(bitSlice, committees2[index2], att2, committeeOffset2)
+				index2++
+			} else {
+				// check overlapping when the committee is the same
+				members, err := state.GetBeaconCommitee(slot, uint64(committees1[index1]))
+				if err != nil {
+					log.Warn("[Block Production] Cannot get committee members", "err", err)
+					return nil, false
+				}
+				bits1 := att1.AggregationBits
+				bits2 := att2.AggregationBits
+				for i := range members {
+					if bits1.GetBitAt(committeeOffset1+i) && bits2.GetBitAt(committeeOffset2+i) {
+						// overlapping
+						return nil, false
+					} else {
+						bitSlice.AppendBit(bits1.GetBitAt(committeeOffset1+i) || bits2.GetBitAt(committeeOffset2+i))
+					}
+				}
+				committeeOffset1 += len(members)
+				committeeOffset2 += len(members)
+				index1++
+				index2++
+			}
+		} else if index1 < len(committees1) {
+			bitSlice, committeeOffset1 = appendBits(bitSlice, committees1[index1], att1, committeeOffset1)
+			index1++
+		} else {
+			bitSlice, committeeOffset2 = appendBits(bitSlice, committees2[index2], att2, committeeOffset2)
+			index2++
+		}
+	}
+
+	bitSlice.AppendBit(true) // mark the end of the bitlist
+	mergedAggregationBits := solid.BitlistFromBytes(bitSlice.Bytes(), int(a.beaconChainCfg.MaxCommitteesPerSlot)*int(a.beaconChainCfg.MaxValidatorsPerCommittee))
+	return mergedAggregationBits, true
 }
 
 // computeAttestationReward computes the reward for a specific attestation.

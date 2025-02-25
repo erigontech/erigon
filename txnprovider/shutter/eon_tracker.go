@@ -158,7 +158,10 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 		return err
 	}
 
-	et.logger.Debug("current eon at block", "blockNum", blockEvent.LatestBlockNum, "eonIndex", eon.Index)
+	if et.currentEon == nil || et.currentEon.Index != eon.Index {
+		et.logger.Debug("current eon at block", "blockNum", blockEvent.LatestBlockNum, "eonIndex", eon.Index)
+	}
+
 	et.currentEon = &eon
 	et.recentEons.ReplaceOrInsert(eon)
 	et.maybeCleanup(blockEvent.LatestBlockNum)
@@ -174,7 +177,7 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, error) {
 			return
 		}
 
-		et.logger.Debug("readEonAtNewBlockEvent timing", "blockNum", blockNum, "cached", cached, "duration", time.Since(startTime))
+		et.logger.Trace("readEonAtNewBlockEvent timing", "blockNum", blockNum, "cached", cached, "duration", time.Since(startTime))
 	}()
 
 	callOpts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNum)}

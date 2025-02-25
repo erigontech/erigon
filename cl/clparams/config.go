@@ -533,6 +533,8 @@ type BeaconChainConfig struct {
 	DenebForkEpoch       uint64            `yaml:"DENEB_FORK_EPOCH" spec:"true" json:"DENEB_FORK_EPOCH,string"`         // DenebForkEpoch is used to represent the assigned fork epoch for Deneb.
 	ElectraForkVersion   ConfigForkVersion `yaml:"ELECTRA_FORK_VERSION" spec:"true" json:"ELECTRA_FORK_VERSION"`        // ElectraForkVersion is used to represent the fork version for Electra.
 	ElectraForkEpoch     uint64            `yaml:"ELECTRA_FORK_EPOCH" spec:"true" json:"ELECTRA_FORK_EPOCH,string"`     // ElectraForkEpoch is used to represent the assigned fork epoch for Electra.
+	FuluForkVersion      ConfigForkVersion `yaml:"FULU_FORK_VERSION" spec:"true" json:"FULU_FORK_VERSION"`              // FuluForkVersion is used to represent the fork version for Fulu.
+	FuluForkEpoch        uint64            `yaml:"FULU_FORK_EPOCH" spec:"true" json:"FULU_FORK_EPOCH,string"`           // FuluForkEpoch is used to represent the assigned fork epoch for Fulu.
 
 	ForkVersionSchedule map[libcommon.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
 
@@ -823,6 +825,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DenebForkEpoch:       269568,
 	ElectraForkVersion:   0x05000000,
 	ElectraForkEpoch:     math.MaxUint64,
+	FuluForkVersion:      0x06000000,
+	FuluForkEpoch:        math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -1021,20 +1025,22 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.BellatrixForkVersion = 0x02000064
 	cfg.CapellaForkEpoch = 648704
 	cfg.CapellaForkVersion = 0x03000064
+	cfg.DenebForkEpoch = 889856
+	cfg.DenebForkVersion = 0x04000064
 	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
 	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
-	cfg.DenebForkEpoch = 889856
-	cfg.DenebForkVersion = 0x04000064
 	cfg.InactivityScoreRecoveryRate = 16
 	cfg.InactivityScoreBias = 4
 	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
 	cfg.MaxBlobsPerBlock = 2
+	cfg.MaxBlobsPerBlockElectra = 2
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
+	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -1061,6 +1067,8 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.CapellaForkVersion = 0x0300006f
 	cfg.DenebForkEpoch = 516608
 	cfg.DenebForkVersion = 0x0400006f
+	cfg.ElectraForkEpoch = 948224
+	cfg.ElectraForkVersion = 0x0500006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
 	cfg.BaseRewardFactor = 25
@@ -1069,8 +1077,10 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
 	cfg.MaxBlobsPerBlock = 2
+	cfg.MaxBlobsPerBlockElectra = 2
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
+	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.InitializeForkSchedule()
 	return cfg
 }

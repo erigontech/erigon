@@ -194,13 +194,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
 		msg.SetCheckNonce(!rw.vmConfig.StatelessExec)
-		if msg.FeeCap().IsZero() {
-			// Only zero-gas transactions may be service ones
-			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, true /* constCall */)
-			}
-			msg.SetIsFree(rw.execArgs.Engine.IsServiceTransaction(msg.From(), syscall))
-		}
 
 		txContext := core.NewEVMTxContext(msg)
 		if rw.vmConfig.TraceJumpDest {
@@ -209,7 +202,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
 
 		// MA applytx
-		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
+		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
 		if err != nil {
 			txTask.Error = err
 		} else {

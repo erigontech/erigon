@@ -60,8 +60,8 @@ func getData(data []byte, start uint64, size uint64) []byte {
 	if start > length {
 		start = length
 	}
-	end := start + size
-	if end > length {
+	end, overflow := math.SafeAdd(start, size)
+	if end > length || overflow {
 		end = length
 	}
 	return common.RightPadBytes(data[start:end], int(size))

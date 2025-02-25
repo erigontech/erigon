@@ -601,12 +601,11 @@ func (s *RoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
 }
 
 func (s *RoSnapshots) DownloadComplete() {
-	if !s.SegmentsReady() {
-		return
-	}
 	wasReady := s.downloadReady.Swap(true)
 	if !wasReady {
-		s.ready.set()
+		if s.SegmentsReady() {
+			s.ready.set()
+		}
 	}
 }
 
@@ -987,7 +986,12 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 	}
 
 	s.recalcVisibleFiles()
-	s.segmentsReady.Store(true)
+	wasReady := s.segmentsReady.Swap(true)
+	if !wasReady {
+		if s.downloadReady.Load() {
+			s.ready.set()
+		}
+	}
 
 	return nil
 }
@@ -1152,7 +1156,12 @@ func (s *RoSnapshots) OpenFolder() error {
 	}
 
 	s.recalcVisibleFiles()
-	s.segmentsReady.Store(true)
+	wasReady := s.segmentsReady.Swap(true)
+	if !wasReady {
+		if s.downloadReady.Load() {
+			s.ready.set()
+		}
+	}
 	return nil
 }
 

@@ -46,12 +46,12 @@ var (
 	ErrNotInCheckpointList   = errors.New("checkpontId doesn't exist in Heimdall")
 	ErrBadGateway            = errors.New("bad gateway")
 	ErrServiceUnavailable    = errors.New("service unavailable")
-	ErrCloudflareAccess      = errors.New("cloudflare access")
+	ErrCloudflareAccessNoApp = errors.New("cloudflare access - no application")
 
 	TransientErrors = []error{
 		ErrBadGateway,
 		ErrServiceUnavailable,
-		ErrCloudflareAccess,
+		ErrCloudflareAccessNoApp,
 		context.DeadlineExceeded,
 	}
 )
@@ -686,10 +686,10 @@ func internalFetch(ctx context.Context, handler httpRequestHandler, u *url.URL, 
 
 	// check status code
 	if res.StatusCode != 200 {
-		cloudflareErr := regexp.MustCompile(`Error.*Cloudflare Access`)
+		cloudflareErr := regexp.MustCompile(`Error.*Cloudflare Access.*Unable to find your Access application`)
 		bodyStr := string(body)
 		if res.StatusCode == 404 && cloudflareErr.MatchString(bodyStr) {
-			return nil, fmt.Errorf("%w: url='%s', status=%d, body='%s'", ErrCloudflareAccess, u.String(), res.StatusCode, bodyStr)
+			return nil, fmt.Errorf("%w: url='%s', status=%d, body='%s'", ErrCloudflareAccessNoApp, u.String(), res.StatusCode, bodyStr)
 		}
 
 		return nil, fmt.Errorf("%w: url='%s', status=%d, body='%s'", ErrNotSuccessfulResponse, u.String(), res.StatusCode, bodyStr)

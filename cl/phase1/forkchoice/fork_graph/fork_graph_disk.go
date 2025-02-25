@@ -26,7 +26,6 @@ import (
 	"github.com/spf13/afero"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -421,11 +420,8 @@ func (f *forkGraphDisk) getState(blockRoot libcommon.Hash, alwaysCopy bool, addC
 	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
 	// Use the parent root as a reverse iterator.
 	currentIteratorRoot := blockRoot
-	var copyReferencedState, outState *state.CachingBeaconState
+	var copyReferencedState *state.CachingBeaconState
 	var err error
-	if addChainSegment && dbg.CaplinEfficientReorg {
-		outState = f.currentState
-	}
 
 	// try and find the point of recconnection
 	for copyReferencedState == nil {
@@ -434,7 +430,7 @@ func (f *forkGraphDisk) getState(blockRoot libcommon.Hash, alwaysCopy bool, addC
 			// check if it is in the header
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
 			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
-				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot, outState)
+				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
 					log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
 					copyReferencedState = nil
@@ -445,7 +441,7 @@ func (f *forkGraphDisk) getState(blockRoot libcommon.Hash, alwaysCopy bool, addC
 			return nil, nil
 		}
 		if block.Block.Slot%dumpSlotFrequency == 0 {
-			copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot, outState)
+			copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 			if err != nil {
 				log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
 			}

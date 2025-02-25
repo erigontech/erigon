@@ -269,9 +269,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		Block:               blockRoot,
 		ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
 	})
-	if f.validatorMonitor != nil {
-		f.validatorMonitor.OnNewBlock(lastProcessedState, block.Block)
-	}
+
 	if !isVerifiedExecutionPayload {
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
 	}
