@@ -1539,8 +1539,10 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 			} else {
 				switch path {
 				case BalancePath:
-					balance := val.(uint256.Int)
-					s.SetBalance(addr, &balance, writes[i].Reason)
+					if _, isDestructed := destructed[addr]; !isDestructed {
+						balance := val.(uint256.Int)
+						s.SetBalance(addr, &balance, writes[i].Reason)
+					}
 				case NoncePath:
 					nonce := val.(uint64)
 					s.SetNonce(addr, nonce)
