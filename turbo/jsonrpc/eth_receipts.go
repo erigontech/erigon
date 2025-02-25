@@ -274,8 +274,11 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
 	defer exec.Close()
 
-	var blockHash common.Hash
-	var header *types.Header
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, begin)
+	if err != nil {
+		return nil, err
+	}
+	blockHash := header.Hash()
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 	txNumbers, err := applyFiltersV3(txNumsReader, tx, begin, end, crit)
@@ -298,7 +301,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if isFinalTxn {
 			if chainConfig.Bor != nil {
 				// check for state sync event logs
-				events, err := api.stateSyncEvents(ctx, tx, header.Hash(), blockNum, chainConfig)
+				events, err := api.stateSyncEvents(ctx, tx, blockHash, blockNum, chainConfig)
 				if err != nil {
 					return logs, err
 				}

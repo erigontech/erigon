@@ -24,8 +24,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-
 	"github.com/erigontech/erigon-lib/log/v3"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -241,7 +241,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		// End of block transaction in a block
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
+			ret, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
+			//logs := ibs.GetLogs(0, bortypes.ComputeBorTxHash(header.Number.Uint64(), header.Hash()), header.Number.Uint64(), header.Hash())
+			return ret, err
 		}
 
 		if isMining {
@@ -260,6 +262,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
 				txTask.TraceTos[uncle.Coinbase] = struct{}{}
+			}
+
+			if rw.chainConfig.Bor != nil { // only gets the last state sync tx, need to edit commitstates and finalize function
+				logs := ibs.GetLogs(0, bortypes.ComputeBorTxHash(header.Number.Uint64(), header.Hash()), header.Number.Uint64(), header.Hash())
+				txTask.Logs = logs
 			}
 		}
 	default:
