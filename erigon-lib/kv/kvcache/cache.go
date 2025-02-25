@@ -122,11 +122,12 @@ type Coherent struct {
 }
 
 type CoherentRoot struct {
-	cache     *btree2.BTreeG[*Element]
-	codeCache *btree2.BTreeG[*Element]
-	ready     chan struct{} // close when ready
-	closeOnce sync.Once    // protecting `ready` field from double-close
-	isCanonical bool
+	cache           *btree2.BTreeG[*Element]
+	codeCache       *btree2.BTreeG[*Element]
+	ready           chan struct{} // close when ready
+	readyChanClosed atomic.Bool   // quick check if ready channel is closed
+	closeOnce       sync.Once    // protecting `ready` field from double-close
+	isCanonical     bool
 }
 
 // CoherentView - dumb object, which proxy all requests to Coherent object.
@@ -322,6 +323,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 	}
 
 	r.closeOnce.Do(func() {
+		r.readyChanClosed.Store(true)
 		close(r.ready) //broadcast
 	})
 	//log.Info("on new block handled", "viewID", stateChanges.StateVersionID)
@@ -332,9 +334,14 @@ func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	r := c.selectOrCreateRoot(id)
 
 	if !c.cfg.WaitForNewBlock || c.waitExceededCount.Load() >= MAX_WAITS {
+		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
+	}
+
+	if r.readyChanClosed.Load() {
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	}
 
