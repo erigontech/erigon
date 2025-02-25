@@ -144,7 +144,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			return err
 		}
 
-		{ //assert
+		if cfg.ChainConfig.Bor == nil { //assert
 			if err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
 				return err
 			}
@@ -292,6 +292,22 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			if txTask.Final { // block changed
+				if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
+					// get last receipt and store the last log index + 1
+					lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+					if len(lastReceipt.Logs) > 0 {
+						firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
+						receipt := types.Receipt{
+							CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
+							FirstLogIndexWithinBlock: uint32(firstIndex),
+						}
+						//log.Info("adding extra", "firstLog", firstIndex)
+						if err := rawtemporaldb.AppendReceipt(doms, &receipt, cumulativeBlobGasUsedInBlock); err != nil {
+							return err
+						}
+					}
+				}
+
 				cumulativeBlobGasUsedInBlock = 0
 			}
 
