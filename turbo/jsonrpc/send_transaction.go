@@ -23,14 +23,11 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 	}
 
 	if txn.Type() == types.BlobTxType || txn.Type() == types.DynamicFeeTxType || txn.Type() == types.SetCodeTxType {
-		baseFeeBig, err := api.BaseFee(ctx)
-		if err != nil {
-			return common.Hash{}, err
-		}
+		blockGasLimit := api.BlockGasLimit(ctx)
 
 		// If the transaction fee cap is already specified, ensure the
 		// effective gas fee is less than fee cap.
-		if err := checkDynamicTxFee(txn.GetFeeCap(), baseFeeBig); err != nil {
+		if err := checkDynamicTxFee(txn.GetFeeCap(), blockGasLimit); err != nil {
 			return common.Hash{}, err
 		}
 	} else {
@@ -102,17 +99,17 @@ func checkTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
 	return nil
 }
 
-// checkTxFee is an internal function used to check whether the fee of
-// the given transaction is _reasonable_(under the cap).
-func checkDynamicTxFee(gasCap *uint256.Int, baseFeeBig *hexutil.Big) error {
-	baseFee := uint256.NewInt(0)
-	overflow := baseFee.SetFromBig(baseFeeBig.ToInt())
-	if overflow {
-		return errors.New("opts.Value higher than 2^256-1")
-	}
+// checkDynamicTxFee checks if the provided gas cap exceeds the block gas limit.
+// It returns an error if the gas cap is greater than the block gas limit.
+// checkDynamicTxFee checks if the provided gas cap is within acceptable limits
+// compared to the block gas limit. It calculates a gas limit as 1.5 times the
+// block gas limit and compares it to the gas cap.
+func checkDynamicTxFee(gasCap *uint256.Int, blockGasLimit uint64) error {
+	gasLimit := uint256.NewInt(0)
+	gasLimit.SetUint64(blockGasLimit + (blockGasLimit / 2))
 
-	if gasCap.Lt(baseFee) {
-		return errors.New("fee cap is lower than the base fee")
+	if gasLimit.Lt(gasCap) {
+		return errors.New("fee cap is bigger than the block gas limit")
 	}
 
 	return nil
