@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"io/fs"
 	"math"
 	randOld "math/rand"
@@ -34,6 +33,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
