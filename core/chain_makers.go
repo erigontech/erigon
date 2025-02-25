@@ -332,7 +332,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
 
-	domains, err := libstate.NewSharedDomains(tx, logger)
+	domains, err := libstate.NewSharedDomains(db, logger)
 	if err != nil {
 		return nil, err
 	}

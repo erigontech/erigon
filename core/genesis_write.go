@@ -516,13 +516,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		}
 		defer tdb.Close()
 
-		tx, err := tdb.BeginTemporalRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-
-		sd, err := state2.NewSharedDomains(tx, logger)
+		sd, err := state2.NewSharedDomains(tdb, logger)
 		if err != nil {
 			return err
 		}

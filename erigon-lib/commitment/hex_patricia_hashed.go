@@ -101,10 +101,6 @@ type nibbleUpdate struct {
 	stateUpdate         *Update
 }
 
-type NibbleProcessor struct {
-	php *ParallelPatriciaHashed
-}
-
 type ParallelPatriciaHashed struct {
 	HexPatriciaHashed
 	rootLocker sync.Mutex

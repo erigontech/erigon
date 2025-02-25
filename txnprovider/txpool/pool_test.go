@@ -20,11 +20,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/state"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/big"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/state"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -927,10 +928,8 @@ func TestShanghaiValidateTxn(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			t.Cleanup(cancel)
-			tx, err := coreDB.BeginTemporalRw(ctx)
-			defer tx.Rollback()
-			asrt.NoError(err)
-			sd, err := state.NewSharedDomains(tx, logger)
+
+			sd, err := state.NewSharedDomains(coreDB, logger)
 			asrt.NoError(err)
 			defer sd.Close()
 			cache := kvcache.NewDummy()
@@ -941,7 +940,9 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			sndrBytes := accounts3.SerialiseV3(&sndr)
 			err = sd.DomainPut(kv.AccountsDomain, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, nil, sndrBytes, nil, 0)
 			asrt.NoError(err)
-
+			tx, err := coreDB.BeginTemporalRw(ctx)
+			defer tx.Rollback()
+			asrt.NoError(err)
 			err = sd.Flush(ctx, tx)
 			asrt.NoError(err)
 
@@ -1049,10 +1050,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
 	assert.NoError(t, err)
 	pool.blockGasLimit.Store(30_000_000)
-	tx, err := coreDB.BeginRw(ctx)
-	defer tx.Rollback()
-	assert.NoError(t, err)
-	sd, err := state.NewSharedDomains(tx, logger)
+	sd, err := state.NewSharedDomains(coreDB, logger)
 	assert.NoError(t, err)
 	defer sd.Close()
 
@@ -1061,6 +1059,9 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	err = sd.DomainPut(kv.AccountsDomain, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, nil, sndrBytes, nil, 0)
 	assert.NoError(t, err)
 
+	tx, err := coreDB.BeginRw(ctx)
+	defer tx.Rollback()
+	assert.NoError(t, err)
 	err = sd.Flush(ctx, tx)
 	assert.NoError(t, err)
 
