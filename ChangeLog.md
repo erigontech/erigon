@@ -1,7 +1,15 @@
 ChangeLog
 ---------
 
-## v3.0.0-beta2 (in development)
+## v3.0.0 (in development)
+
+### TODO
+
+- milestones:
+https://github.com/erigontech/erigon/milestone/34
+https://github.com/erigontech/erigon/milestone/30
+
+## v3.0.0-beta2
 
 ### Breaking changes
 - Reverts Optimize gas by default in eth_createAccessList #8337  
