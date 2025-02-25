@@ -124,9 +124,9 @@ type Coherent struct {
 type CoherentRoot struct {
 	cache           *btree2.BTreeG[*Element]
 	codeCache       *btree2.BTreeG[*Element]
-	ready           chan struct{} // close when ready
-	readyChanClosed atomic.Bool   // quick check if ready channel is closed
-	closeOnce       sync.Once    // protecting `ready` field from double-close
+	ready           chan struct{}  // close when ready
+	readyChanClosed atomic.Bool    // quick check if ready channel is closed
+	closeOnce       sync.Once     // protecting `ready` field from double-close
 	isCanonical     bool
 }
 
@@ -283,7 +283,6 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 			case remote.Action_UPSERT:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				v := sc.Changes[i].Data
-				//fmt.Printf("set: %x,%x\n", addr, v)
 				c.add(addr[:], v, r, id)
 			case remote.Action_UPSERT_CODE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
@@ -324,7 +323,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 
 	r.closeOnce.Do(func() {
 		r.readyChanClosed.Store(true)
-		close(r.ready) //broadcast
+		close(r.ready) // broadcast
 	})
 	//log.Info("on new block handled", "viewID", stateChanges.StateVersionID)
 }
