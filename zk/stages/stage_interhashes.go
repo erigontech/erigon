@@ -161,6 +161,10 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 			if shouldIncrement {
 				eridb.RollbackBatch()
 			}
+			if cfg.zk.DebugLimit > 0 {
+				err = fmt.Errorf("wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", to, root, expectedRootHash, headerHash)
+				return trie.EmptyRoot, err
+			}
 			panic(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
 		}
 

@@ -49,8 +49,10 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 	defer func() {
 		if cfg.zk.DebugLimit > 0 {
 			if err != nil {
-				log.Error("Execution Failed", "err", err, "block", highestBlockExecuted)
-				os.Exit(2)
+				if !errors.Is(err, common.ErrStopped) {
+					log.Error("Execution Failed", "err", err, "block", highestBlockExecuted)
+					os.Exit(2)
+				}
 			}
 		}
 	}()
