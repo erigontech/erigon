@@ -55,9 +55,7 @@ func (ip *IdentityPreimage) DecodeSSZ(buf []byte, _ int) error {
 		return fmt.Errorf("%w: len=%d", ErrIncorrectIdentityPreimageSize, len(ip))
 	}
 
-	var newIp IdentityPreimage
-	copy(newIp[:], buf)
-	*ip = newIp
+	copy(ip[:], buf)
 	return nil
 }
 
@@ -74,10 +72,10 @@ func (ip *IdentityPreimage) String() string {
 	return hexutil.Encode(ip[:])
 }
 
-func IdentityPreimageFromSSZ(b []byte) (*IdentityPreimage, error) {
-	ip := new(IdentityPreimage)
+func IdentityPreimageFromBytes(b []byte) (*IdentityPreimage, error) {
+	var ip IdentityPreimage
 	err := ip.DecodeSSZ(b, 0)
-	return ip, err
+	return &ip, err
 }
 
 type IdentityPreimages []*IdentityPreimage

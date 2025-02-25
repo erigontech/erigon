@@ -32,7 +32,7 @@ var (
 )
 
 func TestBLSToEL(t *testing.T) {
-	decompressed, _ := utils.DecompressSnappy(serializedBlsToELSnappy)
+	decompressed, _ := utils.DecompressSnappy(serializedBlsToELSnappy, false)
 	obj := &cltypes.SignedBLSToExecutionChange{}
 	require.NoError(t, obj.DecodeSSZ(decompressed, 1))
 	root, err := obj.HashSSZ()
