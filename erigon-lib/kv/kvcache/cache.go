@@ -124,8 +124,8 @@ type Coherent struct {
 type CoherentRoot struct {
 	cache           *btree2.BTreeG[*Element]
 	codeCache       *btree2.BTreeG[*Element]
-	ready           chan struct{}  // close when ready
-	readyChanClosed atomic.Bool    // quick check if ready channel is closed
+	ready           chan struct{} // close when ready
+	readyChanClosed atomic.Bool   // quick check if ready channel is closed
 	closeOnce       sync.Once     // protecting `ready` field from double-close
 	isCanonical     bool
 }
