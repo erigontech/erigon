@@ -1,4 +1,5 @@
 package testdata
+
 const (
 
 	// Some arbitrary hardcoded example

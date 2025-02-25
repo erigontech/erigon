@@ -57,8 +57,6 @@ import (
 
 // Do 1 step to start txPool
 func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *testing.T) {
-
-	// TODO change the genesis with added account balance
 	chain, err := core.GenerateChain(mockSentry.ChainConfig, mockSentry.Genesis, mockSentry.Engine, mockSentry.DB, 1 /*number of blocks:*/, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
@@ -99,11 +97,10 @@ func newBaseApiForTest(m *mock.MockSentry) *jsonrpc.BaseAPI {
 }
 
 func TestGetBlobsV1(t *testing.T) {
-	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
 	logger := log.New()
-
-	oneBlockStep(mockSentry, require, t)
 	buf := bytes.NewBuffer(nil)
+	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
+	oneBlockStep(mockSentry, require, t)
 
 	wrappedTxn := types.MakeWrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
 	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
@@ -115,25 +112,21 @@ func TestGetBlobsV1(t *testing.T) {
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, logger)
 
-	require.NoError(err)
-
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)	
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)
 	engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil)
-	
+
 	err = wrappedTxn.MarshalBinary(buf)
-	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
+	require.NoError(err)
+	_, err = api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
 
 	blobsResp, err := engineServer.GetBlobsV1(ctx, wrappedTxn.Tx.BlobVersionedHashes)
+	require.NoError(err)
 	require.Equal(blobsResp[0].Blob, wrappedTxn.Blobs[0][:])
 	require.Equal(blobsResp[1].Blob, wrappedTxn.Blobs[1][:])
-
 	require.Equal(blobsResp[0].Proof, wrappedTxn.Proofs[0][:])
 	require.Equal(blobsResp[1].Proof, wrappedTxn.Proofs[1][:])
-	if err != nil{
-		t.Log(blobsResp)
-		t.Log(txHash)
-	}
+
 }

@@ -1539,10 +1539,9 @@ func TestGetBlobsV1(t *testing.T) {
 	require.True(len(blobs) == len(blobHashes))
 	require.True(len(proofs) == len(blobHashes))
 	assert.Equal(blobTxn.Blobs, blobs)
-	assert.Equal(blobTxn.Proofs[0][:], proofs[0] )
-	assert.Equal(blobTxn.Proofs[1][:], proofs[1] )
+	assert.Equal(blobTxn.Proofs[0][:], proofs[0])
+	assert.Equal(blobTxn.Proofs[1][:], proofs[1])
 }
-
 
 func TestGasLimitChanged(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)

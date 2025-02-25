@@ -399,7 +399,7 @@ func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
 	}
 	payloadSize := txw.payloadSize()
 	l := rlp.EncodeListPrefix(payloadSize, b[1:])
-	w.Write(b[1:1+l])
+	w.Write(b[1 : 1+l])
 	bw := bytes.Buffer{}
 	if err := txw.Tx.MarshalBinary(&bw); err != nil {
 		return err

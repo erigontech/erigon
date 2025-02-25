@@ -72,18 +72,16 @@ func MakeBlobTxnRlp() ([]byte, []gokzg4844.KZGCommitment) {
 	return wrapperRlp, []gokzg4844.KZGCommitment{commitment0, commitment1}
 }
 
-func MakeWrappedBlobTxn(chainId *uint256.Int) (*BlobTxWrapper) {
+func MakeWrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 	wrappedTxn := BlobTxWrapper{}
-	// buf := bytes.NewBuffer(nil)
-	wrappedTxn.Tx.To = &common.Address{129,26,117,44,140,214,151,227,203,39,39,156,51,14,209,173,167,69,168,215}
+	wrappedTxn.Tx.To = &common.Address{129, 26, 117, 44, 140, 214, 151, 227, 203, 39, 39, 156, 51, 14, 209, 173, 167, 69, 168, 215}
 	wrappedTxn.Tx.Nonce = 0
 	wrappedTxn.Tx.Gas = 100000
 	wrappedTxn.Tx.Value = uint256.NewInt(0)
-	wrappedTxn.Tx.Data = []byte{4,247}
+	wrappedTxn.Tx.Data = []byte{4, 247}
 	wrappedTxn.Tx.ChainID = chainId
 	wrappedTxn.Tx.Tip = uint256.NewInt(10000000000)
 	wrappedTxn.Tx.FeeCap = uint256.NewInt(10000000000)
-	// wrappedTxn.Tx.Tip = uint256.NewInt(10000000000)
 	wrappedTxn.Tx.MaxFeePerBlobGas = uint256.NewInt(123)
 
 	wrappedTxn.Blobs = make(Blobs, 2)
@@ -95,22 +93,22 @@ func MakeWrappedBlobTxn(chainId *uint256.Int) (*BlobTxWrapper) {
 
 	commitment0, err := kzg.Ctx().BlobToKZGCommitment(wrappedTxn.Blobs[0][:], 0)
 	if err != nil {
-		fmt.Println("error", err)
+		panic(err)
 	}
 	commitment1, err := kzg.Ctx().BlobToKZGCommitment(wrappedTxn.Blobs[1][:], 0)
 	if err != nil {
-		fmt.Println("error", err)
+		panic(err)
 	}
 	copy(wrappedTxn.Commitments[0][:], commitment0[:])
 	copy(wrappedTxn.Commitments[1][:], commitment1[:])
 
 	proof0, err := kzg.Ctx().ComputeBlobKZGProof(wrappedTxn.Blobs[0][:], commitment0, 0)
 	if err != nil {
-		fmt.Println("error", err)
+		panic(err)
 	}
 	proof1, err := kzg.Ctx().ComputeBlobKZGProof(wrappedTxn.Blobs[1][:], commitment1, 0)
 	if err != nil {
-		fmt.Println("error", err)
+		panic(err)
 	}
 	copy(wrappedTxn.Proofs[0][:], proof0[:])
 	copy(wrappedTxn.Proofs[1][:], proof1[:])

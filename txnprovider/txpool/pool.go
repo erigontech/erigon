@@ -151,8 +151,8 @@ type TxPool struct {
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
 	auths                   map[common.Address]*metaTxn // All accounts with a pooled authorization
-	blobHashToTxn			map[common.Hash]struct{
-		index int
+	blobHashToTxn           map[common.Hash]struct {
+		index   int
 		txnHash common.Hash
 	}
 }
@@ -232,7 +232,10 @@ func New(
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
 		auths:                   map[common.Address]*metaTxn{},
-		blobHashToTxn: 			 map[common.Hash]struct{index int; txnHash common.Hash}{},
+		blobHashToTxn: map[common.Hash]struct {
+			index   int
+			txnHash common.Hash
+		}{},
 	}
 
 	if shanghaiTime != nil {
@@ -1529,7 +1532,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		t := p.totalBlobsInPool.Load()
 		p.totalBlobsInPool.Store(t + (uint64(len(mt.TxnSlot.BlobHashes))))
 		for i, b := range mt.TxnSlot.BlobHashes {
-			p.blobHashToTxn[b] = struct{index int; txnHash common.Hash}{i, mt.TxnSlot.IDHash}
+			p.blobHashToTxn[b] = struct {
+				index   int
+				txnHash common.Hash
+			}{i, mt.TxnSlot.IDHash}
 		}
 	}
 
@@ -1575,7 +1581,7 @@ func (p *TxPool) getBlobsAndProofByBlobHashLocked(blobHashes []common.Hash) ([][
 			continue
 		}
 		mt, ok := p.byHash[string(th.txnHash[:])]
-		if !ok || mt == nil{
+		if !ok || mt == nil {
 			continue
 		}
 		blobs[i] = mt.TxnSlot.Blobs[th.index][:]

@@ -168,8 +168,8 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 	return ourCapabilities
 }
 
-func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []libcommon.Hash) ([]*txpoolproto.BlobAndProofV1, error){
+func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []libcommon.Hash) ([]*txpoolproto.BlobAndProofV1, error) {
 	e.logger.Debug("[engine_getBlobsV1] Received Reuqust", "hashes", len(blobHashes))
 	return e.getBlobs(ctx, blobHashes)
-	
+
 }

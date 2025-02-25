@@ -70,7 +70,7 @@ type EngineServer struct {
 	test             bool
 	caplin           bool // we need to send errors for caplin.
 	executionService execution.ExecutionClient
-	txpool           txpool.TxpoolClient	// needed for getBlobs
+	txpool           txpool.TxpoolClient // needed for getBlobs
 
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
 	lock    sync.Mutex
@@ -886,9 +886,9 @@ func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
 }
 
-func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash) ([]*txpoolproto.BlobAndProofV1, error){
+func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash) ([]*txpoolproto.BlobAndProofV1, error) {
 	if len(blobHashes) > 128 {
-		return nil,  &engine_helpers.TooLargeRequestErr
+		return nil, &engine_helpers.TooLargeRequestErr
 	}
 	req := &txpool.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(blobHashes))}
 	for i := range blobHashes {
