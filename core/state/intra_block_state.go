@@ -1536,40 +1536,29 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 		val := writes[i].Val
 		addr := writes[i].Address
 
-		destructed := map[libcommon.Address]struct{}{}
-
 		if val != nil {
 			if path == StatePath {
-				if _, isDestructed := destructed[addr]; !isDestructed {
-					stateKey := writes[i].Key
-					state := val.(uint256.Int)
-					s.setState(addr, stateKey, state, true)
-				}
+				stateKey := writes[i].Key
+				state := val.(uint256.Int)
+				s.setState(addr, stateKey, state, true)
 			} else if path == AddressPath {
 				continue
 			} else {
 				switch path {
 				case BalancePath:
-					if _, isDestructed := destructed[addr]; !isDestructed {
-						balance := val.(uint256.Int)
-						s.SetBalance(addr, &balance, writes[i].Reason)
-					}
+					balance := val.(uint256.Int)
+					s.SetBalance(addr, &balance, writes[i].Reason)
 				case NoncePath:
-					if _, isDestructed := destructed[addr]; !isDestructed {
-						nonce := val.(uint64)
-						s.SetNonce(addr, nonce)
-					}
+					nonce := val.(uint64)
+					s.SetNonce(addr, nonce)
 				case CodePath:
-					if _, isDestructed := destructed[addr]; !isDestructed {
-						code := val.([]byte)
-						s.SetCode(addr, code)
-					}
+					code := val.([]byte)
+					s.SetCode(addr, code)
 				case CodeHashPath, CodeSizePath:
 					// set by SetCode
 				case SelfDestructPath:
 					deleted := val.(bool)
 					if deleted {
-						destructed[addr] = struct{}{}
 						s.Selfdestruct(addr)
 					}
 				default:

@@ -2064,7 +2064,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 
 		if Captured != nil {
-			Captured = append(Captured, fmt.Sprintf("%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen]))
+			Captured = append(Captured, fmt.Sprintf("%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen]))
 		}
 
 		hph.updateCell(plainKey, hashedKey, update)

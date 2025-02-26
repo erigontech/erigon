@@ -950,7 +950,7 @@ func ExecV3(ctx context.Context,
 							uncommittedGas += applyResult.GasUsed
 						}
 
-						if !dbg.DiscardCommitment() {
+						if false /*!dbg.DiscardCommitment()*/ {
 							var trace bool
 							if traceBlock(applyResult.BlockNum) {
 								trace = true
@@ -966,7 +966,9 @@ func ExecV3(ctx context.Context,
 							}
 							if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
 								logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
-								fmt.Println(captured)
+								for _, line := range captured {
+									fmt.Println(line)
+								}
 								return errors.New("wrong trie root")
 							}
 						}
@@ -988,9 +990,19 @@ func ExecV3(ctx context.Context,
 						logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
 					}
 				case <-pruneEvery:
-					if false {
+					if !dbg.DiscardCommitment() {
 						if pe.rs.SizeEstimate() < pe.cfg.batchSize.Bytes() && lastBlockResult.BlockNum > pe.lastCommittedBlockNum {
+							if traceBlock(applyResult.BlockNum) {
+								trace = true
+							}
+							pe.doms.SetTrace(trace)
+							commitment.Captured = []string{}
+
 							rhash, err := pe.doms.ComputeCommitment(ctx, applyTx, true, lastBlockResult.BlockNum, pe.logPrefix)
+
+							pe.doms.SetTrace(false)
+							captured := commitment.Captured
+							commitment.Captured = nil
 
 							if err != nil {
 								return err
@@ -999,6 +1011,9 @@ func ExecV3(ctx context.Context,
 							if !bytes.Equal(rhash, lastBlockResult.StateRoot.Bytes()) {
 								logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x",
 									pe.logPrefix, lastBlockResult.BlockNum, rhash, lastBlockResult.StateRoot.Bytes(), lastBlockResult.BlockHash))
+								for _, line := range captured {
+									fmt.Println(line)
+								}
 								return errors.New("wrong trie root")
 							}
 
