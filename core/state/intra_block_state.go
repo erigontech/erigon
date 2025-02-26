@@ -1518,7 +1518,7 @@ func (ibs *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 					appends = VersionedWrites{v}
 					break
 				} else {
-					appends := append(appends, v)
+					appends = append(appends, v)
 				}
 			}
 			writes = append(writes, appends...)
