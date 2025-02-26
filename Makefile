@@ -13,6 +13,7 @@ ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
 DOCKER_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell id -g)
+DOCKER_BINARIES ?= "erigon downloader"
 DOCKER_TAG ?= local-erigon/erigon:latest
 
 # Variables below for building on host OS, and are ignored for docker
@@ -96,7 +97,7 @@ docker: validate_docker_build_args git-submodules
 		--target erigon \
 		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
-		--build-arg BINARIES="erigon downloader" \
+		--build-arg BINARIES=${DOCKER_BINARIES} \
 		--build-arg BUILD_DBTOOLS="true" \
 		--progress plain \
 		-t ${DOCKER_TAG} .
