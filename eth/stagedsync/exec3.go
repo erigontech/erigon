@@ -992,6 +992,7 @@ func ExecV3(ctx context.Context,
 				case <-pruneEvery:
 					if !dbg.DiscardCommitment() {
 						if pe.rs.SizeEstimate() < pe.cfg.batchSize.Bytes() && lastBlockResult.BlockNum > pe.lastCommittedBlockNum {
+							var trace bool
 							if traceBlock(applyResult.BlockNum) {
 								trace = true
 							}
