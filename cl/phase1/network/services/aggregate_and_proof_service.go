@@ -187,7 +187,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			return err
 		}
 		// [REJECT] The attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1
-		attestingIndices, err = headState.GetAttestingIndicies(aggregate, true)
+		attestingIndices, err = headState.GetAttestingIndicies(aggregate, false)
 		if err != nil {
 			return err
 		}
@@ -216,6 +216,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			return errors.New("invalid aggregate and proof")
 		}
 
+		log.Debug("AggregateAndProofService: processing aggregate and proof", "slot", slot, "committeeIndex", committeeIndex, "attestingIndices", attestingIndices)
 		// aggregate signatures for later verification
 		aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
 		if err != nil {

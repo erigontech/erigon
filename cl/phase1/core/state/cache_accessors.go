@@ -372,13 +372,12 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 
 	if clversion.BeforeOrEqual(clparams.DenebVersion) {
 		// deneb and before version
-		aggregationBits := attestation.AggregationBits
 		data := attestation.Data
 		committee, err := b.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
 		if err != nil {
 			return nil, err
 		}
-		aggregationBitsLen := aggregationBits.Bits()
+		aggregationBitsLen := attestation.AggregationBits.Bits()
 		if checkBitsLength && aggregationBitsLen != len(committee) {
 			return nil, fmt.Errorf(
 				"GetAttestingIndicies: invalid aggregation bits. agg bits size: %d, expect: %d",
@@ -389,7 +388,10 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 
 		attestingIndices := []uint64{}
 		for i, member := range committee {
-			if aggregationBits.GetBitAt(i) {
+			if i >= aggregationBitsLen {
+				break
+			}
+			if attestation.AggregationBits.GetBitAt(i) {
 				attestingIndices = append(attestingIndices, member)
 			}
 		}
