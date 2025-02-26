@@ -388,7 +388,7 @@ type Message struct {
 	maxFeePerBlobGas uint256.Int
 	data             []byte
 	accessList       AccessList
-	checkNonce       bool
+	checkNonce       bool // if true, skip checking of the nonce, code hash etc
 	isFree           bool
 	blobHashes       []libcommon.Hash
 	authorizations   []Authorization
@@ -396,7 +396,7 @@ type Message struct {
 	// Arbitrum
 	// L1 charging is disabled when SkipL1Charging is true.
 	// This field might be set to true for operations like RPC eth_call.
-	SkipAccountChecks bool
+	SkipAccountChecks bool // same as checkNonce
 	SkipL1Charging    bool
 	TxRunMode         MessageRunMode // deprecated (shoudl be)
 	Tx                Transaction

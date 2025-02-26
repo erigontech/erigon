@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	cmath "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/holiman/uint256"
@@ -158,10 +159,13 @@ func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		to:         tx.GetTo(),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
-		checkNonce: skipAccountChecks[tx.Type()],
+		checkNonce: !skipAccountChecks[tx.Type()],
 
 		Tx: tx,
 	}
+	// if baseFee != nil {
+	// 	msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
+	// }
 
 	return msg, nil
 }
@@ -574,9 +578,12 @@ func (tx *ArbitrumContractTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		to:         tx.GetTo(),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
-		checkNonce: skipAccountChecks[tx.Type()],
+		checkNonce: !skipAccountChecks[tx.Type()],
 
 		Tx: tx,
+	}
+	if baseFee != nil {
+		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
 	}
 	return msg, nil
 }
@@ -1011,9 +1018,12 @@ func (tx *ArbitrumRetryTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Ru
 		to:         tx.GetTo(),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
-		checkNonce: skipAccountChecks[tx.Type()],
+		checkNonce: !skipAccountChecks[tx.Type()],
 
 		Tx: tx,
+	}
+	if baseFee != nil {
+		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
 	}
 	return msg, nil
 }
@@ -1683,9 +1693,12 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules
 		to:         tx.GetTo(),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
-		checkNonce: skipAccountChecks[tx.Type()],
+		checkNonce: !skipAccountChecks[tx.Type()],
 
 		Tx: tx,
+	}
+	if baseFee != nil {
+		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
 	}
 	// if !rules.IsCancun {
 	// 	return msg, errors.New("BlobTx transactions require Cancun")
@@ -2024,23 +2037,26 @@ func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.
 		to:         tx.GetTo(),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
-		checkNonce: skipAccountChecks[tx.Type()],
+		checkNonce: !skipAccountChecks[tx.Type()],
 
 		Tx: tx,
+	}
+	if baseFee != nil {
+		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
 	}
 	// if !rules.IsCancun {
 	// 	return msg, errors.New("BlobTx transactions require Cancun")
 	// }
-	if baseFee != nil {
-		overflow := msg.gasPrice.SetFromBig(baseFee)
-		if overflow {
-			return msg, errors.New("gasPrice higher than 2^256-1")
-		}
-	}
-	msg.gasPrice.Add(&msg.gasPrice, tx.GetTip())
-	if msg.gasPrice.Gt(tx.GetFeeCap()) {
-		msg.gasPrice.Set(tx.GetFeeCap())
-	}
+	// if baseFee != nil {
+	// 	overflow := msg.gasPrice.SetFromBig(baseFee)
+	// 	if overflow {
+	// 		return msg, errors.New("gasPrice higher than 2^256-1")
+	// 	}
+	// }
+	// msg.gasPrice.Add(&msg.gasPrice, tx.GetTip())
+	// if msg.gasPrice.Gt(tx.GetFeeCap()) {
+	// 	msg.gasPrice.Set(tx.GetFeeCap())
+	// }
 	// var err error
 	// msg.from, err = d.Sender(s)
 	// msg.maxFeePerBlobGas = *stx.MaxFeePerBlobGas
@@ -2323,23 +2339,27 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		to:         tx.GetTo(),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
-		checkNonce: skipAccountChecks[tx.Type()],
+		checkNonce: !skipAccountChecks[tx.Type()],
 
 		Tx: tx,
 	}
+
 	if baseFee != nil {
-		overflow := msg.gasPrice.SetFromBig(baseFee)
-		if overflow {
-			return msg, errors.New("gasPrice higher than 2^256-1")
-		}
+		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
 	}
-	if msg.feeCap.IsZero() {
-		msg.gasLimit = baseFee.Uint64()
-	}
-	msg.gasPrice.Add(&msg.gasPrice, tx.GetTip())
-	if msg.gasPrice.Gt(tx.GetFeeCap()) {
-		msg.gasPrice.Set(tx.GetFeeCap())
-	}
+	// if baseFee != nil {
+	// 	overflow := msg.gasPrice.SetFromBig(baseFee)
+	// 	if overflow {
+	// 		return msg, errors.New("gasPrice higher than 2^256-1")
+	// 	}
+	// }
+	// if msg.feeCap.IsZero() {
+	// 	msg.gasLimit = baseFee.Uint64()
+	// }
+	// msg.gasPrice.Add(&msg.gasPrice, tx.GetTip())
+	// if msg.gasPrice.Gt(tx.GetFeeCap()) {
+	// 	msg.gasPrice.Set(tx.GetFeeCap())
+	// }
 	return msg, nil
 }
 
