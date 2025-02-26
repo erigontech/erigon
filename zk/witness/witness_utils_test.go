@@ -201,3 +201,81 @@ func TestMergeWitnessesWithHashNodes(t *testing.T) {
 	}
 	assert.Equal(t, 0, len(diff), "witnesses should be equal")
 }
+
+func TestGetBatchesToCache(t *testing.T) {
+	scenarios := map[string]struct {
+		highestVerifiedBatch uint64
+		highestExecutedBatch uint64
+		latestCachedBatch    uint64
+
+		offsetAhead  uint64
+		offsetBehind uint64
+
+		expectedStartBatch uint64
+		expectedEndBatch   uint64
+	}{
+		"5 ahead, 5 behind": {
+			highestVerifiedBatch: 10,
+			highestExecutedBatch: 100,
+			latestCachedBatch:    0,
+
+			offsetAhead:  5,
+			offsetBehind: 5,
+
+			expectedStartBatch: 5,
+			expectedEndBatch:   15,
+		},
+		"5 ahead, 5 behind, latest cached 10": {
+			highestVerifiedBatch: 10,
+			highestExecutedBatch: 100,
+			latestCachedBatch:    10,
+
+			offsetAhead:  5,
+			offsetBehind: 5,
+
+			expectedStartBatch: 11,
+			expectedEndBatch:   15,
+		},
+		"5 ahead, 5 behind, latest cached 10, highest verified 5": {
+			highestVerifiedBatch: 5,
+			highestExecutedBatch: 100,
+			latestCachedBatch:    10,
+
+			offsetAhead:  5,
+			offsetBehind: 5,
+
+			expectedStartBatch: 10,
+			expectedEndBatch:   10,
+		},
+		"highest ver 0, latest cached 0, highest executed 10": {
+			highestVerifiedBatch: 0,
+			highestExecutedBatch: 10,
+			latestCachedBatch:    0,
+
+			offsetAhead:  500,
+			offsetBehind: 500,
+
+			expectedStartBatch: 1,
+			expectedEndBatch:   10,
+		},
+		"highest ver 0, latest cached 0, highest executed 0": {
+			highestVerifiedBatch: 0,
+			highestExecutedBatch: 0,
+			latestCachedBatch:    0,
+
+			offsetAhead:  500,
+			offsetBehind: 500,
+
+			expectedStartBatch: 0,
+			expectedEndBatch:   0,
+		},
+	}
+
+	for name, scenario := range scenarios {
+		t.Run(name, func(t *testing.T) {
+			startBatch, endBatch, _ := GetBatchesToCache(scenario.highestVerifiedBatch, scenario.highestExecutedBatch, scenario.latestCachedBatch, scenario.offsetAhead, scenario.offsetBehind)
+			assert.Equal(t, scenario.expectedStartBatch, startBatch, "start batch should be equal")
+			assert.Equal(t, scenario.expectedEndBatch, endBatch, "end batch should be equal")
+		})
+	}
+}

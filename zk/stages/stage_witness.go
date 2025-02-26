@@ -105,36 +105,38 @@ func SpawnStageWitness(
 
 	reader := hermez_db.NewHermezDbReader(tx)
 
+	var highestVerifiedBatchNo uint64
 	highestVerifiedBatch, err := reader.GetLatestVerification()
 	if err != nil {
 		return fmt.Errorf("GetLatestVerification: %w", err)
 	}
+	if highestVerifiedBatch == nil {
+		highestVerifiedBatchNo = 0
+	} else {
+		highestVerifiedBatchNo = highestVerifiedBatch.BatchNo
+	}
 
-	highestVerifiedBatchWithOffset := highestVerifiedBatch.BatchNo - cfg.zkCfg.WitnessCacheBatchBehindOffset // default 5
+	latestBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return fmt.Errorf("GetStageProgress: %w", err)
+	}
+
+	latestExecutedBatchNo, err := reader.GetBatchNoByL2Block(latestBlock)
+	if err != nil {
+		return fmt.Errorf("GetBatchNoByL2Block: %w", err)
+	}
 
 	latestCachedWitnessBatchNo, err := reader.GetLatestCachedWitnessBatchNo()
 	if err != nil {
 		return fmt.Errorf("GetLatestCachedWitnessBatchNo: %w", err)
 	}
 
-	fromBatch := latestCachedWitnessBatchNo + 1
-	if fromBatch < highestVerifiedBatchWithOffset {
-		fromBatch = highestVerifiedBatchWithOffset
-	}
-
-	toBatch := highestVerifiedBatch.BatchNo + cfg.zkCfg.WitnessCacheBatchAheadOffset
-	highestBatch, err := stages.GetStageProgress(tx, stages.HighestSeenBatchNumber)
-	if err != nil {
-		return fmt.Errorf("GetStageProgress: %w", err)
-	}
-	if toBatch > highestBatch {
-		toBatch = highestBatch - 1 // we cannot cache the highest batch because it might not be full yet
-	}
+	startBatch, endBatch, truncateTo := witness.GetBatchesToCache(highestVerifiedBatchNo, latestExecutedBatchNo, latestCachedWitnessBatchNo, cfg.zkCfg.WitnessCacheBatchAheadOffset, cfg.zkCfg.WitnessCacheBatchBehindOffset)
 
 	hermezDb := hermez_db.NewHermezDb(tx)
 	g := witness.NewGenerator(cfg.dirs, cfg.historyV3, cfg.agg, cfg.blockReader, cfg.chainConfig, cfg.zkCfg, cfg.engine, cfg.forcedContracts, cfg.unwindLimit)
 
-	for batchNo := fromBatch; batchNo <= toBatch; batchNo++ {
+	for batchNo := startBatch; batchNo <= endBatch; batchNo++ {
 		badBatch, err := reader.GetInvalidBatch(batchNo)
 		if err != nil {
 			return fmt.Errorf("GetInvalidBatch: %w", err)
@@ -175,7 +177,7 @@ func SpawnStageWitness(
 	}
 
 	log.Info(fmt.Sprintf("[%s] Deleting old witness caches", logPrefix))
-	if err = hermezDb.TruncateWitnessCacheBelow(highestVerifiedBatchWithOffset); err != nil {
+	if err = hermezDb.TruncateWitnessCacheBelow(truncateTo); err != nil {
 		return fmt.Errorf("DeleteWitnessCache: %w", err)
 	}
 

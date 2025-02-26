@@ -218,3 +218,33 @@ func MergeWitnesses(ctx context.Context, witnesses []*trie.Witness) (*trie.Witne
 
 	return witness, nil
 }
+
+// GetBatchesToCache calculates and returns the start batch, and the end batch to cache.
+func GetBatchesToCache(highestVerifiedBatch, highestExecutedBatch, latestCachedBatch, offsetAhead, offsetBehind uint64) (startBatch, endBatch, truncateTo uint64) {
+	var highestVerifiedBatchOffsetBehind uint64
+	if highestVerifiedBatch >= offsetBehind {
+		highestVerifiedBatchOffsetBehind = highestVerifiedBatch - offsetBehind
+	} else {
+		highestVerifiedBatchOffsetBehind = 0
+	}
+
+	startBatch = latestCachedBatch + 1
+	if startBatch < highestVerifiedBatchOffsetBehind {
+		startBatch = highestVerifiedBatchOffsetBehind
+	}
+
+	var highestVerifiedBatchOffsetAhead uint64
+	highestVerifiedBatchOffsetAhead = highestVerifiedBatch + offsetAhead
+
+	if highestVerifiedBatchOffsetAhead > highestExecutedBatch {
+		highestVerifiedBatchOffsetAhead = highestExecutedBatch
+	}
+
+	endBatch = highestVerifiedBatchOffsetAhead
+
+	if startBatch > endBatch {
+		startBatch = endBatch
+	}
+
+	return startBatch, endBatch, highestVerifiedBatchOffsetBehind
+}
