@@ -40,7 +40,7 @@ type DynamicFeeTransaction struct {
 	AccessList AccessList
 }
 
-func (tx *DynamicFeeTransaction) GetPrice() *uint256.Int  { return tx.Tip }
+func (tx *DynamicFeeTransaction) GetPrice() *uint256.Int  { return tx.FeeCap }
 func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return tx.FeeCap }
 func (tx *DynamicFeeTransaction) GetTip() *uint256.Int    { return tx.Tip }
 func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
