@@ -18,7 +18,7 @@ func TestEOFValidation(t *testing.T) {
 
 	et := new(testMatcher)
 
-	dir := filepath.Join(".", "osaka-eof/eof_tests/osaka/eip7692_eof_v1")
+	dir := filepath.Join(".", "osaka-eof/eof_tests/osaka/eip7692_eof_v1/eip7620_eof_create/subcontainer_validation")
 
 	et.walk(t, dir, func(t *testing.T, name string, test *EOFTest) {
 		// import pre accounts & construct test genesis block & state root
@@ -52,7 +52,7 @@ func TestEOFStateTest(t *testing.T) {
 
 	st := new(testMatcher)
 
-	dir := filepath.Join(".", "osaka-eof/state_tests/osaka/eip7692_eof_v1/eip6206_jumpf")
+	dir := filepath.Join(".", "osaka-eof/state_tests/osaka/eip7692_eof_v1/eip7620_eof_create/eofcreate")
 
 	dirs := datadir.New(t.TempDir())
 	db, _ := temporaltest.NewTestDB(t, dirs)

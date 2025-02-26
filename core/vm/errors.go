@@ -42,11 +42,6 @@ var (
 	ErrReturnDataOutOfBounds    = errors.New("return data out of bounds")
 	ErrGasUintOverflow          = errors.New("gas uint64 overflow")
 	ErrInvalidRetsub            = errors.New("invalid retsub")
-	ErrReturnStackExceeded      = errors.New("return stack limit reached")
-	ErrLegacyCode               = errors.New("invalid code: EOF contract must not deploy legacy code")
-	ErrInvalidCode              = errors.New("invalid code: must not begin with 0xef")
-	ErrInvalidEOF               = errors.New("invalid eof")
-	ErrInvalidEOFInitcode       = errors.New("invalid eof initcode")
 	ErrNonceUintOverflow        = errors.New("nonce uint64 overflow")
 	ErrStaticModeViolation      = errors.New("Calling EOFCreate in static mode")
 	// errStopToken is an internal token indicating interpreter loop termination,
