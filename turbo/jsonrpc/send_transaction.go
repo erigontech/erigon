@@ -23,9 +23,10 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
-	if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGasLimit(), api.FeeCap); err != nil {
+	if err := checkTxFee(txn.GetFeeCap().ToBig(), txn.GetGasLimit(), api.FeeCap); err != nil {
 		return common.Hash{}, err
 	}
+
 	if !txn.Protected() && !api.AllowUnprotectedTxs {
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
@@ -77,10 +78,12 @@ func checkTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
 	if gasCap == 0 {
 		return nil
 	}
+
 	feeEth := new(big.Float).Quo(new(big.Float).SetInt(new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gas))), new(big.Float).SetInt(big.NewInt(params.Ether)))
 	feeFloat, _ := feeEth.Float64()
 	if feeFloat > gasCap {
 		return fmt.Errorf("tx fee (%.2f ether) exceeds the configured cap (%.2f ether)", feeFloat, gasCap)
 	}
+
 	return nil
 }
