@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -955,11 +956,11 @@ func ExecV3(ctx context.Context,
 								trace = true
 							}
 							pe.doms.SetTrace(trace)
-							comittement.Captured = []string{}
+							commitment.Captured = []string{}
 							rh, err := pe.doms.ComputeCommitment(ctx, applyWorker.Tx(), true, applyResult.BlockNum, pe.logPrefix)
 							pe.doms.SetTrace(false)
-							captured := comittement.Captured
-							comittement.Captured = nil
+							captured := commitment.Captured
+							commitment.Captured = nil
 							if err != nil {
 								return err
 							}
