@@ -105,7 +105,11 @@ func TestGetBlobsV1(t *testing.T) {
 	wrappedTxn := types.MakeWrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
 	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
 	require.NoError(err)
-	wrappedTxn.Tx.DynamicFeeTransaction = *txn.(*types.DynamicFeeTransaction)
+	dt := &wrappedTxn.Tx.DynamicFeeTransaction
+	v, r, s := txn.RawSignatureValues()
+	dt.V.Set(v)
+	dt.R.Set(r)
+	dt.S.Set(s)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := txpool.NewTxpoolClient(conn)

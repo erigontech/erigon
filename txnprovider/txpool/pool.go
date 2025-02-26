@@ -1582,7 +1582,7 @@ func (p *TxPool) getBlobsAndProofByBlobHashLocked(blobHashes []common.Hash) ([][
 		if !ok || mt == nil {
 			continue
 		}
-		blobs[i] = mt.TxnSlot.Blobs[th.index][:]
+		blobs[i] = mt.TxnSlot.Blobs[th.index]
 		proofs[i] = mt.TxnSlot.Proofs[th.index][:]
 	}
 	return blobs, proofs
