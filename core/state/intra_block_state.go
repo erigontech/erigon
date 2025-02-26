@@ -1500,18 +1500,29 @@ func (ibs *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 	if ibs.versionedWrites != nil {
 		writes = make(VersionedWrites, 0, ibs.versionedWrites.Len())
 
-		ibs.versionedWrites.Scan(func(v *VersionedWrite) bool {
+		for addr, vwrites := range ibs.versionedWrites {
 			if checkDirty {
-				if _, isDirty := ibs.journal.dirties[v.Address]; isDirty {
-					writes = append(writes, v)
-				} else {
-					ibs.versionMap.Delete(v.Address, v.Path, v.Key, ibs.txIndex, false)
+				if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+					for _, v := range vwrites {
+						ibs.versionMap.Delete(v.Address, v.Path, v.Key, ibs.txIndex, false)
+					}
+					continue
 				}
-			} else {
-				writes = append(writes, v)
 			}
-			return true
-		})
+			
+			// if an account has been destructed remove any additional
+			// writes to avoid ambiguity
+			var appends make(VersionedWrites,0,len(vwrites))
+			for _, v := range vwrites {
+				if v.Path == SelfDestructPath {
+					appends = VersionedWrites{v}
+					break
+				} else {
+					appends := append(appends,v)
+				}
+			}
+			writes = append(writes,appends...)
+		}
 	}
 
 	return writes
