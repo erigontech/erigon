@@ -248,20 +248,6 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 	return (*hexutil.Big)(misc.CalcBaseFee(config, header)), nil
 }
 
-func (api *APIImpl) BlockGasLimit(ctx context.Context) uint64 {
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return 0
-	}
-	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
-	if header == nil {
-		return ethconfig.Defaults.Miner.GasLimit
-	}
-
-	return header.GasLimit
-}
-
 type GasPriceOracleBackend struct {
 	tx      kv.TemporalTx
 	baseApi *BaseAPI

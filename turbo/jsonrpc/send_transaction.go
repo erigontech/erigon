@@ -9,7 +9,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	txPoolProto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
@@ -23,11 +22,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 	}
 
 	if txn.Type() == types.BlobTxType || txn.Type() == types.DynamicFeeTxType || txn.Type() == types.SetCodeTxType {
-		blockGasLimit := api.BlockGasLimit(ctx)
-
-		// If the transaction fee cap is already specified, ensure the
-		// effective gas fee is less than fee cap.
-		if err := checkDynamicTxFee(txn.GetFeeCap(), blockGasLimit); err != nil {
+		if err := checkTxFee(txn.GetFeeCap().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
 			return common.Hash{}, err
 		}
 	} else {
@@ -99,21 +94,18 @@ func checkTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
 	return nil
 }
 
-// checkDynamicTxFee verifies whether the given gas fee cap exceeds the allowable limit
-// based on the block's gas limit.
-//
-// This function ensures that the transaction's fee cap does not exceed 1.5 times
-// the block gas limit, in accordance with Ethereum's gas fee constraints.
-func checkDynamicTxFee(gasCap *uint256.Int, blockGasLimit uint64) error {
-	if gasCap == nil {
-		return errors.New("gas cap cannot be nil")
+// checkTxFee is an internal function used to check whether the fee of
+// the given transaction is _reasonable_(under the cap).
+func checkDynamicTxFee(feeCap *big.Int, gas uint64, effectiveGasTip, gasCap float64) error {
+	// Short circuit if there is no gasCap for transaction fee at all.
+	if gasCap == 0 {
+		return nil
 	}
 
-	// Compute the adjusted gas limit as 1.5x the block gas limit.
-	adjustedGasLimit := uint256.NewInt(blockGasLimit + (blockGasLimit / 2))
-
-	if adjustedGasLimit.Lt(gasCap) {
-		return errors.New("fee cap is bigger than the block gas limit")
+	feeEth := new(big.Float).Quo(new(big.Float).SetInt(new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gas))), new(big.Float).SetInt(big.NewInt(params.Ether)))
+	feeFloat, _ := feeEth.Float64()
+	if feeFloat > gasCap {
+		return fmt.Errorf("tx fee (%.2f ether) exceeds the configured cap (%.2f ether)", feeFloat, gasCap)
 	}
 
 	return nil
