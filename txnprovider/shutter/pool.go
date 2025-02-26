@@ -193,6 +193,7 @@ func (p Pool) provide(ctx context.Context, mark DecryptionMark, opts ...txnprovi
 		return nil, fmt.Errorf("decrypted txns gas gt target: %d > %d", decryptedTxnsGas, totalGasTarget)
 	}
 
+	p.logger.Debug("providing decrypted txns", "count", len(decryptedTxns.Transactions), "gas", decryptedTxnsGas)
 	if decryptedTxnsGas == totalGasTarget {
 		return decryptedTxns.Transactions, nil
 	}
@@ -204,5 +205,6 @@ func (p Pool) provide(ctx context.Context, mark DecryptionMark, opts ...txnprovi
 		return nil, err
 	}
 
+	p.logger.Debug("providing additional public txns", "count", len(additionalTxns))
 	return append(decryptedTxns.Transactions, additionalTxns...), nil
 }
