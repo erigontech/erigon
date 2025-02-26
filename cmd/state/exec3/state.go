@@ -273,7 +273,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, true /* constCall */)
 			}
-			fmt.Printf("txNum=%d, blockNum=%d, service transaction\n", txTask.TxNum, txTask.BlockNum)
+			fmt.Printf("txNum=%d, blockNum=%d, service transaction= %t\n", txTask.TxNum, txTask.BlockNum, rw.engine.IsServiceTransaction(msg.From(), syscall))
 			msg.SetIsFree(rw.engine.IsServiceTransaction(msg.From(), syscall))
 		}
 
