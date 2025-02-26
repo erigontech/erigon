@@ -42,9 +42,17 @@ type _index struct {
 
 func parseError(err error) error {
 	var _errors = []error{ // add new errors here
-
 		vm.ErrIncompatibleContainer,
 		vm.ErrAmbiguousContainer,
+		vm.ErrInvalidSectionsSize,
+		vm.ErrInvalidCodeTermination,
+		vm.ErrInvalidMagic,
+		vm.ErrOrphanSubContainer,
+		vm.ErrTopLevelTruncated,
+		vm.ErrIncompleteEOF,
+		vm.ErrInvalidVersion,
+		vm.ErrTooManyContainerSections,
+		vm.ErrTooLargeByteCode,
 	}
 
 	for _, _err := range _errors {
@@ -56,9 +64,15 @@ func parseError(err error) error {
 }
 
 var errorsMap = map[string][]error{
-
-	// new
-	"EOFException.INCOMPATIBLE_CONTAINER_KIND": []error{vm.ErrIncompatibleContainer, vm.ErrAmbiguousContainer},
+	"EOFException.INCOMPATIBLE_CONTAINER_KIND":  []error{vm.ErrIncompatibleContainer, vm.ErrAmbiguousContainer},
+	"EOFException.INVALID_SECTION_BODIES_SIZE":  []error{vm.ErrInvalidSectionsSize},
+	"EOFException.MISSING_STOP_OPCODE":          []error{vm.ErrInvalidCodeTermination},
+	"EOFException.INVALID_MAGIC":                []error{vm.ErrInvalidMagic, vm.ErrIncompleteEOF},
+	"EOFException.ORPHAN_SUBCONTAINER":          []error{vm.ErrOrphanSubContainer},
+	"EOFException.TOPLEVEL_CONTAINER_TRUNCATED": []error{vm.ErrTopLevelTruncated},
+	"EOFException.INVALID_VERSION":              []error{vm.ErrInvalidVersion},
+	"EOFException.TOO_MANY_CONTAINERS":          []error{vm.ErrTooManyContainerSections},
+	"EOFException.CONTAINER_SIZE_ABOVE_LIMIT":   []error{vm.ErrTooLargeByteCode},
 }
 
 func mapError(exception string, err error) bool {
@@ -108,19 +122,19 @@ func (e *EOFTest) Run(t *testing.T) error {
 	arr := strings.Split(exception, ".")
 	fmt.Println(arr)
 	if _, err := vm.UnmarshalEOF(code, 0, byte(_cotainerKind)); err != nil {
-		fmt.Println("------------------ got err")
+		fmt.Println("------------------ got err, ", err)
 		if !result { // if we do expect fail and got an error
 			if !mapError(exception, err) {
-				t.Errorf("test did not pas: expected err: %v, got err: %v", exception, err.Error())
+				t.Errorf("test did not pass: expected err: %v, got err: %v", exception, err.Error())
 			}
 		} else { // if we do not expect fail and got an error
 			fmt.Println(err)
-			t.Errorf("test did not pas: expected err: nil, got err: %v", err.Error())
+			t.Errorf("test did not pass: expected err: nil, got err: %v", err.Error())
 		}
 	} else {
 		fmt.Println("------------------ no err")
 		if !result { // if do expect fail, but did not got an error
-			t.Errorf("test did not pas: expected err: %v, got err: nil", arr[1])
+			t.Errorf("test did not pass: expected err: %v, got err: nil", arr[1])
 		} else { // if we do not expect fail and did not got and error
 			// skip
 		}

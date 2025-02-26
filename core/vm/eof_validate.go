@@ -50,6 +50,9 @@ var (
 var (
 	ErrIncompatibleContainer = errors.New("INCOMPATIBLE_CONTAINER_KIND")
 	ErrAmbiguousContainer    = errors.New("AMBIGUOUS_CONTAINER_KIND")
+	ErrInvalidSectionsSize   = errors.New("INVALID_SECTION_BODIES_SIZE")
+	ErrOrphanSubContainer    = errors.New("UNREFERENCED_SUBCONTAINER")
+	ErrTopLevelTruncated     = errors.New("TOPLEVEL_CONTAINER_TRUNCATED")
 )
 
 func ValidateEOFContainer(c *EOFContainer, jt *JumpTable) error {
