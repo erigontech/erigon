@@ -2043,6 +2043,9 @@ func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.
 	if baseFee != nil {
 		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
 	}
+	// if msg.feeCap.IsZero() {
+	// 	msg.feeCap.Set(uint256.NewInt(0x5f5e100))
+	// }
 	// if !rules.IsCancun {
 	// 	return msg, errors.New("BlobTx transactions require Cancun")
 	// }
@@ -2345,6 +2348,9 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 
 	if baseFee != nil {
 		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
+	}
+	if msg.feeCap.IsZero() {
+		msg.feeCap.Set(uint256.NewInt(0x5f5e100))
 	}
 	// if baseFee != nil {
 	// 	overflow := msg.gasPrice.SetFromBig(baseFee)
