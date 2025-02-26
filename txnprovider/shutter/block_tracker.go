@@ -69,6 +69,7 @@ func (bt BlockTracker) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case blockEvent := <-blockEventC:
+			bt.logger.Debug("block tracker got block event", "blockNum", blockEvent.LatestBlockNum)
 			bt.blockChangeMu.Lock()
 			bt.currentBlockNum = blockEvent.LatestBlockNum
 			bt.blockChangeCond.Broadcast()
