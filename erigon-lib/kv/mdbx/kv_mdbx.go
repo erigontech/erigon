@@ -65,8 +65,8 @@ type MdbxOpts struct {
 	log             log.Logger
 	bucketsCfg      TableCfgFunc
 	path            string
-	syncPeriod      time.Duration
-	syncBytes       *uint
+	syncPeriod      time.Duration // to be used only in combination with SafeNoSync flag. The dirty data will automatically be flushed to disk periodically in the background.
+	syncBytes       *uint         // to be used only in combination with SafeNoSync flag. The dirty data will be flushed to disk when this threshold is reached.
 	mapSize         datasize.ByteSize
 	growthStep      datasize.ByteSize
 	shrinkThreshold int
@@ -341,14 +341,14 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		return nil, err
 	}
 
-	if opts.syncPeriod != 0 {
+	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
 		if err = env.SetSyncPeriod(opts.syncPeriod); err != nil {
 			env.Close()
 			return nil, err
 		}
 	}
 
-	if opts.syncBytes != nil {
+	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncBytes != nil {
 		if err = env.SetSyncBytes(*opts.syncBytes); err != nil {
 			env.Close()
 			return nil, err
