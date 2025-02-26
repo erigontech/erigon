@@ -412,7 +412,7 @@ const (
 )
 
 // these message modes are executed onchain so cannot make any gas shortcuts
-func (m MessageRunMode) ExecutedOnChain() bool {
+func (m MessageRunMode) ExecutedOnChain() bool { // can use isFree for that??
 	return m == MessageCommitMode || m == MessageReplayMode
 }
 

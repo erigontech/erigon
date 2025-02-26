@@ -2322,12 +2322,14 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
 		// from:       tx.From,
+		isFree: true,
 		to:     tx.GetTo(),
 		data:   tx.GetData(),
 		amount: *tx.GetValue(),
 
 		Tx:                tx,
-		SkipAccountChecks: skipAccountChecks[tx.Type()]}
+		SkipAccountChecks: skipAccountChecks[tx.Type()],
+	}
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
