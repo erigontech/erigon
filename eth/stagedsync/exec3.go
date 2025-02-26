@@ -571,6 +571,7 @@ Loop:
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
 				if err != nil {
+					logger.Error("Failed to convert tx to message", "txIndex", txIndex, "block", blockNum, "err", err)
 					return err
 				}
 			}
