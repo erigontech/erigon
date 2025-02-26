@@ -93,20 +93,3 @@ func checkTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
 
 	return nil
 }
-
-// checkTxFee is an internal function used to check whether the fee of
-// the given transaction is _reasonable_(under the cap).
-func checkDynamicTxFee(feeCap *big.Int, gas uint64, effectiveGasTip, gasCap float64) error {
-	// Short circuit if there is no gasCap for transaction fee at all.
-	if gasCap == 0 {
-		return nil
-	}
-
-	feeEth := new(big.Float).Quo(new(big.Float).SetInt(new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gas))), new(big.Float).SetInt(big.NewInt(params.Ether)))
-	feeFloat, _ := feeEth.Float64()
-	if feeFloat > gasCap {
-		return fmt.Errorf("tx fee (%.2f ether) exceeds the configured cap (%.2f ether)", feeFloat, gasCap)
-	}
-
-	return nil
-}
