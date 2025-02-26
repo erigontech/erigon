@@ -27,18 +27,16 @@ import (
 type BlockTracker struct {
 	logger          log.Logger
 	blockListener   BlockListener
-	blockChangeMu   *sync.Mutex
 	blockChangeCond *sync.Cond
 	currentBlockNum uint64
 	stopped         bool
 }
 
 func NewBlockTracker(logger log.Logger, blockListener BlockListener) BlockTracker {
-	blockChangeMu := sync.Mutex{}
+	var blockChangeMu sync.Mutex
 	return BlockTracker{
 		logger:          logger,
 		blockListener:   blockListener,
-		blockChangeMu:   &blockChangeMu,
 		blockChangeCond: sync.NewCond(&blockChangeMu),
 	}
 }
@@ -49,10 +47,10 @@ func (bt BlockTracker) Run(ctx context.Context) error {
 
 	defer func() {
 		// make sure we wake up all waiters upon getting stopped
-		bt.blockChangeMu.Lock()
+		bt.blockChangeCond.L.Lock()
 		bt.stopped = true
 		bt.blockChangeCond.Broadcast()
-		bt.blockChangeMu.Unlock()
+		bt.blockChangeCond.L.Unlock()
 	}()
 
 	blockEventC := make(chan BlockEvent)
@@ -70,10 +68,10 @@ func (bt BlockTracker) Run(ctx context.Context) error {
 			return ctx.Err()
 		case blockEvent := <-blockEventC:
 			bt.logger.Debug("block tracker got block event", "blockNum", blockEvent.LatestBlockNum)
-			bt.blockChangeMu.Lock()
+			bt.blockChangeCond.L.Lock()
 			bt.currentBlockNum = blockEvent.LatestBlockNum
 			bt.blockChangeCond.Broadcast()
-			bt.blockChangeMu.Unlock()
+			bt.blockChangeCond.L.Unlock()
 		}
 	}
 }
@@ -83,8 +81,8 @@ func (bt BlockTracker) Wait(ctx context.Context, blockNum uint64) error {
 	go func() {
 		defer close(done)
 
-		bt.blockChangeMu.Lock()
-		defer bt.blockChangeMu.Unlock()
+		bt.blockChangeCond.L.Lock()
+		defer bt.blockChangeCond.L.Unlock()
 
 		for bt.currentBlockNum < blockNum && !bt.stopped && ctx.Err() == nil {
 			bt.blockChangeCond.Wait()
@@ -98,8 +96,8 @@ func (bt BlockTracker) Wait(ctx context.Context, blockNum uint64) error {
 		bt.blockChangeCond.Broadcast()
 		return ctx.Err()
 	case <-done:
-		bt.blockChangeMu.Lock()
-		defer bt.blockChangeMu.Unlock()
+		bt.blockChangeCond.L.Lock()
+		defer bt.blockChangeCond.L.Unlock()
 
 		if bt.currentBlockNum < blockNum && bt.stopped {
 			return errors.New("block tracker stopped")
