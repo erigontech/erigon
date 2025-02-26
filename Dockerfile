@@ -157,15 +157,21 @@ RUN echo "DEBUG: content of build-amd64" && ls -l /build-amd64 && \
 FROM ${CI_CD_MAIN_TARGET_BASE_IMAGE} AS ci-cd-main-branch
 ARG USER=erigon \
     GROUP=erigon \
+    UID_ERIGON \
+    GID_ERIGON \
     TARGETARCH \
     EXPOSED_PORTS
 
 RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/build-${TARGETARCH},target=/tmp/erigon \
-    apk add --no-cache curl ca-certificates tzdata libstdc++ && \
-    addgroup ${GROUP} && \
-    adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \
+    addgroup --gid ${GID_ERIGON} ${GROUP} && \
+    adduser --system --uid ${UID_ERIGON} --ingroup ${GROUP} --home /home/${USER} --shell /bin/bash ${USER} && \
+    apt update -y && \
+    apt install -y --no-install-recommends ca-certificates && \
+    apt clean && \
+    rm -rf /var/lib/apt/lists/* && \
     install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
-    install -o ${USER} -g ${GROUP} /tmp/erigon/* /usr/local/bin/
+    echo "Installing all binaries:" && \
+    install -v -o root -g root /tmp/erigon/* /usr/local/bin/
 
 VOLUME [ "/home/${USER}" ]
 WORKDIR /home/${USER}

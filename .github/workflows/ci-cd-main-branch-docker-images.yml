@@ -3,8 +3,8 @@ run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images bas
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "golang:1.23-alpine"
-  TARGET_BASE_IMAGE: "alpine:3.21"
+  BUILDER_IMAGE: "golang:1.23-bookworm"
+  TARGET_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   CHECKOUT_REF: "main"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
