@@ -49,18 +49,13 @@ type EntityTxI interface {
 
 type MarkedTxI interface {
 	EntityTxI
-	GetNc(num Num, hash []byte, tx kv.Tx) (Bytes, error)
+	GetNc(num Num, hash []byte, tx kv.Tx) ([]byte, error)
 	Put(num Num, hash []byte, value Bytes, tx kv.RwTx) error
 }
 
 type UnmarkedTxI interface {
 	EntityTxI
 	Append(entityNum Num, value Bytes, tx kv.RwTx) error
-
-	// when you don't need "write then read" pattern, one can use RangedEntityWriter
-	// this collects and sorts data in memory and then writes to db in single tx.
-	// which can be more efficient than calling Append() multiple times.
-	//NewWriter() *ValueBufferedWriter
 }
 
 type AppendingTxI interface {
@@ -90,13 +85,18 @@ type CanonicityStrategy uint8
 const (
 	// canonicalTbl & valsTbl
 	Marked CanonicityStrategy = iota
-	// valsTbl; storing only canonical values
-	// unwinds are rare or values arrive far apart
-	// and so unwind doesn't need to be very performant.
+
+	/*
+		valsTbl; storing only canonical values
+		unwinds are rare or values arrive far apart
+		and so unwind doesn't need to be very performant.
+	*/
 	Unmarked
-	// valsTbl;
-	// unwinds are frequent and values arrive at high cadence
-	// so need to have very performant unwinds.
+	/*
+		valsTbl;
+		unwinds are frequent and values arrive at high cadence
+		so need to have very performant unwinds.
+	*/
 	Appending
 	Buffered
 )

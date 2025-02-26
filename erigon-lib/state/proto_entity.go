@@ -2,7 +2,6 @@ package state
 
 import (
 	"context"
-	"sync"
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
@@ -25,7 +24,6 @@ type ProtoEntity struct {
 	dirtyFiles *btree2.BTreeG[*filesItem]
 	_visible   visibleFiles
 
-	visibleLock   sync.RWMutex
 	sameKeyAsRoot bool
 	strategy      CanonicityStrategy
 
@@ -37,14 +35,18 @@ func NewProto(a ae.EntityId, builders []AccessorIndexBuilder, freezer Freezer, l
 		a:          a,
 		builders:   builders,
 		freezer:    freezer,
-		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		logger:     logger,
 	}
 }
 
 func (a *ProtoEntity) VisibleFilesMaxRootNum() ae.RootNum {
-	latest := a._visible[len(a._visible)-1]
-	return ae.RootNum(latest.src.endTxNum)
+	lasti := len(a._visible) - 1
+	if lasti < 0 {
+		return 0
+	}
+
+	return RootNum(a._visible[lasti].src.endTxNum)
 }
 
 func (a *ProtoEntity) DirtyFilesMaxRootNum() ae.RootNum {
@@ -64,7 +66,7 @@ func (a *ProtoEntity) VisibleFilesMaxNum() Num {
 	return Num(a.VisibleFilesMaxRootNum())
 }
 
-func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) error {
+func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) (filesBuilt uint, err error) {
 	log.Debug("freezing %s from %d to %d", a.a.Name(), from, to)
 	calcFrom, calcTo := from, to
 	var canFreeze bool
@@ -78,17 +80,17 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 		log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
 		path := ae.SegName(a.a, snaptype.Version(1), calcFrom, calcTo)
 		sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, a.logger)
-		defer sn.Close()
 		if err != nil {
-			return err
+			return filesBuilt, err
 		}
+		defer sn.Close()
 
 		{
 			a.freezer.SetCollector(func(values []byte) error {
 				return sn.AddWord(values)
 			})
 			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, db); err != nil {
-				return err
+				return filesBuilt, err
 			}
 		}
 
@@ -96,7 +98,7 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 			p := ps.AddNew(path, 1)
 			defer ps.Delete(p)
 			if err := sn.Compress(); err != nil {
-				return err
+				return filesBuilt, err
 			}
 			sn.Close()
 			sn = nil
@@ -105,7 +107,7 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 
 		valuesDecomp, err := seg.NewDecompressor(path)
 		if err != nil {
-			return err
+			return filesBuilt, err
 		}
 
 		df := newFilesItemWithFrozenSteps(uint64(calcFrom), uint64(calcTo), cfg.MinimumSize, cfg.StepsInFrozenFile())
@@ -117,7 +119,7 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 			ps.Add(p)
 			recsplitIdx, err := ib.Build(ctx, from, to, p)
 			if err != nil {
-				return err
+				return filesBuilt, err
 			}
 
 			indexes[i] = recsplitIdx
@@ -128,9 +130,10 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 		calcFrom = calcTo
 		calcTo = to
 		sn.Close()
+		filesBuilt++
 	}
 
-	return nil
+	return filesBuilt, nil
 }
 
 // proto_appendable_rotx
@@ -142,9 +145,7 @@ type ProtoEntityTx struct {
 }
 
 func (a *ProtoEntity) BeginFilesRo() *ProtoEntityTx {
-	a.visibleLock.Lock()
-	defer a.visibleLock.RUnlock()
-	for i := 0; i < len(a._visible); i++ {
+	for i := range a._visible {
 		if a._visible[i].src.frozen {
 			a._visible[i].src.refcount.Add(1)
 		}

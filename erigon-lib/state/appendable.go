@@ -18,13 +18,17 @@ type RootRelationI interface {
 	RootNum2Num(from RootNum, tx kv.Tx) (Num, error)
 }
 
+type BufferFactory interface {
+	New() etl.Buffer
+}
+
 type markedStructure struct {
 	canonicalTbl string
 }
 
-type TxInfo interface{ Type() CanonicityStrategy }
+var _ StartRoTx[EntityTxI] = (*Appendable[EntityTxI])(nil)
 
-type Appendable[T TxInfo] struct {
+type Appendable[T EntityTxI] struct {
 	*ProtoEntity
 
 	ms      *markedStructure
@@ -37,27 +41,27 @@ type Appendable[T TxInfo] struct {
 	rel RootRelationI
 }
 
-type AppOpts[T TxInfo] func(a *Appendable[T])
+type AppOpts[T EntityTxI] func(a *Appendable[T])
 
-func App_WithFreezer[T TxInfo](freezer Freezer) AppOpts[T] {
+func App_WithFreezer[T EntityTxI](freezer Freezer) AppOpts[T] {
 	return func(a *Appendable[T]) {
 		a.freezer = freezer
 	}
 }
 
-func App_WithIndexBuilders[T TxInfo](builders ...AccessorIndexBuilder) AppOpts[T] {
+func App_WithIndexBuilders[T EntityTxI](builders ...AccessorIndexBuilder) AppOpts[T] {
 	return func(a *Appendable[T]) {
 		a.builders = builders
 	}
 }
 
-func App_WithTs4Bytes[T TxInfo](ts4Bytes bool) AppOpts[T] {
+func App_WithTs4Bytes[T EntityTxI](ts4Bytes bool) AppOpts[T] {
 	return func(a *Appendable[T]) {
 		a.ts4Bytes = ts4Bytes
 	}
 }
 
-func App_WithPruneFrom[T TxInfo](pruneFrom Num) AppOpts[T] {
+func App_WithPruneFrom[T EntityTxI](pruneFrom Num) AppOpts[T] {
 	return func(a *Appendable[T]) {
 		a.pruneFrom = pruneFrom
 	}
@@ -165,29 +169,15 @@ func (a *Appendable[T]) encTs(ts Num) []byte {
 	return ts.EncToBytes(!a.ts4Bytes)
 }
 
-func (a *Appendable[T]) combK(ts Num, hash []byte) []byte {
-	// TODO: move this to marked_tx
-	// relevant only for marked appendable
-	// assuming hash is common.Hash which is 32 bytes
-	const HashBytes = 32
-	k := make([]byte, 8+HashBytes)
-	binary.BigEndian.PutUint64(k, uint64(ts))
-	copy(k[8:], hash)
-	return k
-}
-
 func (a *Appendable[T]) BeginFilesRo() T {
 	return a.beginFilesRoGen()
 }
 
 // marked tx
-
 type MarkedTx struct {
 	*ProtoEntityTx
 	ap *Appendable[MarkedTxI]
 }
-
-var _ MarkedTxI = (*MarkedTx)(nil)
 
 func (m *MarkedTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
 	ap := m.ap
@@ -227,10 +217,10 @@ func (m *MarkedTx) getDb(entityNum Num, hash []byte, tx kv.Tx) (Bytes, error) {
 		}
 		hash = canHash
 	}
-	return tx.GetOne(a.valsTbl, a.combK(entityNum, hash))
+	return tx.GetOne(a.valsTbl, m.combK(entityNum, hash))
 }
 
-func (m *MarkedTx) GetNc(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
+func (m *MarkedTx) GetNc(num Num, hash []byte, tx kv.Tx) ([]byte, error) {
 	return m.getDb(num, hash, tx)
 }
 
@@ -241,7 +231,7 @@ func (m *MarkedTx) Put(num Num, hash []byte, val Bytes, tx kv.RwTx) error {
 		return err
 	}
 
-	key := a.combK(num, hash)
+	key := m.combK(num, hash)
 	return tx.Put(a.valsTbl, key, val)
 }
 
@@ -274,14 +264,21 @@ func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.Rw
 	return nil
 }
 
-/// unmarked tx
+func (m *MarkedTx) combK(ts Num, hash []byte) []byte {
+	// relevant only for marked appendable
+	// assuming hash is common.Hash which is 32 bytes
+	const HashBytes = 32
+	k := make([]byte, 8+HashBytes)
+	binary.BigEndian.PutUint64(k, uint64(ts))
+	copy(k[8:], hash)
+	return k
+}
 
+// unmarked tx
 type UnmarkedTx struct {
 	*ProtoEntityTx
 	ap *Appendable[UnmarkedTxI]
 }
-
-var _ UnmarkedTxI = (*UnmarkedTx)(nil)
 
 func (m *UnmarkedTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
 	ap := m.ap
@@ -317,17 +314,6 @@ func (m *UnmarkedTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
 	return tx.Append(m.ap.valsTbl, m.ap.encTs(entityNum), value)
 }
 
-func (m *UnmarkedTx) NewWriter() *ValueBufferedWriter {
-	// TODO: caplin uses some pool for sortable buffer
-	// probably can have a global pool here for this...
-	return &ValueBufferedWriter{
-		values: etl.NewCollector(m.id.Name()+".appendable.flush",
-			m.id.Dirs().Tmp, etl.NewSortableBuffer(WALCollectorRAM), m.a.logger).LogLvl(log.LvlTrace),
-		valsTable: m.ap.valsTbl,
-		encFn:     m.ap.encTs,
-	}
-}
-
 func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 	ap := m.ap
 	fromId, err := ap.rel.RootNum2Num(from, tx)
@@ -354,8 +340,6 @@ type AppendingTx struct {
 	*ProtoEntityTx
 	ap *Appendable[AppendingTxI]
 }
-
-var _ AppendingTxI = (*AppendingTx)(nil)
 
 // Get operates on snapshots only, it doesn't do resolution of
 // Num -> Id needed for finding canonical values in db.
@@ -433,17 +417,9 @@ func (m *AppendingTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv
 type BufferedTx struct {
 	*ProtoEntityTx
 	ap      *Appendable[BufferedTxI]
-	writer  *ValueBufferedWriter
+	values  *etl.Collector
 	factory BufferFactory
 }
-
-var _ BufferedTxI = (*BufferedTx)(nil)
-
-// type BufferedTxI interface {
-// 	EntityTxI
-// 	Put(Num, Bytes) error
-// 	Flush(context.Context, kv.RwTx) error
-// }
 
 // Get doesn't reflect the values currently in Buffer
 func (m *BufferedTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
@@ -451,23 +427,22 @@ func (m *BufferedTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
 }
 
 func (m *BufferedTx) Put(entityNum Num, value Bytes) error {
-	if m.writer == nil {
-		m.writer = &ValueBufferedWriter{
-			values: etl.NewCollector(m.id.Name()+".appendable.flush",
-				m.id.Dirs().Tmp, m.factory.New(), m.a.logger).LogLvl(log.LvlTrace),
-			valsTable: m.ap.valsTbl,
-			encFn:     m.ap.encTs,
-		}
+	if m.values == nil {
+		m.values = etl.NewCollector(m.id.Name()+".appendable.flush",
+			m.id.Dirs().Tmp, m.factory.New(), m.a.logger).LogLvl(log.LvlTrace)
 	}
 
-	return m.writer.Add(entityNum, value)
+	key := m.ap.encTs(entityNum)
+	return m.values.Collect(key, value)
 }
 
 func (m *BufferedTx) Flush(ctx context.Context, tx kv.RwTx) error {
-	if m.writer == nil {
+	if m.values == nil {
 		return nil
 	}
-	return m.writer.Flush(ctx, tx)
+	// load uses Append since identityLoadFunc is used.
+	// might want to configure other TransformArgs here?
+	return m.values.Load(tx, m.ap.valsTbl, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()})
 }
 
 func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error {
@@ -489,51 +464,16 @@ func (m *BufferedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
 }
 
 func (m *BufferedTx) Close() {
-	if m.writer != nil {
-		m.writer.Close()
+	if m.values != nil {
+		m.values.Close()
 	}
 
 	m.ProtoEntityTx.Close()
 }
 
-//func ()
-
-// ValueBufferedWriter buffered write into etl collector, and then flush to db
-// can't perform unwinds on this writer
-type ValueBufferedWriter struct {
-	values    *etl.Collector
-	valsTable string
-	encFn     func(ts Num) []byte
-}
-
-func (w *ValueBufferedWriter) Close() {
-	if w == nil {
-		return
-	}
-	if w.values != nil {
-		w.values.Close()
-	}
-}
-
-func (w *ValueBufferedWriter) Add(num Num, value Bytes) error {
-	key := w.encFn(num)
-	if err := w.values.Collect(key, value); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (w *ValueBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
-	if w.values == nil {
-		return nil
-	}
-	// load uses Append since identityLoadFunc is used.
-	// might want to configure other TransformArgs here?
-	//
-	return w.values.Load(tx, w.valsTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()})
-}
-
-type BufferFactory interface {
-	New() etl.Buffer
-}
+var (
+	_ MarkedTxI    = (*MarkedTx)(nil)
+	_ UnmarkedTxI  = (*UnmarkedTx)(nil)
+	_ AppendingTxI = (*AppendingTx)(nil)
+	_ BufferedTxI  = (*BufferedTx)(nil)
+)

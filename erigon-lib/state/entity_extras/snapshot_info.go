@@ -68,6 +68,16 @@ func (s *SnapshotConfig) SetupConfig(id EntityId, snapshotDir string, pre snapcf
 		}
 		s.preverifiedParsed = append(s.preverifiedParsed, res)
 	}
+
+	// some validation
+	for i := range s.MergeStages {
+		if s.MergeStages[i]%s.EntitiesPerStep != 0 {
+			panic(fmt.Sprintf("MergeStages[%d] must be divisible by EntitiesPerStep", i))
+		}
+	}
+	if s.MinimumSize%s.EntitiesPerStep != 0 {
+		panic(fmt.Sprintf("MinimumSize must be divisible by EntitiesPerStep"))
+	}
 }
 
 // parse snapshot file info
@@ -166,7 +176,7 @@ func GetFreezingRange(rootFrom, rootTo RootNum, id EntityId) (freezeFrom RootNum
 	    as allowed by the MergeSteps or MinimumSize.
 	**/
 
-	if rootFrom <= rootTo {
+	if rootFrom >= rootTo {
 		return rootFrom, rootTo, false
 	}
 
@@ -217,7 +227,7 @@ func GetFreezingRange(rootFrom, rootTo RootNum, id EntityId) (freezeFrom RootNum
 		_freezeTo = _freezeFrom
 	}
 
-	return RootNum(_freezeFrom), RootNum(_freezeTo), uint64(freezeTo-freezeFrom) >= cfg.MinimumSize
+	return RootNum(_freezeFrom), RootNum(_freezeTo), uint64(_freezeTo-_freezeFrom) >= cfg.MinimumSize
 }
 
 func getMergeLimit(id EntityId, from uint64) uint64 {
