@@ -950,7 +950,7 @@ func ExecV3(ctx context.Context,
 							uncommittedGas += applyResult.GasUsed
 						}
 
-						if false /*!dbg.DiscardCommitment()*/ {
+						if !dbg.DiscardCommitment() && !dbg.BatchCommitments {
 							var trace bool
 							if traceBlock(applyResult.BlockNum) {
 								trace = true
@@ -990,8 +990,8 @@ func ExecV3(ctx context.Context,
 						logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
 					}
 				case <-pruneEvery:
-					if !dbg.DiscardCommitment() {
-						if pe.rs.SizeEstimate() < pe.cfg.batchSize.Bytes() && lastBlockResult.BlockNum > pe.lastCommittedBlockNum {
+					if !dbg.DiscardCommitment() && dbg.BatchCommitments {
+						if pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes() && lastBlockResult.BlockNum > pe.lastCommittedBlockNum {
 							rhash, err := pe.doms.ComputeCommitment(ctx, applyTx, true, lastBlockResult.BlockNum, pe.logPrefix)
 
 							if err != nil {

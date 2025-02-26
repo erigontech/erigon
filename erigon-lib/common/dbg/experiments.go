@@ -72,14 +72,14 @@ var (
 	numWorkers    = runtime.NumCPU() / 2
 	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
 
-	TraceAccounts      = EnvStrings("TRACE_ACCOUNTS", ",", nil)
-	TraceStateKeys     = EnvStrings("TRACE_STATE_KEYS", ",", nil)
-	TraceInstructions  = EnvBool("TRACE_INSTRUCTIONS", false)
-	TraceTransactionIO = EnvBool("TRACE_TRANSACTION_IO", false)
-	TraceBlocks        = EnvUints("TRACE_BLOCKS", ",", nil)
-	TraceTxIndexes     = EnvInts("TRACE_TRANSACTIONS", ",", nil)
-	StopAfterBlock     = EnvUint("STOP_AFTER_BLOCK", 0)
-
+	TraceAccounts        = EnvStrings("TRACE_ACCOUNTS", ",", nil)
+	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
+	TraceInstructions    = EnvBool("TRACE_INSTRUCTIONS", false)
+	TraceTransactionIO   = EnvBool("TRACE_TRANSACTION_IO", false)
+	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
+	TraceTxIndexes       = EnvInts("TRACE_TRANSACTIONS", ",", nil)
+	StopAfterBlock       = EnvUint("STOP_AFTER_BLOCK", 0)
+	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 )
 
