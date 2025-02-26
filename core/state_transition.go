@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/big"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -275,7 +276,12 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
-	if st.msg.BlobGas() > 0 && st.evm.ChainRules().IsCancun {
+	isCancun := st.evm.ChainRules().IsCancun
+	// st.evm.ChainConfig().IsCancun(st.evm.Context.Time)
+	if cc := st.evm.ChainConfig(); cc.IsArbitrum() {
+		isCancun = st.evm.Context.ArbOSVersion >= 20
+	}
+	if st.msg.BlobGas() > 0 && isCancun {
 		blobGasPrice := st.evm.Context.BlobBaseFee
 		if blobGasPrice == nil {
 			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
@@ -326,6 +332,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	// 5. there is no overflow when calculating intrinsic gas
 	// 6. caller has enough balance to cover asset transfer for **topmost** call
 
+	// Arbitrum: drop tip for delayed (and old) messages
+	if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(st.evm.Context.BaseFee) > 0 {
+		// msg := st.msg.(*types.Message)
+		// st.msg.GasPrice = st.evm.Context.BaseFee
+		// st.msg.GasTipCap = common.Big0
+	}
 	// Check clauses 1-3 and 6, buy gas if everything is correct
 	if err := st.preCheck(gasBailout); err != nil {
 		return nil, err
@@ -449,6 +461,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 	st.gasRemaining -= gas
 
+	tipAmount := big.NewInt(0)
+	_ = tipAmount
+	tipReceipient, err := st.evm.ProcessingHook.GasChargingHook(&st.gasRemaining)
+	if err != nil {
+		return nil, err
+	}
+
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
 	if gasBailout {
@@ -522,12 +541,32 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if burntContractAddress != nil {
 			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
+			fmt.Printf("burnAddr %x tipAddr %x\n", burntContractAddress, tipReceipient)
+			tipAmount = burnAmount.ToBig()
+
 			st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
 			if rules.IsAura && rules.IsPrague {
 				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
 				st.state.AddBalance(*burntContractAddress, st.evm.BlobFee, tracing.BalanceChangeUnspecified)
 			}
 		}
+	}
+	// Arbitrum: record the tip
+	{
+		// if tracer := st.evm.Config.Tracer; tracer != nil && !st.evm.ProcessingHook.DropTip() {
+		// 	tracer.CaptureArbitrumTransfer(st.evm, nil, &tipReceipient, tipAmount, false, "tip")
+		// }
+
+		st.evm.ProcessingHook.EndTxHook(st.gasRemaining, vmerr == nil)
+
+		// Arbitrum: record self destructs
+		// if tracer := st.evm.Config.Tracer; tracer != nil {
+		// 	suicides := st.evm.StateDB.GetSelfDestructs()
+		// 	for i, address := range suicides {
+		// 		balance := st.evm.StateDB.GetBalance(address)
+		// 		tracer.CaptureArbitrumTransfer(st.evm, &suicides[i], nil, balance.ToBig(), false, "selfDestruct")
+		// 	}
+		// }
 	}
 
 	result := &evmtypes.ExecutionResult{
@@ -539,7 +578,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		CoinbaseInitBalance: coinbaseInitBalance,
 		FeeTipped:           amount,
 
-		// ScheduledTxes:    st.evm.ProcessingHook.ScheduledTxes(),
+		// Arbitrum
+		ScheduledTxes:    st.evm.ProcessingHook.ScheduledTxes(),
 		TopLevelDeployed: deployedContract,
 	}
 
