@@ -72,7 +72,7 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
 			Data:            libcommon.CopyBytes(tx.Data),
-			Gas:             tx.Gas,
+			GasLimit:        tx.GasLimit,
 			// These are copied below.
 			Value: new(uint256.Int),
 		},
@@ -126,7 +126,7 @@ func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLe
 	payloadSize += rlp.Uint256LenExcludingHead(tx.FeeCap)
 	// size of Gas
 	payloadSize++
-	gasLen = rlp.IntLenExcludingHead(tx.Gas)
+	gasLen = rlp.IntLenExcludingHead(tx.GasLimit)
 	payloadSize += gasLen
 	// size of To
 	payloadSize++
@@ -205,8 +205,8 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 	if err := rlp.EncodeUint256(tx.FeeCap, w, b); err != nil {
 		return err
 	}
-	// encode Gas
-	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+	// encode GasLimit
+	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
 		return err
 	}
 	// encode To
@@ -286,7 +286,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	tx.FeeCap = new(uint256.Int).SetBytes(b)
-	if tx.Gas, err = s.Uint(); err != nil {
+	if tx.GasLimit, err = s.Uint(); err != nil {
 		return err
 	}
 	if b, err = s.Bytes(); err != nil {
@@ -331,7 +331,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
-		gasLimit:   tx.Gas,
+		gasLimit:   tx.GasLimit,
 		gasPrice:   *tx.FeeCap,
 		tip:        *tx.Tip,
 		feeCap:     *tx.FeeCap,
@@ -370,7 +370,7 @@ func (tx *DynamicFeeTransaction) Hash() libcommon.Hash {
 		tx.Nonce,
 		tx.Tip,
 		tx.FeeCap,
-		tx.Gas,
+		tx.GasLimit,
 		tx.To,
 		tx.Value,
 		tx.Data,
@@ -389,7 +389,7 @@ func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 			tx.Nonce,
 			tx.Tip,
 			tx.FeeCap,
-			tx.Gas,
+			tx.GasLimit,
 			tx.To,
 			tx.Value,
 			tx.Data,
@@ -433,11 +433,11 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error
 func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
 	return &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			Nonce: nonce,
-			To:    &to,
-			Value: amount,
-			Gas:   gasLimit,
-			Data:  data,
+			Nonce:    nonce,
+			To:       &to,
+			Value:    amount,
+			GasLimit: gasLimit,
+			Data:     data,
 		},
 		ChainID: &chainID,
 		Tip:     gasTip,

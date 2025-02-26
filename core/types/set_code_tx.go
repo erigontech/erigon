@@ -117,7 +117,7 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
-		gasLimit:   tx.Gas,
+		gasLimit:   tx.GasLimit,
 		gasPrice:   *tx.FeeCap,
 		tip:        *tx.Tip,
 		feeCap:     *tx.FeeCap,
@@ -174,7 +174,7 @@ func (tx *SetCodeTransaction) Hash() libcommon.Hash {
 		tx.Nonce,
 		tx.Tip,
 		tx.FeeCap,
-		tx.Gas,
+		tx.GasLimit,
 		tx.To,
 		tx.Value,
 		tx.Data,
@@ -194,7 +194,7 @@ func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 			tx.Nonce,
 			tx.Tip,
 			tx.FeeCap,
-			tx.Gas,
+			tx.GasLimit,
 			tx.To,
 			tx.Value,
 			tx.Data,
@@ -245,7 +245,7 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	tx.FeeCap = new(uint256.Int).SetBytes(b)
-	if tx.Gas, err = s.Uint(); err != nil {
+	if tx.GasLimit, err = s.Uint(); err != nil {
 		return err
 	}
 	if b, err = s.Bytes(); err != nil {
@@ -312,8 +312,8 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 	if err := rlp.EncodeUint256(tx.FeeCap, w, b); err != nil {
 		return err
 	}
-	// encode Gas
-	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+	// encode GasLimit
+	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
 		return err
 	}
 	// encode To

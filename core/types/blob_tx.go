@@ -65,7 +65,7 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      stx.Nonce,
-		gasLimit:   stx.Gas,
+		gasLimit:   stx.GasLimit,
 		gasPrice:   *stx.FeeCap,
 		tip:        *stx.Tip,
 		feeCap:     *stx.FeeCap,
@@ -126,7 +126,7 @@ func (stx *BlobTx) Hash() libcommon.Hash {
 		stx.Nonce,
 		stx.Tip,
 		stx.FeeCap,
-		stx.Gas,
+		stx.GasLimit,
 		stx.To,
 		stx.Value,
 		stx.Data,
@@ -147,7 +147,7 @@ func (stx *BlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 			stx.Nonce,
 			stx.Tip,
 			stx.FeeCap,
-			stx.Gas,
+			stx.GasLimit,
 			stx.To,
 			stx.Value,
 			stx.Data,
@@ -208,8 +208,8 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 	if err := rlp.EncodeUint256(stx.FeeCap, w, b); err != nil {
 		return err
 	}
-	// encode Gas
-	if err := rlp.EncodeInt(stx.Gas, w, b); err != nil {
+	// encode GasLimit
+	if err := rlp.EncodeInt(stx.GasLimit, w, b); err != nil {
 		return err
 	}
 	// encode To
@@ -330,7 +330,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	stx.FeeCap = new(uint256.Int).SetBytes(b)
 
-	if stx.Gas, err = s.Uint(); err != nil {
+	if stx.GasLimit, err = s.Uint(); err != nil {
 		return err
 	}
 

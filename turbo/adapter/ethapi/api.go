@@ -404,7 +404,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 	chainId := uint256.NewInt(0)
 	result := &RPCTransaction{
 		Type:  hexutil.Uint64(txn.Type()),
-		Gas:   hexutil.Uint64(txn.GetGas()),
+		Gas:   hexutil.Uint64(txn.GetGasLimit()),
 		Hash:  txn.Hash(),
 		Input: hexutil.Bytes(txn.GetData()),
 		Nonce: hexutil.Uint64(txn.GetNonce()),
@@ -489,7 +489,7 @@ func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash libcommon.Hash, bl
 		Type:     hexutil.Uint64(txn.Type()),
 		ChainID:  (*hexutil.Big)(new(big.Int)),
 		GasPrice: (*hexutil.Big)(txn.GasPrice.ToBig()),
-		Gas:      hexutil.Uint64(txn.GetGas()),
+		Gas:      hexutil.Uint64(txn.GetGasLimit()),
 		Hash:     txHash,
 		Input:    hexutil.Bytes(txn.GetData()),
 		Nonce:    hexutil.Uint64(txn.GetNonce()),

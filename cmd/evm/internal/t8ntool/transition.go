@@ -413,11 +413,11 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	}
 
 	commonTx := types.CommonTx{
-		Nonce: uint64(txJson.Nonce),
-		To:    txJson.To,
-		Value: value,
-		Gas:   uint64(txJson.Gas),
-		Data:  txJson.Input,
+		Nonce:    uint64(txJson.Nonce),
+		To:       txJson.To,
+		Value:    value,
+		GasLimit: uint64(txJson.Gas),
+		Data:     txJson.Input,
 	}
 
 	commonTx.V.SetFromBig(txJson.V.ToInt())

@@ -120,7 +120,7 @@ func (tx *LegacyTx) MarshalJSON() ([]byte, error) {
 	enc.Hash = tx.Hash()
 	enc.Type = hexutil.Uint64(tx.Type())
 	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
-	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
+	enc.Gas = (*hexutil.Uint64)(&tx.GasLimit)
 	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
 	enc.Data = (*hexutil.Bytes)(&tx.Data)
@@ -142,7 +142,7 @@ func (tx *AccessListTx) MarshalJSON() ([]byte, error) {
 	enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
 	enc.AccessList = &tx.AccessList
 	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
-	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
+	enc.Gas = (*hexutil.Uint64)(&tx.GasLimit)
 	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
 	enc.Data = (*hexutil.Bytes)(&tx.Data)
@@ -161,7 +161,7 @@ func (tx *DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
 	enc.AccessList = &tx.AccessList
 	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
-	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
+	enc.Gas = (*hexutil.Uint64)(&tx.GasLimit)
 	enc.FeeCap = (*hexutil.Big)(tx.FeeCap.ToBig())
 	enc.Tip = (*hexutil.Big)(tx.Tip.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
@@ -181,7 +181,7 @@ func toBlobTxJSON(tx *BlobTx) *txJSON {
 	enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
 	enc.AccessList = &tx.AccessList
 	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
-	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
+	enc.Gas = (*hexutil.Uint64)(&tx.GasLimit)
 	enc.FeeCap = (*hexutil.Big)(tx.FeeCap.ToBig())
 	enc.Tip = (*hexutil.Big)(tx.Tip.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
@@ -282,7 +282,7 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	if dec.Gas == nil {
 		return errors.New("missing required field 'gas' in transaction")
 	}
-	tx.Gas = uint64(*dec.Gas)
+	tx.GasLimit = uint64(*dec.Gas)
 	if dec.Value == nil {
 		return errors.New("missing required field 'value' in transaction")
 	}
@@ -361,7 +361,7 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	if dec.Gas == nil {
 		return errors.New("missing required field 'gas' in transaction")
 	}
-	tx.Gas = uint64(*dec.Gas)
+	tx.GasLimit = uint64(*dec.Gas)
 	if dec.Value == nil {
 		return errors.New("missing required field 'value' in transaction")
 	}
@@ -437,7 +437,7 @@ func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 	if dec.Gas == nil {
 		return errors.New("missing required field 'gas' in transaction")
 	}
-	tx.Gas = uint64(*dec.Gas)
+	tx.GasLimit = uint64(*dec.Gas)
 	if dec.Value == nil {
 		return errors.New("missing required field 'value' in transaction")
 	}
@@ -548,7 +548,7 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	if dec.Gas == nil {
 		return nil, errors.New("missing required field 'gas' in transaction")
 	}
-	tx.Gas = uint64(*dec.Gas)
+	tx.GasLimit = uint64(*dec.Gas)
 	if dec.Value == nil {
 		return nil, errors.New("missing required field 'value' in transaction")
 	}

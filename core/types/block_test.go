@@ -200,10 +200,10 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 	feeCap, _ := uint256.FromBig(block.BaseFee())
 	var tx2 Transaction = &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			Nonce: 0,
-			To:    &to,
-			Gas:   123457,
-			Data:  []byte{},
+			Nonce:    0,
+			To:       &to,
+			GasLimit: 123457,
+			Data:     []byte{},
 		},
 		ChainID:    u256.Num1,
 		FeeCap:     feeCap,
@@ -256,10 +256,10 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 	ten := new(uint256.Int).SetUint64(10)
 	var tx1 Transaction = &LegacyTx{
 		CommonTx: CommonTx{
-			Nonce: 0,
-			To:    &to,
-			Value: ten,
-			Gas:   50000,
+			Nonce:    0,
+			To:       &to,
+			Value:    ten,
+			GasLimit: 50000,
 		},
 		GasPrice: ten,
 	}
@@ -273,9 +273,9 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 		ChainID: chainID,
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
-				Nonce: 0,
-				To:    &to,
-				Gas:   123457,
+				Nonce:    0,
+				To:       &to,
+				GasLimit: 123457,
 			},
 			GasPrice: ten,
 		},
@@ -348,7 +348,7 @@ func makeBenchBlock() *Block {
 			panic(err)
 		}
 		txs[i] = signedTx
-		receipts[i] = NewReceipt(false, tx.GetGas())
+		receipts[i] = NewReceipt(false, tx.GetGasLimit())
 	}
 	for i := range uncles {
 		uncles[i] = &Header{
@@ -585,10 +585,10 @@ func TestCopyTxs(t *testing.T) {
 	var txs Transactions
 	txs = append(txs, &LegacyTx{
 		CommonTx: CommonTx{
-			Nonce: 0,
-			Value: new(uint256.Int).SetUint64(10000),
-			Gas:   50000,
-			Data:  []byte("Sparta"),
+			Nonce:    0,
+			Value:    new(uint256.Int).SetUint64(10000),
+			GasLimit: 50000,
+			Data:     []byte("Sparta"),
 		},
 		GasPrice: new(uint256.Int).SetUint64(10),
 	})

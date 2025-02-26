@@ -373,13 +373,13 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 				}
 			}
 		}
-		txnGas := transaction.GetGas()
+		txnGasLimit := transaction.GetGasLimit()
 		txnPrice := transaction.GetPrice()
 		value := transaction.GetValue()
 		accountBalance := account.Balance
 
 		want := uint256.NewInt(0)
-		want.SetUint64(txnGas)
+		want.SetUint64(txnGasLimit)
 		want, overflow := want.MulOverflow(want, txnPrice)
 		if overflow {
 			transactions = transactions[1:]
@@ -388,7 +388,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		}
 
 		if transaction.GetFeeCap() != nil {
-			want.SetUint64(txnGas)
+			want.SetUint64(txnGasLimit)
 			want, overflow = want.MulOverflow(want, transaction.GetFeeCap())
 			if overflow {
 				transactions = transactions[1:]

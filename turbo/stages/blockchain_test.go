@@ -2100,9 +2100,9 @@ func TestEIP2718Transition(t *testing.T) {
 			ChainID: chainID,
 			LegacyTx: types.LegacyTx{
 				CommonTx: types.CommonTx{
-					Nonce: 0,
-					To:    &aa,
-					Gas:   30000,
+					Nonce:    0,
+					To:       &aa,
+					GasLimit: 30000,
 				},
 				GasPrice: gasPrice,
 			},
@@ -2202,10 +2202,10 @@ func TestEIP1559Transition(t *testing.T) {
 			chainID.SetFromBig(gspec.Config.ChainID)
 			var txn types.Transaction = &types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{
-					Nonce: 0,
-					To:    &aa,
-					Gas:   30000,
-					Data:  []byte{},
+					Nonce:    0,
+					To:       &aa,
+					GasLimit: 30000,
+					Data:     []byte{},
 				},
 				ChainID:    &chainID,
 				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)),

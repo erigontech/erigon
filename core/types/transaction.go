@@ -65,7 +65,7 @@ type Transaction interface {
 	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
 	GetFeeCap() *uint256.Int
 	GetBlobHashes() []libcommon.Hash
-	GetGas() uint64
+	GetGasLimit() uint64
 	GetBlobGas() uint64
 	GetValue() *uint256.Int
 	GetTo() *libcommon.Address
