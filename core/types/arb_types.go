@@ -2351,7 +2351,7 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 	}
 	if msg.feeCap.IsZero() {
 		msg.gasLimit = baseFee.Uint64()
-		// msg.feeCap.Set(uint256.NewInt(0x5f5e100))
+		msg.feeCap.Set(uint256.NewInt(0x5f5e100))
 	}
 	// if baseFee != nil {
 	// 	overflow := msg.gasPrice.SetFromBig(baseFee)
