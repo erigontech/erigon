@@ -99,7 +99,7 @@ func newBaseApiForTest(m *mock.MockSentry) *jsonrpc.BaseAPI {
 func TestGetBlobsV1(t *testing.T) {
 	logger := log.New()
 	buf := bytes.NewBuffer(nil)
-	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
+	mockSentry, require := mock.MockWithTxPoolCancun(t), require.New(t)
 	oneBlockStep(mockSentry, require, t)
 
 	wrappedTxn := types.MakeWrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
@@ -132,5 +132,4 @@ func TestGetBlobsV1(t *testing.T) {
 	require.Equal(blobsResp[1].Blob, wrappedTxn.Blobs[1][:])
 	require.Equal(blobsResp[0].Proof, wrappedTxn.Proofs[0][:])
 	require.Equal(blobsResp[1].Proof, wrappedTxn.Proofs[1][:])
-
 }
