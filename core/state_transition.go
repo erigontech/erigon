@@ -310,6 +310,16 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
+	endTxNow, startHookUsedGas, err, returnData := st.evm.ProcessingHook.StartTxHook()
+	if endTxNow {
+		return &evmtypes.ExecutionResult{
+			UsedGas:       startHookUsedGas,
+			Err:           err,
+			ReturnData:    returnData,
+			ScheduledTxes: st.evm.ProcessingHook.ScheduledTxes(),
+		}, nil
+	}
+
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
 	if err != nil {
@@ -512,14 +522,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		if rules.IsLondon {
 			refundQuotient = params.RefundQuotientEIP3529
 		}
-		gasUsed := st.gasUsed()
-		refund := min(gasUsed/refundQuotient, st.state.GetRefund())
-		gasUsed = gasUsed - refund
-		if rules.IsPrague {
-			gasUsed = max(floorGas7623, gasUsed)
-		}
-		st.gasRemaining = st.initialGas - gasUsed
-		st.refundGas()
+		// gasUsed := st.gasUsed() // TODO conflicts with arb logic
+		// refund := min(gasUsed/refundQuotient, st.state.GetRefund())
+		// gasUsed = gasUsed - refund
+		// if rules.IsPrague {
+		// 	gasUsed = max(floorGas7623, gasUsed)
+		// }
+		// st.gasRemaining = st.initialGas - gasUsed
+		st.refundGas(refundQuotient)
 	} else if rules.IsPrague {
 		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
 	}
@@ -590,11 +600,27 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	return result, nil
 }
 
-func (st *StateTransition) refundGas() {
+func (st *StateTransition) refundGas(refundQuotient uint64) {
+	// Arbitrum:
+	st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
+	nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
+	if nonrefundable < st.gasUsed() {
+		// Apply refund counter, capped to a refund quotient
+		refund := (st.gasUsed() - nonrefundable) / refundQuotient
+		if refund > st.state.GetRefund() {
+			refund = st.state.GetRefund()
+		}
+		st.gasRemaining += refund
+	}
+
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
 
+	// Arbitrum: record the gas refund
+	// if tracer := st.evm.Config.Tracer; tracer != nil {
+	// 	tracer.CaptureArbitrumTransfer(st.evm, nil, &st.msg.From, remaining.ToBig(), false, "gasRefund")
+	// }
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
 	st.gp.AddGas(st.gasRemaining)

@@ -122,6 +122,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		JumpDestCache:   NewJumpDestCache(),
 	}
 
+	evm.ProcessingHook = DefaultTxProcessor{evm: evm}
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
 
 	return evm
