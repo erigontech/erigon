@@ -160,8 +160,7 @@ func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		amount:     *tx.GetValue(),
 
 		SkipAccountChecks: skipAccountChecks[tx.Type()],
-
-		// SkipAccountChecks: false, // it's NOT fake arb tx
+		Tx:                tx,
 	}
 	return msg, nil
 }
@@ -576,6 +575,7 @@ func (tx *ArbitrumContractTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		amount:     *tx.GetValue(),
 
 		SkipAccountChecks: skipAccountChecks[tx.Type()],
+		Tx:                tx,
 	}
 	return msg, nil
 }
@@ -1011,6 +1011,7 @@ func (tx *ArbitrumRetryTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Ru
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
 
+		Tx:                tx,
 		SkipAccountChecks: skipAccountChecks[tx.Type()],
 	}
 	return msg, nil
@@ -1683,6 +1684,7 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules
 		amount:     *tx.GetValue(),
 
 		SkipAccountChecks: skipAccountChecks[tx.Type()],
+		Tx:                tx,
 	}
 	// if !rules.IsCancun {
 	// 	return msg, errors.New("BlobTx transactions require Cancun")
@@ -2022,6 +2024,7 @@ func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
 
+		Tx:                tx,
 		SkipAccountChecks: skipAccountChecks[tx.Type()], // it's fake arb tx
 	}
 	// if !rules.IsCancun {
@@ -2265,17 +2268,6 @@ func (d *ArbitrumDepositTx) IsContractDeploy() bool {
 func (d *ArbitrumDepositTx) Unwrap() Transaction {
 	return d
 }
-
-// func (d *ArbitrumDepositTx) chainID() *big.Int            { return d.ChainId }
-// func (d *ArbitrumDepositTx) accessList() types.AccessList { return nil }
-// func (d *ArbitrumDepositTx) data() []byte                 { return nil }
-// func (d *ArbitrumDepositTx) gas() uint64                  { return 0 }
-// func (d *ArbitrumDepositTx) gasPrice() *big.Int           { return bigZero }
-// func (d *ArbitrumDepositTx) gasTipCap() *big.Int          { return bigZero }
-// func (d *ArbitrumDepositTx) gasFeeCap() *big.Int          { return bigZero }
-// func (d *ArbitrumDepositTx) value() *big.Int     { return d.Value }
-// func (d *ArbitrumDepositTx) nonce() uint64       { return 0 }
-// func (d *ArbitrumDepositTx) to() *common.Address { return &d.To }
 func (d *ArbitrumDepositTx) encode(b *bytes.Buffer) error {
 	return rlp.Encode(b, d)
 }
@@ -2283,10 +2275,6 @@ func (d *ArbitrumDepositTx) decode(input []byte) error {
 	return rlp.DecodeBytes(input, d)
 }
 
-//func (d *ArbitrumDepositTx) rawSignatureValues() (v, r, s *big.Int) {
-//	return bigZero, bigZero, bigZero
-//}
-//func (d *ArbitrumDepositTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //func (tx *ArbitrumDepositTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
 //	return dst.Set(bigZero)
 //}
@@ -2338,8 +2326,8 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		data:   tx.GetData(),
 		amount: *tx.GetValue(),
 
-		SkipAccountChecks: true, // it's fake arb tx
-	}
+		Tx:                tx,
+		SkipAccountChecks: skipAccountChecks[tx.Type()]}
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
