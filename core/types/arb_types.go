@@ -2030,16 +2030,16 @@ func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.
 	// if !rules.IsCancun {
 	// 	return msg, errors.New("BlobTx transactions require Cancun")
 	// }
-	// if baseFee != nil {
-	// 	overflow := msg.gasPrice.SetFromBig(baseFee)
-	// 	if overflow {
-	// 		return msg, errors.New("gasPrice higher than 2^256-1")
-	// 	}
-	// }
-	// msg.gasPrice.Add(&msg.gasPrice, stx.Tip)
-	// if msg.gasPrice.Gt(stx.FeeCap) {
-	// 	msg.gasPrice.Set(stx.FeeCap)
-	// }
+	if baseFee != nil {
+		overflow := msg.gasPrice.SetFromBig(baseFee)
+		if overflow {
+			return msg, errors.New("gasPrice higher than 2^256-1")
+		}
+	}
+	msg.gasPrice.Add(&msg.gasPrice, tx.GetTip())
+	if msg.gasPrice.Gt(tx.GetFeeCap()) {
+		msg.gasPrice.Set(tx.GetFeeCap())
+	}
 	// var err error
 	// msg.from, err = d.Sender(s)
 	// msg.maxFeePerBlobGas = *stx.MaxFeePerBlobGas
@@ -2331,6 +2331,10 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		if overflow {
 			return msg, errors.New("gasPrice higher than 2^256-1")
 		}
+	}
+	msg.gasPrice.Add(&msg.gasPrice, tx.GetTip())
+	if msg.gasPrice.Gt(tx.GetFeeCap()) {
+		msg.gasPrice.Set(tx.GetFeeCap())
 	}
 	return msg, nil
 }
