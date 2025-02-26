@@ -159,7 +159,7 @@ var (
 		IstanbulBlock:         big.NewInt(0),
 		MuirGlacierBlock:      big.NewInt(0),
 		BerlinBlock:           big.NewInt(0),
-		Ethash: new(chain.EthashConfig),
+		Ethash:                new(chain.EthashConfig),
 	}
 
 	TestChainAuraConfig = &chain.Config{
