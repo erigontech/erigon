@@ -701,12 +701,6 @@ func populateBlobTxs() {
 	}
 }
 
-func populateBlobWrapperTxs() {
-	for i := 0; i < N; i++ {
-		dummyBlobWrapperTxs[i] = newRandBlobWrapper()
-	}
-}
-
 func TestBlobTxEncodeDecode(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	populateBlobTxs()

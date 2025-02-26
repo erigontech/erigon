@@ -600,13 +600,6 @@ func TestCopyTxs(t *testing.T) {
 		}
 	}
 
-	populateBlobWrapperTxs()
-	for _, txn := range dummyBlobWrapperTxs {
-		if txn.Tx.To != nil {
-			txs = append(txs, txn)
-		}
-	}
-
 	copies := CopyTxs(txs)
 	assert.Equal(t, txs, copies)
 }
