@@ -1634,7 +1634,7 @@ func (zkapi *ZkEvmAPIImpl) GetProof(ctx context.Context, address common.Address,
 		unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr}
 		stageState := &stagedsync.StageState{BlockNumber: latestBlock}
 
-		interHashStageCfg := zkStages.StageZkInterHashesCfg(nil, true, true, false, api.dirs.Tmp, api._blockReader, nil, api.historyV3(tx), api._agg, nil)
+		interHashStageCfg := zkStages.StageZkInterHashesCfg(nil, !api.DisableStateRootCheck, true, false, api.dirs.Tmp, api._blockReader, nil, api.historyV3(tx), api._agg, nil)
 
 		if err = zkStages.UnwindZkIntermediateHashesStage(unwindState, stageState, batch, interHashStageCfg, ctx, true); err != nil {
 			return nil, fmt.Errorf("unwind intermediate hashes: %w", err)

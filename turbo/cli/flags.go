@@ -521,6 +521,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		DataStreamInactivityTimeout:       ctx.Duration(utils.DataStreamInactivityTimeout.Name),
 		DataStreamInactivityCheckInterval: ctx.Duration(utils.DataStreamInactivityCheckInterval.Name),
 		L2RpcUrl:                          ctx.String(utils.L2RpcUrlFlag.Name),
+		DisableStateRootCheck:             ctx.Bool(utils.DebugDisableStateRootCheck.Name),
 	}
 
 	if ctx.IsSet(utils.HttpCompressionFlag.Name) {

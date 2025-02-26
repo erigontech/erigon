@@ -27,7 +27,7 @@ func TestGetLogsWithRange(t *testing.T) {
 	db := contractBackend.DB()
 	agg := contractBackend.Agg()
 	baseApi := NewBaseApi(nil, stateCache, contractBackend.BlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout, contractBackend.Engine(), datadir.New(t.TempDir()))
-	ethImpl := NewEthAPI(baseApi, db, nil, nil, nil, 5000000, 100_000, 100_000, &ethconfig.Defaults, false, 100, 100, log.New(), defaultL1GasPriceTracker, logsMaxRange)
+	ethImpl := NewEthAPI(baseApi, db, nil, nil, nil, 5000000, 100_000, 100_000, &ethconfig.Defaults, false, 100, 100, log.New(), defaultL1GasPriceTracker, logsMaxRange, false)
 
 	scenarios := []struct {
 		name          string

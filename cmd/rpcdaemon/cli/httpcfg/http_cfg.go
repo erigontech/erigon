@@ -87,6 +87,7 @@ type HttpCfg struct {
 	ReturnDataLimit             int    // Maximum number of bytes returned from calls (like eth_call)
 	LogsMaxRange                uint64 // Maximum number of logs that can be requested in a single call
 	AllowUnprotectedTxs         bool   // Whether to allow non EIP-155 protected transactions  txs over RPC
+	DisableStateRootCheck       bool   // Disable state root check in GetProof
 	MaxGetProofRewindBlockCount int    //Max GetProof rewind block count
 	// Ots API
 	OtsMaxPageSize uint64

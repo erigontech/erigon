@@ -936,6 +936,11 @@ var (
 		Name:  "debug.step-after",
 		Usage: "Start incrementing by debug.step after this block",
 	}
+	DebugDisableStateRootCheck = cli.BoolFlag{
+		Name:  "debug.disable-state-root-check",
+		Usage: "Check the state root after each block",
+		Value: false,
+	}
 	RpcBatchConcurrencyFlag = cli.UintFlag{
 		Name:  "rpc.batch.concurrency",
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
