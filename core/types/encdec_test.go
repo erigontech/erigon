@@ -270,7 +270,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		return &DynamicFeeTransaction{
 			CommonTx:   commonTx, //nolint
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
-			Tip:        uint256.NewInt(*tr.RandUint64()),
+			TipCap:     uint256.NewInt(*tr.RandUint64()),
 			FeeCap:     uint256.NewInt(*tr.RandUint64()),
 			AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 		}
@@ -280,7 +280,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			DynamicFeeTransaction: DynamicFeeTransaction{
 				CommonTx:   commonTx, //nolint
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
-				Tip:        uint256.NewInt(*tr.RandUint64()),
+				TipCap:     uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
 				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 			},
@@ -292,7 +292,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			DynamicFeeTransaction: DynamicFeeTransaction{
 				CommonTx:   commonTx, //nolint
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
-				Tip:        uint256.NewInt(*tr.RandUint64()),
+				TipCap:     uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
 				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 			},
@@ -441,7 +441,7 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 	check(t, "Tx.Type", a.Type(), b.Type())
 	check(t, "Tx.GetChainID", a.GetChainID(), b.GetChainID())
 	check(t, "Tx.GetNonce", a.GetNonce(), b.GetNonce())
-	check(t, "Tx.GetTip", a.GetTip(), b.GetTip())
+	check(t, "Tx.GetTipCap", a.GetTipCap(), b.GetTipCap())
 	check(t, "Tx.GetFeeCap", a.GetFeeCap(), b.GetFeeCap())
 	check(t, "Tx.GetBlobHashes", a.GetBlobHashes(), b.GetBlobHashes())
 	check(t, "Tx.GetGasLimit", a.GetGasLimit(), b.GetGasLimit())

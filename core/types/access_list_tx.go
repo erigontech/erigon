@@ -416,7 +416,7 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Me
 		nonce:      tx.Nonce,
 		gasLimit:   tx.GasLimit,
 		gasPrice:   *tx.GasPrice,
-		tip:        *tx.GasPrice,
+		tipCap:     *tx.GasPrice,
 		feeCap:     *tx.GasPrice,
 		to:         tx.To,
 		amount:     *tx.Value,

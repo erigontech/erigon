@@ -70,7 +70,7 @@ func MarshalReceipt(
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
-		fields["effectiveGasPrice"] = (*hexutil.Big)(txn.GetTip().ToBig())
+		fields["effectiveGasPrice"] = (*hexutil.Big)(txn.GetTipCap().ToBig())
 	} else {
 		baseFee, _ := uint256.FromBig(header.BaseFee)
 		gasPrice := new(big.Int).Add(header.BaseFee, txn.GetEffectiveGasTip(baseFee).ToBig())

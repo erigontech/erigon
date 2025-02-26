@@ -97,11 +97,11 @@ type LegacyTx struct {
 	GasPrice *uint256.Int // wei per gas
 }
 
-func (tx *LegacyTx) GetTip() *uint256.Int    { return tx.GasPrice }
+func (tx *LegacyTx) GetTipCap() *uint256.Int { return tx.GasPrice }
 func (tx *LegacyTx) GetFeeCap() *uint256.Int { return tx.GasPrice }
 func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
-		return tx.GetTip()
+		return tx.GetTipCap()
 	}
 	gasFeeCap := tx.GetFeeCap()
 	// return 0 because effectiveFee cant be < 0
@@ -109,8 +109,8 @@ func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 		return uint256.NewInt(0)
 	}
 	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if tx.GetTip().Lt(effectiveFee) {
-		return tx.GetTip()
+	if tx.GetTipCap().Lt(effectiveFee) {
+		return tx.GetTipCap()
 	} else {
 		return effectiveFee
 	}
@@ -347,7 +347,7 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, e
 		nonce:      tx.Nonce,
 		gasLimit:   tx.GasLimit,
 		gasPrice:   *tx.GasPrice,
-		tip:        *tx.GasPrice,
+		tipCap:     *tx.GasPrice,
 		feeCap:     *tx.GasPrice,
 		to:         tx.To,
 		amount:     *tx.Value,

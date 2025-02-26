@@ -38,7 +38,7 @@ import (
 func testingHeaderBody(t *testing.T) (h *types.Header, b *types.RawBody) {
 	t.Helper()
 
-	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, ChainID: u256.N1, CommonTx: types.CommonTx{Value: u256.N1, GasLimit: 1, Nonce: 1}}
+	txn := &types.DynamicFeeTransaction{TipCap: u256.N1, FeeCap: u256.N1, ChainID: u256.N1, CommonTx: types.CommonTx{Value: u256.N1, GasLimit: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
 	err := txn.MarshalBinary(buf)
 	require.NoError(t, err)

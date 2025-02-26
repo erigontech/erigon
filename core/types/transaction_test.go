@@ -95,7 +95,7 @@ var (
 			Data:     libcommon.FromHex("5544"),
 		},
 		ChainID: u256.Num1,
-		Tip:     uint256.NewInt(1),
+		TipCap:  uint256.NewInt(1),
 		FeeCap:  uint256.NewInt(1),
 	}
 
@@ -606,7 +606,7 @@ func newRandBlobTx() *BlobTx {
 			S:        *uint256.NewInt(rand.Uint64()),
 		},
 		ChainID:    uint256.NewInt(rand.Uint64()),
-		Tip:        uint256.NewInt(rand.Uint64()),
+		TipCap:     uint256.NewInt(rand.Uint64()),
 		FeeCap:     uint256.NewInt(rand.Uint64()),
 		AccessList: randAccessList(),
 	},
@@ -620,7 +620,7 @@ func printSTX(stx *BlobTx) {
 	fmt.Println("--BlobTx")
 	fmt.Printf("ChainID: %v\n", stx.ChainID)
 	fmt.Printf("Nonce: %v\n", stx.Nonce)
-	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.Tip)
+	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.TipCap)
 	fmt.Printf("MaxFeePerGas: %v\n", stx.FeeCap)
 	fmt.Printf("Gas: %v\n", stx.GasLimit)
 	fmt.Printf("To: %v\n", stx.To)

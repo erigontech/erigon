@@ -108,8 +108,8 @@ func buildDynamicFeeFields(tx *types.DynamicFeeTransaction, rawTx map[string]int
 	if accessListRaw, ok := rawTx["accessList"].([]interface{}); ok {
 		tx.AccessList = decodeAccessList(accessListRaw)
 	}
-	if tip := getUint256FromField(rawTx, "maxPriorityFeePerGas"); tip != nil {
-		tx.Tip = tip
+	if tipCap := getUint256FromField(rawTx, "maxPriorityFeePerGas"); tipCap != nil {
+		tx.TipCap = tipCap
 	}
 	if feeCap := getUint256FromField(rawTx, "maxFeePerGas"); feeCap != nil {
 		tx.FeeCap = feeCap

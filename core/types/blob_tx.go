@@ -67,7 +67,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 		nonce:      stx.Nonce,
 		gasLimit:   stx.GasLimit,
 		gasPrice:   *stx.FeeCap,
-		tip:        *stx.Tip,
+		tipCap:     *stx.TipCap,
 		feeCap:     *stx.FeeCap,
 		to:         stx.To,
 		amount:     *stx.Value,
@@ -84,7 +84,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 			return nil, errors.New("gasPrice higher than 2^256-1")
 		}
 	}
-	msg.gasPrice.Add(&msg.gasPrice, stx.Tip)
+	msg.gasPrice.Add(&msg.gasPrice, stx.TipCap)
 	if msg.gasPrice.Gt(stx.FeeCap) {
 		msg.gasPrice.Set(stx.FeeCap)
 	}
@@ -124,7 +124,7 @@ func (stx *BlobTx) Hash() libcommon.Hash {
 	hash := prefixedRlpHash(BlobTxType, []interface{}{
 		stx.ChainID,
 		stx.Nonce,
-		stx.Tip,
+		stx.TipCap,
 		stx.FeeCap,
 		stx.GasLimit,
 		stx.To,
@@ -145,7 +145,7 @@ func (stx *BlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 		[]interface{}{
 			chainID,
 			stx.Nonce,
-			stx.Tip,
+			stx.TipCap,
 			stx.FeeCap,
 			stx.GasLimit,
 			stx.To,
@@ -201,7 +201,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(stx.Tip, w, b); err != nil {
+	if err := rlp.EncodeUint256(stx.TipCap, w, b); err != nil {
 		return err
 	}
 	// encode MaxFeePerGas
@@ -323,7 +323,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
-	stx.Tip = new(uint256.Int).SetBytes(b)
+	stx.TipCap = new(uint256.Int).SetBytes(b)
 
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err

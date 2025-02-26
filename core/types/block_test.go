@@ -207,7 +207,7 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 		},
 		ChainID:    u256.Num1,
 		FeeCap:     feeCap,
-		Tip:        u256.Num0,
+		TipCap:     u256.Num0,
 		AccessList: accesses,
 	}
 	tx2, err := tx2.WithSignature(*LatestSignerForChainID(big.NewInt(1)), libcommon.Hex2Bytes("fe38ca4e44a30002ac54af7cf922a6ac2ba11b7d22f548e8ecb3f51f41cb31b06de6a5cbae13c0c856e33acf021b51819636cfc009d39eafb9f606d546e305a800"))

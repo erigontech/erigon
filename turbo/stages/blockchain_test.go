@@ -2209,7 +2209,7 @@ func TestEIP1559Transition(t *testing.T) {
 				},
 				ChainID:    &chainID,
 				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)),
-				Tip:        u256.Num2,
+				TipCap:     u256.Num2,
 				AccessList: accesses,
 			}
 			txn, _ = types.SignTx(txn, *signer, key1)
@@ -2243,7 +2243,7 @@ func TestEIP1559Transition(t *testing.T) {
 			return err
 		}
 		expected := new(uint256.Int).Add(
-			new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetTip().Uint64()),
+			new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetTipCap().Uint64()),
 			ethash.ConstantinopleBlockReward,
 		)
 		if actual.Cmp(expected) != 0 {
@@ -2256,7 +2256,7 @@ func TestEIP1559Transition(t *testing.T) {
 			return err
 		}
 		actual = new(uint256.Int).Sub(funds, balance)
-		expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetTip().Uint64() + block.BaseFee().Uint64()))
+		expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetTipCap().Uint64() + block.BaseFee().Uint64()))
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("sender expenditure incorrect: expected %d, got %d", expected, actual)
 		}
