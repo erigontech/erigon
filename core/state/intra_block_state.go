@@ -1509,19 +1509,19 @@ func (ibs *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 					continue
 				}
 			}
-			
+
 			// if an account has been destructed remove any additional
 			// writes to avoid ambiguity
-			var appends make(VersionedWrites,0,len(vwrites))
+			var appends = make(VersionedWrites, 0, len(vwrites))
 			for _, v := range vwrites {
 				if v.Path == SelfDestructPath {
 					appends = VersionedWrites{v}
 					break
 				} else {
-					appends := append(appends,v)
+					appends := append(appends, v)
 				}
 			}
-			writes = append(writes,appends...)
+			writes = append(writes, appends...)
 		}
 	}
 
