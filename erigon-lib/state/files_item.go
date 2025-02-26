@@ -69,7 +69,7 @@ func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
 func newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *filesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
-	frozen := endStep-startStep == stepsInFrozenFile
+	frozen := endStep-startStep >= stepsInFrozenFile
 	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
 

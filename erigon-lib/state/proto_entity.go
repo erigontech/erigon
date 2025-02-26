@@ -97,12 +97,14 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 		{
 			p := ps.AddNew(path, 1)
 			defer ps.Delete(p)
+
 			if err := sn.Compress(); err != nil {
 				return filesBuilt, err
 			}
 			sn.Close()
 			sn = nil
 			ps.Delete(p)
+
 		}
 
 		valuesDecomp, err := seg.NewDecompressor(path)
@@ -117,7 +119,7 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 		for i, ib := range a.builders {
 			p := &background.Progress{}
 			ps.Add(p)
-			recsplitIdx, err := ib.Build(ctx, from, to, p)
+			recsplitIdx, err := ib.Build(ctx, calcFrom, calcTo, p)
 			if err != nil {
 				return filesBuilt, err
 			}

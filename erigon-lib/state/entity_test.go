@@ -1,13 +1,16 @@
 package state_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"math/big"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -15,6 +18,7 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	ae "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon/core/snaptype"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -154,19 +158,27 @@ func TestBuildFiles(t *testing.T) {
 	require.NoError(t, err)
 	cfg := headerId.SnapshotConfig()
 	entries_count := cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 2
+	buffer := &bytes.Buffer{}
 
 	for i := range int(entries_count) {
 		num := Num(i)
-		hash := common.HexToHash(fmt.Sprintf("0x%x%x", i, i+1)).Bytes()
-		value := common.HexToHash(fmt.Sprintf("0x%x", i)).Bytes()
-		err = ma_tx.Put(num, hash, value, rwtx)
+		value := &types.Header{
+			Number: big.NewInt(int64(i)),
+			Extra:  []byte("test header"),
+		}
+		hash := value.Hash()
+		buffer.Reset()
+		err = value.EncodeRLP(buffer)
+		require.NoError(t, err)
+		err = ma_tx.Put(num, hash.Bytes(), buffer.Bytes(), rwtx)
 		require.NoError(t, err)
 	}
 
 	require.NoError(t, rwtx.Commit())
 	ma_tx.Close()
 
-	count, err := ma.BuildFiles(ctx, 0, RootNum(entries_count), db, nil)
+	ps := background.NewProgressSet()
+	count, err := ma.BuildFiles(ctx, 0, RootNum(entries_count), db, ps)
 	require.NoError(t, err)
 	require.Equal(t, count, 1) // 1 snapshot made
 
