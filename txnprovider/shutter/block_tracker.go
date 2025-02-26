@@ -41,7 +41,7 @@ func NewBlockTracker(logger log.Logger, blockListener BlockListener) BlockTracke
 	}
 }
 
-func (bt BlockTracker) Run(ctx context.Context) error {
+func (bt *BlockTracker) Run(ctx context.Context) error {
 	defer bt.logger.Info("block tracker stopped")
 	bt.logger.Info("running block tracker")
 
@@ -76,7 +76,7 @@ func (bt BlockTracker) Run(ctx context.Context) error {
 	}
 }
 
-func (bt BlockTracker) Wait(ctx context.Context, blockNum uint64) error {
+func (bt *BlockTracker) Wait(ctx context.Context, blockNum uint64) error {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
