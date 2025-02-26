@@ -21,16 +21,10 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return common.Hash{}, err
 	}
 
-	if txn.Type() == types.BlobTxType || txn.Type() == types.DynamicFeeTxType || txn.Type() == types.SetCodeTxType {
-		if err := checkTxFee(txn.GetFeeCap().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
-			return common.Hash{}, err
-		}
-	} else {
-		// If the transaction fee cap is already specified, ensure the
-		// fee of the given transaction is _reasonable_.
-		if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
-			return common.Hash{}, err
-		}
+	// If the transaction fee cap is already specified, ensure the
+	// fee of the given transaction is _reasonable_.
+	if err := checkTxFee(txn.GetFeeCap().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
+		return common.Hash{}, err
 	}
 
 	if !txn.Protected() && !api.AllowUnprotectedTxs {
