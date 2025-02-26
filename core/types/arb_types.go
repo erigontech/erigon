@@ -2340,9 +2340,6 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 
 		SkipAccountChecks: true, // it's fake arb tx
 	}
-	if !rules.IsCancun {
-		return msg, errors.New("BlobTx transactions require Cancun")
-	}
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
