@@ -136,6 +136,7 @@ type ReusableCaller struct {
 	callTimeout     time.Duration
 	message         *types.Message
 	batchCounters   *vm.BatchCounterCollector
+	txCounters      *vm.TransactionCounter
 }
 
 func (r *ReusableCaller) DoCallWithNewGas(
@@ -248,10 +249,11 @@ func NewReusableCaller(
 	)
 
 	var batchCounters *vm.BatchCounterCollector
+	var txCounters *vm.TransactionCounter
 	var counterCollector *vm.CounterCollector
 	if useCounters {
 		batchCounters = vm.NewBatchCounterCollector(smtDepth, uint16(forkId), VirtualCountersSmtReduction, false, nil)
-		txCounters := vm.NewTransactionCounter(transaction, smtDepth, uint16(forkId), VirtualCountersSmtReduction, false)
+		txCounters = vm.NewTransactionCounter(transaction, smtDepth, uint16(forkId), VirtualCountersSmtReduction, false)
 
 		_, err = batchCounters.AddNewTransactionCounters(txCounters)
 		if err != nil {
@@ -273,5 +275,34 @@ func NewReusableCaller(
 		stateReader:     stateReader,
 		message:         &msg,
 		batchCounters:   batchCounters,
+		txCounters:      txCounters,
 	}, nil
+}
+
+func (r *ReusableCaller) CheckCountersOverflow(result *core.ExecutionResult) (bool, error) {
+	if r.batchCounters == nil || r.txCounters == nil {
+		return false, nil
+	}
+
+	if err := r.txCounters.ProcessTx(r.intraBlockState, result.ReturnData); err != nil {
+		return false, err
+	}
+
+	r.batchCounters.UpdateExecutionAndProcessingCountersCache(r.txCounters)
+
+	overflow, err := r.batchCounters.CheckForOverflow(false)
+	if err != nil {
+		log.Info("CheckForOverflow failed", "err", err)
+		return false, err
+	}
+
+	if overflow {
+		collected, err := r.batchCounters.CombineCollectors(false)
+		if err != nil {
+			return false, err
+		}
+		return true, fmt.Errorf("counters overflow: %s", collected.OverflownAsString())
+	}
+
+	return false, nil
 }

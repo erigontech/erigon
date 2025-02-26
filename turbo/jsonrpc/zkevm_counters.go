@@ -209,11 +209,20 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 		return nil, err
 	}
 
+	if err = txCounters.ProcessTx(ibs, execResult.ReturnData); err != nil {
+		return nil, err
+	}
+
 	batchCounters.UpdateExecutionAndProcessingCountersCache(txCounters)
 
-	collected, err := batchCounters.CombineCollectors(l1InfoIndex != 0)
+	overflow, err := batchCounters.CheckForOverflow(l1InfoIndex != 0)
 	if err != nil {
 		return nil, err
+	}
+
+	collected := batchCounters.CombineCollectorsNoChanges()
+	if oocError == nil && overflow {
+		oocError = fmt.Errorf("%s", collected.OverflownAsString())
 	}
 
 	res, err := populateCounters(&collected, execResult, tx.GetGas(), oocError)

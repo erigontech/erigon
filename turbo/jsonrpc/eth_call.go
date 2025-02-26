@@ -250,11 +250,12 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	header := block.HeaderNoCopy()
 
-	caller, err := transactions.NewReusableCaller(engine, stateReader, nil, header, args, api.GasCap, latestNumOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout, api.VirtualCountersSmtReduction, false)
+	caller, err := transactions.NewReusableCaller(engine, stateReader, nil, header, args, api.GasCap, latestNumOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout, api.VirtualCountersSmtReduction, true)
 	if err != nil {
 		return 0, err
 	}
 
+	countersChecked := false
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		result, err := caller.DoCallWithNewGas(ctx, gas)
@@ -267,6 +268,14 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			// Bail out
 			return true, nil, err
 		}
+
+		if !countersChecked {
+			if overflow, err := caller.CheckCountersOverflow(result); overflow {
+				return true, nil, err
+			}
+			countersChecked = true
+		}
+
 		return result.Failed(), result, nil
 	}
 
