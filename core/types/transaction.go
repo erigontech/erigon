@@ -402,6 +402,8 @@ type Message struct {
 	Tx                Transaction
 }
 
+func (msg *Message) SetGasPrice(f *uint256.Int) { msg.gasPrice.Set(f) }
+
 type MessageRunMode uint8
 
 const (
