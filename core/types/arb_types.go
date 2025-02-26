@@ -2284,10 +2284,6 @@ type ArbitrumInternalTx struct {
 	Data    []byte
 }
 
-func (t *ArbitrumInternalTx) Type() byte {
-	return ArbitrumInternalTxType
-}
-
 func (t *ArbitrumInternalTx) copy() *ArbitrumInternalTx {
 	return &ArbitrumInternalTx{
 		t.ChainId.Clone(),
@@ -2295,6 +2291,7 @@ func (t *ArbitrumInternalTx) copy() *ArbitrumInternalTx {
 	}
 }
 
+func (tx *ArbitrumInternalTx) Type() byte                   { return ArbitrumInternalTxType }
 func (tx *ArbitrumInternalTx) GetChainID() *uint256.Int     { return tx.ChainId }
 func (tx *ArbitrumInternalTx) GetNonce() uint64             { return 0 }
 func (tx *ArbitrumInternalTx) GetPrice() *uint256.Int       { return uintZero }
@@ -2321,11 +2318,10 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		gasLimit:   tx.GetGas(),
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
-		// from:       tx.From,
-		isFree: true,
-		to:     tx.GetTo(),
-		data:   tx.GetData(),
-		amount: *tx.GetValue(),
+		from:       ArbosAddress,
+		to:         tx.GetTo(),
+		data:       tx.GetData(),
+		amount:     *tx.GetValue(),
 
 		Tx:                tx,
 		SkipAccountChecks: skipAccountChecks[tx.Type()],
