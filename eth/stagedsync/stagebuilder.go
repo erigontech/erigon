@@ -76,7 +76,7 @@ func MiningStages(
 			ID:          stages.MiningExecution,
 			Description: "Mining: execute new block from txn pool",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnMiningExecStage(s, txc, execCfg, sendersCfg, executeBlockCfg, ctx, logger, nil)
+				return SpawnMiningExecStage(s, txc, createBlockCfg.db, execCfg, sendersCfg, executeBlockCfg, ctx, logger, nil)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return nil

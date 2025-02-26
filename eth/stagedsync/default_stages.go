@@ -28,6 +28,7 @@ import (
 )
 
 func DefaultStages(ctx context.Context,
+	db kv.RwDB,
 	snapshots SnapshotsCfg,
 	headers HeadersCfg,
 	borHeimdallCfg BorHeimdallCfg,
@@ -62,7 +63,7 @@ func DefaultStages(ctx context.Context,
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageHeaders(s, u, ctx, txc.Tx, headers, test, logger)
+				return SpawnStageHeaders(s, u, ctx, txc.Tx, db, headers, test, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return HeadersUnwind(ctx, u, s, txc.Tx, headers, test)
@@ -131,10 +132,10 @@ func DefaultStages(ctx context.Context,
 			Description: "Execute blocks w/o hash checks",
 			Disabled:    dbg.StagesOnlyBlocks,
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, txc, 0, ctx, exec, logger)
+				return SpawnExecuteBlocksStage(s, u, txc, db, 0, ctx, exec, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
+				return UnwindExecutionStage(u, s, txc, db, ctx, exec, logger)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneExecutionStage(p, tx, exec, ctx, logger)
@@ -187,7 +188,7 @@ func DefaultStages(ctx context.Context,
 	}
 }
 
-func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func PipelineStages(ctx context.Context, db kv.RwDB, snapshots SnapshotsCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
@@ -235,10 +236,10 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, txc, 0, ctx, exec, logger)
+				return SpawnExecuteBlocksStage(s, u, txc, db, 0, ctx, exec, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
+				return UnwindExecutionStage(u, s, txc, db, ctx, exec, logger)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneExecutionStage(p, tx, exec, ctx, logger)
@@ -275,7 +276,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 }
 
 // when uploading - potentially from zero we need to include headers and bodies stages otherwise we won't recover the POW portion of the chain
-func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, bodies BodiesCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func UploaderPipelineStages(ctx context.Context, db kv.RwDB, snapshots SnapshotsCfg, headers HeadersCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, bodies BodiesCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
@@ -300,7 +301,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageHeaders(s, u, ctx, txc.Tx, headers, test, logger)
+				return SpawnStageHeaders(s, u, ctx, txc.Tx, db, headers, test, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return HeadersUnwind(ctx, u, s, txc.Tx, headers, test)
@@ -352,10 +353,10 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, txc, 0, ctx, exec, logger)
+				return SpawnExecuteBlocksStage(s, u, txc, db, 0, ctx, exec, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
+				return UnwindExecutionStage(u, s, txc, db, ctx, exec, logger)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneExecutionStage(p, tx, exec, ctx, logger)
@@ -391,7 +392,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 }
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarily used to process side forks and memory execution.
-func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg) []*Stage {
+func StateStages(ctx context.Context, headers HeadersCfg, db kv.RwDB, bodies BodiesCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Headers,
@@ -437,10 +438,10 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, txc, 0, ctx, exec, logger)
+				return SpawnExecuteBlocksStage(s, u, txc, db, 0, ctx, exec, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
+				return UnwindExecutionStage(u, s, txc, db, ctx, exec, logger)
 			},
 		},
 	}
@@ -448,6 +449,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 
 func PolygonSyncStages(
 	ctx context.Context,
+	db kv.RwDB,
 	snapshots SnapshotsCfg,
 	polygonSyncStageCfg PolygonSyncStageCfg,
 	senders SendersCfg,
@@ -503,10 +505,10 @@ func PolygonSyncStages(
 			Description: "Execute blocks w/o hash checks",
 			Disabled:    dbg.StagesOnlyBlocks,
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, txc, 0, ctx, exec, logger)
+				return SpawnExecuteBlocksStage(s, u, txc, db, 0, ctx, exec, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
+				return UnwindExecutionStage(u, s, txc, db, ctx, exec, logger)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneExecutionStage(p, tx, exec, ctx, logger)

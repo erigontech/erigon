@@ -21,9 +21,10 @@ package state
 import (
 	"context"
 	"encoding/binary"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common"
@@ -64,7 +65,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), db, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -191,7 +192,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	}()
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), db, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 

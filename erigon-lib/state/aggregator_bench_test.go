@@ -82,7 +82,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(tx, ac), db, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 

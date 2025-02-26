@@ -118,7 +118,7 @@ func testTemporalTxSD(t *testing.T, db *temporal.DB) (kv.RwTx, *state3.SharedDom
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := state3.NewSharedDomains(tx, log.New())
+	sd, err := state3.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -200,7 +200,7 @@ func TestCreateGas(t *testing.T) {
 		eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
 		fmt.Printf("init tx %x\n", eface[1])
 
-		domains, err := state3.NewSharedDomains(txc.Tx, log.New())
+		domains, err := state3.NewSharedDomains(txc.Tx, db, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 		txc.Doms = domains

@@ -120,7 +120,10 @@ func NewSharedDomains(tx kv.Tx, db kv.RoDB, logger log.Logger) (*SharedDomains, 
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
 	}
-	sd.SetTx(tx)
+
+	if err := sd.SetTx(tx); err != nil {
+		return nil, err
+	}
 	sd.iiWriters = make([]*invertedIndexBufferedWriter, len(sd.aggTx.iis))
 
 	sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
@@ -1327,6 +1330,11 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expected
 	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
 	if ok {
 		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, nil, expectedRoot, logPrefix)
+	}
+
+	parallelHexPatriciaHashed, ok := sdc.Trie().(*commitment.ParallelPatriciaHashed)
+	if ok {
+		return parallelHexPatriciaHashed.HexPatriciaHashed.GenerateWitness(ctx, sdc.updates, nil, expectedRoot, logPrefix)
 	}
 
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")

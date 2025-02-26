@@ -129,7 +129,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	var lastTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		ttx := tx.(kv.TemporalRwTx)
-		doms, err := state2.NewSharedDomains(tx, logger)
+		doms, err := state2.NewSharedDomains(tx, db, logger)
 		if err != nil {
 			return err
 		}

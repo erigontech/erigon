@@ -104,7 +104,7 @@ func StageHeadersCfg(
 	}
 }
 
-func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, logger log.Logger) error {
+func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, db kv.RwDB, cfg HeadersCfg, test bool, logger log.Logger) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -120,12 +120,12 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		}
 	}
 	cfg.hd.Progress()
-	return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
+	return HeadersPOW(s, u, ctx, tx, db, cfg, test, useExternalTx, logger)
 
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
-func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, useExternalTx bool, logger log.Logger) error {
+func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, db kv.RwDB, cfg HeadersCfg, test bool, useExternalTx bool, logger log.Logger) error {
 	var err error
 
 	startTime := time.Now()
@@ -313,7 +313,7 @@ Loop:
 	}
 	if headerInserter.Unwind() {
 		unwindTo := headerInserter.UnwindPoint()
-		doms, err := state.NewSharedDomains(tx, logger) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
+		doms, err := state.NewSharedDomains(tx, db, logger) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
 		if err != nil {
 			return err
 		}

@@ -95,7 +95,7 @@ func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot libcommon.
 }
 
 // RewindStagesForWitness rewinds the Execution stage to previous block.
-func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, latestBlockNr uint64, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) error {
+func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, db kv.RoDB, blockNr, latestBlockNr uint64, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) error {
 	// Rewind the Execution stage to previous block
 	unwindState := &UnwindState{ID: stages.Execution, UnwindPoint: blockNr - 1, CurrentBlockNumber: latestBlockNr}
 	stageState := &StageState{ID: stages.Execution, BlockNumber: blockNr}
@@ -119,7 +119,7 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true, dirs, blockReader, nil, nil, syncCfg, nil)
 
-	if err := UnwindExecutionStage(unwindState, stageState, txc, ctx, execCfg, logger); err != nil {
+	if err := UnwindExecutionStage(unwindState, stageState, txc, db, ctx, execCfg, logger); err != nil {
 		return err
 	}
 

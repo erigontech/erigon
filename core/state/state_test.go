@@ -139,7 +139,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	}
 	defer tx.Rollback()
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := stateLib.NewSharedDomains(tx, _db, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -250,9 +250,9 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 func TestSnapshot2(t *testing.T) {
 	//TODO: why I shouldn't recreate writer here? And why domains.SetBlockNum(1) is enough for green test?
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
+	db, tx, _ := NewTestTemporalDb(t)
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := stateLib.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -414,9 +414,9 @@ func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.
 
 func TestDump(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
+	db, tx, _ := NewTestTemporalDb(t)
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 

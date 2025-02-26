@@ -249,7 +249,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	defer tx.Rollback()
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), e.logger)
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, e.db, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}

@@ -2096,39 +2096,37 @@ func (phph *ParallelPatriciaHashed) Process(ctx context.Context, updates *Update
 	//hph.trace = true
 	nibbleUpdates := make([]*nibbleUpdate, 0)
 	currentNibble := 16 // invalid nibble value
-	errChan := make(chan error)
+	errChan := make(chan error, 16)
 	nibblesBeingProcessed := 0
-	updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-		if currentNibble != int(hashedKey[0]) && len(nibbleUpdates) != 0 {
-			// we must submit the nibble updates and reinitialise slice
+
+	runParallelUnfolding := func() {
+		// we must submit the nibble updates and reinitialise slice
+		if len(nibbleUpdates) != 0 {
 			passedUpdates := append([]*nibbleUpdate{}, nibbleUpdates...)
-			go phph.StartKeyProcessing(ctx, errChan, passedUpdates)
+			/* go */ phph.StartKeyProcessing(ctx, errChan, passedUpdates)
 			nibblesBeingProcessed++
 			nibbleUpdates = make([]*nibbleUpdate, 0)
 		}
+	}
 
+	// collect updates for each starting nibble and submit it to goroutine for asynchronous unfolding/processing
+	updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+		if currentNibble != int(hashedKey[0]) {
+			runParallelUnfolding()
+		}
 		currentNibble = int(hashedKey[0])
 		nibbleUpdates = append(nibbleUpdates, &nibbleUpdate{hashedKey: append([]byte{}, hashedKey...), plainKey: append([]byte{}, plainKey...), stateUpdate: stateUpdate})
 		return nil
 	})
+	// for the last nibble from the upadtes
+	runParallelUnfolding()
 
-	if len(nibbleUpdates) != 0 {
-		// we must submit the nibble updates and reinitialise slice
-		passedUpdates := append([]*nibbleUpdate{}, nibbleUpdates...)
-		go phph.StartKeyProcessing(ctx, errChan, passedUpdates)
-		nibblesBeingProcessed++
-	}
-
-	// gracefully stop each nibble processing and capture error if any
+	// wait for all nibble processing
 	for range nibblesBeingProcessed {
+		err := <-errChan
 		if err != nil {
-			<-errChan
-		} else {
-			err = <-errChan
+			return nil, fmt.Errorf("error processing keys: %w", err)
 		}
-	}
-	if err != nil {
-		return nil, fmt.Errorf("error processing keys: %w", err)
 	}
 
 	// Folding everything up to the root

@@ -332,7 +332,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
 
-	domains, err := libstate.NewSharedDomains(tx, logger)
+	domains, err := libstate.NewSharedDomains(tx, db, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -454,8 +454,8 @@ func hashKeyAndAddIncarnation(k []byte, h *libcommon.Hasher) (newK []byte, err e
 	return newK, nil
 }
 
-func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) (hashRoot libcommon.Hash, err error) {
-	domains, err := libstate.NewSharedDomains(tx, log.New())
+func CalcHashRootForTests(tx kv.RwTx, db kv.RwDB, header *types.Header, histV4, trace bool) (hashRoot libcommon.Hash, err error) {
+	domains, err := libstate.NewSharedDomains(tx, db, log.New())
 	if err != nil {
 		return hashRoot, fmt.Errorf("NewSharedDomains: %w", err)
 	}

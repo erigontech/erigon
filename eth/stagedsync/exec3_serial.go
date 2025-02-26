@@ -155,7 +155,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 			return t2, err
 		}
 	}
-	se.doms, err = state2.NewSharedDomains(se.applyTx, se.logger)
+	se.doms, err = state2.NewSharedDomains(se.applyTx, se.cfg.db, se.logger)
 	if err != nil {
 		return t2, err
 	}

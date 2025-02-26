@@ -21,7 +21,7 @@ func TestAppendReceipt(t *testing.T) {
 	defer tx.Rollback()
 
 	ttx := tx.(kv.TemporalTx)
-	doms, err := state.NewSharedDomains(ttx, log.New())
+	doms, err := state.NewSharedDomains(ttx, db, log.New())
 	require.NoError(err)
 	defer doms.Close()
 	doms.SetTx(ttx)
