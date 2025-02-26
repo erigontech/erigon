@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
 )
 
 func BaseCaseDB(t *testing.T) kv.RwDB {
@@ -1108,4 +1109,20 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 		}
 	}
 	tx.Rollback()
+}
+
+func TestMdbxWithSyncBytes(t *testing.T) {
+	_, err := New(kv.TemporaryDB, log.Root()).
+		Path(t.TempDir()).
+		MapSize(8 * datasize.GB).
+		GrowthStep(16 * datasize.MB).
+		Flags(func(f uint) uint { return f&^mdbxgo.Durable | mdbxgo.SafeNoSync }).
+		SyncPeriod(2 * time.Second).
+		SyncBytes(20_000).
+		DirtySpace(uint64(64 * datasize.MB)).
+		// WithMetrics().
+		Open(context.Background())
+	if err != nil {
+		t.Fatalf("failed to open mdbx")
+	}
 }
