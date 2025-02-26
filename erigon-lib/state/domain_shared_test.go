@@ -20,18 +20,17 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"testing"
 	"time"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -42,11 +41,14 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 
 	ctx := context.Background()
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -55,10 +57,8 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 
 	// 1. generate data
 	data := generateSharedDomainsUpdates(t, domains, maxTx, rnd, length.Addr, 10, stepSize)
-	rwTx, err := db.BeginRw(ctx)
 	fillRawdbTxNumsIndexForSharedDomains(t, rwTx, maxTx, stepSize)
 
-	require.NoError(t, err)
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
 
@@ -90,10 +90,10 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	ac = agg.BeginFilesRo()
 	rwTx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
-	rwTx.Rollback()
+	defer rwTx.Rollback()
 
 	// 4. restart on same (replaced keys) files
-	domains, err = NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
+	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -116,11 +116,14 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 
 	ctx := context.Background()
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -132,13 +135,17 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	count := 10
 	rnd := newRnd(0)
 	ac.Close()
+	err = rwTx.Commit()
 	require.NoError(t, err)
 
 Loop:
+	rwTx, err = db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
 
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err = NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
+	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -175,8 +182,6 @@ Loop:
 		}
 	}
 
-	rwTx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
 
@@ -228,20 +233,21 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 
 	rwTx, err := db.BeginRw(ctx)
 	require.NoError(err)
+	defer rwTx.Rollback()
 	for i := uint64(0); i < stepSize*2; i++ {
 		blockNum := i
 		maxTxNum := blockNum*2 - 1
 		err = rawdbv3.TxNums.Append(rwTx, blockNum, maxTxNum)
 		require.NoError(err)
 	}
-	rwTx.Commit()
 
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
-	wrwTx := WrapTxWithCtx(db, ac)
+	wrwTx := WrapTxWithCtx(rwTx, ac)
 	domains, err := NewSharedDomains(wrwTx, log.New())
 	require.NoError(err)
 	defer domains.Close()
+
 	acc := func(i uint64) []byte {
 		buf := make([]byte, 20)
 		binary.BigEndian.PutUint64(buf[20-8:], i)
@@ -264,12 +270,9 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	}
 
 	{ // no deletes
-		rwTx, err := db.BeginRw(ctx)
-		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
 		require.NoError(err)
 		domains.Close()
-		rwTx.Commit()
 
 		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
@@ -277,12 +280,8 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize), iterCount(domains))
 	}
 	{ // delete marker is in RAM
-		rwTx, err := db.BeginRw(ctx)
-		require.NoError(err)
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
-		rwTx.Commit()
-
 		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
@@ -309,20 +308,17 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete marker is in DB
 		_, err = domains.ComputeCommitment(ctx, true, domains.TxNum()/2, "")
 		require.NoError(err)
-		rwTx, err := db.BeginRw(ctx)
-		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
-		rwTx.Commit()
 		require.NoError(err)
 		domains.Close()
 
 		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
+		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
-		domains.Close()
-
 	}
 	{ //delete marker is in Files
+		domains.Close()
 		ac.Close()
 		err = rwTx.Commit() // otherwise agg.BuildFiles will not see data
 		require.NoError(err)
@@ -335,27 +331,24 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 
 		rwTx, err = db.BeginRw(ctx)
 		require.NoError(err)
+		defer rwTx.Rollback()
+
 		_, err := ac.Prune(ctx, rwTx, 0, nil)
-		rwTx.Rollback()
 		require.NoError(err)
 
-		wrwTx = WrapTxWithCtx(db, ac)
+		wrwTx = WrapTxWithCtx(rwTx, ac)
 		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
+		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
-		domains.Close()
 	}
 
 	{ // delete/update more keys in RAM
-		rwTx, err = db.BeginRw(ctx)
-		require.NoError(err)
 		require.NoError(domains.Flush(ctx, rwTx))
-		rwTx.Commit()
-
 		domains.Close()
-
 		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
+		defer domains.Close()
 
 		domains.SetTxNum(stepSize*2 + 1)
 		if err := domains.DomainDel(kv.StorageDomain, addr, st(4), nil, 0); err != nil {
@@ -369,12 +362,9 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // flush delete/updates to DB
 		_, err = domains.ComputeCommitment(ctx, true, domains.TxNum()/2, "")
 		require.NoError(err)
-		rwTx, err = db.BeginRw(ctx)
-		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
 		require.NoError(err)
 		domains.Close()
-		rwTx.Commit()
 
 		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
@@ -382,10 +372,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
 	}
 	{ // delete everything - must see 0
-		rwTx, err = db.BeginRw(ctx)
-		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
-		rwTx.Commit()
 		require.NoError(err)
 		domains.Close()
 
@@ -408,11 +395,14 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 
 	ctx := context.Background()
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	wtxRw := WrapTxWithCtx(db, ac)
+	wtxRw := WrapTxWithCtx(rwTx, ac)
 	domains, err := NewSharedDomains(wtxRw, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
@@ -471,8 +461,6 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	}
 	fmt.Printf("calling build files step %d\n", maxTx/stepSize)
-	rwTx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
 	domains.Close()
@@ -497,7 +485,10 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err = NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
+	rwTx, err = db.BeginRw(ctx)
+	require.NoError(t, err)
+
+	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -539,8 +530,6 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		require.Zero(t, notRemoved)
 	}
 
-	rwTx, err = db.BeginRw(ctx)
-	require.NoError(t, err)
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
 	rwTx.Rollback()

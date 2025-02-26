@@ -57,22 +57,8 @@ type txWithCtx struct {
 	ac *AggregatorRoTx
 }
 
-type dbWithCtx struct {
-	kv.RoDB
-	ac *AggregatorRoTx
-}
-
-func (tx *txWithCtx) AggTx() any { return tx.ac }
-
-func (db *dbWithCtx) BeginRo(ctx context.Context) (kv.Tx, error) {
-	tx, err := db.RoDB.BeginRo(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	return &txWithCtx{Tx: tx, ac: db.ac}, nil
-}
-
-func WrapTxWithCtx(db kv.RoDB, ctx *AggregatorRoTx) *dbWithCtx { return &dbWithCtx{RoDB: db, ac: ctx} }
+func WrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *txWithCtx { return &txWithCtx{Tx: tx, ac: ctx} }
+func (tx *txWithCtx) AggTx() any                             { return tx.ac }
 
 func BenchmarkAggregator_Processing(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -96,7 +82,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 

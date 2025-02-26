@@ -2,11 +2,10 @@ package state
 
 import (
 	"context"
-	"math"
-	"testing"
-
 	"github.com/erigontech/erigon-lib/common"
 	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
+	"math"
+	"testing"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -34,7 +33,11 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(tb, err)
+	defer rwTx.Rollback()
+
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
 
@@ -67,8 +70,6 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 		}
 	}
 
-	rwTx, err := db.BeginRw(context.Background())
-	require.NoError(tb, err)
 	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(tb, err)
 	domains.Close() // closes ac
@@ -90,7 +91,11 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -112,12 +117,10 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err = NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
+	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment
-	rwTx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
 	acit, err := ac.RangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
 	require.NoError(t, err)
 	defer acit.Close()
@@ -128,10 +131,9 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 		require.NoError(t, err)
 		domains.sdCtx.updates.TouchPlainKey(string(k), nil, domains.sdCtx.updates.TouchAccount)
 	}
-	rwTx.Commit()
+
 	// check if the commitment is the same
 	root, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), "")
-	domains.Close()
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.EqualValues(t, latestRoot, root)

@@ -21,11 +21,9 @@ package state
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"testing"
 	"time"
-
-	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common"
@@ -56,13 +54,20 @@ func Fuzz_BtreeIndex_Allocation(f *testing.F) {
 
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
-	roTx, err := db.BeginRo(context.Background())
+	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(f, err)
+	defer func() {
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
+	}()
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err := NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(f, err)
+	defer domains.Close()
+
 	const txs = uint64(1000)
 
 	var (
@@ -72,11 +77,10 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
-	// var maxWrite, otherMaxWrite uint64
+	var maxWrite, otherMaxWrite uint64
 	//f.Add([]common.Address{common.HexToAddress("0x123"), common.HexToAddress("0x456")})
 	//f.Add([]common.Hash{common.HexToHash("0x123"), common.HexToHash("0x456")})
 	f.Fuzz(func(t *testing.T, data []byte) {
-		fmt.Println("WWWW")
 		if len(data) < int(txs*(length.Addr+length.Hash)) {
 			t.Skip()
 		}
@@ -108,79 +112,86 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 			var v [8]byte
 			binary.BigEndian.PutUint64(v[:], txNum)
 			if txNum%135 == 0 {
-				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey2, roTx)
+				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey2, rwTx)
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.CommitmentDomain, commKey2, nil, v[:], pv, step)
 				require.NoError(t, err)
-				// otherMaxWrite = txNum
+				otherMaxWrite = txNum
 			} else {
-				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey1, roTx)
+				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey1, rwTx)
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.CommitmentDomain, commKey1, nil, v[:], pv, step)
 				require.NoError(t, err)
-				// maxWrite = txNum
+				maxWrite = txNum
 			}
 			require.NoError(t, err)
 
 		}
-		// rwTx, err := db.BeginRw(context.Background())
-		// require.NoError(f, err)
-		// err = domains.Flush(context.Background(), rwTx)
-		// require.NoError(t, err)
-		// err = rwTx.Commit()
-		// require.NoError(t, err)
 
-		// err = agg.BuildFiles(txs)
-		// require.NoError(t, err)
+		err = domains.Flush(context.Background(), rwTx)
+		require.NoError(t, err)
 
-		// rwTx, err = db.BeginRw(context.Background())
-		// require.NoError(t, err)
+		require.NoError(t, err)
+		err = rwTx.Commit()
+		require.NoError(t, err)
+		rwTx = nil
 
-		// logEvery := time.NewTicker(30 * time.Second)
-		// defer logEvery.Stop()
-		// stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
-		// require.NoError(t, err)
-		// t.Logf("Prune: %s", stat)
+		err = agg.BuildFiles(txs)
+		require.NoError(t, err)
 
-		// err = rwTx.Commit()
-		// require.NoError(t, err)
+		rwTx, err = db.BeginRw(context.Background())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
 
-		// err = agg.MergeLoop(context.Background())
-		// require.NoError(t, err)
+		logEvery := time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
+		stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
+		require.NoError(t, err)
+		t.Logf("Prune: %s", stat)
 
-		// // Check the history
-		// roTx, err := db.BeginRo(context.Background())
-		// require.NoError(t, err)
+		err = rwTx.Commit()
+		require.NoError(t, err)
 
-		// dc := agg.BeginFilesRo()
+		err = agg.MergeLoop(context.Background())
+		require.NoError(t, err)
 
-		// v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, commKey1, roTx)
-		// require.NoError(t, err)
-		// require.Truef(t, ex, "key %x not found", commKey1)
+		// Check the history
+		roTx, err := db.BeginRo(context.Background())
+		require.NoError(t, err)
+		defer roTx.Rollback()
 
-		// require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+		dc := agg.BeginFilesRo()
 
-		// v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, roTx)
-		// require.NoError(t, err)
-		// require.Truef(t, ex, "key %x not found", commKey2)
-		// dc.Close()
-		// roTx.Rollback()
+		v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, commKey1, roTx)
+		require.NoError(t, err)
+		require.Truef(t, ex, "key %x not found", commKey1)
 
-		// require.EqualValues(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
+		require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+
+		v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, roTx)
+		require.NoError(t, err)
+		require.Truef(t, ex, "key %x not found", commKey2)
+		dc.Close()
+
+		require.EqualValues(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 	})
-	roTx.Rollback()
-	domains.Close()
 
 }
 
 func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
-
+	rwTx, err := db.BeginRwNosync(context.Background())
+	require.NoError(f, err)
+	defer func() {
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
+	}()
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err := NewSharedDomains(WrapTxWithCtx(db, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -231,8 +242,6 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			state[string(addrs[txNum].Bytes())+string(locs[txNum].Bytes())] = []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
 		}
 
-		rwTx, err := db.BeginRwNosync(context.Background())
-		require.NoError(f, err)
 		err = domains.Flush(context.Background(), rwTx)
 		require.NoError(t, err)
 

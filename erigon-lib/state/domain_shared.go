@@ -113,21 +113,14 @@ type HasAgg interface {
 	Agg() any
 }
 
-func NewSharedDomains(db kv.RoDB, logger log.Logger) (*SharedDomains, error) {
+func NewSharedDomains(tx kv.Tx, db kv.RoDB, logger log.Logger) (*SharedDomains, error) {
 
 	sd := &SharedDomains{
 		logger:  logger,
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
 	}
-
-	tx, err := db.BeginRo(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	if err := sd.SetTx(tx); err != nil {
-		return nil, err
-	}
+	sd.SetTx(tx)
 	sd.iiWriters = make([]*invertedIndexBufferedWriter, len(sd.aggTx.iis))
 
 	sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
@@ -885,7 +878,6 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 }
 
 func (sd *SharedDomains) Close() {
-	sd.roTx.Rollback()
 	sd.SetBlockNum(0)
 	if sd.aggTx != nil {
 		sd.SetTxNum(0)

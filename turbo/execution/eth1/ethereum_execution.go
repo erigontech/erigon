@@ -243,11 +243,19 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(e.db, header, body.RawBody(), e.logger)
+	tx, err := e.db.BeginRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}
-	tx, err := e.db.BeginRw(ctx)
+	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
+	tx.Rollback()
+	tx, err = e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, err
 	}

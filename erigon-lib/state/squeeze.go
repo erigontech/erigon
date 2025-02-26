@@ -303,30 +303,16 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 	return nil
 }
 
+// wraps tx and aggregator for tests. (when temporal db is unavailable)
 type wrappedTxWithCtx struct {
 	kv.Tx
 	ac *AggregatorRoTx
 }
 
-// wraps tx and aggregator for tests. (when temporal db is unavailable)
-type wrappedDBWithCtx struct {
-	kv.RoDB
-	ac *AggregatorRoTx
-}
-
 func (w *wrappedTxWithCtx) AggTx() any { return w.ac }
 
-func wrapTxWithCtxForTest(db kv.RoDB, ctx *AggregatorRoTx) *wrappedDBWithCtx {
-	return &wrappedDBWithCtx{RoDB: db, ac: ctx}
-}
-
-func (db *wrappedDBWithCtx) BeginRo(ctx context.Context) (kv.Tx, error) {
-	tx, err := db.RoDB.BeginRo(context.Background())
-	if err != nil {
-		panic(err)
-		return nil, err
-	}
-	return &wrappedTxWithCtx{Tx: tx, ac: db.ac}, nil
+func wrapTxWithCtxForTest(tx kv.Tx, ctx *AggregatorRoTx) *wrappedTxWithCtx {
+	return &wrappedTxWithCtx{Tx: tx, ac: ctx}
 }
 
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
@@ -458,11 +444,19 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 				return true, k
 			}
 
+			var rwTx kv.RwTx
 			var domains *SharedDomains
 			var ac *AggregatorRoTx
 
 			if rwDb != nil {
-				domains, err = NewSharedDomains(rwDb, log.New())
+				// regular case
+				rwTx, err = rwDb.BeginRw(ctx)
+				if err != nil {
+					return nil, err
+				}
+				defer rwTx.Rollback()
+
+				domains, err = NewSharedDomains(rwTx, log.New())
 				if err != nil {
 					return nil, err
 				}
@@ -476,7 +470,8 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			} else {
 				// case when we do testing and temporal db with aggtx is not available
 				ac = a.BeginFilesRo()
-				domains, err = NewSharedDomains(wrapTxWithCtxForTest(a.db, ac), log.New())
+
+				domains, err = NewSharedDomains(wrapTxWithCtxForTest(roTx, ac), log.New())
 				if err != nil {
 					ac.Close()
 					return nil, err
@@ -498,6 +493,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			domains.SetBlockNum(blockNum)
 			domains.SetTxNum(lastTxnumInShard - 1)
 			domains.sdCtx.SetLimitReadAsOfTxNum(domains.TxNum() + 1) // this helps to read state from correct file during commitment
+
 			rebuiltCommit, err = domains.RebuildCommitmentShard(ctx, nextKey, &RebuiltCommitment{
 				StepFrom: shardFrom,
 				StepTo:   shardTo,
@@ -515,6 +511,10 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			domains.Close()
 
 			a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+			if rwTx != nil {
+				rwTx.Rollback()
+				rwTx = nil
+			}
 
 			if shardTo+shardSize > lastShard && shardSize > 1 {
 				shardSize /= 2
