@@ -248,7 +248,25 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	aggregateVerificationData.SendingPeer = aggregateAndProof.Receiver
 
 	if aggregateAndProof.ImmediateProcess {
-		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+		//return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+		fail := false
+		for i := range len(aggregateVerificationData.Signatures) {
+			// push the signatures to verify asynchronously and run final functions after that.
+			data := &AggregateVerificationData{
+				Signatures:  [][]byte{aggregateVerificationData.Signatures[i]},
+				SignRoots:   [][]byte{aggregateVerificationData.SignRoots[i]},
+				Pks:         [][]byte{aggregateVerificationData.Pks[i]},
+				F:           aggregateVerificationData.F,
+				SendingPeer: aggregateVerificationData.SendingPeer,
+			}
+			if err := a.batchSignatureVerifier.ImmediateVerification(data); err != nil {
+				log.Warn("[AggregateAndProofService] ImmediateVerification failed", "err", err, "index", i)
+				fail = true
+			}
+		}
+		if fail {
+			return errors.New("ImmediateVerification failed")
+		}
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.
