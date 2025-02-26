@@ -187,7 +187,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			return err
 		}
 		// [REJECT] The attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1
-		attestingIndices, err = headState.GetAttestingIndicies(aggregate, false)
+		attestingIndices, err = headState.GetAttestingIndicies(aggregate, true)
 		if err != nil {
 			return err
 		}
