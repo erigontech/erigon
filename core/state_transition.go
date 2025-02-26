@@ -267,7 +267,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	}
 
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
-	if st.evm.ChainRules().IsLondon {
+	if il := st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber); il || st.evm.ChainRules().IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		skipCheck := st.evm.Config().NoBaseFee && st.gasFeeCap.IsZero() && st.tip.IsZero()
 		if !skipCheck {
@@ -344,8 +344,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 
 	// Arbitrum: drop tip for delayed (and old) messages
 	if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(st.evm.Context.BaseFee) > 0 {
-		// msg := st.msg.(*types.Message)
-		// st.msg.GasPrice = st.evm.Context.BaseFee
+		st.msg.(*types.Message).SetGasPrice(st.evm.Context.BaseFee)
 		// st.msg.GasTipCap = common.Big0
 	}
 	// Check clauses 1-3 and 6, buy gas if everything is correct
