@@ -246,7 +246,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	origin, _ := signer.Sender(tx)
 	txContext := evmtypes.TxContext{
 		Origin:   origin,
-		GasPrice: tx.GetPrice(),
+		GasPrice: tx.GetTip(),
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,

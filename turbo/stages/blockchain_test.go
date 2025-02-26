@@ -2243,7 +2243,7 @@ func TestEIP1559Transition(t *testing.T) {
 			return err
 		}
 		expected := new(uint256.Int).Add(
-			new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetPrice().Uint64()),
+			new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetTip().Uint64()),
 			ethash.ConstantinopleBlockReward,
 		)
 		if actual.Cmp(expected) != 0 {
@@ -2256,7 +2256,7 @@ func TestEIP1559Transition(t *testing.T) {
 			return err
 		}
 		actual = new(uint256.Int).Sub(funds, balance)
-		expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetPrice().Uint64() + block.BaseFee().Uint64()))
+		expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetTip().Uint64() + block.BaseFee().Uint64()))
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("sender expenditure incorrect: expected %d, got %d", expected, actual)
 		}
@@ -2284,7 +2284,8 @@ func TestEIP1559Transition(t *testing.T) {
 	block = chain.Blocks[0]
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(1, tx))
-		effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
+		baseFee := uint256.MustFromBig(block.BaseFee())
+		effectiveTip := block.Transactions()[0].GetEffectiveGasTip(baseFee).Uint64()
 
 		// 6+5: Ensure that miner received only the tx's effective tip.
 		actual, err := statedb.GetBalance(block.Coinbase())

@@ -60,7 +60,6 @@ type Transaction interface {
 	Type() byte
 	GetChainID() *uint256.Int
 	GetNonce() uint64
-	GetPrice() *uint256.Int
 	GetTip() *uint256.Int
 	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
 	GetFeeCap() *uint256.Int

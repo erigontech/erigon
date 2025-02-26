@@ -298,7 +298,6 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 func (txw *BlobTxWrapper) Type() byte               { return txw.Tx.Type() }
 func (txw *BlobTxWrapper) GetChainID() *uint256.Int { return txw.Tx.GetChainID() }
 func (txw *BlobTxWrapper) GetNonce() uint64         { return txw.Tx.GetNonce() }
-func (txw *BlobTxWrapper) GetPrice() *uint256.Int   { return txw.Tx.GetPrice() }
 func (txw *BlobTxWrapper) GetTip() *uint256.Int     { return txw.Tx.GetTip() }
 func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	return txw.Tx.GetEffectiveGasTip(baseFee)

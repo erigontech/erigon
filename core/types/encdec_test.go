@@ -441,7 +441,6 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 	check(t, "Tx.Type", a.Type(), b.Type())
 	check(t, "Tx.GetChainID", a.GetChainID(), b.GetChainID())
 	check(t, "Tx.GetNonce", a.GetNonce(), b.GetNonce())
-	check(t, "Tx.GetPrice", a.GetPrice(), b.GetPrice())
 	check(t, "Tx.GetTip", a.GetTip(), b.GetTip())
 	check(t, "Tx.GetFeeCap", a.GetFeeCap(), b.GetFeeCap())
 	check(t, "Tx.GetBlobHashes", a.GetBlobHashes(), b.GetBlobHashes())

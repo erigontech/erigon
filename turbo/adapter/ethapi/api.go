@@ -426,7 +426,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 		if !chainId.IsZero() {
 			result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		}
-		result.GasPrice = (*hexutil.Big)(txn.GetPrice().ToBig())
+		result.GasPrice = (*hexutil.Big)(txn.GetTip().ToBig())
 	} else {
 		chainId.Set(txn.GetChainID())
 		result.ChainID = (*hexutil.Big)(chainId.ToBig())
@@ -435,7 +435,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 		result.Accesses = &acl
 
 		if txn.Type() == types.AccessListTxType {
-			result.GasPrice = (*hexutil.Big)(txn.GetPrice().ToBig())
+			result.GasPrice = (*hexutil.Big)(txn.GetTip().ToBig())
 		} else {
 			result.GasPrice = computeGasPrice(txn, blockHash, baseFee)
 			result.Tip = (*hexutil.Big)(txn.GetTip().ToBig())
