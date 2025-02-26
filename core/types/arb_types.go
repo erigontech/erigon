@@ -158,10 +158,11 @@ func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		to:         tx.GetTo(),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
+		checkNonce: skipAccountChecks[tx.Type()],
 
-		SkipAccountChecks: skipAccountChecks[tx.Type()],
-		Tx:                tx,
+		Tx: tx,
 	}
+
 	return msg, nil
 }
 
@@ -573,9 +574,9 @@ func (tx *ArbitrumContractTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		to:         tx.GetTo(),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
+		checkNonce: skipAccountChecks[tx.Type()],
 
-		SkipAccountChecks: skipAccountChecks[tx.Type()],
-		Tx:                tx,
+		Tx: tx,
 	}
 	return msg, nil
 }
@@ -1010,9 +1011,9 @@ func (tx *ArbitrumRetryTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Ru
 		to:         tx.GetTo(),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
+		checkNonce: skipAccountChecks[tx.Type()],
 
-		Tx:                tx,
-		SkipAccountChecks: skipAccountChecks[tx.Type()],
+		Tx: tx,
 	}
 	return msg, nil
 }
@@ -1682,9 +1683,9 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules
 		to:         tx.GetTo(),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
+		checkNonce: skipAccountChecks[tx.Type()],
 
-		SkipAccountChecks: skipAccountChecks[tx.Type()],
-		Tx:                tx,
+		Tx: tx,
 	}
 	// if !rules.IsCancun {
 	// 	return msg, errors.New("BlobTx transactions require Cancun")
@@ -2023,9 +2024,9 @@ func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.
 		to:         tx.GetTo(),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
+		checkNonce: skipAccountChecks[tx.Type()],
 
-		Tx:                tx,
-		SkipAccountChecks: skipAccountChecks[tx.Type()], // it's fake arb tx
+		Tx: tx,
 	}
 	// if !rules.IsCancun {
 	// 	return msg, errors.New("BlobTx transactions require Cancun")
@@ -2322,15 +2323,18 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		to:         tx.GetTo(),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
+		checkNonce: skipAccountChecks[tx.Type()],
 
-		Tx:                tx,
-		SkipAccountChecks: skipAccountChecks[tx.Type()],
+		Tx: tx,
 	}
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
 			return msg, errors.New("gasPrice higher than 2^256-1")
 		}
+	}
+	if msg.feeCap.IsZero() {
+		msg.gasLimit = baseFee.Uint64()
 	}
 	msg.gasPrice.Add(&msg.gasPrice, tx.GetTip())
 	if msg.gasPrice.Gt(tx.GetFeeCap()) {
