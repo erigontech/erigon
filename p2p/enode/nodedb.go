@@ -126,7 +126,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		GrowthStep(16 * datasize.MB).
 		Flags(func(f uint) uint { return f ^ mdbx1.Durable | mdbx1.SafeNoSync }).
 		SyncPeriod(2 * time.Second).
-		DirtySpace(uint64(64 * datasize.MB)).
+		DirtySpace(uint64(32 * datasize.MB)).
 		Open(ctx)
 	if err != nil {
 		return nil, err
