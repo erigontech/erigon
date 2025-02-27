@@ -612,7 +612,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		chainID = new(big.Int)
 	}
 
-	return &Rules{
+	rules := &Rules{
 		ChainID:            new(big.Int).Set(chainID),
 		IsHomestead:        c.IsHomestead(num),
 		IsTangerineWhistle: c.IsTangerineWhistle(num),
@@ -630,6 +630,18 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsOsaka:            c.IsOsaka(time),
 		IsAura:             c.Aura != nil,
 	}
+
+	if c.IsArbitrum() {
+		rules.IsLondon = isBlockForked(new(big.Int).SetUint64(c.ArbitrumChainParams.GenesisBlockNum), big.NewInt(int64(num)))
+		// 	rules.IsCancun = c.arbosver
+		// isCancun := st.evm.ChainRules().IsCancun
+		// // st.evm.ChainConfig().IsCancun(st.evm.Context.Time)
+		// if cc := st.evm.ChainConfig(); cc.IsArbitrum() {
+		// 	isCancun = st.evm.Context.ArbOSVersion >= 20
+		// }
+
+	}
+	return rules
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.
