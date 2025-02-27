@@ -216,7 +216,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			return errors.New("invalid aggregate and proof")
 		}
 
-		log.Debug("AggregateAndProofService: processing aggregate and proof", "slot", slot, "committee", committee, "attestingIndices", attestingIndices)
+		log.Debug("AggregateAndProofService: processing aggregate and proof", "slot", slot, "committee", committee, "committeeLen", len(committee), "attestingIndices", attestingIndices, "attestingIndicesLen", len(attestingIndices))
 		// aggregate signatures for later verification
 		aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
 		if err != nil {
