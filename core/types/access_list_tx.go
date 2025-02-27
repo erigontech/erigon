@@ -66,7 +66,7 @@ func (tx *AccessListTx) copy() *AccessListTx {
 				Nonce:           tx.Nonce,
 				To:              tx.To, // TODO: copy pointed-to address
 				Data:            libcommon.CopyBytes(tx.Data),
-				Gas:             tx.Gas,
+				GasLimit:        tx.GasLimit,
 				// These are copied below.
 				Value: new(uint256.Int),
 			},
@@ -122,9 +122,9 @@ func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 	// size of GasPrice
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.GasPrice)
-	// size of Gas
+	// size of GasLimit
 	payloadSize++
-	gasLen = rlp.IntLenExcludingHead(tx.Gas)
+	gasLen = rlp.IntLenExcludingHead(tx.GasLimit)
 	payloadSize += gasLen
 	// size of To
 	payloadSize++
@@ -227,8 +227,8 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 	if err := rlp.EncodeUint256(tx.GasPrice, w, b); err != nil {
 		return err
 	}
-	// encode Gas
-	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+	// encode GasLimit
+	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
 		return err
 	}
 	// encode To
@@ -366,8 +366,8 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read GasPrice: %w", err)
 	}
 	tx.GasPrice = new(uint256.Int).SetBytes(b)
-	if tx.Gas, err = s.Uint(); err != nil {
-		return fmt.Errorf("read Gas: %w", err)
+	if tx.GasLimit, err = s.Uint(); err != nil {
+		return fmt.Errorf("read GasLimit: %w", err)
 	}
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read To: %w", err)
@@ -414,9 +414,9 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
-		gasLimit:   tx.Gas,
+		gasLimit:   tx.GasLimit,
 		gasPrice:   *tx.GasPrice,
-		tip:        *tx.GasPrice,
+		tipCap:     *tx.GasPrice,
 		feeCap:     *tx.GasPrice,
 		to:         tx.To,
 		amount:     *tx.Value,
@@ -456,7 +456,7 @@ func (tx *AccessListTx) Hash() libcommon.Hash {
 		tx.ChainID,
 		tx.Nonce,
 		tx.GasPrice,
-		tx.Gas,
+		tx.GasLimit,
 		tx.To,
 		tx.Value,
 		tx.Data,
@@ -474,7 +474,7 @@ func (tx *AccessListTx) SigningHash(chainID *big.Int) libcommon.Hash {
 			chainID,
 			tx.Nonce,
 			tx.GasPrice,
-			tx.Gas,
+			tx.GasLimit,
 			tx.To,
 			tx.Value,
 			tx.Data,
