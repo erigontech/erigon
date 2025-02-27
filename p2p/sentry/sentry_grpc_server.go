@@ -543,7 +543,7 @@ func runPeer(
 		msgType := eth.ToProto[protocol][msg.Code]
 		msgCap := cap.String()
 
-		trackPeerStatistics(peerInfo.peer.Info().Name, peerInfo.peer.Info().ID, true, msgType.String(), msgCap, int(msg.Size))
+		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), true, msgType.String(), msgCap, int(msg.Size))
 
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
