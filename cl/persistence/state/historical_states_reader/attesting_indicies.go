@@ -47,19 +47,17 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestatio
 		if err != nil {
 			return nil, err
 		}
-		aggregationBitsLen := utils.GetBitlistLength(aggregationBits)
 		if checkBitsLength && utils.GetBitlistLength(aggregationBits) != len(committee) {
-			return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits. agg bits size: %d, expect: %d", aggregationBitsLen, len(committee))
+			return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits")
 		}
+		aggregationBitsLen := attestation.AggregationBits.Bits()
 
 		attestingIndices := []uint64{}
 		for i, member := range committee {
-			bitIndex := i % 8
-			sliceIndex := i / 8
-			if sliceIndex >= len(aggregationBits) {
-				return nil, errors.New("GetAttestingIndicies: committee is too big")
+			if i >= aggregationBitsLen {
+				break
 			}
-			if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
+			if attestation.AggregationBits.GetBitAt(i) {
 				attestingIndices = append(attestingIndices, member)
 			}
 		}
@@ -68,9 +66,10 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestatio
 
 	// Electra and later
 	var (
-		committeeBits   = attestation.CommitteeBits
-		aggregationBits = attestation.AggregationBits
-		attesters       = []uint64{}
+		committeeBits      = attestation.CommitteeBits
+		aggregationBits    = attestation.AggregationBits
+		attesters          = []uint64{}
+		aggregationBitsLen = attestation.AggregationBits.Bits()
 	)
 	committeeOffset := 0
 	for _, committeeIndex := range committeeBits.GetOnIndices() {
@@ -82,7 +81,7 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestatio
 			return nil, err
 		}
 		for i, member := range committee {
-			if i >= aggregationBits.Bits() {
+			if i >= aggregationBitsLen {
 				return nil, errors.New("GetAttestingIndicies: committee is too big")
 			}
 			if aggregationBits.GetBitAt(committeeOffset + i) {

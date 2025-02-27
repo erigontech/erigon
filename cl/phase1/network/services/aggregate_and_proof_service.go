@@ -250,7 +250,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	if aggregateAndProof.ImmediateProcess {
 		//return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
-		fail := false
 		for i := range len(aggregateVerificationData.Signatures) {
 			// push the signatures to verify asynchronously and run final functions after that.
 			data := &AggregateVerificationData{
@@ -262,12 +261,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			}
 			if err := a.batchSignatureVerifier.ImmediateVerification(data); err != nil {
 				log.Warn("[AggregateAndProofService] ImmediateVerification failed", "err", err, "index", i)
-				fail = true
 			}
 		}
-		if fail {
-			return errors.New("ImmediateVerification failed")
-		}
+		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.
