@@ -124,7 +124,7 @@ func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLe
 	// size of MaxFeePerGas
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.FeeCap)
-	// size of Gas
+	// size of GasLimit
 	payloadSize++
 	gasLen = rlp.IntLenExcludingHead(tx.GasLimit)
 	payloadSize += gasLen

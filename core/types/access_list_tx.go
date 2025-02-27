@@ -122,7 +122,7 @@ func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 	// size of GasPrice
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.GasPrice)
-	// size of Gas
+	// size of GasLimit
 	payloadSize++
 	gasLen = rlp.IntLenExcludingHead(tx.GasLimit)
 	payloadSize += gasLen
