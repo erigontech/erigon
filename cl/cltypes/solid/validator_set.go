@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -168,6 +169,7 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 	} else {
 		t.MerkleTree = nil
 	}
+	log.Warn("[dbg] how long is it?", "v.l", v.l)
 	// skip copying (unsupported for phase0)
 	t.phase0Data = make([]Phase0Data, v.l)
 	copy(t.buffer, v.buffer)
