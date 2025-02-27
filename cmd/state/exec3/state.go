@@ -200,7 +200,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 	txTask.Error = nil
 	if rw.chainConfig.IsArbitrum() {
 		// core.ReadyEVMForL2(rw.evm, &txTask.TxAsMessage)
-		rw.evm.ProcessingHook = arbos.NewTxProcessor(rw.evm, &txTask.TxAsMessage)
+		rw.evm.IntraBlockState()
+		rw.evm.ProcessingHook = arbos.NewTxProcessorIBS(rw.evm, rw.ibs, &txTask.TxAsMessage)
 	}
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
