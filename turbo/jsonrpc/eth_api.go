@@ -384,6 +384,7 @@ type APIImpl struct {
 	SenderLocks                   *SenderLock
 	LogsMaxRange                  uint64
 	DisableStateRootCheck         bool
+	DisableVirtualCounters        bool
 }
 
 // NewEthAPI returns APIImpl instance
@@ -425,6 +426,7 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		SenderLocks:                   NewSenderLock(),
 		LogsMaxRange:                  LogsMaxRange,
 		DisableStateRootCheck:         disableStateRootCheck,
+		DisableVirtualCounters:        ethCfg.DisableVirtualCounters,
 	}
 }
 

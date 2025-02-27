@@ -250,7 +250,8 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	header := block.HeaderNoCopy()
 
-	caller, err := transactions.NewReusableCaller(engine, stateReader, nil, header, args, api.GasCap, latestNumOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout, api.VirtualCountersSmtReduction, true)
+	useCounters := !api.DisableVirtualCounters
+	caller, err := transactions.NewReusableCaller(engine, stateReader, nil, header, args, api.GasCap, latestNumOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout, api.VirtualCountersSmtReduction, useCounters)
 	if err != nil {
 		return 0, err
 	}
@@ -269,7 +270,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			return true, nil, err
 		}
 
-		if !countersChecked {
+		if useCounters && !countersChecked {
 			if overflow, err := caller.CheckCountersOverflow(result); overflow {
 				return true, nil, err
 			}
