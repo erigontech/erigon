@@ -23,7 +23,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
-	if err := checkTxFee(txn.GetFeeCap().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
+	if err := checkTxFee(txn.GetFeeCap().ToBig(), txn.GetGasLimit(), api.FeeCap); err != nil {
 		return common.Hash{}, err
 	}
 
