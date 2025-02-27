@@ -2308,17 +2308,11 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
-
-		// TxRunMode: MessageEthcallMode,
-		Tx: tx,
+		Tx:         tx,
 	}
 
 	if baseFee != nil {
-		if !msg.feeCap.IsZero() {
-			msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
-		} else {
-			msg.gasPrice.SetFromBig(baseFee)
-		}
+		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
 	}
 	// if msg.feeCap.IsZero() {
 	// 	msg.gasLimit = baseFee.Uint64()
