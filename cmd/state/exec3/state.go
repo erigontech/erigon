@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/nitro-erigon/arbos"
 	"github.com/erigontech/nitro-erigon/arbos/arbosState"
 	"github.com/erigontech/nitro-erigon/arbos/arbostypes"
+	"github.com/erigontech/nitro-erigon/gethhook"
 	"github.com/erigontech/nitro-erigon/statetransfer"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -108,6 +109,29 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 	w.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, w.vmCfg)
 	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0))
 	w.ibs = state.New(w.stateReader)
+	if w.chainConfig.IsArbitrum() {
+		ibsa := state.NewArbitrum(w.ibs)
+		accountsPerSync := uint(100000)
+		initMessage, err := arbostypes.GetSepoliaRollupInitMessage()
+		if err != nil {
+			w.logger.Error("Failed to get Sepolia Rollup init message", "err", err)
+			// return
+		}
+		gethhook.RequireHookedGeth()
+
+		initData := statetransfer.ArbosInitializationInfo{
+			NextBlockNumber: 0,
+		}
+		initReader := statetransfer.NewMemoryInitDataReader(&initData)
+
+		stateRoot, err := arbosState.InitializeArbosInDatabase(ibsa, w.rs.Domains(), initReader, w.chainConfig, initMessage, w.evm.Context.Time, accountsPerSync)
+		if err != nil {
+			w.logger.Error("Failed to init ArbOS", "err", err)
+			// return
+		}
+		_ = stateRoot
+		w.logger.Info("ArbOS initialized", "stateRoot", stateRoot) // todo this produces invalid state isnt it?
+	}
 	return w
 }
 
@@ -201,40 +225,16 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	}
 	txTask.Error = nil
-	if rw.chainConfig.IsArbitrum() {
-		if _, ok := rw.evm.ProcessingHook.(*arbos.TxProcessor); !ok {
-			// core.ReadyEVMForL2(rw.evm, &txTask.TxAsMessage)
-			// rw.evm.IntraBlockState()
-			ibsa := state.NewArbitrum(rw.ibs)
-			accountsPerSync := uint(100000)
-			initMessage, err := arbostypes.GetSepoliaRollupInitMessage()
-			if err != nil {
-				rw.logger.Error("Failed to get Sepolia Rollup init message", "err", err)
-				return
-			}
-
-			initData := statetransfer.ArbosInitializationInfo{
-				NextBlockNumber: 0,
-			}
-			initReader := statetransfer.NewMemoryInitDataReader(&initData)
-
-			stateRoot, err := arbosState.InitializeArbosInDatabase(ibsa, rw.rs.Domains(), initReader, rw.chainConfig, initMessage, rw.evm.Context.Time, accountsPerSync)
-			if err != nil {
-				rw.logger.Error("Failed to init ArbOS", "err", err)
-				return
-			}
-			_ = stateRoot
-			rw.logger.Info("ArbOS initialized", "stateRoot", stateRoot) // todo this produces invalid state isnt it?
-
-			rw.evm.ProcessingHook = arbos.NewTxProcessorIBS(rw.evm, rw.ibs, &txTask.TxAsMessage)
-
-		}
-	}
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.rs.Domains().SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
+	if rw.chainConfig.IsArbitrum() {
+		ibsa := state.NewArbitrum(rw.ibs)
+
+		rw.evm.ProcessingHook = arbos.NewTxProcessorIBS(rw.evm, ibsa, &txTask.TxAsMessage)
+	}
 
 	rw.ibs.Reset()
 	ibs := rw.ibs
