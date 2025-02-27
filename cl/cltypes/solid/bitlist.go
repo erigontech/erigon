@@ -267,7 +267,7 @@ func (u *BitList) Merge(other *BitList) (*BitList, error) {
 	}
 	// copy by the longer one
 	var ret, unionFrom *BitList
-	if u.l < other.l {
+	if len(u.u) < len(other.u) {
 		ret = other.Copy()
 		unionFrom = u
 	} else {

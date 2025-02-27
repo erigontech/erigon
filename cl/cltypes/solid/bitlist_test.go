@@ -137,6 +137,16 @@ func TestBitlistMerge(t *testing.T) {
 	require.Equal(7, merged.Bits(), "BitList Merge did not return the expected number of bits")
 	require.Equal(1, merged.Length(), "BitList Union did not return the expected length")
 	require.Equal(byte(0b11010101), merged.Get(0), "BitList Union did not return the expected value")
+
+	b3 := solid.BitlistFromBytes([]byte{0b11110000}, 10)
+	b4 := solid.BitlistFromBytes([]byte{0b00011111}, 10)
+
+	merged, err = b3.Merge(b4)
+	require.NoError(err)
+
+	require.Equal(7, merged.Bits(), "BitList Merge did not return the expected number of bits")
+	require.Equal(1, merged.Length(), "BitList Union did not return the expected length")
+	require.Equal(byte(0b11111111), merged.Get(0), "BitList Union did not return the expected value")
 }
 
 func TestBitSlice(t *testing.T) {
