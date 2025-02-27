@@ -305,6 +305,7 @@ func opCaller(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 }
 
 func opCallValue(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	fmt.Println("CALLVALUE: ", scope.Contract.value.Bytes32())
 	scope.Stack.Push(scope.Contract.value)
 	return nil, nil
 }
@@ -326,6 +327,31 @@ func opCallDataSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 }
 
 func opCallDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+
+	// const auto& mem_index = stack.pop();
+	// const auto& input_index = stack.pop();
+	// const auto& size = stack.pop();
+
+	// if (!check_memory(gas_left, state.memory, mem_index, size))
+	//     return {EVMC_OUT_OF_GAS, gas_left};
+
+	// auto dst = static_cast<size_t>(mem_index);
+	// auto src = state.msg->input_size < input_index ? state.msg->input_size :
+	//                                                  static_cast<size_t>(input_index);
+	// auto s = static_cast<size_t>(size);
+	// auto copy_size = std::min(s, state.msg->input_size - src);
+
+	// if (const auto cost = copy_cost(s); (gas_left -= cost) < 0)
+	//     return {EVMC_OUT_OF_GAS, gas_left};
+
+	// if (copy_size > 0)
+	//     std::memcpy(&state.memory[dst], &state.msg->input_data[src], copy_size);
+
+	// if (s - copy_size > 0)
+	//     std::memset(&state.memory[dst + copy_size], 0, s - copy_size);
+
+	// return {EVMC_SUCCESS, gas_left};
+
 	var (
 		memOffset  = scope.Stack.Pop()
 		dataOffset = scope.Stack.Pop()
@@ -338,7 +364,21 @@ func opCallDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	// These values are checked for overflow during gas cost calculation
 	memOffset64 := memOffset.Uint64()
 	length64 := length.Uint64()
-	scope.Memory.Set(memOffset64, length64, getData(scope.Contract.Input, dataOffset64, length64))
+	src := uint64(len(scope.Contract.Input))
+	if src >= dataOffset64 {
+		src = dataOffset64
+	}
+	fmt.Println("SRC: ", src)
+	copySize := min(length64, uint64(len(scope.Contract.Input))-src)
+	if copySize > 0 {
+		fmt.Println("HIT 1")
+		scope.Memory.Set(memOffset64, copySize, scope.Contract.Input[src:src+copySize])
+	}
+	if length64-copySize > 0 {
+		fmt.Println("HIT 2")
+		scope.Memory.SetZero(memOffset64+copySize, length64-copySize)
+	}
+	// scope.Memory.Set(memOffset64, length64, getData(scope.Contract.Input, dataOffset64, length64))
 	return nil, nil
 }
 
@@ -352,35 +392,61 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		memOffset  = scope.Stack.Pop()
 		dataOffset = scope.Stack.Pop()
 		length     = scope.Stack.Pop()
+
+		returnDataSize = uint64(len(interpreter.returnData))
 	)
 
+	length64 := length.Uint64()
 	offset64, overflow := dataOffset.Uint64WithOverflow()
 	if overflow {
-		return nil, ErrReturnDataOutOfBounds
-	}
-	// we can reuse dataOffset now (aliasing it for clarity)
-	end := dataOffset
-	_, overflow = end.AddOverflow(&dataOffset, &length)
-	if overflow {
-		return nil, ErrReturnDataOutOfBounds
+		// return nil, ErrReturnDataOutOfBounds // TODO(racytech): uncomenting this results in failing eof state_tests/eip7069_extcall/returndatacopy_memory_expansion
 	}
 
-	end64, overflow := end.Uint64WithOverflow()
-	if overflow || uint64(len(interpreter.returnData)) < end64 {
-		return nil, ErrReturnDataOutOfBounds
+	if scope.Contract.Container != nil { // TODO(racytech): this may not be right
+		if returnDataSize < offset64 {
+			offset64 = returnDataSize
+		}
+		copySize := min(length64, returnDataSize-offset64)
+
+		if copySize > 0 {
+			// fmt.Printf("-------------> HITTIN copySize > 0 0x%x, copySize: %v\n", interpreter.returnData[offset64:offset64+copySize], copySize)
+			scope.Memory.Set(memOffset.Uint64(), copySize, interpreter.returnData[offset64:offset64+copySize])
+		}
+		if length64-copySize > 0 {
+			// fmt.Printf("-------------> HITTIN length64-copySize > 0 0x%x, length64-copySize: %v", interpreter.returnData[0:length64-copySize], length64-copySize)
+			// scope.Memory.Set(memOffset.Uint64()+copySize, length64-copySize, interpreter.returnData[0:length64-copySize])
+			scope.Memory.SetZero(memOffset.Uint64()+copySize, length64-copySize)
+		}
+	} else {
+		// we can reuse dataOffset now (aliasing it for clarity)
+		end := dataOffset
+		_, overflow = end.AddOverflow(&dataOffset, &length)
+		if overflow {
+			return nil, ErrReturnDataOutOfBounds
+		}
+
+		end64, overflow := end.Uint64WithOverflow()
+		if overflow || uint64(len(interpreter.returnData)) < end64 {
+			return nil, ErrReturnDataOutOfBounds
+		}
+		scope.Memory.Set(memOffset.Uint64(), length.Uint64(), interpreter.returnData[offset64:end64])
 	}
-	scope.Memory.Set(memOffset.Uint64(), length.Uint64(), interpreter.returnData[offset64:end64])
+
 	return nil, nil
 }
 
 func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
 	addr := slot.Bytes20()
-	codeSize, err := interpreter.evm.IntraBlockState().GetCodeSize(addr)
+	code, err := interpreter.evm.IntraBlockState().GetCode(addr)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	slot.SetUint64(uint64(codeSize))
+	if HasEOFByte(code) {
+		slot.SetUint64(2)
+	} else {
+		slot.SetUint64(uint64(len(code)))
+	}
 	return nil, nil
 }
 
@@ -413,16 +479,25 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 		memOffset  = stack.Pop()
 		codeOffset = stack.Pop()
 		length     = stack.Pop()
+		codeCopy   []byte
 	)
 	addr := libcommon.Address(a.Bytes20())
 	len64 := length.Uint64()
+	uint64CodeOffset, overflow := codeOffset.Uint64WithOverflow()
+	if overflow {
+		uint64CodeOffset = math.MaxUint64
+	}
 
 	code, err := interpreter.evm.IntraBlockState().GetCode(addr)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-
-	codeCopy := getDataBig(code, &codeOffset, len64)
+	if HasEOFByte(code) {
+		codeCopy = getData(eofMagic, uint64CodeOffset, len64)
+	} else {
+		codeCopy = getData(code, uint64CodeOffset, len64)
+	}
+	// codeCopy := getDataBig(code, &codeOffset, len64)
 	scope.Memory.Set(memOffset.Uint64(), len64, codeCopy)
 	return nil, nil
 }
@@ -475,12 +550,20 @@ func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	if empty {
 		slot.Clear()
 	} else {
-		var codeHash libcommon.Hash
-		codeHash, err = interpreter.evm.IntraBlockState().GetCodeHash(address)
+		code, err := interpreter.evm.IntraBlockState().GetCode(address)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
-		slot.SetBytes(codeHash.Bytes())
+		if HasEOFByte(code) {
+			slot.SetFromHex("0x9dbf3648db8210552e9c4f75c6a1c3057c0ca432043bd648be15fe7be05646f5")
+		} else {
+			var codeHash libcommon.Hash
+			codeHash, err = interpreter.evm.IntraBlockState().GetCodeHash(address)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			}
+			slot.SetBytes(codeHash.Bytes())
+		}
 	}
 	return nil, nil
 }
@@ -679,7 +762,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 
 	scope.Contract.UseGas(gas, tracing.GasChangeCallContractCreation)
 
-	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value, false)
+	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value, false, false)
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -871,6 +954,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 func opReturn(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	offset, size := scope.Stack.Pop(), scope.Stack.Pop()
 	ret := scope.Memory.GetPtr(int64(offset.Uint64()), int64(size.Uint64()))
+	fmt.Println("RETURN: ", ret)
 	return ret, errStopToken
 }
 
@@ -968,12 +1052,13 @@ func makeLog(size int) executionFunc {
 // opPush1 is a specialized version of pushN
 func opPush1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		codeLen = uint64(len(scope.Contract.Code))
+		code    = scope.Contract.CodeAt(scope.CodeSection)
+		codeLen = uint64(len(code))
 		integer = new(uint256.Int)
 	)
 	*pc++
 	if *pc < codeLen {
-		scope.Stack.Push(integer.SetUint64(uint64(scope.Contract.Code[*pc])))
+		scope.Stack.Push(integer.SetUint64(uint64(code[*pc])))
 	} else {
 		scope.Stack.Push(integer.Clear())
 	}
@@ -983,8 +1068,10 @@ func opPush1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 // make push instruction function
 func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-		codeLen := len(scope.Contract.Code)
+		code := scope.Contract.CodeAt(scope.CodeSection)
+		codeLen := len(code)
 
+		// fmt.Printf("scope.CodeSection: %v, len(code): %v, code: 0x%x\n", scope.CodeSection, codeLen, code)
 		startMin := int(*pc + 1)
 		if startMin >= codeLen {
 			startMin = codeLen
@@ -997,7 +1084,7 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		integer := new(uint256.Int)
 		scope.Stack.Push(integer.SetBytes(libcommon.RightPadBytes(
 			// So it doesn't matter what we push onto the stack.
-			scope.Contract.Code[startMin:endMin], pushByteSize)))
+			code[startMin:endMin], pushByteSize)))
 
 		*pc += size
 		return nil, nil

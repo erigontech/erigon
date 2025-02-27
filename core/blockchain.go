@@ -274,6 +274,7 @@ func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, ch
 		true, // isFree
 		nil,  // maxFeePerBlobGas
 	)
+	fmt.Println("SysCallContract")
 	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall}
 	// Create a new context to be used in the EVM environment
 	isBor := chainConfig.Bor != nil
@@ -293,6 +294,7 @@ func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, ch
 		msg.Value(),
 		false,
 	)
+
 	if isBor && err != nil {
 		return nil, nil
 	}
