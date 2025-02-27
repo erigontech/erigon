@@ -105,12 +105,12 @@ func fileName(baseName string, version snaptype.Version, from, to uint64) string
 	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from, to, baseName)
 }
 
-func SegName(id EntityId, version snaptype.Version, from, to RootNum) string {
-	return fileName(id.Name(), version, from.Step(id), to.Step(id)) + ".seg"
+func SnapFilePath(id EntityId, version snaptype.Version, from, to RootNum) string {
+	return filepath.Join(id.SnapshotDir(), fileName(id.Name(), version, from.Step(id), to.Step(id))+".seg")
 }
 
-func IdxName(id EntityId, version snaptype.Version, from, to RootNum, idxNum uint64) string {
-	return fileName(id.IndexPrefix()[idxNum], version, from.Step(id), to.Step(id)) + ".idx"
+func IdxFilePath(id EntityId, version snaptype.Version, from, to RootNum, idxNum uint64) string {
+	return filepath.Join(id.SnapshotDir(), fileName(id.IndexPrefix()[idxNum], version, from.Step(id), to.Step(id))+".idx")
 }
 
 func ParseFileName(id EntityId, fileName string) (res *FileInfo, ok bool) {

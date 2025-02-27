@@ -45,6 +45,9 @@ type EntityTxI interface {
 	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
 	Close()
 	Type() CanonicityStrategy
+
+	VisibleFilesMaxRootNum() RootNum
+	VisibleFilesMaxNum() Num
 }
 
 type MarkedTxI interface {

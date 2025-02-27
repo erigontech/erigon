@@ -3,7 +3,6 @@ package state_test
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"math/big"
 	"testing"
 
@@ -79,7 +78,7 @@ func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs) (EntityId, *sta
 	// create marked appendable
 	freezer := snaptype.NewHeaderFreezer(kv.HeaderCanonical, kv.Headers, log)
 
-	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true), headerId,
+	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true), headerId, log,
 		state.WithIndexKeyFactory(&snaptype.HeaderAccessorIndexKeyFactory{}))
 
 	ma, err := state.NewMarkedAppendable(headerId, kv.Headers, kv.HeaderCanonical, ae.IdentityRootRelationInstance, log,
@@ -160,17 +159,21 @@ func TestBuildFiles(t *testing.T) {
 	entries_count := cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 2
 	buffer := &bytes.Buffer{}
 
-	for i := range int(entries_count) {
-		num := Num(i)
-		value := &types.Header{
+	getData := func(i int) (num Num, hash []byte, value []byte) {
+		header := &types.Header{
 			Number: big.NewInt(int64(i)),
 			Extra:  []byte("test header"),
 		}
-		hash := value.Hash()
 		buffer.Reset()
-		err = value.EncodeRLP(buffer)
+		err = header.EncodeRLP(buffer)
 		require.NoError(t, err)
-		err = ma_tx.Put(num, hash.Bytes(), buffer.Bytes(), rwtx)
+
+		return Num(i), header.Hash().Bytes(), buffer.Bytes()
+	}
+
+	for i := range int(entries_count) {
+		num, hash, value := getData(i)
+		err = ma_tx.Put(num, hash, value, rwtx)
 		require.NoError(t, err)
 	}
 
@@ -178,15 +181,22 @@ func TestBuildFiles(t *testing.T) {
 	ma_tx.Close()
 
 	ps := background.NewProgressSet()
-	count, err := ma.BuildFiles(ctx, 0, RootNum(entries_count), db, ps)
+	files, err := ma.BuildFiles(ctx, 0, RootNum(entries_count), db, ps)
 	require.NoError(t, err)
-	require.Equal(t, count, 1) // 1 snapshot made
+	require.True(t, len(files) == 1) // 1 snapshot made
+
+	ma.IntegrateDirtyFiles(files)
+	ma.RecalcVisibleFiles(RootNum(entries_count))
+
+	ma_tx = ma.BeginFilesRo()
+	defer ma_tx.Close()
 
 	rwtx, err = db.BeginRw(ctx)
 	defer rwtx.Rollback()
 	require.NoError(t, err)
 
-	err = ma_tx.Prune(ctx, ma.VisibleFilesMaxRootNum(), 1000, rwtx)
+	lastRootNumInSnap := ma_tx.VisibleFilesMaxRootNum()
+	err = ma_tx.Prune(ctx, lastRootNumInSnap, 1000, rwtx)
 	require.NoError(t, err)
 
 	require.NoError(t, rwtx.Commit())
@@ -198,42 +208,44 @@ func TestBuildFiles(t *testing.T) {
 
 	// check unified interface
 	for i := range int(entries_count) {
-		num := Num(i)
-		hash := common.HexToHash(fmt.Sprintf("0x%x%x", i, i+1)).Bytes()
-		value := common.HexToHash(fmt.Sprintf("0x%x", i)).Bytes()
+		num, hash, value := getData(i)
 		returnv, err := ma_tx.Get(num, rwtx)
 		require.NoError(t, err)
-		require.Equal(t, value, returnv)
-
-		returnv, err = ma_tx.GetNc(num, hash, rwtx)
-		require.NoError(t, err)
-		require.Equal(t, value, returnv)
+		require.Equal(t, value, returnv[1:]) // headers freezer stores first byte as first byte of header hash
 
 		// just look in db....
-		if int(num) < int(ma.VisibleFilesMaxRootNum()) {
-			// these should not be in db
-			value, err = rwtx.GetOne(kv.HeaderCanonical, num.EncTo8Bytes())
-			require.NoError(t, err)
-			require.True(t, value == nil)
-
-			rwtx.ForEach(kv.Headers, num.EncTo8Bytes(), func(k, v []byte) error {
-				require.Fail(t, "should not be in db")
-				return nil
-			})
-		} else {
+		if num < ma.PruneFrom() || num >= Num(lastRootNumInSnap) {
 			// these should be in db
+			returnv, err = ma_tx.GetNc(num, hash, rwtx)
+			require.NoError(t, err)
+			require.Equal(t, value, returnv)
+
 			value, err = rwtx.GetOne(kv.HeaderCanonical, num.EncTo8Bytes())
 			require.NoError(t, err)
 			require.Equal(t, value, hash)
 			found := false
 
-			rwtx.ForEach(kv.Headers, num.EncTo8Bytes(), func(k, v []byte) error {
+			rwtx.ForAmount(kv.Headers, num.EncTo8Bytes(), 1, func(k, v []byte) error {
+				require.Equal(t, k[:8], num.EncTo8Bytes())
 				found = true
-				require.Equal(t, v, hash)
+				require.Equal(t, k[8:], hash)
 				return nil
 			})
 
 			require.True(t, found, "value expected to be found in db")
+		} else {
+			// these should not be in db (pruned)
+			value, err = rwtx.GetOne(kv.HeaderCanonical, num.EncTo8Bytes())
+			require.NoError(t, err)
+			require.True(t, value == nil)
+
+			rwtx.ForAmount(kv.Headers, num.EncTo8Bytes(), 1, func(k, v []byte) error {
+				if !bytes.Equal(k[:8], num.EncTo8Bytes()) {
+					return nil
+				}
+				require.Fail(t, "should not be in db")
+				return nil
+			})
 		}
 	}
 }

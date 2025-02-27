@@ -3,8 +3,7 @@ package state
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
-	"sort"
+	"errors"
 
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -27,6 +26,7 @@ type markedStructure struct {
 }
 
 var _ StartRoTx[EntityTxI] = (*Appendable[EntityTxI])(nil)
+var ErrNotFoundInSnapshot = errors.New("entity not found in snapshot")
 
 type Appendable[T EntityTxI] struct {
 	*ProtoEntity
@@ -98,7 +98,7 @@ func NewUnmarkedAppendable(id EntityId, valsTbl string, relation RootRelationI, 
 
 	if a.builders == nil {
 		// mapping num -> offset (ordinal map)
-		builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), id)
+		builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), id, logger)
 		a.builders = []AccessorIndexBuilder{builder}
 	}
 
@@ -165,6 +165,10 @@ func create[T EntityTxI](id EntityId, strategy CanonicityStrategy, valsTbl strin
 	return a, nil
 }
 
+func (a *Appendable[T]) PruneFrom() Num {
+	return a.pruneFrom
+}
+
 func (a *Appendable[T]) encTs(ts Num) []byte {
 	return ts.EncToBytes(!a.ts4Bytes)
 }
@@ -180,31 +184,14 @@ type MarkedTx struct {
 }
 
 func (m *MarkedTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
-	ap := m.ap
-	lastNum := ap.VisibleFilesMaxNum()
-	if entityNum <= lastNum {
-		var word []byte
-		// snapshot
-		index := sort.Search(len(ap._visible), func(i int) bool {
-			return ap._visible[i].src.FirstEntityNum() >= uint64(entityNum)
-		})
-
-		if index == -1 {
-			return nil, fmt.Errorf("entity get error: snapshot expected but now found: (%s, %d)", ap.a.Name(), entityNum)
-		}
-		visible := ap._visible[index]
-		g := visible.getter
-		offset := visible.reader.OrdinalLookup(uint64(entityNum))
-		g.Reset(offset)
-		if g.HasNext() {
-			word, _ = g.Next(word[:0])
-			return word, nil
-		}
-
-		return nil, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", m.id.Name(), entityNum, visible.src.decompressor.FileName())
+	data, found, err := m.LookupFile(entityNum, tx)
+	if err != nil {
+		return nil, err
 	}
-
-	return m.getDb(entityNum, nil, tx)
+	if !found {
+		return m.getDb(entityNum, nil, tx)
+	}
+	return data, nil
 }
 
 func (m *MarkedTx) getDb(entityNum Num, hash []byte, tx kv.Tx) (Bytes, error) {
@@ -282,32 +269,15 @@ type UnmarkedTx struct {
 
 func (m *UnmarkedTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
 	ap := m.ap
-	lastNum := ap.VisibleFilesMaxNum()
-	if entityNum <= lastNum {
-		var word []byte
-		index := sort.Search(len(ap._visible), func(i int) bool {
-			return ap._visible[i].src.FirstEntityNum() >= uint64(entityNum)
-		})
-
-		if index == -1 {
-			return nil, fmt.Errorf("entity get error: snapshot expected but now found: (%s, %d)", ap.a.Name(), entityNum)
-		}
-
-		visible := ap._visible[index]
-		g := visible.getter
-
-		offset := visible.reader.OrdinalLookup(uint64(entityNum)) // TODO: allowed values
-		g.Reset(offset)
-		if g.HasNext() {
-			word, _ = g.Next(word[:0])
-			return word, nil
-		}
-
-		return nil, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, visible.src.decompressor.FileName())
+	data, found, err := m.LookupFile(entityNum, tx)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return tx.GetOne(ap.valsTbl, ap.encTs(entityNum))
 	}
 
-	// else the db
-	return tx.GetOne(ap.valsTbl, ap.encTs(entityNum))
+	return data, nil
 }
 
 func (m *UnmarkedTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
@@ -345,31 +315,14 @@ type AppendingTx struct {
 // Num -> Id needed for finding canonical values in db.
 func (m *AppendingTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
 	// snapshots only
-	ap := m.ap
-	lastNum := ap.VisibleFilesMaxNum()
-	if entityNum > lastNum {
-		return nil, nil
+	data, found, err := m.LookupFile(entityNum, tx)
+	if err != nil {
+		return nil, err
 	}
-	var word []byte
-	index := sort.Search(len(ap._visible), func(i int) bool {
-		return ap._visible[i].src.FirstEntityNum() >= uint64(entityNum)
-	})
-
-	if index == -1 {
-		return nil, fmt.Errorf("entity get error: snapshot expected but now found: (%s, %d)", ap.a.Name(), entityNum)
+	if !found {
+		return nil, ErrNotFoundInSnapshot
 	}
-
-	visible := ap._visible[index]
-	g := visible.getter
-
-	offset := visible.reader.OrdinalLookup(uint64(entityNum)) // TODO: allowed values
-	g.Reset(offset)
-	if g.HasNext() {
-		word, _ = g.Next(word[:0])
-		return word, nil
-	}
-	return nil, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, visible.src.decompressor.FileName())
-
+	return data, nil
 }
 
 func (m *AppendingTx) GetNc(entityId Id, tx kv.Tx) (Bytes, error) {

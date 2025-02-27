@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -71,10 +70,11 @@ type SimpleAccessorBuilder struct {
 
 var _ AccessorIndexBuilder = (*SimpleAccessorBuilder)(nil)
 
-func NewSimpleAccessorBuilder(args *AccessorArgs, id EntityId, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
+func NewSimpleAccessorBuilder(args *AccessorArgs, id EntityId, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
 	b := &SimpleAccessorBuilder{
-		args: args,
-		id:   id,
+		args:   args,
+		id:     id,
+		logger: logger,
 	}
 
 	for _, opt := range options {
@@ -111,7 +111,7 @@ func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 
 func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
 	// just segname?
-	sgname := ae.SegName(s.id, snaptype.Version(1), from, to)
+	sgname := ae.SnapFilePath(s.id, snaptype.Version(1), from, to)
 	decomp, _ := seg.NewDecompressor(sgname)
 	return &DecompressorIndexInputDataQuery{decomp: decomp}
 }
@@ -131,8 +131,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 		}
 	}()
 	iidq := s.GetInputDataQuery(from, to)
-	idxFile := ae.IdxName(s.id, snaptype.Version(1), from, to, s.indexPos)
-	idxFile = filepath.Join(s.id.SnapshotDir(), idxFile)
+	idxFile := ae.IdxFilePath(s.id, snaptype.Version(1), from, to, s.indexPos)
 
 	keyCount := iidq.GetCount()
 	if p != nil {

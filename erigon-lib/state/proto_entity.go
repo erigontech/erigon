@@ -2,6 +2,8 @@ package state
 
 import (
 	"context"
+	"fmt"
+	"sort"
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
@@ -40,33 +42,25 @@ func NewProto(a ae.EntityId, builders []AccessorIndexBuilder, freezer Freezer, l
 	}
 }
 
-func (a *ProtoEntity) VisibleFilesMaxRootNum() ae.RootNum {
-	lasti := len(a._visible) - 1
-	if lasti < 0 {
-		return 0
+// func (a *ProtoEntity) DirtyFilesMaxRootNum() ae.RootNum {
+// 	latest, found := a.dirtyFiles.Max()
+// 	if latest == nil || !found {
+// 		return 0
+// 	}
+// 	return ae.RootNum(latest.endTxNum)
+// }
+
+func (a *ProtoEntity) RecalcVisibleFiles(toRootNum RootNum) {
+	a._visible = calcVisibleFiles(a.dirtyFiles, AccessorHashMap, false, uint64(toRootNum))
+}
+
+func (a *ProtoEntity) IntegrateDirtyFiles(files []*filesItem) {
+	for _, item := range files {
+		a.dirtyFiles.Set(item)
 	}
-
-	return RootNum(a._visible[lasti].src.endTxNum)
 }
 
-func (a *ProtoEntity) DirtyFilesMaxRootNum() ae.RootNum {
-	latest, found := a.dirtyFiles.Max()
-	if latest == nil || !found {
-		return 0
-	}
-	return ae.RootNum(latest.endTxNum)
-}
-
-func (a *ProtoEntity) VisibleFilesMaxNum() Num {
-	//latest := a._visible[len(a._visible)-1]
-	// need to store first entity num in snapshots for this
-	// TODO: just sending max root num now; so it won't work if rootnum!=num;
-	// maybe we should just test bodies and headers till then.
-
-	return Num(a.VisibleFilesMaxRootNum())
-}
-
-func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) (filesBuilt uint, err error) {
+func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) (dirtyFiles []*filesItem, err error) {
 	log.Debug("freezing %s from %d to %d", a.a.Name(), from, to)
 	calcFrom, calcTo := from, to
 	var canFreeze bool
@@ -78,19 +72,22 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 		}
 
 		log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
-		path := ae.SegName(a.a, snaptype.Version(1), calcFrom, calcTo)
+		path := ae.SnapFilePath(a.a, snaptype.Version(1), calcFrom, calcTo)
 		sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, a.logger)
 		if err != nil {
-			return filesBuilt, err
+			return dirtyFiles, err
 		}
 		defer sn.Close()
 
 		{
 			a.freezer.SetCollector(func(values []byte) error {
-				return sn.AddWord(values)
+				// TODO: look at block_Snapshots.go#dumpRange
+				// when snapshot is non-frozen range, it AddsUncompressedword (fast creation)
+				// else AddWord.
+				return sn.AddUncompressedWord(values)
 			})
 			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, db); err != nil {
-				return filesBuilt, err
+				return dirtyFiles, err
 			}
 		}
 
@@ -99,7 +96,7 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 			defer ps.Delete(p)
 
 			if err := sn.Compress(); err != nil {
-				return filesBuilt, err
+				return dirtyFiles, err
 			}
 			sn.Close()
 			sn = nil
@@ -109,7 +106,7 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 
 		valuesDecomp, err := seg.NewDecompressor(path)
 		if err != nil {
-			return filesBuilt, err
+			return dirtyFiles, err
 		}
 
 		df := newFilesItemWithFrozenSteps(uint64(calcFrom), uint64(calcTo), cfg.MinimumSize, cfg.StepsInFrozenFile())
@@ -121,21 +118,20 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 			ps.Add(p)
 			recsplitIdx, err := ib.Build(ctx, calcFrom, calcTo, p)
 			if err != nil {
-				return filesBuilt, err
+				return dirtyFiles, err
 			}
 
 			indexes[i] = recsplitIdx
 		}
 		// TODO: add support for multiple indexes in filesItem.
 		df.index = indexes[0]
+		dirtyFiles = append(dirtyFiles, df)
 
 		calcFrom = calcTo
 		calcTo = to
-		sn.Close()
-		filesBuilt++
 	}
 
-	return filesBuilt, nil
+	return dirtyFiles, nil
 }
 
 // proto_appendable_rotx
@@ -144,6 +140,9 @@ type ProtoEntityTx struct {
 	id    EntityId
 	files visibleFiles
 	a     *ProtoEntity
+
+	readers []*recsplit.IndexReader
+	getters []*seg.Reader
 }
 
 func (a *ProtoEntity) BeginFilesRo() *ProtoEntityTx {
@@ -178,6 +177,35 @@ func (a *ProtoEntityTx) Close() {
 	}
 }
 
+func (a *ProtoEntityTx) StatelessGetter(i int) *seg.Reader {
+	if a.getters == nil {
+		a.getters = make([]*seg.Reader, len(a.files))
+	}
+
+	r := a.getters[i]
+	if r == nil {
+		g := a.files[i].src.decompressor.MakeGetter()
+		r = seg.NewReader(g, seg.CompressVals) // TODO: add compression support
+		a.getters[i] = r
+	}
+
+	return r
+}
+
+func (a *ProtoEntityTx) StatelessIdxReader(i int) *recsplit.IndexReader {
+	if a.readers == nil {
+		a.readers = make([]*recsplit.IndexReader, len(a.files))
+	}
+
+	r := a.readers[i]
+	if r == nil {
+		r = a.files[i].src.index.GetReaderFromPool()
+		a.readers[i] = r
+	}
+
+	return r
+}
+
 func (a *ProtoEntityTx) Type() CanonicityStrategy {
 	return a.a.strategy
 }
@@ -202,4 +230,47 @@ func (a *ProtoEntityTx) Garbage(merged *filesItem) (outs []*filesItem) {
 		return true
 	})
 	return outs
+}
+
+func (a *ProtoEntityTx) VisibleFilesMaxRootNum() RootNum {
+	lasti := len(a.files) - 1
+	if lasti < 0 {
+		return 0
+	}
+
+	return RootNum(a.files[lasti].src.endTxNum)
+}
+
+func (a *ProtoEntityTx) VisibleFilesMaxNum() Num {
+	// need to store first entity num in snapshots for this
+	// TODO: just sending max root num now; so it won't work if rootnum!=num;
+	// maybe we should just test bodies and headers till then.
+
+	return Num(a.VisibleFilesMaxRootNum())
+}
+
+func (a *ProtoEntityTx) LookupFile(entityNum Num, tx kv.Tx) (b Bytes, found bool, err error) {
+	ap := a.a
+	lastNum := a.VisibleFilesMaxNum()
+	if entityNum <= lastNum && ap.builders[0].AllowsOrdinalLookupByNum() {
+		var word []byte
+		index := sort.Search(len(ap._visible), func(i int) bool {
+			return ap._visible[i].src.LastEntityNum() > uint64(entityNum)
+		})
+
+		if index == -1 {
+			return nil, false, fmt.Errorf("entity get error: snapshot expected but now found: (%s, %d)", ap.a.Name(), entityNum)
+		}
+		offset := a.StatelessIdxReader(index).OrdinalLookup(uint64(entityNum))
+		g := a.StatelessGetter(index)
+		g.Reset(offset)
+		if g.HasNext() {
+			word, _ = g.Next(word[:0])
+			return word, true, nil
+		}
+		return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, ap._visible[index].src.decompressor.FileName1)
+	}
+
+	return nil, false, nil
+
 }

@@ -158,6 +158,10 @@ func (i *filesItem) FirstEntityNum() uint64 {
 	return i.startTxNum
 }
 
+func (i *filesItem) LastEntityNum() uint64 {
+	return i.FirstEntityNum() + uint64(i.decompressor.Count())
+}
+
 func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*filesItem) {
 	re := regexp.MustCompile("^v([0-9]+)-" + filenameBase + ".([0-9]+)-([0-9]+)." + ext + "$")
 	var err error
