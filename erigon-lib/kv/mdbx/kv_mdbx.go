@@ -355,10 +355,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		}
 	}
 
-	// if err := env.SetOption(mdbx.OptSyncBytes, uint64(math2.MaxUint64)); err != nil {
-	// 	return nil, err
-	// }
-
 	if opts.roTxsLimiter == nil {
 		targetSemCount := int64(runtime.GOMAXPROCS(-1) * 16)
 		opts.roTxsLimiter = semaphore.NewWeighted(targetSemCount) // 1 less than max to allow unlocking to happen
