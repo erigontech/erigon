@@ -109,29 +109,6 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 	w.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, w.vmCfg)
 	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0))
 	w.ibs = state.New(w.stateReader)
-	if w.chainConfig.IsArbitrum() {
-		ibsa := state.NewArbitrum(w.ibs)
-		accountsPerSync := uint(100000)
-		initMessage, err := arbostypes.GetSepoliaRollupInitMessage()
-		if err != nil {
-			w.logger.Error("Failed to get Sepolia Rollup init message", "err", err)
-			// return
-		}
-		gethhook.RequireHookedGeth()
-
-		initData := statetransfer.ArbosInitializationInfo{
-			NextBlockNumber: 0,
-		}
-		initReader := statetransfer.NewMemoryInitDataReader(&initData)
-
-		stateRoot, err := arbosState.InitializeArbosInDatabase(ibsa, w.rs.Domains(), initReader, w.chainConfig, initMessage, w.evm.Context.Time, accountsPerSync)
-		if err != nil {
-			w.logger.Error("Failed to init ArbOS", "err", err)
-			// return
-		}
-		_ = stateRoot
-		w.logger.Info("ArbOS initialized", "stateRoot", stateRoot) // todo this produces invalid state isnt it?
-	}
 	return w
 }
 
@@ -145,6 +122,29 @@ func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator)
 		rw.SetReader(state.NewReaderV3(rs.Domains()))
 	}
 	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
+	if rw.chainConfig.IsArbitrum() {
+		ibsa := state.NewArbitrum(rw.ibs)
+		accountsPerSync := uint(100000)
+		initMessage, err := arbostypes.GetSepoliaRollupInitMessage()
+		if err != nil {
+			rw.logger.Error("Failed to get Sepolia Rollup init message", "err", err)
+			return
+		}
+		gethhook.RequireHookedGeth()
+
+		initData := statetransfer.ArbosInitializationInfo{
+			NextBlockNumber: 0,
+		}
+		initReader := statetransfer.NewMemoryInitDataReader(&initData)
+
+		stateRoot, err := arbosState.InitializeArbosInDatabase(ibsa, rw.rs.Domains(), initReader, rw.chainConfig, initMessage, rw.evm.Context.Time, accountsPerSync)
+		if err != nil {
+			rw.logger.Error("Failed to init ArbOS", "err", err)
+			return
+		}
+		_ = stateRoot
+		rw.logger.Info("ArbOS initialized", "stateRoot", stateRoot) // todo this produces invalid state isnt it?
+	}
 }
 
 func (rw *Worker) Tx() kv.TemporalTx { return rw.chainTx }
