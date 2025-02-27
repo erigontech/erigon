@@ -24,6 +24,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/nitro-erigon/arbos"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -197,6 +198,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	}
 	txTask.Error = nil
+	if rw.chainConfig.IsArbitrum() {
+		// core.ReadyEVMForL2(rw.evm, &txTask.TxAsMessage)
+		rw.evm.ProcessingHook = arbos.NewTxProcessor(rw.evm, &txTask.TxAsMessage)
+	}
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.rs.Domains().SetTxNum(txTask.TxNum)
