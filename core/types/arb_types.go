@@ -2343,7 +2343,8 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
 
-		Tx: tx,
+		TxRunMode: MessageEthcallMode,
+		Tx:        tx,
 	}
 
 	if baseFee != nil {
