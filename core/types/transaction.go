@@ -60,9 +60,9 @@ type Transaction interface {
 	Type() byte
 	GetChainID() *uint256.Int
 	GetNonce() uint64
-	GetTipCap() *uint256.Int // max_priority_fee_per_gas in EIP-1559
-	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
-	GetFeeCap() *uint256.Int // max_fee_per_gas in EIP-1559
+	GetTipCap() *uint256.Int                              // max_priority_fee_per_gas in EIP-1559
+	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int // effective_gas_price in EIP-1559
+	GetFeeCap() *uint256.Int                              // max_fee_per_gas in EIP-1559
 	GetBlobHashes() []libcommon.Hash
 	GetGasLimit() uint64
 	GetBlobGas() uint64
