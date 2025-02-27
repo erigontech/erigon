@@ -15,7 +15,7 @@ DOCKER_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell id -g)
 DOCKER_BINARIES ?= "erigon downloader"
 DOCKER_BUILD_DBTOOLS ?= "false"
-DOCKER_TAG ?= local-erigon/erigon:latest
+DOCKER_TAG ?= "local-erigon/erigon:latest"
 
 # Variables below for building on host OS, and are ignored for docker
 #
@@ -97,9 +97,9 @@ docker: validate_docker_build_args git-submodules
 	DOCKER_BUILDKIT=1 $(DOCKER) build \
 		--target erigon \
 		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
-		--build-arg VCS_REF=\"${GIT_COMMIT}\" \
-		--build-arg BINARIES=\"${DOCKER_BINARIES}\" \
-		--build-arg BUILD_DBTOOLS=\"${DOCKER_BUILD_DBTOOLS}\" \
+		--build-arg VCS_REF=${GIT_COMMIT} \
+		--build-arg BINARIES=${DOCKER_BINARIES} \
+		--build-arg BUILD_DBTOOLS=${DOCKER_BUILD_DBTOOLS} \
 		--progress plain \
 		-t ${DOCKER_TAG} .
 
