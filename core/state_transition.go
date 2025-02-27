@@ -231,7 +231,7 @@ func CheckEip1559TxGasFeeCap(from libcommon.Address, feeCap, tipCap, baseFee *ui
 			from.Hex(), tipCap, feeCap)
 	}
 	if baseFee != nil && feeCap.Lt(baseFee) && !isFree {
-		return fmt.Errorf("%w: address %v, feeCap: %s baseFee: %s", ErrFeeCapTooLow,
+		return fmt.Errorf("%w: address %v, gasFeeCap: %s baseFee: %s", ErrFeeCapTooLow,
 			from.Hex(), feeCap, baseFee)
 	}
 	return nil
