@@ -3,6 +3,19 @@ ChangeLog
 
 ## v3.0.0 (in development)
 
+**Improvements:**
+
+- Schedule Pectra for Chiado by @yperbasis in https://github.com/erigontech/erigon/pull/13898
+- stagedsync: dbg option to log receipts on receipts hash mismatch (#13905) by @taratorio in https://github.com/erigontech/erigon/pull/13940
+- Introduces a new method for estimating transaction gas that targets the maximum gas a contract could use (#13913). Fixes eth_estimateGas for historical blocks (#13903) by @somnathb1 in https://github.com/erigontech/erigon/pull/13916
+
+**Bugfixes:**
+
+- rpcdaemon: Show state sync transactions in eth_getLogs (#13924) by @shohamc1 in https://github.com/erigontech/erigon/pull/13951
+- polygon/heimdall: fix snapshot store last entity to check in snapshots too (#13845) by @taratorio in https://github.com/erigontech/erigon/pull/13938
+- Implemented wait if heimdall is not synced to the chain (#13807) by @taratorio in https://github.com/erigontech/erigon/pull/13939
+
+
 ### TODO
 
 - milestones:
