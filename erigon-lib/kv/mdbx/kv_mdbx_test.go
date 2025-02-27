@@ -1112,7 +1112,7 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 }
 
 func TestMdbxWithSyncBytes(t *testing.T) {
-	_, err := New(kv.TemporaryDB, log.Root()).
+	db, err := New(kv.TemporaryDB, log.Root()).
 		Path(t.TempDir()).
 		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
@@ -1125,4 +1125,5 @@ func TestMdbxWithSyncBytes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open mdbx")
 	}
+	t.Cleanup(db.Close)
 }
