@@ -108,7 +108,7 @@ type EVM struct {
 // only ever be used *once*.
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
 	if vmConfig.NoBaseFee {
-		if txCtx.GasPrice.IsZero() {
+		if txCtx.GasPrice == nil || txCtx.GasPrice.IsZero() {
 			blockCtx.BaseFee = new(uint256.Int)
 		}
 	}
