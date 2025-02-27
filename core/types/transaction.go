@@ -406,7 +406,7 @@ func (m *Message) From() libcommon.Address         { return m.from }
 func (m *Message) To() *libcommon.Address          { return m.to }
 func (m *Message) GasPrice() *uint256.Int          { return &m.gasPrice }
 func (m *Message) FeeCap() *uint256.Int            { return &m.feeCap }
-func (m *Message) Tip() *uint256.Int               { return &m.tipCap }
+func (m *Message) TipCap() *uint256.Int            { return &m.tipCap }
 func (m *Message) Value() *uint256.Int             { return &m.amount }
 func (m *Message) Gas() uint64                     { return m.gasLimit }
 func (m *Message) Nonce() uint64                   { return m.nonce }
