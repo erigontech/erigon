@@ -1,4 +1,31 @@
 ChangeLog
+## v2.61.2
+
+**Improvements:**
+* Engine API: shorter waits by @yperbasis in https://github.com/erigontech/erigon/pull/13821
+* Schedule Pectra for Chiado by @yperbasis in https://github.com/erigontech/erigon/pull/13935
+
+**Bugfixes:**
+* rpcdaemon: Don't set miner by @shohamc1 in https://github.com/erigontech/erigon/pull/13799
+
+## v2.61.1 
+
+**Breaking changes:**
+
+- Prohibit --internalcl in E2 by @yperbasis in https://github.com/erigontech/erigon/pull/13757
+
+**New Feature:**
+
+- Up to date implementation of EIPs for Pectra and scheduled hard fork for Sepolia and Holešky
+- Add support to eth_blobBaseFee, eth_baseFee and EIP4844 support to eth_feeHistory
+- Add support for `engine_getClientVersionV1`
+
+**Bugfixes:**
+
+- rpcdaemon: Set miner on eth_getBlockByNumber on Polygon by @shohamc1 in https://github.com/erigontech/erigon/pull/13336
+- Fix incorrect intrinsic gas calculation by @shohamc1 in https://github.com/erigontech/erigon/pull/13632
+
+
 ## v2.61.0
 
 **Improvements:**
