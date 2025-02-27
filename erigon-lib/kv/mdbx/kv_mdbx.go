@@ -338,6 +338,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	txsCountMutex := &sync.Mutex{}
 
+	log.Warn("[dbg] dplimit", "db", opts.label, "limit", dirtyPagesLimit*opts.pageSize.Bytes())
 	db := &MdbxKV{
 		opts:         opts,
 		env:          env,
