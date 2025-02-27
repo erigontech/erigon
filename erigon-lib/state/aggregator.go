@@ -790,6 +790,7 @@ func (ac *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) uint64 {
 	return txNumInFiles / ac.a.StepSize()
 }
 
+// TxNumsInFiles - returns minimal TxNum in files across domains in entitySet
 func (ac *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64) {
 	if len(entitySet) == 0 {
 		panic("assert: missed arguments")
