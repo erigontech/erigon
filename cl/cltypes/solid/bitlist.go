@@ -277,7 +277,7 @@ func (u *BitList) Merge(other *BitList) (*BitList, error) {
 	// union
 	unionFrom.removeMsb()
 	ret.removeMsb()
-	for i := 0; i < unionFrom.l; i++ {
+	for i := 0; i < len(unionFrom.u); i++ {
 		ret.u[i] |= unionFrom.u[i]
 	}
 	unionFrom.addMsb()
