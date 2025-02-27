@@ -101,11 +101,7 @@ func (tx *ArbitrumUnsignedTx) copy() Transaction {
 func (tx *ArbitrumUnsignedTx) Type() byte { return ArbitrumUnsignedTxType }
 
 func (tx *ArbitrumUnsignedTx) GetChainID() *uint256.Int {
-	ub, ok := uint256.FromBig(tx.ChainId)
-	if !ok {
-		panic("invalid chain id")
-	}
-	return ub
+	return uint256.MustFromBig(tx.ChainId)
 }
 
 func (tx *ArbitrumUnsignedTx) GetNonce() uint64 { return tx.Nonce }
@@ -128,17 +124,11 @@ func (tx *ArbitrumUnsignedTx) GetFeeCap() *uint256.Int {
 	return uint256.MustFromBig(tx.GasFeeCap)
 }
 
-func (tx *ArbitrumUnsignedTx) GetBlobHashes() []common.Hash {
-	//TODO implement me
-	panic("implement me")
-}
+func (tx *ArbitrumUnsignedTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
 
 func (tx *ArbitrumUnsignedTx) GetGas() uint64 { return tx.Gas }
 
-func (tx *ArbitrumUnsignedTx) GetBlobGas() uint64 {
-	//TODO implement me
-	panic("implement me")
-}
+func (tx *ArbitrumUnsignedTx) GetBlobGas() uint64 { return 0 }
 
 func (tx *ArbitrumUnsignedTx) GetValue() *uint256.Int {
 	return uint256.MustFromBig(tx.Value)
@@ -524,11 +514,7 @@ func (tx *ArbitrumContractTx) copy() *ArbitrumContractTx {
 }
 func (tx *ArbitrumContractTx) Type() byte { return ArbitrumContractTxType }
 func (tx *ArbitrumContractTx) GetChainID() *uint256.Int {
-	ub, ok := uint256.FromBig(tx.ChainId)
-	if !ok {
-		panic("invalid chain id")
-	}
-	return ub
+	return uint256.MustFromBig(tx.ChainId)
 }
 func (tx *ArbitrumContractTx) GetNonce() uint64 { return 0 }
 func (tx *ArbitrumContractTx) GetPrice() *uint256.Int {
@@ -545,16 +531,10 @@ func (tx *ArbitrumContractTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.
 func (tx *ArbitrumContractTx) GetFeeCap() *uint256.Int {
 	return uint256.MustFromBig(tx.GasFeeCap)
 }
-func (tx *ArbitrumContractTx) GetBlobHashes() []common.Hash {
-	//TODO implement me
-	panic("implement me")
-}
-func (tx *ArbitrumContractTx) GetGas() uint64 { return tx.Gas }
-func (tx *ArbitrumContractTx) GetBlobGas() uint64 {
-	//TODO implement me
-	panic("implement me")
-}
-func (tx *ArbitrumContractTx) GetData() []byte { return tx.Data }
+func (tx *ArbitrumContractTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
+func (tx *ArbitrumContractTx) GetGas() uint64               { return tx.Gas }
+func (tx *ArbitrumContractTx) GetBlobGas() uint64           { return 0 }
+func (tx *ArbitrumContractTx) GetData() []byte              { return tx.Data }
 
 func (tx *ArbitrumContractTx) GetValue() *uint256.Int {
 	return uint256.MustFromBig(tx.Value)
@@ -965,11 +945,7 @@ func (tx *ArbitrumRetryTx) copy() *ArbitrumRetryTx {
 }
 
 func (tx *ArbitrumRetryTx) GetChainID() *uint256.Int {
-	ub, ok := uint256.FromBig(tx.ChainId)
-	if !ok {
-		panic("invalid chain id")
-	}
-	return ub
+	return uint256.MustFromBig(tx.ChainId)
 }
 func (tx *ArbitrumRetryTx) GetNonce() uint64 { return tx.Nonce }
 func (tx *ArbitrumRetryTx) GetPrice() *uint256.Int {
@@ -987,13 +963,11 @@ func (tx *ArbitrumRetryTx) GetFeeCap() *uint256.Int {
 	return uint256.MustFromBig(tx.GasFeeCap)
 }
 func (tx *ArbitrumRetryTx) GetBlobHashes() []common.Hash {
-	//TODO implement me
-	panic("implement me")
+	return []common.Hash{}
 }
 func (tx *ArbitrumRetryTx) GetGas() uint64 { return tx.Gas }
 func (tx *ArbitrumRetryTx) GetBlobGas() uint64 {
-	//TODO implement me
-	panic("implement me")
+	return 0
 }
 func (tx *ArbitrumRetryTx) GetData() []byte { return tx.Data }
 func (tx *ArbitrumRetryTx) GetValue() *uint256.Int {
@@ -1476,11 +1450,7 @@ func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
 }
 
 func (tx *ArbitrumSubmitRetryableTx) GetChainID() *uint256.Int {
-	ub, ok := uint256.FromBig(tx.ChainId)
-	if !ok {
-		panic("invalid chain id")
-	}
-	return ub
+	return uint256.MustFromBig(tx.ChainId)
 }
 func (tx *ArbitrumSubmitRetryableTx) GetNonce() uint64 { return 0 }
 func (tx *ArbitrumSubmitRetryableTx) GetPrice() *uint256.Int {
@@ -1500,14 +1470,14 @@ func (tx *ArbitrumSubmitRetryableTx) GetFeeCap() *uint256.Int {
 }
 
 func (tx *ArbitrumSubmitRetryableTx) GetBlobHashes() []common.Hash {
-	//TODO implement me
-	panic("implement me")
+	return []common.Hash{}
 }
+
 func (tx *ArbitrumSubmitRetryableTx) GetGas() uint64 { return tx.Gas }
 func (tx *ArbitrumSubmitRetryableTx) GetBlobGas() uint64 {
-	//TODO implement me
-	panic("implement me")
+	return 0
 }
+
 func (tx *ArbitrumSubmitRetryableTx) GetData() []byte {
 	var retryTo common.Address
 	if tx.RetryTo != nil {
@@ -1992,11 +1962,7 @@ func (d *ArbitrumDepositTx) copy() *ArbitrumDepositTx {
 
 func (tx *ArbitrumDepositTx) Type() byte { return ArbitrumDepositTxType }
 func (tx *ArbitrumDepositTx) GetChainID() *uint256.Int {
-	ub, ok := uint256.FromBig(tx.ChainId)
-	if !ok {
-		panic("invalid chain id")
-	}
-	return ub
+	return uint256.MustFromBig(tx.ChainId)
 }
 func (tx *ArbitrumDepositTx) GetNonce() uint64             { return 0 }
 func (tx *ArbitrumDepositTx) GetPrice() *uint256.Int       { return uintZero }
@@ -2343,8 +2309,8 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
 
-		TxRunMode: MessageEthcallMode,
-		Tx:        tx,
+		// TxRunMode: MessageEthcallMode,
+		Tx: tx,
 	}
 
 	if baseFee != nil {
