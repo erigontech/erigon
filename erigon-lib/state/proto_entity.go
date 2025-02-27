@@ -252,7 +252,7 @@ func (a *ProtoEntityTx) VisibleFilesMaxNum() Num {
 func (a *ProtoEntityTx) LookupFile(entityNum Num, tx kv.Tx) (b Bytes, found bool, err error) {
 	ap := a.a
 	lastNum := a.VisibleFilesMaxNum()
-	if entityNum <= lastNum && ap.builders[0].AllowsOrdinalLookupByNum() {
+	if entityNum < lastNum && ap.builders[0].AllowsOrdinalLookupByNum() {
 		var word []byte
 		index := sort.Search(len(ap._visible), func(i int) bool {
 			return ap._visible[i].src.LastEntityNum() > uint64(entityNum)

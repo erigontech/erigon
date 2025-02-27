@@ -110,9 +110,10 @@ func TestMarked_PutToDb(t *testing.T) {
 
 	err = ma_tx.Put(num, hash, value, rwtx)
 	require.NoError(t, err)
-	returnv, err := ma_tx.Get(num, rwtx.(kv.Tx))
+	returnv, snap, err := ma_tx.Get(num, rwtx.(kv.Tx))
 	require.NoError(t, err)
 	require.Equal(t, value, returnv)
+	require.False(t, snap)
 
 	returnv, err = ma_tx.GetNc(num, hash, rwtx.(kv.Tx))
 	require.NoError(t, err)
@@ -195,8 +196,8 @@ func TestBuildFiles(t *testing.T) {
 	defer rwtx.Rollback()
 	require.NoError(t, err)
 
-	lastRootNumInSnap := ma_tx.VisibleFilesMaxRootNum()
-	err = ma_tx.Prune(ctx, lastRootNumInSnap, 1000, rwtx)
+	firstRootNumNotInSnap := ma_tx.VisibleFilesMaxRootNum()
+	err = ma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, rwtx)
 	require.NoError(t, err)
 
 	require.NoError(t, rwtx.Commit())
@@ -209,12 +210,19 @@ func TestBuildFiles(t *testing.T) {
 	// check unified interface
 	for i := range int(entries_count) {
 		num, hash, value := getData(i)
-		returnv, err := ma_tx.Get(num, rwtx)
+		returnv, snap, err := ma_tx.Get(num, rwtx)
 		require.NoError(t, err)
-		require.Equal(t, value, returnv[1:]) // headers freezer stores first byte as first byte of header hash
+
+		if num < Num(firstRootNumNotInSnap) {
+			require.True(t, snap)
+			require.Equal(t, value, returnv[1:]) // headers freezer stores first byte as first byte of header hash
+		} else {
+			require.False(t, snap)
+			require.Equal(t, value, returnv)
+		}
 
 		// just look in db....
-		if num < ma.PruneFrom() || num >= Num(lastRootNumInSnap) {
+		if num < ma.PruneFrom() || num >= Num(firstRootNumNotInSnap) {
 			// these should be in db
 			returnv, err = ma_tx.GetNc(num, hash, rwtx)
 			require.NoError(t, err)

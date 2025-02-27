@@ -183,15 +183,16 @@ type MarkedTx struct {
 	ap *Appendable[MarkedTxI]
 }
 
-func (m *MarkedTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
+func (m *MarkedTx) Get(entityNum Num, tx kv.Tx) (Bytes, bool, error) {
 	data, found, err := m.LookupFile(entityNum, tx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !found {
-		return m.getDb(entityNum, nil, tx)
+		data, err := m.getDb(entityNum, nil, tx)
+		return data, false, err
 	}
-	return data, nil
+	return data, true, nil
 }
 
 func (m *MarkedTx) getDb(entityNum Num, hash []byte, tx kv.Tx) (Bytes, error) {
@@ -239,7 +240,7 @@ func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.Rw
 	if err != nil {
 		return err
 	}
-	toKeyPrefix := a.encTs(eto - 1)
+	toKeyPrefix := a.encTs(eto)
 	if err := ae.DeleteRangeFromTbl(a.ms.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, tx); err != nil {
 		return err
 	}
@@ -267,17 +268,18 @@ type UnmarkedTx struct {
 	ap *Appendable[UnmarkedTxI]
 }
 
-func (m *UnmarkedTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
+func (m *UnmarkedTx) Get(entityNum Num, tx kv.Tx) (Bytes, bool, error) {
 	ap := m.ap
 	data, found, err := m.LookupFile(entityNum, tx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !found {
-		return tx.GetOne(ap.valsTbl, ap.encTs(entityNum))
+		data, err := tx.GetOne(ap.valsTbl, ap.encTs(entityNum))
+		return data, false, err
 	}
 
-	return data, nil
+	return data, true, nil
 }
 
 func (m *UnmarkedTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
@@ -302,7 +304,7 @@ func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
 
 	eFrom := ap.encTs(ap.pruneFrom)
-	eTo := ap.encTs(toId - 1)
+	eTo := ap.encTs(toId)
 	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 
@@ -313,16 +315,16 @@ type AppendingTx struct {
 
 // Get operates on snapshots only, it doesn't do resolution of
 // Num -> Id needed for finding canonical values in db.
-func (m *AppendingTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
+func (m *AppendingTx) Get(entityNum Num, tx kv.Tx) (Bytes, bool, error) {
 	// snapshots only
 	data, found, err := m.LookupFile(entityNum, tx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !found {
-		return nil, ErrNotFoundInSnapshot
+		return nil, false, ErrNotFoundInSnapshot
 	}
-	return data, nil
+	return data, true, nil
 }
 
 func (m *AppendingTx) GetNc(entityId Id, tx kv.Tx) (Bytes, error) {
@@ -363,7 +365,7 @@ func (m *AppendingTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv
 	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
 
 	eFrom := ap.encTs(ap.pruneFrom)
-	eTo := ap.encTs(toId - 1)
+	eTo := ap.encTs(toId)
 	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 
@@ -375,8 +377,9 @@ type BufferedTx struct {
 }
 
 // Get doesn't reflect the values currently in Buffer
-func (m *BufferedTx) Get(entityNum Num, tx kv.Tx) (Bytes, error) {
-	return tx.GetOne(m.ap.valsTbl, m.ap.encTs(entityNum))
+func (m *BufferedTx) Get(entityNum Num, tx kv.Tx) (Bytes, bool, error) {
+	data, err := tx.GetOne(m.ap.valsTbl, m.ap.encTs(entityNum))
+	return data, false, err
 }
 
 func (m *BufferedTx) Put(entityNum Num, value Bytes) error {
@@ -407,7 +410,7 @@ func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
 
 	eFrom := ap.encTs(ap.pruneFrom)
-	eTo := ap.encTs(toId - 1)
+	eTo := ap.encTs(toId)
 	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 
