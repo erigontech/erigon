@@ -1,6 +1,8 @@
 module github.com/erigontech/erigon-lib
 
-go 1.22.0
+go 1.23.0
+
+toolchain go1.24.0
 
 replace (
 	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.3-alpha-1
@@ -17,7 +19,7 @@ require (
 )
 
 require (
-	github.com/RoaringBitmap/roaring/v2 v2.4.3
+	github.com/RoaringBitmap/roaring/v2 v2.4.5
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.15.2
@@ -42,23 +44,23 @@ require (
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml/v2 v2.2.3
-	github.com/prometheus/client_golang v1.20.5
+	github.com/prometheus/client_golang v1.21.0
 	github.com/prometheus/client_model v0.6.1
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
-	github.com/shirou/gopsutil/v4 v4.24.8
+	github.com/shirou/gopsutil/v4 v4.24.9
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.10.0
 	github.com/tidwall/btree v1.6.0
 	github.com/ugorji/go/codec v1.2.12
 	go.uber.org/mock v0.5.0
-	golang.org/x/crypto v0.32.0
+	golang.org/x/crypto v0.35.0
 	golang.org/x/exp v0.0.0-20250128182459-e0ece0dbea4c
-	golang.org/x/sync v0.10.0
-	golang.org/x/sys v0.29.0
-	golang.org/x/time v0.9.0
+	golang.org/x/sync v0.11.0
+	golang.org/x/sys v0.30.0
+	golang.org/x/time v0.10.0
 	google.golang.org/grpc v1.69.4
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
-	google.golang.org/protobuf v1.36.4
+	google.golang.org/protobuf v1.36.5
 )
 
 require (
@@ -156,7 +158,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.31.0 // indirect
 	go.uber.org/goleak v1.3.0 // indirect
 	golang.org/x/net v0.34.0
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/text v0.22.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/mathutil v1.6.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
