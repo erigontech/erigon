@@ -385,6 +385,9 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 				len(committee),
 			)
 		}
+		if len(committee) < aggregationBitsLen {
+			return nil, fmt.Errorf("GetAttestingIndicies: committee is too small. committee size: %d, agg bits size: %d", len(committee), aggregationBitsLen)
+		}
 
 		attestingIndices := []uint64{}
 		for i, member := range committee {
