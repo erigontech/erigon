@@ -225,8 +225,8 @@ func (dkp DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub 
 		return nil, errors.New("blob txns not allowed in shutter")
 	}
 
-	if subGasLimit := sub.GasLimit.Uint64(); txn.GetGas() != subGasLimit {
-		return nil, fmt.Errorf("txn gas limit mismatch: txn=%d, encryptedTxnSubmission=%d", txn.GetGas(), subGasLimit)
+	if subGasLimit := sub.GasLimit.Uint64(); txn.GetGasLimit() != subGasLimit {
+		return nil, fmt.Errorf("txn gas limit mismatch: txn=%d, encryptedTxnSubmission=%d", txn.GetGasLimit(), subGasLimit)
 	}
 
 	return txn, nil

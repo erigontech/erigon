@@ -60,12 +60,11 @@ type Transaction interface {
 	Type() byte
 	GetChainID() *uint256.Int
 	GetNonce() uint64
-	GetPrice() *uint256.Int
-	GetTip() *uint256.Int
-	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
-	GetFeeCap() *uint256.Int
+	GetTipCap() *uint256.Int                              // max_priority_fee_per_gas in EIP-1559
+	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int // effective_gas_price in EIP-1559
+	GetFeeCap() *uint256.Int                              // max_fee_per_gas in EIP-1559
 	GetBlobHashes() []libcommon.Hash
-	GetGas() uint64
+	GetGasLimit() uint64
 	GetBlobGas() uint64
 	GetValue() *uint256.Int
 	GetTo() *libcommon.Address
@@ -363,7 +362,7 @@ type Message struct {
 	gasLimit         uint64
 	gasPrice         uint256.Int
 	feeCap           uint256.Int
-	tip              uint256.Int
+	tipCap           uint256.Int
 	maxFeePerBlobGas uint256.Int
 	data             []byte
 	accessList       AccessList
@@ -374,7 +373,7 @@ type Message struct {
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
-	gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
+	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
 	m := Message{
@@ -391,8 +390,8 @@ func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amo
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)
 	}
-	if tip != nil {
-		m.tip.Set(tip)
+	if tipCap != nil {
+		m.tipCap.Set(tipCap)
 	}
 	if feeCap != nil {
 		m.feeCap.Set(feeCap)
@@ -407,7 +406,7 @@ func (m *Message) From() libcommon.Address         { return m.from }
 func (m *Message) To() *libcommon.Address          { return m.to }
 func (m *Message) GasPrice() *uint256.Int          { return &m.gasPrice }
 func (m *Message) FeeCap() *uint256.Int            { return &m.feeCap }
-func (m *Message) Tip() *uint256.Int               { return &m.tip }
+func (m *Message) TipCap() *uint256.Int            { return &m.tipCap }
 func (m *Message) Value() *uint256.Int             { return &m.amount }
 func (m *Message) Gas() uint64                     { return m.gasLimit }
 func (m *Message) Nonce() uint64                   { return m.nonce }
