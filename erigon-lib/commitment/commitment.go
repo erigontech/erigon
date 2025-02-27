@@ -518,6 +518,25 @@ func (branchData BranchData) IsComplete() bool {
 	return ^touchMap&afterMap == 0
 }
 
+func (branchData BranchData) Verify(itsPrefix []byte) error {
+	if bytes.Equal(itsPrefix, []byte("state")) {
+		return nil
+	}
+
+	// most checks happen during decoding
+	_, am, cells, err := branchData.decodeCells()
+	if err != nil {
+		return err
+	}
+	if am == 0 && len(branchData) > 4 {
+		fmt.Printf("tombstone %x contains %d trailing bytes\n", itsPrefix, len(branchData)-4)
+		return fmt.Errorf("tombstone %x contains %d trailing bytes\n", itsPrefix, len(branchData)-4)
+	}
+	_ = cells
+
+	return nil
+}
+
 // MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1
 func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []byte) (BranchData, error) {
 	if branchData2 == nil {
@@ -599,22 +618,34 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 }
 
 func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*cell, err error) {
+	pos, decCount := 4, 0
+	if len(branchData) < pos {
+		return 0, 0, row, fmt.Errorf("branch is shorter than 4 bytes")
+	}
 	touchMap = binary.BigEndian.Uint16(branchData[0:])
 	afterMap = binary.BigEndian.Uint16(branchData[2:])
-	pos := 4
 	for bitset, j := touchMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		if afterMap&bit != 0 {
+			if pos >= len(branchData) {
+				return 0, 0, row, fmt.Errorf("branch ended at %d without nibble %x", nibble)
+			}
 			fields := cellFields(branchData[pos])
 			pos++
 			row[nibble] = new(cell)
 			if pos, err = row[nibble].fillFromFields(branchData, pos, fields); err != nil {
-				err = fmt.Errorf("failed to fill cell at nibble %x: %w", nibble, err)
-				return
+				return 0, 0, row, fmt.Errorf("failed to read cell at nibble %x: %w", nibble, err)
 			}
+			decCount++
 		}
 		bitset ^= bit
+	}
+	if exp := bits.OnesCount16(afterMap); exp != decCount {
+		if afterMap != touchMap && decCount == bits.OnesCount16(touchMap) {
+			return 0, 0, row, fmt.Errorf("decoded partial update for %d cells, expected %d", decCount, exp)
+		}
+		return 0, 0, row, fmt.Errorf("decoded %d cells, expected %d", decCount, exp)
 	}
 	return
 }
@@ -798,10 +829,10 @@ func (bs *BranchStat) Collect(other *BranchStat) {
 	bs.LeafHashCount += other.LeafHashCount
 }
 
-func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat {
+func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) (*BranchStat, error) {
 	stat := &BranchStat{}
 	if len(key) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	stat.KeySize = uint64(len(key))
@@ -814,7 +845,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 
 		tm, am, cells, err := BranchData(branch).decodeCells()
 		if err != nil {
-			return nil
+			return nil, err
 		}
 		stat.TAMapsSize = uint64(2 + 2) // touchMap + afterMap
 		stat.CellCount = uint64(bits.OnesCount16(tm & am))
@@ -878,7 +909,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			}
 		}
 	}
-	return stat
+	return stat, nil
 }
 
 // Defines how to evaluate commitments
