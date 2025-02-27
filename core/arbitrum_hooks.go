@@ -19,6 +19,9 @@ package core
 import (
 	"context"
 	"fmt"
+	"math/big"
+	"time"
+
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -26,8 +29,6 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"math/big"
-	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -82,6 +83,8 @@ type BlockChain interface {
 	services.FullBlockReader
 	//services.BlockAndTxnReader
 	//services.HeaderAndCanonicalReader
+
+	CurrentBlock2() (*types.Block, error)
 	ChainReader() consensus.ChainHeaderReader // may be useful more than embedding of FullBlockReader itself
 	Engine() consensus.Engine
 
@@ -167,7 +170,7 @@ type Processor interface {
 // 	return state.New(root, bc.stateCache, bc.snaps)
 // }
 
-func NewBlockChain(db kv.RwTx /*cacheConfig *CacheConfig, */, chainConfig *chain.Config, genesis *types.Genesis /* overrides *types.ChainOverrides, */, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(header *types.Header) bool, txLookupLimit *uint64) (BlockChain, error) {
+func NewBlockChain(db kv.RwDB /*cacheConfig *CacheConfig, */, chainConfig *chain.Config, genesis *types.Genesis /* overrides *types.ChainOverrides, */, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(header *types.Header) bool, txLookupLimit *uint64) (BlockChain, error) {
 	return &BlockChainArbitrum{
 		db:             db,
 		chainConfig:    chainConfig,
@@ -406,7 +409,7 @@ func NewBlockChain(db kv.RwTx /*cacheConfig *CacheConfig, */, chainConfig *chain
 // }
 
 type BlockChainArbitrum struct {
-	db             kv.RwTx
+	db             kv.RwDB
 	agg            *state2.Aggregator
 	sd             *state2.SharedDomains
 	chainConfig    *chain.Config
@@ -417,7 +420,7 @@ type BlockChainArbitrum struct {
 	//genesis *types.Genesis
 }
 
-func NewBlockChainSD(db kv.RwTx, sd *state2.SharedDomains, chainConfig *chain.Config, genesis *types.Genesis /* overrides *types.ChainOverrides, */, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(header *types.Header) bool, txLookupLimit *uint64) (BlockChain, error) {
+func NewBlockChainSD(db kv.RwDB, sd *state2.SharedDomains, chainConfig *chain.Config, genesis *types.Genesis /* overrides *types.ChainOverrides, */, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(header *types.Header) bool, txLookupLimit *uint64) (BlockChain, error) {
 	return &BlockChainArbitrum{
 		db:             db,
 		chainConfig:    chainConfig,
@@ -447,6 +450,20 @@ func (b BlockChainArbitrum) CurrentBlock(db kv.Tx) (*types.Block, error) {
 		return block, nil
 	}
 	return nil, nil
+}
+
+func (b BlockChainArbitrum) CurrentBlock2() (*types.Block, error) {
+	tx, err := b.db.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	hdr := rawdb.ReadCurrentHeader(tx)
+	if hdr == nil {
+		return nil, nil
+	}
+	return rawdb.ReadBlock(tx, hdr.Hash(), hdr.Number.Uint64()), nil
 }
 
 func (b BlockChainArbitrum) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error) {

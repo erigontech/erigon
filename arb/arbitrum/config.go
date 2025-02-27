@@ -327,18 +327,7 @@ func WriteOrTestChainConfig(tx kv.TemporalRwTx, config *chain.Config) error {
 	return rawdb.WriteChainConfig(tx, block0Hash, config)
 }
 
-func GetBlockChain(chainTx kv.TemporalRwTx, cacheConfig *CachingConfig, chainConfig *chain.Config, txLookupLimit uint64) (core.BlockChain, error) {
-	engine := arbos.Engine{
-		IsSequencer: true, // TODO
-	}
-
-	vmConfig := vm.Config{
-		//	EnablePreimageRecording: false,
-	}
-
-	return core.NewBlockChain(chainTx, chainConfig, nil, engine, vmConfig, shouldPreserveFalse, &txLookupLimit)
-}
-func GetBlockChainSD(chainTx kv.TemporalRwTx, sd *state2.SharedDomains, chainConfig *chain.Config, txLookupLimit uint64) (core.BlockChain, error) {
+func GetBlockChainSD(chainTx kv.TemporalRwDB, sd *state2.SharedDomains, chainConfig *chain.Config, txLookupLimit uint64) (core.BlockChain, error) {
 	engine := arbos.Engine{
 		IsSequencer: true, // TODO
 	}
@@ -368,7 +357,8 @@ func WriteOrTestGenesis(chainRwTx kv.TemporalRwTx, initData statetransfer.InitDa
 	return chainRwTx.Commit()
 }
 
-func WriteOrTestBlockChain(chainRwTx kv.TemporalRwTx, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, txLookupLimit uint64, accountsPerSync uint, domains *state2.SharedDomains) (core.BlockChain, error) {
+// TODO remove
+func WriteOrTestBlockChain(db kv.TemporalRwDB, initData statetransfer.InitDataReader, chainConfig *chain.Config, initMessage *arbostypes.ParsedInitMessage, txLookupLimit uint64, accountsPerSync uint, domains *state2.SharedDomains) (core.BlockChain, error) {
 	// emptyBlockChain := rawdb.ReadHeadHeader(chainRwTx) == nil
 	// if !emptyBlockChain && (cacheConfig.StateScheme == rawdb.PathScheme) {
 	// 	// When using path scheme, and the stored state trie is not empty,
@@ -377,7 +367,12 @@ func WriteOrTestBlockChain(chainRwTx kv.TemporalRwTx, initData statetransfer.Ini
 	// 	return GetBlockChain(chainRwTx, cacheConfig, chainConfig, txLookupLimit)
 	// }
 
-	err := WriteOrTestGenblock(chainRwTx, domains, initData, chainConfig, initMessage, accountsPerSync)
+	chainRwTx, err := db.BeginTemporalRw(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	err = WriteOrTestGenblock(chainRwTx, domains, initData, chainConfig, initMessage, accountsPerSync)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +380,10 @@ func WriteOrTestBlockChain(chainRwTx kv.TemporalRwTx, initData statetransfer.Ini
 	if err != nil {
 		return nil, err
 	}
-	return GetBlockChainSD(chainRwTx, domains, chainConfig, txLookupLimit)
+	if err = chainRwTx.Commit(); err != nil {
+		return nil, err
+	}
+	return GetBlockChainSD(db, domains, chainConfig, txLookupLimit)
 }
 
 // Don't preserve reorg'd out blocks

@@ -2,6 +2,7 @@ package arbitrum
 
 import (
 	"context"
+
 	"github.com/erigontech/erigon/eth/filters"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -21,7 +22,7 @@ type Backend struct {
 	stack      *node.Node
 	apiBackend *APIBackend
 	config     *Config
-	chainDb    kv.TemporalRwDB
+	chainDb    kv.TemporalRwDB // TODO questionable  if we really need db  instance
 
 	txFeed event.Feed
 	scope  event.SubscriptionScope
