@@ -102,11 +102,11 @@ Loop:
 				// this is so we do not get stuck on a side-fork
 				responses, pid, err := r.SendBlobsSidecarByIdentifierReq(ctx, req)
 				if err != nil {
-					log.Debug("RequestBlobsFrantically: error", "err", err, "peer", pid)
+					log.Trace("RequestBlobsFrantically: error", "err", err, "peer", pid)
 					return
 				}
 				if responses == nil {
-					log.Debug("RequestBlobsFrantically: response is nil", "peer", pid)
+					log.Trace("RequestBlobsFrantically: response is nil", "peer", pid)
 					return
 				}
 				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
@@ -120,7 +120,7 @@ Loop:
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-timer.C:
-			log.Debug("RequestBlobsFrantically: timeout")
+			log.Trace("RequestBlobsFrantically: timeout")
 			return nil, errors.New("timeout")
 		default:
 			if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {

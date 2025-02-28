@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -97,7 +97,7 @@ func extractHeaders(k []byte, _ []byte, next etl.ExtractNextFunc) error {
 }
 
 func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error {
-	fromB := hexutility.EncodeTs(from)
+	fromB := hexutil.EncodeTs(from)
 	if err := tx.ForEach(kv.BlockBody, fromB, func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
 		return err
 	}
@@ -108,9 +108,10 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 	); err != nil {
 		return err
 	}
-	if err := rawdb.ResetSequence(tx, kv.EthTx, 0); err != nil {
+	if err := tx.ResetSequence(kv.EthTx, 0); err != nil {
 		return err
 	}
+
 	return nil
 }
 

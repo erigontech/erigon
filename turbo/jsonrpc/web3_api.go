@@ -19,7 +19,7 @@ package jsonrpc
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon/turbo/rpchelper"
@@ -28,7 +28,7 @@ import (
 // Web3API provides interfaces for the web3_ RPC commands
 type Web3API interface {
 	ClientVersion(_ context.Context) (string, error)
-	Sha3(_ context.Context, input hexutility.Bytes) hexutility.Bytes
+	Sha3(_ context.Context, input hexutil.Bytes) hexutil.Bytes
 }
 
 type Web3APIImpl struct {
@@ -50,6 +50,6 @@ func (api *Web3APIImpl) ClientVersion(ctx context.Context) (string, error) {
 }
 
 // Sha3 implements web3_sha3. Returns Keccak-256 (not the standardized SHA3-256) of the given data.
-func (api *Web3APIImpl) Sha3(_ context.Context, input hexutility.Bytes) hexutility.Bytes {
+func (api *Web3APIImpl) Sha3(_ context.Context, input hexutil.Bytes) hexutil.Bytes {
 	return crypto.Keccak256(input)
 }

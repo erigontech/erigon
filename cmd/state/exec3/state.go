@@ -263,23 +263,16 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			}
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGas(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
+		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
-		if msg.FeeCap().IsZero() && rw.engine != nil {
-			// Only zero-gas transactions may be service ones
-			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, true /* constCall */)
-			}
-			msg.SetIsFree(rw.engine.IsServiceTransaction(msg.From(), syscall))
-		}
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
 		// MA applytx
-		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
+		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.engine)
 		if err != nil {
 			txTask.Error = err
 		} else {

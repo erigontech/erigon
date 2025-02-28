@@ -23,6 +23,5 @@ import (
 
 type TxContainer struct {
 	Tx   kv.RwTx
-	Ttx  kv.TemporalTx
 	Doms *state.SharedDomains
 }

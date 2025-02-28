@@ -543,7 +543,7 @@ func runPeer(
 		msgType := eth.ToProto[protocol][msg.Code]
 		msgCap := cap.String()
 
-		trackPeerStatistics(peerInfo.peer.Info().Name, peerInfo.peer.Info().ID, true, msgType.String(), msgCap, int(msg.Size))
+		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), true, msgType.String(), msgCap, int(msg.Size))
 
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
@@ -759,7 +759,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 
 		cap := p2p.Cap{Name: eth.ProtocolName, Version: peerInfo.protocol}
 		msgType := eth.ToProto[cap.Version][msgcode]
-		trackPeerStatistics(peerInfo.peer.Info().Name, peerInfo.peer.Info().ID, false, msgType.String(), cap.String(), len(data))
+		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgType.String(), cap.String(), len(data))
 
 		err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {

@@ -23,7 +23,6 @@ import (
 	"net"
 	"net/http"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -31,7 +30,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/go-chi/chi/v5"
-	"github.com/prysmaticlabs/go-bitfield"
 
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -45,7 +43,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -386,89 +383,89 @@ func (s *Sentinel) HasTooManyPeers() bool {
 	return active >= int(s.cfg.MaxPeerCount)
 }
 
-func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
-	ret := false
+// func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
+// 	ret := false
 
-	nodeAttnets := bitfield.NewBitvector64()
-	nodeSyncnets := bitfield.NewBitvector4()
-	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &nodeAttnets)); err != nil {
-		log.Trace("Could not load att subnet", "err", err)
-		return false
-	}
-	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &nodeSyncnets)); err != nil {
-		log.Trace("Could not load sync subnet", "err", err)
-		return false
-	}
+// 	nodeAttnets := bitfield.NewBitvector64()
+// 	nodeSyncnets := bitfield.NewBitvector4()
+// 	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &nodeAttnets)); err != nil {
+// 		log.Trace("Could not load att subnet", "err", err)
+// 		return false
+// 	}
+// 	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &nodeSyncnets)); err != nil {
+// 		log.Trace("Could not load sync subnet", "err", err)
+// 		return false
+// 	}
 
-	s.subManager.subscriptions.Range(func(key, value any) bool {
-		sub := value.(*GossipSubscription)
-		sub.lock.Lock()
-		defer sub.lock.Unlock()
-		if sub.sub == nil {
-			return true
-		}
+// 	s.subManager.subscriptions.Range(func(key, value any) bool {
+// 		sub := value.(*GossipSubscription)
+// 		sub.lock.Lock()
+// 		defer sub.lock.Unlock()
+// 		if sub.sub == nil {
+// 			return true
+// 		}
 
-		if !sub.subscribed.Load() {
-			return true
-		}
+// 		if !sub.subscribed.Load() {
+// 			return true
+// 		}
 
-		if len(sub.topic.ListPeers()) > peerSubnetTarget {
-			return true
-		}
-		if gossip.IsTopicBeaconAttestation(sub.sub.Topic()) {
-			ret = s.isPeerUsefulForAttNet(sub, nodeAttnets)
-			return !ret
-		}
+// 		if len(sub.topic.ListPeers()) > peerSubnetTarget {
+// 			return true
+// 		}
+// 		if gossip.IsTopicBeaconAttestation(sub.sub.Topic()) {
+// 			ret = s.isPeerUsefulForAttNet(sub, nodeAttnets)
+// 			return !ret
+// 		}
 
-		if gossip.IsTopicSyncCommittee(sub.sub.Topic()) {
-			ret = s.isPeerUsefulForSyncNet(sub, nodeSyncnets)
-			return !ret
-		}
+// 		if gossip.IsTopicSyncCommittee(sub.sub.Topic()) {
+// 			ret = s.isPeerUsefulForSyncNet(sub, nodeSyncnets)
+// 			return !ret
+// 		}
 
-		return true
-	})
-	return ret
-}
+// 		return true
+// 	})
+// 	return ret
+// }
 
-func (s *Sentinel) isPeerUsefulForAttNet(sub *GossipSubscription, nodeAttnets bitfield.Bitvector64) bool {
-	splitTopic := strings.Split(sub.sub.Topic(), "/")
-	if len(splitTopic) < 4 {
-		return false
-	}
-	subnetIdStr, found := strings.CutPrefix(splitTopic[3], "beacon_attestation_")
-	if !found {
-		return false
-	}
-	subnetId, err := strconv.Atoi(subnetIdStr)
-	if err != nil {
-		log.Warn("Could not parse subnet id", "subnet", subnetIdStr, "err", err)
-		return false
-	}
-	// check if subnetIdth bit is set in nodeAttnets
-	return nodeAttnets.BitAt(uint64(subnetId))
+// func (s *Sentinel) isPeerUsefulForAttNet(sub *GossipSubscription, nodeAttnets bitfield.Bitvector64) bool {
+// 	splitTopic := strings.Split(sub.sub.Topic(), "/")
+// 	if len(splitTopic) < 4 {
+// 		return false
+// 	}
+// 	subnetIdStr, found := strings.CutPrefix(splitTopic[3], "beacon_attestation_")
+// 	if !found {
+// 		return false
+// 	}
+// 	subnetId, err := strconv.Atoi(subnetIdStr)
+// 	if err != nil {
+// 		log.Warn("Could not parse subnet id", "subnet", subnetIdStr, "err", err)
+// 		return false
+// 	}
+// 	// check if subnetIdth bit is set in nodeAttnets
+// 	return nodeAttnets.BitAt(uint64(subnetId))
 
-}
+// }
 
-func (s *Sentinel) isPeerUsefulForSyncNet(sub *GossipSubscription, nodeSyncnets bitfield.Bitvector4) bool {
-	splitTopic := strings.Split(sub.sub.Topic(), "/")
-	if len(splitTopic) < 4 {
-		return false
-	}
-	syncnetIdStr, found := strings.CutPrefix(splitTopic[3], "sync_committee_")
-	if !found {
-		return false
-	}
-	syncnetId, err := strconv.Atoi(syncnetIdStr)
-	if err != nil {
-		log.Warn("Could not parse syncnet id", "syncnet", syncnetIdStr, "err", err)
-		return false
-	}
-	// check if syncnetIdth bit is set in nodeSyncnets
-	if nodeSyncnets.BitAt(uint64(syncnetId)) {
-		return true
-	}
-	return false
-}
+// func (s *Sentinel) isPeerUsefulForSyncNet(sub *GossipSubscription, nodeSyncnets bitfield.Bitvector4) bool {
+// 	splitTopic := strings.Split(sub.sub.Topic(), "/")
+// 	if len(splitTopic) < 4 {
+// 		return false
+// 	}
+// 	syncnetIdStr, found := strings.CutPrefix(splitTopic[3], "sync_committee_")
+// 	if !found {
+// 		return false
+// 	}
+// 	syncnetId, err := strconv.Atoi(syncnetIdStr)
+// 	if err != nil {
+// 		log.Warn("Could not parse syncnet id", "syncnet", syncnetIdStr, "err", err)
+// 		return false
+// 	}
+// 	// check if syncnetIdth bit is set in nodeSyncnets
+// 	if nodeSyncnets.BitAt(uint64(syncnetId)) {
+// 		return true
+// 	}
+// 	return false
+// }
 
 func (s *Sentinel) GetPeersCount() (active int, connected int, disconnected int) {
 	peers := s.host.Network().Peers()

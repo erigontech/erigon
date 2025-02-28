@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -110,7 +109,6 @@ type ApiHandler struct {
 	blsToExecutionChangeService      services.BLSToExecutionChangeService
 	proposerSlashingService          services.ProposerSlashingService
 	builderClient                    builder.BuilderClient
-	validatorsMonitor                monitor.ValidatorMonitor
 	enableMemoizedHeadState          bool
 }
 
@@ -145,7 +143,6 @@ func NewApiHandler(
 	blsToExecutionChangeService services.BLSToExecutionChangeService,
 	proposerSlashingService services.ProposerSlashingService,
 	builderClient builder.BuilderClient,
-	validatorMonitor monitor.ValidatorMonitor,
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots,
 	enableMemoizedHeadState bool,
 ) *ApiHandler {
@@ -195,7 +192,6 @@ func NewApiHandler(
 		blsToExecutionChangeService:      blsToExecutionChangeService,
 		proposerSlashingService:          proposerSlashingService,
 		builderClient:                    builderClient,
-		validatorsMonitor:                validatorMonitor,
 		enableMemoizedHeadState:          enableMemoizedHeadState,
 	}
 }
@@ -279,7 +275,7 @@ func (a *ApiHandler) init() {
 						r.Get("/bls_to_execution_changes", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolBLSExecutionChanges))
 						r.Post("/bls_to_execution_changes", a.PostEthV1BeaconPoolBlsToExecutionChanges)
 						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttestations))
-						r.Post("/attestations", a.PostEthV1BeaconPoolAttestations)
+						r.Post("/attestations", a.PostEthV1BeaconPoolAttestations) // deprecate after electra fork
 						r.Post("/sync_committees", a.PostEthV1BeaconPoolSyncCommittees)
 					})
 					r.Route("/light_client", func(r chi.Router) {
@@ -349,7 +345,7 @@ func (a *ApiHandler) init() {
 					})
 					r.Route("/pool", func(r chi.Router) {
 						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV2BeaconPoolAttestations))
-						r.Post("/attestations", a.PostEthV1BeaconPoolAttestations)                                         // reuse
+						r.Post("/attestations", a.PostEthV2BeaconPoolAttestations)
 						r.Get("/attester_slashings", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttesterSlashings)) // reuse
 						r.Post("/attester_slashings", a.PostEthV1BeaconPoolAttesterSlashings)                              // resue
 					})

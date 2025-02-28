@@ -22,7 +22,7 @@ import (
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -78,11 +78,11 @@ func (b *KZGCommitment) HashSSZ() ([32]byte, error) {
 }
 
 func (b *Blob) MarshalJSON() ([]byte, error) {
-	return json.Marshal(hexutility.Bytes(b[:]))
+	return json.Marshal(hexutil.Bytes(b[:]))
 }
 
 func (b *Blob) UnmarshalJSON(in []byte) error {
-	return hexutility.UnmarshalFixedJSON(blobT, in, b[:])
+	return hexutil.UnmarshalFixedJSON(blobT, in, b[:])
 }
 
 func (b *Blob) Clone() clonable.Clonable {

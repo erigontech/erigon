@@ -1,7 +1,7 @@
 # Erigon
 
 Documentation: **[docs.erigon.tech](https://docs.erigon.tech)**
-Blog: **[erigon.tech/news](https://erigon.tech/news/)**
+Blog: **[erigon.tech/blog](https://erigon.tech/blog/)**
 X/Twitter: **[x.com/ErigonEth](https://x.com/ErigonEth)**
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
@@ -547,7 +547,7 @@ make DIST=/opt/erigon install
 
 ### Run local devnet
 
-<code> 🔬 Detailed explanation is [here](/DEV_CHAIN.md).</code>
+<code> 🔬 Detailed explanation is [here](/docs/DEV_CHAIN.md).</code>
 
 ### Docker permissions error
 

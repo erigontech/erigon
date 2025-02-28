@@ -29,7 +29,7 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -387,7 +387,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return ""
 		}
-		return hexutility.Encode(b)
+		return hexutil.Encode(b)
 	})
 	vm.Set("toWord", func(v goja.Value) goja.Value {
 		// TODO: add test with []byte len < 32 or > 32

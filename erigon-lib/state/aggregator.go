@@ -672,11 +672,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 			}
 		}
 
-		if ok := a.mergingFiles.CompareAndSwap(false, true); !ok {
-			return
-		}
 		go func() {
-			defer a.mergingFiles.Store(false)
 			if err := a.MergeLoop(ctx); err != nil {
 				panic(err)
 			}
@@ -701,7 +697,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 		return false, nil
 	}
 
-	outs, err := aggTx.staticFilesInRange(r)
+	outs, err := aggTx.StaticFilesInRange(r)
 	defer func() {
 		if closeAll {
 			outs.Close()
@@ -729,7 +725,16 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	return true, nil
 }
 
+// TODO: merge must have own semphore
 func (a *Aggregator) MergeLoop(ctx context.Context) error {
+	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
+		return nil // currently merging or merge is prohibited
+	}
+
+	a.wg.Add(1)
+	defer a.wg.Done()
+	defer a.mergingFiles.Store(false)
+
 	for {
 		somethingMerged, err := a.mergeLoopStep(ctx, a.visibleFilesMinimaxTxNum.Load())
 		if err != nil {
@@ -1244,6 +1249,10 @@ type RangesV3 struct {
 	invertedIndex []*MergeRange
 }
 
+func NewRangesV3(domain [kv.DomainLen]DomainRanges, invertedIndex []*MergeRange) RangesV3 {
+	return RangesV3{domain: domain, invertedIndex: invertedIndex}
+}
+
 func (r RangesV3) String() string {
 	ss := []string{}
 	for _, d := range &r.domain {
@@ -1494,6 +1503,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			//we are inside own goroutine - it's fine to block here
 			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil {
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				close(fin)
 				return //nolint
 			}
 			defer a.snapshotBuildSema.Release(1)
@@ -1528,23 +1538,9 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				break
 			}
 		}
-
-		if dbg.NoMerge() {
-			close(fin)
-			return
-		}
-		if ok := a.mergingFiles.CompareAndSwap(false, true); !ok {
-			close(fin)
-			return
-		}
-		a.wg.Add(1)
 		go func() {
-			defer a.wg.Done()
-			defer a.mergingFiles.Store(false)
+			defer close(fin)
 
-			//TODO: merge must have own semphore
-
-			defer func() { close(fin) }()
 			if err := a.MergeLoop(a.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					return

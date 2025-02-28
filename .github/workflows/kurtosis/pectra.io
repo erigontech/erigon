@@ -19,4 +19,8 @@ assertoor_params:
   run_stability_check: false
   run_block_proposal_check: true
   tests:
-    - { file: "https://raw.githubusercontent.com/ethpandaops/assertoor/refs/heads/electra-support/playbooks/pectra-dev/kurtosis/all.yaml"}
+    - file: https://raw.githubusercontent.com/ethpandaops/assertoor/refs/heads/master/playbooks/pectra-dev/execution-spec-tests.yaml
+    - file: https://raw.githubusercontent.com/ethpandaops/assertoor/refs/heads/master/playbooks/pectra-dev/kurtosis/all.yaml
+    - file: https://raw.githubusercontent.com/ethpandaops/assertoor/refs/heads/master/playbooks/pectra-dev/blockhash-test-with-rpc-call.yaml
+    - file: https://raw.githubusercontent.com/ethpandaops/assertoor/refs/heads/master/playbooks/pectra-dev/eip7002-all.yaml
+    - file: https://raw.githubusercontent.com/ethpandaops/assertoor/blob/master/playbooks/pectra-dev/eip7251-all.yaml
