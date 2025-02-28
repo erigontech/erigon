@@ -40,6 +40,7 @@ type DbgLog2 struct {
 	lvl      log.Lvl
 	prefixFn func() string
 	msg      string
+	msgSet   bool
 	entries  []interface{}
 }
 
@@ -49,6 +50,7 @@ func (d *DbgLog2) Msg(msg string) *DbgLog2 {
 	}
 
 	d.msg = d.prefixFn() + msg
+	d.msgSet = true
 	return d
 }
 
@@ -64,6 +66,10 @@ func (d *DbgLog2) Entry(key string, lazyValue func() string) *DbgLog2 {
 func (d *DbgLog2) Log() {
 	if d == nil {
 		return
+	}
+
+	if !d.msgSet {
+		d.msg = d.prefixFn()
 	}
 
 	log.Log(d.lvl, d.msg, d.entries...)
