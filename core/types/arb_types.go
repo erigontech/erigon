@@ -22,6 +22,7 @@ import (
 // This also disables requiring that sender is an EOA and not a contract
 func (tx *ArbTx) SkipAccountChecks() bool {
 	// return tx.inner.skipAccountChecks()
+	return skipAccountChecks[tx.Type()]
 }
 
 var fallbackErrorMsg = "missing trie node 0000000000000000000000000000000000000000000000000000000000000000 (path ) <nil>"
@@ -56,15 +57,15 @@ var skipAccountChecks = [...]bool{
 	ArbitrumUnsignedTxType:        false,
 }
 
-func (tx *LegacyTx) skipAccountChecks() bool                  { return false }
-func (tx *AccessListTx) skipAccountChecks() bool              { return false }
-func (tx *DynamicFeeTransaction) skipAccountChecks() bool     { return false }
-func (tx *ArbitrumUnsignedTx) skipAccountChecks() bool        { return false }
-func (tx *ArbitrumContractTx) skipAccountChecks() bool        { return true }
-func (tx *ArbitrumRetryTx) skipAccountChecks() bool           { return true }
-func (tx *ArbitrumSubmitRetryableTx) skipAccountChecks() bool { return true }
-func (tx *ArbitrumDepositTx) skipAccountChecks() bool         { return true }
-func (tx *ArbitrumInternalTx) skipAccountChecks() bool        { return true }
+// func (tx *LegacyTx) skipAccountChecks() bool                  { return false }
+// func (tx *AccessListTx) skipAccountChecks() bool              { return false }
+// func (tx *DynamicFeeTransaction) skipAccountChecks() bool     { return false }
+// func (tx *ArbitrumUnsignedTx) skipAccountChecks() bool        { return false }
+// func (tx *ArbitrumContractTx) skipAccountChecks() bool        { return true }
+// func (tx *ArbitrumRetryTx) skipAccountChecks() bool           { return true }
+// func (tx *ArbitrumSubmitRetryableTx) skipAccountChecks() bool { return true }
+// func (tx *ArbitrumDepositTx) skipAccountChecks() bool         { return true }
+// func (tx *ArbitrumInternalTx) skipAccountChecks() bool        { return true }
 
 type ArbitrumUnsignedTx struct {
 	ChainId *big.Int
