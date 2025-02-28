@@ -82,12 +82,13 @@ const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 const dbLabelName = "db"
 
 type DBGauges struct { // these gauges are shared by all MDBX instances, but need to be filtered by label
-	DbSize    *metrics.GaugeVec
-	TxLimit   *metrics.GaugeVec
-	TxSpill   *metrics.GaugeVec
-	TxUnspill *metrics.GaugeVec
-	TxDirty   *metrics.GaugeVec
-	TxRetired *metrics.GaugeVec
+	DbSize        *metrics.GaugeVec
+	TxLimit       *metrics.GaugeVec
+	TxSpill       *metrics.GaugeVec
+	TxUnspill     *metrics.GaugeVec
+	TxDirty       *metrics.GaugeVec
+	TxRetired     *metrics.GaugeVec
+	UnsyncedBytes *metrics.GaugeVec
 
 	DbPgopsNewly   *metrics.GaugeVec
 	DbPgopsCow     *metrics.GaugeVec
@@ -119,6 +120,7 @@ func InitMDBXMGauges() *DBGauges {
 		TxSpill:        metrics.GetOrCreateGaugeVec(`tx_spill`, []string{dbLabelName}),
 		TxUnspill:      metrics.GetOrCreateGaugeVec(`tx_unspill`, []string{dbLabelName}),
 		TxDirty:        metrics.GetOrCreateGaugeVec(`tx_dirty`, []string{dbLabelName}),
+		UnsyncedBytes:  metrics.GetOrCreateGaugeVec(`unsynced_bytes`, []string{dbLabelName}),
 		TxRetired:      metrics.GetOrCreateGaugeVec(`tx_retired`, []string{dbLabelName}),
 		DbPgopsNewly:   metrics.GetOrCreateGaugeVec(`db_pgops{phase="newly"}`, []string{dbLabelName}),
 		DbPgopsCow:     metrics.GetOrCreateGaugeVec(`db_pgops{phase="cow"}`, []string{dbLabelName}),
