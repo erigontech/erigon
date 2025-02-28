@@ -1,17 +1,13 @@
 name: QA - TxPool performance test
 
-env:
-  DOCKERHUB_REPOSITORY: "erigontech/erigon"
-  APP_REPO: "erigontech/erigon"
-
 on:
-  push:
-    branches:
-        - main
-        - release/*
-        - docker_pectra
   workflow_call:
   workflow_dispatch:
+  # push:
+  #   branches:
+  #       - main
+  #       - release/*
+  #       - docker_pectra
 
 jobs:
   assertoor_test:
@@ -20,12 +16,6 @@ jobs:
     steps:
       - name: Fast checkout git repository
         uses: actions/checkout@v4
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
-        with:
-          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
-          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
       - name: Docker build current branch
         run: |
