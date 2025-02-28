@@ -18,6 +18,8 @@ package dbg
 
 import (
 	"context"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type debugContextKey struct{}
@@ -32,6 +34,50 @@ func Enabled(ctx context.Context) bool {
 		return false
 	}
 	return v.(bool)
+}
+
+type DbgLog2 struct {
+	lvl      log.Lvl
+	prefixFn func() string
+	msg      string
+	entries  []interface{}
+}
+
+func (d *DbgLog2) Msg(msg string) *DbgLog2 {
+	if d == nil {
+		return d
+	}
+
+	d.msg = d.prefixFn() + msg
+	return d
+}
+
+func (d *DbgLog2) Entry(key string, lazyValue func() string) *DbgLog2 {
+	if d == nil {
+		return d
+	}
+
+	d.entries = append(d.entries, key, log.Lazy{Fn: lazyValue})
+	return d
+}
+
+func (d *DbgLog2) Log() {
+	if d == nil {
+		return
+	}
+
+	log.Log(d.lvl, d.msg, d.entries...)
+}
+
+func DbgLog(ctx context.Context, level log.Lvl, lazyPrefix func() string) *DbgLog2 {
+	if !Enabled(ctx) {
+		return nil
+	}
+
+	return &DbgLog2{
+		lvl:      level,
+		prefixFn: lazyPrefix,
+	}
 }
 
 // https://stackoverflow.com/a/3561399 -> https://www.rfc-editor.org/rfc/rfc6648
