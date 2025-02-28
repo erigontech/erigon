@@ -15,6 +15,9 @@ ChangeLog
 - polygon/heimdall: fix snapshot store last entity to check in snapshots too (#13845) by @taratorio in https://github.com/erigontech/erigon/pull/13938
 - Implemented wait if heimdall is not synced to the chain (#13807) by @taratorio in https://github.com/erigontech/erigon/pull/13939
 
+Known problems:
+- polygon: `eth_getLogs` if search by filters - doesn't return state-sync (state-sync events are not indexed yet). Without filter can see state-sync events. In `eth_getReceipts` also can see. [Will](https://github.com/erigontech/erigon/issues/14003) release fixed files in E3.1
+- polygon: `eth_getLogs` state-sync events have incorrect `index` field. [Will](https://github.com/erigontech/erigon/issues/14003) release fixed files in E3.1
 
 ### TODO
 
