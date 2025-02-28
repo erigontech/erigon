@@ -21,11 +21,7 @@ import (
 // Returns true if nonce checks should be skipped based on inner's isFake()
 // This also disables requiring that sender is an EOA and not a contract
 func (tx *ArbTx) SkipAccountChecks() bool {
-	//return tx.inner.skipAccountChecks()
-	return false
-}
-
-type fallbackError struct {
+	// return tx.inner.skipAccountChecks()
 }
 
 var fallbackErrorMsg = "missing trie node 0000000000000000000000000000000000000000000000000000000000000000 (path ) <nil>"
@@ -37,6 +33,8 @@ func SetFallbackError(msg string, code int) {
 	log.Debug("setting fallback error", "msg", msg, "code", code)
 }
 
+type fallbackError struct{}
+
 func (f fallbackError) ErrorCode() int { return fallbackErrorCode }
 func (f fallbackError) Error() string  { return fallbackErrorMsg }
 
@@ -47,17 +45,26 @@ type FallbackClient interface {
 }
 
 var bigZero = big.NewInt(0)
+var uintZero = uint256.NewInt(0)
 
-func (tx *LegacyTx) skipAccountChecks() bool              { return false }
-func (tx *AccessListTx) skipAccountChecks() bool          { return false }
-func (tx *DynamicFeeTransaction) skipAccountChecks() bool { return false }
+var skipAccountChecks = [...]bool{
+	ArbitrumDepositTxType:         true,
+	ArbitrumRetryTxType:           true,
+	ArbitrumSubmitRetryableTxType: true,
+	ArbitrumInternalTxType:        true,
+	ArbitrumContractTxType:        true,
+	ArbitrumUnsignedTxType:        false,
+}
 
+func (tx *LegacyTx) skipAccountChecks() bool                  { return false }
+func (tx *AccessListTx) skipAccountChecks() bool              { return false }
+func (tx *DynamicFeeTransaction) skipAccountChecks() bool     { return false }
 func (tx *ArbitrumUnsignedTx) skipAccountChecks() bool        { return false }
 func (tx *ArbitrumContractTx) skipAccountChecks() bool        { return true }
 func (tx *ArbitrumRetryTx) skipAccountChecks() bool           { return true }
 func (tx *ArbitrumSubmitRetryableTx) skipAccountChecks() bool { return true }
-func (d *ArbitrumDepositTx) skipAccountChecks() bool          { return true }
-func (t *ArbitrumInternalTx) skipAccountChecks() bool         { return true }
+func (tx *ArbitrumDepositTx) skipAccountChecks() bool         { return true }
+func (tx *ArbitrumInternalTx) skipAccountChecks() bool        { return true }
 
 type ArbitrumUnsignedTx struct {
 	ChainId *big.Int
@@ -98,19 +105,19 @@ func (tx *ArbitrumUnsignedTx) copy() Transaction {
 	return cpy
 }
 
-func (tx *ArbitrumUnsignedTx) Type() byte { return ArbitrumUnsignedTxType }
-
-func (tx *ArbitrumUnsignedTx) GetChainID() *uint256.Int {
-	return uint256.MustFromBig(tx.ChainId)
-}
-
-func (tx *ArbitrumUnsignedTx) GetNonce() uint64 { return tx.Nonce }
-
-func (tx *ArbitrumUnsignedTx) GetPrice() *uint256.Int {
-	return uint256.MustFromBig(tx.GasFeeCap)
-}
-
-func (tx *ArbitrumUnsignedTx) GetTip() *uint256.Int { return uintZero }
+func (tx *ArbitrumUnsignedTx) Type() byte                   { return ArbitrumUnsignedTxType }
+func (tx *ArbitrumUnsignedTx) GetChainID() *uint256.Int     { return uint256.MustFromBig(tx.ChainId) }
+func (tx *ArbitrumUnsignedTx) GetNonce() uint64             { return tx.Nonce }
+func (tx *ArbitrumUnsignedTx) GetPrice() *uint256.Int       { return uint256.MustFromBig(tx.GasFeeCap) }
+func (tx *ArbitrumUnsignedTx) GetTip() *uint256.Int         { return uintZero }
+func (tx *ArbitrumUnsignedTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
+func (tx *ArbitrumUnsignedTx) GetGas() uint64               { return tx.Gas }
+func (tx *ArbitrumUnsignedTx) GetBlobGas() uint64           { return 0 }
+func (tx *ArbitrumUnsignedTx) GetValue() *uint256.Int       { return uint256.MustFromBig(tx.Value) }
+func (tx *ArbitrumUnsignedTx) GetTo() *common.Address       { return tx.To }
+func (tx *ArbitrumUnsignedTx) GetData() []byte              { return tx.Data }
+func (tx *ArbitrumUnsignedTx) GetAccessList() AccessList    { return nil }
+func (tx *ArbitrumUnsignedTx) GetFeeCap() *uint256.Int      { return uint256.MustFromBig(tx.GasFeeCap) }
 
 func (tx *ArbitrumUnsignedTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
@@ -119,22 +126,6 @@ func (tx *ArbitrumUnsignedTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.
 	res := uint256.NewInt(0)
 	return res.Set(baseFee)
 }
-
-func (tx *ArbitrumUnsignedTx) GetFeeCap() *uint256.Int {
-	return uint256.MustFromBig(tx.GasFeeCap)
-}
-
-func (tx *ArbitrumUnsignedTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
-
-func (tx *ArbitrumUnsignedTx) GetGas() uint64 { return tx.Gas }
-
-func (tx *ArbitrumUnsignedTx) GetBlobGas() uint64 { return 0 }
-
-func (tx *ArbitrumUnsignedTx) GetValue() *uint256.Int {
-	return uint256.MustFromBig(tx.Value)
-}
-
-func (tx *ArbitrumUnsignedTx) GetTo() *common.Address { return tx.To }
 
 func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
 	msg := Message{
@@ -183,19 +174,10 @@ func (tx *ArbitrumUnsignedTx) SigningHash(chainID *big.Int) common.Hash {
 	panic("implement me")
 }
 
-func (tx *ArbitrumUnsignedTx) GetData() []byte {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (tx *ArbitrumUnsignedTx) GetAccessList() AccessList { return nil }
-
 func (tx *ArbitrumUnsignedTx) Protected() bool {
 	//TODO implement me
 	panic("implement me")
 }
-
-var uintZero = uint256.NewInt(0)
 
 func (tx *ArbitrumUnsignedTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
@@ -455,8 +437,6 @@ func (tx *ArbitrumUnsignedTx) Unwrap() Transaction {
 	panic("implement me")
 }
 
-//func (tx *ArbitrumUnsignedTx) data() []byte { return tx.Data }
-
 // func (tx *ArbitrumUnsignedTx) gas() uint64         {  }
 // func (tx *ArbitrumUnsignedTx) gasPrice() *big.Int  { return tx.GasFeeCap }
 // func (tx *ArbitrumUnsignedTx) gasTipCap() *big.Int { return bigZero }
@@ -512,15 +492,20 @@ func (tx *ArbitrumContractTx) copy() *ArbitrumContractTx {
 	}
 	return cpy
 }
-func (tx *ArbitrumContractTx) Type() byte { return ArbitrumContractTxType }
-func (tx *ArbitrumContractTx) GetChainID() *uint256.Int {
-	return uint256.MustFromBig(tx.ChainId)
-}
-func (tx *ArbitrumContractTx) GetNonce() uint64 { return 0 }
-func (tx *ArbitrumContractTx) GetPrice() *uint256.Int {
-	return uint256.MustFromBig(tx.GasFeeCap)
-}
-func (tx *ArbitrumContractTx) GetTip() *uint256.Int { return uintZero }
+func (tx *ArbitrumContractTx) Type() byte                   { return ArbitrumContractTxType }
+func (tx *ArbitrumContractTx) GetChainID() *uint256.Int     { return uint256.MustFromBig(tx.ChainId) }
+func (tx *ArbitrumContractTx) GetNonce() uint64             { return 0 }
+func (tx *ArbitrumContractTx) GetPrice() *uint256.Int       { return uint256.MustFromBig(tx.GasFeeCap) }
+func (tx *ArbitrumContractTx) GetTip() *uint256.Int         { return uintZero }
+func (tx *ArbitrumContractTx) GetFeeCap() *uint256.Int      { return uint256.MustFromBig(tx.GasFeeCap) }
+func (tx *ArbitrumContractTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
+func (tx *ArbitrumContractTx) GetGas() uint64               { return tx.Gas }
+func (tx *ArbitrumContractTx) GetBlobGas() uint64           { return 0 }
+func (tx *ArbitrumContractTx) GetData() []byte              { return tx.Data }
+func (tx *ArbitrumContractTx) GetValue() *uint256.Int       { return uint256.MustFromBig(tx.Value) }
+func (tx *ArbitrumContractTx) GetTo() *common.Address       { return tx.To }
+func (tx *ArbitrumContractTx) GetAccessList() AccessList    { return nil }
+
 func (tx *ArbitrumContractTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
 		return tx.GetPrice()
@@ -528,19 +513,6 @@ func (tx *ArbitrumContractTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.
 	res := uint256.NewInt(0)
 	return res.Set(baseFee)
 }
-func (tx *ArbitrumContractTx) GetFeeCap() *uint256.Int {
-	return uint256.MustFromBig(tx.GasFeeCap)
-}
-func (tx *ArbitrumContractTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
-func (tx *ArbitrumContractTx) GetGas() uint64               { return tx.Gas }
-func (tx *ArbitrumContractTx) GetBlobGas() uint64           { return 0 }
-func (tx *ArbitrumContractTx) GetData() []byte              { return tx.Data }
-
-func (tx *ArbitrumContractTx) GetValue() *uint256.Int {
-	return uint256.MustFromBig(tx.Value)
-}
-func (tx *ArbitrumContractTx) GetTo() *common.Address    { return tx.To }
-func (tx *ArbitrumContractTx) GetAccessList() AccessList { return nil }
 func (tx *ArbitrumContractTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
 }
@@ -905,8 +877,6 @@ type ArbitrumRetryTx struct {
 	SubmissionFeeRefund *big.Int // the submission fee to refund if successful (capped by MaxRefund)
 }
 
-func (tx *ArbitrumRetryTx) Type() byte { return ArbitrumRetryTxType }
-
 func (tx *ArbitrumRetryTx) copy() *ArbitrumRetryTx {
 	cpy := &ArbitrumRetryTx{
 		ChainId:             new(big.Int),
@@ -944,14 +914,20 @@ func (tx *ArbitrumRetryTx) copy() *ArbitrumRetryTx {
 	return cpy
 }
 
-func (tx *ArbitrumRetryTx) GetChainID() *uint256.Int {
-	return uint256.MustFromBig(tx.ChainId)
-}
-func (tx *ArbitrumRetryTx) GetNonce() uint64 { return tx.Nonce }
-func (tx *ArbitrumRetryTx) GetPrice() *uint256.Int {
-	return uint256.MustFromBig(tx.GasFeeCap)
-}
-func (tx *ArbitrumRetryTx) GetTip() *uint256.Int { return uintZero }
+func (tx *ArbitrumRetryTx) Type() byte                   { return ArbitrumRetryTxType }
+func (tx *ArbitrumRetryTx) GetChainID() *uint256.Int     { return uint256.MustFromBig(tx.ChainId) }
+func (tx *ArbitrumRetryTx) GetNonce() uint64             { return tx.Nonce }
+func (tx *ArbitrumRetryTx) GetPrice() *uint256.Int       { return uint256.MustFromBig(tx.GasFeeCap) }
+func (tx *ArbitrumRetryTx) GetTip() *uint256.Int         { return uintZero }
+func (tx *ArbitrumRetryTx) GetFeeCap() *uint256.Int      { return uint256.MustFromBig(tx.GasFeeCap) }
+func (tx *ArbitrumRetryTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
+func (tx *ArbitrumRetryTx) GetGas() uint64               { return tx.Gas }
+func (tx *ArbitrumRetryTx) GetBlobGas() uint64           { return 0 }
+func (tx *ArbitrumRetryTx) GetData() []byte              { return tx.Data }
+func (tx *ArbitrumRetryTx) GetValue() *uint256.Int       { return uint256.MustFromBig(tx.Value) }
+func (tx *ArbitrumRetryTx) GetTo() *common.Address       { return tx.To }
+func (tx *ArbitrumRetryTx) GetAccessList() AccessList    { return nil }
+
 func (tx *ArbitrumRetryTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
 		return tx.GetPrice()
@@ -959,22 +935,6 @@ func (tx *ArbitrumRetryTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
 	res := uint256.NewInt(0)
 	return res.Set(baseFee)
 }
-func (tx *ArbitrumRetryTx) GetFeeCap() *uint256.Int {
-	return uint256.MustFromBig(tx.GasFeeCap)
-}
-func (tx *ArbitrumRetryTx) GetBlobHashes() []common.Hash {
-	return []common.Hash{}
-}
-func (tx *ArbitrumRetryTx) GetGas() uint64 { return tx.Gas }
-func (tx *ArbitrumRetryTx) GetBlobGas() uint64 {
-	return 0
-}
-func (tx *ArbitrumRetryTx) GetData() []byte { return tx.Data }
-func (tx *ArbitrumRetryTx) GetValue() *uint256.Int {
-	return uint256.MustFromBig(tx.Value)
-}
-func (tx *ArbitrumRetryTx) GetTo() *common.Address    { return tx.To }
-func (tx *ArbitrumRetryTx) GetAccessList() AccessList { return nil }
 func (tx *ArbitrumRetryTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
 }
@@ -1377,9 +1337,6 @@ func (tx *ArbitrumRetryTx) decode(input []byte) error {
 	return rlp.DecodeBytes(input, tx)
 }
 
-//	func (tx *ArbitrumRetryTx) rawSignatureValues() (v, r, s *big.Int) {
-//		return bigZero, bigZero, bigZero
-//	}
 func (tx *ArbitrumRetryTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 
 //func (tx *ArbitrumRetryTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
@@ -1405,8 +1362,6 @@ type ArbitrumSubmitRetryableTx struct {
 	FeeRefundAddr    common.Address
 	RetryData        []byte // contract invocation input data
 }
-
-func (tx *ArbitrumSubmitRetryableTx) Type() byte { return ArbitrumSubmitRetryableTxType }
 
 func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
 	cpy := &ArbitrumSubmitRetryableTx{
@@ -1449,33 +1404,31 @@ func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
 	return cpy
 }
 
+func (tx *ArbitrumSubmitRetryableTx) Type() byte                   { return ArbitrumSubmitRetryableTxType }
+func (tx *ArbitrumSubmitRetryableTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
+func (tx *ArbitrumSubmitRetryableTx) GetGas() uint64               { return tx.Gas }
+func (tx *ArbitrumSubmitRetryableTx) GetBlobGas() uint64           { return 0 }
+func (tx *ArbitrumSubmitRetryableTx) GetNonce() uint64             { return 0 }
+func (tx *ArbitrumSubmitRetryableTx) GetTip() *uint256.Int         { return uintZero }
+func (tx *ArbitrumSubmitRetryableTx) GetValue() *uint256.Int       { return uintZero }
+func (tx *ArbitrumSubmitRetryableTx) GetTo() *common.Address       { return &ArbRetryableTxAddress }
+func (tx *ArbitrumSubmitRetryableTx) GetAccessList() AccessList    { return nil }
 func (tx *ArbitrumSubmitRetryableTx) GetChainID() *uint256.Int {
 	return uint256.MustFromBig(tx.ChainId)
 }
-func (tx *ArbitrumSubmitRetryableTx) GetNonce() uint64 { return 0 }
 func (tx *ArbitrumSubmitRetryableTx) GetPrice() *uint256.Int {
 	return uint256.MustFromBig(tx.GasFeeCap)
 }
-func (tx *ArbitrumSubmitRetryableTx) GetTip() *uint256.Int { return uintZero }
+func (tx *ArbitrumSubmitRetryableTx) GetFeeCap() *uint256.Int {
+	return uint256.MustFromBig(tx.GasFeeCap)
+}
+
 func (tx *ArbitrumSubmitRetryableTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
 		return tx.GetPrice()
 	}
 	res := uint256.NewInt(0)
 	return res.Set(baseFee)
-}
-
-func (tx *ArbitrumSubmitRetryableTx) GetFeeCap() *uint256.Int {
-	return uint256.MustFromBig(tx.GasFeeCap)
-}
-
-func (tx *ArbitrumSubmitRetryableTx) GetBlobHashes() []common.Hash {
-	return []common.Hash{}
-}
-
-func (tx *ArbitrumSubmitRetryableTx) GetGas() uint64 { return tx.Gas }
-func (tx *ArbitrumSubmitRetryableTx) GetBlobGas() uint64 {
-	return 0
 }
 
 func (tx *ArbitrumSubmitRetryableTx) GetData() []byte {
@@ -1509,9 +1462,6 @@ func (tx *ArbitrumSubmitRetryableTx) GetData() []byte {
 	return data
 }
 
-func (tx *ArbitrumSubmitRetryableTx) GetValue() *uint256.Int    { return uintZero }
-func (tx *ArbitrumSubmitRetryableTx) GetTo() *common.Address    { return &ArbRetryableTxAddress }
-func (tx *ArbitrumSubmitRetryableTx) GetAccessList() AccessList { return nil }
 func (tx *ArbitrumSubmitRetryableTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
 }
@@ -1920,9 +1870,6 @@ func (tx *ArbitrumSubmitRetryableTx) decode(input []byte) error {
 	return rlp.DecodeBytes(input, tx)
 }
 
-//func (tx *ArbitrumSubmitRetryableTx) rawSignatureValues() (v, r, s *big.Int) {
-//	return bigZero, bigZero, bigZero
-//}
 //func (tx *ArbitrumSubmitRetryableTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //
 //func (tx *ArbitrumSubmitRetryableTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
@@ -1930,9 +1877,6 @@ func (tx *ArbitrumSubmitRetryableTx) decode(input []byte) error {
 //		return dst.Set(tx.GasFeeCap)
 //	}
 //	return dst.Set(baseFee)
-//}
-//
-//func (tx *ArbitrumSubmitRetryableTx) data() []byte {
 //}
 
 type ArbitrumDepositTx struct {
@@ -1960,10 +1904,8 @@ func (d *ArbitrumDepositTx) copy() *ArbitrumDepositTx {
 	return tx
 }
 
-func (tx *ArbitrumDepositTx) Type() byte { return ArbitrumDepositTxType }
-func (tx *ArbitrumDepositTx) GetChainID() *uint256.Int {
-	return uint256.MustFromBig(tx.ChainId)
-}
+func (tx *ArbitrumDepositTx) Type() byte                   { return ArbitrumDepositTxType }
+func (tx *ArbitrumDepositTx) GetChainID() *uint256.Int     { return uint256.MustFromBig(tx.ChainId) }
 func (tx *ArbitrumDepositTx) GetNonce() uint64             { return 0 }
 func (tx *ArbitrumDepositTx) GetPrice() *uint256.Int       { return uintZero }
 func (tx *ArbitrumDepositTx) GetTip() *uint256.Int         { return uintZero }
@@ -1979,15 +1921,6 @@ func (tx *ArbitrumDepositTx) GetAccessList() AccessList    { return nil }
 func (tx *ArbitrumDepositTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int { return uintZero }
 func (tx *ArbitrumDepositTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
-}
-
-var skipAccountChecks = [...]bool{
-	ArbitrumDepositTxType:         true,
-	ArbitrumRetryTxType:           true,
-	ArbitrumSubmitRetryableTxType: true,
-	ArbitrumInternalTxType:        true,
-	ArbitrumContractTxType:        true,
-	ArbitrumUnsignedTxType:        false,
 }
 
 func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
