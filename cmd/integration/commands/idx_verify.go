@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
@@ -126,7 +126,7 @@ var idxVerify = &cobra.Command{
 				// checks new efi lookup points to the same value
 				offset, found := targetEfiReader.TwoLayerLookup(targetK)
 				if !found {
-					log.Printf("key %v not found in efi", hexutility.Encode(targetK))
+					log.Printf("key %v not found in efi", hexutil.Encode(targetK))
 					log.Println("skipping to next file...")
 					continue F
 				}
@@ -162,14 +162,14 @@ func compareSequences(sourceK, sourceV, targetV []byte, baseTxNum uint64) bool {
 	}
 	if targetSeq.Count() > sourceEf.Count() {
 		log.Print("Optimized eliasfano is longer")
-		log.Printf("key=%s", hexutility.Encode(sourceK))
+		log.Printf("key=%s", hexutil.Encode(sourceK))
 		log.Printf("source min=%d max=%d count=%d", sourceEf.Min(), sourceEf.Max(), sourceEf.Count())
 		log.Printf("target min=%d max=%d count=%d", targetSeq.Min(), targetSeq.Max(), targetSeq.Count())
 		return false
 	}
 	if sourceEf.Count() > targetSeq.Count() {
 		log.Print("Optimized eliasfano is shorter")
-		log.Printf("key=%s", hexutility.Encode(sourceK))
+		log.Printf("key=%s", hexutil.Encode(sourceK))
 		log.Printf("source min=%d max=%d count=%d", sourceEf.Min(), sourceEf.Max(), sourceEf.Count())
 		log.Printf("target min=%d max=%d count=%d", targetSeq.Min(), targetSeq.Max(), targetSeq.Count())
 		return false
@@ -188,7 +188,7 @@ func compareSequences(sourceK, sourceV, targetV []byte, baseTxNum uint64) bool {
 		}
 		if sourceN != targetN {
 			log.Printf("values mismatch: source=%d target=%d", sourceN, targetN)
-			log.Printf("key=%s", hexutility.Encode(sourceK))
+			log.Printf("key=%s", hexutil.Encode(sourceK))
 			log.Printf("source min=%d max=%d count=%d", sourceEf.Min(), sourceEf.Max(), sourceEf.Count())
 			log.Printf("target min=%d max=%d count=%d", targetSeq.Min(), targetSeq.Max(), targetSeq.Count())
 			return false
