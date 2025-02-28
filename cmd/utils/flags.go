@@ -843,12 +843,12 @@ var (
 	CaplinMaxInboundTrafficPerPeerFlag = cli.StringFlag{
 		Name:  "caplin.max-inbound-traffic-per-peer",
 		Usage: "Max inbound traffic per second per peer",
-		Value: "256KB",
+		Value: "1MB",
 	}
 	CaplinMaxOutboundTrafficPerPeerFlag = cli.StringFlag{
 		Name:  "caplin.max-outbound-traffic-per-peer",
 		Usage: "Max outbound traffic per second per peer",
-		Value: "256KB",
+		Value: "1MB",
 	}
 	CaplinAdaptableTrafficRequirementsFlag = cli.BoolFlag{
 		Name:  "caplin.adaptable-maximum-traffic-requirements",
@@ -878,7 +878,7 @@ var (
 	CaplinMaxPeerCount = cli.Uint64Flag{
 		Name:  "caplin.max-peer-count",
 		Usage: "Max number of peers to connect",
-		Value: 80,
+		Value: 128,
 	}
 
 	SentinelAddrFlag = cli.StringFlag{
@@ -1112,6 +1112,14 @@ var (
 	ShutterP2pListenPortFlag = cli.UintFlag{
 		Name:  "shutter.p2p.listen.port",
 		Usage: "Use to override the default p2p listen port (defaults to 23102)",
+	}
+	PolygonPosSingleSlotFinalityFlag = cli.BoolFlag{
+		Name:  "polygon.pos.ssf",
+		Usage: "Enabling Polygon PoS Single Slot Finality",
+	}
+	PolygonPosSingleSlotFinalityBlockAtFlag = cli.Int64Flag{
+		Name:  "polygon.pos.ssf.block",
+		Usage: "Enabling Polygon PoS Single Slot Finality since block",
 	}
 )
 
@@ -1718,6 +1726,9 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 		nodeConfig.P2P.MaxPeers = 100
 		logger.Info("Maximum peer count default sanitizing for bor", "total", nodeConfig.P2P.MaxPeers)
 	}
+
+	cfg.PolygonPosSingleSlotFinality = ctx.Bool(PolygonPosSingleSlotFinalityFlag.Name)
+	cfg.PolygonPosSingleSlotFinalityBlockAt = ctx.Uint64(PolygonPosSingleSlotFinalityBlockAtFlag.Name)
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {

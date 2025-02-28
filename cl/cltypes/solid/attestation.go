@@ -173,8 +173,8 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 //	data: AttestationData
 //	signature: BLSSignature
 type SingleAttestation struct {
-	CommitteeIndex uint64            `json:"committee_index"`
-	AttesterIndex  uint64            `json:"attester_index"`
+	CommitteeIndex uint64            `json:"committee_index,string"`
+	AttesterIndex  uint64            `json:"attester_index,string"`
 	Data           *AttestationData  `json:"data"`
 	Signature      libcommon.Bytes96 `json:"signature"`
 }
@@ -208,6 +208,7 @@ func (s *SingleAttestation) Static() bool {
 
 func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int) *Attestation {
 	committeeBits := NewBitVector(maxCommitteesPerSlot)
+	committeeBits.SetBitAt(int(s.CommitteeIndex), true)
 	aggregationBits := NewBitList(0, aggregationBitsSizeElectra)
 	aggregationBits.SetOnBit(maxValidatorsPerCommittee*int(s.CommitteeIndex) + memberIndexInCommittee)
 	return &Attestation{
@@ -216,4 +217,8 @@ func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int) *Attestati
 		Signature:       s.Signature,
 		CommitteeBits:   committeeBits,
 	}
+}
+
+func (s *SingleAttestation) AttestationData() *AttestationData {
+	return s.Data
 }

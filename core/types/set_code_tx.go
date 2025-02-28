@@ -114,12 +114,12 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
-		gasLimit:   tx.Gas,
+		gasLimit:   tx.GasLimit,
 		gasPrice:   *tx.FeeCap,
-		tip:        *tx.Tip,
+		tipCap:     *tx.TipCap,
 		feeCap:     *tx.FeeCap,
 		to:         tx.To,
 		amount:     *tx.Value,
@@ -128,27 +128,27 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		checkNonce: true,
 	}
 	if !rules.IsPrague {
-		return msg, errors.New("SetCodeTransaction is only supported in Prague")
+		return nil, errors.New("SetCodeTransaction is only supported in Prague")
 	}
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
-			return msg, errors.New("gasPrice higher than 2^256-1")
+			return nil, errors.New("gasPrice higher than 2^256-1")
 		}
 	}
-	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
+	msg.gasPrice.Add(&msg.gasPrice, tx.TipCap)
 	if msg.gasPrice.Gt(tx.FeeCap) {
 		msg.gasPrice.Set(tx.FeeCap)
 	}
 
 	if len(tx.Authorizations) == 0 {
-		return msg, errors.New("SetCodeTransaction without authorizations is invalid")
+		return nil, errors.New("SetCodeTransaction without authorizations is invalid")
 	}
 	msg.authorizations = tx.Authorizations
 
 	var err error
 	msg.from, err = tx.Sender(s)
-	return msg, err
+	return &msg, err
 }
 
 func (tx *SetCodeTransaction) Sender(signer Signer) (libcommon.Address, error) {
@@ -172,9 +172,9 @@ func (tx *SetCodeTransaction) Hash() libcommon.Hash {
 	hash := prefixedRlpHash(SetCodeTxType, []interface{}{
 		tx.ChainID,
 		tx.Nonce,
-		tx.Tip,
+		tx.TipCap,
 		tx.FeeCap,
-		tx.Gas,
+		tx.GasLimit,
 		tx.To,
 		tx.Value,
 		tx.Data,
@@ -192,9 +192,9 @@ func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 		[]interface{}{
 			chainID,
 			tx.Nonce,
-			tx.Tip,
+			tx.TipCap,
 			tx.FeeCap,
-			tx.Gas,
+			tx.GasLimit,
 			tx.To,
 			tx.Value,
 			tx.Data,
@@ -240,12 +240,12 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
-	tx.Tip = new(uint256.Int).SetBytes(b)
+	tx.TipCap = new(uint256.Int).SetBytes(b)
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
 	tx.FeeCap = new(uint256.Int).SetBytes(b)
-	if tx.Gas, err = s.Uint(); err != nil {
+	if tx.GasLimit, err = s.Uint(); err != nil {
 		return err
 	}
 	if b, err = s.Bytes(); err != nil {
@@ -305,15 +305,15 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(tx.Tip, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.TipCap, w, b); err != nil {
 		return err
 	}
 	// encode MaxFeePerGas
 	if err := rlp.EncodeUint256(tx.FeeCap, w, b); err != nil {
 		return err
 	}
-	// encode Gas
-	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+	// encode GasLimit
+	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
 		return err
 	}
 	// encode To

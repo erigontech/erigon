@@ -54,7 +54,7 @@ func (g *genesisDB) ReadGenesisState() (*state.CachingBeaconState, error) {
 		return nil, err
 	}
 
-	decompressedEnc, err := utils.DecompressSnappy(enc)
+	decompressedEnc, err := utils.DecompressSnappy(enc, false)
 	if err != nil {
 		return nil, err
 	}

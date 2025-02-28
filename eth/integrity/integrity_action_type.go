@@ -23,9 +23,17 @@ const (
 	BlocksTxnID        Check = "BlocksTxnID"
 	InvertedIndex      Check = "InvertedIndex"
 	HistoryNoSystemTxs Check = "HistoryNoSystemTxs"
-	NoBorEventGaps     Check = "NoBorEventGaps"
+	ReceiptsNoDups     Check = "ReceiptsNoDups"
+	BorEvents          Check = "BorEvents"
+	BorSpans           Check = "BorSpans"
+	BorCheckpoints     Check = "BorCheckpoints"
+	BorMilestones      Check = "BorMilestones" // this check is informational, and we don't run it by default (e.g. gaps may exist but that is ok)
 )
 
 var AllChecks = []Check{
-	Blocks, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, NoBorEventGaps,
+	Blocks, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, ReceiptsNoDups, BorEvents, BorSpans, BorCheckpoints,
+}
+
+var NonDefaultChecks = []Check{
+	BorMilestones,
 }

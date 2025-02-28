@@ -40,7 +40,7 @@ func (s *Sentinel) msgId(pmsg *pubsubpb.Message) string {
 	// beyond Bellatrix epoch, allow 10 Mib gossip data size
 	gossipPubSubSize := s.cfg.NetworkConfig.GossipMaxSizeBellatrix
 
-	decodedData, err := utils.DecompressSnappy(pmsg.Data)
+	decodedData, err := utils.DecompressSnappy(pmsg.Data, true)
 	if err != nil || uint64(len(decodedData)) > gossipPubSubSize {
 		totalLength :=
 			len(s.cfg.NetworkConfig.MessageDomainValidSnappy) +

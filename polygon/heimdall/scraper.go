@@ -18,7 +18,6 @@ package heimdall
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -149,18 +148,10 @@ func (s *Scraper[TEntity]) RegisterObserver(observer func([]TEntity)) event.Unre
 	return s.observers.Register(observer)
 }
 
-func (s *Scraper[TEntity]) Synchronize(ctx context.Context) (TEntity, error) {
+func (s *Scraper[TEntity]) Synchronize(ctx context.Context) (TEntity, bool, error) {
 	if err := s.syncEvent.Wait(ctx); err != nil {
-		return generics.Zero[TEntity](), err
+		return generics.Zero[TEntity](), false, err
 	}
 
-	last, ok, err := s.store.LastEntity(ctx)
-	if err != nil {
-		return generics.Zero[TEntity](), err
-	}
-	if !ok {
-		return generics.Zero[TEntity](), errors.New("unexpected last entity not available")
-	}
-
-	return last, nil
+	return s.store.LastEntity(ctx)
 }

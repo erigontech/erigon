@@ -51,6 +51,12 @@ var sortableBuffersPoolForPruning = sync.Pool{
 	},
 }
 
+func sortableBufferForPruning() etl.Buffer {
+	sortableBuffer := sortableBuffersPoolForPruning.Get().(etl.Buffer)
+	sortableBuffer.Reset()
+	return sortableBuffer
+}
+
 var (
 	asserts          = dbg.EnvBool("AGG_ASSERTS", false)
 	traceFileLife    = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
@@ -1531,9 +1537,18 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		}
 		return v, v != nil, nil
 	}
-	v, _, _, err = dt.GetLatest(key, roTx)
+
+	var ok bool
+	v, _, ok, err = dt.GetLatest(key, roTx)
 	if err != nil {
 		return nil, false, err
+	}
+	if traceGetAsOf == dt.d.filenameBase {
+		if ok {
+			fmt.Printf("DomainGetAsOf(%s, %x, %d) -> found in latest state\n", dt.d.filenameBase, key, txNum)
+		} else {
+			fmt.Printf("DomainGetAsOf(%s, %x, %d) -> not found in latest state\n", dt.d.filenameBase, key, txNum)
+		}
 	}
 	return v, v != nil, nil
 }
@@ -1874,8 +1889,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 
 	var valsCursor kv.RwCursor
 
-	sortableBuffer := sortableBuffersPoolForPruning.Get().(etl.Buffer)
-	sortableBuffer.Reset()
+	sortableBuffer := sortableBufferForPruning()
 	defer sortableBuffersPoolForPruning.Put(sortableBuffer)
 
 	ancientDomainValsCollector := etl.NewCollector(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, sortableBuffer, dt.d.logger).LogLvl(log.LvlTrace)
@@ -2021,3 +2035,5 @@ func (dt *DomainRoTx) Files() (res []string) {
 	return append(res, dt.ht.Files()...)
 }
 func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
+
+func (dt *DomainRoTx) DbgMaxTxNumInDB(tx kv.Tx) uint64 { return dt.ht.iit.ii.maxTxNumInDB(tx) }

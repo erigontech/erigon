@@ -24,7 +24,7 @@ import (
 	"math/rand"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 )
 
@@ -35,16 +35,16 @@ var (
 type Bytes4 [length.Bytes4]byte
 
 // Hex converts a hash to a hex string.
-func (b Bytes4) Hex() string { return hexutility.Encode(b[:]) }
+func (b Bytes4) Hex() string { return hexutil.Encode(b[:]) }
 
 // UnmarshalJSON parses a hash in hex syntax.
 func (b *Bytes4) UnmarshalJSON(input []byte) error {
-	return hexutility.UnmarshalFixedJSON(bytes4T, input, b[:])
+	return hexutil.UnmarshalFixedJSON(bytes4T, input, b[:])
 }
 
 // UnmarshalText parses a hash in hex syntax.
 func (b *Bytes4) UnmarshalText(input []byte) error {
-	return hexutility.UnmarshalFixedText("Bytes4", input, b[:])
+	return hexutil.UnmarshalFixedText("Bytes4", input, b[:])
 }
 
 // MarshalText returns the hex representation of a.

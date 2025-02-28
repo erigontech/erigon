@@ -18,7 +18,6 @@ package solid
 
 import (
 	"encoding/json"
-	"io"
 
 	"github.com/erigontech/erigon-lib/types/clonable"
 )
@@ -109,12 +108,4 @@ func (arr *uint64VectorSSZ) Pop() uint64 {
 
 func (arr *uint64VectorSSZ) Append(uint64) {
 	panic("not implemented")
-}
-
-func (arr *uint64VectorSSZ) ReadMerkleTree(r io.Reader) error {
-	return arr.u.ReadMerkleTree(r)
-}
-
-func (arr *uint64VectorSSZ) WriteMerkleTree(w io.Writer) error {
-	return arr.u.WriteMerkleTree(w)
 }

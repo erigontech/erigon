@@ -22,12 +22,15 @@ import (
 	"math/bits"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
 	"github.com/golang/snappy"
 )
 
 var IsSysLittleEndian bool
+
+const maxDecodeLenAllowed = 15 * datasize.MB
 
 func init() {
 	buf := [2]byte{}
@@ -63,11 +66,14 @@ func Uint64ToLE(i uint64) []byte {
 	return buf
 }
 
-func DecompressSnappy(data []byte) ([]byte, error) {
+func DecompressSnappy(data []byte, lengthCheck bool) ([]byte, error) {
 	// Decode the snappy
 	lenDecoded, err := snappy.DecodedLen(data)
 	if err != nil {
 		return nil, err
+	}
+	if lengthCheck && lenDecoded > int(maxDecodeLenAllowed) {
+		return nil, errors.New("snappy: decoded length is too large")
 	}
 	decodedData := make([]byte, lenDecoded)
 

@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clstages"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -63,7 +62,6 @@ type Cfg struct {
 	sn                      *freezeblocks.CaplinSnapshots
 	blobStore               blob_storage.BlobStorage
 	attestationDataProducer attestation_producer.AttestationDataProducer
-	validatorMonitor        monitor.ValidatorMonitor
 	caplinConfig            clparams.CaplinConfig
 	hasDownloaded           bool
 }
@@ -96,7 +94,6 @@ func ClStagesCfg(
 	emitters *beaconevents.EventEmitter,
 	blobStore blob_storage.BlobStorage,
 	attestationDataProducer attestation_producer.AttestationDataProducer,
-	validatorMonitor monitor.ValidatorMonitor,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
@@ -118,7 +115,6 @@ func ClStagesCfg(
 		blobStore:               blobStore,
 		blockCollector:          block_collector.NewBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, dirs.Tmp),
 		attestationDataProducer: attestationDataProducer,
-		validatorMonitor:        validatorMonitor,
 	}
 }
 

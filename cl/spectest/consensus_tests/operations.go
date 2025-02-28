@@ -23,7 +23,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/spectest"
 
 	"github.com/erigontech/erigon/cl/clparams"

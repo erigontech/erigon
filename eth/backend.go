@@ -346,7 +346,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if err != nil {
 		return nil, err
 	}
-
 	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
 
 	backend.chainDB, err = temporal.New(rawChainDB, agg)
@@ -744,7 +743,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		)
 		contractBackend := contracts.NewDirectBackend(ethApi)
 		secondaryTxnProvider := backend.txPool
-		backend.shutterPool = shutter.NewPool(logger, config.Shutter, secondaryTxnProvider, contractBackend)
+		backend.shutterPool = shutter.NewPool(logger, config.Shutter, secondaryTxnProvider, contractBackend, backend.stateDiffClient)
 		txnProvider = backend.shutterPool
 	}
 
@@ -890,14 +889,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		for {
 			select {
 			case b := <-backend.minedBlocks:
-				// Add mined header and block body before broadcast. This is because the broadcast call
-				// will trigger the staged sync which will require headers and blocks to be available
-				// in their respective cache in the download stage. If not found, it would cause a
-				// liveness issue for the chain.
-				if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
-					logger.Error("add mined block to header downloader", "err", err)
+				if !sentryMcDisableBlockDownload {
+					// Add mined header and block body before broadcast. This is because the broadcast call
+					// will trigger the staged sync which will require headers and blocks to be available
+					// in their respective cache in the download stage. If not found, it would cause a
+					// liveness issue for the chain.
+					if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
+						logger.Error("add mined block to header downloader", "err", err)
+					}
+					backend.sentriesClient.Bd.AddToPrefetch(b.Header(), b.RawBody())
 				}
-				backend.sentriesClient.Bd.AddToPrefetch(b.Header(), b.RawBody())
 
 				//p2p
 				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
@@ -958,6 +959,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			backend.stopNode,
+			&engineAPISwitcher{backend: backend},
 		)
 		backend.syncUnwindOrder = stagedsync.PolygonSyncUnwindOrder
 		backend.syncPruneOrder = stagedsync.PolygonSyncPruneOrder
@@ -1018,7 +1020,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.chainDB, chainConfig, tmpdir, config.Sync),
 		config.InternalCL, // If the chain supports the engine API, then we should not make the server fail.
 		false,
-		config.Miner.EnabledPOS)
+		config.Miner.EnabledPOS,
+		!config.PolygonPosSingleSlotFinality,
+	)
 	backend.engineBackendRPC = engineBackendRPC
 	// If we choose not to run a consensus layer, run our embedded.
 	if config.InternalCL && (clparams.EmbeddedSupported(config.NetworkID) || config.CaplinConfig.IsDevnet()) {
@@ -1035,6 +1039,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if chainConfig.Bor != nil && config.PolygonSync {
 		backend.polygonSyncService = polygonsync.NewService(
+			config,
 			logger,
 			chainConfig,
 			polygonSyncSentry(sentries),
@@ -1045,6 +1050,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			polygonBridge,
 			heimdallService,
 			backend.notifications,
+			backend.engineBackendRPC,
 		)
 
 		// we need to initiate download before the heimdall services start rather than
@@ -1080,6 +1086,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			allBorSnapshots.SetRangeExtractor(heimdall.Events, withRangeExtractor.RangeExtractor())
 		}
 	}
+
+	go func() {
+		if err := agg.MergeLoop(ctx); err != nil {
+			logger.Error("snapashot merge loop error", "err", err)
+		}
+	}()
 
 	return backend, nil
 }
@@ -1159,7 +1171,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		}()
 	}
 
-	if chainConfig.Bor == nil {
+	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
 		go s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient)
 	}
 
@@ -1491,7 +1503,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 
 		if snConfig.PolygonSync {
 			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots, chainConfig.Bor)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots)
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots)
 		} else {
 			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots, chainConfig.Bor)
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
@@ -1581,6 +1593,7 @@ func (s *Ethereum) Start() error {
 		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Info("polygon sync goroutine terminated")
 			// when we're running in stand alone mode we need to run the downloader before we start the
 			// polygon services becuase they will wait for it to complete before opening thier stores
 			// which make use of snapshots and expect them to be initialize
@@ -1604,11 +1617,12 @@ func (s *Ethereum) Start() error {
 			}
 
 			s.logger.Error("polygon sync crashed - stopping node", "err", err)
-			stopErr := s.stopNode()
-			if stopErr != nil {
-				s.logger.Error("could not stop node", "err", stopErr)
-				err = fmt.Errorf("%w: %w", stopErr, err)
-			}
+			go func() { // call stopNode in another goroutine to avoid deadlock
+				stopErr := s.stopNode()
+				if stopErr != nil {
+					s.logger.Error("could not stop node", "err", stopErr)
+				}
+			}()
 
 			return err
 		})
@@ -1638,8 +1652,9 @@ func (s *Ethereum) Start() error {
 		// to initialize it properly.
 		// 2) we cannot propose for block 1 regardless.
 		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Info("devp2p txn pool goroutine terminated")
 			err := s.txPool.Run(s.sentryCtx)
-			if err != nil {
+			if err != nil && !errors.Is(err, context.Canceled) {
 				s.logger.Error("txPool.Run error", "err", err)
 			}
 			return err
@@ -1648,8 +1663,9 @@ func (s *Ethereum) Start() error {
 
 	if s.shutterPool != nil {
 		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Info("shutter pool goroutine terminated")
 			err := s.shutterPool.Run(s.sentryCtx)
-			if err != nil {
+			if err != nil && !errors.Is(err, context.Canceled) {
 				s.logger.Error("shutterPool.Run error", "err", err)
 			}
 			return err
@@ -1712,7 +1728,7 @@ func (s *Ethereum) Stop() error {
 	}
 
 	if err := s.bgComponentsEg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
-		s.logger.Error("bgComponentsEg.Wait error", "err", err)
+		s.logger.Error("background component error", "err", err)
 	}
 
 	return nil
@@ -1835,4 +1851,16 @@ func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.C
 
 func polygonSyncSentry(sentries []protosentry.SentryClient) protosentry.SentryClient {
 	return libsentry.NewSentryMultiplexer(sentries)
+}
+
+type engineAPISwitcher struct {
+	backend *Ethereum
+}
+
+func (e *engineAPISwitcher) SetConsuming(consuming bool) {
+	if e.backend.engineBackendRPC == nil {
+		return
+	}
+
+	e.backend.engineBackendRPC.SetConsuming(consuming)
 }

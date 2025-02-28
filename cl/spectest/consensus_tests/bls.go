@@ -31,9 +31,9 @@ func (b *BlsAggregateVerify) Run(t *testing.T, root fs.FS, c spectest.TestCase) 
 	return
 	//var meta struct {
 	//	Input struct {
-	//		Pubkeys   []hexutility.Bytes `yaml:"pubkeys"`
+	//		Pubkeys   []hexutil.Bytes `yaml:"pubkeys"`
 	//		Messages  []common.Hash      `yaml:"messages"`
-	//		Signature hexutility.Bytes   `yaml:"signature"`
+	//		Signature hexutil.Bytes   `yaml:"signature"`
 	//	} `yaml:"input"`
 	//	Output bool `yaml:"output"`
 	//}

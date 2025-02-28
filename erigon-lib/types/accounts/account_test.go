@@ -36,28 +36,28 @@ func TestEmptyAccount(t *testing.T) {
 		Incarnation: 5,
 	}
 
-	encodedAccount := make([]byte, a.EncodingLengthForStorage())
-	a.EncodeForStorage(encodedAccount)
+	encodedAccount := SerialiseV3(&a)
 
-	var decodedAccount Account
-	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
-		t.Fatal("cant decode the account", err, encodedAccount)
+	decodedAcc := Account{}
+	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
-	isAccountsEqual(t, a, decodedAccount)
+	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 }
 
 func TestEmptyAccount2(t *testing.T) {
 	t.Parallel()
-	encodedAccount := Account{}
+	emptyAcc := Account{}
 
-	b := make([]byte, encodedAccount.EncodingLengthForStorage())
-	encodedAccount.EncodeForStorage(b)
+	encodedAccount := SerialiseV3(&emptyAcc)
 
-	var decodedAccount Account
-	if err := decodedAccount.DecodeForStorage(b); err != nil {
-		t.Fatal("cant decode the account", err, encodedAccount)
+	decodedAcc := Account{}
+	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
+
+	isIncarnationEqual(t, emptyAcc.Incarnation, decodedAcc.Incarnation)
 }
 
 // fails if run package tests
@@ -66,13 +66,14 @@ func TestEmptyAccount_BufferStrangeBehaviour(t *testing.T) {
 	t.Parallel()
 	a := Account{}
 
-	encodedAccount := make([]byte, a.EncodingLengthForStorage())
-	a.EncodeForStorage(encodedAccount)
+	encodedAccount := SerialiseV3(&a)
 
-	var decodedAccount Account
-	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
-		t.Fatal("cant decode the account", err, encodedAccount)
+	decodedAcc := Account{}
+	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
+
+	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 }
 
 func TestAccountEncodeWithCode(t *testing.T) {
@@ -86,16 +87,14 @@ func TestAccountEncodeWithCode(t *testing.T) {
 		Incarnation: 4,
 	}
 
-	encodedLen := a.EncodingLengthForStorage()
-	encodedAccount := make([]byte, encodedLen)
-	a.EncodeForStorage(encodedAccount)
+	encodedAccount := SerialiseV3(&a)
 
-	var decodedAccount Account
-	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
-		t.Fatal("cant decode the account", err, encodedAccount)
+	decodedAcc := Account{}
+	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
-	isAccountsEqual(t, a, decodedAccount)
+	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 }
 
 func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
@@ -109,16 +108,14 @@ func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 		Incarnation: 5,
 	}
 
-	encodedLen := a.EncodingLengthForStorage()
-	encodedAccount := make([]byte, encodedLen)
-	a.EncodeForStorage(encodedAccount)
+	encodedAccount := SerialiseV3(&a)
 
-	var decodedAccount Account
-	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
-		t.Fatal("cant decode the account", err, encodedAccount)
+	decodedAcc := Account{}
+	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
-	isAccountsEqual(t, a, decodedAccount)
+	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 }
 
 func TestAccountEncodeWithoutCode(t *testing.T) {
@@ -132,16 +129,14 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 		Incarnation: 5,
 	}
 
-	encodedLen := a.EncodingLengthForStorage()
-	encodedAccount := make([]byte, encodedLen)
-	a.EncodeForStorage(encodedAccount)
+	encodedAccount := SerialiseV3(&a)
 
-	var decodedAccount Account
-	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
-		t.Fatal("cant decode the account", err, encodedAccount)
+	decodedAcc := Account{}
+	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
-	isAccountsEqual(t, a, decodedAccount)
+	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 }
 
 func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *testing.T) {
@@ -154,16 +149,14 @@ func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *tes
 		CodeHash:    libcommon.HexToHash("123"),
 		Incarnation: 1,
 	}
-	encodedLen := a.EncodingLengthForStorage()
-	encodedAccount := make([]byte, encodedLen)
-	a.EncodeForStorage(encodedAccount)
+	encodedAccount := SerialiseV3(&a)
 
-	var decodedAccount Account
-	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
-		t.Fatal("cant decode the account", err, encodedAccount)
+	decodedAcc := Account{}
+	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
-	isAccountsEqual(t, a, decodedAccount)
+	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 }
 func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 	t.Parallel()
@@ -173,13 +166,11 @@ func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 		Balance:     *uint256.NewInt(0),
 		Incarnation: 1,
 	}
-	encodedLen := a.EncodingLengthForStorage()
-	encodedAccount := make([]byte, encodedLen)
-	a.EncodeForStorage(encodedAccount)
+	encodedAccount := SerialiseV3(&a)
 
-	var decodedAccount Account
-	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
-		t.Fatal("cant decode the account", err, encodedAccount)
+	decodedAccount := Account{}
+	if err := DeserialiseV3(&decodedAccount, encodedAccount); err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
 	if a.Incarnation != decodedAccount.Incarnation {
@@ -226,38 +217,28 @@ func TestIncarnationForEmptyAccount(t *testing.T) {
 		Incarnation: 4,
 	}
 
-	encodedAccount := make([]byte, a.EncodingLengthForStorage())
-	a.EncodeForStorage(encodedAccount)
+	encodedAccount := SerialiseV3(&a)
 
-	if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
+	decodedAcc := Account{}
+	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
 		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
-	decodedIncarnation, err := DecodeIncarnationFromStorage(encodedAccount)
-	if err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
+	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 }
 
 func TestEmptyIncarnationForEmptyAccount2(t *testing.T) {
 	t.Parallel()
 	a := Account{}
 
-	encodedAccount := make([]byte, a.EncodingLengthForStorage())
-	a.EncodeForStorage(encodedAccount)
+	encodedAccount := SerialiseV3(&a)
 
-	if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
+	decodedAcc := Account{}
+	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
 		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
-	decodedIncarnation, err := DecodeIncarnationFromStorage(encodedAccount)
-	if err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
+	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 
 }
 
@@ -272,20 +253,14 @@ func TestIncarnationWithNonEmptyAccount(t *testing.T) {
 		Incarnation: 4,
 	}
 
-	encodedAccount := make([]byte, a.EncodingLengthForStorage())
-	a.EncodeForStorage(encodedAccount)
+	encodedAccount := SerialiseV3(&a)
 
-	if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
+	decodedAcc := Account{}
+	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
 		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
-	decodedIncarnation, err := DecodeIncarnationFromStorage(encodedAccount)
-	if err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
-
+	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 }
 
 func TestIncarnationWithNoIncarnation(t *testing.T) {
@@ -299,19 +274,14 @@ func TestIncarnationWithNoIncarnation(t *testing.T) {
 		Incarnation: 0,
 	}
 
-	encodedAccount := make([]byte, a.EncodingLengthForStorage())
-	a.EncodeForStorage(encodedAccount)
+	encodedAccount := SerialiseV3(&a)
 
-	if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
+	decodedAcc := Account{}
+	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
 		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
-	decodedIncarnation, err := DecodeIncarnationFromStorage(encodedAccount)
-	if err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
+	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 
 }
 

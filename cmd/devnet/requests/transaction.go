@@ -26,7 +26,6 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
@@ -49,11 +48,11 @@ func (reqGen *requestGenerator) EstimateGas(args ethereum.CallMsg, blockRef Bloc
 		gasPrice = &big
 	}
 
-	var tip *hexutil.Big
+	var tipCap *hexutil.Big
 
-	if args.Tip != nil {
-		big := hexutil.Big(*args.Tip.ToBig())
-		tip = &big
+	if args.TipCap != nil {
+		big := hexutil.Big(*args.TipCap.ToBig())
+		tipCap = &big
 	}
 
 	var feeCap *hexutil.Big
@@ -70,10 +69,10 @@ func (reqGen *requestGenerator) EstimateGas(args ethereum.CallMsg, blockRef Bloc
 		value = &big
 	}
 
-	var data *hexutility.Bytes
+	var data *hexutil.Bytes
 
 	if args.Data != nil {
-		bytes := hexutility.Bytes(args.Data)
+		bytes := hexutil.Bytes(args.Data)
 		data = &bytes
 	}
 
@@ -82,7 +81,7 @@ func (reqGen *requestGenerator) EstimateGas(args ethereum.CallMsg, blockRef Bloc
 		To:                   args.To,
 		Gas:                  &gas,
 		GasPrice:             gasPrice,
-		MaxPriorityFeePerGas: tip,
+		MaxPriorityFeePerGas: tipCap,
 		MaxFeePerGas:         feeCap,
 		Value:                value,
 		Data:                 data,
@@ -124,7 +123,7 @@ func (reqGen *requestGenerator) GasPrice() (*big.Int, error) {
 }
 
 func (reqGen *requestGenerator) Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error) {
-	var result hexutility.Bytes
+	var result hexutil.Bytes
 
 	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHCall, args, blockRef, overrides); err != nil {
 		return nil, err
@@ -141,7 +140,7 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (lib
 		return libcommon.Hash{}, fmt.Errorf("failed to marshal binary: %v", err)
 	}
 
-	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHSendRawTransaction, hexutility.Bytes(buf.Bytes())); err != nil {
+	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHSendRawTransaction, hexutil.Bytes(buf.Bytes())); err != nil {
 		return libcommon.Hash{}, err
 	}
 

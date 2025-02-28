@@ -1,4 +1,4 @@
-// Copyright 2021 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,30 +14,22 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package hexutility
+package crypto
 
 import (
+	"bytes"
+	"encoding/gob"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-type marshalTest struct {
-	input interface{}
-	want  string
-}
-
-var (
-	encodeBytesTests = []marshalTest{
-		{[]byte{}, "0x"},
-		{[]byte{0}, "0x00"},
-		{[]byte{0, 0, 1, 2}, "0x00000102"},
-	}
-)
-
-func TestEncode(t *testing.T) {
-	for _, test := range encodeBytesTests {
-		enc := Encode(test.input.([]byte))
-		if enc != test.want {
-			t.Errorf("input %x: wrong encoding %s", test.input, enc)
-		}
-	}
+func EnsureGobable(t *testing.T, src, dst interface{}) {
+	t.Helper()
+	buff := bytes.Buffer{}
+	err := gob.NewEncoder(&buff).Encode(src)
+	assert.NoError(t, err)
+	err = gob.NewDecoder(&buff).Decode(dst)
+	assert.NoError(t, err)
+	assert.Equal(t, src, dst)
 }

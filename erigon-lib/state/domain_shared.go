@@ -30,6 +30,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/erigontech/erigon-lib/types/accounts"
+
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/pkg/errors"
@@ -48,7 +50,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/types"
 )
 
 var ErrBehindCommitment = errors.New("behind commitment")
@@ -1226,14 +1227,18 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	u = &commitment.Update{CodeHash: commitment.EmptyCodeHashArray}
 
 	if len(encAccount) > 0 {
-		nonce, balance, chash := types.DecodeAccountBytesV3(encAccount)
+		acc := accounts.Account{}
+		err = accounts.DeserialiseV3(&acc, encAccount)
+		if err != nil {
+			return nil, err
+		}
 		u.Flags |= commitment.NonceUpdate
-		u.Nonce = nonce
+		u.Nonce = acc.Nonce
 		u.Flags |= commitment.BalanceUpdate
-		u.Balance.Set(balance)
-		if len(chash) > 0 {
+		u.Balance.Set(&acc.Balance)
+		if len(acc.CodeHash.Bytes()) > 0 {
 			u.Flags |= commitment.CodeUpdate
-			copy(u.CodeHash[:], chash)
+			copy(u.CodeHash[:], acc.CodeHash.Bytes())
 		}
 	}
 	if u.CodeHash == commitment.EmptyCodeHashArray {

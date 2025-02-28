@@ -23,7 +23,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -38,7 +37,7 @@ type AccountResult struct {
 	AccountProof []string          `json:"accountProof"`
 	Balance      *hexutil.Big      `json:"balance"`
 	CodeHash     libcommon.Hash    `json:"codeHash"`
-	Code         hexutility.Bytes  `json:"code"`
+	Code         hexutil.Bytes     `json:"code"`
 	Nonce        hexutil.Uint64    `json:"nonce"`
 	StorageHash  libcommon.Hash    `json:"storageHash"`
 	StorageProof []StorageResult   `json:"storageProof"`
@@ -50,8 +49,8 @@ type StorageResult struct {
 	Proof []string     `json:"proof"`
 }
 
-func (reqGen *requestGenerator) GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutility.Bytes, error) {
-	var result hexutility.Bytes
+func (reqGen *requestGenerator) GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error) {
+	var result hexutil.Bytes
 
 	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGetCode, address, blockRef); err != nil {
 		return nil, err

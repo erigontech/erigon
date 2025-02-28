@@ -18,7 +18,6 @@ package solid
 
 import (
 	"encoding/json"
-	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -117,12 +116,4 @@ func (h *hashVector) Range(fn func(int, libcommon.Hash, int) bool) {
 
 func (h *hashVector) Pop() libcommon.Hash {
 	panic("didnt ask, dont need it, go fuck yourself")
-}
-
-func (h *hashVector) ReadMerkleTree(r io.Reader) error {
-	return h.u.ReadMerkleTree(r)
-}
-
-func (h *hashVector) WriteMerkleTree(w io.Writer) error {
-	return h.u.WriteMerkleTree(w)
 }

@@ -506,6 +506,10 @@ type MergeRange struct {
 	to        uint64
 }
 
+func NewMergeRange(name string, needMerge bool, from uint64, to uint64) *MergeRange {
+	return &MergeRange{name: name, needMerge: needMerge, from: from, to: to}
+}
+
 func (mr *MergeRange) FromTo() (uint64, uint64) {
 	return mr.from, mr.to
 }
@@ -852,8 +856,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 	defer idxDelCursor.Close()
 
-	sortableBuffer := sortableBuffersPoolForPruning.Get().(etl.Buffer)
-	sortableBuffer.Reset()
+	sortableBuffer := sortableBufferForPruning()
 	defer sortableBuffersPoolForPruning.Put(sortableBuffer)
 
 	collector := etl.NewCollector(ii.filenameBase+".prune.ii", ii.dirs.Tmp, sortableBuffer, ii.logger)

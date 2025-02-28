@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -76,7 +75,7 @@ func (cc *ExecutionClientRpc) NewPayload(
 	payload *cltypes.Eth1Block,
 	beaconParentRoot *libcommon.Hash,
 	versionedHashes []libcommon.Hash,
-	executionRequestsList []hexutility.Bytes,
+	executionRequestsList []hexutil.Bytes,
 ) (PayloadStatus, error) {
 	if payload == nil {
 		return PayloadStatusValidated, nil

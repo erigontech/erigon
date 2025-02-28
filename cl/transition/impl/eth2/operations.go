@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 
-	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon/cl/utils/bls"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -1077,7 +1077,7 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	// Verify pubkey exists
 	vindex, exist := s.ValidatorIndexByPubkey(reqPubkey)
 	if !exist {
-		log.Warn("ProcessWithdrawalRequest: validator index not found for pubkey %v", common.Bytes2Hex(reqPubkey[:]))
+		log.Warn("ProcessWithdrawalRequest: validator index not found", "pubkey", common.Bytes2Hex(reqPubkey[:]))
 		return nil
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(vindex))
@@ -1109,6 +1109,7 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 		if pendingBalanceToWithdraw == 0 {
 			return s.InitiateValidatorExit(vindex)
 		}
+		return nil
 	}
 
 	vbalance, err := s.ValidatorBalance(int(vindex))
@@ -1267,7 +1268,7 @@ func switchToCompoundingValidator(s abstract.BeaconState, vindex uint64) error {
 	wc := validator.WithdrawalCredentials()
 	newWc := common.Hash{}
 	copy(newWc[:], wc[:])
-	newWc[0] = s.BeaconConfig().CompoundingWithdrawalPrefix
+	newWc[0] = byte(s.BeaconConfig().CompoundingWithdrawalPrefix)
 	validator.SetWithdrawalCredentials(newWc)
 	s.SetValidatorAtIndex(int(vindex), validator) // update the state
 	return state.QueueExcessActiveBalance(s, vindex, &validator)

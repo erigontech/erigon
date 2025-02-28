@@ -77,6 +77,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
+		MaxPeerCount:  8883,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
@@ -181,6 +182,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
+		MaxPeerCount:  8883,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
@@ -290,6 +292,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
+		MaxPeerCount:  8883,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()

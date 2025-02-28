@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,10 +46,12 @@ var (
 	ErrNotInCheckpointList   = errors.New("checkpontId doesn't exist in Heimdall")
 	ErrBadGateway            = errors.New("bad gateway")
 	ErrServiceUnavailable    = errors.New("service unavailable")
+	ErrCloudflareAccessNoApp = errors.New("cloudflare access - no application")
 
 	TransientErrors = []error{
 		ErrBadGateway,
 		ErrServiceUnavailable,
+		ErrCloudflareAccessNoApp,
 		context.DeadlineExceeded,
 	}
 )
@@ -121,6 +124,8 @@ const (
 	fetchStateSyncEventsFormat = "from-id=%d&to-time=%d&limit=%d"
 	fetchStateSyncEventsPath   = "clerk/event-record/list"
 	fetchStateSyncEvent        = "clerk/event-record/%s"
+
+	fetchStatus = "/status"
 
 	fetchCheckpoint                = "/checkpoints/%s"
 	fetchCheckpointCount           = "/checkpoints/count"
@@ -342,6 +347,22 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 	}
 
 	response.Result.Id = MilestoneId(number)
+
+	return &response.Result, nil
+}
+
+func (c *HttpClient) FetchStatus(ctx context.Context) (*Status, error) {
+	url, err := statusURL(c.urlString)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx = withRequestType(ctx, statusRequest)
+
+	response, err := FetchWithRetry[StatusResponse](ctx, c, url, c.logger)
+	if err != nil {
+		return nil, err
+	}
 
 	return &response.Result, nil
 }
@@ -584,6 +605,10 @@ func checkpointCountURL(urlString string) (*url.URL, error) {
 	return makeURL(urlString, fetchCheckpointCount, "")
 }
 
+func statusURL(urlString string) (*url.URL, error) {
+	return makeURL(urlString, fetchStatus, "")
+}
+
 func checkpointListURL(urlString string, page uint64, limit uint64) (*url.URL, error) {
 	return makeURL(urlString, fetchCheckpointList, fmt.Sprintf(fetchCheckpointListQueryFormat, page, limit))
 }
@@ -661,7 +686,13 @@ func internalFetch(ctx context.Context, handler httpRequestHandler, u *url.URL, 
 
 	// check status code
 	if res.StatusCode != 200 {
-		return nil, fmt.Errorf("%w: url='%s', status=%d, body='%s'", ErrNotSuccessfulResponse, u.String(), res.StatusCode, string(body))
+		cloudflareErr := regexp.MustCompile(`Error.*Cloudflare Access.*Unable to find your Access application`)
+		bodyStr := string(body)
+		if res.StatusCode == 404 && cloudflareErr.MatchString(bodyStr) {
+			return nil, fmt.Errorf("%w: url='%s', status=%d, body='%s'", ErrCloudflareAccessNoApp, u.String(), res.StatusCode, bodyStr)
+		}
+
+		return nil, fmt.Errorf("%w: url='%s', status=%d, body='%s'", ErrNotSuccessfulResponse, u.String(), res.StatusCode, bodyStr)
 	}
 
 	return body, nil

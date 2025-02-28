@@ -185,7 +185,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txTask.Error = err
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGas(), txTask.Tx.GetBlobGas())
+		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), txTask.Tx.GetBlobGas())
 		if tracer := rw.consumer.NewTracer(); tracer != nil {
 			rw.vmConfig.Debug = true
 			rw.vmConfig.Tracer = tracer
@@ -194,13 +194,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
 		msg.SetCheckNonce(!rw.vmConfig.StatelessExec)
-		if msg.FeeCap().IsZero() {
-			// Only zero-gas transactions may be service ones
-			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, true /* constCall */)
-			}
-			msg.SetIsFree(rw.execArgs.Engine.IsServiceTransaction(msg.From(), syscall))
-		}
 
 		txContext := core.NewEVMTxContext(msg)
 		if rw.vmConfig.TraceJumpDest {
@@ -209,7 +202,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
 
 		// MA applytx
-		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
+		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
 		if err != nil {
 			txTask.Error = err
 		} else {
@@ -281,9 +274,8 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 	}
 	defer tx.Rollback()
 
-	var rwsClosed bool
-	for outputTxNum.Load() <= toTxNum && !rwsClosed {
-		rwsClosed, err = rws.DrainNonBlocking(ctx)
+	for outputTxNum.Load() <= toTxNum {
+		err = rws.DrainNonBlocking(ctx)
 		if err != nil {
 			return err
 		}
@@ -296,6 +288,9 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 			outputTxNum.Store(processedTxNum)
 		}
 	}
+	//if outputTxNum.Load() != toTxNum {
+	//	return fmt.Errorf("not all txnums proceeded: toTxNum=%d, outputTxNum=%d", toTxNum, outputTxNum.Load())
+	//}
 	return nil
 }
 func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in *state.QueueWithRetry, workerCount int, rws *state.ResultsQueue, logger log.Logger) error {
@@ -333,9 +328,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 			return outputTxNum, false, txTask.Error
 		}
 
-		if txTask.TxIndex >= 0 && !txTask.Final {
-			txTask.CreateReceipt(tx)
-		}
+		txTask.CreateReceipt(tx)
 		if err := consumer.Reduce(txTask, tx); err != nil {
 			return outputTxNum, false, err
 		}
@@ -348,7 +341,6 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 }
 
 func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx context.Context, tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
-	log.Info("[Receipt] batch start", "fromBlock", fromBlock, "toBlock", toBlock, "workers", cfg.Workers)
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
 	if chainConfig.ChainName == networkname.Gnosis {
@@ -379,6 +371,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		WorkerCount = cfg.Workers
 	}
 
+	log.Info("[Receipt] batch start", "fromBlock", fromBlock, "toBlock", toBlock, "workers", cfg.Workers, "toTxNum", toTxNum)
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
 		if tx != nil && WorkerCount == 1 {
 			h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)

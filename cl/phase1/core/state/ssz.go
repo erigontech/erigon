@@ -28,7 +28,7 @@ func (b *CachingBeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	}
 	sz := metrics.NewHistTimer("encode_ssz_beacon_state_size")
 	sz.Observe(float64(len(bts)))
-	return bts, err
+	return bts, nil
 }
 
 func (b *CachingBeaconState) DecodeSSZ(buf []byte, version int) error {

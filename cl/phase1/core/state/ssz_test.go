@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	_ "embed"
 	"testing"
 
@@ -36,7 +35,7 @@ var phase0BeaconSnappyTest []byte
 
 func TestBeaconStateCapellaEncodingDecoding(t *testing.T) {
 	state := New(&clparams.MainnetBeaconConfig)
-	decodedSSZ, err := utils.DecompressSnappy(capellaBeaconSnappyTest)
+	decodedSSZ, err := utils.DecompressSnappy(capellaBeaconSnappyTest, true)
 	require.NoError(t, err)
 	require.NoError(t, state.DecodeSSZ(decodedSSZ, int(clparams.CapellaVersion)))
 	root, err := state.HashSSZ()
@@ -47,15 +46,10 @@ func TestBeaconStateCapellaEncodingDecoding(t *testing.T) {
 
 func TestBeaconStatePhase0EncodingDecoding(t *testing.T) {
 	state := New(&clparams.MainnetBeaconConfig)
-	decodedSSZ, err := utils.DecompressSnappy(phase0BeaconSnappyTest)
+	decodedSSZ, err := utils.DecompressSnappy(phase0BeaconSnappyTest, true)
 	require.NoError(t, err)
 	state.DecodeSSZ(decodedSSZ, int(clparams.Phase0Version))
 	root, err := state.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash(root), libcommon.HexToHash("0xf23b6266af40567516afeee250c1f8c06e9800f34a990a210604c380b506e053"))
-	// Lets test the caches too
-	var w bytes.Buffer
-	require.NoError(t, state.EncodeCaches(&w))
-
-	require.NoError(t, state.DecodeCaches(&w))
 }

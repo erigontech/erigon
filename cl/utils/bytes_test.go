@@ -42,7 +42,7 @@ func TestSSZSnappy(t *testing.T) {
 func TestPlainSnappy(t *testing.T) {
 	msg := common.Hex2Bytes("10103849358111387348383738784374783811111754097864786873478675489485765483936576486387645456876772090909090ff")
 	sussyEncoded := utils.CompressSnappy(msg)
-	sussyDecoded, err := utils.DecompressSnappy(sussyEncoded)
+	sussyDecoded, err := utils.DecompressSnappy(sussyEncoded, false)
 	require.NoError(t, err)
 	require.Equal(t, msg, sussyDecoded)
 }

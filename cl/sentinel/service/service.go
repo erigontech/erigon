@@ -378,7 +378,7 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	topic := pkt.TopicName
 	// If we use snappy codec then decompress it accordingly.
 	if strings.Contains(topic, sentinel.SSZSnappyCodec) {
-		data, err = utils.DecompressSnappy(data)
+		data, err = utils.DecompressSnappy(data, true)
 		if err != nil {
 			return err
 		}

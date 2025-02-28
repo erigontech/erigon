@@ -69,7 +69,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNum) && !se.cfg.vmConfig.NoReceipts && !se.isMining
 				if txTask.BlockNum > 0 && !se.skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					if err := core.BlockPostValidation(se.usedGas, se.blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, se.isMining); err != nil {
+					if err := core.BlockPostValidation(se.usedGas, se.blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
@@ -114,11 +114,26 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 
 		if !txTask.Final {
 			var receipt *types.Receipt
-			if txTask.TxIndex >= 0 && !txTask.Final {
+			if txTask.TxIndex >= 0 {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
 			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
 				return false, err
+			}
+		} else {
+			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
+				// get last receipt and store the last log index + 1
+				lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+				if len(lastReceipt.Logs) > 0 {
+					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
+					receipt := types.Receipt{
+						CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
+						FirstLogIndexWithinBlock: uint32(firstIndex),
+					}
+					if err := rawtemporaldb.AppendReceipt(se.doms, &receipt, se.blobGasUsed); err != nil {
+						return false, err
+					}
+				}
 			}
 		}
 

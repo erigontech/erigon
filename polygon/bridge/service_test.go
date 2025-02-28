@@ -169,9 +169,6 @@ func TestService(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	err = b.Synchronize(ctx, 6)
-	require.NoError(t, err)
-
 	res, err := b.Events(ctx, 2)
 	require.NoError(t, err)
 	require.Len(t, res, 0)
@@ -284,9 +281,6 @@ func TestService_Unwind(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	err = b.Synchronize(ctx, 10)
-	require.NoError(t, err)
-
 	res, err := b.Events(ctx, 4)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
@@ -386,9 +380,6 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 
 	blocks := getBlocks(t, 10)
 	err = b.ProcessNewBlocks(ctx, blocks)
-	require.NoError(t, err)
-
-	err = b.Synchronize(ctx, 10)
 	require.NoError(t, err)
 
 	return b

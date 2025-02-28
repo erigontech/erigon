@@ -242,14 +242,14 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		to = nil
 	}
 	commonTx := CommonTx{
-		Nonce: *tr.RandUint64(),
-		Gas:   *tr.RandUint64(),
-		To:    to,
-		Value: uint256.NewInt(*tr.RandUint64()), // wei amount
-		Data:  tr.RandBytes(tr.RandIntInRange(128, 1024)),
-		V:     *tr.RandUint256(),
-		R:     *tr.RandUint256(),
-		S:     *tr.RandUint256(),
+		Nonce:    *tr.RandUint64(),
+		GasLimit: *tr.RandUint64(),
+		To:       to,
+		Value:    uint256.NewInt(*tr.RandUint64()), // wei amount
+		Data:     tr.RandBytes(tr.RandIntInRange(128, 1024)),
+		V:        *tr.RandUint256(),
+		R:        *tr.RandUint256(),
+		S:        *tr.RandUint256(),
 	}
 	switch txType {
 	case LegacyTxType:
@@ -270,7 +270,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		return &DynamicFeeTransaction{
 			CommonTx:   commonTx, //nolint
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
-			Tip:        uint256.NewInt(*tr.RandUint64()),
+			TipCap:     uint256.NewInt(*tr.RandUint64()),
 			FeeCap:     uint256.NewInt(*tr.RandUint64()),
 			AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 		}
@@ -280,7 +280,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			DynamicFeeTransaction: DynamicFeeTransaction{
 				CommonTx:   commonTx, //nolint
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
-				Tip:        uint256.NewInt(*tr.RandUint64()),
+				TipCap:     uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
 				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 			},
@@ -292,7 +292,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			DynamicFeeTransaction: DynamicFeeTransaction{
 				CommonTx:   commonTx, //nolint
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
-				Tip:        uint256.NewInt(*tr.RandUint64()),
+				TipCap:     uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
 				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 			},
@@ -441,11 +441,10 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 	check(t, "Tx.Type", a.Type(), b.Type())
 	check(t, "Tx.GetChainID", a.GetChainID(), b.GetChainID())
 	check(t, "Tx.GetNonce", a.GetNonce(), b.GetNonce())
-	check(t, "Tx.GetPrice", a.GetPrice(), b.GetPrice())
-	check(t, "Tx.GetTip", a.GetTip(), b.GetTip())
+	check(t, "Tx.GetTipCap", a.GetTipCap(), b.GetTipCap())
 	check(t, "Tx.GetFeeCap", a.GetFeeCap(), b.GetFeeCap())
 	check(t, "Tx.GetBlobHashes", a.GetBlobHashes(), b.GetBlobHashes())
-	check(t, "Tx.GetGas", a.GetGas(), b.GetGas())
+	check(t, "Tx.GetGasLimit", a.GetGasLimit(), b.GetGasLimit())
 	check(t, "Tx.GetBlobGas", a.GetBlobGas(), b.GetBlobGas())
 	check(t, "Tx.GetValue", a.GetValue(), b.GetValue())
 	check(t, "Tx.GetTo", a.GetTo(), b.GetTo())

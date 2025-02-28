@@ -127,7 +127,7 @@ func TestValidatorSlashed(t *testing.T) {
 }
 
 func TestValidatorNonSlashed(t *testing.T) {
-	encoded, _ := utils.DecompressSnappy(testValidator2Snappified)
+	encoded, _ := utils.DecompressSnappy(testValidator2Snappified, false)
 	decodedValidator := solid.NewValidator()
 	require.NoError(t, decodedValidator.DecodeSSZ(encoded, 0))
 	encoded2, _ := decodedValidator.EncodeSSZ(nil)

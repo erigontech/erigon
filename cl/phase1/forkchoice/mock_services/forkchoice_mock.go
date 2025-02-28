@@ -367,11 +367,3 @@ func (f *ForkChoiceStorageMock) IsRootOptimistic(root common.Hash) bool {
 func (f *ForkChoiceStorageMock) IsHeadOptimistic() bool {
 	return false
 }
-
-func (f *ForkChoiceStorageMock) ProcessBlockConsensus(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
-	return nil
-}
-
-func (f *ForkChoiceStorageMock) ProcessBlockExecution(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
-	return nil
-}

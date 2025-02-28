@@ -23,10 +23,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 // BenchTraceCallMany compares response of Erigon with Geth
@@ -86,12 +84,12 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 		}
 
 		n := len(b.Result.Transactions)
-		from := make([]libcommon.Address, n)
-		to := make([]*libcommon.Address, n)
+		from := make([]common.Address, n)
+		to := make([]*common.Address, n)
 		gas := make([]*hexutil.Big, n)
 		gasPrice := make([]*hexutil.Big, n)
 		value := make([]*hexutil.Big, n)
-		data := make([]hexutility.Bytes, n)
+		data := make([]hexutil.Bytes, n)
 
 		for i := 0; i < n; i++ {
 			tx := b.Result.Transactions[i]

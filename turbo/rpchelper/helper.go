@@ -47,6 +47,14 @@ func (e nonCanonocalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
+type BlockNotFoundErr struct {
+	Hash libcommon.Hash
+}
+
+func (e BlockNotFoundErr) Error() string {
+	return fmt.Sprintf("block %x not found", e.Hash)
+}
+
 func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, libcommon.Hash, bool, error) {
 	bn, bh, latest, _, err := _GetBlockNumber(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, br, filters)
 	return bn, bh, latest, err
@@ -121,7 +129,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return 0, libcommon.Hash{}, false, false, err
 		}
 		if number == nil {
-			return 0, libcommon.Hash{}, false, false, fmt.Errorf("block %x not found", hash)
+			return 0, libcommon.Hash{}, false, false, BlockNotFoundErr{Hash: hash}
 		}
 		blockNumber = *number
 
