@@ -265,7 +265,7 @@ func TestPrecompiledModExpOOG(t *testing.T) {
 }
 
 func TestModExpPrecompilePotentialOutOfRange(t *testing.T) {
-	modExpContract := allPrecompiles[libcommon.BytesToAddress([]byte{0x05})]
+	modExpContract := allPrecompiles[libcommon.BytesToAddress([]byte{0xf5})]
 	hexString := "0x0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000ee"
 	input := hexutil.MustDecode(hexString)
 	maxGas := uint64(math.MaxUint64)
