@@ -46,6 +46,8 @@ jobs:
             kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             persistent_logs: "true"
 
+      # todo: save result on mongodb
+
       # - name: Run Pectra Kurtosis + assertoor tests
       #   uses: ethpandaops/kurtosis-assertoor-github-action@v1
       #   with:
