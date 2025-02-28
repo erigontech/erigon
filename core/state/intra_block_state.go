@@ -1081,6 +1081,8 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
+var Captures = map[uint64][]string{}
+
 func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr libcommon.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks) error {
 	emptyRemoval := EIP161Enabled && stateObject.empty() && (!isAura || addr != SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
@@ -1088,9 +1090,12 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
 			tracingHooks.OnBalanceChange(stateObject.address, &balance, uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)
 		}
-		if true || dbg.TraceTransactionIO && (trace || traceAccount(addr)) {
+		if dbg.TraceTransactionIO && (trace || traceAccount(addr)) {
 			fmt.Printf("%d (%d.%d) Delete Account: %x selfdestructed=%v\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed)
 		}
+		Captures[stateObject.db.blockNum] = append(Captures[stateObject.db.blockNum],
+			fmt.Sprintf("%d (%d.%d) Delete Account: %x selfdestructed=%v\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed))
+
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 			return err
 		}
@@ -1112,9 +1117,12 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 		if err := stateObject.updateTrie(stateWriter); err != nil {
 			return err
 		}
-		if true || dbg.TraceTransactionIO && (trace || traceAccount(addr)) {
+		if dbg.TraceTransactionIO && (trace || traceAccount(addr)) {
 			fmt.Printf("%d (%d.%d) Update Account Data: %x, balance=%d, nonce=%d codehash=%x\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash)
 		}
+		Captures[stateObject.db.blockNum] = append(Captures[stateObject.db.blockNum],
+			fmt.Sprintf("%d (%d.%d) Delete Account: %x selfdestructed=%v\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed))
+
 		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
 		}

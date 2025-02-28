@@ -969,6 +969,11 @@ func ExecV3(ctx context.Context,
 								for _, line := range captured {
 									fmt.Println(line)
 								}
+								fmt.Println("io")
+								for _, line := range state.Captures[applyResult.BlockNum] {
+									fmt.Println(line)
+								}
+
 								return errors.New("wrong trie root")
 							}
 						}
