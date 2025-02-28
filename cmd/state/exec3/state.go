@@ -25,7 +25,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/nitro-erigon/arbos"
+	"github.com/erigontech/nitro-erigon/arbos/arbosState"
+	"github.com/erigontech/nitro-erigon/arbos/arbostypes"
 	"github.com/erigontech/nitro-erigon/gethhook"
+	"github.com/erigontech/nitro-erigon/statetransfer"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -123,28 +126,6 @@ func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator)
 		rw.SetReader(state.NewReaderV3(rs.Domains()))
 	}
 	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
-	if rw.chainConfig.IsArbitrum() {
-		// ibsa := state.NewArbitrum(rw.ibs)
-		// accountsPerSync := uint(100000)
-		// initMessage, err := arbostypes.GetSepoliaRollupInitMessage()
-		// if err != nil {
-		// 	rw.logger.Error("Failed to get Sepolia Rollup init message", "err", err)
-		// 	return
-		// }
-
-		// initData := statetransfer.ArbosInitializationInfo{
-		// 	NextBlockNumber: 0,
-		// }
-		// initReader := statetransfer.NewMemoryInitDataReader(&initData)
-
-		// stateRoot, err := arbosState.InitializeArbosInDatabase(ibsa, rw.rs.Domains(), initReader, rw.chainConfig, initMessage, rw.evm.Context.Time, accountsPerSync)
-		// if err != nil {
-		// 	rw.logger.Error("Failed to init ArbOS", "err", err)
-		// 	return
-		// }
-		// _ = stateRoot
-		// rw.logger.Info("ArbOS initialized", "stateRoot", stateRoot) // todo this produces invalid state isnt it?
-	}
 }
 
 func (rw *Worker) Tx() kv.TemporalTx { return rw.chainTx }
@@ -256,6 +237,28 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			}
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{}
+
+			if rw.chainConfig.IsArbitrum() {
+				ibsa := state.NewArbitrum(rw.ibs)
+				accountsPerSync := uint(100000) // const for sep-rollup
+				initMessage, err := arbostypes.GetSepoliaRollupInitMessage()
+				if err != nil {
+					rw.logger.Error("Failed to get Sepolia Rollup init message", "err", err)
+					return
+				}
+
+				initData := statetransfer.ArbosInitializationInfo{
+					NextBlockNumber: 0,
+				}
+				initReader := statetransfer.NewMemoryInitDataReader(&initData)
+				stateRoot, err := arbosState.InitializeArbosInDatabase(ibsa, rw.rs.Domains(), initReader, rw.chainConfig, initMessage, rw.evm.Context.Time, accountsPerSync)
+				if err != nil {
+					rw.logger.Error("Failed to init ArbOS", "err", err)
+					return
+				}
+				_ = stateRoot
+				rw.logger.Info("ArbOS initialized", "stateRoot", stateRoot) // todo this produces invalid state isnt it?
+			}
 			break
 		}
 
