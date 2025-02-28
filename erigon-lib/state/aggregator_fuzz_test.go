@@ -21,9 +21,10 @@ package state
 import (
 	"context"
 	"encoding/binary"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common"

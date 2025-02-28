@@ -20,11 +20,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/state"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/big"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/state"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
