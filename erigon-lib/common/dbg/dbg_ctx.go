@@ -103,8 +103,12 @@ func NewConditionalLogger(logger log.Logger, condition func() bool) ConditionalL
 	}
 }
 
-func (c ConditionalLogger) CLog(level log.Lvl, lazyPrefix func() string) *dbgLog {
+func (c ConditionalLogger) CLog2(level log.Lvl, lazyPrefix func() string) *dbgLog {
 	return ConditionalLog(c.condition(), level, lazyPrefix, c.Logger)
+}
+
+func (c *ConditionalLogger) CLog(level log.Lvl, lazyMsg func() string) {
+	ConditionalLog(c.condition(), level, lazyMsg, c.Logger).Log()
 }
 
 // https://stackoverflow.com/a/3561399 -> https://www.rfc-editor.org/rfc/rfc6648
