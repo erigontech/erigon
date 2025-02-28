@@ -467,9 +467,9 @@ func (d *Domain) Close() {
 
 func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevStep uint64) error {
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
-	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
-		fmt.Printf("PutWithPrev(%s, txn %d, key[%x][%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, w.h.ii.txNum, key1, key2, val, preval)
-	}
+	w.logger.CLog(log.LvlInfo, func() string {
+		return fmt.Sprintf("PutWithPrev(%s, txn %d, key[%x][%x] value[%x] preval[%x])", w.h.ii.filenameBase, w.h.ii.txNum, key1, key2, val, preval)
+	}).Log()
 	if err := w.h.AddPrevValue(key1, key2, preval, prevStep); err != nil {
 		return err
 	}
@@ -511,6 +511,9 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWrit
 
 		h: dt.ht.newWriter(tmpdir, discardHistory),
 	}
+	w.logger = dbg.NewConditionalLogger(dt.d.logger, func() bool {
+		return tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase
+	})
 	w.values.SortAndFlushInBackground(true)
 	return w
 }
@@ -529,7 +532,8 @@ type domainBufferedWriter struct {
 	aux2      []byte  // auxilary buffer for step + val
 	diff      *StateDiffDomain
 
-	h *historyBufferedWriter
+	h      *historyBufferedWriter
+	logger dbg.ConditionalLogger
 }
 
 func (w *domainBufferedWriter) close() {

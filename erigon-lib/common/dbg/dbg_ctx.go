@@ -42,6 +42,7 @@ type DbgLog2 struct {
 	msg      string
 	msgSet   bool
 	entries  []interface{}
+	logger   log.Logger
 }
 
 func (d *DbgLog2) Msg(msg string) *DbgLog2 {
@@ -72,21 +73,38 @@ func (d *DbgLog2) Log() {
 		d.msg = d.prefixFn()
 	}
 
-	log.Log(d.lvl, d.msg, d.entries...)
+	d.logger.Log(d.lvl, d.msg, d.entries...)
 }
 
 func DbgLog(ctx context.Context, level log.Lvl, lazyPrefix func() string) *DbgLog2 {
-	return ConditionalLog(Enabled(ctx), level, lazyPrefix)
+	return ConditionalLog(Enabled(ctx), level, lazyPrefix, log.Root())
 }
 
-func ConditionalLog(evaluation bool, level log.Lvl, lazyPrefix func() string) *DbgLog2 {
+func ConditionalLog(evaluation bool, level log.Lvl, lazyPrefix func() string, logger log.Logger) *DbgLog2 {
 	if !evaluation {
 		return nil
 	}
 	return &DbgLog2{
 		lvl:      level,
 		prefixFn: lazyPrefix,
+		logger:   logger,
 	}
+}
+
+type ConditionalLogger struct {
+	log.Logger
+	condition func() bool
+}
+
+func NewConditionalLogger(logger log.Logger, condition func() bool) ConditionalLogger {
+	return ConditionalLogger{
+		Logger:    logger,
+		condition: condition,
+	}
+}
+
+func (c ConditionalLogger) CLog(level log.Lvl, lazyPrefix func() string) *DbgLog2 {
+	return ConditionalLog(c.condition(), level, lazyPrefix, c.Logger)
 }
 
 // https://stackoverflow.com/a/3561399 -> https://www.rfc-editor.org/rfc/rfc6648
