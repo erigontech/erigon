@@ -192,6 +192,14 @@ func (m *MarkedTx) Get(entityNum Num, tx kv.Tx) (Bytes, bool, error) {
 		data, err := m.getDb(entityNum, nil, tx)
 		return data, false, err
 	}
+
+	switch m.ap.a.Name() {
+	case "headers":
+		// remove the first byte; it's first byte of header hash
+		// we should ultimately remove this first byte...as it's an old implementation of
+		// LessFalsePositives=True
+		data = data[1:]
+	}
 	return data, true, nil
 }
 

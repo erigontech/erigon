@@ -213,13 +213,8 @@ func TestBuildFiles(t *testing.T) {
 		returnv, snap, err := ma_tx.Get(num, rwtx)
 		require.NoError(t, err)
 
-		if num < Num(firstRootNumNotInSnap) {
-			require.True(t, snap)
-			require.Equal(t, value, returnv[1:]) // headers freezer stores first byte as first byte of header hash
-		} else {
-			require.False(t, snap)
-			require.Equal(t, value, returnv)
-		}
+		require.True(t, snap == (num < Num(firstRootNumNotInSnap)))
+		require.Equal(t, value, returnv)
 
 		// just look in db....
 		if num < ma.PruneFrom() || num >= Num(firstRootNumNotInSnap) {
