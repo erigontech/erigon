@@ -71,6 +71,8 @@ func TestMultiEncSeq(t *testing.T) {
 }
 
 func requireSequenceChecks(t *testing.T, s *SequenceReader) {
+	t.Helper()
+
 	require.Equal(t, uint64(1000), s.Min())
 	require.Equal(t, uint64(1027), s.Max())
 	require.Equal(t, uint64(3), s.Count())
@@ -170,6 +172,8 @@ func requireSequenceChecks(t *testing.T, s *SequenceReader) {
 }
 
 func requireRawDataChecks(t *testing.T, b []byte) {
+	t.Helper()
+
 	// check fast count
 	require.Equal(t, uint64(3), Count(1000, b))
 
