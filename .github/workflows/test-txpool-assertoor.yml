@@ -1,4 +1,4 @@
-name: Kurtosis Assertoor GitHub Action
+name: QA - TxPool performance tes
 
 env:
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
@@ -36,6 +36,7 @@ jobs:
           git clone https://github.com/noku-team/assertoor.git
           cd assertoor
           docker build -t test/assertoor:current
+          cd ..
 
       - name: Run regular Kurtosis + assertoor tests
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
