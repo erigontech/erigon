@@ -57,10 +57,10 @@ func txDeferRollback(m dsl.Matcher) {
 		`$tx, $err := $db.BeginRwNosync($ctx); $chk; $rollback`,
 		`$tx, $err = $db.BeginRwNosync($ctx); $chk; $rollback`,
 	).
-		Where(!m["rollback"].Text.Matches(`defer .*\.Rollback()`)).
+		Where(!m["rollback"].Text.Contains("defer ")).
 		//At(m["rollback"]).
 		Report(`Add "defer $tx.Rollback()" right after transaction creation error check. 
-			If you are in the loop - consider use "$db.View" or "$db.Update" or extract whole transaction to function.
+			If you are in the loop - consider using "$db.View" or "$db.Update" or extract whole transaction to function.
 			Without rollback in defer - app can deadlock on error or panic.
 			Rules are in ./rules.go file.
 			`)
@@ -126,12 +126,12 @@ func mismatchingUnlock(m dsl.Matcher) {
 	m.Match(`$mu.Lock(); defer $mu.$unlock()`).
 		Where(m["unlock"].Text == "RUnlock").
 		At(m["unlock"]).
-		Report(`maybe $mu.Unlock() was intended?
+		Report(`Did you mean $mu.Unlock()?
 			Rules are in ./rules.go file.`)
 
 	m.Match(`$mu.RLock(); defer $mu.$unlock()`).
 		Where(m["unlock"].Text == "Unlock").
 		At(m["unlock"]).
-		Report(`maybe $mu.RUnlock() was intended?
+		Report(`Did you mean $mu.RUnlock()?
 			Rules are in ./rules.go file.`)
 }
