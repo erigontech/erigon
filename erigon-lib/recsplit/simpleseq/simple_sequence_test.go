@@ -3,7 +3,7 @@ package simpleseq
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/stretchr/testify/require"
 )
@@ -30,7 +30,7 @@ func TestSimpleSequence(t *testing.T) {
 		b := make([]byte, 0)
 		b = s.AppendBytes(b)
 
-		require.Equal(t, hexutility.MustDecodeHex("0x"+
+		require.Equal(t, hexutil.MustDecodeHex("0x"+
 			"00000001"+
 			"00000007"+
 			"0000000f"+

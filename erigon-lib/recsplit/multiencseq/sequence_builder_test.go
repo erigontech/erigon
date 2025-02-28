@@ -3,7 +3,7 @@ package multiencseq
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +17,7 @@ func TestMultiEncodingSeqBuilder(t *testing.T) {
 
 		b := make([]byte, 0)
 		b = builder.AppendBytes(b)
-		require.Equal(t, hexutility.MustDecodeHex("0x8000000005"), b)
+		require.Equal(t, hexutil.MustDecodeHex("0x8000000005"), b)
 	})
 
 	t.Run("short sequences must use simple encoding", func(t *testing.T) {
@@ -42,7 +42,7 @@ func TestMultiEncodingSeqBuilder(t *testing.T) {
 
 		b := make([]byte, 0)
 		b = builder.AppendBytes(b)
-		require.Equal(t, hexutility.MustDecodeHex(
+		require.Equal(t, hexutil.MustDecodeHex(
 			"0x8F"+
 				"00000005"+
 				"00000007"+
