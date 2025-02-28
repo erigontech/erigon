@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/holiman/uint256"
 
