@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"path/filepath"
 	"runtime"
@@ -31,24 +30,23 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/pkg/errors"
-	"golang.org/x/crypto/sha3"
-
-	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	btree2 "github.com/tidwall/btree"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 var ErrBehindCommitment = errors.New("behind commitment")
@@ -83,9 +81,10 @@ type dataWithPrevStep struct {
 }
 
 type SharedDomains struct {
-	aggTx  *AggregatorRoTx
-	sdCtx  *SharedDomainsCommitmentContext
-	roTx   kv.Tx
+	aggTx *AggregatorRoTx
+	sdCtx *SharedDomainsCommitmentContext
+
+	roTx   kv.TemporalTx
 	logger log.Logger
 
 	txNum    uint64
@@ -119,7 +118,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
 	}
-	sd.SetTx(tx)
+	sd.SetTx(tx.(kv.TemporalTx)) //TODO: propagate interface to higher-level code
 	sd.iiWriters = make([]*invertedIndexBufferedWriter, len(sd.aggTx.iis))
 
 	sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
@@ -263,7 +262,7 @@ func (sd *SharedDomains) RebuildCommitmentShard(ctx context.Context, next func()
 	sd.DiscardWrites(kv.StorageDomain)
 	sd.DiscardWrites(kv.CodeDomain)
 
-	visComFiles := sd.aggTx.d[kv.CommitmentDomain].Files()
+	visComFiles := sd.roTx.FreezeInfo().Files(kv.CommitmentDomain)
 	sd.logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
 		"totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum(),
 		"commitment files before dump step", cfg.StepTo,
@@ -679,7 +678,7 @@ func (sd *SharedDomains) SetTx(tx kv.Tx) {
 	if tx == nil {
 		panic("tx is nil")
 	}
-	sd.roTx = tx
+	sd.roTx = tx.(kv.TemporalTx)
 
 	casted, ok := tx.(HasAggTx)
 	if !ok {

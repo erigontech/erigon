@@ -171,6 +171,7 @@ func (tx *Tx) ForceReopenAggCtx() {
 	tx.filesTx.Close()
 	tx.filesTx = tx.Agg().BeginFilesRo()
 }
+func (tx *Tx) FreezeInfo() kv.FreezeInfo { return tx.filesTx }
 
 func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
 func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }

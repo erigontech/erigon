@@ -566,6 +566,13 @@ type TemporalTx interface {
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
 	HistoryRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
+
+	FreezeInfo() FreezeInfo
+}
+
+type FreezeInfo interface {
+	AllFiles() []string
+	Files(domainName Domain) []string
 }
 
 type TemporalRwTx interface {
