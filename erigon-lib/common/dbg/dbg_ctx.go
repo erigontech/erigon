@@ -36,7 +36,7 @@ func Enabled(ctx context.Context) bool {
 	return v.(bool)
 }
 
-type DbgLog2 struct {
+type dbgLog struct {
 	lvl      log.Lvl
 	prefixFn func() string
 	msg      string
@@ -45,7 +45,7 @@ type DbgLog2 struct {
 	logger   log.Logger
 }
 
-func (d *DbgLog2) Msg(msg string) *DbgLog2 {
+func (d *dbgLog) Msg(msg string) *dbgLog {
 	if d == nil {
 		return d
 	}
@@ -55,7 +55,7 @@ func (d *DbgLog2) Msg(msg string) *DbgLog2 {
 	return d
 }
 
-func (d *DbgLog2) Entry(key string, lazyValue func() string) *DbgLog2 {
+func (d *dbgLog) Entry(key string, lazyValue func() string) *dbgLog {
 	if d == nil {
 		return d
 	}
@@ -64,7 +64,7 @@ func (d *DbgLog2) Entry(key string, lazyValue func() string) *DbgLog2 {
 	return d
 }
 
-func (d *DbgLog2) Log() {
+func (d *dbgLog) Log() {
 	if d == nil {
 		return
 	}
@@ -76,15 +76,15 @@ func (d *DbgLog2) Log() {
 	d.logger.Log(d.lvl, d.msg, d.entries...)
 }
 
-func DbgLog(ctx context.Context, level log.Lvl, lazyPrefix func() string) *DbgLog2 {
+func DbgLog(ctx context.Context, level log.Lvl, lazyPrefix func() string) *dbgLog {
 	return ConditionalLog(Enabled(ctx), level, lazyPrefix, log.Root())
 }
 
-func ConditionalLog(evaluation bool, level log.Lvl, lazyPrefix func() string, logger log.Logger) *DbgLog2 {
+func ConditionalLog(evaluation bool, level log.Lvl, lazyPrefix func() string, logger log.Logger) *dbgLog {
 	if !evaluation {
 		return nil
 	}
-	return &DbgLog2{
+	return &dbgLog{
 		lvl:      level,
 		prefixFn: lazyPrefix,
 		logger:   logger,
@@ -103,7 +103,7 @@ func NewConditionalLogger(logger log.Logger, condition func() bool) ConditionalL
 	}
 }
 
-func (c ConditionalLogger) CLog(level log.Lvl, lazyPrefix func() string) *DbgLog2 {
+func (c ConditionalLogger) CLog(level log.Lvl, lazyPrefix func() string) *dbgLog {
 	return ConditionalLog(c.condition(), level, lazyPrefix, c.Logger)
 }
 
