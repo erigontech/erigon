@@ -70,11 +70,11 @@ var (
 		ChainID: u256.Num1,
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
-				Nonce: 3,
-				To:    &testAddr,
-				Value: uint256.NewInt(10),
-				Gas:   25000,
-				Data:  libcommon.FromHex("5544"),
+				Nonce:    3,
+				To:       &testAddr,
+				Value:    uint256.NewInt(10),
+				GasLimit: 25000,
+				Data:     libcommon.FromHex("5544"),
 			},
 			GasPrice: uint256.NewInt(1),
 		},
@@ -87,14 +87,14 @@ var (
 
 	dynFeeTx = &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			Nonce: 3,
-			To:    &testAddr,
-			Value: uint256.NewInt(10),
-			Gas:   25000,
-			Data:  libcommon.FromHex("5544"),
+			Nonce:    3,
+			To:       &testAddr,
+			Value:    uint256.NewInt(10),
+			GasLimit: 25000,
+			Data:     libcommon.FromHex("5544"),
 		},
 		ChainID: u256.Num1,
-		Tip:     uint256.NewInt(1),
+		TipCap:  uint256.NewInt(1),
 		FeeCap:  uint256.NewInt(1),
 	}
 
@@ -381,10 +381,10 @@ func TestTransactionCoding(t *testing.T) {
 			// Legacy tx.
 			txdata = &LegacyTx{
 				CommonTx: CommonTx{
-					Nonce: i,
-					To:    &recipient,
-					Gas:   1,
-					Data:  []byte("abcdef"),
+					Nonce:    i,
+					To:       &recipient,
+					GasLimit: 1,
+					Data:     []byte("abcdef"),
 				},
 				GasPrice: u256.Num2,
 			}
@@ -392,9 +392,9 @@ func TestTransactionCoding(t *testing.T) {
 			// Legacy txn contract creation.
 			txdata = &LegacyTx{
 				CommonTx: CommonTx{
-					Nonce: i,
-					Gas:   1,
-					Data:  []byte("abcdef"),
+					Nonce:    i,
+					GasLimit: 1,
+					Data:     []byte("abcdef"),
 				},
 				GasPrice: u256.Num2,
 			}
@@ -404,10 +404,10 @@ func TestTransactionCoding(t *testing.T) {
 				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
-						Nonce: i,
-						To:    &recipient,
-						Gas:   123457,
-						Data:  []byte("abcdef"),
+						Nonce:    i,
+						To:       &recipient,
+						GasLimit: 123457,
+						Data:     []byte("abcdef"),
 					},
 					GasPrice: uint256.NewInt(10),
 				},
@@ -419,10 +419,10 @@ func TestTransactionCoding(t *testing.T) {
 				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
-						Nonce: i,
-						To:    &recipient,
-						Gas:   123457,
-						Data:  []byte("abcdef"),
+						Nonce:    i,
+						To:       &recipient,
+						GasLimit: 123457,
+						Data:     []byte("abcdef"),
 					},
 					GasPrice: uint256.NewInt(10),
 				},
@@ -433,8 +433,8 @@ func TestTransactionCoding(t *testing.T) {
 				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
-						Nonce: i,
-						Gas:   123457,
+						Nonce:    i,
+						GasLimit: 123457,
 					},
 					GasPrice: uint256.NewInt(10),
 				},
@@ -595,17 +595,17 @@ func randData() []byte {
 func newRandBlobTx() *BlobTx {
 	stx := &BlobTx{DynamicFeeTransaction: DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			Nonce: rand.Uint64(),
-			Gas:   rand.Uint64(),
-			To:    randAddr(),
-			Value: uint256.NewInt(rand.Uint64()),
-			Data:  randData(),
-			V:     *uint256.NewInt(0),
-			R:     *uint256.NewInt(rand.Uint64()),
-			S:     *uint256.NewInt(rand.Uint64()),
+			Nonce:    rand.Uint64(),
+			GasLimit: rand.Uint64(),
+			To:       randAddr(),
+			Value:    uint256.NewInt(rand.Uint64()),
+			Data:     randData(),
+			V:        *uint256.NewInt(0),
+			R:        *uint256.NewInt(rand.Uint64()),
+			S:        *uint256.NewInt(rand.Uint64()),
 		},
 		ChainID:    uint256.NewInt(rand.Uint64()),
-		Tip:        uint256.NewInt(rand.Uint64()),
+		TipCap:     uint256.NewInt(rand.Uint64()),
 		FeeCap:     uint256.NewInt(rand.Uint64()),
 		AccessList: randAccessList(),
 	},
@@ -619,9 +619,9 @@ func printSTX(stx *BlobTx) {
 	fmt.Println("--BlobTx")
 	fmt.Printf("ChainID: %v\n", stx.ChainID)
 	fmt.Printf("Nonce: %v\n", stx.Nonce)
-	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.Tip)
+	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.TipCap)
 	fmt.Printf("MaxFeePerGas: %v\n", stx.FeeCap)
-	fmt.Printf("Gas: %v\n", stx.Gas)
+	fmt.Printf("Gas: %v\n", stx.GasLimit)
 	fmt.Printf("To: %v\n", stx.To)
 	fmt.Printf("Value: %v\n", stx.Value)
 	fmt.Printf("Data: %v\n", stx.Data)
