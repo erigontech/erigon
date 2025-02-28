@@ -238,26 +238,23 @@ func (m *MarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 		return err
 	}
 	fromKey := a.encTs(efrom)
-	return ae.DeleteRangeFromTbl(a.ms.canonicalTbl, fromKey, nil, MaxUint64, tx)
+	_, err = ae.DeleteRangeFromTbl(a.ms.canonicalTbl, fromKey, nil, MaxUint64, tx)
+	return err
 }
 
-func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error {
+func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error) {
 	a := m.ap
 	fromKeyPrefix := a.encTs(a.pruneFrom)
 	eto, err := a.rel.RootNum2Num(to, tx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	toKeyPrefix := a.encTs(eto)
-	if err := ae.DeleteRangeFromTbl(a.ms.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, tx); err != nil {
-		return err
+	if del, err := ae.DeleteRangeFromTbl(a.ms.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, tx); err != nil {
+		return del, err
 	}
 
-	if err := ae.DeleteRangeFromTbl(a.valsTbl, fromKeyPrefix, toKeyPrefix, limit, tx); err != nil {
-		return err
-	}
-
-	return nil
+	return ae.DeleteRangeFromTbl(a.valsTbl, fromKeyPrefix, toKeyPrefix, limit, tx)
 }
 
 func (m *MarkedTx) combK(ts Num, hash []byte) []byte {
@@ -300,14 +297,15 @@ func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
 	if err != nil {
 		return err
 	}
-	return ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(fromId), nil, 0, tx)
+	_, err = ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(fromId), nil, 0, tx)
+	return err
 }
 
-func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error {
+func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error) {
 	ap := m.ap
 	toId, err := ap.rel.RootNum2Num(to, tx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
 
@@ -361,14 +359,15 @@ func (m *AppendingTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) erro
 	if err != nil {
 		return err
 	}
-	return ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(fromId), nil, 0, tx)
+	_, err = ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(fromId), nil, 0, tx)
+	return err
 }
 
-func (m *AppendingTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error {
+func (m *AppendingTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error) {
 	ap := m.ap
 	toId, err := ap.rel.RootNum2Num(to, tx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
 
@@ -409,11 +408,11 @@ func (m *BufferedTx) Flush(ctx context.Context, tx kv.RwTx) error {
 	return m.values.Load(tx, m.ap.valsTbl, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()})
 }
 
-func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error {
+func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error) {
 	ap := m.ap
 	toId, err := ap.rel.RootNum2Num(to, tx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
 

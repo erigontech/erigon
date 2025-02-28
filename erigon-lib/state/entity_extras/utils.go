@@ -32,10 +32,10 @@ func Decode64FromBytes(buf []byte, x8Bytes bool) (x uint64) {
 }
 
 // toPrefix exclusive
-func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, rwTx kv.RwTx) error {
+func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, rwTx kv.RwTx) (del uint64, err error) {
 	c, err := rwTx.RwCursor(tbl) // TODO: no dupsort tbl assumed
 	if err != nil {
-		return err
+		return
 	}
 
 	defer c.Close()
@@ -43,16 +43,17 @@ func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, r
 	// imo this can be generalized if needed, by using key comparison functions, which mdbx provides.
 	for k, _, err := c.Seek(fromPrefix); k != nil && (toPrefix == nil || bytes.Compare(k, toPrefix) < 0) && limit > 0; k, _, err = c.Next() {
 		if err != nil {
-			return err
+			return del, err
 		}
 
 		if err := c.DeleteCurrent(); err != nil {
-			return err
+			return del, err
 		}
 		limit--
+		del++
 	}
 
-	return nil
+	return
 }
 
 type IdentityRootRelation struct{}

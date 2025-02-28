@@ -76,6 +76,12 @@ func RegisterEntity(name string, dirs datadir.Dirs, pre snapcfg.Preverified, opt
 	return id
 }
 
+func Cleanup() {
+	// only for tests
+	entityRegistry = nil
+	curr = 0
+}
+
 type EntityIdOption func(*holder)
 
 func WithSnapshotPrefix(prefix string) EntityIdOption {

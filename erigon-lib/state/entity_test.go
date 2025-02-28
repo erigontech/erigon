@@ -3,7 +3,9 @@ package state_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
+	"os"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -15,6 +17,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/state/entity_extras"
 	ae "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/core/types"
@@ -126,13 +129,75 @@ func TestMarked_PutToDb(t *testing.T) {
 	require.Equal(t, ma_tx.Type(), state.Marked)
 }
 
-func TestGetFromDb(t *testing.T) {
-	// get
-	// getnc
-}
-
 func TestPrune(t *testing.T) {
 	// prune
+	for pruneTo := RootNum(0); ; pruneTo++ {
+		var entries_count uint64
+		t.Run(fmt.Sprintf("prune to %d", pruneTo), func(t *testing.T) {
+			dir, db, log := setup(t)
+			headerId, ma := setupHeader(t, log, dir)
+
+			t.Cleanup(func() {
+				db.Close()
+				os.RemoveAll(dir.Snap)
+				os.RemoveAll(dir.Chaindata)
+				entity_extras.Cleanup()
+			})
+
+			ctx := context.Background()
+			cfg := headerId.SnapshotConfig()
+			entries_count = cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
+
+			ma_tx := ma.BeginFilesRo()
+			defer ma_tx.Close()
+			rwtx, err := db.BeginRw(ctx)
+			defer rwtx.Rollback()
+			require.NoError(t, err)
+
+			buffer := &bytes.Buffer{}
+
+			getData := func(i int) (num Num, hash []byte, value []byte) {
+				header := &types.Header{
+					Number: big.NewInt(int64(i)),
+					Extra:  []byte("test header"),
+				}
+				buffer.Reset()
+				err = header.EncodeRLP(buffer)
+				require.NoError(t, err)
+
+				return Num(i), header.Hash().Bytes(), buffer.Bytes()
+			}
+
+			for i := range int(entries_count) {
+				num, hash, value := getData(i)
+				err = ma_tx.Put(num, hash, value, rwtx)
+				require.NoError(t, err)
+			}
+
+			require.NoError(t, rwtx.Commit())
+			ma_tx.Close()
+
+			rwtx, err = db.BeginRw(ctx)
+			defer rwtx.Rollback()
+			require.NoError(t, err)
+
+			del, err := ma_tx.Prune(ctx, pruneTo, 1000, rwtx)
+			require.NoError(t, err)
+			cfgPruneFrom := int64(ma.PruneFrom())
+			require.Equal(t, int64(del), max(0, min(int64(pruneTo), int64(entries_count))-cfgPruneFrom))
+
+			require.NoError(t, rwtx.Commit())
+			ma_tx = ma.BeginFilesRo()
+			defer ma_tx.Close()
+			rwtx, err = db.BeginRw(ctx)
+			require.NoError(t, err)
+			defer rwtx.Rollback()
+		})
+		if pruneTo >= RootNum(entries_count+1) {
+			break
+		}
+	}
+
 }
 func TestUnwind(t *testing.T) {
 	// unwind
@@ -197,8 +262,9 @@ func TestBuildFiles(t *testing.T) {
 	require.NoError(t, err)
 
 	firstRootNumNotInSnap := ma_tx.VisibleFilesMaxRootNum()
-	err = ma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, rwtx)
+	del, err := ma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, rwtx)
 	require.NoError(t, err)
+	require.Equal(t, del, uint64(firstRootNumNotInSnap)-uint64(ma.PruneFrom()))
 
 	require.NoError(t, rwtx.Commit())
 	ma_tx = ma.BeginFilesRo()

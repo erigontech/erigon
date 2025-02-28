@@ -42,7 +42,7 @@ type StartRoTx[T EntityTxI] interface {
 type EntityTxI interface {
 	// value, value from snapshot?, error
 	Get(entityNum Num, tx kv.Tx) (Bytes, bool, error)
-	Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) error
+	Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error)
 	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
 	Close()
 	Type() CanonicityStrategy
