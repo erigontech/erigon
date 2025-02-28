@@ -23,13 +23,14 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/trie"
