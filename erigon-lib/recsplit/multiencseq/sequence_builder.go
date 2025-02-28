@@ -45,11 +45,11 @@ type SequenceBuilder struct {
 //
 // baseNum: this is used to calculate the deltas on simple encoding and on "rebased elias fano"
 // count: this is the number of elements in the sequence, used in case of elias fano
-// max: this is maximum value in the sequence, used in case of elias fano
-func NewBuilder(baseNum, count, max uint64) *SequenceBuilder {
+// maxOffset: this is maximum value in the sequence, used in case of elias fano
+func NewBuilder(baseNum, count, maxOffset uint64) *SequenceBuilder {
 	return &SequenceBuilder{
 		baseNum: baseNum,
-		ef:      eliasfano32.NewEliasFano(count, max),
+		ef:      eliasfano32.NewEliasFano(count, maxOffset),
 	}
 }
 
