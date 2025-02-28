@@ -76,10 +76,13 @@ func (d *DbgLog2) Log() {
 }
 
 func DbgLog(ctx context.Context, level log.Lvl, lazyPrefix func() string) *DbgLog2 {
-	if !Enabled(ctx) {
+	return ConditionalLog(Enabled(ctx), level, lazyPrefix)
+}
+
+func ConditionalLog(evaluation bool, level log.Lvl, lazyPrefix func() string) *DbgLog2 {
+	if !evaluation {
 		return nil
 	}
-
 	return &DbgLog2{
 		lvl:      level,
 		prefixFn: lazyPrefix,
