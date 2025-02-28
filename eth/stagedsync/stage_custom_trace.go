@@ -129,10 +129,10 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.Tem
 	var lastTxNum uint64
 	{
 		tx, err := db.BeginTemporalRw(ctx)
-		defer tx.Rollback()
 		if err != nil {
 			return err
 		}
+		defer tx.Rollback()
 
 		doms, err := state2.NewSharedDomains(tx, logger)
 		if err != nil {
