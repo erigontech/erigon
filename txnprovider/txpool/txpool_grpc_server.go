@@ -25,7 +25,6 @@ import (
 	"sync"
 	"time"
 
-	// "github.com/erigontech/erigon-lib/common/hexutil"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/holiman/uint256"

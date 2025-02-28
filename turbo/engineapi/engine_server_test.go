@@ -21,19 +21,14 @@ import (
 	"math/big"
 	"testing"
 
-	// "github.com/holiman/uint256"
-
-	// "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/holiman/uint256"
-	// "github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 
-	// txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -46,13 +41,11 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 
-	// "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/stages"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-	// "github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // Do 1 step to start txPool
