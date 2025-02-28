@@ -1,4 +1,4 @@
-name: QA - TxPool performance tes
+name: QA - TxPool performance test
 
 env:
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
