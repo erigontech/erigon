@@ -326,16 +326,6 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 	}
 }
 
-func (a *Aggregator) DiscardHistory(name kv.Domain) *Aggregator {
-	a.d[name].historyDisabled = true
-	return a
-}
-
-func (a *Aggregator) EnableHistory(name kv.Domain) *Aggregator {
-	a.d[name].historyDisabled = false
-	return a
-}
-
 func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 	return a.buildingFiles.Load() || a.mergingFiles.Load()
 }
