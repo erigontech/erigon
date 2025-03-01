@@ -357,6 +357,7 @@ func (ac *AggregatorRoTx) AllFiles() []string {
 	return res
 }
 func (ac *AggregatorRoTx) Files(domain kv.Domain) []string { return ac.d[domain].Files() }
+func (ac *AggregatorRoTx) StepSize() uint64                { return ac.a.StepSize() }
 
 func (a *Aggregator) Files() []string {
 	ac := a.BeginFilesRo()

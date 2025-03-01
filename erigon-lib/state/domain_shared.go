@@ -184,10 +184,10 @@ func (sd *SharedDomains) AggTx() any { return sd.aggTx }
 
 // aggregator context should call aggTx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff) error {
-	step := txUnwindTo / sd.aggTx.a.StepSize()
+	step := txUnwindTo / sd.StepSize()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	sd.aggTx.a.logger.Info("aggregator unwind", "step", step,
+	sd.logger.Info("aggregator unwind", "step", step,
 		"txUnwindTo", txUnwindTo, "stepsRangeInDB", sd.aggTx.a.StepsRangeInDBAsStr(rwTx))
 	//fmt.Printf("aggregator unwind step %d txUnwindTo %d stepsRangeInDB %s\n", step, txUnwindTo, sd.aggTx.a.StepsRangeInDBAsStr(rwTx))
 	sf := time.Now()
@@ -392,7 +392,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 	// disable mutex - because work on parallel execution postponed after E3 release.
 	//sd.muMaps.Lock()
-	valWithPrevStep := dataWithPrevStep{data: val, prevStep: sd.txNum / sd.aggTx.a.StepSize()}
+	valWithPrevStep := dataWithPrevStep{data: val, prevStep: sd.txNum / sd.StepSize()}
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
 			sd.estSize += len(val) - len(old.data)
@@ -457,7 +457,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	}
 
 	if !sd.aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
-		return v, endTx / sd.aggTx.a.StepSize(), nil
+		return v, endTx / sd.StepSize(), nil
 	}
 
 	// replace shortened keys in the branch with full keys to allow HPH work seamlessly
@@ -465,7 +465,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	if err != nil {
 		return nil, 0, err
 	}
-	return rv, endTx / sd.aggTx.a.StepSize(), nil
+	return rv, endTx / sd.StepSize(), nil
 }
 
 // replaceShortenedKeysInBranch replaces shortened keys in the branch with full keys
@@ -537,7 +537,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		}
 		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
 		if !found {
-			s0, s1 := fStartTxNum/sd.aggTx.a.StepSize(), fEndTxNum/sd.aggTx.a.StepSize()
+			s0, s1 := fStartTxNum/sd.StepSize(), fEndTxNum/sd.StepSize()
 			sd.logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
@@ -690,7 +690,7 @@ func (sd *SharedDomains) SetTx(tx kv.Tx) {
 	}
 }
 
-func (sd *SharedDomains) StepSize() uint64 { return sd.aggTx.a.StepSize() }
+func (sd *SharedDomains) StepSize() uint64 { return sd.aggTx.StepSize() }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
@@ -1286,10 +1286,6 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
-}
-
-func (sdc *SharedDomainsCommitmentContext) TempDir() string {
-	return sdc.sharedDomains.aggTx.a.dirs.Tmp
 }
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
