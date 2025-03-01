@@ -343,7 +343,7 @@ func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *Aggregator) BackgroundProgress() string    { return a.ps.String() }
 
-func (ac *AggregatorRoTx) Files() []string {
+func (ac *AggregatorRoTx) AllFiles() []string {
 	var res []string
 	if ac == nil {
 		return res
@@ -356,10 +356,13 @@ func (ac *AggregatorRoTx) Files() []string {
 	}
 	return res
 }
+func (ac *AggregatorRoTx) Files(domain kv.Domain) []string { return ac.d[domain].Files() }
+func (ac *AggregatorRoTx) StepSize() uint64                { return ac.a.StepSize() }
+
 func (a *Aggregator) Files() []string {
 	ac := a.BeginFilesRo()
 	defer ac.Close()
-	return ac.Files()
+	return ac.AllFiles()
 }
 func (a *Aggregator) LS() {
 	doLS := func(dirtyFiles *btree.BTreeG[*filesItem]) {
