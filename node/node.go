@@ -33,6 +33,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon/params"
+	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -345,6 +346,9 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
 			opts = opts.DirtySpace(uint64(1024 * datasize.MB))
+			opts = opts.Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync }).
+				SyncBytes(1 * 1024 * 1024).
+				SyncPeriod(2 * time.Second)
 		case kv.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize)
