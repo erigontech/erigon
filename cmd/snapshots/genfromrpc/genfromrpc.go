@@ -41,11 +41,10 @@ var FromBlock = cli.Uint64Flag{
 }
 
 var Command = cli.Command{
-	Action:      func(cliCtx *cli.Context) error { return genFromRPc(cliCtx) },
-	Name:        "genfromrpc",
-	Usage:       "genfromrpc utilities",
-	Flags:       []cli.Flag{&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock},
-	Description: ``,
+	Action: genFromRPc,
+	Name:   "genfromrpc",
+	Usage:  "genfromrpc utilities",
+	Flags:  []cli.Flag{&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock},
 }
 
 // BlockJson is the JSON representation of a block returned from the RPC.
