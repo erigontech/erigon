@@ -282,14 +282,14 @@ func (u *BitList) Merge(other *BitList) (*BitList, error) {
 		unionFrom = other
 	}
 	// union
-	unionFrom.RemoveMsb()
-	ret.RemoveMsb()
+	//unionFrom.RemoveMsb()
+	//ret.RemoveMsb()
 	for i := 0; i < unionFrom.l; i++ {
 		ret.u[i] |= unionFrom.u[i]
 	}
-	unionFrom.AddMsb()
-	byteLen := ret.AddMsb()
-	ret.l = byteLen
+	//unionFrom.AddMsb()
+	//byteLen := ret.AddMsb()
+	//ret.l = byteLen
 	return ret, nil
 }
 
