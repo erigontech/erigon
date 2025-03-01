@@ -1092,7 +1092,7 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-var Captures = map[uint64][]string{}
+var Captures = nil //map[uint64][]string{}
 var captureLock sync.Mutex
 
 func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr libcommon.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks) error {
@@ -1105,10 +1105,10 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 		if dbg.TraceTransactionIO && (trace || traceAccount(addr)) {
 			fmt.Printf("%d (%d.%d) Delete Account: %x selfdestructed=%v\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed)
 		}
-		captureLock.Lock()
-		Captures[stateObject.db.blockNum] = append(Captures[stateObject.db.blockNum],
-			fmt.Sprintf("%d (%d.%d) Delete Account: %x selfdestructed=%v", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed))
-		captureLock.Unlock()
+		//captureLock.Lock()
+		//Captures[stateObject.db.blockNum] = append(Captures[stateObject.db.blockNum],
+		//	fmt.Sprintf("%d (%d.%d) Delete Account: %x selfdestructed=%v", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed))
+		//captureLock.Unlock()
 
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 			return err
@@ -1134,10 +1134,10 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 		if dbg.TraceTransactionIO && (trace || traceAccount(addr)) {
 			fmt.Printf("%d (%d.%d) Update Account Data: %x, balance=%d, nonce=%d codehash=%x\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash)
 		}
-		captureLock.Lock()
-		Captures[stateObject.db.blockNum] = append(Captures[stateObject.db.blockNum],
-			fmt.Sprintf("%d (%d.%d) Update Account Data: %x, balance=%d, nonce=%d codehash=%x", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash))
-		captureLock.Unlock()
+		//captureLock.Lock()
+		//Captures[stateObject.db.blockNum] = append(Captures[stateObject.db.blockNum],
+		//	fmt.Sprintf("%d (%d.%d) Update Account Data: %x, balance=%d, nonce=%d codehash=%x", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash))
+		//captureLock.Unlock()
 
 		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
