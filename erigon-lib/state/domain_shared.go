@@ -81,10 +81,9 @@ type dataWithPrevStep struct {
 }
 
 type SharedDomains struct {
-	aggTx *AggregatorRoTx
-	sdCtx *SharedDomainsCommitmentContext
-
-	roTx   kv.TemporalTx
+	aggTx  *AggregatorRoTx
+	sdCtx  *SharedDomainsCommitmentContext
+	roTx   kv.Tx
 	logger log.Logger
 
 	txNum    uint64
@@ -262,7 +261,7 @@ func (sd *SharedDomains) RebuildCommitmentShard(ctx context.Context, next func()
 	sd.DiscardWrites(kv.StorageDomain)
 	sd.DiscardWrites(kv.CodeDomain)
 
-	visComFiles := sd.roTx.FreezeInfo().Files(kv.CommitmentDomain)
+	visComFiles := sd.roTx.(kv.TemporalTx).FreezeInfo().Files(kv.CommitmentDomain)
 	sd.logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
 		"totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum(),
 		"commitment files before dump step", cfg.StepTo,
