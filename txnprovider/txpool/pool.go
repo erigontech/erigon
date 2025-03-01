@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/u256"
@@ -60,7 +58,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-const DefaultBlockGasLimit = uint64(30000000)
+const DefaultBlockGasLimit = uint64(36000000)
 
 // txMaxBroadcastSize is the max size of a transaction that will be broadcast.
 // All transactions with a higher size will be announced and need to be fetched
@@ -2324,8 +2322,6 @@ func (p *TxPool) logStats() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
 	ctx := []interface{}{
 		"pending", p.pending.Len(),
 		"baseFee", p.baseFee.Len(),
@@ -2335,7 +2331,6 @@ func (p *TxPool) logStats() {
 	if cacheKeys > 0 {
 		ctx = append(ctx, "cache_keys", cacheKeys)
 	}
-	ctx = append(ctx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	p.logger.Info("[txpool] stat", ctx...)
 	pendingSubCounter.SetInt(p.pending.Len())
 	basefeeSubCounter.SetInt(p.baseFee.Len())

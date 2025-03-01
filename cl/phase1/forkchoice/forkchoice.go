@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
@@ -136,7 +135,6 @@ type ForkChoiceStore struct {
 
 	ethClock                eth_clock.EthereumClock
 	optimisticStore         optimistic.OptimisticStore
-	validatorMonitor        monitor.ValidatorMonitor
 	probabilisticHeadGetter bool
 }
 
@@ -160,7 +158,6 @@ func NewForkChoiceStore(
 	emitters *beaconevents.EventEmitter,
 	syncedDataManager *synced_data.SyncedDataManager,
 	blobStorage blob_storage.BlobStorage,
-	validatorMonitor monitor.ValidatorMonitor,
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry,
 	probabilisticHeadGetter bool,
 ) (*ForkChoiceStore, error) {
@@ -257,7 +254,6 @@ func NewForkChoiceStore(
 		blobStorage:              blobStorage,
 		ethClock:                 ethClock,
 		optimisticStore:          optimistic.NewOptimisticStore(),
-		validatorMonitor:         validatorMonitor,
 		probabilisticHeadGetter:  probabilisticHeadGetter,
 		publicKeysRegistry:       publicKeysRegistry,
 		verifiedExecutionPayload: verifiedExecutionPayload,
