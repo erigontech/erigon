@@ -38,7 +38,6 @@ func (a *ApiHandler) PostEthV1ValidatorPrepareBeaconProposal(w http.ResponseWrit
 	for _, v := range req {
 		a.logger.Trace("[Caplin] Registered new proposer", "index", v.ValidatorIndex, "fee_recipient", v.FeeRecipient.String())
 		a.validatorParams.SetFeeRecipient(v.ValidatorIndex, v.FeeRecipient)
-		a.validatorsMonitor.ObserveValidator(v.ValidatorIndex)
 	}
 	w.WriteHeader(http.StatusOK)
 }

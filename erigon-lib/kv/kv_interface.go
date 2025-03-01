@@ -19,12 +19,15 @@ package kv
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 //Variables Naming:
@@ -79,12 +82,13 @@ const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 const dbLabelName = "db"
 
 type DBGauges struct { // these gauges are shared by all MDBX instances, but need to be filtered by label
-	DbSize    *metrics.GaugeVec
-	TxLimit   *metrics.GaugeVec
-	TxSpill   *metrics.GaugeVec
-	TxUnspill *metrics.GaugeVec
-	TxDirty   *metrics.GaugeVec
-	TxRetired *metrics.GaugeVec
+	DbSize        *metrics.GaugeVec
+	TxLimit       *metrics.GaugeVec
+	TxSpill       *metrics.GaugeVec
+	TxUnspill     *metrics.GaugeVec
+	TxDirty       *metrics.GaugeVec
+	TxRetired     *metrics.GaugeVec
+	UnsyncedBytes *metrics.GaugeVec
 
 	DbPgopsNewly   *metrics.GaugeVec
 	DbPgopsCow     *metrics.GaugeVec
@@ -116,6 +120,7 @@ func InitMDBXMGauges() *DBGauges {
 		TxSpill:        metrics.GetOrCreateGaugeVec(`tx_spill`, []string{dbLabelName}),
 		TxUnspill:      metrics.GetOrCreateGaugeVec(`tx_unspill`, []string{dbLabelName}),
 		TxDirty:        metrics.GetOrCreateGaugeVec(`tx_dirty`, []string{dbLabelName}),
+		UnsyncedBytes:  metrics.GetOrCreateGaugeVec(`unsynced_bytes`, []string{dbLabelName}),
 		TxRetired:      metrics.GetOrCreateGaugeVec(`tx_retired`, []string{dbLabelName}),
 		DbPgopsNewly:   metrics.GetOrCreateGaugeVec(`db_pgops{phase="newly"}`, []string{dbLabelName}),
 		DbPgopsCow:     metrics.GetOrCreateGaugeVec(`db_pgops{phase="cow"}`, []string{dbLabelName}),
@@ -134,26 +139,41 @@ func InitMDBXMGauges() *DBGauges {
 
 // initialize summaries for a particular MDBX instance
 func InitSummaries(dbLabel Label) {
-	// just in case the global singleton map is not already initialized
-	if MDBXSummaries == nil {
-		MDBXSummaries = make(map[Label]*DBSummaries)
-	}
-
-	_, ok := MDBXSummaries[dbLabel]
+	_, ok := MDBXSummaries.Load(dbLabel)
 	if !ok {
 		dbName := string(dbLabel)
-		MDBXSummaries[dbLabel] = &DBSummaries{
+		MDBXSummaries.Store(dbName, &DBSummaries{
 			DbCommitPreparation: metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "preparation"}),
 			DbCommitWrite:       metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "write"}),
 			DbCommitSync:        metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "sync"}),
 			DbCommitEnding:      metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "ending"}),
 			DbCommitTotal:       metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "total"}),
-		}
+		})
 	}
 }
 
-var MDBXGauges *DBGauges = InitMDBXMGauges()                            // global mdbx gauges. each gauge can be filtered by db name
-var MDBXSummaries map[Label]*DBSummaries = make(map[Label]*DBSummaries) // dbName => Summaries mapping
+func RecordSummaries(dbLabel Label, latency mdbx.CommitLatency) error {
+	_summaries, ok := MDBXSummaries.Load(string(dbLabel))
+	if !ok {
+		return fmt.Errorf("MDBX summaries not initialized yet for db=%s", string(dbLabel))
+	}
+	// cast to *DBSummaries
+	summaries, ok := _summaries.(*DBSummaries)
+	if !ok {
+		return fmt.Errorf("type casting to *DBSummaries failed")
+	}
+
+	summaries.DbCommitPreparation.Observe(latency.Preparation.Seconds())
+	summaries.DbCommitWrite.Observe(latency.Write.Seconds())
+	summaries.DbCommitSync.Observe(latency.Sync.Seconds())
+	summaries.DbCommitEnding.Observe(latency.Ending.Seconds())
+	summaries.DbCommitTotal.Observe(latency.Whole.Seconds())
+	return nil
+
+}
+
+var MDBXGauges *DBGauges = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name
+var MDBXSummaries sync.Map                   // dbName => Summaries mapping
 
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
@@ -519,6 +539,7 @@ type TemporalGetter interface {
 type TemporalTx interface {
 	Tx
 	TemporalGetter
+	WithFreezeInfo
 
 	// return the earliest known txnum in history of a given domain
 	HistoryStartFrom(domainName Domain) uint64
@@ -546,6 +567,15 @@ type TemporalTx interface {
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
 	HistoryRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
+}
+
+type WithFreezeInfo interface {
+	FreezeInfo() FreezeInfo
+}
+
+type FreezeInfo interface {
+	AllFiles() []string
+	Files(domainName Domain) []string
 }
 
 type TemporalRwTx interface {

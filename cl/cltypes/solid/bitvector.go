@@ -168,3 +168,13 @@ func (b *BitVector) Union(other *BitVector) (*BitVector, error) {
 	}
 	return new, nil
 }
+
+func (b *BitVector) IsOverlap(other *BitVector) bool {
+	// check by bytes
+	for i := 0; i < len(b.container) && i < len(other.container); i++ {
+		if b.container[i]&other.container[i] != 0 {
+			return true
+		}
+	}
+	return false
+}

@@ -129,7 +129,7 @@ func ReadBlockSlot(root fs.FS, index int) (uint64, error) {
 		return 0, err
 	}
 
-	blockBytes, err = utils.DecompressSnappy(blockBytes)
+	blockBytes, err = utils.DecompressSnappy(blockBytes, false)
 	if err != nil {
 		return 0, err
 	}

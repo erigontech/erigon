@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
-func SnapBlocksRead(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) error {
+func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) error {
 	defer log.Info("[integrity] SnapBlocksRead: done")
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
