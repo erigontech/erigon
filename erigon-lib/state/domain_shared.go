@@ -677,7 +677,7 @@ func (sd *SharedDomains) SetTx(tx kv.Tx) {
 	if tx == nil {
 		panic("tx is nil")
 	}
-	sd.roTx = tx.(kv.TemporalTx)
+	sd.roTx = tx
 
 	casted, ok := tx.(HasAggTx)
 	if !ok {
