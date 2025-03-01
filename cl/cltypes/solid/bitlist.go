@@ -126,8 +126,8 @@ func (u *BitList) Set(index int, v byte) {
 	u.u[index] = v
 }
 
-// removeMsb removes the most significant bit from the list, but doesn't change the length l.
-func (u *BitList) removeMsb() {
+// RemoveMsb removes the most significant bit from the list, but doesn't change the length l.
+func (u *BitList) RemoveMsb() {
 	for i := len(u.u) - 1; i >= 0; i-- {
 		if u.u[i] != 0 {
 			// find last bit, make a mask and clear it
@@ -137,9 +137,10 @@ func (u *BitList) removeMsb() {
 	}
 }
 
-// addMsb adds a most significant bit to the list, but doesn't change the length l.
-func (u *BitList) addMsb() int {
+// AddMsb adds a most significant bit to the list, but doesn't change the length l.
+func (u *BitList) AddMsb() int {
 	byteLen := len(u.u)
+	found := false
 	for i := len(u.u) - 1; i >= 0; i-- {
 		if u.u[i] != 0 {
 			msb := bits.Len8(u.u[i])
@@ -152,10 +153,16 @@ func (u *BitList) addMsb() int {
 			} else {
 				u.u[i] |= 1 << uint(msb)
 			}
+			found = true
 			break
 		}
 		byteLen--
 	}
+	if !found {
+		u.u[0] = 1
+		byteLen = 1
+	}
+	u.l = byteLen
 	return byteLen
 }
 
@@ -164,7 +171,7 @@ func (u *BitList) SetOnBit(bitIndex int) {
 		return
 	}
 	// remove the last on bit if necessary
-	u.removeMsb()
+	u.RemoveMsb()
 	// expand the bitlist if necessary
 	for len(u.u)*8 <= bitIndex {
 		u.u = append(u.u, 0)
@@ -172,7 +179,7 @@ func (u *BitList) SetOnBit(bitIndex int) {
 	// set the bit
 	u.u[bitIndex/8] |= 1 << uint(bitIndex%8)
 	// set last bit
-	byteLen := u.addMsb()
+	byteLen := u.AddMsb()
 	u.l = byteLen
 }
 
@@ -275,13 +282,13 @@ func (u *BitList) Merge(other *BitList) (*BitList, error) {
 		unionFrom = other
 	}
 	// union
-	unionFrom.removeMsb()
-	ret.removeMsb()
+	unionFrom.RemoveMsb()
+	ret.RemoveMsb()
 	for i := 0; i < unionFrom.l; i++ {
 		ret.u[i] |= unionFrom.u[i]
 	}
-	unionFrom.addMsb()
-	byteLen := ret.addMsb()
+	unionFrom.AddMsb()
+	byteLen := ret.AddMsb()
 	ret.l = byteLen
 	return ret, nil
 }

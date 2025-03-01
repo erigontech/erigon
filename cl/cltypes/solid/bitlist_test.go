@@ -154,3 +154,42 @@ func TestBitSlice(t *testing.T) {
 	require.Equal([]byte{0b00000101}, bytes, "BitSlice AppendBit did not append the bits correctly")
 	require.Equal(4, bs.Length(), "BitSlice AppendBit did not increment the length correctly")
 }
+
+func TestBitListRemoveMsb(t *testing.T) {
+	require := require.New(t)
+
+	bitList := solid.BitlistFromBytes([]byte{0b11010000}, 10)
+	bitList.RemoveMsb()
+	require.Equal([]byte{0b01010000}, bitList.Bytes())
+	bitList = solid.BitlistFromBytes([]byte{0b00000000}, 10)
+	bitList.RemoveMsb()
+	require.Equal([]byte{0b00000000}, bitList.Bytes())
+	bitList = solid.BitlistFromBytes([]byte{0b00000001}, 10)
+	bitList.RemoveMsb()
+	require.Equal([]byte{0b00000000}, bitList.Bytes())
+	bitList = solid.BitlistFromBytes([]byte{0b00000100}, 10)
+	bitList.RemoveMsb()
+	require.Equal([]byte{0b00000000}, bitList.Bytes())
+	bitList = solid.BitlistFromBytes([]byte{0b11111111}, 10)
+	bitList.RemoveMsb()
+	require.Equal([]byte{0b01111111}, bitList.Bytes())
+}
+
+func TestBitListAddMsb(t *testing.T) {
+	require := require.New(t)
+	bitList := solid.BitlistFromBytes([]byte{0b11010000}, 10)
+	bitList.AddMsb()
+	require.Equal([]byte{0b11010000, 0b00000001}, bitList.Bytes(), bitList.Bytes())
+
+	bitList = solid.BitlistFromBytes([]byte{0b00000000}, 10)
+	bitList.AddMsb()
+	require.Equal([]byte{0b00000001}, bitList.Bytes(), bitList.Bytes())
+
+	bitList = solid.BitlistFromBytes([]byte{0b00000001}, 10)
+	bitList.AddMsb()
+	require.Equal([]byte{0b00000011}, bitList.Bytes(), bitList.Bytes())
+
+	bitList = solid.BitlistFromBytes([]byte{0b11111111}, 10)
+	bitList.AddMsb()
+	require.Equal([]byte{0b11111111, 0b00000001}, bitList.Bytes(), bitList.Bytes())
+}
