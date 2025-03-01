@@ -57,7 +57,7 @@ func txDeferRollback(m dsl.Matcher) {
 		`$tx, $err := $db.BeginRwNosync($ctx); $chk; $rollback`,
 		`$tx, $err = $db.BeginRwNosync($ctx); $chk; $rollback`,
 	).
-		Where(!m["rollback"].Text.Contains("defer ")).
+		Where(!m["rollback"].Text.Matches(`defer .*\.Rollback()`)).
 		//At(m["rollback"]).
 		Report(`Add "defer $tx.Rollback()" right after transaction creation error check. 
 			If you are in the loop - consider using "$db.View" or "$db.Update" or extract whole transaction to function.
