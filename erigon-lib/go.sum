@@ -162,6 +162,8 @@ github.com/erigontech/mdbx-go v0.38.8 h1:3lmjIvMRYfBOXnfEaMn8Oi5XuaIGON927QWoMmZ
 github.com/erigontech/mdbx-go v0.38.8/go.mod h1:lkqHAZqXtFaIPlvTaGAx3VUDuGYZcuhve1l4JVVN1Z0=
 github.com/erigontech/mdbx-go v0.38.9 h1:MGodEEc+PdF8eolJLxZf0jl2ToEtEVFpkQzDnHQOyy4=
 github.com/erigontech/mdbx-go v0.38.9/go.mod h1:lkqHAZqXtFaIPlvTaGAx3VUDuGYZcuhve1l4JVVN1Z0=
+github.com/erigontech/mdbx-go v0.38.10 h1:Nxqxu9QNOU9Bvgs9pq6SKkNYysbjt6b9n929daVNfcU=
+github.com/erigontech/mdbx-go v0.38.10/go.mod h1:lkqHAZqXtFaIPlvTaGAx3VUDuGYZcuhve1l4JVVN1Z0=
 github.com/erigontech/secp256k1 v1.1.0 h1:mO3YJMUSoASE15Ya//SoHiisptUhdXExuMUN1M0X9qY=
 github.com/erigontech/secp256k1 v1.1.0/go.mod h1:GokhPepsMB+EYDs7I5JZCprxHW6+yfOcJKaKtoZ+Fls=
 github.com/erigontech/speedtest v0.0.2 h1:W9Cvky/8AMUtUONwkLA/dZjeQ2XfkBdYfJzvhMZUO+U=
