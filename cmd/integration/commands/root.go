@@ -86,7 +86,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
 	}
 	opts = opts.Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync }).
-		SyncBytes(1 * 1024 * 1024).
+		SyncBytes(128 * 1024 * 1024).
 		SyncPeriod(2 * time.Second)
 	return opts
 }
