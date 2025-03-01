@@ -22,7 +22,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
@@ -83,6 +85,9 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	if databaseVerbosity != -1 {
 		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
 	}
+	opts = opts.Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync }).
+		SyncBytes(1 * 1024 * 1024).
+		SyncPeriod(2 * time.Second)
 	return opts
 }
 
