@@ -539,6 +539,7 @@ type TemporalGetter interface {
 type TemporalTx interface {
 	Tx
 	TemporalGetter
+	WithFreezeInfo
 
 	// return the earliest known txnum in history of a given domain
 	HistoryStartFrom(domainName Domain) uint64
@@ -566,7 +567,9 @@ type TemporalTx interface {
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
 	HistoryRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
+}
 
+type WithFreezeInfo interface {
 	FreezeInfo() FreezeInfo
 }
 
