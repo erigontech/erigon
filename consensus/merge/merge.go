@@ -198,18 +198,22 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		}
 		if depositReqs != nil {
 			rs = append(rs, *depositReqs)
+			log.Debug("Parsed Depsoit Requests", "len", len(depositReqs.RequestData), "data", fmt.Sprintf("0x%x", depositReqs.RequestData))
 		}
-		withdrawalReq := misc.DequeueWithdrawalRequests7002(syscall)
-		if withdrawalReq != nil {
-			rs = append(rs, *withdrawalReq)
+		withdrawalReqs := misc.DequeueWithdrawalRequests7002(syscall)
+		if withdrawalReqs != nil {
+			rs = append(rs, *withdrawalReqs)
+			log.Debug("Parsed Withdrawal Requests", "len", len(withdrawalReqs.RequestData), "data", fmt.Sprintf("0x%x", withdrawalReqs.RequestData))
 		}
-		consolidations := misc.DequeueConsolidationRequests7251(syscall)
-		if consolidations != nil {
-			rs = append(rs, *consolidations)
+		consolidationReqs := misc.DequeueConsolidationRequests7251(syscall)
+		if consolidationReqs != nil {
+			rs = append(rs, *consolidationReqs)
+			log.Debug("Parsed Consolidation Requests", "len", len(consolidationReqs.RequestData), "data", fmt.Sprintf("0x%x", consolidationReqs.RequestData))
 		}
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {
+				log.Error(fmt.Sprintf("error: invalid requests root hash in header, expected: %v, got :%v, requestsData: %x", header.RequestsHash, rh, rs))
 				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
 			}
 		}

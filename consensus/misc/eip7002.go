@@ -17,7 +17,6 @@
 package misc
 
 import (
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
@@ -26,8 +25,7 @@ import (
 func DequeueWithdrawalRequests7002(syscall consensus.SystemCall) *types.FlatRequest {
 	res, err := syscall(params.WithdrawalRequestAddress, nil)
 	if err != nil {
-		log.Warn("Err with syscall to WithdrawalRequestAddress", "err", err)
-		return nil
+		panic("Err with syscall to WithdrawalRequestAddress " + err.Error())
 	}
 	if res != nil {
 		// Just append the contract output
