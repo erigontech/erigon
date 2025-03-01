@@ -1095,7 +1095,7 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-var Captures = nil //map[uint64][]string{}
+var Captures map[uint64][]string //{}
 var captureLock sync.Mutex
 
 func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr libcommon.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks) error {
