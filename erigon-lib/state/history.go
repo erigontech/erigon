@@ -557,14 +557,13 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-// TODO: rename ef* fields
 type HistoryCollation struct {
 	historyComp   *seg.Writer
 	efHistoryComp *seg.Writer
 	historyPath   string
 	efHistoryPath string
-	efBaseTxNum   uint64 // TODO: is it necessary or using step later is reliable?
-	historyCount  int    // same as historyComp.Count()
+	efBaseTxNum   uint64
+	historyCount  int // same as historyComp.Count()
 }
 
 func (c HistoryCollation) Close() {
@@ -583,10 +582,10 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	}
 
 	var (
-		historyComp *seg.Writer
-		seqWriter   *seg.Writer
-		txKey       [8]byte
-		err         error
+		historyComp   *seg.Writer
+		efHistoryComp *seg.Writer
+		txKey         [8]byte
+		err           error
 
 		historyPath   = h.vFilePath(step, step+1)
 		efHistoryPath = h.efFilePath(step, step+1)
@@ -599,8 +598,8 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			if historyComp != nil {
 				historyComp.Close()
 			}
-			if seqWriter != nil {
-				seqWriter.Close()
+			if efHistoryComp != nil {
+				efHistoryComp.Close()
 			}
 		}
 	}()
@@ -656,23 +655,23 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		defer cd.Close()
 	}
 
-	seqComp, err := seg.NewCompressor(ctx, "collate idx "+h.filenameBase, efHistoryPath, h.dirs.Tmp, h.compressorCfg, log.LvlTrace, h.logger)
+	efComp, err := seg.NewCompressor(ctx, "collate idx "+h.filenameBase, efHistoryPath, h.dirs.Tmp, h.compressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
 	}
 	if h.noFsync {
-		seqComp.DisableFsync()
+		efComp.DisableFsync()
 	}
 
 	var (
 		keyBuf      = make([]byte, 0, 256)
 		numBuf      = make([]byte, 8)
 		bitmap      = bitmapdb.NewBitmap64()
-		prevSeq     []byte
+		prevEf      []byte
 		prevKey     []byte
 		initialized bool
 	)
-	seqWriter = seg.NewWriter(seqComp, seg.CompressNone) // coll+build must be fast - no compression
+	efHistoryComp = seg.NewWriter(efComp, seg.CompressNone) // coll+build must be fast - no compression
 	collector.SortAndFlushInBackground(true)
 	defer bitmapdb.ReturnToPool64(bitmap)
 
@@ -728,12 +727,12 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		bitmap.Clear()
 		seqBuilder.Build()
 
-		prevSeq = seqBuilder.AppendBytes(prevSeq[:0])
+		prevEf = seqBuilder.AppendBytes(prevEf[:0])
 
-		if err = seqWriter.AddWord(prevKey); err != nil {
+		if err = efHistoryComp.AddWord(prevKey); err != nil {
 			return fmt.Errorf("add %s ef history key [%x]: %w", h.filenameBase, prevKey, err)
 		}
-		if err = seqWriter.AddWord(prevSeq); err != nil {
+		if err = efHistoryComp.AddWord(prevEf); err != nil {
 			return fmt.Errorf("add %s ef history val: %w", h.filenameBase, err)
 		}
 
@@ -758,7 +757,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	mxCollationSizeHist.SetUint64(uint64(historyComp.Count()))
 
 	return HistoryCollation{
-		efHistoryComp: seqWriter,
+		efHistoryComp: efHistoryComp,
 		efHistoryPath: efHistoryPath,
 		efBaseTxNum:   step * h.aggregationStep,
 		historyPath:   historyPath,

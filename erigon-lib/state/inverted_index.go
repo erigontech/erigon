@@ -1031,7 +1031,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 	coll.writer = seg.NewWriter(comp, ii.compression)
 
 	var (
-		prevSeq     []byte
+		prevEf      []byte
 		prevKey     []byte
 		initialized bool
 		bitmap      = bitmapdb.NewBitmap64()
@@ -1051,20 +1051,20 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 			return nil
 		}
 
-		seqBuilder := multiencseq.NewBuilder(step*ii.aggregationStep, bitmap.GetCardinality(), bitmap.Maximum())
+		ef := multiencseq.NewBuilder(step*ii.aggregationStep, bitmap.GetCardinality(), bitmap.Maximum())
 		it := bitmap.Iterator()
 		for it.HasNext() {
-			seqBuilder.AddOffset(it.Next())
+			ef.AddOffset(it.Next())
 		}
 		bitmap.Clear()
-		seqBuilder.Build()
+		ef.Build()
 
-		prevSeq = seqBuilder.AppendBytes(prevSeq[:0])
+		prevEf = ef.AppendBytes(prevEf[:0])
 
 		if err = coll.writer.AddWord(prevKey); err != nil {
 			return fmt.Errorf("add %s efi index key [%x]: %w", ii.filenameBase, prevKey, err)
 		}
-		if err = coll.writer.AddWord(prevSeq); err != nil {
+		if err = coll.writer.AddWord(prevEf); err != nil {
 			return fmt.Errorf("add %s efi index val: %w", ii.filenameBase, err)
 		}
 

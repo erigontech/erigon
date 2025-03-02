@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// TODO: this utility can be safely deleted after PR https://github.com/erigontech/erigon/pull/12907/ is rolled out in production
 func parseEFFilename(fileName string) (*efFileInfo, error) {
 	parts := strings.Split(fileName, ".")
 	stepParts := strings.Split(parts[1], "-")

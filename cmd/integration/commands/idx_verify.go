@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// TODO: this utility can be safely deleted after PR https://github.com/erigontech/erigon/pull/12907/ is rolled out in production
 var idxVerify = &cobra.Command{
 	Use:   "idx_verify",
 	Short: "After a genesis sync + snapshot regen, deep compare original and optimized .ef files of 2 E3 instances",

@@ -10,7 +10,8 @@ type EncodingType uint8
 
 const (
 	// TODO: remove PlainEliasFano reader support once all snapshots are migrated to
-	// optimized .ef and E3 alpha/beta version which writes ONLY new format is published
+	// optimized .ef and E3 alpha/beta version which writes ONLY new format is published.
+	// until then keep this constant which will be used ONLY for reading legacy .ef support.
 	PlainEliasFano   EncodingType = 0b0
 	SimpleEncoding   EncodingType = 0b10000000
 	RebasedEliasFano EncodingType = 0b10010000

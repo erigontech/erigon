@@ -149,6 +149,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 }
 
 // TODO: exported for idx_optimize.go
+// TODO: this utility can be safely deleted after PR https://github.com/erigontech/erigon/pull/12907/ is rolled out in production
 func GetStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	return getStateIndicesSalt(baseDir)
 }

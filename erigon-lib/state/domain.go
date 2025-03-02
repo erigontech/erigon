@@ -1273,6 +1273,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 }
 
 // TODO: exported for idx_optimize.go
+// TODO: this utility can be safely deleted after PR https://github.com/erigontech/erigon/pull/12907/ is rolled out in production
 func BuildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
 	return buildAccessor(ctx, d, compressed, idxPath, values, cfg, ps, logger)
 }
