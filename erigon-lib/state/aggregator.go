@@ -927,7 +927,7 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 func (at *AggregatorRoTx) stepsRangeInDBAsStr(tx kv.Tx) string {
 	steps := make([]string, 0, len(at.d)+len(at.iis))
 	for _, dt := range at.d {
-		a1, a2 := dt.ht.iit.stepsRangeInDB(tx)
+		a1, a2 := dt.stepsRangeInDB(tx)
 		steps = append(steps, fmt.Sprintf("%s:%.1f", dt.d.filenameBase, a2-a1))
 	}
 	for _, iit := range at.iis {
