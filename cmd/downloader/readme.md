@@ -12,7 +12,7 @@
 - When snapshots are pulled? - Erigon download snapshots **only-once** when creating node - all other files are
   self-generated
 
-- How does it benefit the new nodes? - P2P and Becaon networks may have not enough good peers for old data (no
+- How does it benefit the new nodes? - P2P and Beacon networks may have not enough good peers for old data (no
   incentives). StageSenders results are included into blocks snaps - means new node can skip it.
 
 - How network benefit? - Serve immutable snapshots can use cheaper infrastructure: Bittorrent/S3/R2/etc... - because
