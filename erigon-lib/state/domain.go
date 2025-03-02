@@ -2017,6 +2017,10 @@ func (sr *SegStreamReader) Next() (k, v []byte, err error) {
 	return k, v, nil
 }
 
+func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	return dt.ht.iit.stepsRangeInDB(tx)
+}
+
 func (dt *DomainRoTx) Files() (res []string) {
 	for _, item := range dt.files {
 		if item.src.decompressor != nil {
