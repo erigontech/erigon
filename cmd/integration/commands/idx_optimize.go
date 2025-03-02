@@ -107,12 +107,6 @@ var idxOptimize = &cobra.Command{
 			}
 			log.Printf("Optimizing file %s [%d/%d]...", file.Name(), cOpt, cEF)
 
-			// only optimize frozen files for this experiment, because we are not
-			// implementing collation, merge, etc. support now
-			// if efInfo.stepSize < 64 {
-			// 	log.Printf("Skipping file %s, step size %d < 64", file.Name(), efInfo.stepSize)
-			// 	continue
-			// }
 			cOpt++
 			baseTxNum := efInfo.startStep * config3.DefaultStepSize
 
