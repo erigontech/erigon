@@ -780,7 +780,7 @@ func (ac *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) uint64 {
 	if txNumInFiles > 0 {
 		txNumInFiles--
 	}
-	return txNumInFiles / ac.a.StepSize()
+	return txNumInFiles / ac.StepSize()
 }
 
 func (ac *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64) {
@@ -1052,7 +1052,7 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 	txTo := ac.a.visibleFilesMinimaxTxNum.Load()
 	if txTo > 0 {
 		// txTo is first txNum in next step, has to go 1 tx behind to get correct step number
-		step = (txTo - 1) / ac.a.StepSize()
+		step = (txTo - 1) / ac.StepSize()
 	}
 
 	if txFrom == txTo || !ac.CanPrune(tx, txTo) {
@@ -1108,7 +1108,7 @@ func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 			ac.a.logger.Warn("[snapshots:history] Stat", "err", err)
 			return
 		}
-		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/ac.a.StepSize(), bn/1_000))
+		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/ac.StepSize(), bn/1_000))
 	}
 	//str2 := make([]string, 0, len(ac.storage.files))
 	//for _, item := range ac.storage.files {
@@ -1127,7 +1127,7 @@ func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 			return
 		}
 	}
-	firstHistoryIndexBlockInDB, err := tx2block(ac.d[kv.AccountsDomain].d.minStepInDB(tx) * ac.a.StepSize())
+	firstHistoryIndexBlockInDB, err := tx2block(ac.d[kv.AccountsDomain].d.minStepInDB(tx) * ac.StepSize())
 	if err != nil {
 		ac.a.logger.Warn("[snapshots:history] Stat", "err", err)
 		return
@@ -1282,8 +1282,8 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *RangesV3 
 		if !lmrCom.Equal(&lmrAcc) || !lmrCom.Equal(&lmrSto) {
 			// ensure that we do not make further merge progress until ranges are not equal
 			maxEndTxNum = min(maxEndTxNum, max(lmrAcc.to, lmrSto.to, lmrCom.to))
-			ac.a.logger.Warn("findMergeRange: hold further merge", "to", maxEndTxNum/ac.a.StepSize(),
-				"acc", lmrAcc.String("", ac.a.StepSize()), "sto", lmrSto.String("", ac.a.StepSize()), "com", lmrCom.String("", ac.a.StepSize()))
+			ac.a.logger.Warn("findMergeRange: hold further merge", "to", maxEndTxNum/ac.StepSize(),
+				"acc", lmrAcc.String("", ac.StepSize()), "sto", lmrSto.String("", ac.StepSize()), "com", lmrCom.String("", ac.StepSize()))
 		}
 	}
 	for id, d := range ac.d {
@@ -1305,8 +1305,8 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *RangesV3 
 					// file for required range exists, hold this domain from merge but allow to merge comitemnt
 					r.domain[k].values = MergeRange{}
 					ac.a.logger.Debug("findMergeRange: commitment range is different but file exists in domain, hold further merge",
-						ac.d[k].d.filenameBase, dr.values.String("vals", ac.a.StepSize()),
-						"commitment", cr.values.String("vals", ac.a.StepSize()))
+						k, dr.values.String("vals", ac.StepSize()),
+						"commitment", cr.values.String("vals", ac.StepSize()))
 					continue
 				}
 				restorePrevRange = true
@@ -1316,7 +1316,7 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *RangesV3 
 			for k, dr := range &r.domain {
 				r.domain[k].values = MergeRange{}
 				ac.a.logger.Debug("findMergeRange: commitment range is different than accounts or storage, cancel kv merge",
-					ac.d[k].d.filenameBase, dr.values.String("", ac.a.StepSize()))
+					ac.d[k].d.filenameBase, dr.values.String("", ac.StepSize()))
 			}
 		}
 	}
