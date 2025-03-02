@@ -266,12 +266,6 @@ var (
 		Usage: "How often transactions should be committed to the storage",
 		Value: txpoolcfg.DefaultConfig.CommitEvery,
 	}
-
-	CsvOutput = cli.StringFlag{
-		Name:  "csv",
-		Usage: "Output statistics to a CSV file",
-		Value: "idx_stat.csv",
-	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
