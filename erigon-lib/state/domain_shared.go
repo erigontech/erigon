@@ -186,8 +186,8 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	sd.logger.Info("aggregator unwind", "step", step,
-		"txUnwindTo", txUnwindTo, "stepsRangeInDB", sd.aggTx.a.StepsRangeInDBAsStr(rwTx))
-	//fmt.Printf("aggregator unwind step %d txUnwindTo %d stepsRangeInDB %s\n", step, txUnwindTo, sd.aggTx.a.stepsRangeInDBAsStr(rwTx))
+		"txUnwindTo", txUnwindTo)
+	//fmt.Printf("aggregator unwind step %d txUnwindTo %d\n", step, txUnwindTo)
 	sf := time.Now()
 	defer mxUnwindSharedTook.ObserveDuration(sf)
 
