@@ -309,7 +309,8 @@ type wrappedTxWithCtx struct {
 	ac *AggregatorRoTx
 }
 
-func (w *wrappedTxWithCtx) AggTx() any { return w.ac }
+func (w *wrappedTxWithCtx) AggTx() any                { return w.ac }
+func (w *wrappedTxWithCtx) FreezeInfo() kv.FreezeInfo { return w.ac }
 
 func wrapTxWithCtxForTest(tx kv.Tx, ctx *AggregatorRoTx) *wrappedTxWithCtx {
 	return &wrappedTxWithCtx{Tx: tx, ac: ctx}
