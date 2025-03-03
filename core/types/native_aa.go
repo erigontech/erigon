@@ -126,6 +126,14 @@ func (tx *AccountAbstractionTransaction) GetFeeCap() *uint256.Int {
 	return tx.FeeCap
 }
 
+func (tx *AccountAbstractionTransaction) GetGasLimit() uint64 {
+	return tx.Gas
+}
+
+func (tx *AccountAbstractionTransaction) GetTipCap() *uint256.Int {
+	return uint256.NewInt(0)
+}
+
 func (tx *AccountAbstractionTransaction) GetBlobHashes() []common.Hash {
 	return []common.Hash{}
 }
@@ -185,8 +193,8 @@ func (tx *AccountAbstractionTransaction) Type() byte {
 	return AccountAbstractionTxType
 }
 
-func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	return Message{}, errors.New("do not use")
+func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	return nil, errors.New("do not use")
 }
 
 func (tx *AccountAbstractionTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
@@ -762,7 +770,7 @@ func convertAuthorizations(auths []Authorization) []*typesproto.Authorization {
 	protoAuths := make([]*typesproto.Authorization, len(auths))
 	for i, auth := range auths {
 		protoAuths[i] = &typesproto.Authorization{
-			ChainId: auth.ChainID,
+			ChainId: auth.ChainID.Uint64(),
 			Address: auth.Address.Bytes(),
 			Nonce:   auth.Nonce,
 			YParity: uint32(auth.YParity), // Convert uint8 to uint32 since protobuf lacks uint8
@@ -806,16 +814,18 @@ func FromProto(tx *typesproto.AccountAbstractionTransaction) *AccountAbstraction
 
 func convertProtoAuthorizations(auths []*typesproto.Authorization) []Authorization {
 	goAuths := make([]Authorization, len(auths))
+	var r, s, chainID uint256.Int
 	for i, auth := range auths {
-		r := uint256.NewInt(0).SetBytes(auth.R) // Convert bytes to uint256
-		s := uint256.NewInt(0).SetBytes(auth.S)
+		r.SetBytes(auth.R) // Convert bytes to uint256
+		s.SetBytes(auth.S)
+		chainID.SetUint64(auth.ChainId)
 		goAuths[i] = Authorization{
-			ChainID: auth.ChainId,
+			ChainID: chainID,
 			Address: common.BytesToAddress(auth.Address),
 			Nonce:   auth.Nonce,
 			YParity: uint8(auth.YParity),
-			R:       *r,
-			S:       *s,
+			R:       r,
+			S:       s,
 		}
 	}
 

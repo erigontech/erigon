@@ -679,6 +679,7 @@ type TxnSlot struct {
 	Creation            bool     // Set to true if "To" field of the transaction is not set
 	Type                byte     // Transaction type
 	Size                uint32   // Size of the payload (without the RLP string envelope for typed transactions)
+	ChainID             uint256.Int
 
 	// EIP-4844: Shard Blob Transactions
 	BlobFeeCap  uint256.Int // max_fee_per_blob_gas
@@ -690,6 +691,12 @@ type TxnSlot struct {
 	// EIP-7702: set code tx
 	Authorizations []Signature
 	AuthRaw        [][]byte // rlp encoded chainID+address+nonce, used to recover authorization address in txpool
+
+	// RIP-7560: account abstraction
+	SenderAddress, Paymaster, Deployer                              *common.Address
+	PaymasterData, DeployerData, ExecutionData                      []byte
+	PostOpGasLimit, ValidationGasLimit, PaymasterValidationGasLimit uint64
+	NonceKey, BuilderFee                                            uint256.Int
 }
 
 // nolint

@@ -32,6 +32,14 @@ func (tx *AccountAbstractionBatchHeaderTransaction) SetTxnIndex(txnIndex uint64)
 
 // Transaction interface
 
+func (tx *AccountAbstractionBatchHeaderTransaction) GetTipCap() *uint256.Int {
+	return uint256.NewInt(0)
+}
+
+func (tx *AccountAbstractionBatchHeaderTransaction) GetGasLimit() uint64 {
+	return 0
+}
+
 func (tx *AccountAbstractionBatchHeaderTransaction) Type() byte {
 	return AccountAbstractionTxType
 }
@@ -80,8 +88,8 @@ func (tx *AccountAbstractionBatchHeaderTransaction) GetTo() *libcommon.Address {
 	return nil
 }
 
-func (tx *AccountAbstractionBatchHeaderTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	return Message{}, errors.New("not implemented")
+func (tx *AccountAbstractionBatchHeaderTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	return nil, errors.New("not implemented")
 }
 
 func (tx *AccountAbstractionBatchHeaderTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
