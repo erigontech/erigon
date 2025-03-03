@@ -29,12 +29,19 @@ jobs:
           cd ..
 
       - name: Run regular Kurtosis + assertoor tests
+        id: kurtosis_test
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
             enclave_name: "kurtosis-run1-${{ github.run_id }}"
             ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
             kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             persistent_logs: "true"
+
+      - name: Save test result as artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: test-result
+          path: ${{ steps.kurtosis_test.outputs.test_result }}
 
       # todo: save result on mongodb
 
