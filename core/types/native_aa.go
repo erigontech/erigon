@@ -261,7 +261,6 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 		payloadSize += 20
 	}
 
-	payloadSize++
 	payloadSize += rlp.StringLen(tx.DeployerData)
 
 	payloadSize++
@@ -269,10 +268,8 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 		payloadSize += 20
 	}
 
-	payloadSize++
 	payloadSize += rlp.StringLen(tx.PaymasterData)
 
-	payloadSize++
 	payloadSize += rlp.StringLen(tx.ExecutionData)
 
 	payloadSize++
