@@ -66,3 +66,19 @@ func TestConfigValueLookup(t *testing.T) {
 	assert.Equal(t, ConfigValueLookup(burntContract, 41874000), address2)
 	assert.Equal(t, ConfigValueLookup(burntContract, 41874000+1), address2)
 }
+
+func TestNilBlobSchedule(t *testing.T) {
+	var b *BlobSchedule
+
+	// Original EIP-4844 values
+	isPrague := false
+	assert.Equal(t, uint64(3), b.TargetBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(6), b.MaxBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(3338477), b.BaseFeeUpdateFraction(isPrague))
+
+	// EIP-7691: Blob throughput increase
+	isPrague = true
+	assert.Equal(t, uint64(6), b.TargetBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(9), b.MaxBlobsPerBlock(isPrague))
+	assert.Equal(t, uint64(5007716), b.BaseFeeUpdateFraction(isPrague))
+}

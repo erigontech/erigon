@@ -23,12 +23,11 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
 )
 
 var ErrNotImplemented = errors.New("not implemented")
@@ -52,7 +51,7 @@ func (n NopRequestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) GetTransactionByHash(hash libcommon.Hash) (*jsonrpc.RPCTransaction, error) {
+func (n NopRequestGenerator) GetTransactionByHash(hash libcommon.Hash) (*ethapi.RPCTransaction, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -104,7 +103,7 @@ func (n NopRequestGenerator) DebugAccountAt(blockHash libcommon.Hash, txIndex ui
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutility.Bytes, error) {
+func (n NopRequestGenerator) GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error) {
 	return nil, ErrNotImplemented
 }
 

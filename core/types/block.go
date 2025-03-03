@@ -34,7 +34,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -66,12 +65,12 @@ func (n BlockNonce) Uint64() uint64 {
 
 // MarshalText encodes n as a hex string with 0x prefix.
 func (n BlockNonce) MarshalText() ([]byte, error) {
-	return hexutility.Bytes(n[:]).MarshalText()
+	return hexutil.Bytes(n[:]).MarshalText()
 }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (n *BlockNonce) UnmarshalText(input []byte) error {
-	return hexutility.UnmarshalFixedText("BlockNonce", input, n[:])
+	return hexutil.UnmarshalFixedText("BlockNonce", input, n[:])
 }
 
 //()go:generate gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
@@ -571,7 +570,7 @@ type headerMarshaling struct {
 	GasLimit      hexutil.Uint64
 	GasUsed       hexutil.Uint64
 	Time          hexutil.Uint64
-	Extra         hexutility.Bytes
+	Extra         hexutil.Bytes
 	BaseFee       *hexutil.Big
 	BlobGasUsed   *hexutil.Uint64
 	ExcessBlobGas *hexutil.Uint64
@@ -682,7 +681,7 @@ func TxCountToTxAmount(txsLen int) uint32 {
 
 func (b BaseTxnID) U64() uint64 { return uint64(b) }
 
-func (b BaseTxnID) Bytes() []byte { return hexutility.EncodeTs(uint64(b)) }
+func (b BaseTxnID) Bytes() []byte { return hexutil.EncodeTs(uint64(b)) }
 
 // First non-system txn number in block
 // as if baseTxnID is first original transaction in block
@@ -1095,24 +1094,37 @@ func NewBlockFromNetwork(header *Header, body *Body) *Block {
 // CopyHeader creates a deep copy of a block header to prevent side effects from
 // modifying a header variable.
 func CopyHeader(h *Header) *Header {
-	cpy := *h //nolint
+	cpy := Header{} // note: do not copy hash atomic.Pointer
+	cpy.ParentHash = h.ParentHash
+	cpy.UncleHash = h.UncleHash
+	cpy.Coinbase = h.Coinbase
+	cpy.Root = h.Root
+	cpy.TxHash = h.TxHash
+	cpy.ReceiptHash = h.ReceiptHash
+	cpy.Bloom = h.Bloom
 	if cpy.Difficulty = new(big.Int); h.Difficulty != nil {
 		cpy.Difficulty.Set(h.Difficulty)
 	}
 	if cpy.Number = new(big.Int); h.Number != nil {
 		cpy.Number.Set(h.Number)
 	}
-	if h.BaseFee != nil {
-		cpy.BaseFee = new(big.Int)
-		cpy.BaseFee.Set(h.BaseFee)
-	}
-	if len(h.Extra) > 0 {
+	cpy.GasLimit = h.GasLimit
+	cpy.GasUsed = h.GasUsed
+	cpy.Time = h.Time
+	if h.Extra != nil {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
 	}
-	if len(h.AuRaSeal) > 0 {
+	cpy.MixDigest = h.MixDigest
+	cpy.Nonce = h.Nonce
+	cpy.AuRaStep = h.AuRaStep
+	if h.AuRaSeal != nil {
 		cpy.AuRaSeal = make([]byte, len(h.AuRaSeal))
 		copy(cpy.AuRaSeal, h.AuRaSeal)
+	}
+	if h.BaseFee != nil {
+		cpy.BaseFee = new(big.Int)
+		cpy.BaseFee.Set(h.BaseFee)
 	}
 	if h.WithdrawalsHash != nil {
 		cpy.WithdrawalsHash = new(libcommon.Hash)
@@ -1133,6 +1145,15 @@ func CopyHeader(h *Header) *Header {
 	if h.RequestsHash != nil {
 		cpy.RequestsHash = new(libcommon.Hash)
 		cpy.RequestsHash.SetBytes(h.RequestsHash.Bytes())
+	}
+	cpy.Verkle = h.Verkle
+	if h.VerkleProof != nil {
+		cpy.VerkleProof = make([]byte, len(h.VerkleProof))
+		copy(cpy.VerkleProof, h.VerkleProof)
+	}
+	if h.VerkleKeyVals != nil {
+		cpy.VerkleKeyVals = make([]verkle.KeyValuePair, len(h.VerkleKeyVals))
+		copy(cpy.VerkleKeyVals, h.VerkleKeyVals)
 	}
 	cpy.mutable = h.mutable
 	if hash := h.hash.Load(); hash != nil {

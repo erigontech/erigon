@@ -286,7 +286,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 
 	ic.Close()
 	err = db.Update(ctx, func(tx kv.RwTx) error {
-		from, to := ii.stepsRangeInDB(tx)
+		from, to := ic.stepsRangeInDB(tx)
 		require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
 		require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
 
@@ -315,7 +315,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		require.Nil(t, k, table)
 	}
 
-	from, to := ii.stepsRangeInDB(tx)
+	from, to := ic.stepsRangeInDB(tx)
 	require.Equal(t, float64(0), from)
 	require.Equal(t, float64(0), to)
 }

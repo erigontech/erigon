@@ -27,7 +27,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/math"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -260,6 +264,15 @@ func TestPrecompiledModExpOOG(t *testing.T) {
 	}
 }
 
+func TestModExpPrecompilePotentialOutOfRange(t *testing.T) {
+	modExpContract := PrecompiledContractsCancun[libcommon.BytesToAddress([]byte{0x05})]
+	hexString := "0x0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000ee"
+	input := hexutil.MustDecode(hexString)
+	maxGas := uint64(math.MaxUint64)
+	_, _, err := RunPrecompiledContract(modExpContract, input, maxGas, nil)
+	assert.NoError(t, err)
+}
+
 // Tests the sample inputs from the elliptic curve scalar multiplication EIP 213.
 func TestPrecompiledBn256ScalarMul(t *testing.T)      { testJson("bn256ScalarMul", "07", t) }
 func BenchmarkPrecompiledBn256ScalarMul(b *testing.B) { benchJson("bn256ScalarMul", "07", b) }
@@ -407,7 +420,6 @@ func BenchmarkPrecompiledP256Verify(b *testing.B) {
 }
 
 func TestPrecompiledP256Verify(t *testing.T) {
-	// t.Parallel()
-
+	t.Parallel()
 	testJson("p256Verify", "100", t)
 }

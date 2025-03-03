@@ -418,6 +418,8 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 	// For 0-period chains, refuse to seal empty blocks (no reward but would spin sealing)
 	if c.config.Period == 0 && len(block.Transactions()) == 0 {
 		c.logger.Info("Sealing paused, waiting for transactions")
+		results <- nil
+
 		return nil
 	}
 	// Don't hold the signer fields for the entire sealing procedure

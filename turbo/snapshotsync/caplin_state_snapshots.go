@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -110,7 +109,6 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 			kv.Eth1DataVotes:             getKvGetterForStateTable(db, kv.Eth1DataVotes),
 			kv.IntraRandaoMixes:          getKvGetterForStateTable(db, kv.IntraRandaoMixes),
 			kv.RandaoMixes:               getKvGetterForStateTable(db, kv.RandaoMixes),
-			kv.Proposers:                 getKvGetterForStateTable(db, kv.Proposers),
 			kv.BalancesDump:              getKvGetterForStateTable(db, kv.BalancesDump),
 			kv.EffectiveBalancesDump:     getKvGetterForStateTable(db, kv.EffectiveBalancesDump),
 		},
@@ -308,7 +306,7 @@ Loop:
 				// segType: f.Type, Unsupported
 				version:  f.Version,
 				Range:    Range{f.From, f.To},
-				frozen:   snapcfg.IsFrozen(s.cfg.ChainName, f),
+				frozen:   true,
 				filePath: filePath,
 			}
 		}

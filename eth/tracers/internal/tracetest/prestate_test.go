@@ -132,7 +132,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			txContext := core.NewEVMTxContext(msg)
 			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer.Hooks})
 			tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
-			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()))
+			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
 			vmRet, err := st.TransitionDb(true /* refunds */, false /* gasBailout */)
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)

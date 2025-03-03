@@ -26,16 +26,16 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
 type BlockHandler interface {
-	Handle(ctx context.Context, node devnet.Node, block *requests.Block, transaction *jsonrpc.RPCTransaction) error
+	Handle(ctx context.Context, node devnet.Node, block *requests.Block, transaction *ethapi.RPCTransaction) error
 }
 
-type BlockHandlerFunc func(ctx context.Context, node devnet.Node, block *requests.Block, transaction *jsonrpc.RPCTransaction) error
+type BlockHandlerFunc func(ctx context.Context, node devnet.Node, block *requests.Block, transaction *ethapi.RPCTransaction) error
 
-func (f BlockHandlerFunc) Handle(ctx context.Context, node devnet.Node, block *requests.Block, transaction *jsonrpc.RPCTransaction) error {
+func (f BlockHandlerFunc) Handle(ctx context.Context, node devnet.Node, block *requests.Block, transaction *ethapi.RPCTransaction) error {
 	return f(ctx, node, block, transaction)
 }
 

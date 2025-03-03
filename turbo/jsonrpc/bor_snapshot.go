@@ -329,12 +329,6 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	}
 	defer tx.Rollback()
 
-	service := whitelist.GetWhitelistingService()
-
-	if service == nil {
-		return false, errors.New("only available in Bor engine")
-	}
-
 	//Confirmation of 16 blocks on the endblock
 	tipConfirmationBlockNr := endBlockNr + uint64(16)
 
@@ -352,21 +346,26 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 
 	localEndBlockHash := localEndBlock.Hash().String()
 
-	isLocked := service.LockMutex(endBlockNr)
+	// TODO whitelisting service is pending removal - https://github.com/erigontech/erigon/issues/12855
+	if service := whitelist.GetWhitelistingService(); service != nil {
+		isLocked := service.LockMutex(endBlockNr)
 
-	if !isLocked {
-		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
-		return false, errors.New("whitelisted number or locked sprint number is more than the received end block number")
+		if !isLocked {
+			service.UnlockMutex(false, "", endBlockNr, common.Hash{})
+			return false, errors.New("whitelisted number or locked sprint number is more than the received end block number")
+		}
+
+		if localEndBlockHash != hash {
+			service.UnlockMutex(false, "", endBlockNr, common.Hash{})
+			return false, fmt.Errorf("hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
+		}
+
+		service.UnlockMutex(true, milestoneId, endBlockNr, localEndBlock.Hash())
+
+		return true, nil
 	}
 
-	if localEndBlockHash != hash {
-		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
-		return false, fmt.Errorf("hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
-	}
-
-	service.UnlockMutex(true, milestoneId, endBlockNr, localEndBlock.Hash())
-
-	return true, nil
+	return localEndBlockHash == hash, nil
 }
 
 type BlockSigners struct {

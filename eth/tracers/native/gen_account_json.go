@@ -8,7 +8,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 var _ = (*accountMarshaling)(nil)
@@ -17,7 +16,7 @@ var _ = (*accountMarshaling)(nil)
 func (a account) MarshalJSON() ([]byte, error) {
 	type account struct {
 		Balance *hexutil.Big                `json:"balance,omitempty"`
-		Code    hexutility.Bytes            `json:"code,omitempty"`
+		Code    hexutil.Bytes               `json:"code,omitempty"`
 		Nonce   uint64                      `json:"nonce,omitempty"`
 		Storage map[common.Hash]common.Hash `json:"storage,omitempty"`
 	}
@@ -33,7 +32,7 @@ func (a account) MarshalJSON() ([]byte, error) {
 func (a *account) UnmarshalJSON(input []byte) error {
 	type account struct {
 		Balance *hexutil.Big                `json:"balance,omitempty"`
-		Code    *hexutility.Bytes           `json:"code,omitempty"`
+		Code    *hexutil.Bytes              `json:"code,omitempty"`
 		Nonce   *uint64                     `json:"nonce,omitempty"`
 		Storage map[common.Hash]common.Hash `json:"storage,omitempty"`
 	}

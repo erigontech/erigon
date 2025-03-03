@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
@@ -62,7 +62,9 @@ type EngineServer struct {
 	blockDownloader *engine_block_downloader.EngineBlockDownloader
 	config          *chain.Config
 	// Block proposing for proof-of-stake
-	proposing        bool
+	proposing bool
+	// Block consuming for proof-of-stake
+	consuming        atomic.Bool
 	test             bool
 	caplin           bool // we need to send errors for caplin.
 	executionService execution.ExecutionClient
@@ -72,25 +74,32 @@ type EngineServer struct {
 	logger  log.Logger
 
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
+	// TODO Remove this on next release
+	printPectraBanner bool
 }
 
 const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 
 func NewEngineServer(logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
-	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing bool) *EngineServer {
+	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, consuming bool) *EngineServer {
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
-	return &EngineServer{
-		logger:           logger,
-		config:           config,
-		executionService: executionService,
-		blockDownloader:  blockDownloader,
-		chainRW:          chainRW,
-		proposing:        proposing,
-		hd:               hd,
-		caplin:           caplin,
-		engineLogSpamer:  engine_logs_spammer.NewEngineLogsSpammer(logger, config),
+	srv := &EngineServer{
+		logger:            logger,
+		config:            config,
+		executionService:  executionService,
+		blockDownloader:   blockDownloader,
+		chainRW:           chainRW,
+		proposing:         proposing,
+		hd:                hd,
+		caplin:            caplin,
+		engineLogSpamer:   engine_logs_spammer.NewEngineLogsSpammer(logger, config),
+		printPectraBanner: true,
 	}
+
+	srv.consuming.Store(consuming)
+
+	return srv
 }
 
 func (e *EngineServer) Start(
@@ -142,7 +151,7 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 	return nil
 }
 
-func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutility.Bytes) error {
+func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutil.Bytes) error {
 	if version < clparams.ElectraVersion {
 		if executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
@@ -153,8 +162,12 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutility.Bytes, version clparams.StateVersion,
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
+	if !s.consuming.Load() {
+		return nil, errors.New("engine payload consumption is not enabled")
+	}
+
 	if s.caplin {
 		s.logger.Crit(caplinEnabledLog)
 		return nil, errCaplinEnabled
@@ -209,11 +222,13 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	if version >= clparams.ElectraVersion {
 		requests = make(types.FlatRequests, 0)
+		lastReqType := -1
 		for i, r := range executionRequests {
-			if len(r) <= 1 {
+			if len(r) <= 1 || lastReqType >= 0 && int(r[0]) <= lastReqType {
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("Invalid Request at index %d", i)}
 			}
-			requests = append(requests, types.FlatRequest{Type: r[0], RequestData: r})
+			lastReqType = int(r[0])
+			requests = append(requests, types.FlatRequest{Type: r[0], RequestData: r[1:]})
 		}
 		rh := requests.Hash()
 		header.RequestsHash = rh
@@ -273,7 +288,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
-		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(), s.config.GetMaxBlobsPerBlock(), expectedBlobHashes, &transactions)
+		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time), s.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions)
 		if errors.Is(err, ethutils.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
@@ -324,6 +339,11 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
+	}
+
+	if version == clparams.ElectraVersion && s.printPectraBanner && payloadStatus.Status == engine_types.ValidStatus {
+		s.printPectraBanner = false
+		log.Info(engine_helpers.PectraBanner)
 	}
 
 	return payloadStatus, nil
@@ -417,14 +437,14 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		if header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
-		if shouldWait, _ := waitForStuff(func() (bool, error) {
+		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
 			return parent == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
 		}); shouldWait {
 			s.logger.Info(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
-		if shouldWait, _ := waitForStuff(func() (bool, error) {
+		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
 			return header == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
 		}); shouldWait {
 			s.logger.Info(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
@@ -438,7 +458,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-	waitingForExecutionReady, err := waitForStuff(func() (bool, error) {
+	waitingForExecutionReady, err := waitForStuff(500*time.Millisecond, func() (bool, error) {
 		isReady, err := s.chainRW.Ready(ctx)
 		return !isReady, err
 	})
@@ -490,9 +510,9 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 
 	data := resp.Data
-	var executionRequests []hexutility.Bytes
+	var executionRequests []hexutil.Bytes
 	if version >= clparams.ElectraVersion {
-		executionRequests = make([]hexutility.Bytes, 0)
+		executionRequests = make([]hexutil.Bytes, 0)
 		for _, r := range data.Requests.Requests {
 			executionRequests = append(executionRequests, r)
 		}
@@ -517,6 +537,10 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
 func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
 ) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	if !s.consuming.Load() {
+		return nil, errors.New("engine payload consumption is not enabled")
+	}
+
 	if s.caplin {
 		s.logger.Crit("[NewPayload] caplin is enabled")
 		return nil, errCaplinEnabled
@@ -599,7 +623,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 
 	var resp *execution.AssembleBlockResponse
 
-	execBusy, err := waitForStuff(func() (bool, error) {
+	execBusy, err := waitForStuff(500*time.Millisecond, func() (bool, error) {
 		resp, err = s.executionService.AssembleBlock(ctx, req)
 		if err != nil {
 			return false, err
@@ -645,7 +669,7 @@ func extractPayloadBodyFromBody(body *types.RawBody) *engine_types.ExecutionPayl
 		return nil
 	}
 
-	bdTxs := make([]hexutility.Bytes, len(body.Transactions))
+	bdTxs := make([]hexutil.Bytes, len(body.Transactions))
 	for idx := range body.Transactions {
 		bdTxs[idx] = body.Transactions[idx]
 	}
@@ -729,15 +753,9 @@ func (e *EngineServer) HandleNewPayload(
 		if currentHeadNumber != nil {
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
-			success := false
-			for i := 0; i < 100; i++ {
-				time.Sleep(10 * time.Millisecond)
-				if e.blockDownloader.Status() == headerdownload.Synced {
-					success = true
-					break
-				}
-			}
-			if !success {
+			if stillSyncing, _ := waitForStuff(500*time.Millisecond, func() (bool, error) {
+				return e.blockDownloader.Status() != headerdownload.Synced, nil
+			}); stillSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
 			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
@@ -863,15 +881,19 @@ func (e *EngineServer) HandlesForkChoice(
 	return payloadStatus, nil
 }
 
-func waitForStuff(waitCondnF func() (bool, error)) (bool, error) {
+func (e *EngineServer) SetConsuming(consuming bool) {
+	e.consuming.Store(consuming)
+}
+
+func waitForStuff(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
 	shouldWait, err := waitCondnF()
 	if err != nil || !shouldWait {
 		return false, err
 	}
-	// Times out after 8s - loosely based on timeouts of FCU and NewPayload for Ethereum specs
-	// Look for "timeout" in, for instance, https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md
-	for i := 0; i < 800; i++ {
-		time.Sleep(10 * time.Millisecond)
+	checkInterval := 10 * time.Millisecond
+	maxChecks := int64(maxWait) / int64(checkInterval)
+	for i := int64(0); i < maxChecks; i++ {
+		time.Sleep(checkInterval)
 		shouldWait, err = waitCondnF()
 		if err != nil || !shouldWait {
 			return shouldWait, err

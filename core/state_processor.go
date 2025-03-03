@@ -61,14 +61,6 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		}
 	}
 
-	if msg.FeeCap().IsZero() && engine != nil {
-		// Only zero-gas transactions may be service ones
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */, cfg.Tracer)
-		}
-		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
-	}
-
 	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {
 		txContext.TxHash = txn.Hash()
@@ -76,7 +68,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
-	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, nil, err
 	}

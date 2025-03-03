@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -110,28 +111,29 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		return nil
 	}
 
-	rng := NewRangesV3()
-	rng.domain = [5]DomainRanges{
-		kv.AccountsDomain: {
-			name:    kv.AccountsDomain,
-			values:  MergeRange{true, 0, math.MaxUint64},
-			history: HistoryRanges{},
-			aggStep: ac.a.StepSize(),
-		},
-		kv.StorageDomain: {
-			name:    kv.StorageDomain,
-			values:  MergeRange{true, 0, math.MaxUint64},
-			history: HistoryRanges{},
-			aggStep: ac.a.StepSize(),
-		},
-		kv.CommitmentDomain: {
-			name:    kv.CommitmentDomain,
-			values:  MergeRange{true, 0, math.MaxUint64},
-			history: HistoryRanges{},
-			aggStep: ac.a.StepSize(),
+	rng := &RangesV3{
+		domain: [5]DomainRanges{
+			kv.AccountsDomain: {
+				name:    kv.AccountsDomain,
+				values:  MergeRange{"", true, 0, math.MaxUint64},
+				history: HistoryRanges{},
+				aggStep: ac.a.StepSize(),
+			},
+			kv.StorageDomain: {
+				name:    kv.StorageDomain,
+				values:  MergeRange{"", true, 0, math.MaxUint64},
+				history: HistoryRanges{},
+				aggStep: ac.a.StepSize(),
+			},
+			kv.CommitmentDomain: {
+				name:    kv.CommitmentDomain,
+				values:  MergeRange{"", true, 0, math.MaxUint64},
+				history: HistoryRanges{},
+				aggStep: ac.a.StepSize(),
+			},
 		},
 	}
-	sf, err := ac.staticFilesInRange(rng)
+	sf, err := ac.StaticFilesInRange(rng)
 	if err != nil {
 		return err
 	}
@@ -307,7 +309,8 @@ type wrappedTxWithCtx struct {
 	ac *AggregatorRoTx
 }
 
-func (w *wrappedTxWithCtx) AggTx() any { return w.ac }
+func (w *wrappedTxWithCtx) AggTx() any                { return w.ac }
+func (w *wrappedTxWithCtx) FreezeInfo() kv.FreezeInfo { return w.ac }
 
 func wrapTxWithCtxForTest(tx kv.Tx, ctx *AggregatorRoTx) *wrappedTxWithCtx {
 	return &wrappedTxWithCtx{Tx: tx, ac: ctx}
@@ -320,16 +323,17 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
 
-	rng := NewRangesV3()
-	rng.domain = [5]DomainRanges{
-		kv.AccountsDomain: {
-			name:    kv.AccountsDomain,
-			values:  MergeRange{true, 0, math.MaxUint64},
-			history: HistoryRanges{},
-			aggStep: a.StepSize(),
+	rng := &RangesV3{
+		domain: [5]DomainRanges{
+			kv.AccountsDomain: {
+				name:    kv.AccountsDomain,
+				values:  MergeRange{"", true, 0, math.MaxUint64},
+				history: HistoryRanges{},
+				aggStep: a.StepSize(),
+			},
 		},
 	}
-	sf, err := acRo.staticFilesInRange(rng)
+	sf, err := acRo.StaticFilesInRange(rng)
 	if err != nil {
 		return nil, err
 	}

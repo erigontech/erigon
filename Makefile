@@ -6,6 +6,7 @@ UNAME = $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
+SHORT_COMMIT := $(shell echo $(GIT_COMMIT) | cut -c 1-8)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags '--match=*.*.*' --abbrev=7 --dirty)
 ERIGON_USER ?= erigon
@@ -195,6 +196,59 @@ test-hive:
 	else \
 		act -j test-hive -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
 	fi
+
+
+# Define the run_suite function
+define run_suite
+    printf "\n\n============================================================"; \
+    echo "Running test: $1-$2"; \
+    printf "\n"; \
+    ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --client erigon $3 2>&1 | tee output.log; \
+    if [ $$? -gt 0 ]; then \
+        echo "Exitcode gt 0"; \
+    fi; \
+    status_line=$$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g"); \
+    suites=$$(echo "$$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p'); \
+    if [ -z "$$suites" ]; then \
+        status_line=$$(tail -1 output.log | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g"); \
+        suites=$$(echo "$$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p'); \
+    fi; \
+    tests=$$(echo "$$status_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p'); \
+    failed=$$(echo "$$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p'); \
+    printf "\n"; \
+    echo "-----------   Results for $1-$2    -----------"; \
+    echo "Tests: $$tests, Failed: $$failed"; \
+    printf "\n\n============================================================"
+endef
+
+hive-local:
+	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
+	rm -rf "hive-local-$(SHORT_COMMIT)" && mkdir "hive-local-$(SHORT_COMMIT)"
+	cd "hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+
+	cd "hive-local-$(SHORT_COMMIT)/hive" && \
+	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
+	cd "hive-local-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
+	cd "hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,exchange-capabilities)
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,withdrawals)
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,cancun)
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,api)
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
+
+eest-hive:
+	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
+	rm -rf "eest-hive-$(SHORT_COMMIT)" && mkdir "eest-hive-$(SHORT_COMMIT)"
+	cd "eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+
+	cd "eest-hive-$(SHORT_COMMIT)/hive" && \
+	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
+	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
+	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
+	cd "eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/pectra-devnet-6%40v1.0.0/fixtures_pectra-devnet-6.tar.gz)
 
 ## lint-deps:                         install lint dependencies
 lint-deps:

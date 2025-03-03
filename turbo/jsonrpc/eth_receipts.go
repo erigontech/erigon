@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/v2"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -295,6 +296,35 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		if isFinalTxn {
+			if chainConfig.Bor != nil {
+				// check for state sync event logs
+				events, err := api.stateSyncEvents(ctx, tx, header.Hash(), blockNum, chainConfig)
+				if err != nil {
+					return logs, err
+				}
+
+				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, txNumsReader, tx, header, chainConfig, txIndex, len(logs))
+				if err != nil {
+					return logs, err
+				}
+
+				borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
+				for _, filteredLog := range borLogs {
+					logs = append(logs, &types.ErigonLog{
+						Address:     filteredLog.Address,
+						Topics:      filteredLog.Topics,
+						Data:        filteredLog.Data,
+						BlockNumber: filteredLog.BlockNumber,
+						TxHash:      filteredLog.TxHash,
+						TxIndex:     filteredLog.TxIndex,
+						BlockHash:   filteredLog.BlockHash,
+						Index:       filteredLog.Index,
+						Removed:     filteredLog.Removed,
+						Timestamp:   header.Time,
+					})
+				}
+			}
+
 			continue
 		}
 
@@ -424,7 +454,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if err != nil {
 		return nil, err
 	}
-
 	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
@@ -433,10 +462,27 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
+	txNumMin, err := txNumsReader.Min(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	// Private API returns 0 if transaction is not found.
 	if blockNum == 0 && chainConfig.Bor != nil {
 		if api.useBridgeReader {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				txNumNextBlock, err := txNumsReader.Min(tx, blockNum+1)
+				if err != nil {
+					return nil, err
+				}
+				txNum = txNumNextBlock - 1
+			}
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
 		}
@@ -449,20 +495,13 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
+	if txNumMin+2 > txNum { //TODO: what a magic is this "2" and how to avoid it
+		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
+	}
+
 	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
-	}
-
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-
-	txNumMin, err := txNumsReader.Min(tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	if txNumMin+2 > txNum { //TODO: what a magic is this "2" and how to avoid it
-		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 
 	var txnIndex = int(txNum - txNumMin - 2)
@@ -472,17 +511,13 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	if txn == nil && chainConfig.Bor != nil { //TODO: add tx gran here to.
+	if txn == nil && chainConfig.Bor != nil {
 		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
 		if block == nil {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
-		}
-		receipts, err := api.getReceipts(ctx, tx, block)
-		if err != nil {
-			return nil, fmt.Errorf("getReceipts error: %w", err)
 		}
 
 		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
@@ -494,7 +529,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			return nil, errors.New("tx not found")
 		}
 
-		borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
+		borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -519,6 +554,10 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	defer tx.Rollback()
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		bnh, _ := numberOrHash.Hash()
+		if errors.Is(err, rpchelper.BlockNotFoundErr{Hash: bnh}) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
@@ -549,7 +588,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		}
 
 		if len(events) != 0 {
-			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
+			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
 			if err != nil {
 				return nil, err
 			}

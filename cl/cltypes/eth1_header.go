@@ -23,7 +23,7 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -72,7 +72,9 @@ func (e *Eth1Header) SetVersion(v clparams.StateVersion) {
 func (e *Eth1Header) Copy() *Eth1Header {
 	copied := *e
 	copied.Extra = solid.NewExtraData()
-	copied.Extra.SetBytes(e.Extra.Bytes())
+	if e.Extra != nil {
+		copied.Extra.SetBytes(e.Extra.Bytes())
+	}
 	return &copied
 }
 
@@ -201,13 +203,13 @@ func (h *Eth1Header) UnmarshalJSON(data []byte) error {
 		FeeRecipient     libcommon.Address `json:"fee_recipient"`
 		StateRoot        libcommon.Hash    `json:"state_root"`
 		ReceiptsRoot     libcommon.Hash    `json:"receipts_root"`
-		LogsBloom        hexutility.Bytes  `json:"logs_bloom"`
+		LogsBloom        hexutil.Bytes     `json:"logs_bloom"`
 		PrevRandao       libcommon.Hash    `json:"prev_randao"`
 		BlockNumber      uint64            `json:"block_number,string"`
 		GasLimit         uint64            `json:"gas_limit,string"`
 		GasUsed          uint64            `json:"gas_used,string"`
 		Time             uint64            `json:"timestamp,string"`
-		Extra            hexutility.Bytes  `json:"extra_data"`
+		Extra            hexutil.Bytes     `json:"extra_data"`
 		BaseFeePerGas    string            `json:"base_fee_per_gas"`
 		BlockHash        libcommon.Hash    `json:"block_hash"`
 		TransactionsRoot libcommon.Hash    `json:"transactions_root"`

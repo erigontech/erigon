@@ -20,35 +20,12 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"reflect"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 )
-
-func (e *EthereumExecutionModule) validatePayloadBlobs(expectedBlobHashes []libcommon.Hash, transactions []types.Transaction, blobGasUsed uint64) error {
-	if expectedBlobHashes == nil {
-		return &rpc.InvalidParamsError{Message: "nil blob hashes array"}
-	}
-	actualBlobHashes := []libcommon.Hash{}
-	for _, txn := range transactions {
-		actualBlobHashes = append(actualBlobHashes, txn.GetBlobHashes()...)
-	}
-	if len(actualBlobHashes) > int(e.config.GetMaxBlobsPerBlock()) || blobGasUsed > e.config.GetMaxBlobGasPerBlock() {
-		return nil
-	}
-	if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
-		e.logger.Warn("[NewPayload] mismatch in blob hashes",
-			"expectedBlobHashes", expectedBlobHashes, "actualBlobHashes", actualBlobHashes)
-		return nil
-	}
-	return nil
-}
 
 func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *execution.InsertBlocksRequest) (*execution.InsertionResult, error) {
 	if !e.semaphore.TryAcquire(1) {
@@ -106,6 +83,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
 		}
+		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: could not commit: %s", err)

@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"fmt"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/bits"
 
@@ -29,7 +30,6 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -222,7 +222,7 @@ func (sc *sendersBatch) getOrCreateID(addr common.Address, logger log.Logger) (u
 	return id, traced
 }
 
-func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint64, balance uint256.Int, err error) {
+func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, uint256.Int, error) {
 	addr, ok := sc.senderID2Addr[id]
 	if !ok {
 		panic("must not happen")
@@ -234,17 +234,12 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint
 	if len(encoded) == 0 {
 		return 0, uint256.Int{}, nil
 	}
-	if cacheView.StateV3() {
-		var bp *uint256.Int
-		nonce, bp, _ = types2.DecodeAccountBytesV3(encoded)
-		balance = *bp
-	} else {
-		nonce, balance, err = DecodeSender(encoded)
-	}
+	acc := accounts.Account{}
+	err = accounts.DeserialiseV3(&acc, encoded)
 	if err != nil {
 		return 0, uint256.Int{}, err
 	}
-	return nonce, balance, nil
+	return acc.Nonce, acc.Balance, nil
 }
 
 func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger) (err error) {
@@ -310,40 +305,4 @@ func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
 	}
 
 	buffer[0] = byte(fieldSet)
-}
-
-// Decode the sender's balance and nonce from encoded byte-slice
-func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
-	if len(enc) == 0 {
-		return
-	}
-
-	var fieldSet = enc[0]
-	var pos = 1
-
-	if fieldSet&1 > 0 {
-		decodeLength := int(enc[pos])
-
-		if len(enc) < pos+decodeLength+1 {
-			return nonce, balance, fmt.Errorf(
-				"malformed CBOR for Account.Nonce: %s, Length %d",
-				enc[pos+1:], decodeLength)
-		}
-
-		nonce = common.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
-		pos += decodeLength + 1
-	}
-
-	if fieldSet&2 > 0 {
-		decodeLength := int(enc[pos])
-
-		if len(enc) < pos+decodeLength+1 {
-			return nonce, balance, fmt.Errorf(
-				"malformed CBOR for Account.Nonce: %s, Length %d",
-				enc[pos+1:], decodeLength)
-		}
-
-		(&balance).SetBytes(enc[pos+1 : pos+decodeLength+1])
-	}
-	return
 }

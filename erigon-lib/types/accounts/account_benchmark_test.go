@@ -175,10 +175,11 @@ func BenchmarkEncodingAccountForStorage(b *testing.B) {
 	for _, test := range accountCases {
 		test := test
 
-		buf := make([]byte, test.acc.EncodingLengthForStorage())
+		//buf := make([]byte, test.acc.EncodingLengthForStorage())
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				test.acc.EncodeForStorage(buf)
+				SerialiseV3(test.acc)
+				//test.acc.EncodeForStorage(buf) performance has degraded a bit because we are not using the same buf now
 			}
 		})
 	}
@@ -286,17 +287,16 @@ func BenchmarkDecodingAccount(b *testing.B) {
 		test := test
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
+				println(test.name, i, b.N) //TODO: it just stucks w/o that print
 				b.StopTimer()
 				test.acc.Nonce = uint64(i)
 				test.acc.Balance.SetUint64(uint64(i))
-				encodedAccount := make([]byte, test.acc.EncodingLengthForStorage())
-
-				test.acc.EncodeForStorage(encodedAccount)
+				encodedAccount := SerialiseV3(test.acc)
 
 				b.StartTimer()
 
 				var decodedAccount Account
-				if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
+				if err := DeserialiseV3(&decodedAccount, encodedAccount); err != nil {
 					b.Fatal("cant decode the account", err, encodedAccount)
 				}
 
@@ -314,7 +314,7 @@ func BenchmarkDecodingAccount(b *testing.B) {
 	}
 }
 
-func BenchmarkDecodingIncarnation(b *testing.B) {
+func BenchmarkDecodingIncarnation(b *testing.B) { // V2 version of bench was a panic one
 	accountCases := []struct {
 		name string
 		acc  *Account
@@ -354,25 +354,24 @@ func BenchmarkDecodingIncarnation(b *testing.B) {
 	b.ResetTimer()
 	for _, test := range accountCases {
 		test := test
-		encodedAccount := make([]byte, test.acc.EncodingLengthForStorage())
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
+				println(test.name, i, b.N) //TODO: it just stucks w/o that print
 				b.StopTimer()
 
 				test.acc.Nonce = uint64(i)
 				test.acc.Balance.SetUint64(uint64(i))
-				test.acc.EncodeForStorage(encodedAccount)
+				encodedAccount := SerialiseV3(test.acc)
 
 				b.StartTimer()
 
-				if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
+				decodedAcc := Account{}
+				if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
 					b.Fatal("can't decode the incarnation", err, encodedAccount)
 				}
 
-				decodedIncarnation, _ := DecodeIncarnationFromStorage(encodedAccount)
-
 				b.StopTimer()
-				decodedIncarnations = append(decodedIncarnations, decodedIncarnation)
+				decodedIncarnations = append(decodedIncarnations, decodedAcc.Incarnation)
 
 				b.StartTimer()
 			}

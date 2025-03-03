@@ -823,7 +823,7 @@ var (
 	CaplinDiscoveryAddrFlag = cli.StringFlag{
 		Name:  "caplin.discovery.addr",
 		Usage: "Address for Caplin DISCV5 protocol",
-		Value: "127.0.0.1",
+		Value: "0.0.0.0",
 	}
 	CaplinDiscoveryPortFlag = cli.Uint64Flag{
 		Name:  "caplin.discovery.port",
@@ -843,12 +843,12 @@ var (
 	CaplinMaxInboundTrafficPerPeerFlag = cli.StringFlag{
 		Name:  "caplin.max-inbound-traffic-per-peer",
 		Usage: "Max inbound traffic per second per peer",
-		Value: "256KB",
+		Value: "1MB",
 	}
 	CaplinMaxOutboundTrafficPerPeerFlag = cli.StringFlag{
 		Name:  "caplin.max-outbound-traffic-per-peer",
 		Usage: "Max outbound traffic per second per peer",
-		Value: "256KB",
+		Value: "1MB",
 	}
 	CaplinAdaptableTrafficRequirementsFlag = cli.BoolFlag{
 		Name:  "caplin.adaptable-maximum-traffic-requirements",
@@ -878,7 +878,7 @@ var (
 	CaplinMaxPeerCount = cli.Uint64Flag{
 		Name:  "caplin.max-peer-count",
 		Usage: "Max number of peers to connect",
-		Value: 80,
+		Value: 128,
 	}
 
 	SentinelAddrFlag = cli.StringFlag{
@@ -894,6 +894,11 @@ var (
 	SentinelBootnodes = cli.StringSliceFlag{
 		Name:  "sentinel.bootnodes",
 		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
+		Value: cli.NewStringSlice(),
+	}
+	SentinelStaticPeers = cli.StringSliceFlag{
+		Name:  "sentinel.staticpeers",
+		Usage: "connect to comma-separated Consensus static peers",
 		Value: cli.NewStringSlice(),
 	}
 
@@ -1107,6 +1112,19 @@ var (
 	ShutterP2pListenPortFlag = cli.UintFlag{
 		Name:  "shutter.p2p.listen.port",
 		Usage: "Use to override the default p2p listen port (defaults to 23102)",
+	}
+	PolygonPosSingleSlotFinalityFlag = cli.BoolFlag{
+		Name:  "polygon.pos.ssf",
+		Usage: "Enabling Polygon PoS Single Slot Finality",
+	}
+	PolygonPosSingleSlotFinalityBlockAtFlag = cli.Int64Flag{
+		Name:  "polygon.pos.ssf.block",
+		Usage: "Enabling Polygon PoS Single Slot Finality since block",
+	}
+	GDBMeFlag = cli.BoolFlag{
+		Name:  "gdbme",
+		Usage: "restart erigon under gdb for debug purposes",
+		Value: false,
 	}
 )
 
@@ -1713,6 +1731,9 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 		nodeConfig.P2P.MaxPeers = 100
 		logger.Info("Maximum peer count default sanitizing for bor", "total", nodeConfig.P2P.MaxPeers)
 	}
+
+	cfg.PolygonPosSingleSlotFinality = ctx.Bool(PolygonPosSingleSlotFinalityFlag.Name)
+	cfg.PolygonPosSingleSlotFinalityBlockAt = ctx.Uint64(PolygonPosSingleSlotFinalityBlockAtFlag.Name)
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
@@ -1880,6 +1901,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
 	cfg.CaplinConfig.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 	cfg.CaplinConfig.BootstrapNodes = ctx.StringSlice(SentinelBootnodes.Name)
+	cfg.CaplinConfig.StaticPeers = ctx.StringSlice(SentinelStaticPeers.Name)
 
 	chain := ctx.String(ChainFlag.Name) // mainnet by default
 	if ctx.IsSet(NetworkIdFlag.Name) {

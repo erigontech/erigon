@@ -30,24 +30,23 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/pkg/errors"
-	"golang.org/x/crypto/sha3"
-
-	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	btree2 "github.com/tidwall/btree"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 var ErrBehindCommitment = errors.New("behind commitment")
@@ -98,7 +97,7 @@ type SharedDomains struct {
 	storage *btree2.Map[string, dataWithPrevStep]
 
 	domainWriters [kv.DomainLen]*domainBufferedWriter
-	iiWriters     map[kv.InvertedIdx]*invertedIndexBufferedWriter
+	iiWriters     []*invertedIndexBufferedWriter
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
@@ -114,14 +113,12 @@ type HasAgg interface {
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
 	sd := &SharedDomains{
-		logger:    logger,
-		storage:   btree2.NewMap[string, dataWithPrevStep](128),
-		iiWriters: map[kv.InvertedIdx]*invertedIndexBufferedWriter{},
+		logger:  logger,
+		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
 	}
 	sd.SetTx(tx)
-
-	sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
+	sd.iiWriters = make([]*invertedIndexBufferedWriter, len(sd.aggTx.iis))
 
 	for id, ii := range sd.aggTx.iis {
 		sd.iiWriters[id] = ii.NewWriter()
@@ -162,6 +159,10 @@ func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blo
 	sd.pastChangesAccumulator[toStringZeroCopy(key)] = acc
 }
 
+func (sd *SharedDomains) GetCommitmentContext() *SharedDomainsCommitmentContext {
+	return sd.sdCtx
+}
+
 func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]DomainEntryDiff, bool, error) {
 	var key [40]byte
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
@@ -181,12 +182,12 @@ func (sd *SharedDomains) AggTx() any { return sd.aggTx }
 
 // aggregator context should call aggTx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff) error {
-	step := txUnwindTo / sd.aggTx.a.StepSize()
+	step := txUnwindTo / sd.StepSize()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	sd.aggTx.a.logger.Info("aggregator unwind", "step", step,
-		"txUnwindTo", txUnwindTo, "stepsRangeInDB", sd.aggTx.a.StepsRangeInDBAsStr(rwTx))
-	//fmt.Printf("aggregator unwind step %d txUnwindTo %d stepsRangeInDB %s\n", step, txUnwindTo, sd.aggTx.a.StepsRangeInDBAsStr(rwTx))
+	sd.logger.Info("aggregator unwind", "step", step,
+		"txUnwindTo", txUnwindTo)
+	//fmt.Printf("aggregator unwind step %d txUnwindTo %d\n", step, txUnwindTo)
 	sf := time.Now()
 	defer mxUnwindSharedTook.ObserveDuration(sf)
 
@@ -258,7 +259,7 @@ func (sd *SharedDomains) RebuildCommitmentShard(ctx context.Context, next func()
 	sd.DiscardWrites(kv.StorageDomain)
 	sd.DiscardWrites(kv.CodeDomain)
 
-	visComFiles := sd.aggTx.d[kv.CommitmentDomain].Files()
+	visComFiles := sd.roTx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
 	sd.logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
 		"totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum(),
 		"commitment files before dump step", cfg.StepTo,
@@ -389,7 +390,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 	// disable mutex - because work on parallel execution postponed after E3 release.
 	//sd.muMaps.Lock()
-	valWithPrevStep := dataWithPrevStep{data: val, prevStep: sd.txNum / sd.aggTx.a.StepSize()}
+	valWithPrevStep := dataWithPrevStep{data: val, prevStep: sd.txNum / sd.StepSize()}
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
 			sd.estSize += len(val) - len(old.data)
@@ -454,7 +455,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	}
 
 	if !sd.aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
-		return v, endTx / sd.aggTx.a.StepSize(), nil
+		return v, endTx / sd.StepSize(), nil
 	}
 
 	// replace shortened keys in the branch with full keys to allow HPH work seamlessly
@@ -462,7 +463,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	if err != nil {
 		return nil, 0, err
 	}
-	return rv, endTx / sd.aggTx.a.StepSize(), nil
+	return rv, endTx / sd.StepSize(), nil
 }
 
 // replaceShortenedKeysInBranch replaces shortened keys in the branch with full keys
@@ -534,7 +535,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		}
 		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
 		if !found {
-			s0, s1 := fStartTxNum/sd.aggTx.a.StepSize(), fEndTxNum/sd.aggTx.a.StepSize()
+			s0, s1 := fStartTxNum/sd.StepSize(), fEndTxNum/sd.StepSize()
 			sd.logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
@@ -662,8 +663,10 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
-	if writer, ok := sd.iiWriters[table]; ok {
-		return writer.Add(key)
+	for _, writer := range sd.iiWriters {
+		if writer.name == table {
+			return writer.Add(key)
+		}
 	}
 	panic(fmt.Errorf("unknown index %s", table))
 }
@@ -685,7 +688,7 @@ func (sd *SharedDomains) SetTx(tx kv.Tx) {
 	}
 }
 
-func (sd *SharedDomains) StepSize() uint64 { return sd.aggTx.a.StepSize() }
+func (sd *SharedDomains) StepSize() uint64 { return sd.aggTx.StepSize() }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
@@ -810,7 +813,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 			case FILE_CURSOR:
-				indexList := sd.aggTx.d[kv.StorageDomain].d.IndexList
+				indexList := sd.aggTx.d[kv.StorageDomain].d.AccessorList
 				if indexList&AccessorBTree != 0 {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
@@ -1219,14 +1222,18 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	u = &commitment.Update{CodeHash: commitment.EmptyCodeHashArray}
 
 	if len(encAccount) > 0 {
-		nonce, balance, chash := types.DecodeAccountBytesV3(encAccount)
+		acc := accounts.Account{}
+		err = accounts.DeserialiseV3(&acc, encAccount)
+		if err != nil {
+			return nil, err
+		}
 		u.Flags |= commitment.NonceUpdate
-		u.Nonce = nonce
+		u.Nonce = acc.Nonce
 		u.Flags |= commitment.BalanceUpdate
-		u.Balance.Set(balance)
-		if len(chash) > 0 {
+		u.Balance.Set(&acc.Balance)
+		if len(acc.CodeHash.Bytes()) > 0 {
 			u.Flags |= commitment.CodeUpdate
-			copy(u.CodeHash[:], chash)
+			copy(u.CodeHash[:], acc.CodeHash.Bytes())
 		}
 	}
 	if u.CodeHash == commitment.EmptyCodeHashArray {
@@ -1279,10 +1286,6 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	}
 }
 
-func (sdc *SharedDomainsCommitmentContext) TempDir() string {
-	return sdc.sharedDomains.aggTx.a.dirs.Tmp
-}
-
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
 	return sdc.updates.Size()
 }
@@ -1308,6 +1311,15 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	default:
 		panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
+}
+
+func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expectedRoot []byte, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
+	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	if ok {
+		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, nil, expectedRoot, logPrefix)
+	}
+
+	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 }
 
 // Evaluates commitment for processed state.

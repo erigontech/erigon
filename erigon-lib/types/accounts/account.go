@@ -791,3 +791,39 @@ func SerialiseV3To(a *Account, value []byte) {
 		}
 	}
 }
+
+// Decode the sender's balance and nonce from encoded byte-slice
+func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
+	if len(enc) == 0 {
+		return
+	}
+
+	var fieldSet = enc[0]
+	var pos = 1
+
+	if fieldSet&1 > 0 {
+		decodeLength := int(enc[pos])
+
+		if len(enc) < pos+decodeLength+1 {
+			return nonce, balance, fmt.Errorf(
+				"malformed CBOR for Account.Nonce: %s, Length %d",
+				enc[pos+1:], decodeLength)
+		}
+
+		nonce = libcommon.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
+		pos += decodeLength + 1
+	}
+
+	if fieldSet&2 > 0 {
+		decodeLength := int(enc[pos])
+
+		if len(enc) < pos+decodeLength+1 {
+			return nonce, balance, fmt.Errorf(
+				"malformed CBOR for Account.Nonce: %s, Length %d",
+				enc[pos+1:], decodeLength)
+		}
+
+		(&balance).SetBytes(enc[pos+1 : pos+decodeLength+1])
+	}
+	return
+}

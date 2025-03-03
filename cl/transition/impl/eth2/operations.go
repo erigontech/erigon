@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 
-	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon/cl/utils/bls"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -390,7 +390,7 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, body cltypes.Gene
 
 	// Verify commitments are under limit
 	// assert len(body.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
-	if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlock) {
+	if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlockByVersion(s.Version())) {
 		return errors.New("ProcessExecutionPayload: too many blob commitments")
 	}
 
@@ -880,7 +880,7 @@ func batchVerifyAttestations(
 	s abstract.BeaconState,
 	indexedAttestations []*cltypes.IndexedAttestation,
 ) (valid bool, err error) {
-	c := make(chan indexedAttestationVerificationResult, 1)
+	c := make(chan indexedAttestationVerificationResult, len(indexedAttestations))
 
 	for idx := range indexedAttestations {
 		go func(idx int) {
@@ -894,7 +894,7 @@ func batchVerifyAttestations(
 	for i := 0; i < len(indexedAttestations); i++ {
 		result := <-c
 		if result.err != nil {
-			return false, err
+			return false, result.err
 		}
 		if !result.valid {
 			return false, nil
@@ -1077,11 +1077,12 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	// Verify pubkey exists
 	vindex, exist := s.ValidatorIndexByPubkey(reqPubkey)
 	if !exist {
+		log.Warn("ProcessWithdrawalRequest: validator index not found", "pubkey", common.Bytes2Hex(reqPubkey[:]))
 		return nil
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(vindex))
 	if err != nil {
-		return err
+		return fmt.Errorf("ProcessWithdrawalRequest: validator not found for index %d", vindex)
 	}
 	// Verify withdrawal credentials
 	hasCorrectCredential := state.HasExecutionWithdrawalCredential(validator, s.BeaconConfig())
@@ -1108,6 +1109,7 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 		if pendingBalanceToWithdraw == 0 {
 			return s.InitiateValidatorExit(vindex)
 		}
+		return nil
 	}
 
 	vbalance, err := s.ValidatorBalance(int(vindex))
@@ -1122,7 +1124,7 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 			vbalance-s.BeaconConfig().MinActivationBalance-pendingBalanceToWithdraw,
 			amount,
 		)
-		exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(validator.EffectiveBalance())
+		exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(toWithdraw)
 		withdrawableEpoch := exitQueueEpoch + s.BeaconConfig().MinValidatorWithdrawabilityDelay
 		s.AppendPendingPartialWithdrawal(&solid.PendingPartialWithdrawal{
 			Index:             vindex,
@@ -1185,8 +1187,8 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 	if !(isCorrectSourceAddress && hasCorrectCredential) {
 		return nil
 	}
-	// Verify that target has execution withdrawal credentials
-	if !state.HasExecutionWithdrawalCredential(targetValidator, s.BeaconConfig()) {
+	// Verify that target has compounding withdrawal credentials
+	if !state.HasCompoundingWithdrawalCredential(targetValidator, s.BeaconConfig()) {
 		return nil
 	}
 	// Verify the source and the target are active
@@ -1201,10 +1203,12 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 	}
 	// Verify the source has been active long enough
 	if curEpoch < sourceValidator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
+		log.Info("[Consolidation] Source has not been active long enough, ignoring consolidation request", "slot", s.Slot(), "curEpoch", curEpoch, "activationEpoch", sourceValidator.ActivationEpoch())
 		return nil
 	}
 	// Verify the source has no pending withdrawals in the queue
 	if getPendingBalanceToWithdraw(s, sourceIndex) > 0 {
+		log.Info("[Consolidation] Source has pending withdrawals, ignoring consolidation request", "slot", s.Slot())
 		return nil
 	}
 
@@ -1216,9 +1220,6 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 		SourceIndex: sourceIndex,
 		TargetIndex: targetIndex,
 	})
-	if state.HasEth1WithdrawalCredential(targetValidator, s.BeaconConfig()) {
-		return switchToCompoundingValidator(s, targetIndex)
-	}
 	return nil
 }
 
@@ -1267,7 +1268,7 @@ func switchToCompoundingValidator(s abstract.BeaconState, vindex uint64) error {
 	wc := validator.WithdrawalCredentials()
 	newWc := common.Hash{}
 	copy(newWc[:], wc[:])
-	newWc[0] = s.BeaconConfig().CompoundingWithdrawalPrefix
+	newWc[0] = byte(s.BeaconConfig().CompoundingWithdrawalPrefix)
 	validator.SetWithdrawalCredentials(newWc)
 	s.SetValidatorAtIndex(int(vindex), validator) // update the state
 	return state.QueueExcessActiveBalance(s, vindex, &validator)

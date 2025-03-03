@@ -25,7 +25,6 @@ import (
 	"math"
 	"math/rand"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -48,7 +47,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -93,8 +92,13 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
 		require.EqualValues(t, length.Hash, n)
-
-		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(0), nil, 0)
+		acc := accounts.Account{
+			Nonce:       1,
+			Balance:     *uint256.NewInt(0),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
 		require.NoError(t, err)
 
@@ -208,8 +212,13 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
 		require.EqualValues(t, length.Hash, n)
-
-		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(txNum*1e6), nil, 0)
+		acc := accounts.Account{
+			Nonce:       1,
+			Balance:     *uint256.NewInt(txNum * 1e6),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
 		require.NoError(t, err)
 
@@ -335,8 +344,13 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		require.NoError(t, err)
 		require.EqualValues(t, length.Hash, n)
 		//keys[txNum-1] = append(addr, loc...)
-
-		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(rnd.Uint64()), nil, 0)
+		acc := accounts.Account{
+			Nonce:       1,
+			Balance:     *uint256.NewInt(rnd.Uint64()),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
 		require.NoError(t, err)
 
@@ -678,7 +692,13 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 		r := rnd.IntN(101)
 		switch {
 		case r <= 33:
-			buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(txNum*100_000), nil, 0)
+			acc := accounts.Account{
+				Nonce:       txNum,
+				Balance:     *uint256.NewInt(txNum * 100_000),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
 			prev, step, err := domains.GetLatest(kv.AccountsDomain, key)
 			require.NoError(t, err)
 
@@ -723,7 +743,13 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 			require.NoError(t, err)
 			if prev == nil {
 				usedKeys[string(key)] = struct{}{}
-				buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(txNum*100_000), nil, 0)
+				acc := accounts.Account{
+					Nonce:       txNum,
+					Balance:     *uint256.NewInt(txNum * 100_000),
+					CodeHash:    common.Hash{},
+					Incarnation: 0,
+				}
+				buf := accounts.SerialiseV3(&acc)
 				err = domains.DomainPut(kv.AccountsDomain, key, nil, buf, prev, step)
 				require.NoError(t, err)
 			}
@@ -788,7 +814,13 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, length.Hash, n)
 
-		buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(1000000000000), nil, 0)
+		acc := accounts.Account{
+			Nonce:       txNum,
+			Balance:     *uint256.NewInt(1000000000000),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf[:], nil, 0)
 		require.NoError(t, err)
 
@@ -853,9 +885,11 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			//fmt.Printf("%x [%d/%d]", key, miss, i+1) // txnum starts from 1
 			continue
 		}
-		nonce, _, _ := types.DecodeAccountBytesV3(stored)
+		acc := accounts.Account{}
+		err = accounts.DeserialiseV3(&acc, stored)
+		require.NoError(t, err)
 
-		require.EqualValues(t, i+1, int(nonce))
+		require.EqualValues(t, i+1, int(acc.Nonce))
 
 		storedV, _, found, err := ac.GetLatest(kv.StorageDomain, key, newTx)
 		require.NoError(t, err)
@@ -929,7 +963,13 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		require.EqualValues(t, length.Hash, n)
 		keys[txNum-1] = append(addr, loc...)
 
-		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(0), nil, 0)
+		acc := accounts.Account{
+			Nonce:       1,
+			Balance:     *uint256.NewInt(0),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
 
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, prev1, 0)
 		require.NoError(t, err)
@@ -1028,7 +1068,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	rnd := newRnd(0)
 	values := make([]byte, valueSize)
 
-	dataPath := path.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
+	dataPath := filepath.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
 	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
@@ -1077,7 +1117,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	compPath := decomp.FilePath()
 	ps := background.NewProgressSet()
 
-	IndexFile := path.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
+	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
 	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true)
 	require.NoError(tb, err)
 
@@ -1161,7 +1201,13 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		}
 
 		for j := 0; j < len(keys); j++ {
-			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			acc := accounts.Account{
+				Nonce:       uint64(i),
+				Balance:     *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
 			prev, step, err := domains.GetLatest(kv.AccountsDomain, keys[j])
 			require.NoError(t, err)
 
@@ -1196,7 +1242,13 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		domains.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
-			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			acc := accounts.Account{
+				Nonce:       uint64(i),
+				Balance:     *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
 			prev, step, _, err := mc.GetLatest(kv.AccountsDomain, keys[j], rwTx)
 			require.NoError(t, err)
 
@@ -1233,7 +1285,13 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		domains.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
-			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			acc := accounts.Account{
+				Nonce:       uint64(i),
+				Balance:     *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
 			prev, step, _, err := mc.GetLatest(kv.AccountsDomain, keys[j], rwTx)
 			require.NoError(t, err)
 
@@ -1256,8 +1314,9 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 	input, err := hex.DecodeString("000114000101")
 	require.NoError(t, err)
 
-	n, b, ch := types.DecodeAccountBytesV3(input)
-	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, n, b.Uint64(), ch)
+	acc := accounts.Account{}
+	_ = accounts.DeserialiseV3(&acc, input)
+	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash.Bytes())
 }
 
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
@@ -1274,7 +1333,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	fnames := []string{}
 	for _, f := range ac.d[kv.CommitmentDomain].files {
 		var k, stateVal []byte
-		if ac.d[kv.CommitmentDomain].d.IndexList&AccessorHashMap != 0 {
+		if ac.d[kv.CommitmentDomain].d.AccessorList&AccessorHashMap != 0 {
 			idx := f.src.index.GetReaderFromPool()
 			r := seg.NewReader(f.src.decompressor.MakeGetter(), compression)
 
