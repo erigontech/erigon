@@ -33,7 +33,11 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
-func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockReader services.HeaderAndCanonicalReader) ([]*types.Header, error) {
+type blockPrefetcher interface {
+	GetPrefetchedByHash(hash libcommon.Hash) (*types.Header, *types.RawBody)
+}
+
+func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockReader services.HeaderAndCanonicalReader, headerPrefetcher blockPrefetcher) ([]*types.Header, error) {
 	hashMode := query.Origin.Hash != (libcommon.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)
@@ -53,19 +57,22 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 		// Retrieve the next header satisfying the query
 		var origin *types.Header
 		if hashMode {
-			if first {
-				first = false
-				origin, err = blockReader.HeaderByHash(context.Background(), db, query.Origin.Hash)
-				if err != nil {
-					return nil, err
-				}
-				if origin != nil {
-					query.Origin.Number = origin.Number.Uint64()
-				}
-			} else {
-				origin, err = blockReader.Header(context.Background(), db, query.Origin.Hash, query.Origin.Number)
-				if err != nil {
-					return nil, err
+			origin, _ = headerPrefetcher.GetPrefetchedByHash(query.Origin.Hash)
+			if origin == nil {
+				if first {
+					first = false
+					origin, err = blockReader.HeaderByHash(context.Background(), db, query.Origin.Hash)
+					if err != nil {
+						return nil, err
+					}
+					if origin != nil {
+						query.Origin.Number = origin.Number.Uint64()
+					}
+				} else {
+					origin, err = blockReader.Header(context.Background(), db, query.Origin.Hash, query.Origin.Number)
+					if err != nil {
+						return nil, err
+					}
 				}
 			}
 		} else {
@@ -135,28 +142,44 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 	return headers, nil
 }
 
-func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader services.FullBlockReader) []rlp.RawValue { //nolint:unparam
+func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader services.FullBlockReader, bodyPrefetcher blockPrefetcher) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather blocks until the fetch or network limits is reached
-	var bytes int
+	var bytesCount int
 	bodies := make([]rlp.RawValue, 0, len(query))
 
 	for lookups, hash := range query {
-		if bytes >= softResponseLimit || len(bodies) >= MaxBodiesServe ||
+		if bytesCount >= softResponseLimit || len(bodies) >= MaxBodiesServe ||
 			lookups >= 2*MaxBodiesServe {
 			break
 		}
-		number, _ := blockReader.HeaderNumber(context.Background(), db, hash)
-		if number == nil {
-			continue
+
+		var bodyRLP rlp.RawValue
+		var err error
+
+		_, body := bodyPrefetcher.GetPrefetchedByHash(hash)
+		if body != nil {
+			bodyRLP, err = rlp.EncodeToBytes(body)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			number, _ := blockReader.HeaderNumber(context.Background(), db, hash)
+			if number == nil {
+				continue
+			}
+			bodyRLP, err = blockReader.BodyRlp(context.Background(), db, hash, *number)
+			if err != nil {
+				return nil, err
+			}
 		}
-		bodyRLP, _ := blockReader.BodyRlp(context.Background(), db, hash, *number)
+
 		if len(bodyRLP) == 0 {
 			continue
 		}
 		bodies = append(bodies, bodyRLP)
-		bytes += len(bodyRLP)
+		bytesCount += len(bodyRLP)
 	}
-	return bodies
+	return bodies, nil
 }
 
 type ReceiptsGetter interface {

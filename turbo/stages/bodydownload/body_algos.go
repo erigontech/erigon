@@ -436,6 +436,10 @@ func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, del bool) *types.RawBo
 	return nil
 }
 
+func (bd *BodyDownload) GetPrefetchedByHash(hash libcommon.Hash) (*types.Header, *types.RawBody) {
+	return bd.prefetchedBlocks.Get(hash)
+}
+
 func (bd *BodyDownload) ClearBodyCache() {
 	bd.bodyCache.Clear(true)
 }

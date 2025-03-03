@@ -178,36 +178,29 @@ func NewMultiClient(
 	logger log.Logger,
 ) (*MultiClient, error) {
 	// header downloader
-	var hd *headerdownload.HeaderDownload
+	hd := headerdownload.NewHeaderDownload(
+		512,       /* anchorLimit */
+		1024*1024, /* linkLimit */
+		engine,
+		blockReader,
+		logger,
+	)
+
+	if chainConfig.TerminalTotalDifficultyPassed {
+		hd.SetPOSSync(true)
+	}
+
 	if !disableBlockDownload {
-		hd = headerdownload.NewHeaderDownload(
-			512,       /* anchorLimit */
-			1024*1024, /* linkLimit */
-			engine,
-			blockReader,
-			logger,
-		)
-		if chainConfig.TerminalTotalDifficultyPassed {
-			hd.SetPOSSync(true)
-		}
 		if err := hd.RecoverFromDb(db); err != nil {
 			return nil, fmt.Errorf("recovery from DB failed: %w", err)
 		}
-	} else {
-		hd = &headerdownload.HeaderDownload{}
 	}
 
-	// body downloader
-	var bd *bodydownload.BodyDownload
-	if !disableBlockDownload {
-		bd = bodydownload.NewBodyDownload(engine, blockBufferSize, int(syncCfg.BodyCacheLimit), blockReader, logger)
-		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			return bd.UpdateFromDb(tx)
-		}); err != nil {
-			return nil, err
-		}
-	} else {
-		bd = &bodydownload.BodyDownload{}
+	bd := bodydownload.NewBodyDownload(engine, blockBufferSize, int(syncCfg.BodyCacheLimit), blockReader, logger)
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		return bd.UpdateFromDb(tx)
+	}); err != nil {
+		return nil, err
 	}
 
 	cs := &MultiClient{
@@ -490,7 +483,7 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentr
 
 	var headers []*types.Header
 	if err := cs.db.View(ctx, func(tx kv.Tx) (err error) {
-		headers, err = eth.AnswerGetBlockHeadersQuery(tx, query.GetBlockHeadersPacket, cs.blockReader)
+		headers, err = eth.AnswerGetBlockHeadersQuery(tx, query.GetBlockHeadersPacket, cs.blockReader, cs.Bd)
 		if err != nil {
 			return err
 		}
@@ -540,11 +533,14 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 		return err
 	}
 	defer tx.Rollback()
-	response := eth.AnswerGetBlockBodiesQuery(tx, query.GetBlockBodiesPacket, cs.blockReader)
+	bodies, err := eth.AnswerGetBlockBodiesQuery(tx, query.GetBlockBodiesPacket, cs.blockReader, cs.Bd)
+	if err != nil {
+		return err
+	}
 	tx.Rollback()
 	b, err := rlp.EncodeToBytes(&eth.BlockBodiesRLPPacket66{
 		RequestId:            query.RequestId,
-		BlockBodiesRLPPacket: response,
+		BlockBodiesRLPPacket: bodies,
 	})
 	if err != nil {
 		return fmt.Errorf("encode header response: %w", err)
