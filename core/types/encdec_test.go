@@ -224,7 +224,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			ChainID:                     uint256.NewInt(*tr.RandUint64()),
 			Tip:                         uint256.NewInt(*tr.RandUint64()),
 			FeeCap:                      uint256.NewInt(*tr.RandUint64()),
-			Gas:                         commonTx.Gas,
+			GasLimit:                    commonTx.GasLimit,
 			AccessList:                  tr.RandAccessList(tr.RandIntInRange(0, 5)),
 			SenderAddress:               &senderAddress,
 			Authorizations:              tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
@@ -509,21 +509,21 @@ func TestTransactionEncodeRLP_AA(t *testing.T) {
 	tr := NewTRand()
 	senderAddress, paymaster, deployer, to := tr.RandAddress(), tr.RandAddress(), tr.RandAddress(), tr.RandAddress()
 	commonTx := CommonTx{
-		Nonce: *tr.RandUint64(),
-		Gas:   *tr.RandUint64(),
-		To:    &to,
-		Value: uint256.NewInt(*tr.RandUint64()), // wei amount
-		Data:  tr.RandBytes(tr.RandIntInRange(128, 1024)),
-		V:     *tr.RandUint256(),
-		R:     *tr.RandUint256(),
-		S:     *tr.RandUint256(),
+		Nonce:    *tr.RandUint64(),
+		GasLimit: *tr.RandUint64(),
+		To:       &to,
+		Value:    uint256.NewInt(*tr.RandUint64()), // wei amount
+		Data:     tr.RandBytes(tr.RandIntInRange(128, 1024)),
+		V:        *tr.RandUint256(),
+		R:        *tr.RandUint256(),
+		S:        *tr.RandUint256(),
 	}
 	aaTxn := AccountAbstractionTransaction{
 		Nonce:                       commonTx.Nonce,
 		ChainID:                     uint256.NewInt(*tr.RandUint64()),
 		Tip:                         uint256.NewInt(*tr.RandUint64()),
 		FeeCap:                      uint256.NewInt(*tr.RandUint64()),
-		Gas:                         commonTx.Gas,
+		GasLimit:                    commonTx.GasLimit,
 		AccessList:                  tr.RandAccessList(tr.RandIntInRange(0, 5)),
 		SenderAddress:               &senderAddress,
 		Authorizations:              tr.RandAuthorizations(tr.RandIntInRange(0, 5)),

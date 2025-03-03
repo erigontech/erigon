@@ -35,7 +35,7 @@ type AccountAbstractionTransaction struct {
 	ChainID    *uint256.Int
 	Tip        *uint256.Int
 	FeeCap     *uint256.Int
-	Gas        uint64
+	GasLimit   uint64
 	AccessList AccessList
 
 	SenderAddress               *common.Address
@@ -127,7 +127,7 @@ func (tx *AccountAbstractionTransaction) GetFeeCap() *uint256.Int {
 }
 
 func (tx *AccountAbstractionTransaction) GetGasLimit() uint64 {
-	return tx.Gas
+	return tx.GasLimit
 }
 
 func (tx *AccountAbstractionTransaction) GetTipCap() *uint256.Int {
@@ -139,7 +139,7 @@ func (tx *AccountAbstractionTransaction) GetBlobHashes() []common.Hash {
 }
 
 func (tx *AccountAbstractionTransaction) GetGas() uint64 {
-	return tx.Gas
+	return tx.GasLimit
 }
 
 func (tx *AccountAbstractionTransaction) GetBlobGas() uint64 {
@@ -160,7 +160,7 @@ func (tx *AccountAbstractionTransaction) copy() *AccountAbstractionTransaction {
 		ChainID:                     tx.ChainID,
 		Tip:                         tx.Tip,
 		FeeCap:                      tx.FeeCap,
-		Gas:                         tx.Gas,
+		GasLimit:                    tx.GasLimit,
 		AccessList:                  tx.AccessList,
 		SenderAddress:               &*tx.SenderAddress,
 		ExecutionData:               common.CopyBytes(tx.ExecutionData),
@@ -215,7 +215,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 		tx.BuilderFee,
 		tx.Tip, tx.FeeCap,
 		tx.ValidationGasLimit, tx.PaymasterValidationGasLimit, tx.PostOpGasLimit,
-		tx.Gas,
+		tx.GasLimit,
 		tx.AccessList,
 		tx.Authorizations,
 	})
@@ -235,7 +235,7 @@ func (tx *AccountAbstractionTransaction) SigningHash(chainID *big.Int) common.Ha
 		tx.BuilderFee,
 		tx.Tip, tx.FeeCap,
 		tx.ValidationGasLimit, tx.PaymasterValidationGasLimit, tx.PostOpGasLimit,
-		tx.Gas,
+		tx.GasLimit,
 		tx.AccessList, // authorization data is not included for signing hash
 	})
 
@@ -299,7 +299,7 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 	payloadSize += rlp.IntLenExcludingHead(tx.PostOpGasLimit)
 
 	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.Gas)
+	payloadSize += rlp.IntLenExcludingHead(tx.GasLimit)
 
 	accessListLen = accessListSize(tx.AccessList)
 	payloadSize += rlp.ListPrefixLen(accessListLen) + accessListLen
@@ -401,7 +401,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
 		return err
 	}
 
@@ -513,7 +513,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if tx.Gas, err = s.Uint(); err != nil {
+	if tx.GasLimit, err = s.Uint(); err != nil {
 		return err
 	}
 
@@ -584,7 +584,7 @@ func (tx *AccountAbstractionTransaction) ExecutionFrame() *Message {
 	return &Message{
 		to:       tx.SenderAddress,
 		from:     AA_ENTRY_POINT,
-		gasLimit: tx.Gas,
+		gasLimit: tx.GasLimit,
 		data:     tx.ExecutionData,
 	}
 }
@@ -704,7 +704,7 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 		ValidationGasLimit:          uint256.NewInt(tx.ValidationGasLimit),
 		PaymasterValidationGasLimit: uint256.NewInt(tx.PaymasterValidationGasLimit),
 		PostOpGasLimit:              uint256.NewInt(tx.PostOpGasLimit),
-		CallGasLimit:                uint256.NewInt(tx.Gas),
+		CallGasLimit:                uint256.NewInt(tx.GasLimit),
 		MaxFeePerGas:                tx.FeeCap,
 		MaxPriorityFeePerGas:        tx.Tip,
 		BuilderFee:                  tx.BuilderFee,
@@ -750,7 +750,7 @@ func (tx *AccountAbstractionTransaction) ToProto() *typesproto.AccountAbstractio
 		ChainId:                     tx.ChainID.Bytes(),
 		Tip:                         tx.Tip.Bytes(),
 		FeeCap:                      tx.FeeCap.Bytes(),
-		Gas:                         tx.Gas,
+		Gas:                         tx.GasLimit,
 		SenderAddress:               tx.SenderAddress.Bytes(),
 		Authorizations:              convertAuthorizations(tx.Authorizations),
 		ExecutionData:               tx.ExecutionData,
@@ -796,7 +796,7 @@ func FromProto(tx *typesproto.AccountAbstractionTransaction) *AccountAbstraction
 		ChainID:                     uint256.NewInt(0).SetBytes(tx.ChainId),
 		Tip:                         uint256.NewInt(0).SetBytes(tx.Tip),
 		FeeCap:                      uint256.NewInt(0).SetBytes(tx.FeeCap),
-		Gas:                         tx.Gas,
+		GasLimit:                    tx.Gas,
 		SenderAddress:               &senderAddress,
 		Authorizations:              convertProtoAuthorizations(tx.Authorizations),
 		ExecutionData:               tx.ExecutionData,

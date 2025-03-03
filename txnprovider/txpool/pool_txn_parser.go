@@ -711,7 +711,7 @@ func (tx *TxnSlot) ToAATxn() types.AccountAbstractionTransaction {
 		ChainID:                     &tx.ChainID,
 		Tip:                         &tx.Tip,
 		FeeCap:                      &tx.FeeCap,
-		Gas:                         tx.Gas,
+		GasLimit:                    tx.Gas,
 		SenderAddress:               tx.SenderAddress,
 		ExecutionData:               tx.ExecutionData,
 		Paymaster:                   tx.Paymaster,
