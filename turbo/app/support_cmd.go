@@ -481,11 +481,10 @@ func (nc *nodeConnection) startListening() {
 			return
 		}
 
-		fmt.Println("Received message, ", string(message))
 		nc.responseChannel <- nodeResponse{
 			Id:     nc.requestId,
 			Result: message,
-			Last:   true,
+			Last:   false,
 		}
 	}
 }
@@ -530,7 +529,7 @@ func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
 			nc.responseChannel <- nodeResponse{
 				Id:     action.requestId,
 				Result: json.RawMessage(bytes.Bytes()),
-				Last:   true,
+				Last:   false,
 			}
 
 		case isUnsubscribe(action.method):

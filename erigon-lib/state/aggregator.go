@@ -326,16 +326,6 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 	}
 }
 
-func (a *Aggregator) DiscardHistory(name kv.Domain) *Aggregator {
-	a.d[name].historyDisabled = true
-	return a
-}
-
-func (a *Aggregator) EnableHistory(name kv.Domain) *Aggregator {
-	a.d[name].historyDisabled = false
-	return a
-}
-
 func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 	return a.buildingFiles.Load() || a.mergingFiles.Load()
 }
@@ -343,7 +333,7 @@ func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *Aggregator) BackgroundProgress() string    { return a.ps.String() }
 
-func (ac *AggregatorRoTx) Files() []string {
+func (ac *AggregatorRoTx) AllFiles() []string {
 	var res []string
 	if ac == nil {
 		return res
@@ -356,10 +346,13 @@ func (ac *AggregatorRoTx) Files() []string {
 	}
 	return res
 }
+func (ac *AggregatorRoTx) Files(domain kv.Domain) []string { return ac.d[domain].Files() }
+func (ac *AggregatorRoTx) StepSize() uint64                { return ac.a.StepSize() }
+
 func (a *Aggregator) Files() []string {
 	ac := a.BeginFilesRo()
 	defer ac.Close()
-	return ac.Files()
+	return ac.AllFiles()
 }
 func (a *Aggregator) LS() {
 	doLS := func(dirtyFiles *btree.BTreeG[*filesItem]) {
@@ -921,7 +914,7 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 				"until commit", time.Until(started.Add(timeout)).String(),
 				"pruneLimit", pruneLimit,
 				"aggregatedStep", ac.StepsInFiles(kv.StateDomains...),
-				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
+				"stepsRangeInDB", ac.stepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
 		case <-ctx.Done():
@@ -931,13 +924,15 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	}
 }
 
-func (a *Aggregator) StepsRangeInDBAsStr(tx kv.Tx) string {
-	steps := make([]string, 0, kv.DomainLen+4)
-	for _, d := range a.d {
-		steps = append(steps, d.stepsRangeInDBAsStr(tx))
+func (at *AggregatorRoTx) stepsRangeInDBAsStr(tx kv.Tx) string {
+	steps := make([]string, 0, len(at.d)+len(at.iis))
+	for _, dt := range at.d {
+		a1, a2 := dt.stepsRangeInDB(tx)
+		steps = append(steps, fmt.Sprintf("%s:%.1f", dt.d.filenameBase, a2-a1))
 	}
-	for _, ii := range a.iis {
-		steps = append(steps, ii.stepsRangeInDBAsStr(tx))
+	for _, iit := range at.iis {
+		a1, a2 := iit.stepsRangeInDB(tx)
+		steps = append(steps, fmt.Sprintf("%s:%.1f", iit.ii.filenameBase, a2-a1))
 	}
 	return strings.Join(steps, ", ")
 }
@@ -1072,7 +1067,7 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 	}
 	//ac.a.logger.Info("aggregator prune", "step", step,
 	//	"txn_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
-	//	/*"stepsLimit", limit/ac.a.aggregationStep,*/ "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
+	//	/*"stepsLimit", limit/ac.a.aggregationStep,*/ "stepsRangeInDB", ac.a.stepsRangeInDBAsStr(tx))
 	aggStat := newAggregatorPruneStat()
 	for id, d := range ac.d {
 		var err error
@@ -1650,7 +1645,7 @@ func (ac *AggregatorRoTx) getAsOfFile(name kv.Domain, key []byte, ts uint64) (v 
 	return ac.d[name].GetAsOfFile(key, ts)
 }
 
-func (ac *AggregatorRoTx) GetAsOf(tx kv.Tx, name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
+func (ac *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
 	return ac.d[name].GetAsOf(k, ts, tx)
 }
 func (ac *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {
