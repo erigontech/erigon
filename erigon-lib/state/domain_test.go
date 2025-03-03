@@ -919,7 +919,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 		require.EqualValues(t, v[:], storedV, label)
 	}
 
-	from, to := d.stepsRangeInDB(tx)
+	from, to := dc.stepsRangeInDB(tx)
 	require.Equal(t, 3, int(from))
 	require.Equal(t, 4, int(to))
 

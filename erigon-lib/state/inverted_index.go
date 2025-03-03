@@ -1222,18 +1222,14 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	ii.dirtyFiles.Set(fi)
 }
 
-func (ii *InvertedIndex) stepsRangeInDBAsStr(tx kv.Tx) string {
-	a1, a2 := ii.stepsRangeInDB(tx)
-	return fmt.Sprintf("%s: %.1f", ii.filenameBase, a2-a1)
-}
-func (ii *InvertedIndex) stepsRangeInDB(tx kv.Tx) (from, to float64) {
-	fst, _ := kv.FirstKey(tx, ii.keysTable)
+func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	fst, _ := kv.FirstKey(tx, iit.ii.keysTable)
 	if len(fst) > 0 {
-		from = float64(binary.BigEndian.Uint64(fst)) / float64(ii.aggregationStep)
+		from = float64(binary.BigEndian.Uint64(fst)) / float64(iit.ii.aggregationStep)
 	}
-	lst, _ := kv.LastKey(tx, ii.keysTable)
+	lst, _ := kv.LastKey(tx, iit.ii.keysTable)
 	if len(lst) > 0 {
-		to = float64(binary.BigEndian.Uint64(lst)) / float64(ii.aggregationStep)
+		to = float64(binary.BigEndian.Uint64(lst)) / float64(iit.ii.aggregationStep)
 	}
 	if to == 0 {
 		to = from
