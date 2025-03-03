@@ -127,14 +127,26 @@ func NewStringifiedErrorFromString(err string) *StringifiedError {
 	return &StringifiedError{err: errors.New(err)}
 }
 
-func (e StringifiedError) MarshalJSON() ([]byte, error) {
+func (e *StringifiedError) MarshalJSON() ([]byte, error) {
 	if e.err == nil {
 		return json.Marshal(nil)
 	}
 	return json.Marshal(e.err.Error())
 }
 
-func (e StringifiedError) Error() error {
+func (e *StringifiedError) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	var errStr string
+	if err := json.Unmarshal(data, &errStr); err != nil {
+		return err
+	}
+	e.err = errors.New(errStr)
+	return nil
+}
+
+func (e *StringifiedError) Error() error {
 	return e.err
 }
 
