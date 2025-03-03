@@ -172,5 +172,3 @@ func EncodeTxnForFrame(frameType string, signingHash common.Hash, txAbiEncoding 
 func EncodePostOpFrame(paymasterContext []byte, gasUsed *big.Int, executionSuccess bool) ([]byte, error) {
 	return AccountAbstractionABI.Pack("postPaymasterTransaction", executionSuccess, gasUsed, paymasterContext)
 }
-
-/// TRANSACTION

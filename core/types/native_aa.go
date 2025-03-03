@@ -676,8 +676,7 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 		{Name: "paymasterData", Type: "bytes"},
 		{Name: "deployer", Type: "address"},
 		{Name: "deployerData", Type: "bytes"},
-		{Name: "executionData", Type: "bytes"},
-		{Name: "authorizationData", Type: "bytes"},
+		{Name: "executionData", Type: "bytes"}, // TODO: discuss how to pass authorization data to EVM
 	})
 
 	args := abi.Arguments{
@@ -691,12 +690,6 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 	deployer := tx.Deployer
 	if deployer == nil {
 		deployer = &common.Address{}
-	}
-
-	var authorizations bytes.Buffer
-	b := make([]byte, authorizationsSize(tx.Authorizations)) // NOTE: may be wrong??
-	if err := encodeAuthorizations(tx.Authorizations, &authorizations, b); err != nil {
-		return nil, err
 	}
 
 	record := &ABIAccountAbstractTxn{
@@ -715,7 +708,6 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 		Deployer:                    *deployer,
 		DeployerData:                tx.DeployerData,
 		ExecutionData:               tx.ExecutionData,
-		AuthorizationData:           authorizations.Bytes(),
 	}
 	packed, err := args.Pack(&record)
 	return packed, err
@@ -723,7 +715,6 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 
 // ABIAccountAbstractTxn an equivalent of a solidity struct only used to encode the 'transaction' parameter
 type ABIAccountAbstractTxn struct {
-	// NOTE: these were big.Int and were changed to uint256
 	Sender                      common.Address
 	NonceKey                    *uint256.Int
 	Nonce                       *uint256.Int
@@ -740,48 +731,6 @@ type ABIAccountAbstractTxn struct {
 	DeployerData                []byte
 	ExecutionData               []byte
 	AuthorizationData           []byte
-}
-
-func (tx *AccountAbstractionTransaction) ToProto() *typesproto.AccountAbstractionTransaction {
-	if tx == nil {
-		return nil
-	}
-
-	return &typesproto.AccountAbstractionTransaction{
-		Nonce:                       tx.Nonce,
-		ChainId:                     tx.ChainID.Bytes(),
-		Tip:                         tx.Tip.Bytes(),
-		FeeCap:                      tx.FeeCap.Bytes(),
-		Gas:                         tx.GasLimit,
-		SenderAddress:               tx.SenderAddress.Bytes(),
-		Authorizations:              convertAuthorizations(tx.Authorizations),
-		ExecutionData:               tx.ExecutionData,
-		Paymaster:                   tx.Paymaster.Bytes(),
-		PaymasterData:               tx.PaymasterData,
-		Deployer:                    tx.Deployer.Bytes(),
-		DeployerData:                tx.DeployerData,
-		BuilderFee:                  tx.BuilderFee.Bytes(),
-		ValidationGasLimit:          tx.ValidationGasLimit,
-		PaymasterValidationGasLimit: tx.PaymasterValidationGasLimit,
-		PostOpGasLimit:              tx.PostOpGasLimit,
-		NonceKey:                    tx.NonceKey.Bytes(),
-	}
-}
-
-func convertAuthorizations(auths []Authorization) []*typesproto.Authorization {
-	protoAuths := make([]*typesproto.Authorization, len(auths))
-	for i, auth := range auths {
-		protoAuths[i] = &typesproto.Authorization{
-			ChainId: auth.ChainID.Uint64(),
-			Address: auth.Address.Bytes(),
-			Nonce:   auth.Nonce,
-			YParity: uint32(auth.YParity), // Convert uint8 to uint32 since protobuf lacks uint8
-			R:       auth.R.Bytes(),
-			S:       auth.S.Bytes(),
-		}
-	}
-
-	return protoAuths
 }
 
 func FromProto(tx *typesproto.AccountAbstractionTransaction) *AccountAbstractionTransaction {

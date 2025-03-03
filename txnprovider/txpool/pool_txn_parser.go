@@ -34,8 +34,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
 )
 
 const (
@@ -705,24 +705,29 @@ func (tx *TxnSlot) PrintDebug(prefix string) {
 	//fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,hash=%x\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.IdHash)
 }
 
-func (tx *TxnSlot) ToAATxn() types.AccountAbstractionTransaction {
-	return types.AccountAbstractionTransaction{ // authorization is missing here - need to adjust `ABIAccountAbstractTxn` with "authorizationList" and "authorizationListStatus" (pending chat with EF team about why it is designed this way and if it needs changes)
+// ToProtoAccountAbstractionTxn converts a TxnSlot to a typesproto.AccountAbstractionTransaction
+func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstractionTransaction {
+	if tx == nil {
+		return nil
+	}
+
+	return &typesproto.AccountAbstractionTransaction{
 		Nonce:                       tx.Nonce,
-		ChainID:                     &tx.ChainID,
-		Tip:                         &tx.Tip,
-		FeeCap:                      &tx.FeeCap,
-		GasLimit:                    tx.Gas,
-		SenderAddress:               tx.SenderAddress,
+		ChainId:                     tx.ChainID.Bytes(),
+		Tip:                         tx.Tip.Bytes(),
+		FeeCap:                      tx.FeeCap.Bytes(),
+		Gas:                         tx.Gas,
+		SenderAddress:               tx.SenderAddress.Bytes(),
 		ExecutionData:               tx.ExecutionData,
-		Paymaster:                   tx.Paymaster,
+		Paymaster:                   tx.Paymaster.Bytes(),
 		PaymasterData:               tx.PaymasterData,
-		Deployer:                    tx.Deployer,
+		Deployer:                    tx.Deployer.Bytes(),
 		DeployerData:                tx.DeployerData,
-		BuilderFee:                  &tx.BuilderFee,
+		BuilderFee:                  tx.BuilderFee.Bytes(),
 		ValidationGasLimit:          tx.ValidationGasLimit,
 		PaymasterValidationGasLimit: tx.PaymasterValidationGasLimit,
 		PostOpGasLimit:              tx.PostOpGasLimit,
-		NonceKey:                    &tx.NonceKey,
+		NonceKey:                    tx.NonceKey.Bytes(),
 	}
 }
 
