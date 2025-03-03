@@ -266,7 +266,6 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 		payloadSize += 20
 	}
 
-	payloadSize++
 	payloadSize += rlp.StringLen(tx.DeployerData)
 
 	payloadSize++
@@ -274,10 +273,8 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 		payloadSize += 20
 	}
 
-	payloadSize++
 	payloadSize += rlp.StringLen(tx.PaymasterData)
 
-	payloadSize++
 	payloadSize += rlp.StringLen(tx.ExecutionData)
 
 	payloadSize++
@@ -313,7 +310,7 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 func (tx *AccountAbstractionTransaction) EncodingSize() int {
 	payloadSize, _, _ := tx.payloadSize()
 	// Add envelope size and type size
-	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
+	return 2 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
@@ -332,7 +329,11 @@ func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	return tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen)
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
@@ -538,7 +539,8 @@ func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 	defer pooledBuf.Put(b)
 	// encode TxType
 	b[0] = AccountAbstractionTxType
-	if _, err := w.Write(b[:1]); err != nil {
+	b[1] = 0x0
+	if _, err := w.Write(b[:2]); err != nil {
 		return err
 	}
 	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
