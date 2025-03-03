@@ -37,15 +37,15 @@ jobs:
           kurtosis_extra_args: --verbosity detailed --cli-log-level trace
           persistent_logs: "true"
 
-      - name: Save test result to file
-        run: echo '${{ steps.kurtosis_test.outputs.test_result }}' > test_result.json
+      - name: Save test overview to file
+        run: echo '${{ steps.kurtosis_test.outputs.test_overview }}' > test_overview.json
 
-      - name: Upload test result as artifact
+      - name: Upload test overview as artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-result
-          path: test_result.json
+          name: test_overview
+          path: test_overview.json
 
       # todo: save result on mongodb
 
