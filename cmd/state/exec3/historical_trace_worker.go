@@ -79,7 +79,7 @@ type HistoricalTraceWorker struct {
 type TraceConsumer struct {
 	NewTracer func() GenericTracer
 	//Reduce receiving results of execution. They are sorted and have no gaps.
-	Reduce func(task *state.TxTask, tx kv.Tx) error
+	Reduce func(task *state.TxTask, tx kv.TemporalTx) error
 }
 
 func NewHistoricalTraceWorker(

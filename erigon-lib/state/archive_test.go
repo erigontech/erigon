@@ -19,7 +19,6 @@ package state
 import (
 	"bytes"
 	"context"
-	"path"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -87,7 +86,7 @@ func TestArchiveWriter(t *testing.T) {
 		writeLatest(t, w, td)
 		w.Close()
 
-		decomp, err := seg.NewDecompressor(path.Join(tmp, "uncompressed"))
+		decomp, err := seg.NewDecompressor(filepath.Join(tmp, "uncompressed"))
 		require.NoError(t, err)
 		defer decomp.Close()
 
@@ -102,7 +101,7 @@ func TestArchiveWriter(t *testing.T) {
 		writeLatest(t, w, td)
 		w.Close()
 
-		decomp, err := seg.NewDecompressor(path.Join(tmp, "compressed"))
+		decomp, err := seg.NewDecompressor(filepath.Join(tmp, "compressed"))
 		require.NoError(t, err)
 		defer decomp.Close()
 		ds := (datasize.B * datasize.ByteSize(decomp.Size())).HR()
@@ -117,7 +116,7 @@ func TestArchiveWriter(t *testing.T) {
 		writeLatest(t, w, td)
 		w.Close()
 
-		decomp, err := seg.NewDecompressor(path.Join(tmp, "compressed-keys"))
+		decomp, err := seg.NewDecompressor(filepath.Join(tmp, "compressed-keys"))
 		require.NoError(t, err)
 		defer decomp.Close()
 		ds := (datasize.B * datasize.ByteSize(decomp.Size())).HR()
@@ -132,7 +131,7 @@ func TestArchiveWriter(t *testing.T) {
 		writeLatest(t, w, td)
 		w.Close()
 
-		decomp, err := seg.NewDecompressor(path.Join(tmp, "compressed-vals"))
+		decomp, err := seg.NewDecompressor(filepath.Join(tmp, "compressed-vals"))
 		require.NoError(t, err)
 		defer decomp.Close()
 		ds := (datasize.B * datasize.ByteSize(decomp.Size())).HR()

@@ -612,7 +612,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 
 	// define these keys as "updates", but we are not really updating anything, we just want to load them into the grid,
 	// so this is just to satisfy the current hex patricia trie api.
-	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), commitment.KeyToHexNibbleHash)
+	updates := commitment.NewUpdates(commitment.ModeDirect, api.dirs.Tmp, commitment.KeyToHexNibbleHash)
 	for _, key := range touchedPlainKeys {
 		updates.TouchPlainKey(string(key), nil, updates.TouchAccount)
 	}
