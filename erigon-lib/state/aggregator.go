@@ -914,7 +914,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 				"until commit", time.Until(started.Add(timeout)).String(),
 				"pruneLimit", pruneLimit,
 				"aggregatedStep", at.StepsInFiles(kv.StateDomains...),
-				"stepsRangeInDB", at.a.StepsRangeInDBAsStr(tx),
+				"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
 		case <-ctx.Done():
@@ -924,13 +924,15 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	}
 }
 
-func (a *Aggregator) StepsRangeInDBAsStr(tx kv.Tx) string {
-	steps := make([]string, 0, kv.DomainLen+4)
-	for _, d := range a.d {
-		steps = append(steps, d.stepsRangeInDBAsStr(tx))
+func (at *AggregatorRoTx) stepsRangeInDBAsStr(tx kv.Tx) string {
+	steps := make([]string, 0, len(at.d)+len(at.iis))
+	for _, dt := range at.d {
+		a1, a2 := dt.stepsRangeInDB(tx)
+		steps = append(steps, fmt.Sprintf("%s:%.1f", dt.d.filenameBase, a2-a1))
 	}
-	for _, ii := range a.iis {
-		steps = append(steps, ii.stepsRangeInDBAsStr(tx))
+	for _, iit := range at.iis {
+		a1, a2 := iit.stepsRangeInDB(tx)
+		steps = append(steps, fmt.Sprintf("%s:%.1f", iit.ii.filenameBase, a2-a1))
 	}
 	return strings.Join(steps, ", ")
 }
@@ -1065,7 +1067,7 @@ func (at *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 	}
 	//at.a.logger.Info("aggregator prune", "step", step,
 	//	"txn_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
-	//	/*"stepsLimit", limit/at.a.aggregationStep,*/ "stepsRangeInDB", at.a.StepsRangeInDBAsStr(tx))
+	//	/*"stepsLimit", limit/at.a.aggregationStep,*/ "stepsRangeInDB", at.a.stepsRangeInDBAsStr(tx))
 	aggStat := newAggregatorPruneStat()
 	for id, d := range at.d {
 		var err error
