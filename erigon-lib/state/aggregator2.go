@@ -150,6 +150,7 @@ var Schema = map[kv.Domain]domainCfg{
 			historyLargeValues: false,
 			filenameBase:       kv.CommitmentDomain.String(),
 			historyIdx:         kv.CommitmentHistoryIdx,
+			historyDisabled:    true,
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
