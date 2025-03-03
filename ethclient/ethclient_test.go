@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2025 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package ethclient_test
 
@@ -40,6 +43,8 @@ import (
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
+
+	ethereum "github.com/erigontech/erigon"
 )
 
 // Verify that Client implements the ethereum interfaces.
@@ -117,7 +122,7 @@ func newTestBackend(config *node.Config) (*node.Node, []*types.Block, error) {
 	if _, err := ethservice.BlockChain().InsertChain(blocks[1:]); err != nil {
 		return nil, nil, fmt.Errorf("can't import test blocks: %v", err)
 	}
-	// Ensure the tx indexing is fully generated
+	// Ensure the txn indexing is fully generated
 	for ; ; time.Sleep(time.Millisecond * 100) {
 		progress, err := ethservice.BlockChain().TxIndexProgress()
 		if err == nil && progress.Done() {
@@ -286,12 +291,12 @@ func testTransactionInBlock(t *testing.T, client *rpc.Client) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Test tx in block not found.
+	// Test txn in block not found.
 	if _, err := ec.TransactionInBlock(context.Background(), block.Hash(), 20); err != ethereum.NotFound {
 		t.Fatal("error should be ethereum.NotFound")
 	}
 
-	// Test tx in block found.
+	// Test txn in block found.
 	tx, err := ec.TransactionInBlock(context.Background(), block.Hash(), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -605,10 +610,10 @@ func testTransactionSender(t *testing.T, client *rpc.Client) {
 	}
 	tx1, err := ec.TransactionInBlock(ctx, block2.Hash(), 0)
 	if err != nil {
-		t.Fatal("can't get tx:", err)
+		t.Fatal("can't get txn:", err)
 	}
 	if tx1.Hash() != testTx1.Hash() {
-		t.Fatalf("wrong tx hash %v, want %v", tx1.Hash(), testTx1.Hash())
+		t.Fatalf("wrong txn hash %v, want %v", tx1.Hash(), testTx1.Hash())
 	}
 
 	// The sender address is cached in tx1, so no additional RPC should be required in

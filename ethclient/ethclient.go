@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2025 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package ethclient provides a client for the Ethereum RPC API.
 package ethclient
@@ -24,11 +27,12 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/rpc"
+	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // Client defines typed wrappers for the Ethereum RPC API.
@@ -37,13 +41,13 @@ type Client struct {
 }
 
 // Dial connects a client to the given URL.
-func Dial(rawurl string) (*Client, error) {
-	return DialContext(context.Background(), rawurl)
+func Dial(rawurl string, logger log.Logger) (*Client, error) {
+	return DialContext(context.Background(), rawurl, logger)
 }
 
 // DialContext connects a client to the given URL with context.
-func DialContext(ctx context.Context, rawurl string) (*Client, error) {
-	c, err := rpc.DialContext(ctx, rawurl)
+func DialContext(ctx context.Context, rawurl string, logger log.Logger) (*Client, error) {
+	c, err := rpc.DialContext(ctx, rawurl, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -196,20 +200,15 @@ func (ec *Client) getBlock(ctx context.Context, method string, args ...interface
 		}
 	}
 	// Fill the sender cache of transactions in the block.
-	txs := make([]*types.Transaction, len(body.Transactions))
-	for i, tx := range body.Transactions {
-		if tx.From != nil {
-			setSenderFromServer(tx.tx, *tx.From, body.Hash)
+	txns := make([]types.Transaction, len(body.Transactions))
+	for i, rpcTxn := range body.Transactions {
+		if rpcTxn.From != nil {
+			rpcTxn.txn.SetSender()
 		}
-		txs[i] = tx.tx
+		txns[i] = rpcTxn.txn
 	}
 
-	return types.NewBlockWithHeader(head).WithBody(
-		types.Body{
-			Transactions: txs,
-			Uncles:       uncles,
-			Withdrawals:  body.Withdrawals,
-		}), nil
+	return types.NewBlock(head, txns, uncles, nil, body.Withdrawals), nil
 }
 
 // HeaderByHash returns the block header with the given hash.
@@ -247,7 +246,7 @@ func (ec *Client) HeaderByNumber(ctx context.Context, number *big.Int) (*types.H
 }
 
 type rpcTransaction struct {
-	tx *types.Transaction
+	txn types.Transaction
 	txExtraInfo
 }
 
@@ -258,7 +257,7 @@ type txExtraInfo struct {
 }
 
 func (tx *rpcTransaction) UnmarshalJSON(msg []byte) error {
-	if err := json.Unmarshal(msg, &tx.tx); err != nil {
+	if err := json.Unmarshal(msg, &tx.txn); err != nil {
 		return err
 	}
 	return json.Unmarshal(msg, &tx.txExtraInfo)
@@ -272,13 +271,13 @@ func (ec *Client) TransactionByHash(ctx context.Context, hash common.Hash) (tx *
 		return nil, false, err
 	} else if json == nil {
 		return nil, false, ethereum.NotFound
-	} else if _, r, _ := json.tx.RawSignatureValues(); r == nil {
+	} else if _, r, _ := json.txn.RawSignatureValues(); r == nil {
 		return nil, false, errors.New("server returned transaction without signature")
 	}
 	if json.From != nil && json.BlockHash != nil {
-		setSenderFromServer(json.tx, *json.From, *json.BlockHash)
+		setSenderFromServer(json.txn, *json.From, *json.BlockHash)
 	}
-	return json.tx, json.BlockNumber == nil, nil
+	return json.txn, json.BlockNumber == nil, nil
 }
 
 // TransactionSender returns the sender address of the given transaction. The transaction
@@ -324,13 +323,13 @@ func (ec *Client) TransactionInBlock(ctx context.Context, blockHash common.Hash,
 	}
 	if json == nil {
 		return nil, ethereum.NotFound
-	} else if _, r, _ := json.tx.RawSignatureValues(); r == nil {
+	} else if _, r, _ := json.txn.RawSignatureValues(); r == nil {
 		return nil, errors.New("server returned transaction without signature")
 	}
 	if json.From != nil && json.BlockHash != nil {
-		setSenderFromServer(json.tx, *json.From, *json.BlockHash)
+		setSenderFromServer(json.txn, *json.From, *json.BlockHash)
 	}
-	return json.tx, err
+	return json.txn, err
 }
 
 // TransactionReceipt returns the receipt of a transaction by transaction hash.
@@ -342,25 +341,6 @@ func (ec *Client) TransactionReceipt(ctx context.Context, txHash common.Hash) (*
 		return nil, ethereum.NotFound
 	}
 	return r, err
-}
-
-// SyncProgress retrieves the current progress of the sync algorithm. If there's
-// no sync currently running, it returns nil.
-func (ec *Client) SyncProgress(ctx context.Context) (*ethereum.SyncProgress, error) {
-	var raw json.RawMessage
-	if err := ec.c.CallContext(ctx, &raw, "eth_syncing"); err != nil {
-		return nil, err
-	}
-	// Handle the possible response types
-	var syncing bool
-	if err := json.Unmarshal(raw, &syncing); err == nil {
-		return nil, nil // Not syncing (always false)
-	}
-	var p *rpcProgress
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, err
-	}
-	return p.toSyncProgress(), nil
 }
 
 // SubscribeNewHead subscribes to notifications about the current blockchain head
@@ -729,56 +709,4 @@ func toCallArg(msg ethereum.CallMsg) interface{} {
 		arg["blobVersionedHashes"] = msg.BlobHashes
 	}
 	return arg
-}
-
-// rpcProgress is a copy of SyncProgress with hex-encoded fields.
-type rpcProgress struct {
-	StartingBlock hexutil.Uint64
-	CurrentBlock  hexutil.Uint64
-	HighestBlock  hexutil.Uint64
-
-	PulledStates hexutil.Uint64
-	KnownStates  hexutil.Uint64
-
-	SyncedAccounts         hexutil.Uint64
-	SyncedAccountBytes     hexutil.Uint64
-	SyncedBytecodes        hexutil.Uint64
-	SyncedBytecodeBytes    hexutil.Uint64
-	SyncedStorage          hexutil.Uint64
-	SyncedStorageBytes     hexutil.Uint64
-	HealedTrienodes        hexutil.Uint64
-	HealedTrienodeBytes    hexutil.Uint64
-	HealedBytecodes        hexutil.Uint64
-	HealedBytecodeBytes    hexutil.Uint64
-	HealingTrienodes       hexutil.Uint64
-	HealingBytecode        hexutil.Uint64
-	TxIndexFinishedBlocks  hexutil.Uint64
-	TxIndexRemainingBlocks hexutil.Uint64
-}
-
-func (p *rpcProgress) toSyncProgress() *ethereum.SyncProgress {
-	if p == nil {
-		return nil
-	}
-	return &ethereum.SyncProgress{
-		StartingBlock:          uint64(p.StartingBlock),
-		CurrentBlock:           uint64(p.CurrentBlock),
-		HighestBlock:           uint64(p.HighestBlock),
-		PulledStates:           uint64(p.PulledStates),
-		KnownStates:            uint64(p.KnownStates),
-		SyncedAccounts:         uint64(p.SyncedAccounts),
-		SyncedAccountBytes:     uint64(p.SyncedAccountBytes),
-		SyncedBytecodes:        uint64(p.SyncedBytecodes),
-		SyncedBytecodeBytes:    uint64(p.SyncedBytecodeBytes),
-		SyncedStorage:          uint64(p.SyncedStorage),
-		SyncedStorageBytes:     uint64(p.SyncedStorageBytes),
-		HealedTrienodes:        uint64(p.HealedTrienodes),
-		HealedTrienodeBytes:    uint64(p.HealedTrienodeBytes),
-		HealedBytecodes:        uint64(p.HealedBytecodes),
-		HealedBytecodeBytes:    uint64(p.HealedBytecodeBytes),
-		HealingTrienodes:       uint64(p.HealingTrienodes),
-		HealingBytecode:        uint64(p.HealingBytecode),
-		TxIndexFinishedBlocks:  uint64(p.TxIndexFinishedBlocks),
-		TxIndexRemainingBlocks: uint64(p.TxIndexRemainingBlocks),
-	}
 }
