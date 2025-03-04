@@ -530,7 +530,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
 			mgasPerSec := gasUsedMgas / totalTime.Seconds()
 			metrics.ChainTipMgasPerSec.Add(mgasPerSec)
-			e.avgMgasSec = (e.avgMgasSec*float64(e.recordedMgasSec) + mgasPerSec) / float64(e.recordedMgasSec+1)
+
+			const blockRange = 300 // ~1 hour
+			const alpha = 2.0 / (blockRange + 1)
+			e.avgMgasSec = alpha*mgasPerSec + (1-alpha)*e.avgMgasSec
 			e.recordedMgasSec++
 			logArgs = append(logArgs, "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
 			if !e.syncCfg.ParallelStateFlushing {
