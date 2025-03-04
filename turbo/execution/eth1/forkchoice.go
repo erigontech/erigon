@@ -533,6 +533,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 			const blockRange = 300 // ~1 hour
 			const alpha = 2.0 / (blockRange + 1)
+
+			if e.avgMgasSec == 0 {
+				e.avgMgasSec = mgasPerSec
+			}
 			e.avgMgasSec = alpha*mgasPerSec + (1-alpha)*e.avgMgasSec
 			e.recordedMgasSec++
 			logArgs = append(logArgs, "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
