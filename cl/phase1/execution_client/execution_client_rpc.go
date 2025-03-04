@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/jwt"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -47,7 +48,7 @@ type ExecutionClientRpc struct {
 }
 
 func NewExecutionClientRPC(jwtSecret []byte, addr string, port int) (*ExecutionClientRpc, error) {
-	roundTripper := rpc_helper.NewJWTRoundTripper(jwtSecret)
+	roundTripper := jwt.NewHttpRoundTripper(http.DefaultTransport, jwtSecret)
 	client := &http.Client{Timeout: DefaultRPCHTTPTimeout, Transport: roundTripper}
 
 	isHTTPpecified := strings.HasPrefix(addr, "http")

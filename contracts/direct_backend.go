@@ -1,3 +1,19 @@
+// Copyright 2025 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package contracts
 
 import (
@@ -30,8 +46,8 @@ func NewDirectBackend(api jsonrpc.EthAPI) Backend {
 	}
 }
 
-func (b Backend) CodeAt(ctx context.Context, contract libcommon.Address, blockNum *big.Int) ([]byte, error) {
-	return b.api.GetCode(ctx, contract, BlockNumArg(blockNum))
+func (b Backend) CodeAt(ctx context.Context, account libcommon.Address, blockNum *big.Int) ([]byte, error) {
+	return b.api.GetCode(ctx, account, BlockNumArg(blockNum))
 }
 
 func (b Backend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNum *big.Int) ([]byte, error) {
