@@ -273,7 +273,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool, silkwormI
 		// // fmt.Println("JG RunTxTaskNoLock", "BlockNum", txTask.BlockNum, "BlockHash", hexutil.Encode(txTask.BlockHash.Bytes()),
 		// 	"TxIndex", txTask.TxIndex, "TxNum", txTask.TxNum, "Transactions in block", len(txTask.Txs))
 
-		rw.taskGasPool.Reset(txTask.Tx.GetGas(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
+		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)

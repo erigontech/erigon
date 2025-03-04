@@ -62,9 +62,10 @@ const (
 )
 
 const (
-	dbNodeExpiration = 24 * time.Hour // Time after which an unseen node should be dropped.
-	dbCleanupCycle   = time.Hour      // Time period for running the expiration task.
-	dbVersion        = 10
+	dbNodeExpiration     = 24 * time.Hour // Time after which an unseen node should be dropped.
+	dbCleanupCycle       = time.Hour      // Time period for running the expiration task.
+	dbVersion            = 10
+	dbSyncBytesThreshold = 20_000 // if we have about 20kb of dirty data , then flush to disk
 )
 
 var (
@@ -124,9 +125,10 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		WithTableCfg(bucketsConfig).
 		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
-		Flags(func(f uint) uint { return f ^ mdbx1.Durable | mdbx1.SafeNoSync }).
+		Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync }).
+		SyncBytes(dbSyncBytesThreshold).
 		SyncPeriod(2 * time.Second).
-		DirtySpace(uint64(64 * datasize.MB)).
+		DirtySpace(uint64(32 * datasize.MB)).
 		// WithMetrics().
 		Open(ctx)
 	if err != nil {

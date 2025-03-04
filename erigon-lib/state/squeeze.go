@@ -105,8 +105,8 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 
 // SqueezeCommitmentFiles should be called only when NO EXECUTION is running.
 // Removes commitment files and suppose following aggregator shutdown and restart  (to integrate new files and rebuild indexes)
-func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
-	if !ac.a.commitmentValuesTransform {
+func (at *AggregatorRoTx) SqueezeCommitmentFiles() error {
+	if !at.a.commitmentValuesTransform {
 		return nil
 	}
 
@@ -116,23 +116,23 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 				name:    kv.AccountsDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: ac.a.StepSize(),
+				aggStep: at.StepSize(),
 			},
 			kv.StorageDomain: {
 				name:    kv.StorageDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: ac.a.StepSize(),
+				aggStep: at.StepSize(),
 			},
 			kv.CommitmentDomain: {
 				name:    kv.CommitmentDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: ac.a.StepSize(),
+				aggStep: at.StepSize(),
 			},
 		},
 	}
-	sf, err := ac.StaticFilesInRange(rng)
+	sf, err := at.StaticFilesInRange(rng)
 	if err != nil {
 		return err
 	}
@@ -172,9 +172,9 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		processedFiles int
 		sizeDelta      = datasize.B
 		sqExt          = ".squeezed"
-		commitment     = ac.d[kv.CommitmentDomain]
-		accounts       = ac.d[kv.AccountsDomain]
-		storage        = ac.d[kv.StorageDomain]
+		commitment     = at.d[kv.CommitmentDomain]
+		accounts       = at.d[kv.AccountsDomain]
+		storage        = at.d[kv.StorageDomain]
 		logEvery       = time.NewTicker(30 * time.Second)
 	)
 	defer logEvery.Stop()
@@ -198,18 +198,18 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		cf.decompressor.EnableMadvNormal()
 
 		err = func() error {
-			steps := cf.endTxNum/ac.a.aggregationStep - cf.startTxNum/ac.a.aggregationStep
+			steps := cf.endTxNum/at.a.aggregationStep - cf.startTxNum/at.a.aggregationStep
 			compression := commitment.d.Compression
 			if steps < DomainMinStepsToCompress {
 				compression = seg.CompressNone
 			}
-			ac.a.logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
+			at.a.logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
 				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg, "compress", compression)
 
 			originalPath := cf.decompressor.FilePath()
 			squeezedTmpPath := originalPath + sqExt + ".tmp"
 
-			squeezedCompr, err := seg.NewCompressor(context.Background(), "squeeze", squeezedTmpPath, ac.a.dirs.Tmp,
+			squeezedCompr, err := seg.NewCompressor(context.Background(), "squeeze", squeezedTmpPath, at.a.dirs.Tmp,
 				commitment.d.CompressCfg, log.LvlInfo, commitment.d.logger)
 			if err != nil {
 				return err
@@ -253,7 +253,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 
 				select {
 				case <-logEvery.C:
-					ac.a.logger.Info("[squeeze_migration]", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
+					at.a.logger.Info("[squeeze_migration]", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
 						"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(cf.decompressor.Count())))
 				default:
 				}
@@ -278,7 +278,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 			}
 			temporalFiles = append(temporalFiles, squeezedPath)
 
-			ac.a.logger.Info("[sqeeze_migration] file done", "original", filepath.Base(originalPath),
+			at.a.logger.Info("[sqeeze_migration] file done", "original", filepath.Base(originalPath),
 				"sizeDelta", fmt.Sprintf("%s (%.1f%%)", delta.HR(), deltaP))
 
 			processedFiles++
@@ -295,9 +295,9 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		if err := os.Rename(path, strings.TrimSuffix(path, sqExt)); err != nil {
 			return err
 		}
-		ac.a.logger.Debug("[squeeze_migration] temporal file renaming", "path", path)
+		at.a.logger.Debug("[squeeze_migration] temporal file renaming", "path", path)
 	}
-	ac.a.logger.Info("[squeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(ranges))
+	at.a.logger.Info("[squeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(ranges))
 
 	return nil
 }
@@ -308,7 +308,8 @@ type wrappedTxWithCtx struct {
 	ac *AggregatorRoTx
 }
 
-func (w *wrappedTxWithCtx) AggTx() any { return w.ac }
+func (w *wrappedTxWithCtx) AggTx() any                { return w.ac }
+func (w *wrappedTxWithCtx) FreezeInfo() kv.FreezeInfo { return w.ac }
 
 func wrapTxWithCtxForTest(tx kv.Tx, ctx *AggregatorRoTx) *wrappedTxWithCtx {
 	return &wrappedTxWithCtx{Tx: tx, ac: ctx}
