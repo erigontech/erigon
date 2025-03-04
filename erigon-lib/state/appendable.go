@@ -8,7 +8,7 @@ import (
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	ae "github.com/erigontech/erigon-lib/state/entity_extras"
+	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
 )
 
 const MaxUint64 = ^uint64(0)
@@ -29,7 +29,7 @@ var _ StartRoTx[EntityTxI] = (*Appendable[EntityTxI])(nil)
 var ErrNotFoundInSnapshot = errors.New("entity not found in snapshot")
 
 type Appendable[T EntityTxI] struct {
-	*ProtoEntity
+	*ProtoAppendable
 
 	ms      *markedStructure
 	valsTbl string
@@ -68,7 +68,7 @@ func App_WithPruneFrom[T EntityTxI](pruneFrom Num) AppOpts[T] {
 }
 
 // func App
-func NewMarkedAppendable(id EntityId, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[MarkedTxI]) (*Appendable[MarkedTxI], error) {
+func NewMarkedAppendable(id AppendableId, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[MarkedTxI]) (*Appendable[MarkedTxI], error) {
 	a, err := create(id, Marked, valsTbl, canonicalTbl, relation, logger, options...)
 	if err != nil {
 		return nil, err
@@ -76,15 +76,15 @@ func NewMarkedAppendable(id EntityId, valsTbl string, canonicalTbl string, relat
 
 	a.beginFilesRoGen = func() MarkedTxI {
 		return &MarkedTx{
-			ProtoEntityTx: a.ProtoEntity.BeginFilesRo(),
-			ap:            (*Appendable[MarkedTxI])(a),
+			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
+			ap:                (*Appendable[MarkedTxI])(a),
 		}
 	}
 
 	return a, nil
 }
 
-func NewUnmarkedAppendable(id EntityId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[UnmarkedTxI]) (*Appendable[UnmarkedTxI], error) {
+func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[UnmarkedTxI]) (*Appendable[UnmarkedTxI], error) {
 	a, err := create(id, Unmarked, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
@@ -104,29 +104,29 @@ func NewUnmarkedAppendable(id EntityId, valsTbl string, relation RootRelationI, 
 
 	a.beginFilesRoGen = func() UnmarkedTxI {
 		return &UnmarkedTx{
-			ProtoEntityTx: a.ProtoEntity.BeginFilesRo(),
-			ap:            (*Appendable[UnmarkedTxI])(a),
+			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
+			ap:                (*Appendable[UnmarkedTxI])(a),
 		}
 	}
 
 	return a, nil
 }
 
-func NewAppendingAppendable(id EntityId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[AppendingTxI]) (*Appendable[AppendingTxI], error) {
+func NewAppendingAppendable(id AppendableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[AppendingTxI]) (*Appendable[AppendingTxI], error) {
 	a, err := create(id, Appending, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
 	}
 	a.beginFilesRoGen = func() AppendingTxI {
 		return &AppendingTx{
-			ProtoEntityTx: a.ProtoEntity.BeginFilesRo(),
-			ap:            (*Appendable[AppendingTxI])(a),
+			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
+			ap:                (*Appendable[AppendingTxI])(a),
 		}
 	}
 	return a, nil
 }
 
-func NewBufferedAppendable(id EntityId, valsTbl string, relation RootRelationI, factory BufferFactory, logger log.Logger, options ...AppOpts[BufferedTxI]) (*Appendable[BufferedTxI], error) {
+func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelationI, factory BufferFactory, logger log.Logger, options ...AppOpts[BufferedTxI]) (*Appendable[BufferedTxI], error) {
 	a, err := create(id, Buffered, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
@@ -138,9 +138,9 @@ func NewBufferedAppendable(id EntityId, valsTbl string, relation RootRelationI, 
 
 	a.beginFilesRoGen = func() BufferedTxI {
 		return &BufferedTx{
-			ProtoEntityTx: a.ProtoEntity.BeginFilesRo(),
-			ap:            (*Appendable[BufferedTxI])(a),
-			factory:       factory,
+			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
+			ap:                (*Appendable[BufferedTxI])(a),
+			factory:           factory,
 		}
 	}
 
@@ -148,9 +148,9 @@ func NewBufferedAppendable(id EntityId, valsTbl string, relation RootRelationI, 
 	return a, nil
 }
 
-func create[T EntityTxI](id EntityId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[T]) (*Appendable[T], error) {
+func create[T EntityTxI](id AppendableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[T]) (*Appendable[T], error) {
 	a := &Appendable[T]{
-		ProtoEntity: NewProto(id, nil, nil, logger),
+		ProtoAppendable: NewProto(id, nil, nil, logger),
 	}
 	a.rel = relation
 	a.valsTbl = valsTbl
@@ -179,7 +179,7 @@ func (a *Appendable[T]) BeginFilesRo() T {
 
 // marked tx
 type MarkedTx struct {
-	*ProtoEntityTx
+	*ProtoAppendableTx
 	ap *Appendable[MarkedTxI]
 }
 
@@ -269,7 +269,7 @@ func (m *MarkedTx) combK(ts Num, hash []byte) []byte {
 
 // unmarked tx
 type UnmarkedTx struct {
-	*ProtoEntityTx
+	*ProtoAppendableTx
 	ap *Appendable[UnmarkedTxI]
 }
 
@@ -315,7 +315,7 @@ func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 }
 
 type AppendingTx struct {
-	*ProtoEntityTx
+	*ProtoAppendableTx
 	ap *Appendable[AppendingTxI]
 }
 
@@ -377,7 +377,7 @@ func (m *AppendingTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv
 }
 
 type BufferedTx struct {
-	*ProtoEntityTx
+	*ProtoAppendableTx
 	ap      *Appendable[BufferedTxI]
 	values  *etl.Collector
 	factory BufferFactory
@@ -431,7 +431,7 @@ func (m *BufferedTx) Close() {
 		m.values.Close()
 	}
 
-	m.ProtoEntityTx.Close()
+	m.ProtoAppendableTx.Close()
 }
 
 var (

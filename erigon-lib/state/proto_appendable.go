@@ -11,29 +11,30 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ae "github.com/erigontech/erigon-lib/state/entity_extras"
+	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
 
 	btree2 "github.com/tidwall/btree"
 )
 
-// ProtoEntity with basic functionality it's not intended to be used directly.
-// Can be embedded in other marker/relational/appendable entities
-type ProtoEntity struct {
+/*
+ProtoAppendable with basic functionality it's not intended to be used directly.
+Can be embedded in other marker/relational/appendable entities.
+*/
+type ProtoAppendable struct {
 	freezer Freezer
 
-	a          ae.EntityId
+	a          ae.AppendableId
 	builders   []AccessorIndexBuilder
 	dirtyFiles *btree2.BTreeG[*filesItem]
 	_visible   visibleFiles
 
-	sameKeyAsRoot bool
-	strategy      CanonicityStrategy
+	strategy CanonicityStrategy
 
 	logger log.Logger
 }
 
-func NewProto(a ae.EntityId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoEntity {
-	return &ProtoEntity{
+func NewProto(a ae.AppendableId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoAppendable {
+	return &ProtoAppendable{
 		a:          a,
 		builders:   builders,
 		freezer:    freezer,
@@ -50,17 +51,17 @@ func NewProto(a ae.EntityId, builders []AccessorIndexBuilder, freezer Freezer, l
 // 	return ae.RootNum(latest.endTxNum)
 // }
 
-func (a *ProtoEntity) RecalcVisibleFiles(toRootNum RootNum) {
+func (a *ProtoAppendable) RecalcVisibleFiles(toRootNum RootNum) {
 	a._visible = calcVisibleFiles(a.dirtyFiles, AccessorHashMap, false, uint64(toRootNum))
 }
 
-func (a *ProtoEntity) IntegrateDirtyFiles(files []*filesItem) {
+func (a *ProtoAppendable) IntegrateDirtyFiles(files []*filesItem) {
 	for _, item := range files {
 		a.dirtyFiles.Set(item)
 	}
 }
 
-func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) (dirtyFiles []*filesItem, err error) {
+func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) (dirtyFiles []*filesItem, err error) {
 	log.Debug("freezing %s from %d to %d", a.a.Name(), from, to)
 	calcFrom, calcTo := from, to
 	var canFreeze bool
@@ -84,6 +85,7 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 				// TODO: look at block_Snapshots.go#dumpRange
 				// when snapshot is non-frozen range, it AddsUncompressedword (fast creation)
 				// else AddWord.
+				// But BuildFiles perhaps only used for fast builds...and merge is for slow builds.
 				return sn.AddUncompressedWord(values)
 			})
 			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, db); err != nil {
@@ -136,30 +138,29 @@ func (a *ProtoEntity) BuildFiles(ctx context.Context, from, to RootNum, db kv.Ro
 
 // proto_appendable_rotx
 
-type ProtoEntityTx struct {
-	id    EntityId
+type ProtoAppendableTx struct {
+	id    AppendableId
 	files visibleFiles
-	a     *ProtoEntity
+	a     *ProtoAppendable
 
 	readers []*recsplit.IndexReader
-	getters []*seg.Reader
 }
 
-func (a *ProtoEntity) BeginFilesRo() *ProtoEntityTx {
+func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableTx {
 	for i := range a._visible {
 		if a._visible[i].src.frozen {
 			a._visible[i].src.refcount.Add(1)
 		}
 	}
 
-	return &ProtoEntityTx{
+	return &ProtoAppendableTx{
 		id:    a.a,
 		files: a._visible,
 		a:     a,
 	}
 }
 
-func (a *ProtoEntityTx) Close() {
+func (a *ProtoAppendableTx) Close() {
 	if a.files == nil {
 		return
 	}
@@ -177,22 +178,7 @@ func (a *ProtoEntityTx) Close() {
 	}
 }
 
-func (a *ProtoEntityTx) StatelessGetter(i int) *seg.Reader {
-	if a.getters == nil {
-		a.getters = make([]*seg.Reader, len(a.files))
-	}
-
-	r := a.getters[i]
-	if r == nil {
-		g := a.files[i].src.decompressor.MakeGetter()
-		r = seg.NewReader(g, seg.CompressVals) // TODO: add compression support
-		a.getters[i] = r
-	}
-
-	return r
-}
-
-func (a *ProtoEntityTx) StatelessIdxReader(i int) *recsplit.IndexReader {
+func (a *ProtoAppendableTx) StatelessIdxReader(i int) *recsplit.IndexReader {
 	if a.readers == nil {
 		a.readers = make([]*recsplit.IndexReader, len(a.files))
 	}
@@ -206,11 +192,11 @@ func (a *ProtoEntityTx) StatelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
-func (a *ProtoEntityTx) Type() CanonicityStrategy {
+func (a *ProtoAppendableTx) Type() CanonicityStrategy {
 	return a.a.strategy
 }
 
-func (a *ProtoEntityTx) Garbage(merged *filesItem) (outs []*filesItem) {
+func (a *ProtoAppendableTx) Garbage(merged *filesItem) (outs []*filesItem) {
 	if merged == nil {
 		return
 	}
@@ -232,7 +218,7 @@ func (a *ProtoEntityTx) Garbage(merged *filesItem) (outs []*filesItem) {
 	return outs
 }
 
-func (a *ProtoEntityTx) VisibleFilesMaxRootNum() RootNum {
+func (a *ProtoAppendableTx) VisibleFilesMaxRootNum() RootNum {
 	lasti := len(a.files) - 1
 	if lasti < 0 {
 		return 0
@@ -241,15 +227,16 @@ func (a *ProtoEntityTx) VisibleFilesMaxRootNum() RootNum {
 	return RootNum(a.files[lasti].src.endTxNum)
 }
 
-func (a *ProtoEntityTx) VisibleFilesMaxNum() Num {
-	// need to store first entity num in snapshots for this
-	// TODO: just sending max root num now; so it won't work if rootnum!=num;
-	// maybe we should just test bodies and headers till then.
-
-	return Num(a.VisibleFilesMaxRootNum())
+func (a *ProtoAppendableTx) VisibleFilesMaxNum() Num {
+	lasti := len(a.files) - 1
+	if lasti < 0 {
+		return 0
+	}
+	idx := a.files[lasti].src.index
+	return Num(idx.BaseDataID() + idx.KeyCount())
 }
 
-func (a *ProtoEntityTx) LookupFile(entityNum Num, tx kv.Tx) (b Bytes, found bool, err error) {
+func (a *ProtoAppendableTx) LookupFile(entityNum Num, tx kv.Tx) (b Bytes, found bool, err error) {
 	ap := a.a
 	lastNum := a.VisibleFilesMaxNum()
 	if entityNum < lastNum && ap.builders[0].AllowsOrdinalLookupByNum() {
@@ -261,8 +248,14 @@ func (a *ProtoEntityTx) LookupFile(entityNum Num, tx kv.Tx) (b Bytes, found bool
 		if index == -1 {
 			return nil, false, fmt.Errorf("entity get error: snapshot expected but now found: (%s, %d)", ap.a.Name(), entityNum)
 		}
-		offset := a.StatelessIdxReader(index).OrdinalLookup(uint64(entityNum))
-		g := a.StatelessGetter(index)
+		indexR := a.StatelessIdxReader(index)
+		id := int64(entityNum) - int64(indexR.BaseDataID())
+		if id < 0 {
+			a.a.logger.Error("ordinal lookup by negative num", "entityNum", entityNum, "index", index, "indexR.BaseDataID()", indexR.BaseDataID())
+			panic("ordinal lookup by negative num")
+		}
+		offset := indexR.OrdinalLookup(uint64(id))
+		g := a.files[index].src.decompressor.MakeGetter()
 		g.Reset(offset)
 		if g.HasNext() {
 			word, _ = g.Next(word[:0])

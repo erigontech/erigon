@@ -6,13 +6,13 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
-	ae "github.com/erigontech/erigon-lib/state/entity_extras"
+	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
 )
 
 type RootNum = ae.RootNum
 type Num = ae.Num
 type Id = ae.Id
-type EntityId = ae.EntityId
+type AppendableId = ae.AppendableId
 type Bytes = ae.Bytes
 
 // Freezer takes hot data (e.g. from db) and transforms it
@@ -104,7 +104,3 @@ const (
 	Appending
 	Buffered
 )
-
-// type checks
-// var _ StartRoTx[UnmarkedTxI] = (*RangedEntity)(nil)
-// var _ StartRoTx[MarkedTxI] = (*MarkedEntity)(nil)

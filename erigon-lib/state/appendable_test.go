@@ -17,8 +17,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/state/entity_extras"
-	ae "github.com/erigontech/erigon-lib/state/entity_extras"
+	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
 	"github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/stretchr/testify/require"
@@ -26,21 +25,24 @@ import (
 
 type Num = state.Num
 type RootNum = state.RootNum
-type EntityId = ae.EntityId
+type EntityId = ae.AppendableId
 
 // test marked appendable
 func TestMarkedAppendableRegistration(t *testing.T) {
 	// just registration goes fine
+	t.Cleanup(func() {
+		ae.Cleanup()
+	})
 	dirs := datadir.New(t.TempDir())
 	blockId := registerEntity(dirs, "blocks")
-	require.Equal(t, ae.EntityId(0), blockId)
+	require.Equal(t, ae.AppendableId(0), blockId)
 	headerId := registerEntity(dirs, "headers")
-	require.Equal(t, ae.EntityId(1), headerId)
+	require.Equal(t, ae.AppendableId(1), headerId)
 }
 
-func registerEntity(dirs datadir.Dirs, name string) ae.EntityId {
+func registerEntity(dirs datadir.Dirs, name string) ae.AppendableId {
 	preverified := snapcfg.Mainnet
-	return ae.RegisterEntity(name, dirs, preverified, ae.WithSnapshotCreationConfig(
+	return ae.RegisterAppendable(name, dirs, preverified, ae.WithSnapshotCreationConfig(
 		&ae.SnapshotConfig{
 			SnapshotCreationConfig: &ae.SnapshotCreationConfig{
 				EntitiesPerStep: 1000,
@@ -52,8 +54,8 @@ func registerEntity(dirs datadir.Dirs, name string) ae.EntityId {
 	))
 }
 
-func registerEntityRelaxed(dirs datadir.Dirs, name string) ae.EntityId {
-	return ae.RegisterEntity(name, dirs, nil, ae.WithSnapshotCreationConfig(
+func registerEntityRelaxed(dirs datadir.Dirs, name string) ae.AppendableId {
+	return ae.RegisterAppendable(name, dirs, nil, ae.WithSnapshotCreationConfig(
 		&ae.SnapshotConfig{
 			SnapshotCreationConfig: &ae.SnapshotCreationConfig{
 				EntitiesPerStep: 10,
@@ -70,13 +72,18 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-	tb.Cleanup(db.Close)
+	tb.Cleanup(func() {
+		db.Close()
+		os.RemoveAll(dirs.Snap)
+		os.RemoveAll(dirs.Chaindata)
+		ae.Cleanup()
+	})
 	return dirs, db, logger
 }
 
 func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs) (EntityId, *state.Appendable[state.MarkedTxI]) {
 	headerId := registerEntityRelaxed(dir, "headers")
-	require.Equal(t, ae.EntityId(0), headerId)
+	require.Equal(t, ae.AppendableId(0), headerId)
 
 	// create marked appendable
 	freezer := snaptype.NewHeaderFreezer(kv.HeaderCanonical, kv.Headers, log)
@@ -136,13 +143,6 @@ func TestPrune(t *testing.T) {
 		t.Run(fmt.Sprintf("prune to %d", pruneTo), func(t *testing.T) {
 			dir, db, log := setup(t)
 			headerId, ma := setupHeader(t, log, dir)
-
-			t.Cleanup(func() {
-				db.Close()
-				os.RemoveAll(dir.Snap)
-				os.RemoveAll(dir.Chaindata)
-				entity_extras.Cleanup()
-			})
 
 			ctx := context.Background()
 			cfg := headerId.SnapshotConfig()

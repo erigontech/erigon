@@ -7,7 +7,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-func step[T ~uint64](n T, a EntityId) uint64 {
+func step[T ~uint64](n T, a AppendableId) uint64 {
 	return uint64(n) / a.SnapshotConfig().EntitiesPerStep
 }
 

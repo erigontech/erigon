@@ -56,7 +56,7 @@ func (s *SnapshotConfig) StepsInFrozenFile() uint64 {
 	return s.MergeStages[len(s.MergeStages)-1] / s.EntitiesPerStep
 }
 
-func (s *SnapshotConfig) SetupConfig(id EntityId, snapshotDir string, pre snapcfg.Preverified) {
+func (s *SnapshotConfig) SetupConfig(id AppendableId, snapshotDir string, pre snapcfg.Preverified) {
 	if s.preverifiedParsed != nil {
 		return
 	}
@@ -87,7 +87,7 @@ type FileInfo struct {
 	Name     string // filename
 	Path     string // full path
 	Ext      string // extenstion
-	Id       EntityId
+	Id       AppendableId
 }
 
 func (f *FileInfo) IsIndex() bool { return strings.Compare(f.Ext, ".idx") == 0 }
@@ -105,19 +105,19 @@ func fileName(baseName string, version snaptype.Version, from, to uint64) string
 	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from, to, baseName)
 }
 
-func SnapFilePath(id EntityId, version snaptype.Version, from, to RootNum) string {
+func SnapFilePath(id AppendableId, version snaptype.Version, from, to RootNum) string {
 	return filepath.Join(id.SnapshotDir(), fileName(id.Name(), version, from.Step(id), to.Step(id))+".seg")
 }
 
-func IdxFilePath(id EntityId, version snaptype.Version, from, to RootNum, idxNum uint64) string {
+func IdxFilePath(id AppendableId, version snaptype.Version, from, to RootNum, idxNum uint64) string {
 	return filepath.Join(id.SnapshotDir(), fileName(id.IndexPrefix()[idxNum], version, from.Step(id), to.Step(id))+".idx")
 }
 
-func ParseFileName(id EntityId, fileName string) (res *FileInfo, ok bool) {
+func ParseFileName(id AppendableId, fileName string) (res *FileInfo, ok bool) {
 	return ParseFileNameInDir(id, id.SnapshotDir(), fileName)
 }
 
-func ParseFileNameInDir(id EntityId, dir, fileName string) (res *FileInfo, ok bool) {
+func ParseFileNameInDir(id AppendableId, dir, fileName string) (res *FileInfo, ok bool) {
 	//	'v1-000000-000500-transactions.seg'
 	// 'v1-017000-017500-transactions-to-block.idx'
 	ext := filepath.Ext(fileName)
@@ -168,7 +168,7 @@ func ParseFileNameInDir(id EntityId, dir, fileName string) (res *FileInfo, ok bo
 }
 
 // determine freezing ranges, given snapshot creation config
-func GetFreezingRange(rootFrom, rootTo RootNum, id EntityId) (freezeFrom RootNum, freezeTo RootNum, canFreeze bool) {
+func GetFreezingRange(rootFrom, rootTo RootNum, id AppendableId) (freezeFrom RootNum, freezeTo RootNum, canFreeze bool) {
 	/**
 	 1. `from`, `to` must be round off to minimum size (atleast)
 	 2. mergeLimit is a function: (from, preverified files, mergeLimit default) -> biggest file size starting `from`
@@ -230,7 +230,7 @@ func GetFreezingRange(rootFrom, rootTo RootNum, id EntityId) (freezeFrom RootNum
 	return RootNum(_freezeFrom), RootNum(_freezeTo), uint64(_freezeTo-_freezeFrom) >= cfg.MinimumSize
 }
 
-func getMergeLimit(id EntityId, from uint64) uint64 {
+func getMergeLimit(id AppendableId, from uint64) uint64 {
 	//return 0
 	cfg := id.SnapshotConfig()
 	maxMergeLimit := cfg.MergeStages[len(cfg.MergeStages)-1]
