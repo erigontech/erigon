@@ -42,7 +42,7 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	t.Name()
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
-	cfg.Workers = 2
+	cfg.Workers.Store(2)
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	t.Name()
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
-	cfg.Workers = 2
+	cfg.Workers.Store(2)
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
@@ -256,7 +256,7 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	t.Name()
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
-	cfg.Workers = 2
+	cfg.Workers.Store(2)
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
@@ -348,7 +348,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		file := filepath.Join(tmpDir, "unc")
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
-		cfg.Workers = 2
+		cfg.Workers.Store(2)
 		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
@@ -370,7 +370,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		file := filepath.Join(tmpDir, "unc_empty")
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
-		cfg.Workers = 2
+		cfg.Workers.Store(2)
 		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
@@ -388,7 +388,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		file := filepath.Join(tmpDir, "comp")
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
-		cfg.Workers = 2
+		cfg.Workers.Store(2)
 		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
@@ -410,7 +410,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		file := filepath.Join(tmpDir, "comp_empty")
 		cfg := DefaultCfg
 		cfg.MinPatternScore = 1
-		cfg.Workers = 2
+		cfg.Workers.Store(2)
 		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
@@ -580,7 +580,7 @@ func prepareRandomDict(t *testing.T) *Decompressor {
 	t.Name()
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 1
-	cfg.Workers = 2
+	cfg.Workers.Store(2)
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)

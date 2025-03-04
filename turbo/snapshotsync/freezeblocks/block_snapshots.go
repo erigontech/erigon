@@ -520,14 +520,14 @@ var BlockCompressCfg = seg.Cfg{
 	MaxDictPatterns: 16 * 1024, // the lower RAM used by huffman tree (arrays)
 
 	DictReducerSoftLimit: 1_000_000,
-	Workers:              1,
+	Workers:              atomic.NewInt32(1),
 }
 
 func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	var lastKeyValue uint64
 
 	compressCfg := BlockCompressCfg
-	compressCfg.Workers = workers
+	compressCfg.Workers.Store(int32(workers))
 	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, compressCfg, log.LvlTrace, logger)
 	if err != nil {
 		return lastKeyValue, err
