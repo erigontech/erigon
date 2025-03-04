@@ -61,12 +61,16 @@ func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
 
 	metrics.DelayLoggingEnabled = ctx.Bool(LogBlockDelayFlag.Name)
 
-	consoleLevel, lErr := tryGetLogLevel(ctx.String(LogConsoleVerbosityFlag.Name))
-	if lErr != nil {
-		// try verbosity flag
-		consoleLevel, lErr = tryGetLogLevel(ctx.String(LogVerbosityFlag.Name))
-		if lErr != nil {
-			consoleLevel = consoleDefaultLevel
+	consoleLevel := consoleDefaultLevel
+
+	// Priority: LogConsoleVerbosityFlag (if explicitly set) > LogVerbosityFlag (if explicitly set) > default
+	if ctx.IsSet(LogConsoleVerbosityFlag.Name) {
+		if level, err := tryGetLogLevel(ctx.String(LogConsoleVerbosityFlag.Name)); err == nil {
+			consoleLevel = level
+		}
+	} else if ctx.IsSet(LogVerbosityFlag.Name) {
+		if level, err := tryGetLogLevel(ctx.String(LogVerbosityFlag.Name)); err == nil {
+			consoleLevel = level
 		}
 	}
 
