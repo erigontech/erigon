@@ -72,16 +72,10 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-	tb.Cleanup(func() {
-		db.Close()
-		os.RemoveAll(dirs.Snap)
-		os.RemoveAll(dirs.Chaindata)
-		ae.Cleanup()
-	})
 	return dirs, db, logger
 }
 
-func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs) (EntityId, *state.Appendable[state.MarkedTxI]) {
+func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (EntityId, *state.Appendable[state.MarkedTxI]) {
 	headerId := registerEntityRelaxed(dir, "headers")
 	require.Equal(t, ae.AppendableId(0), headerId)
 
@@ -98,6 +92,17 @@ func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs) (EntityId, *sta
 	)
 	require.NoError(t, err)
 
+	t.Cleanup(func() {
+		ma.Close()
+		ma.RecalcVisibleFiles(0)
+		ma = nil
+
+		ae.Cleanup()
+		db.Close()
+		os.RemoveAll(dir.Snap)
+		os.RemoveAll(dir.Chaindata)
+	})
+
 	return headerId, ma
 }
 
@@ -106,7 +111,7 @@ func TestMarked_PutToDb(t *testing.T) {
 		put, get, getnc on db-only data
 	*/
 	dir, db, log := setup(t)
-	_, ma := setupHeader(t, log, dir)
+	_, ma := setupHeader(t, log, dir, db)
 
 	ma_tx := ma.BeginFilesRo()
 	defer ma_tx.Close()
@@ -142,7 +147,7 @@ func TestPrune(t *testing.T) {
 		var entries_count uint64
 		t.Run(fmt.Sprintf("prune to %d", pruneTo), func(t *testing.T) {
 			dir, db, log := setup(t)
-			headerId, ma := setupHeader(t, log, dir)
+			headerId, ma := setupHeader(t, log, dir, db)
 
 			ctx := context.Background()
 			cfg := headerId.SnapshotConfig()
@@ -213,7 +218,7 @@ func TestBuildFiles(t *testing.T) {
 	// then unwind and check get
 
 	dir, db, log := setup(t)
-	headerId, ma := setupHeader(t, log, dir)
+	headerId, ma := setupHeader(t, log, dir, db)
 	ctx := context.Background()
 
 	ma_tx := ma.BeginFilesRo()

@@ -24,6 +24,7 @@ type IndexInputDataQuery interface {
 	GetStream(ctx context.Context) stream.Trio[[]byte, uint64, uint64] // (word/value, index, offset)
 	GetBaseDataId() uint64
 	GetCount() uint64
+	Close()
 }
 
 type IndexKeyFactory interface {
@@ -145,6 +146,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 		}
 	}()
 	iidq := s.GetInputDataQuery(from, to)
+	defer iidq.Close()
 	idxFile := ae.IdxFilePath(s.id, snaptype.Version(1), from, to, s.indexPos)
 
 	keyCount := iidq.GetCount()
@@ -238,6 +240,11 @@ func (d *DecompressorIndexInputDataQuery) GetBaseDataId() uint64 {
 
 func (d *DecompressorIndexInputDataQuery) GetCount() uint64 {
 	return uint64(d.decomp.Count())
+}
+
+func (d *DecompressorIndexInputDataQuery) Close() {
+	d.decomp.Close()
+	d.decomp = nil
 }
 
 type seg_stream struct {

@@ -136,6 +136,18 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 	return dirtyFiles, nil
 }
 
+func (a *ProtoAppendable) Close() {
+	var toClose []*filesItem
+	a.dirtyFiles.Walk(func(items []*filesItem) bool {
+		toClose = append(toClose, items...)
+		return true
+	})
+	for _, item := range toClose {
+		item.closeFiles()
+		a.dirtyFiles.Delete(item)
+	}
+}
+
 // proto_appendable_rotx
 
 type ProtoAppendableTx struct {
@@ -176,6 +188,11 @@ func (a *ProtoAppendableTx) Close() {
 			src.closeFilesAndRemove()
 		}
 	}
+
+	for i := range a.readers {
+		a.readers[i].Close()
+	}
+	a.readers = nil
 }
 
 func (a *ProtoAppendableTx) StatelessIdxReader(i int) *recsplit.IndexReader {
