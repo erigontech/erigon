@@ -234,11 +234,17 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	} else {
 		txType = _type
 	}
-	to := tr.RandAddress()
+	var to *libcommon.Address
+	if tr.RandIntInRange(0, 10)%2 == 0 {
+		_to := tr.RandAddress()
+		to = &_to
+	} else {
+		to = nil
+	}
 	commonTx := CommonTx{
 		Nonce:    *tr.RandUint64(),
 		GasLimit: *tr.RandUint64(),
-		To:       &to,
+		To:       to,
 		Value:    uint256.NewInt(*tr.RandUint64()), // wei amount
 		Data:     tr.RandBytes(tr.RandIntInRange(128, 1024)),
 		V:        *tr.RandUint256(),
