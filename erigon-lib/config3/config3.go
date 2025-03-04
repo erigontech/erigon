@@ -16,6 +16,10 @@
 
 package config3
 
+import (
+	"github.com/erigontech/erigon-lib/common/dbg"
+)
+
 // Default number of transactions (txNums) in one "step". One static file can have [1, 64] steps.
 const DefaultStepSize = 1_562_500 // = 100M / 64. Dividers: 2, 5, 10, 20, 50, 100, 500
 //const DefaultStepSize = 1_562_500 / 10
@@ -26,6 +30,6 @@ const StepsInFrozenFile = 64
 
 const EnableHistoryV4InTest = true
 
-const MaxReorgDepthV3 = 512
+var MaxReorgDepthV3 = dbg.EnvInt("MAX_REORG_DEPTH", 512)
 
 const DefaultPruneDistance = 100_000
