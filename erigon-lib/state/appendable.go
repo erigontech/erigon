@@ -183,7 +183,7 @@ type MarkedTx struct {
 	ap *Appendable[MarkedTxI]
 }
 
-func (m *MarkedTx) Get(entityNum Num, tx kv.Tx) (Bytes, bool, error) {
+func (m *MarkedTx) Get(entityNum Num, tx kv.Tx) (value Bytes, foundInSnapshot bool, err error) {
 	data, found, err := m.LookupFile(entityNum, tx)
 	if err != nil {
 		return nil, false, err
@@ -216,7 +216,7 @@ func (m *MarkedTx) getDb(entityNum Num, hash []byte, tx kv.Tx) (Bytes, error) {
 	return tx.GetOne(a.valsTbl, m.combK(entityNum, hash))
 }
 
-func (m *MarkedTx) GetNc(num Num, hash []byte, tx kv.Tx) ([]byte, error) {
+func (m *MarkedTx) GetNc(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
 	return m.getDb(num, hash, tx)
 }
 
@@ -242,7 +242,7 @@ func (m *MarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 	return err
 }
 
-func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error) {
+func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	a := m.ap
 	fromKeyPrefix := a.encTs(a.pruneFrom)
 	eto, err := a.rel.RootNum2Num(to, tx)
@@ -273,7 +273,7 @@ type UnmarkedTx struct {
 	ap *Appendable[UnmarkedTxI]
 }
 
-func (m *UnmarkedTx) Get(entityNum Num, tx kv.Tx) (Bytes, bool, error) {
+func (m *UnmarkedTx) Get(entityNum Num, tx kv.Tx) (value Bytes, pruneCount bool, err error) {
 	ap := m.ap
 	data, found, err := m.LookupFile(entityNum, tx)
 	if err != nil {
@@ -301,7 +301,7 @@ func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
 	return err
 }
 
-func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error) {
+func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
 	toId, err := ap.rel.RootNum2Num(to, tx)
 	if err != nil {
@@ -321,7 +321,7 @@ type AppendingTx struct {
 
 // Get operates on snapshots only, it doesn't do resolution of
 // Num -> Id needed for finding canonical values in db.
-func (m *AppendingTx) Get(entityNum Num, tx kv.Tx) (Bytes, bool, error) {
+func (m *AppendingTx) Get(entityNum Num, tx kv.Tx) (value Bytes, foundInSnapshot bool, err error) {
 	// snapshots only
 	data, found, err := m.LookupFile(entityNum, tx)
 	if err != nil {
@@ -341,7 +341,7 @@ func (m *AppendingTx) Append(entityId Id, value Bytes, tx kv.RwTx) error {
 	return tx.Append(m.ap.valsTbl, m.ap.encTs(Num(entityId)), value)
 }
 
-func (m *AppendingTx) IncrementSequence(amount uint64, tx kv.RwTx) (uint64, error) {
+func (m *AppendingTx) IncrementSequence(amount uint64, tx kv.RwTx) (baseId uint64, err error) {
 	return tx.IncrementSequence(m.ap.valsTbl, amount)
 }
 
@@ -363,7 +363,7 @@ func (m *AppendingTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) erro
 	return err
 }
 
-func (m *AppendingTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error) {
+func (m *AppendingTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
 	toId, err := ap.rel.RootNum2Num(to, tx)
 	if err != nil {
@@ -384,8 +384,8 @@ type BufferedTx struct {
 }
 
 // Get doesn't reflect the values currently in Buffer
-func (m *BufferedTx) Get(entityNum Num, tx kv.Tx) (Bytes, bool, error) {
-	data, err := tx.GetOne(m.ap.valsTbl, m.ap.encTs(entityNum))
+func (m *BufferedTx) Get(entityNum Num, tx kv.Tx) (data Bytes, foundInSnapshot bool, err error) {
+	data, err = tx.GetOne(m.ap.valsTbl, m.ap.encTs(entityNum))
 	return data, false, err
 }
 
@@ -408,7 +408,7 @@ func (m *BufferedTx) Flush(ctx context.Context, tx kv.RwTx) error {
 	return m.values.Load(tx, m.ap.valsTbl, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()})
 }
 
-func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error) {
+func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
 	toId, err := ap.rel.RootNum2Num(to, tx)
 	if err != nil {
