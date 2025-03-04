@@ -205,7 +205,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccountAbstractionTxType, []interface{}{
+	hash := doublePrefixedRlpHash(AccountAbstractionTxType, 0x00, []interface{}{
 		tx.ChainID,
 		tx.NonceKey, tx.Nonce,
 		tx.SenderAddress,
@@ -225,7 +225,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 }
 
 func (tx *AccountAbstractionTransaction) SigningHash(chainID *big.Int) common.Hash {
-	hash := prefixedRlpHash(AccountAbstractionTxType, []interface{}{
+	hash := doublePrefixedRlpHash(AccountAbstractionTxType, 0x00, []interface{}{
 		chainID,
 		tx.NonceKey, tx.Nonce,
 		tx.SenderAddress,
