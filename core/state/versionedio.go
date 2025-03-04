@@ -149,6 +149,8 @@ func (vr VersionedWrite) String() string {
 
 func valueString(path AccountPath, value any) string {
 	switch path {
+	case AddressPath:
+		return fmt.Sprintf("%+v", value)
 	case BalancePath:
 		num := value.(uint256.Int)
 		return (&num).String()
