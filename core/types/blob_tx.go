@@ -62,12 +62,12 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 	return fixedgas.BlobGasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
 
-func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      stx.Nonce,
-		gasLimit:   stx.Gas,
+		gasLimit:   stx.GasLimit,
 		gasPrice:   *stx.FeeCap,
-		tip:        *stx.Tip,
+		tipCap:     *stx.TipCap,
 		feeCap:     *stx.FeeCap,
 		to:         stx.To,
 		amount:     *stx.Value,
@@ -76,15 +76,15 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 		checkNonce: true,
 	}
 	if !rules.IsCancun {
-		return msg, errors.New("BlobTx transactions require Cancun")
+		return nil, errors.New("BlobTx transactions require Cancun")
 	}
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
-			return msg, errors.New("gasPrice higher than 2^256-1")
+			return nil, errors.New("gasPrice higher than 2^256-1")
 		}
 	}
-	msg.gasPrice.Add(&msg.gasPrice, stx.Tip)
+	msg.gasPrice.Add(&msg.gasPrice, stx.TipCap)
 	if msg.gasPrice.Gt(stx.FeeCap) {
 		msg.gasPrice.Set(stx.FeeCap)
 	}
@@ -92,7 +92,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 	msg.from, err = stx.Sender(s)
 	msg.maxFeePerBlobGas = *stx.MaxFeePerBlobGas
 	msg.blobHashes = stx.BlobVersionedHashes
-	return msg, err
+	return &msg, err
 }
 
 func (stx *BlobTx) cachedSender() (sender libcommon.Address, ok bool) {
@@ -124,9 +124,9 @@ func (stx *BlobTx) Hash() libcommon.Hash {
 	hash := prefixedRlpHash(BlobTxType, []interface{}{
 		stx.ChainID,
 		stx.Nonce,
-		stx.Tip,
+		stx.TipCap,
 		stx.FeeCap,
-		stx.Gas,
+		stx.GasLimit,
 		stx.To,
 		stx.Value,
 		stx.Data,
@@ -145,9 +145,9 @@ func (stx *BlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 		[]interface{}{
 			chainID,
 			stx.Nonce,
-			stx.Tip,
+			stx.TipCap,
 			stx.FeeCap,
-			stx.Gas,
+			stx.GasLimit,
 			stx.To,
 			stx.Value,
 			stx.Data,
@@ -201,15 +201,15 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(stx.Tip, w, b); err != nil {
+	if err := rlp.EncodeUint256(stx.TipCap, w, b); err != nil {
 		return err
 	}
 	// encode MaxFeePerGas
 	if err := rlp.EncodeUint256(stx.FeeCap, w, b); err != nil {
 		return err
 	}
-	// encode Gas
-	if err := rlp.EncodeInt(stx.Gas, w, b); err != nil {
+	// encode GasLimit
+	if err := rlp.EncodeInt(stx.GasLimit, w, b); err != nil {
 		return err
 	}
 	// encode To
@@ -323,14 +323,14 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
-	stx.Tip = new(uint256.Int).SetBytes(b)
+	stx.TipCap = new(uint256.Int).SetBytes(b)
 
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
 	stx.FeeCap = new(uint256.Int).SetBytes(b)
 
-	if stx.Gas, err = s.Uint(); err != nil {
+	if stx.GasLimit, err = s.Uint(); err != nil {
 		return err
 	}
 

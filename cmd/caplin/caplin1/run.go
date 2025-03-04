@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/sentinel/service"
@@ -73,7 +72,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/stages"
 	"github.com/erigontech/erigon/cl/pool"
 
-	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon/cl/utils/bls"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
@@ -263,7 +262,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	syncContributionPool := sync_contribution_pool.NewSyncContributionPool(beaconConfig)
 	emitters := beaconevents.NewEventEmitter()
 	aggregationPool := aggregation.NewAggregationPool(ctx, beaconConfig, networkConfig, ethClock)
-	validatorMonitor := monitor.NewValidatorMonitor(config.EnableValidatorMonitor, ethClock, beaconConfig, syncedDataManager)
 	doLMDSampling := len(state.GetActiveValidatorsIndices(state.Slot()/beaconConfig.SlotsPerEpoch)) >= 20_000
 
 	// create the public keys registry
@@ -271,7 +269,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	forkChoice, err := forkchoice.NewForkChoiceStore(
 		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter, emitters),
-		emitters, syncedDataManager, blobStorage, validatorMonitor, pksRegistry, doLMDSampling)
+		emitters, syncedDataManager, blobStorage, pksRegistry, doLMDSampling)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -437,7 +435,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			blsToExecutionChangeService,
 			proposerSlashingService,
 			option.builderClient,
-			validatorMonitor,
 			stateSnapshots,
 			true,
 		)
@@ -466,7 +463,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		emitters,
 		blobStorage,
 		attestationProducer,
-		validatorMonitor,
 	)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 

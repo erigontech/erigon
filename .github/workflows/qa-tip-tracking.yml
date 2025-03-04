@@ -14,6 +14,7 @@ jobs:
     timeout-minutes: 600
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 14400 # 4 hours
       TOTAL_TIME_SECONDS: 28800 # 8 hours
@@ -117,12 +118,15 @@ jobs:
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Restore Erigon Chaindata Directory
-      if: steps.save_chaindata_step.outcome == 'success'
+      if: ${{ always() }}
       run: |
-        rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
-        mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
+        if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ]; then
+          rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
+          mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
+        fi
 
     - name: Resume the Erigon instance dedicated to db maintenance
+      if: ${{ always() }}
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
