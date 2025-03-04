@@ -31,6 +31,8 @@ import (
 )
 
 var (
+	MaxReorgDepthV3 = EnvInt("MAX_REORG_DEPTH", 512)
+
 	doMemstat           = EnvBool("NO_MEMSTAT", true)
 	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")

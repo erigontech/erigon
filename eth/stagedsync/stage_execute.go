@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
@@ -398,7 +397,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 		defer tx.Rollback()
 	}
-	if s.ForwardProgress > config3.MaxReorgDepthV3 && !cfg.syncCfg.AlwaysGenerateChangesets {
+	if s.ForwardProgress > dbg.MaxReorgDepthV3 && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000
@@ -410,7 +409,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		if err := rawdb.PruneTable(
 			tx,
 			kv.ChangeSets3,
-			s.ForwardProgress-config3.MaxReorgDepthV3,
+			s.ForwardProgress-dbg.MaxReorgDepthV3,
 			ctx,
 			pruneDiffsLimitOnChainTip,
 			pruneTimeout,
