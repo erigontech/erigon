@@ -273,14 +273,26 @@ func UnmarshalEOF(data []byte, depth int, containerKind byte) (*EOFContainer, er
 	for _, subContainerSize := range subContainerSizes {
 		expectedRemaining += int(subContainerSize)
 	}
+	if expectedRemaining > buf.Len() {
+		return nil, fmt.Errorf("%w: %d > %d", ErrInvalidSectionsSize, expectedRemaining, buf.Len())
+	}
 	if expectedRemaining < buf.Len()-int(dataLength) {
 		return nil, fmt.Errorf("%w: %d < %d", ErrInvalidSectionsSize, expectedRemaining, buf.Len()-int(dataLength))
 	}
-
+	fmt.Println("expectedRemaining: ", expectedRemaining)
+	fmt.Println("buf.Len(): ", buf.Len())
 	dataOffset := (int(buf.Size()) - buf.Len()) + expectedRemaining
 	if dataOffset == int(buf.Size()) && dataLength > 0 && depth == 0 /* top level container */ {
 		return nil, ErrTopLevelTruncated
 	}
+	// if (container.size() > static_cast<size_t>(header.data_offset) + header.data_size)
+	// return EOFValidationError::invalid_section_bodies_size;
+	if dataOffset+int(dataLength) < int(buf.Size()) {
+		return nil, fmt.Errorf("%w: %d + %d > %d", ErrInvalidSectionsSize, dataOffset, dataLength, buf.Size())
+	}
+	fmt.Println("dataOffset: ", dataOffset)
+	fmt.Println("dataLength: ", dataLength)
+	fmt.Println("buf.Size(): ", buf.Size())
 
 	// numTypes
 	numTypes := typesLength / 4
@@ -334,7 +346,6 @@ func UnmarshalEOF(data []byte, depth int, containerKind byte) (*EOFContainer, er
 			return nil, fmt.Errorf("%w: %w", err, ErrInvalidCode)
 		}
 		fmt.Println("len subcontainer: ", len(container._subContainer))
-		fmt.Println(code)
 		if subcontainerRefs, err := validateInstructions(code, container._types, &jt, i, int(dataLength), len(container._subContainer), containerKind); err != nil {
 			return nil, err
 		} else {
@@ -351,8 +362,12 @@ func UnmarshalEOF(data []byte, depth int, containerKind byte) (*EOFContainer, er
 		if err := validateRjumpDestinations(code, &jt); err != nil {
 			return nil, fmt.Errorf("RJUMP destinations validation fail")
 		}
-		if _, err := validateMaxStackHeight(code, container._types, &jt, i); err != nil {
-			return nil, fmt.Errorf("max_stack_height validation fail")
+		if maxStackHeight, err := validateMaxStackHeight(code, container._types, &jt, i); err != nil {
+			return nil, err
+		} else {
+			if maxStackHeight != int(container._types[i].maxStackHeight) {
+				return nil, ErrInvalidMaxStackHeight
+			}
 		}
 		container._code[i] = code
 	}

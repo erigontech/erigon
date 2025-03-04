@@ -113,7 +113,7 @@ func validateInstructions(code []byte, metadata []*eofMetaData, jt *JumpTable, s
 		if pos+int(jt[op].immediateSize) >= codeSize {
 			return nil, makeEOFerr(0, pos, op, ErrTruncatedImmediate)
 		}
-		fmt.Printf("%s ", op)
+		// fmt.Printf("%s ", op)c
 		if op == RJUMPV {
 			count := int(code[pos+1]) + 1
 			pos += (1 + count*2)
@@ -410,6 +410,11 @@ func validateMaxStackHeight(code []byte, metadata []*eofMetaData, jt *JumpTable,
 		pos = next
 	}
 	// fmt.Println("")
-
-	return len(stackHeights), nil
+	max := 0
+	for _, height := range stackHeights {
+		if height.max > max {
+			max = height.max
+		}
+	}
+	return max, nil
 }

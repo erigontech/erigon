@@ -53,6 +53,17 @@ func parseError(err error) error {
 		vm.ErrInvalidVersion,
 		vm.ErrTooManyContainerSections,
 		vm.ErrTooLargeByteCode,
+		vm.ErrInvalidMaxStackHeight,
+		vm.ErrTooLargeMaxStackHeight,
+		vm.ErrEOFStackUnderflow,
+		vm.ErrUndefinedInstruction,
+		vm.ErrUnreachableCode,
+		vm.ErrTruncatedImmediate,
+		vm.ErrMissingTypeHeader,
+		vm.ErrInvalidTypeSize,
+		vm.ErrInvalidSectionCount,
+		vm.ErrInvalidFirstSectionType,
+		// vm.ErrIncompleteEOF,
 	}
 
 	for _, _err := range _errors {
@@ -65,7 +76,7 @@ func parseError(err error) error {
 
 var errorsMap = map[string][]error{
 	"EOFException.INCOMPATIBLE_CONTAINER_KIND":  []error{vm.ErrIncompatibleContainer, vm.ErrAmbiguousContainer},
-	"EOFException.INVALID_SECTION_BODIES_SIZE":  []error{vm.ErrInvalidSectionsSize},
+	"EOFException.INVALID_SECTION_BODIES_SIZE":  []error{vm.ErrInvalidSectionsSize, vm.ErrInvalidSectionCount},
 	"EOFException.MISSING_STOP_OPCODE":          []error{vm.ErrInvalidCodeTermination},
 	"EOFException.INVALID_MAGIC":                []error{vm.ErrInvalidMagic, vm.ErrIncompleteEOF},
 	"EOFException.ORPHAN_SUBCONTAINER":          []error{vm.ErrOrphanSubContainer},
@@ -73,6 +84,16 @@ var errorsMap = map[string][]error{
 	"EOFException.INVALID_VERSION":              []error{vm.ErrInvalidVersion},
 	"EOFException.TOO_MANY_CONTAINERS":          []error{vm.ErrTooManyContainerSections},
 	"EOFException.CONTAINER_SIZE_ABOVE_LIMIT":   []error{vm.ErrTooLargeByteCode},
+	"EOFException.INVALID_MAX_STACK_HEIGHT":     []error{vm.ErrInvalidMaxStackHeight},
+	"EOFException.MAX_STACK_HEIGHT_ABOVE_LIMIT": []error{vm.ErrTooLargeMaxStackHeight},
+	"EOFException.STACK_UNDERFLOW":              []error{vm.ErrEOFStackUnderflow},
+	"EOFException.UNDEFINED_INSTRUCTION":        []error{vm.ErrUndefinedInstruction},
+	"EOFException.UNREACHABLE_INSTRUCTIONS":     []error{vm.ErrUnreachableCode},
+	"EOFException.TRUNCATED_INSTRUCTION":        []error{vm.ErrTruncatedImmediate},
+	"EOFException.MISSING_TYPE_HEADER":          []error{vm.ErrMissingTypeHeader},
+	"EOFException.INVALID_TYPE_SECTION_SIZE":    []error{vm.ErrInvalidTypeSize},
+	"EOFException.INVALID_FIRST_SECTION_TYPE":   []error{vm.ErrInvalidFirstSectionType},
+	// "EOFException.TOO_MANY_CODE_SECTIONS":       []error{vm.ErrIncompleteEOF},
 }
 
 func mapError(exception string, err error) bool {

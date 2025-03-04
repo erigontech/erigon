@@ -18,7 +18,7 @@ func TestEOFValidation(t *testing.T) {
 
 	et := new(testMatcher)
 
-	dir := filepath.Join(".", "osaka-eof/eof_tests/osaka/eip7692_eof_v1/eip7620_eof_create/returncontract")
+	dir := filepath.Join(".", "osaka-eof/eof_tests/osaka/eip7692_eof_v1/eip3540_eof_v1/container_validation")
 
 	et.walk(t, dir, func(t *testing.T, name string, test *EOFTest) {
 		// import pre accounts & construct test genesis block & state root
