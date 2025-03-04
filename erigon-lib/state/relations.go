@@ -2,7 +2,7 @@ package state
 
 import (
 	"github.com/erigontech/erigon-lib/kv"
-	ae "github.com/erigontech/erigon-lib/state/entity_extras"
+	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
 )
 
 //// relations

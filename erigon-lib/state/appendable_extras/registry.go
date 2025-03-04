@@ -12,10 +12,10 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 )
 
-// EntityId id as a uint64, returned by `RegisterAppendable`. It is dependent on
+// AppendableId id as a uint64, returned by `RegisterAppendable`. It is dependent on
 // the order of registration, and so counting on it being constant across reboots
 // might be tricky.
-type EntityId uint16
+type AppendableId uint16
 
 type holder struct {
 	name                   string
@@ -30,14 +30,14 @@ type holder struct {
 var entityRegistry []holder
 var curr uint16
 
-// RegisterEntity
+// RegisterAppendable
 // not making appendableRegistry/curr thread safe for now, since it's only expected to be setup once
 // at the start and then read.
 // name: just user-defined name for identification
 // dirs: directory where snapshots have to reside
 // salt: for creation of indexes.
 // pre: preverified files are snapshot file lists that gets downloaded initially.
-func RegisterEntity(name string, dirs datadir.Dirs, pre snapcfg.Preverified, options ...EntityIdOption) EntityId {
+func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified, options ...EntityIdOption) AppendableId {
 	h := &holder{
 		name: name,
 		dirs: dirs,
@@ -67,13 +67,19 @@ func RegisterEntity(name string, dirs datadir.Dirs, pre snapcfg.Preverified, opt
 		panic("snapshotCreationConfig is required")
 	}
 	entityRegistry = append(entityRegistry, *h)
-	id := EntityId(curr)
+	id := AppendableId(curr)
 
 	h.snapshotCreationConfig.SetupConfig(id, h.snapshotDir, pre)
 
 	curr++
 
 	return id
+}
+
+func Cleanup() {
+	// only for tests
+	entityRegistry = nil
+	curr = 0
 }
 
 type EntityIdOption func(*holder)
@@ -108,39 +114,39 @@ func WithSnapshotDir(dir string) EntityIdOption {
 	}
 }
 
-func (a EntityId) Id() uint64 {
+func (a AppendableId) Id() uint64 {
 	return uint64(a)
 }
 
-func (a EntityId) Name() string {
+func (a AppendableId) Name() string {
 	return entityRegistry[a].name
 }
 
-func (a EntityId) SnapshotPrefix() string {
+func (a AppendableId) SnapshotPrefix() string {
 	return entityRegistry[a].snapshotNameBase
 }
 
-func (a EntityId) IndexPrefix() []string {
+func (a AppendableId) IndexPrefix() []string {
 	return entityRegistry[a].indexNameBases
 }
 
-func (a EntityId) String() string {
+func (a AppendableId) String() string {
 	return entityRegistry[a].name
 }
 
-func (a EntityId) Dirs() datadir.Dirs {
+func (a AppendableId) Dirs() datadir.Dirs {
 	return entityRegistry[a].dirs
 }
 
-func (a EntityId) SnapshotDir() string {
+func (a AppendableId) SnapshotDir() string {
 	return entityRegistry[a].snapshotDir
 }
 
-func (a EntityId) SnapshotConfig() *SnapshotConfig {
+func (a AppendableId) SnapshotConfig() *SnapshotConfig {
 	return entityRegistry[a].snapshotCreationConfig
 }
 
-func (a EntityId) Salt() (uint32, error) {
+func (a AppendableId) Salt() (uint32, error) {
 	// not computing salt an EntityId inception
 	// since salt file might not be downloaded yet.
 	saltFile := entityRegistry[a].saltFile

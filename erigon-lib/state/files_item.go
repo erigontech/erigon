@@ -69,7 +69,7 @@ func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
 func newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *filesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
-	frozen := endStep-startStep == stepsInFrozenFile
+	frozen := endStep-startStep >= stepsInFrozenFile
 	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
 
@@ -156,6 +156,10 @@ func (i *filesItem) closeFilesAndRemove() {
 
 func (i *filesItem) FirstEntityNum() uint64 {
 	return i.startTxNum
+}
+
+func (i *filesItem) LastEntityNum() uint64 {
+	return i.FirstEntityNum() + uint64(i.decompressor.Count())
 }
 
 func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*filesItem) {

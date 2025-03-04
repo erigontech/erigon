@@ -14,10 +14,10 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ae "github.com/erigontech/erigon-lib/state/entity_extras"
+	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
 )
 
-// interfaces defined here are not required to be implemented by
+// interfaces defined here are not required to be implemented in
 // appendables. These are just helpers when SimpleAccessorBuilder is used. Also can be used to provide some structure
 // to build more custom indexes.
 type IndexInputDataQuery interface {
@@ -63,17 +63,21 @@ func NewAccessorArgs(enums, lessFalsePositives bool) *AccessorArgs {
 type SimpleAccessorBuilder struct {
 	args     *AccessorArgs
 	indexPos uint64
-	id       EntityId
+	id       AppendableId
 	kf       IndexKeyFactory
+	fetcher  FirstEntityNumFetcher
 	logger   log.Logger
 }
 
+type FirstEntityNumFetcher = func(from, to RootNum, seg *seg.Decompressor) Num
+
 var _ AccessorIndexBuilder = (*SimpleAccessorBuilder)(nil)
 
-func NewSimpleAccessorBuilder(args *AccessorArgs, id EntityId, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
+func NewSimpleAccessorBuilder(args *AccessorArgs, id AppendableId, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
 	b := &SimpleAccessorBuilder{
-		args: args,
-		id:   id,
+		args:   args,
+		id:     id,
+		logger: logger,
 	}
 
 	for _, opt := range options {
@@ -81,7 +85,14 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, id EntityId, options ...Access
 	}
 
 	if b.kf == nil {
-		b.kf = simpleIndexKeyFactoryInstance
+		b.kf = &SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
+	}
+
+	if b.fetcher == nil {
+		// assume rootnum and num is same
+		b.fetcher = func(from, to RootNum, seg *seg.Decompressor) Num {
+			return Num(from)
+		}
 	}
 
 	return b
@@ -108,11 +119,15 @@ func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 	s.args = args
 }
 
+// TODO: this is supposed to go away once we start storing first entity num in the snapshot
+func (s *SimpleAccessorBuilder) SetFirstEntityNumFetcher(fetcher FirstEntityNumFetcher) {
+	s.fetcher = fetcher
+}
+
 func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
-	// just segname?
-	sgname := ae.SegName(s.id, snaptype.Version(1), from, to)
+	sgname := ae.SnapFilePath(s.id, snaptype.Version(1), from, to)
 	decomp, _ := seg.NewDecompressor(sgname)
-	return &DecompressorIndexInputDataQuery{decomp: decomp}
+	return &DecompressorIndexInputDataQuery{decomp: decomp, baseDataId: uint64(s.fetcher(from, to, decomp))}
 }
 
 func (s *SimpleAccessorBuilder) SetIndexKeyFactory(factory IndexKeyFactory) {
@@ -130,7 +145,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 		}
 	}()
 	iidq := s.GetInputDataQuery(from, to)
-	idxFile := ae.IdxName(s.id, snaptype.Version(1), from, to, s.indexPos)
+	idxFile := ae.IdxFilePath(s.id, snaptype.Version(1), from, to, s.indexPos)
 
 	keyCount := iidq.GetCount()
 	if p != nil {
@@ -157,6 +172,9 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 	if err != nil {
 		return nil, err
 	}
+
+	s.kf.Refresh()
+	defer s.kf.Close()
 
 	defer iidq.decomp.EnableReadAhead().DisableReadAhead()
 
@@ -201,7 +219,8 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 }
 
 type DecompressorIndexInputDataQuery struct {
-	decomp *seg.Decompressor
+	decomp     *seg.Decompressor
+	baseDataId uint64
 }
 
 // return trio: word, index, offset,
@@ -253,9 +272,6 @@ func (s *seg_stream) Close() {
 }
 
 // index key factory "manufacturing" index keys only
-// TODO: this is not concurrent safe
-var simpleIndexKeyFactoryInstance = &SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
-
 type SimpleIndexKeyFactory struct {
 	num []byte
 }

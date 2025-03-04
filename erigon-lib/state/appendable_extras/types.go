@@ -13,11 +13,11 @@ type RootNum uint64
 
 type Bytes = []byte
 
-func (n Num) Step(a EntityId) uint64 {
+func (n Num) Step(a AppendableId) uint64 {
 	return step(n, a)
 }
 
-func (n RootNum) Step(a EntityId) uint64 {
+func (n RootNum) Step(a AppendableId) uint64 {
 	return step(n, a)
 }
 

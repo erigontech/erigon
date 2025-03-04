@@ -7,7 +7,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-func step[T ~uint64](n T, a EntityId) uint64 {
+func step[T ~uint64](n T, a AppendableId) uint64 {
 	return uint64(n) / a.SnapshotConfig().EntitiesPerStep
 }
 
@@ -31,11 +31,11 @@ func Decode64FromBytes(buf []byte, x8Bytes bool) (x uint64) {
 	return
 }
 
-// toPrefix inclusive
-func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, rwTx kv.RwTx) error {
+// toPrefix exclusive
+func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, rwTx kv.RwTx) (del uint64, err error) {
 	c, err := rwTx.RwCursor(tbl) // TODO: no dupsort tbl assumed
 	if err != nil {
-		return err
+		return
 	}
 
 	defer c.Close()
@@ -43,14 +43,23 @@ func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, r
 	// imo this can be generalized if needed, by using key comparison functions, which mdbx provides.
 	for k, _, err := c.Seek(fromPrefix); k != nil && (toPrefix == nil || bytes.Compare(k, toPrefix) < 0) && limit > 0; k, _, err = c.Next() {
 		if err != nil {
-			return err
+			return del, err
 		}
 
 		if err := c.DeleteCurrent(); err != nil {
-			return err
+			return del, err
 		}
 		limit--
+		del++
 	}
 
-	return nil
+	return
 }
+
+type IdentityRootRelation struct{}
+
+func (i *IdentityRootRelation) RootNum2Num(rootNum RootNum, tx kv.Tx) (num Num, err error) {
+	return Num(rootNum), nil
+}
+
+var IdentityRootRelationInstance = &IdentityRootRelation{}
