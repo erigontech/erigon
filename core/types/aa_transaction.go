@@ -162,17 +162,27 @@ func (tx *AccountAbstractionTransaction) copy() *AccountAbstractionTransaction {
 		FeeCap:                      tx.FeeCap,
 		GasLimit:                    tx.GasLimit,
 		AccessList:                  tx.AccessList,
-		SenderAddress:               &*tx.SenderAddress,
 		ExecutionData:               common.CopyBytes(tx.ExecutionData),
-		Paymaster:                   &*tx.Paymaster,
 		PaymasterData:               common.CopyBytes(tx.PaymasterData),
-		Deployer:                    &*tx.Deployer,
 		DeployerData:                common.CopyBytes(tx.DeployerData),
 		BuilderFee:                  new(uint256.Int),
 		ValidationGasLimit:          tx.ValidationGasLimit,
 		PaymasterValidationGasLimit: tx.PaymasterValidationGasLimit,
 		PostOpGasLimit:              tx.PostOpGasLimit,
 		NonceKey:                    new(uint256.Int),
+	}
+
+	if tx.SenderAddress != nil {
+		addr := *tx.SenderAddress
+		cpy.SenderAddress = &addr
+	}
+	if tx.Paymaster != nil {
+		addr := *tx.Paymaster
+		cpy.Paymaster = &addr
+	}
+	if tx.Deployer != nil {
+		addr := *tx.Deployer
+		cpy.Deployer = &addr
 	}
 
 	cpy.Authorizations = make([]Authorization, len(tx.Authorizations))

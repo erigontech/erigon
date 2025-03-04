@@ -97,8 +97,9 @@ func EncodeRIP7560TransactionEvent(
 		return nil, nil, error
 	}
 	topics = []common.Hash{id, {}, {}}
-	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes()[:], 32))
-	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes()[:], 32))
+	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes(), 32))
+	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes(), 32))
+	topics[3] = [32]byte(common.LeftPadBytes(deployer.Bytes(), 32))
 	return topics, data, nil
 }
 
@@ -111,9 +112,9 @@ func EncodeRIP7560AccountDeployedEvent(paymaster, deployer, sender *common.Addre
 		deployer = &common.Address{}
 	}
 	topics = []common.Hash{id, {}, {}, {}}
-	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes()[:], 32))
-	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes()[:], 32))
-	topics[3] = [32]byte(common.LeftPadBytes(deployer.Bytes()[:], 32))
+	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes(), 32))
+	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes(), 32))
+	topics[3] = [32]byte(common.LeftPadBytes(deployer.Bytes(), 32))
 	return topics, make([]byte, 0), nil
 }
 
@@ -134,7 +135,7 @@ func EncodeRIP7560TransactionRevertReasonEvent(
 		return nil, nil, error
 	}
 	topics = []common.Hash{id, {}}
-	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes()[:], 32))
+	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes(), 32))
 	return topics, data, nil
 }
 
@@ -158,8 +159,8 @@ func EncodeRIP7560TransactionPostOpRevertReasonEvent(
 		return nil, nil, error
 	}
 	topics = []common.Hash{id, {}, {}}
-	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes()[:], 32))
-	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes()[:], 32))
+	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes(), 32))
+	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes(), 32))
 	return topics, data, nil
 }
 
