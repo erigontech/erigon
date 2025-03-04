@@ -538,7 +538,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				e.avgMgasSec = mgasPerSec
 			}
 			e.avgMgasSec = alpha*mgasPerSec + (1-alpha)*e.avgMgasSec
-			e.recordedMgasSec++
 			logArgs = append(logArgs, "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
 			if !e.syncCfg.ParallelStateFlushing {
 				logArgs = append(logArgs, "flushing", blockTimings[engine_helpers.BlockTimingsFlushExtendingFork])
