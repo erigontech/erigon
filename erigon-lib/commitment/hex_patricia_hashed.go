@@ -49,6 +49,7 @@ import (
 	ecrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/sync/errgroup"
 )
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -106,7 +107,7 @@ type ParallelPatriciaHashed struct {
 	rootLocker sync.Mutex
 }
 
-func (phph *ParallelPatriciaHashed) StartKeyProcessing(ctx context.Context, errChan chan error, keyUpdates []*nibbleUpdate) {
+func (phph *ParallelPatriciaHashed) StartKeyProcessing(ctx context.Context, keyUpdates []*nibbleUpdate) error {
 	var (
 		update *Update
 		err    error
@@ -115,23 +116,20 @@ func (phph *ParallelPatriciaHashed) StartKeyProcessing(ctx context.Context, errC
 	defer phph.rootLocker.Unlock()
 
 	for _, keyUpdate := range keyUpdates {
-
 		hashedKey := keyUpdate.hashedKey
 		plainKey := keyUpdate.plainKey
 		stateUpdate := keyUpdate.stateUpdate
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for phph.needFolding(hashedKey) {
 			if err = phph.fold(); err != nil {
-				errChan <- err
-				return
+				return err
 			}
 		}
 
 		// Now unfold until we step on an empty cell
 		for unfolding := phph.needUnfolding(hashedKey); unfolding > 0; unfolding = phph.needUnfolding(hashedKey) {
 			if err = phph.unfold(hashedKey, unfolding); err != nil {
-				errChan <- fmt.Errorf("unfold: %w", err)
-				return
+				return fmt.Errorf("unfold: %w", err)
 			}
 		}
 
@@ -140,14 +138,12 @@ func (phph *ParallelPatriciaHashed) StartKeyProcessing(ctx context.Context, errC
 			if len(plainKey) == phph.accountKeyLen {
 				update, err = phph.ctx.Account(plainKey)
 				if err != nil {
-					errChan <- fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
-					return
+					return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 				}
 			} else {
 				update, err = phph.ctx.Storage(plainKey)
 				if err != nil {
-					errChan <- fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
-					return
+					return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 				}
 			}
 		} else {
@@ -162,8 +158,7 @@ func (phph *ParallelPatriciaHashed) StartKeyProcessing(ctx context.Context, errC
 		mxTrieProcessedKeys.Inc()
 
 	}
-	errChan <- nil
-	return
+	return nil
 }
 
 func NewParallelHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *ParallelPatriciaHashed {
@@ -2096,37 +2091,30 @@ func (phph *ParallelPatriciaHashed) Process(ctx context.Context, updates *Update
 	//hph.trace = true
 	nibbleUpdates := make([]*nibbleUpdate, 0)
 	currentNibble := 16 // invalid nibble value
-	errChan := make(chan error, 16)
-	nibblesBeingProcessed := 0
 
-	runParallelUnfolding := func() {
-		// we must submit the nibble updates and reinitialise slice
-		if len(nibbleUpdates) != 0 {
-			passedUpdates := append([]*nibbleUpdate{}, nibbleUpdates...)
-			/* go */ phph.StartKeyProcessing(ctx, errChan, passedUpdates)
-			nibblesBeingProcessed++
-			nibbleUpdates = make([]*nibbleUpdate, 0)
-		}
-	}
+	keyProcessing, ctx := errgroup.WithContext(ctx)
+	keyProcessing.SetLimit(TotalNibbles)
 
 	// collect updates for each starting nibble and submit it to goroutine for asynchronous unfolding/processing
 	updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		if currentNibble != int(hashedKey[0]) {
-			runParallelUnfolding()
+			nu := append([]*nibbleUpdate{}, nibbleUpdates...)
+			keyProcessing.Go(func() error {
+				return phph.StartKeyProcessing(ctx, nu)
+			})
+			nibbleUpdates = make([]*nibbleUpdate, 0)
 		}
 		currentNibble = int(hashedKey[0])
 		nibbleUpdates = append(nibbleUpdates, &nibbleUpdate{hashedKey: append([]byte{}, hashedKey...), plainKey: append([]byte{}, plainKey...), stateUpdate: stateUpdate})
 		return nil
 	})
 	// for the last nibble from the upadtes
-	runParallelUnfolding()
+	keyProcessing.Go(func() error {
+		return phph.StartKeyProcessing(ctx, append([]*nibbleUpdate{}, nibbleUpdates...))
+	})
 
-	// wait for all nibble processing
-	for range nibblesBeingProcessed {
-		err := <-errChan
-		if err != nil {
-			return nil, fmt.Errorf("error processing keys: %w", err)
-		}
+	if err := keyProcessing.Wait(); err != nil {
+		return nil, fmt.Errorf("processing keys failed: %w", err)
 	}
 
 	// Folding everything up to the root
