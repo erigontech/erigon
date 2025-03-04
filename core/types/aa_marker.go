@@ -93,7 +93,7 @@ func (tx *AccountAbstractionBatchHeaderTransaction) Hash() libcommon.Hash {
 		return *hash
 	}
 
-	hash := prefixedRlpHash(AccountAbstractionTxType, []interface{}{
+	hash := doublePrefixedRlpHash(AccountAbstractionTxType, 0x01, []interface{}{
 		tx.ChainID,
 		tx.TransactionCount,
 		tx.BlockNumber,
