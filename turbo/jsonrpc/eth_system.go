@@ -153,6 +153,7 @@ type feeHistoryResult struct {
 	BlobGasUsedRatio []float64        `json:"blobGasUsedRatio,omitempty"`
 }
 
+// FeeHistory implements eth_feeHistory. Returns the fee history of the last N blocks.
 func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*feeHistoryResult, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -196,7 +197,7 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 	return results, nil
 }
 
-// BlobBaseFee returns the base fee for blob gas at the current head.
+// BlobBaseFee implements eth_blobBaseFee. Returns the base fee for blob gas at the current head.
 func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	// read current header
 	tx, err := api.db.BeginTemporalRo(ctx)
@@ -223,7 +224,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	return (*hexutil.Big)(ret256.ToBig()), nil
 }
 
-// BaseFee returns the base fee at the current head.
+// BaseFee implements eth_baseFee. Returns the base fee at the current head.
 func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 	// read current header
 	tx, err := api.db.BeginTemporalRo(ctx)
