@@ -120,6 +120,21 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
 				return false, err
 			}
+		} else {
+			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
+				// get last receipt and store the last log index + 1
+				lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+				if len(lastReceipt.Logs) > 0 {
+					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
+					receipt := types.Receipt{
+						CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
+						FirstLogIndexWithinBlock: uint32(firstIndex),
+					}
+					if err := rawtemporaldb.AppendReceipt(se.doms, &receipt, se.blobGasUsed); err != nil {
+						return false, err
+					}
+				}
+			}
 		}
 
 		// MA applystate

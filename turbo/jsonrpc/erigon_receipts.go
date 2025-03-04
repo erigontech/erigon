@@ -337,6 +337,9 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 		if err != nil {
 			return nil, err
 		}
+		if blockNum == nil {
+			return nil, fmt.Errorf("block not found %x", cannonicalBlockHash)
+		}
 		isCanonicalHash, err := api._blockReader.IsCanonical(ctx, tx, cannonicalBlockHash, *blockNum)
 		if err != nil {
 			return nil, err

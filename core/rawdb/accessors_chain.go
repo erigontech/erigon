@@ -526,7 +526,7 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*t
 	if err != nil {
 		return nil, err
 	}
-	return body, err
+	return body, nil
 }
 
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
