@@ -84,7 +84,7 @@ type Pool interface {
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-
+	GetBlobs(blobhashes []common.Hash) ([][]byte, [][]byte)
 	AddNewGoodPeer(peerID PeerID)
 }
 
@@ -151,6 +151,10 @@ type TxPool struct {
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
 	auths                   map[common.Address]*metaTxn // All accounts with a pooled authorization
+	blobHashToTxn           map[common.Hash]struct {
+		index   int
+		txnHash common.Hash
+	}
 }
 
 type FeeCalculator interface {
@@ -228,6 +232,10 @@ func New(
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
 		auths:                   map[common.Address]*metaTxn{},
+		blobHashToTxn: map[common.Hash]struct {
+			index   int
+			txnHash common.Hash
+		}{},
 	}
 
 	if shanghaiTime != nil {
@@ -1417,8 +1425,8 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		}
 		priceBump := p.cfg.PriceBump
 
-		//Blob txn threshold checks for replace txn
 		if mt.TxnSlot.Type == BlobTxnType {
+			//Blob txn threshold checks for replace txn
 			priceBump = p.cfg.BlobPriceBump
 			blobFeeThreshold, overflow := (&uint256.Int{}).MulDivOverflow(
 				&found.TxnSlot.BlobFeeCap,
@@ -1431,6 +1439,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 				}
 				return txpoolcfg.ReplaceUnderpriced // TODO: This is the same as NotReplaced
 			}
+
 		}
 
 		//Regular txn threshold checks
@@ -1522,6 +1531,12 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	if mt.TxnSlot.Type == BlobTxnType {
 		t := p.totalBlobsInPool.Load()
 		p.totalBlobsInPool.Store(t + (uint64(len(mt.TxnSlot.BlobHashes))))
+		for i, b := range mt.TxnSlot.BlobHashes {
+			p.blobHashToTxn[b] = struct {
+				index   int
+				txnHash common.Hash
+			}{i, mt.TxnSlot.IDHash}
+		}
 	}
 
 	// Remove from mined cache as we are now "resurrecting" it to a sub-pool
@@ -1553,6 +1568,30 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 			delete(p.auths, *signer)
 		}
 	}
+}
+
+func (p *TxPool) getBlobsAndProofByBlobHashLocked(blobHashes []common.Hash) ([][]byte, [][]byte) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	blobs := make([][]byte, len(blobHashes))
+	proofs := make([][]byte, len(blobHashes))
+	for i, h := range blobHashes {
+		th, ok := p.blobHashToTxn[h]
+		if !ok {
+			continue
+		}
+		mt, ok := p.byHash[string(th.txnHash[:])]
+		if !ok || mt == nil {
+			continue
+		}
+		blobs[i] = mt.TxnSlot.Blobs[th.index]
+		proofs[i] = mt.TxnSlot.Proofs[th.index][:]
+	}
+	return blobs, proofs
+}
+
+func (p *TxPool) GetBlobs(blobHashes []common.Hash) ([][]byte, [][]byte) {
+	return p.getBlobsAndProofByBlobHashLocked(blobHashes)
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
