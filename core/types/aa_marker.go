@@ -140,7 +140,7 @@ func (tx *AccountAbstractionBatchHeaderTransaction) payloadSize() (payloadSize i
 
 func (tx *AccountAbstractionBatchHeaderTransaction) EncodingSize() int {
 	payloadSize := tx.payloadSize()
-	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
+	return 2 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (tx *AccountAbstractionBatchHeaderTransaction) EncodeRLP(w io.Writer) error {
