@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"path"
 	"sync"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -69,6 +71,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 	defer cleanEngineApiPort()
 	jsonRpcPort, cleanJsonRpcPort := ConsumeFreeTcpPort(t)
 	defer cleanJsonRpcPort()
+	sentryPort, cleanSentryPort := ConsumeFreeTcpPort(t)
+	defer cleanSentryPort()
 
 	const localhost = "127.0.0.1"
 	httpConfig := httpcfg.HttpCfg{
@@ -79,8 +83,12 @@ func TestShutterBlockBuilding(t *testing.T) {
 		API:                      []string{"eth"},
 		AuthRpcHTTPListenAddress: localhost,
 		AuthRpcPort:              engineApiPort,
+		JWTSecretPath:            path.Join(dataDir, "jwt.hex"),
 	}
 
+	nodeKeyConfig := p2p.NodeKeyConfig{}
+	nodeKey, err := nodeKeyConfig.LoadOrGenerateAndSave(nodeKeyConfig.DefaultPath(dataDir))
+	require.NoError(t, err)
 	nodeConfig := nodecfg.Config{
 		Dirs: dirs,
 		Http: httpConfig,
@@ -90,6 +98,9 @@ func TestShutterBlockBuilding(t *testing.T) {
 			MaxPendingPeers: 1,
 			NoDiscovery:     true,
 			NoDial:          true,
+			ProtocolVersion: []uint{direct.ETH68},
+			AllowedPorts:    []uint{uint(sentryPort)},
+			PrivateKey:      nodeKey,
 		},
 	}
 
@@ -123,7 +134,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 	genesis := core.ChiadoGenesisBlock()
 	genesis.Config = &chainConfig
 	genesis.Alloc[bank.Address()] = types.GenesisAccount{
-		Balance: big.NewInt(100_000_000_000),
+		// 1_000 ETH in wei
+		Balance: new(big.Int).Mul(big.NewInt(1_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)),
 	}
 	chainDB, err := node.OpenDatabase(ctx, stack.Config(), kv.ChainDB, "", false, logger)
 	require.NoError(t, err)
@@ -265,7 +277,7 @@ type MockCl struct {
 	prevBeaconBlockRoot   *big.Int
 }
 
-func (cl MockCl) BuildBlock(ctx context.Context) (*enginetypes.ExecutionPayload, error) {
+func (cl *MockCl) BuildBlock(ctx context.Context) (*enginetypes.ExecutionPayload, error) {
 	forkChoiceState := enginetypes.ForkChoiceState{
 		FinalizedBlockHash: cl.prevBlockHash,
 		SafeBlockHash:      cl.prevBlockHash,
@@ -281,6 +293,7 @@ func (cl MockCl) BuildBlock(ctx context.Context) (*enginetypes.ExecutionPayload,
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
 	}
 
+	// start block building process
 	fcuRes, err := cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, &payloadAttributes)
 	if err != nil {
 		return nil, err
@@ -289,16 +302,28 @@ func (cl MockCl) BuildBlock(ctx context.Context) (*enginetypes.ExecutionPayload,
 		return nil, fmt.Errorf("payload status is not valid: %s", fcuRes.PayloadStatus.Status)
 	}
 
+	// give block builder time to build a block
+	err = libcommon.Sleep(ctx, time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	// get the newly built block
 	payloadRes, err := cl.engineApiClient.GetPayloadV4(ctx, *fcuRes.PayloadId)
 	if err != nil {
 		return nil, err
 	}
 
-	err = libcommon.Sleep(ctx, 500*time.Millisecond)
+	// insert the newly built block
+	payloadStatus, err := cl.engineApiClient.NewPayloadV4(ctx, payloadRes.ExecutionPayload, []libcommon.Hash{}, &parentBeaconBlockRoot, []hexutil.Bytes{})
 	if err != nil {
 		return nil, err
 	}
+	if payloadStatus.Status != enginetypes.ValidStatus {
+		return nil, fmt.Errorf("payload status is not valid: %s", payloadStatus.Status)
+	}
 
+	// set the newly built block as canonical
 	newHash := payloadRes.ExecutionPayload.BlockHash
 	forkChoiceState = enginetypes.ForkChoiceState{
 		FinalizedBlockHash: newHash,
@@ -309,8 +334,8 @@ func (cl MockCl) BuildBlock(ctx context.Context) (*enginetypes.ExecutionPayload,
 	if err != nil {
 		return nil, err
 	}
-	if fcuRes.PayloadStatus.Status != enginetypes.AcceptedStatus {
-		return nil, fmt.Errorf("payload status is not accepted: %s", fcuRes.PayloadStatus.Status)
+	if fcuRes.PayloadStatus.Status != enginetypes.ValidStatus {
+		return nil, fmt.Errorf("payload status is not valid: %s", fcuRes.PayloadStatus.Status)
 	}
 
 	cl.prevBlockHash = newHash
