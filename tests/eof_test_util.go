@@ -63,7 +63,25 @@ func parseError(err error) error {
 		vm.ErrInvalidTypeSize,
 		vm.ErrInvalidSectionCount,
 		vm.ErrInvalidFirstSectionType,
-		// vm.ErrIncompleteEOF,
+		vm.ErrTooManyInputs,
+		vm.ErrTooManyOutputs,
+		vm.ErrMissingCodeHeader,
+		vm.ErrMissingDataHeader,
+		vm.ErrInvalidCodeSize,
+		vm.ErrInvalidContainerSize,
+		vm.ErrMissingTerminator,
+		vm.ErrZeroSizeContainerSection,
+		vm.ErrUnreachableCodeSections,
+		vm.ErrInvalidRjumpDest,
+		vm.ErrStackHeightMismatch,
+		vm.ErrEOFStackOverflow,
+		vm.ErrStackHeightHigher,
+		vm.ErrInvalidSectionArgument,
+		vm.ErrInvalidNonReturning,
+		vm.ErrJUMPFOutputs,
+		vm.ErrInvalidDataLoadN,
+		vm.ErrInvalidContainerArgument,
+		vm.ErrEOFCreateWithTruncatedContainer,
 	}
 
 	for _, _err := range _errors {
@@ -75,25 +93,50 @@ func parseError(err error) error {
 }
 
 var errorsMap = map[string][]error{
-	"EOFException.INCOMPATIBLE_CONTAINER_KIND":  []error{vm.ErrIncompatibleContainer, vm.ErrAmbiguousContainer},
-	"EOFException.INVALID_SECTION_BODIES_SIZE":  []error{vm.ErrInvalidSectionsSize, vm.ErrInvalidSectionCount},
-	"EOFException.MISSING_STOP_OPCODE":          []error{vm.ErrInvalidCodeTermination},
-	"EOFException.INVALID_MAGIC":                []error{vm.ErrInvalidMagic, vm.ErrIncompleteEOF},
-	"EOFException.ORPHAN_SUBCONTAINER":          []error{vm.ErrOrphanSubContainer},
-	"EOFException.TOPLEVEL_CONTAINER_TRUNCATED": []error{vm.ErrTopLevelTruncated},
-	"EOFException.INVALID_VERSION":              []error{vm.ErrInvalidVersion},
-	"EOFException.TOO_MANY_CONTAINERS":          []error{vm.ErrTooManyContainerSections},
-	"EOFException.CONTAINER_SIZE_ABOVE_LIMIT":   []error{vm.ErrTooLargeByteCode},
-	"EOFException.INVALID_MAX_STACK_HEIGHT":     []error{vm.ErrInvalidMaxStackHeight},
-	"EOFException.MAX_STACK_HEIGHT_ABOVE_LIMIT": []error{vm.ErrTooLargeMaxStackHeight},
-	"EOFException.STACK_UNDERFLOW":              []error{vm.ErrEOFStackUnderflow},
-	"EOFException.UNDEFINED_INSTRUCTION":        []error{vm.ErrUndefinedInstruction},
-	"EOFException.UNREACHABLE_INSTRUCTIONS":     []error{vm.ErrUnreachableCode},
-	"EOFException.TRUNCATED_INSTRUCTION":        []error{vm.ErrTruncatedImmediate},
-	"EOFException.MISSING_TYPE_HEADER":          []error{vm.ErrMissingTypeHeader},
-	"EOFException.INVALID_TYPE_SECTION_SIZE":    []error{vm.ErrInvalidTypeSize},
-	"EOFException.INVALID_FIRST_SECTION_TYPE":   []error{vm.ErrInvalidFirstSectionType},
-	// "EOFException.TOO_MANY_CODE_SECTIONS":       []error{vm.ErrIncompleteEOF},
+	"EOFException.INCOMPATIBLE_CONTAINER_KIND": []error{vm.ErrIncompatibleContainer, vm.ErrAmbiguousContainer},
+	"EOFException.INVALID_SECTION_BODIES_SIZE": []error{
+		vm.ErrInvalidSectionsSize, vm.ErrInvalidSectionCount, vm.ErrInvalidTypeSize},
+	"EOFException.MISSING_STOP_OPCODE":            []error{vm.ErrInvalidCodeTermination},
+	"EOFException.INVALID_MAGIC":                  []error{vm.ErrInvalidMagic, vm.ErrIncompleteEOF},
+	"EOFException.ORPHAN_SUBCONTAINER":            []error{vm.ErrOrphanSubContainer},
+	"EOFException.TOPLEVEL_CONTAINER_TRUNCATED":   []error{vm.ErrTopLevelTruncated},
+	"EOFException.INVALID_VERSION":                []error{vm.ErrInvalidVersion, vm.ErrIncompleteEOF},
+	"EOFException.TOO_MANY_CONTAINERS":            []error{vm.ErrTooManyContainerSections},
+	"EOFException.CONTAINER_SIZE_ABOVE_LIMIT":     []error{vm.ErrTooLargeByteCode},
+	"EOFException.INVALID_MAX_STACK_HEIGHT":       []error{vm.ErrInvalidMaxStackHeight},
+	"EOFException.MAX_STACK_HEIGHT_ABOVE_LIMIT":   []error{vm.ErrTooLargeMaxStackHeight},
+	"EOFException.STACK_UNDERFLOW":                []error{vm.ErrEOFStackUnderflow},
+	"EOFException.UNDEFINED_INSTRUCTION":          []error{vm.ErrUndefinedInstruction},
+	"EOFException.UNREACHABLE_INSTRUCTIONS":       []error{vm.ErrUnreachableCode},
+	"EOFException.TRUNCATED_INSTRUCTION":          []error{vm.ErrTruncatedImmediate},
+	"EOFException.MISSING_TYPE_HEADER":            []error{vm.ErrMissingTypeHeader, vm.ErrIncompleteEOF},
+	"EOFException.INVALID_TYPE_SECTION_SIZE":      []error{vm.ErrInvalidTypeSize, vm.ErrInvalidSectionCount},
+	"EOFException.INVALID_FIRST_SECTION_TYPE":     []error{vm.ErrInvalidFirstSectionType, vm.ErrTopLevelTruncated},
+	"EOFException.TOO_MANY_CODE_SECTIONS":         []error{vm.ErrIncompleteEOF, vm.ErrInvalidTypeSize},
+	"EOFException.INCOMPLETE_SECTION_NUMBER":      []error{vm.ErrIncompleteEOF},
+	"EOFException.INPUTS_OUTPUTS_NUM_ABOVE_LIMIT": []error{vm.ErrTooManyInputs, vm.ErrTooManyOutputs},
+	"EOFException.MISSING_HEADERS_TERMINATOR": []error{
+		vm.ErrIncompleteEOF, vm.ErrInvalidContainerSize, vm.ErrMissingTerminator, vm.ErrMissingDataHeader},
+	"EOFException.INCOMPLETE_SECTION_SIZE": []error{
+		vm.ErrIncompleteEOF, vm.ErrMissingDataHeader, vm.ErrInvalidContainerSize},
+	"EOFException.ZERO_SECTION_SIZE": []error{
+		vm.ErrIncompleteEOF, vm.ErrInvalidTypeSize, vm.ErrInvalidCodeSize, vm.ErrZeroSizeContainerSection, vm.ErrInvalidSectionCount, vm.ErrInvalidContainerSize},
+	"EOFException.MISSING_CODE_HEADER":                    []error{vm.ErrMissingCodeHeader, vm.ErrIncompleteEOF},
+	"EOFException.MISSING_DATA_SECTION":                   []error{vm.ErrMissingDataHeader, vm.ErrInvalidSectionCount},
+	"EOFException.MISSING_TERMINATOR":                     []error{vm.ErrMissingTerminator, vm.ErrInvalidSectionCount},
+	"EOFException.UNEXPECTED_HEADER_KIND":                 []error{vm.ErrMissingTypeHeader},
+	"EOFException.UNREACHABLE_CODE_SECTIONS":              []error{vm.ErrUnreachableCodeSections, vm.ErrInvalidNonReturning, vm.ErrTopLevelTruncated},
+	"EOFException.INVALID_RJUMP_DESTINATION":              []error{vm.ErrInvalidRjumpDest},
+	"EOFException.STACK_HEIGHT_MISMATCH":                  []error{vm.ErrStackHeightMismatch},
+	"EOFException.STACK_OVERFLOW":                         []error{vm.ErrEOFStackOverflow},
+	"EOFException.STACK_HIGHER_THAN_OUTPUTS":              []error{vm.ErrStackHeightHigher},
+	"EOFException.INVALID_CODE_SECTION_INDEX":             []error{vm.ErrInvalidSectionArgument},
+	"EOFException.INVALID_NON_RETURNING_FLAG":             []error{vm.ErrInvalidNonReturning},
+	"EOFException.JUMPF_DESTINATION_INCOMPATIBLE_OUTPUTS": []error{vm.ErrJUMPFOutputs},
+	"EOFException.CALLF_TO_NON_RETURNING":                 []error{vm.ErrInvalidSectionArgument},
+	"EOFException.INVALID_DATALOADN_INDEX":                []error{vm.ErrInvalidDataLoadN},
+	"EOFException.INVALID_CONTAINER_SECTION_INDEX":        []error{vm.ErrInvalidContainerArgument},
+	"EOFException.EOFCREATE_WITH_TRUNCATED_CONTAINER":     []error{vm.ErrEOFCreateWithTruncatedContainer},
 }
 
 func mapError(exception string, err error) bool {
@@ -140,12 +183,19 @@ func (e *EOFTest) Run(t *testing.T) error {
 	}
 	// eofJt := vm.NewEOFInstructionSet()
 	// var c vm.Container
-	arr := strings.Split(exception, ".")
-	fmt.Println(arr)
+	arr := strings.Split(exception, "|")
+
 	if _, err := vm.UnmarshalEOF(code, 0, byte(_cotainerKind)); err != nil {
 		fmt.Println("------------------ got err, ", err)
 		if !result { // if we do expect fail and got an error
-			if !mapError(exception, err) {
+			var found bool
+			for _, exception := range arr {
+				found = mapError(exception, err)
+				if found {
+					break
+				}
+			}
+			if !found {
 				t.Errorf("test did not pass: expected err: %v, got err: %v", exception, err.Error())
 			}
 		} else { // if we do not expect fail and got an error
@@ -155,7 +205,7 @@ func (e *EOFTest) Run(t *testing.T) error {
 	} else {
 		fmt.Println("------------------ no err")
 		if !result { // if do expect fail, but did not got an error
-			t.Errorf("test did not pass: expected err: %v, got err: nil", arr[1])
+			t.Errorf("test did not pass: expected err: %v, got err: nil", arr[0])
 		} else { // if we do not expect fail and did not got and error
 			// skip
 		}

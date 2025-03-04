@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 )
 
 const (
@@ -24,8 +25,7 @@ var (
 
 // EOFContainer represents the structure of the EOF container.
 type EOFContainer struct {
-	Magic         [2]byte
-	Version       uint8
+	_header       *header
 	_types        []*eofMetaData
 	_code         [][]byte
 	_subContainer []*EOFContainer
@@ -38,6 +38,17 @@ type eofMetaData struct {
 	maxStackHeight uint16
 }
 
+type header struct {
+	magic             [2]byte
+	version           uint8
+	numTypeSections   uint16
+	numCodeSections   uint16
+	codeSectionSizes  []uint16
+	numSubContainers  uint16
+	subContainerSizes []uint16
+	dataLength        uint16
+}
+
 var jumpTables = []JumpTable{NewEOFInstructionSet()}
 
 // MarshalEOF serializes theEOFContainer into a byte array.
@@ -46,10 +57,10 @@ func MarshalEOF(container *EOFContainer, depth int) ([]byte, error) {
 	// 	panic("depth >= MaxContainerDepth")
 	// }
 	buf := new(bytes.Buffer)
-	if err := binary.Write(buf, binary.BigEndian, container.Magic); err != nil { // magic
+	if err := binary.Write(buf, binary.BigEndian, container._header.magic); err != nil { // magic
 		return nil, err
 	}
-	if err := binary.Write(buf, binary.BigEndian, container.Version); err != nil { // version
+	if err := binary.Write(buf, binary.BigEndian, container._header.version); err != nil { // version
 		return nil, err
 	}
 	if err := binary.Write(buf, binary.BigEndian, _kindTypes); err != nil { // types section
@@ -124,230 +135,241 @@ func MarshalEOF(container *EOFContainer, depth int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// UnmarshalEOF deserializes a byte array into an EOFContainer object.
-func UnmarshalEOF(data []byte, depth int, containerKind byte) (*EOFContainer, error) {
-	// if depth >= MaxContainerDepth {
-	// 	return nil, errors.New("depth >= MaxContainerDepth")
-	// }
-	fmt.Println("initcodeSize: ", len(data))
-	buf := bytes.NewReader(data)
-	container := &EOFContainer{}
+func readHeader(buf *bytes.Reader) (*header, int64, error) {
+	header := &header{}
 
 	if buf.Size() < 14 {
-		return nil, ErrIncompleteEOF
+		return nil, 0, ErrIncompleteEOF
 	}
 	if buf.Size() > maxInitCodeSize {
-		return nil, fmt.Errorf("%w: %v > %v", ErrTooLargeByteCode, buf.Size(), maxInitCodeSize)
+		return nil, 0, fmt.Errorf("%w: %v > %v", ErrTooLargeByteCode, buf.Size(), maxInitCodeSize)
 	}
 
-	// Read Magic
-	if err := binary.Read(buf, binary.BigEndian, &container.Magic); err != nil {
-		return nil, fmt.Errorf("%w: %w", err, ErrInvalidMagic)
+	if err := binary.Read(buf, binary.BigEndian, &header.magic); err != nil {
+		return nil, 0, fmt.Errorf("%w: %w", err, ErrInvalidMagic)
 	}
-	if container.Magic[0] != 0xef || container.Magic[1] != 0x0 {
-		return nil, fmt.Errorf("%w: want %x, got: %x", ErrInvalidMagic, eofMagic, container.Magic)
+	if header.magic[0] != 0xef || header.magic[1] != 0x0 {
+		return nil, 0, fmt.Errorf("%w: %v", ErrInvalidMagic, header.magic)
 	}
-
-	// Read Version
-	if err := binary.Read(buf, binary.BigEndian, &container.Version); err != nil {
-		return nil, fmt.Errorf("%w: %w", err, ErrInvalidVersion)
+	if err := binary.Read(buf, binary.BigEndian, &header.version); err != nil {
+		return nil, 0, err
 	}
 	isSupportedVersion := false
 	for _, version := range supportedVersions {
-		if version == container.Version {
+		if version == header.version {
 			isSupportedVersion = true
 		}
 	}
 	if !isSupportedVersion {
-		return nil, fmt.Errorf("%w: have %d", ErrInvalidVersion, container.Version)
+		return nil, 0, fmt.Errorf("%w: %v", ErrInvalidVersion, header.version)
 	}
 
-	jt := jumpTables[container.Version-1]
-
-	// Read Types Section
 	var kind byte
 	if err := binary.Read(buf, binary.BigEndian, &kind); err != nil {
-		return nil, fmt.Errorf("%w: %w", err, ErrMissingTypeHeader)
+		fmt.Println("HITTIN THIS ERR")
+		return nil, 0, fmt.Errorf("%w: %w", err, ErrMissingTypeHeader)
 	}
-
 	if kind != _kindTypes {
-		fmt.Println("HERE")
-		return nil, fmt.Errorf("%w: found section kind %x instead", ErrMissingTypeHeader, kind)
+		return nil, 0, fmt.Errorf("%w: found section kind %x instead", ErrMissingTypeHeader, kind)
+	}
+	if err := binary.Read(buf, binary.BigEndian, &header.numTypeSections); err != nil {
+		return nil, 0, fmt.Errorf("%w: %w", ErrMissingTypeHeader, err)
+	}
+	if header.numTypeSections < 4 || header.numTypeSections%4 != 0 {
+		return nil, 0, fmt.Errorf("%w: type section size must be divisible by 4, have %d", ErrInvalidTypeSize, header.numTypeSections)
+	}
+	if header.numTypeSections/4 > 1024 {
+		return nil, 0, fmt.Errorf("%w: type section must not exceed 4*1024: %d", ErrInvalidTypeSize, header.numTypeSections)
 	}
 
-	var typesLength uint16
-	if err := binary.Read(buf, binary.BigEndian, &typesLength); err != nil {
-		return nil, err
-	}
-	if typesLength < 4 || typesLength%4 != 0 {
-		return nil, fmt.Errorf("%w: type section size must be divisible by 4, have %d", ErrInvalidTypeSize, typesLength)
-	}
-	if typesLength/4 > 1024 {
-		return nil, fmt.Errorf("%w: type section must not exceed 4*1024, have %d", ErrInvalidTypeSize, typesLength)
-	}
-
-	// Read Code Section
 	if err := binary.Read(buf, binary.BigEndian, &kind); err != nil {
-		return nil, fmt.Errorf("%w: %w", err, ErrMissingCodeHeader)
+		return nil, 0, fmt.Errorf("%w: %w", err, ErrMissingCodeHeader)
 	}
 	if kind != _kindCode {
-		return nil, fmt.Errorf("%w: found section kind %x instead", ErrMissingCodeHeader, kind)
+		return nil, 0, fmt.Errorf("%w: found section kind %x instead", ErrMissingCodeHeader, kind)
 	}
-	var numCodeSections uint16
-	if err := binary.Read(buf, binary.BigEndian, &numCodeSections); err != nil {
-		return nil, fmt.Errorf("%w: %w", err, ErrInvalidCodeHeader)
+	if err := binary.Read(buf, binary.BigEndian, &header.numCodeSections); err != nil {
+		return nil, 0, fmt.Errorf("%w: %w", err, ErrMissingCodeHeader)
 	}
-	var codeSizes []uint16
-	for i := uint16(0); i < numCodeSections; i++ {
+	if header.numCodeSections == 0 {
+		return nil, 0, fmt.Errorf("%w: numCodeSections must not be 0", ErrIncompleteEOF)
+	}
+	for i := uint16(0); i < header.numCodeSections; i++ {
 		var codeLength uint16
 		if err := binary.Read(buf, binary.BigEndian, &codeLength); err != nil {
-			return nil, fmt.Errorf("%w: %w", err, ErrInvalidCodeSize)
+			return nil, 0, fmt.Errorf("%w: %w", err, ErrInvalidCodeSize)
 		}
 		if codeLength == 0 {
-			return nil, fmt.Errorf("%w for section %d: size must not be 0", ErrInvalidCodeSize, i)
+			return nil, 0, fmt.Errorf("%w for section %d: size must not be 0", ErrInvalidCodeSize, i)
 		}
-		codeSizes = append(codeSizes, codeLength)
+		header.codeSectionSizes = append(header.codeSectionSizes, codeLength)
 	}
-	if len(codeSizes) != int(typesLength)/4 { // invalid code section count or type section count
-		return nil, fmt.Errorf("%w: mismatch of code sections count and type signatures, types %d, code %d", ErrInvalidSectionCount, typesLength/4, len(codeSizes))
+	if len(header.codeSectionSizes) != int(header.numTypeSections)/4 {
+		return nil, 0, fmt.Errorf("%w: mismatch of code sections count and type signatures, code %d, types %d", ErrInvalidSectionCount, len(header.codeSectionSizes), int(header.numTypeSections)/4)
 	}
 
-	// Read SubContainer Section
 	if err := binary.Read(buf, binary.BigEndian, &kind); err != nil {
-		return nil, fmt.Errorf("%w: %w", err, ErrMissingTypeHeader)
+		return nil, 0, fmt.Errorf("%w: %w", err, ErrMissingTypeHeader)
 	}
-
-	var subContainerSizes []uint16
-	var numSubContainers uint16
 	if kind == _kindContainer {
-		if err := binary.Read(buf, binary.BigEndian, &numSubContainers); err != nil {
-			return nil, fmt.Errorf("%w: %w", err, ErrInvalidContainerArgument)
+		if err := binary.Read(buf, binary.BigEndian, &header.numSubContainers); err != nil {
+			return nil, 0, fmt.Errorf("%w: %w", err, ErrInvalidSectionCount)
 		}
-		if numSubContainers > 256 {
-			return nil, ErrTooManyContainerSections
+		if header.numSubContainers > 256 {
+			return nil, 0, fmt.Errorf("%w: too many container sections: %d", ErrTooManyContainerSections, header.numSubContainers)
 		}
-		container._subContainer = make([]*EOFContainer, numSubContainers)
-		for i := uint16(0); i < numSubContainers; i++ {
+		for i := uint16(0); i < header.numSubContainers; i++ {
 			var subContainerLength uint16
 			if err := binary.Read(buf, binary.BigEndian, &subContainerLength); err != nil {
-				return nil, fmt.Errorf("%w: %w", err, ErrInvalidContainerSize)
+				return nil, 0, fmt.Errorf("%w: %w", err, ErrInvalidContainerSize)
 			}
 			if subContainerLength == 0 {
-				return nil, fmt.Errorf("%w for section %d: size must not be 0", ErrInvalidContainerSize, i)
+				return nil, 0, fmt.Errorf("%w for section %d: size must not be 0", ErrInvalidContainerSize, i)
 			}
-			subContainerSizes = append(subContainerSizes, subContainerLength)
-			if len(subContainerSizes) > 256 {
-				return nil, ErrTooManyContainerSections
+			header.subContainerSizes = append(header.subContainerSizes, subContainerLength)
+			if len(header.subContainerSizes) > 256 {
+				return nil, 0, fmt.Errorf("%w: too many container sections: %d", ErrTooManyContainerSections, len(header.subContainerSizes))
 			}
 		}
-		if len(subContainerSizes) == 0 {
-			return nil, ErrZeroSizeContainerSection
+		if len(header.subContainerSizes) == 0 {
+			return nil, 0, ErrZeroSizeContainerSection
 		}
-		// Read Data Section
 		if err := binary.Read(buf, binary.BigEndian, &kind); err != nil {
-			return nil, fmt.Errorf("%w: %w", err, ErrMissingDataHeader)
+			return nil, 0, fmt.Errorf("%w: %w", err, ErrMissingDataHeader)
 		}
 	}
 
 	if kind != _kindData {
-		return nil, fmt.Errorf("%w: found section %x instead", ErrMissingDataHeader, kind)
+		return nil, 0, fmt.Errorf("%w: %v", ErrMissingDataHeader, "expected data section")
 	}
-	var dataLength uint16
-	if err := binary.Read(buf, binary.BigEndian, &dataLength); err != nil {
-		return nil, fmt.Errorf("%w: %w", err, ErrMissingDataHeader)
+	if err := binary.Read(buf, binary.BigEndian, &header.dataLength); err != nil {
+		return nil, 0, fmt.Errorf("%w: %w", err, ErrMissingDataHeader)
 	}
 
 	// Read Terminator
 	var terminator byte
 	if err := binary.Read(buf, binary.BigEndian, &terminator); err != nil {
-		return nil, fmt.Errorf("%w: %w", err, ErrMissingTerminator)
+		return nil, 0, fmt.Errorf("%w: %w", err, ErrMissingTerminator)
 	}
 	if terminator != 0 {
-		return nil, ErrMissingTerminator
+		return nil, 0, ErrMissingTerminator
 	}
 
-	expectedRemaining := int(typesLength)
-	for _, codeSize := range codeSizes {
-		expectedRemaining += int(codeSize)
-	}
-	for _, subContainerSize := range subContainerSizes {
-		expectedRemaining += int(subContainerSize)
-	}
-	if expectedRemaining > buf.Len() {
-		return nil, fmt.Errorf("%w: %d > %d", ErrInvalidSectionsSize, expectedRemaining, buf.Len())
-	}
-	if expectedRemaining < buf.Len()-int(dataLength) {
-		return nil, fmt.Errorf("%w: %d < %d", ErrInvalidSectionsSize, expectedRemaining, buf.Len()-int(dataLength))
-	}
-	fmt.Println("expectedRemaining: ", expectedRemaining)
-	fmt.Println("buf.Len(): ", buf.Len())
-	dataOffset := (int(buf.Size()) - buf.Len()) + expectedRemaining
-	if dataOffset == int(buf.Size()) && dataLength > 0 && depth == 0 /* top level container */ {
-		return nil, ErrTopLevelTruncated
-	}
-	// if (container.size() > static_cast<size_t>(header.data_offset) + header.data_size)
-	// return EOFValidationError::invalid_section_bodies_size;
-	if dataOffset+int(dataLength) < int(buf.Size()) {
-		return nil, fmt.Errorf("%w: %d + %d > %d", ErrInvalidSectionsSize, dataOffset, dataLength, buf.Size())
-	}
-	fmt.Println("dataOffset: ", dataOffset)
-	fmt.Println("dataLength: ", dataLength)
-	fmt.Println("buf.Size(): ", buf.Size())
+	return header, buf.Size() - int64(buf.Len()), nil
+}
 
-	// numTypes
-	numTypes := typesLength / 4
-	container._types = make([]*eofMetaData, numTypes)
+func validateBody(header *header, bytesRead, bytesRemaining int64, depth int, containerKind byte) error {
+	// bytesRead is a headerSize in bytes
+
+	expectedRemaining := int64(header.numTypeSections)
+	for _, codeSize := range header.codeSectionSizes {
+		expectedRemaining += int64(codeSize)
+	}
+	for _, subContainerSize := range header.subContainerSizes {
+		expectedRemaining += int64(subContainerSize)
+	}
+	if expectedRemaining > bytesRemaining {
+		return fmt.Errorf("%w: %d > %d", ErrInvalidSectionsSize, expectedRemaining, bytesRemaining)
+	}
+	if expectedRemaining < bytesRemaining-int64(header.dataLength) {
+		return fmt.Errorf("%w: %d < %d", ErrInvalidSectionsSize, expectedRemaining, bytesRemaining-int64(header.dataLength))
+	}
+	total := bytesRead + bytesRemaining
+	dataOffset := bytesRead + expectedRemaining
+	if dataOffset == total && header.dataLength > 0 && depth == 0 /* top level container */ {
+		return ErrTopLevelTruncated
+	}
+	if dataOffset+int64(header.dataLength) > total {
+		if depth == 0 {
+			return ErrTopLevelTruncated
+		}
+		if containerKind == initcode {
+			return ErrEOFCreateWithTruncatedContainer
+		}
+	}
+	if dataOffset+int64(header.dataLength) < total {
+		return fmt.Errorf("%w: %d + %d > %d", ErrInvalidSectionsSize, dataOffset, header.dataLength, total)
+	}
+
+	return nil
+}
+
+func readMetaData(buf *bytes.Reader, numTypes int) ([]*eofMetaData, int64, error) {
+	_types := make([]*eofMetaData, numTypes)
 	metadata := &eofMetaData{}
 	if err := binary.Read(buf, binary.BigEndian, &metadata.inputs); err != nil {
-		return nil, fmt.Errorf("%w: %w", err, ErrMissingTypesInput)
+		return nil, 0, fmt.Errorf("%w: %w", err, ErrMissingTypesInput)
 	}
 	if err := binary.Read(buf, binary.BigEndian, &metadata.outputs); err != nil {
-		return nil, fmt.Errorf("%w: %w", err, ErrMissingTypesOutput)
+		return nil, 0, fmt.Errorf("%w: %w", err, ErrMissingTypesOutput)
 	}
 	if err := binary.Read(buf, binary.BigEndian, &metadata.maxStackHeight); err != nil {
-		return nil, fmt.Errorf("%w: %w", err, ErrMissingMaxStackHeight)
+		return nil, 0, fmt.Errorf("%w: %w", err, ErrMissingMaxStackHeight)
 	}
 	if metadata.inputs != 0 || metadata.outputs != nonReturningFunction {
-		return nil, fmt.Errorf("%w: have %d, %d", ErrInvalidFirstSectionType, metadata.inputs, metadata.outputs)
+		return nil, 0, fmt.Errorf("%w: have %d, %d", ErrInvalidFirstSectionType, metadata.inputs, metadata.outputs)
 	}
 	if metadata.maxStackHeight > maxStackHeight {
-		return nil, fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, 0, metadata.maxStackHeight)
+		return nil, 0, fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, 0, metadata.maxStackHeight)
 	}
-	container._types[0] = metadata
-	for i := uint16(1); i < numTypes; i++ {
+	_types[0] = metadata
+	for i := 1; i < numTypes; i++ {
 		metadata := &eofMetaData{}
 		if err := binary.Read(buf, binary.BigEndian, &metadata.inputs); err != nil {
-			return nil, fmt.Errorf("%w: %w at %d", err, ErrMissingTypesInput, i)
+			return nil, 0, fmt.Errorf("%w: %w at %d", err, ErrMissingTypesInput, i)
 		}
 		if err := binary.Read(buf, binary.BigEndian, &metadata.outputs); err != nil {
-			return nil, fmt.Errorf("%w: %w at %d", err, ErrMissingTypesOutput, i)
+			return nil, 0, fmt.Errorf("%w: %w at %d", err, ErrMissingTypesOutput, i)
 		}
 		if err := binary.Read(buf, binary.BigEndian, &metadata.maxStackHeight); err != nil {
-			return nil, fmt.Errorf("%w: %w at %d", err, ErrMissingMaxStackHeight, i)
+			return nil, 0, fmt.Errorf("%w: %w at %d", err, ErrMissingMaxStackHeight, i)
 		}
 		if metadata.inputs > maxInputItems {
-			return nil, fmt.Errorf("%w for section %d: have %d", ErrTooManyInputs, i, metadata.inputs)
+			return nil, 0, fmt.Errorf("%w for section %d: have %d", ErrTooManyInputs, i, metadata.inputs)
 		}
 		if metadata.outputs > maxOutputItems && metadata.outputs != nonReturningFunction {
-			return nil, fmt.Errorf("%w for section %d: have %d", ErrTooManyOutputs, i, metadata.outputs)
+			return nil, 0, fmt.Errorf("%w for section %d: have %d", ErrTooManyOutputs, i, metadata.outputs)
 		}
 		if metadata.maxStackHeight > maxStackHeight {
-			return nil, fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, i, metadata.maxStackHeight)
+			return nil, 0, fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, i, metadata.maxStackHeight)
 		}
-		container._types[i] = metadata
+		_types[i] = metadata
 	}
+	return _types, buf.Size() - int64(buf.Len()), nil
+}
+
+func readCodeSection(buf *bytes.Reader, jt *JumpTable, header *header, _types []*eofMetaData, start int64, numCodeSections, numSubContainers uint16, containerKind byte) ([][]byte, []bool, []bool, int64, error) {
 
 	referencedByEofCreate := make([]bool, numSubContainers)
 	referencedByReturnContract := make([]bool, numSubContainers)
-	container._code = make([][]byte, numCodeSections)
-	for i := 0; i < len(codeSizes); i++ {
-		code := make([]byte, codeSizes[i])
-		if _, err := buf.Read(code); err != nil {
-			return nil, fmt.Errorf("%w: %w", err, ErrInvalidCode)
+	_code := make([][]byte, numCodeSections)
+
+	visitedCodeSections := make([]bool, numCodeSections)
+	codeSectionsQueue := make([]uint16, 0)
+	codeSectionsQueue = append(codeSectionsQueue, 0)
+	var err error
+	var subcontainerRefs [][2]uint16
+	var accessCodeSections map[uint16]bool
+	end := start
+	for len(codeSectionsQueue) > 0 {
+		codeIdx := codeSectionsQueue[0]
+		codeSectionsQueue = codeSectionsQueue[1:]
+		if visitedCodeSections[codeIdx] {
+			continue
 		}
-		fmt.Println("len subcontainer: ", len(container._subContainer))
-		if subcontainerRefs, err := validateInstructions(code, container._types, &jt, i, int(dataLength), len(container._subContainer), containerKind); err != nil {
-			return nil, err
+		visitedCodeSections[codeIdx] = true
+		code := make([]byte, header.codeSectionSizes[codeIdx])
+		end += int64(header.codeSectionSizes[codeIdx])
+		offset := start
+		for i := uint16(0); i < codeIdx; i++ {
+			offset += int64(header.codeSectionSizes[i])
+		}
+		if _, err := buf.ReadAt(code, offset); err != nil {
+			return nil, nil, nil, -1, fmt.Errorf("%w: %w", err, ErrInvalidCode)
+		}
+
+		if subcontainerRefs, accessCodeSections, err = validateInstructions(code, _types, jt, int(codeIdx), int(header.dataLength), int(numSubContainers), containerKind); err != nil {
+			return nil, nil, nil, -1, err
 		} else {
 			for _, arr := range subcontainerRefs { // arr[0] - container index, arr[1] - EOFCREATE || RETURNCONTRACT
 				if OpCode(arr[1]) == EOFCREATE {
@@ -359,339 +381,105 @@ func UnmarshalEOF(data []byte, depth int, containerKind byte) (*EOFContainer, er
 				}
 			}
 		}
-		if err := validateRjumpDestinations(code, &jt); err != nil {
-			return nil, fmt.Errorf("RJUMP destinations validation fail")
+		for idx, _ := range accessCodeSections {
+			codeSectionsQueue = append(codeSectionsQueue, idx)
 		}
-		if maxStackHeight, err := validateMaxStackHeight(code, container._types, &jt, i); err != nil {
-			return nil, err
+		if err := validateRjumpDestinations(code, jt); err != nil {
+			return nil, nil, nil, -1, err
+		}
+		if maxStackHeight, err := validateMaxStackHeight(code, _types, jt, int(codeIdx)); err != nil {
+			return nil, nil, nil, -1, err
 		} else {
-			if maxStackHeight != int(container._types[i].maxStackHeight) {
-				return nil, ErrInvalidMaxStackHeight
+			if maxStackHeight != int(_types[codeIdx].maxStackHeight) {
+				return nil, nil, nil, -1, ErrInvalidMaxStackHeight
 			}
 		}
-		container._code[i] = code
+		_code[codeIdx] = code
 	}
-
-	if len(subContainerSizes) > 0 {
-		container._subContainer = make([]*EOFContainer, numSubContainers)
-		for i := uint16(0); i < numSubContainers; i++ {
-
-			eofcreate := referencedByEofCreate[i]
-			returnContract := referencedByReturnContract[i]
-			fmt.Println("eofcreate, returnContract: ", eofcreate, returnContract)
-			if eofcreate && returnContract {
-				return nil, ErrAmbiguousContainer
-			}
-			if !eofcreate && !returnContract {
-				return nil, ErrOrphanSubContainer
-			}
-			subContainerData := make([]byte, subContainerSizes[i])
-			if _, err := buf.Read(subContainerData); err != nil {
-				return nil, fmt.Errorf("%w: %w", err, ErrInvalidEOF)
-			}
-			var subContainer *EOFContainer
-			var err error
-			if eofcreate {
-				subContainer, err = UnmarshalEOF(subContainerData, depth+1, initcode)
-			} else {
-				subContainer, err = UnmarshalEOF(subContainerData, depth+1, runtime)
-			}
-			if err != nil {
-				return nil, err
-			}
-			container._subContainer[i] = subContainer
+	for _, visited := range visitedCodeSections {
+		if !visited {
+			return nil, nil, nil, -1, ErrUnreachableCodeSections
 		}
 	}
+	return _code, referencedByEofCreate, referencedByReturnContract, end, nil
 
-	if dataLength > 0 {
-		container._data = make([]byte, dataLength)
+}
+
+func readSubContainer(buf *bytes.Reader, header *header, referencedByEofCreate, referencedByReturnContract []bool, numSubContainers, depth int) ([]*EOFContainer, int64, error) {
+	_subContainer := make([]*EOFContainer, numSubContainers)
+	for i := 0; i < numSubContainers; i++ {
+
+		eofcreate := referencedByEofCreate[i]
+		returnContract := referencedByReturnContract[i]
+		fmt.Println("eofcreate, returnContract: ", eofcreate, returnContract)
+		if eofcreate && returnContract {
+			return nil, 0, ErrAmbiguousContainer
+		}
+		if !eofcreate && !returnContract {
+			return nil, 0, ErrOrphanSubContainer
+		}
+		subContainerData := make([]byte, header.subContainerSizes[i])
+		if _, err := buf.Read(subContainerData); err != nil {
+			return nil, 0, fmt.Errorf("%w: %w", err, ErrInvalidEOF)
+		}
+		var subContainer *EOFContainer
+		var err error
+		if eofcreate {
+			subContainer, err = UnmarshalEOF(subContainerData, depth+1, initcode)
+		} else {
+			subContainer, err = UnmarshalEOF(subContainerData, depth+1, runtime)
+		}
+		if err != nil {
+			return nil, 0, err
+		}
+		_subContainer[i] = subContainer
+	}
+	return _subContainer, buf.Size() - int64(buf.Len()), nil
+}
+
+// UnmarshalEOF deserializes a byte array into an EOFContainer object.
+func UnmarshalEOF(data []byte, depth int, containerKind byte) (*EOFContainer, error) {
+	// if depth >= MaxContainerDepth {
+	// 	return nil, errors.New("depth >= MaxContainerDepth")
+	// }
+	fmt.Println("initcodeSize: ", len(data))
+	buf := bytes.NewReader(data)
+	container := &EOFContainer{}
+	header, bytesRead, err := readHeader(buf)
+	if err != nil {
+		return nil, err
+	}
+	container._header = header
+	if err := validateBody(header, bytesRead, int64(buf.Len()), depth, containerKind); err != nil {
+		return nil, err
+	}
+
+	jt := jumpTables[header.version-1]
+
+	_types, codeBodyOffset, err := readMetaData(buf, int(header.numTypeSections)/4)
+	if err != nil {
+		return nil, err
+	}
+	container._types = _types
+
+	_code, referencedByEofCreate, referencedByReturnContract, subContainerBodyOffset, err := readCodeSection(buf, &jt, header, _types, codeBodyOffset, header.numCodeSections, header.numSubContainers, containerKind)
+	if err != nil {
+		return nil, err
+	}
+	container._code = _code
+
+	buf.Seek(subContainerBodyOffset, io.SeekStart)
+	_subContainer, _, err := readSubContainer(buf, header, referencedByEofCreate, referencedByReturnContract, int(header.numSubContainers), depth)
+	if err != nil {
+		return nil, err
+	}
+	container._subContainer = _subContainer
+
+	if header.dataLength > 0 {
+		container._data = make([]byte, header.dataLength)
 		if _, err := buf.Read(container._data); err != nil {
 			return nil, fmt.Errorf("%w: %w", err, ErrInvalidEOF)
 		}
 	}
-
 	return container, nil
 }
-
-// // UnmarshalEOF deserializes a byte array into an EOFContainer object.
-// func ParseEOF(data []byte, depth int, containerKind byte) (*EOFContainer, error) {
-// 	// if depth >= MaxContainerDepth {
-// 	// 	return nil, errors.New("depth >= MaxContainerDepth")
-// 	// }
-// 	fmt.Printf("%sinitcode: %x\n", strings.Repeat("\t", depth), data)
-// 	buf := bytes.NewReader(data)
-// 	container := &EOFContainer{}
-
-// 	if buf.Size() < 14 {
-// 		return nil, ErrIncompleteEOF
-// 	}
-// 	if buf.Size() > maxInitCodeSize {
-// 		return nil, fmt.Errorf("%w: %v > %v", ErrTooLargeByteCode, buf.Size(), maxInitCodeSize)
-// 	}
-
-// 	// Read Magic
-// 	if err := binary.Read(buf, binary.BigEndian, &container.Magic); err != nil {
-// 		return nil, fmt.Errorf("%w: %w", err, ErrInvalidMagic)
-// 	}
-// 	if container.Magic[0] != 0xef && container.Magic[1] != 0x00 {
-// 		return nil, fmt.Errorf("%w: want %x", ErrInvalidMagic, eofMagic)
-// 	}
-// 	fmt.Printf("%smagic: %x\n", strings.Repeat("\t", depth), container.Magic)
-
-// 	// Read Version
-// 	if err := binary.Read(buf, binary.BigEndian, &container.Version); err != nil {
-// 		return nil, fmt.Errorf("%w: %w", err, ErrInvalidVersion)
-// 	}
-// 	isSupportedVersion := false
-// 	for _, version := range supportedVersions {
-// 		if version == container.Version {
-// 			isSupportedVersion = true
-// 		}
-// 	}
-// 	if !isSupportedVersion {
-// 		return nil, fmt.Errorf("%w: have %d", ErrInvalidVersion, container.Version)
-// 	}
-// 	fmt.Printf("%sversion: %x\n", strings.Repeat("\t", depth), container.Version)
-
-// 	jt := jumpTables[container.Version-1]
-
-// 	// Read Types Section
-// 	var kind byte
-// 	if err := binary.Read(buf, binary.BigEndian, &kind); err != nil {
-// 		return nil, fmt.Errorf("%w: %w", err, ErrMissingTypeHeader)
-// 	}
-
-// 	if kind != _kindTypes {
-// 		return nil, fmt.Errorf("%w: found section kind %x instead", ErrMissingTypeHeader, kind)
-// 	}
-// 	fmt.Printf("%ssection_types\n", strings.Repeat("\t", depth))
-// 	var typesLength uint16
-// 	if err := binary.Read(buf, binary.BigEndian, &typesLength); err != nil {
-// 		return nil, err
-// 	}
-// 	if typesLength < 4 || typesLength%4 != 0 {
-// 		return nil, fmt.Errorf("%w: type section size must be divisible by 4, have %d", ErrInvalidTypeSize, typesLength)
-// 	}
-// 	if typesLength/4 > 1024 {
-// 		return nil, fmt.Errorf("%w: type section must not exceed 4*1024, have %d", ErrInvalidTypeSize, typesLength)
-// 	}
-// 	fmt.Printf("%stypes_length: %x\n", strings.Repeat("\t", depth), typesLength)
-
-// 	// Read Code Section
-// 	if err := binary.Read(buf, binary.BigEndian, &kind); err != nil {
-// 		return nil, fmt.Errorf("%w: %w", err, ErrMissingCodeHeader)
-// 	}
-// 	if kind != _kindCode {
-// 		return nil, fmt.Errorf("%w: found section kind %x instead", ErrMissingCodeHeader, kind)
-// 	}
-// 	fmt.Printf("%ssection_code\n", strings.Repeat("\t", depth))
-// 	var numCodeSections uint16
-// 	if err := binary.Read(buf, binary.BigEndian, &numCodeSections); err != nil {
-// 		return nil, fmt.Errorf("%w: %w", err, ErrInvalidCodeHeader)
-// 	}
-// 	var codeSizes []uint16
-// 	for i := uint16(0); i < numCodeSections; i++ {
-// 		var codeLength uint16
-// 		if err := binary.Read(buf, binary.BigEndian, &codeLength); err != nil {
-// 			return nil, fmt.Errorf("%w: %w", err, ErrInvalidCodeSize)
-// 		}
-// 		if codeLength == 0 {
-// 			return nil, fmt.Errorf("%w for section %d: size must not be 0", ErrInvalidCodeSize, i)
-// 		}
-// 		codeSizes = append(codeSizes, codeLength)
-// 		fmt.Printf("%scode_length: %v\n", strings.Repeat("\t", depth), codeLength)
-// 	}
-// 	if len(codeSizes) != int(typesLength)/4 { // invalid code section count or type section count
-// 		return nil, fmt.Errorf("%w: mismatch of code sections count and type signatures, types %d, code %d", ErrInvalidSectionCount, typesLength/4, len(codeSizes))
-// 	}
-// 	fmt.Printf("%snum_code_section: %v\n", strings.Repeat("\t", depth), len(codeSizes))
-// 	// Read SubContainer Section
-// 	if err := binary.Read(buf, binary.BigEndian, &kind); err != nil {
-// 		return nil, fmt.Errorf("%w: %w", err, ErrMissingTypeHeader)
-// 	}
-
-// 	var subContainerSizes []uint16
-// 	var numSubContainers uint16
-// 	if kind == _kindContainer {
-// 		fmt.Printf("%ssection_subcontainers\n", strings.Repeat("\t", depth))
-// 		if err := binary.Read(buf, binary.BigEndian, &numSubContainers); err != nil {
-// 			return nil, fmt.Errorf("%w: %w", err, ErrInvalidContainerArgument)
-// 		}
-// 		container._subContainer = make([]*EOFContainer, numSubContainers)
-// 		for i := uint16(0); i < numSubContainers; i++ {
-// 			var subContainerLength uint16
-// 			if err := binary.Read(buf, binary.BigEndian, &subContainerLength); err != nil {
-// 				return nil, fmt.Errorf("%w: %w", err, ErrInvalidContainerSize)
-// 			}
-// 			if subContainerLength == 0 {
-// 				return nil, fmt.Errorf("%w for section %d: size must not be 0", ErrInvalidContainerSize, i)
-// 			}
-// 			subContainerSizes = append(subContainerSizes, subContainerLength)
-// 			fmt.Printf("%ssub_container_length: %v\n", strings.Repeat("\t", depth), subContainerLength)
-// 		}
-// 		if len(subContainerSizes) == 0 {
-// 			return nil, ErrZeroSizeContainerSection
-// 		}
-// 		if len(subContainerSizes) > 256 {
-// 			return nil, ErrTooManyContainerSections
-// 		}
-// 		fmt.Printf("%snum_subcontainers: %v\n", strings.Repeat("\t", depth), len(subContainerSizes))
-// 		// Read Data Section
-// 		if err := binary.Read(buf, binary.BigEndian, &kind); err != nil {
-// 			return nil, fmt.Errorf("%w: %w", err, ErrMissingDataHeader)
-// 		}
-// 	}
-
-// 	if kind != _kindData {
-// 		return nil, fmt.Errorf("%w: found section %x instead", ErrMissingDataHeader, kind)
-// 	}
-// 	fmt.Printf("%ssection_data\n", strings.Repeat("\t", depth))
-// 	var dataLength uint16
-// 	if err := binary.Read(buf, binary.BigEndian, &dataLength); err != nil {
-// 		return nil, fmt.Errorf("%w: %w", err, ErrMissingDataHeader)
-// 	}
-// 	fmt.Printf("%sdata_length: %v\n", strings.Repeat("\t", depth), dataLength)
-// 	// Read Terminator
-// 	var terminator byte
-// 	if err := binary.Read(buf, binary.BigEndian, &terminator); err != nil {
-// 		return nil, fmt.Errorf("%w: %w", err, ErrMissingTerminator)
-// 	}
-// 	if terminator != 0 {
-// 		return nil, ErrMissingTerminator
-// 	}
-// 	fmt.Printf("%sterminator: 00\n", strings.Repeat("\t", depth))
-
-// 	expectedRemaining := int(typesLength)
-// 	for _, codeSize := range codeSizes {
-// 		expectedRemaining += int(codeSize)
-// 	}
-// 	for _, subContainerSize := range subContainerSizes {
-// 		expectedRemaining += int(subContainerSize)
-// 	}
-// 	if expectedRemaining < buf.Len()-int(dataLength) {
-// 		return nil, fmt.Errorf("%w: %d < %d", ErrInvalidSectionsSize, expectedRemaining, buf.Len()-int(dataLength))
-// 	}
-
-// 	// numTypes
-// 	numTypes := typesLength / 4
-// 	fmt.Printf("%snum_types: %v\n", strings.Repeat("\t", depth), numTypes)
-// 	container._types = make([]*eofMetaData, numTypes)
-// 	metadata := &eofMetaData{}
-// 	if err := binary.Read(buf, binary.BigEndian, &metadata.inputs); err != nil {
-// 		return nil, fmt.Errorf("%w: %w", err, ErrMissingTypesInput)
-// 	}
-// 	if err := binary.Read(buf, binary.BigEndian, &metadata.outputs); err != nil {
-// 		return nil, fmt.Errorf("%w: %w", err, ErrMissingTypesOutput)
-// 	}
-// 	if err := binary.Read(buf, binary.BigEndian, &metadata.maxStackHeight); err != nil {
-// 		return nil, fmt.Errorf("%w: %w", err, ErrMissingMaxStackHeight)
-// 	}
-// 	if metadata.inputs != 0 || metadata.outputs != nonReturningFunction {
-// 		return nil, fmt.Errorf("%w: have %d, %d", ErrInvalidFirstSectionType, metadata.inputs, metadata.outputs)
-// 	}
-// 	if metadata.maxStackHeight > maxStackHeight {
-// 		return nil, fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, 0, metadata.maxStackHeight)
-// 	}
-// 	fmt.Printf("%smetadata-0: %v\n", strings.Repeat("\t", depth), metadata)
-// 	container._types[0] = metadata
-// 	for i := uint16(1); i < numTypes; i++ {
-// 		metadata := &eofMetaData{}
-// 		if err := binary.Read(buf, binary.BigEndian, &metadata.inputs); err != nil {
-// 			return nil, fmt.Errorf("%w: %w at %d", err, ErrMissingTypesInput, i)
-// 		}
-// 		if err := binary.Read(buf, binary.BigEndian, &metadata.outputs); err != nil {
-// 			return nil, fmt.Errorf("%w: %w at %d", err, ErrMissingTypesOutput, i)
-// 		}
-// 		if err := binary.Read(buf, binary.BigEndian, &metadata.maxStackHeight); err != nil {
-// 			return nil, fmt.Errorf("%w: %w at %d", err, ErrMissingMaxStackHeight, i)
-// 		}
-// 		if metadata.inputs > maxInputItems {
-// 			return nil, fmt.Errorf("%w for section %d: have %d", ErrTooManyInputs, i, metadata.inputs)
-// 		}
-// 		if metadata.outputs > maxOutputItems && metadata.outputs != nonReturningFunction {
-// 			return nil, fmt.Errorf("%w for section %d: have %d", ErrTooManyOutputs, i, metadata.outputs)
-// 		}
-// 		if metadata.maxStackHeight > maxStackHeight {
-// 			return nil, fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, i, metadata.maxStackHeight)
-// 		}
-// 		fmt.Printf("%smetadata-%d: %v\n", strings.Repeat("\t", depth), i, metadata)
-// 		container._types[i] = metadata
-// 	}
-
-// 	referencedByEofCreate := make([]bool, numSubContainers)
-// 	referencedByReturnContract := make([]bool, numSubContainers)
-// 	container._code = make([][]byte, numCodeSections)
-// 	for i := 0; i < len(codeSizes); i++ {
-// 		code := make([]byte, codeSizes[i])
-// 		if _, err := buf.Read(code); err != nil {
-// 			return nil, fmt.Errorf("%w: %w", err, ErrInvalidCode)
-// 		}
-// 		fmt.Printf("containerKind: %d, codeIndex: %d, depth: %d\n", containerKind, i, depth)
-// 		fmt.Println("len subcontainer: ", len(container._subContainer))
-// 		fmt.Println(code)
-// 		if subcontainerRefs, err := validateInstructions(code, container._types, &jt, i, int(dataLength), len(container._subContainer), containerKind); err != nil {
-// 			return nil, err
-// 		} else {
-// 			for _, arr := range subcontainerRefs { // arr[0] - container index, arr[1] - EOFCREATE || RETURNCONTRACT
-// 				if OpCode(arr[1]) == EOFCREATE {
-// 					referencedByEofCreate[arr[0]] = true
-// 				} else if OpCode(arr[1]) == RETURNCONTRACT {
-// 					referencedByReturnContract[arr[0]] = true
-// 				} else {
-// 					panic("unexpected OpCode")
-// 				}
-// 			}
-// 		}
-// 		if err := validateRjumpDestinations(code, &jt); err != nil {
-// 			return nil, fmt.Errorf("RJUMP destinations validation fail")
-// 		}
-// 		if _, err := validateMaxStackHeight(code, container._types, &jt, i); err != nil {
-// 			return nil, fmt.Errorf("max_stack_height validation fail")
-// 		}
-// 		fmt.Printf("%scode-%d: %x\n", strings.Repeat("\t", depth), i, code)
-// 		container._code[i] = code
-// 	}
-
-// 	if len(subContainerSizes) > 0 {
-// 		container._subContainer = make([]*EOFContainer, numSubContainers)
-// 		for i := uint16(0); i < numSubContainers; i++ {
-
-// 			eofcreate := referencedByEofCreate[i]
-// 			returnContract := referencedByReturnContract[i]
-
-// 			if eofcreate && returnContract {
-// 				return nil, fmt.Errorf("ambiguous_container_kind")
-// 			}
-// 			if !eofcreate && !returnContract {
-// 				return nil, fmt.Errorf("unreferenced_subcontainer")
-// 			}
-// 			subContainerData := make([]byte, subContainerSizes[i])
-// 			if _, err := buf.Read(subContainerData); err != nil {
-// 				return nil, fmt.Errorf("%w: %w", err, ErrInvalidEOF)
-// 			}
-// 			var subContainer *EOFContainer
-// 			var err error
-// 			if eofcreate {
-// 				subContainer, err = ParseEOF(subContainerData, depth+1, initcode)
-// 			} else {
-// 				subContainer, err = ParseEOF(subContainerData, depth+1, runtime)
-// 			}
-// 			if err != nil {
-// 				return nil, err
-// 			}
-// 			container._subContainer[i] = subContainer
-// 		}
-// 	}
-
-// 	if dataLength > 0 {
-// 		container._data = make([]byte, dataLength)
-// 		if _, err := buf.Read(container._data); err != nil {
-// 			return nil, fmt.Errorf("%w: %w", err, ErrInvalidEOF)
-// 		}
-// 		fmt.Printf("%sdata: %x\n", strings.Repeat("\t", depth), container._data)
-// 	} else {
-// 		fmt.Printf("%sdata: nil\n", strings.Repeat("\t", depth))
-// 	}
-
-// 	return container, nil
-// }

@@ -50,6 +50,7 @@ const (
 )
 
 // TODO(racytech): remove unnecessary errors and add matched errors, some errors do not match the logic
+// sort the errors by the logic
 var (
 	ErrIncompleteEOF            = errors.New("incomplete EOF code")
 	ErrInvalidMagic             = errors.New("invalid magic")
@@ -80,6 +81,40 @@ var (
 	ErrInvalidCode              = errors.New("invalid code: must not begin with 0xef")
 	ErrInvalidEOF               = errors.New("invalid eof")
 	ErrInvalidEOFInitcode       = errors.New("invalid eof initcode")
+)
+
+var (
+	ErrUndefinedInstruction     = errors.New("undefined instrustion")
+	ErrTruncatedImmediate       = errors.New("truncated immediate")
+	ErrInvalidSectionArgument   = errors.New("invalid section argument")
+	ErrInvalidContainerArgument = errors.New("invalid container argument")
+	ErrInvalidJumpDest          = errors.New("invalid jump destination")
+	ErrConflictingStack         = errors.New("conflicting stack height")
+	ErrInvalidBranchCount       = errors.New("invalid number of branches in jump table")
+	ErrInvalidOutputs           = errors.New("invalid number of outputs")
+	ErrInvalidMaxStackHeight    = errors.New("invalid max stack height")
+	ErrInvalidCodeTermination   = errors.New("invalid code termination")
+	ErrUnreachableCode          = errors.New("unreachable code")
+	ErrInvalidDataLoadN         = errors.New("invalid DATALOADN index")
+	ErrEOFStackOverflow         = errors.New("stack overflow")
+	ErrEOFStackUnderflow        = errors.New("stack underflow")
+	ErrJUMPFOutputs             = errors.New("current secion outputs less then target section outputs")
+	ErrStackHeightHigher        = errors.New("stack height higher then outputs required")
+	ErrNoTerminalInstruction    = errors.New("expected terminal instruction")
+	ErrStackHeightMismatch      = errors.New("stack height mismatch")
+	ErrCALLFtoNonReturning      = errors.New("op CALLF to non returning function")
+	ErrInvalidNonReturning      = errors.New("declared returning code section does not return")
+	ErrInvalidRjumpDest         = errors.New("invalid relative jump")
+)
+
+var (
+	ErrIncompatibleContainer           = errors.New("INCOMPATIBLE_CONTAINER_KIND")
+	ErrAmbiguousContainer              = errors.New("AMBIGUOUS_CONTAINER_KIND")
+	ErrInvalidSectionsSize             = errors.New("INVALID_SECTION_BODIES_SIZE")
+	ErrOrphanSubContainer              = errors.New("UNREFERENCED_SUBCONTAINER")
+	ErrTopLevelTruncated               = errors.New("TOPLEVEL_CONTAINER_TRUNCATED")
+	ErrEOFCreateWithTruncatedContainer = errors.New("EOF_CREATE_WITH_TRUNCATED_CONTAINER")
+	ErrUnreachableCodeSections         = errors.New("UNREACHABLE_CODE_SECTIONS")
 )
 
 var eofMagic = []byte{0xef, 0x00}

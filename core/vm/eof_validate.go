@@ -15,44 +15,11 @@
 package vm
 
 import (
-	"errors"
 	"fmt"
 )
 
 const (
 	REL_OFFSET_SIZE = 2 // size of uint16
-)
-
-var (
-	ErrUndefinedInstruction     = errors.New("undefined instrustion")
-	ErrTruncatedImmediate       = errors.New("truncated immediate")
-	ErrInvalidSectionArgument   = errors.New("invalid section argument")
-	ErrInvalidContainerArgument = errors.New("invalid container argument")
-	ErrInvalidJumpDest          = errors.New("invalid jump destination")
-	ErrConflictingStack         = errors.New("conflicting stack height")
-	ErrInvalidBranchCount       = errors.New("invalid number of branches in jump table")
-	ErrInvalidOutputs           = errors.New("invalid number of outputs")
-	ErrInvalidMaxStackHeight    = errors.New("invalid max stack height")
-	ErrInvalidCodeTermination   = errors.New("invalid code termination")
-	ErrUnreachableCode          = errors.New("unreachable code")
-	ErrInvalidDataLoadN         = errors.New("invalid DATALOADN index")
-	ErrEOFStackOverflow         = errors.New("stack overflow")
-	ErrEOFStackUnderflow        = errors.New("stack underflow")
-	ErrJUMPFOutputs             = errors.New("current secion outputs less then target section outputs")
-	ErrStackHeightHigher        = errors.New("stack height higher then outputs required")
-	ErrNoTerminalInstruction    = errors.New("expected terminal instruction")
-	ErrStackHeightMismatch      = errors.New("stack height mismatch")
-	ErrCALLFtoNonReturning      = errors.New("op CALLF to non returning function")
-	ErrInvalidNonReturning      = errors.New("declared returning code section does not return")
-	ErrInvalidRjumpDest         = errors.New("invalid relative jump")
-)
-
-var (
-	ErrIncompatibleContainer = errors.New("INCOMPATIBLE_CONTAINER_KIND")
-	ErrAmbiguousContainer    = errors.New("AMBIGUOUS_CONTAINER_KIND")
-	ErrInvalidSectionsSize   = errors.New("INVALID_SECTION_BODIES_SIZE")
-	ErrOrphanSubContainer    = errors.New("UNREFERENCED_SUBCONTAINER")
-	ErrTopLevelTruncated     = errors.New("TOPLEVEL_CONTAINER_TRUNCATED")
 )
 
 func ValidateEOFContainer(c *EOFContainer, jt *JumpTable) error {
@@ -93,46 +60,46 @@ func _validateCode(code []byte, metadata []*eofMetaData, jt *JumpTable, section,
 	return nil
 }
 
-func validateInstructions(code []byte, metadata []*eofMetaData, jt *JumpTable, section, dataSize, containerCount int, containerKind byte) ([][2]int, error) {
+func validateInstructions(code []byte, metadata []*eofMetaData, jt *JumpTable, section, dataSize, containerCount int, containerKind byte) ([][2]uint16, map[uint16]bool, error) {
 	// fmt.Println("--- validateInstructions")
 	var (
-		expectedReturning = metadata[section].outputs != nonReturningFunction
-		isReturning       = false
-		op                OpCode
-		codeSize          = len(code)
-		// accessCodeSections = map[int]bool{}
-		subcontainerRefs = make([][2]int, 0, len(metadata))
+		expectedReturning  = metadata[section].outputs != nonReturningFunction
+		isReturning        = false
+		op                 OpCode
+		codeSize           = len(code)
+		accessCodeSections = map[uint16]bool{}
+		subcontainerRefs   = make([][2]uint16, 0, len(metadata))
 	)
 	pos := 0
 	// fmt.Println("codeSize: ", codeSize)
 	for ; pos < codeSize; pos++ {
 		op = OpCode(code[pos])
 		if jt[op].undefined {
-			return nil, makeEOFerr(0, pos, op, ErrUndefinedInstruction)
+			return nil, nil, makeEOFerr(0, pos, op, ErrUndefinedInstruction)
 		}
 		if pos+int(jt[op].immediateSize) >= codeSize {
-			return nil, makeEOFerr(0, pos, op, ErrTruncatedImmediate)
+			return nil, nil, makeEOFerr(0, pos, op, ErrTruncatedImmediate)
 		}
 		// fmt.Printf("%s ", op)c
 		if op == RJUMPV {
 			count := int(code[pos+1]) + 1
 			pos += (1 + count*2)
 			if pos >= codeSize {
-				return nil, makeEOFerr(0, pos, op, ErrTruncatedImmediate)
+				return nil, nil, makeEOFerr(0, pos, op, ErrTruncatedImmediate)
 			}
 			// fmt.Printf("-> %s ", OpCode(code[pos]))
 		} else {
 			if op == CALLF {
 				fid, _ := parseUint16(code[pos+1:]) // function id
 				if fid >= len(metadata) {
-					return nil, makeEOFerr(0, pos, op, ErrInvalidSectionArgument)
+					return nil, nil, makeEOFerr(0, pos, op, ErrInvalidSectionArgument)
 				}
 				if metadata[fid].outputs == nonReturningFunction {
-					return nil, makeEOFerr(0, pos, op, ErrInvalidSectionArgument)
+					return nil, nil, makeEOFerr(0, pos, op, ErrInvalidSectionArgument)
 				}
-				// if section != fid {
-				// 	accessCodeSections[fid] = true
-				// }
+				if section != fid {
+					accessCodeSections[uint16(fid)] = true
+				}
 			} else if op == RETF {
 				isReturning = true
 			} else if op == JUMPF {
@@ -150,18 +117,18 @@ func validateInstructions(code []byte, metadata []*eofMetaData, jt *JumpTable, s
 				fmt.Printf("Function ID: %v ", fid)
 				if fid >= len(metadata) {
 					fmt.Println("HITTING THIS ERR: JUMPF")
-					return nil, makeEOFerr(0, pos, op, ErrInvalidSectionArgument)
+					return nil, nil, makeEOFerr(0, pos, op, ErrInvalidSectionArgument)
 				}
 				if metadata[fid].outputs != nonReturningFunction {
 					isReturning = true
 				}
-				// if section != fid {
-				// 	accessCodeSections[fid] = true
-				// }
+				if section != fid {
+					accessCodeSections[uint16(fid)] = true
+				}
 			} else if op == DATALOADN {
 				index, _ := parseUint16(code[pos+1:])
 				if dataSize < 32 || index > dataSize-32 {
-					return nil, makeEOFerr(0, pos, op, ErrInvalidDataLoadN)
+					return nil, nil, makeEOFerr(0, pos, op, ErrInvalidDataLoadN)
 				}
 			} else if op == EOFCREATE || op == RETURNCONTRACT {
 
@@ -180,18 +147,18 @@ func validateInstructions(code []byte, metadata []*eofMetaData, jt *JumpTable, s
 
 				containerIDX := int(code[pos+1])
 				if containerIDX >= containerCount {
-					return nil, makeEOFerr(0, pos, op, ErrInvalidContainerArgument)
+					return nil, nil, makeEOFerr(0, pos, op, ErrInvalidContainerArgument)
 				}
 				if op == RETURNCONTRACT {
 					if containerKind == runtime {
-						return nil, makeEOFerr(0, pos, op, ErrIncompatibleContainer)
+						return nil, nil, makeEOFerr(0, pos, op, ErrIncompatibleContainer)
 					}
 				}
 
-				subcontainerRefs = append(subcontainerRefs, [2]int{containerIDX, int(op)})
+				subcontainerRefs = append(subcontainerRefs, [2]uint16{uint16(containerIDX), uint16(op)})
 			} else if op == RETURN || op == STOP {
 				if containerKind == initcode {
-					return nil, makeEOFerr(0, pos, op, ErrIncompatibleContainer)
+					return nil, nil, makeEOFerr(0, pos, op, ErrIncompatibleContainer)
 				}
 			}
 			pos += int(jt[op].immediateSize)
@@ -202,13 +169,13 @@ func validateInstructions(code []byte, metadata []*eofMetaData, jt *JumpTable, s
 	// Code sections may not "fall through" and require proper termination.
 	// Therefore, the last instruction must be considered terminal or RJUMP.
 	if !jt[op].terminal && op != RJUMP {
-		return nil, fmt.Errorf("%w: end with %s, pos %d", ErrInvalidCodeTermination, op, pos)
+		return nil, nil, fmt.Errorf("%w: end with %s, pos %d", ErrInvalidCodeTermination, op, pos)
 	}
 
 	if isReturning != expectedReturning {
-		return nil, ErrInvalidNonReturning
+		return nil, nil, ErrInvalidNonReturning
 	}
-	return subcontainerRefs, nil
+	return subcontainerRefs, accessCodeSections, nil
 }
 
 func checkRjumpDest(codeSize, postPos, relOffset int, rjumpDests *[]int) bool {

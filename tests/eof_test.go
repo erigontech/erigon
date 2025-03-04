@@ -18,7 +18,7 @@ func TestEOFValidation(t *testing.T) {
 
 	et := new(testMatcher)
 
-	dir := filepath.Join(".", "osaka-eof/eof_tests/osaka/eip7692_eof_v1/eip3540_eof_v1/container_validation")
+	dir := filepath.Join(".", "osaka-eof/eof_tests/osaka/eip7692_eof_v1")
 
 	et.walk(t, dir, func(t *testing.T, name string, test *EOFTest) {
 		// import pre accounts & construct test genesis block & state root
@@ -35,7 +35,7 @@ func TestEOFBlockchain(t *testing.T) {
 
 	bt := new(testMatcher)
 
-	dir := filepath.Join(".", "osaka-eof/blockchain_tests/osaka/eip7692_eof_v1/eip3540_eof_v1")
+	dir := filepath.Join(".", "osaka-eof/blockchain_tests/osaka/eip7692_eof_v1/eip663_dupn_swapn_exchange")
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root
