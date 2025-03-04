@@ -871,15 +871,15 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (*stateObject
 	}
 
 	if readAccount != nil && sdb.blockNum == 66929801 && sdb.txIndex == 134 {
-		fmt.Printf("Account RD (reader) %+v\n", readAccount)
+		fmt.Printf("%d (%d.%d) Account RD (reader) %+v\n", sdb.blockNum, sdb.txIndex, sdb.version, readAccount)
 	}
 
 	if readAccount == nil {
 		if sdb.versionMap != nil {
 			readAccount, _, _ = versionedRead[*accounts.Account](sdb, addr, AddressPath, libcommon.Hash{}, false, nil, nil, nil)
 
-			if readAccount != nil && sdb.blockNum == 66929801 && sdb.txIndex == 134 {
-				fmt.Printf("Account RD (map) %+v\n", readAccount)
+			if sdb.blockNum == 66929801 && sdb.txIndex == 134 {
+				fmt.Printf("%d (%d.%d) Account RD (map) %+v\n", sdb.blockNum, sdb.txIndex, sdb.version, readAccount)
 			}
 
 			if readAccount == nil {
