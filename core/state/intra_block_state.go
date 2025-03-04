@@ -870,9 +870,17 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (*stateObject
 		return nil, err
 	}
 
+	if readAccount != nil && sdb.blockNum == 66929801 && sdb.txIndex == 134 {
+		fmt.Printf("Account RD (reader) %+v\n", readAccount)
+	}
+
 	if readAccount == nil {
 		if sdb.versionMap != nil {
 			readAccount, _, _ = versionedRead[*accounts.Account](sdb, addr, AddressPath, libcommon.Hash{}, false, nil, nil, nil)
+
+			if readAccount != nil && sdb.blockNum == 66929801 && sdb.txIndex == 134 {
+				fmt.Printf("Account RD (map) %+v\n", readAccount)
+			}
 
 			if readAccount == nil {
 				return nil, nil
@@ -891,7 +899,7 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (*stateObject
 	account := readAccount
 	if sdb.versionMap != nil {
 		// need to do a versioned read of balance/nonce/codehash
-		if balance, _, _ := versionedRead[uint256.Int](sdb, addr, BalancePath, libcommon.Hash{}, false, account.Balance, nil, nil); balance.Cmp(&account.Balance) != 0 {
+		if balance, _, _ := versionedRead(sdb, addr, BalancePath, libcommon.Hash{}, false, account.Balance, nil, nil); balance.Cmp(&account.Balance) != 0 {
 			if account == readAccount {
 				account = &accounts.Account{}
 				account.Copy(readAccount)
@@ -907,7 +915,7 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (*stateObject
 			account.Nonce = nonce
 		}
 
-		if codeHash, _, _ := versionedRead[libcommon.Hash](sdb, addr, CodeHashPath, libcommon.Hash{}, false, libcommon.Hash{}, nil, nil); (codeHash != libcommon.Hash{}) {
+		if codeHash, _, _ := versionedRead(sdb, addr, CodeHashPath, libcommon.Hash{}, false, libcommon.Hash{}, nil, nil); (codeHash != libcommon.Hash{}) {
 			if account == readAccount {
 				account = &accounts.Account{}
 				account.Copy(readAccount)
