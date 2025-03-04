@@ -95,7 +95,7 @@ func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (En
 	t.Cleanup(func() {
 		ma.Close()
 		ma.RecalcVisibleFiles(0)
-		ma = nil
+		//ma = nil
 
 		ae.Cleanup()
 		db.Close()
