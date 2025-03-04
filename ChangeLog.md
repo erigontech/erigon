@@ -1,6 +1,22 @@
 ChangeLog
 ---------
 
+## v3.1.0 (in development)
+
+**Improvements:**
+
+TODO
+
+**Bugfixes:**
+
+TODO
+
+### TODO
+
+- milestones:
+https://github.com/erigontech/erigon/milestone/31
+
+
 ## v3.0.0 (in development)
 
 **Improvements:**
