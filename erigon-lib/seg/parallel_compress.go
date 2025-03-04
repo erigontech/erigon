@@ -282,8 +282,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	uncompPosMap := make(map[uint64]uint64) // For the uncompressed words
 	posMaps = append(posMaps, uncompPosMap)
 	var wg sync.WaitGroup
-	if cfg.Workers.Load() > 1 {
-		for i := 0; i < int(cfg.Workers.Load()); i++ {
+	if cfg.Workers > 1 {
+		for i := 0; i < cfg.Workers; i++ {
 			posMap := make(map[uint64]uint64)
 			posMaps = append(posMaps, posMap)
 			wg.Add(1)
@@ -312,7 +312,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			return ctx.Err()
 		default:
 		}
-		if cfg.Workers.Load() > 1 {
+		if cfg.Workers > 1 {
 			// take processed words in non-blocking way and push them to the queue
 		outer:
 			for {

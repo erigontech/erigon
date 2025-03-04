@@ -31,7 +31,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -73,7 +72,7 @@ type Cfg struct {
 	// samplingFactor - skip superstrings if `superstringNumber % samplingFactor != 0`
 	SamplingFactor uint64
 
-	Workers atomic.Int32
+	Workers int
 }
 
 var DefaultCfg = Cfg{
@@ -84,8 +83,7 @@ var DefaultCfg = Cfg{
 	MaxDictPatterns: 64 * 1024,
 
 	DictReducerSoftLimit: 1_000_000,
-
-	Workers: atomic.NewInt32(1),
+	Workers:              1,
 }
 
 // Compressor is the main operating type for performing per-word compression
@@ -123,7 +121,7 @@ type Compressor struct {
 }
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
-	workers := int(cfg.Workers.Load())
+	workers := cfg.Workers
 	dir2.MustExist(tmpDir)
 	dir, fileName := filepath.Split(outputFile)
 
@@ -175,8 +173,8 @@ func (c *Compressor) Close() {
 	c.suffixCollectors = nil
 }
 
-func (c *Compressor) SetTrace(trace bool)  { c.trace = trace }
-func (c *Compressor) WorkersAmount() int32 { return c.Workers.Load() }
+func (c *Compressor) SetTrace(trace bool) { c.trace = trace }
+func (c *Compressor) WorkersAmount() int  { return c.Workers }
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }
 
