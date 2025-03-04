@@ -47,8 +47,7 @@ func (r *ManyToOneRelation) RootNum2Num(inp RootNum, tx kv.Tx) (Num, error) {
 // e.g. borevents
 // also id == num here (only canonical data)
 type OneToManyRelation struct {
-	maxNumTbl         string
-	strictlyAppending bool // i.e. no delete on unwind
+	maxNumTbl string
 }
 
 // returns 1st num present in the given inp RootNum

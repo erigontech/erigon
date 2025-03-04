@@ -227,7 +227,7 @@ func GetFreezingRange(rootFrom, rootTo RootNum, id AppendableId) (freezeFrom Roo
 		_freezeTo = _freezeFrom
 	}
 
-	return RootNum(_freezeFrom), RootNum(_freezeTo), uint64(_freezeTo-_freezeFrom) >= cfg.MinimumSize
+	return RootNum(_freezeFrom), RootNum(_freezeTo), _freezeTo-_freezeFrom >= cfg.MinimumSize
 }
 
 func getMergeLimit(id AppendableId, from uint64) uint64 {

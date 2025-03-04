@@ -150,7 +150,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 	keyCount := iidq.GetCount()
 	if p != nil {
 		p.Name.Store(&idxFile)
-		p.Total.Store(uint64(keyCount))
+		p.Total.Store(keyCount)
 	}
 	salt, err := s.id.Salt()
 	if err != nil {

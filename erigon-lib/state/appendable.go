@@ -77,7 +77,7 @@ func NewMarkedAppendable(id AppendableId, valsTbl string, canonicalTbl string, r
 	a.beginFilesRoGen = func() MarkedTxI {
 		return &MarkedTx{
 			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
-			ap:                (*Appendable[MarkedTxI])(a),
+			ap:                a,
 		}
 	}
 
@@ -105,7 +105,7 @@ func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 	a.beginFilesRoGen = func() UnmarkedTxI {
 		return &UnmarkedTx{
 			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
-			ap:                (*Appendable[UnmarkedTxI])(a),
+			ap:                a,
 		}
 	}
 
@@ -120,7 +120,7 @@ func NewAppendingAppendable(id AppendableId, valsTbl string, relation RootRelati
 	a.beginFilesRoGen = func() AppendingTxI {
 		return &AppendingTx{
 			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
-			ap:                (*Appendable[AppendingTxI])(a),
+			ap:                a,
 		}
 	}
 	return a, nil
@@ -139,7 +139,7 @@ func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 	a.beginFilesRoGen = func() BufferedTxI {
 		return &BufferedTx{
 			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
-			ap:                (*Appendable[BufferedTxI])(a),
+			ap:                a,
 			factory:           factory,
 		}
 	}
