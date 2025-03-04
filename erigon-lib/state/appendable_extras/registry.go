@@ -27,12 +27,15 @@ type holder struct {
 	snapshotCreationConfig *SnapshotConfig
 }
 
-var entityRegistry []holder
+// keeping this fixed size, so that append() does not potentially re-allocate array
+// to a different address. This means that the "reads" (methods on AppendableId) can
+// be done without any locks.
+var entityRegistry [20]holder
 var curr uint16
 
+var mu sync.RWMutex
+
 // RegisterAppendable
-// not making appendableRegistry/curr thread safe for now, since it's only expected to be setup once
-// at the start and then read.
 // name: just user-defined name for identification
 // dirs: directory where snapshots have to reside
 // salt: for creation of indexes.
@@ -66,20 +69,24 @@ func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified,
 	if h.snapshotCreationConfig == nil {
 		panic("snapshotCreationConfig is required")
 	}
-	entityRegistry = append(entityRegistry, *h)
+
+	mu.Lock()
+
+	entityRegistry[curr] = *h
 	id := AppendableId(curr)
-
 	h.snapshotCreationConfig.SetupConfig(id, h.snapshotDir, pre)
-
 	curr++
+
+	mu.Unlock()
 
 	return id
 }
 
 func Cleanup() {
 	// only for tests
-	entityRegistry = nil
+	mu.Lock()
 	curr = 0
+	mu.Unlock()
 }
 
 type EntityIdOption func(*holder)

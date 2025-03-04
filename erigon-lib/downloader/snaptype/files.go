@@ -203,7 +203,6 @@ func E3Seedable(name string) bool {
 	}
 	return true
 }
-
 func IsStateFile(name string) (ok bool) {
 	_, name = filepath.Split(name) // remove absolute path, or `history/` prefixes
 	subs := stateFileRegex.FindStringSubmatch(name)

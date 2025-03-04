@@ -242,9 +242,9 @@ func (a *ProtoAppendableTx) LookupFile(entityNum Num, tx kv.Tx) (b Bytes, found 
 	if entityNum < lastNum && ap.builders[0].AllowsOrdinalLookupByNum() {
 		var word []byte
 		index := sort.Search(len(ap._visible), func(i int) bool {
-			return ap._visible[i].src.LastEntityNum() > uint64(entityNum)
+			idx := ap._visible[i].src.index
+			return idx.BaseDataID()+idx.KeyCount() > uint64(entityNum)
 		})
-
 		if index == -1 {
 			return nil, false, fmt.Errorf("entity get error: snapshot expected but now found: (%s, %d)", ap.a.Name(), entityNum)
 		}
@@ -265,5 +265,4 @@ func (a *ProtoAppendableTx) LookupFile(entityNum Num, tx kv.Tx) (b Bytes, found 
 	}
 
 	return nil, false, nil
-
 }

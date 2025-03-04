@@ -135,10 +135,6 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, chainConfig *chai
 	blocksPerFile := snapcfg.MergeLimitFromCfg(snapcfg.KnownCfg(chainName), snapType, from)
 
 	next := (from/blocksPerFile + 1) * blocksPerFile
-
-	// TODO: next is what should be used (and is used in caplin)
-	// the way dump caplin_Snapshot is called..makes the following logic irrevalent
-	// does the same thing happen with blcoks? I want to simplify this.
 	to = min(next, to)
 
 	if to < snaptype.Erigon2MinSegmentSize {
