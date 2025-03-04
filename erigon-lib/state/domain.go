@@ -2017,13 +2017,8 @@ func (sr *SegStreamReader) Next() (k, v []byte, err error) {
 	return k, v, nil
 }
 
-func (d *Domain) stepsRangeInDBAsStr(tx kv.Tx) string {
-	a1, a2 := d.History.InvertedIndex.stepsRangeInDB(tx)
-	//ad1, ad2 := d.stepsRangeInDB(tx)
-	//if ad2-ad1 < 0 {
-	//	fmt.Printf("aaa: %f, %f\n", ad1, ad2)
-	//}
-	return fmt.Sprintf("%s:%.1f", d.filenameBase, a2-a1)
+func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	return dt.ht.iit.stepsRangeInDB(tx)
 }
 
 func (dt *DomainRoTx) Files() (res []string) {
