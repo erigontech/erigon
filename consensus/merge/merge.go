@@ -198,7 +198,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		}
 		if depositReqs != nil {
 			rs = append(rs, *depositReqs)
-			log.Debug("Parsed Depsoit Requests", "len", len(depositReqs.RequestData), "data", fmt.Sprintf("0x%x", depositReqs.RequestData))
+			log.Debug("Parsed Deposit Requests", "len", len(depositReqs.RequestData), "data", fmt.Sprintf("0x%x", depositReqs.RequestData))
 		}
 		withdrawalReqs := misc.DequeueWithdrawalRequests7002(syscall)
 		if withdrawalReqs != nil {
