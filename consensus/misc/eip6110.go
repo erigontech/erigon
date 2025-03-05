@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/ethereum/go-ethereum/common"
 )
 
 const (
@@ -33,7 +32,7 @@ const (
 
 )
 
-var depositTopic = common.HexToHash("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")
+var depositTopic = libcommon.HexToHash("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")
 
 var (
 	// DepositABI is an ABI instance of beacon chain deposit events.
