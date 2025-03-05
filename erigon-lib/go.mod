@@ -1,6 +1,8 @@
 module github.com/erigontech/erigon-lib
 
-go 1.23
+go 1.23.0
+
+toolchain go1.23.6
 
 replace (
 	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.3-alpha-1
@@ -51,7 +53,7 @@ require (
 	github.com/tidwall/btree v1.6.0
 	github.com/ugorji/go/codec v1.2.12
 	go.uber.org/mock v0.5.0
-	golang.org/x/crypto v0.33.0
+	golang.org/x/crypto v0.35.0
 	golang.org/x/exp v0.0.0-20250128182459-e0ece0dbea4c
 	golang.org/x/sync v0.11.0
 	golang.org/x/sys v0.30.0
