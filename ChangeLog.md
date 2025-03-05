@@ -19,6 +19,24 @@ https://github.com/erigontech/erigon/milestone/31
 
 ## v3.0.0 (in development)
 
+
+### Milestone
+
+https://github.com/erigontech/erigon/milestone/30
+
+## v3.0.0-rc2
+
+**Bugfixes:**
+
+- Caplin: error on aggregation_bit merge by @domiwei in https://github.com/erigontech/erigon/pull/14063
+- Pectra: fix bad deposit contract deposit unmarshalling by @Giulio2002 in https://github.com/erigontech/erigon/pull/14068
+
+### Milestone
+
+https://github.com/erigontech/erigon/milestone/36
+
+## v3.0.0-rc1
+
 **Improvements:**
 
 - Schedule Pectra for Chiado by @yperbasis in https://github.com/erigontech/erigon/pull/13898
@@ -36,11 +54,9 @@ https://github.com/erigontech/erigon/milestone/31
 - polygon: `eth_getLogs` if search by filters - doesn't return state-sync (state-sync events are not indexed yet). Without filter can see state-sync events. In `eth_getReceipts` also can see. [Will](https://github.com/erigontech/erigon/issues/14003) release fixed files in E3.1
 - polygon: `eth_getLogs` state-sync events have incorrect `index` field. [Will](https://github.com/erigontech/erigon/issues/14003) release fixed files in E3.1
 
-### TODO
+### Milestone
 
-- milestones:
 https://github.com/erigontech/erigon/milestone/34
-https://github.com/erigontech/erigon/milestone/30
 
 ## v3.0.0-beta2
 
