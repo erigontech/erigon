@@ -18,6 +18,7 @@ package diagnostics
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -53,8 +54,17 @@ func (ti IncomingTxnUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
+type ProcessedRemoteTxnsUpdate struct {
+	Txns [][32]byte `json:"txns"`
+}
+
+func (ti ProcessedRemoteTxnsUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
 func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnIncommingTxnListener(rootCtx)
+	d.runOnProcessedRemoteTxnsListener(rootCtx)
 	d.SetupNotifier()
 }
 
@@ -73,6 +83,27 @@ func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 					MessageType: "txpool",
 					Message:     info,
 				})
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnProcessedRemoteTxnsListener(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[ProcessedRemoteTxnsUpdate](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(ProcessedRemoteTxnsUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				fmt.Println(info)
+				/*d.Notify(DiagMessages{
+					MessageType: "txpool",
+					Message:     info,
+				})*/
 			}
 		}
 	}()
