@@ -386,6 +386,11 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 		return err
 	}
 
+	if event.Source == EventSourceBlockProducer {
+		go s.publishNewBlock(ctx, event.NewBlock)
+		go s.p2pService.PublishNewBlockHashes(event.NewBlock)
+	}
+
 	if event.Source == EventSourceP2PNewBlock {
 		// https://github.com/ethereum/devp2p/blob/master/caps/eth.md#block-propagation
 		// devp2p spec: when a NewBlock announcement message is received from a peer, the client first verifies the

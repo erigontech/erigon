@@ -786,6 +786,7 @@ func NewPolygonSyncStages(
 	statusDataProvider *sentry.StatusDataProvider,
 	stopNode func() error,
 	engineAPISwitcher sync.EngineAPISwitcher,
+	minedBlockReg sync.MinedBlockObserverRegistrar,
 ) []*stagedsync.Stage {
 	return stagedsync.PolygonSyncStages(
 		ctx,
@@ -821,6 +822,7 @@ func NewPolygonSyncStages(
 			nil, /* userUnwindTypeOverrides */
 			notifications,
 			engineAPISwitcher,
+			minedBlockReg,
 		),
 		stagedsync.StageSendersCfg(db, chainConfig, config.Sync, false, config.Dirs.Tmp, config.Prune, blockReader, nil),
 		stagedsync.StageExecuteBlocksCfg(db, config.Prune, config.BatchSize, chainConfig, consensusEngine, &vm.Config{}, notifications, config.StateStream, false, config.Dirs, blockReader, nil, config.Genesis, config.Sync, SilkwormForExecutionStage(silkworm, config), config.PolygonExtraReceipt),

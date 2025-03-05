@@ -73,6 +73,7 @@ func NewPolygonSyncStageCfg(
 	userUnwindTypeOverrides []string,
 	notifications *shards.Notifications,
 	engineAPISwitcher sync.EngineAPISwitcher,
+	minedBlockReg sync.MinedBlockObserverRegistrar,
 ) PolygonSyncStageCfg {
 	// using a buffered channel to preserve order of tx actions,
 	// do not expect to ever have more than 50 goroutines blocking on this channel
@@ -139,7 +140,7 @@ func NewPolygonSyncStageCfg(
 		syncStore,
 		blockLimit,
 	)
-	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService)
+	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService, minedBlockReg)
 	sync := polygonsync.NewSync(
 		config,
 		logger,
