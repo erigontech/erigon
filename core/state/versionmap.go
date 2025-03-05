@@ -190,10 +190,10 @@ func (vm *VersionMap) Read(addr libcommon.Address, path AccountPath, key libcomm
 	return
 }
 
-func (vm *VersionMap) FlushVersionedWrites(writes VersionedWrites, complete bool) {
+func (vm *VersionMap) FlushVersionedWrites(writes VersionedWrites, complete bool, tracePrefix string) {
 	for _, v := range writes {
 		if vm.trace {
-			fmt.Println("WRT", v.Path, v.Version)
+			fmt.Println(tracePrefix, "FLSH", v.String())
 		}
 		vm.Write(v.Address, v.Path, v.Key, v.Version, v.Val, complete)
 	}

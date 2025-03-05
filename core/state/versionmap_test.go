@@ -104,7 +104,7 @@ func TestFlushMVWrite(t *testing.T) {
 		Val:     valueFor(2, 2),
 	})
 
-	mvh.FlushVersionedWrites(wd, true)
+	mvh.FlushVersionedWrites(wd, true, "")
 
 	res = mvh.Read(ap1, AddressPath, libcommon.Hash{}, 0)
 	require.Equal(t, -1, res.DepIdx())

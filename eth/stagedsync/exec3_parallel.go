@@ -761,7 +761,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 					return readsource == state.MapRead && readVersion == writtenVersion
 				}) {
 			if cntInvalid == 0 {
-				be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), true)
+				be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), true, fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation))
 				be.validateTasks.markComplete(tx)
 				// note this assumes that tasks are pushed in order as finalization needs to happen in block order
 				be.finalizeTasks.pushPending(tx)
@@ -776,7 +776,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 				fmt.Println("FAIL", tx, be.txIncarnations[tx], be.execFailed[tx])
 			}
 
-			be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), false)
+			be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), false, fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation))
 			// 'create validation tasks for all transactions > tx ...'
 			be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
 			be.validateTasks.clearInProgress(tx) // clear in progress - pending will be added again once new incarnation executes

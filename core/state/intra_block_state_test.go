@@ -509,7 +509,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	states[1].GetOrNewStateObject(addr)
 	states[1].SetState(addr, key, val)
 	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true)
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	// Tx1 read
 	states[1].GetState(addr, key, &v)
@@ -536,7 +536,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	states[3].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs, tx, nil))
 	states[3].GetState(addr, key, &v)
 	assert.Equal(t, *uint256.NewInt(0), v)
-	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(true), true)
+	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(true), true, "")
 
 	// Tx4 read
 	states[4].GetState(addr, key, &v)
@@ -591,7 +591,7 @@ func TestVersionMapRevert(t *testing.T) {
 	states[0].GetOrNewStateObject(addr)
 	states[0].SetState(addr, key, val)
 	states[0].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true)
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
 
 	var v uint256.Int
 
@@ -615,7 +615,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 	states[1].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs, tx, nil))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true)
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	// Tx2 check the state and balance
 	states[2].GetState(addr, key, &v)
@@ -675,13 +675,13 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	states[0].SetState(addr, key, val)
 	states[0].GetState(addr, key, &v)
 	assert.Equal(t, val, v)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true)
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
 
 	// Tx1 write
 	states[1].GetOrNewStateObject(addr)
 	states[1].SetState(addr, key, val)
 	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true)
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	// Tx2 read
 	states[2].GetState(addr, key, &v)
@@ -761,7 +761,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	states[0].GetOrNewStateObject(addr)
 	states[0].SetState(addr, key, val1)
 	states[0].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true)
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
 
 	// Tx1 write
 	states[1].SetState(addr, key, val2)
@@ -769,7 +769,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	states[1].GetState(addr, key, &v)
 	b, err := states[1].GetBalance(addr)
 	assert.NoError(t, err)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true)
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	assert.Equal(t, val2, v)
 	assert.Equal(t, balance2, b)
@@ -862,17 +862,17 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 	// Tx0 write
 	states[0].GetOrNewStateObject(addr)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true)
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
 
 	// Tx2 write
 	states[2].SetState(addr, key2, val2)
-	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(true), true)
+	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(true), true, "")
 
 	// Tx1 write
 	tx1Snapshot := states[1].Snapshot()
 	states[1].SetState(addr, key1, val1)
 	states[1].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true)
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	var v uint256.Int
 
@@ -924,7 +924,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 	// Tx1 revert
 	states[1].RevertToSnapshot(tx1Snapshot, nil)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true)
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	// Tx3 read
 	states[3].GetState(addr, key1, &v)
@@ -1011,7 +1011,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	states[0].SetState(addr2, key2, val2)
 	states[0].GetOrNewStateObject(addr3)
 	states[0].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs, tx, nil))
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true)
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
 
 	sSingleProcess.GetOrNewStateObject(addr1)
 	sSingleProcess.SetState(addr1, key1, val1)
@@ -1026,7 +1026,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	states[1].SetBalance(addr1, balance2, tracing.BalanceChangeUnspecified)
 	states[1].SetNonce(addr1, 1)
 	states[1].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs, tx, nil))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true)
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	sSingleProcess.SetState(addr1, key2, val2)
 	sSingleProcess.SetBalance(addr1, balance2, tracing.BalanceChangeUnspecified)
@@ -1039,7 +1039,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	states[2].SetBalance(addr1, balance2, tracing.BalanceChangeUnspecified)
 	states[2].SetNonce(addr1, 2)
 	states[2].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs, tx, nil))
-	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(true), true)
+	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(true), true, "")
 
 	sSingleProcess.SetState(addr1, key1, val2)
 	sSingleProcess.SetBalance(addr1, balance2, tracing.BalanceChangeUnspecified)
@@ -1051,7 +1051,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	states[3].Selfdestruct(addr2)
 	states[3].SetCode(addr1, code)
 	states[3].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs, tx, nil))
-	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(true), true)
+	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(true), true, "")
 
 	sSingleProcess.Selfdestruct(addr2)
 	sSingleProcess.SetCode(addr1, code)
