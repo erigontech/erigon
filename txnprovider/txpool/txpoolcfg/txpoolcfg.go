@@ -182,6 +182,8 @@ func (r DiscardReason) String() string {
 		return "blobs limit in txpool is full"
 	case NoAuthorizations:
 		return "EIP-7702 transactions with an empty authorization list are invalid"
+	case GasLimitTooHigh:
+		return "gas limit is too high"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
