@@ -26,6 +26,7 @@ const (
 	KV_StateChanges_FullMethodName = "/remote.KV/StateChanges"
 	KV_Snapshots_FullMethodName    = "/remote.KV/Snapshots"
 	KV_Range_FullMethodName        = "/remote.KV/Range"
+	KV_Sequence_FullMethodName     = "/remote.KV/Sequence"
 	KV_GetLatest_FullMethodName    = "/remote.KV/GetLatest"
 	KV_HistorySeek_FullMethodName  = "/remote.KV/HistorySeek"
 	KV_IndexRange_FullMethodName   = "/remote.KV/IndexRange"
@@ -55,6 +56,7 @@ type KVClient interface {
 	// Range(nil, to)   means [StartOfTable, to)
 	// If orderAscend=false server expecting `from`<`to`. Example: Range("B", "A")
 	Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (*Pairs, error)
+	Sequence(ctx context.Context, in *SequenceReq, opts ...grpc.CallOption) (*SequenceReply, error)
 	// Temporal methods
 	GetLatest(ctx context.Context, in *GetLatestReq, opts ...grpc.CallOption) (*GetLatestReply, error)
 	HistorySeek(ctx context.Context, in *HistorySeekReq, opts ...grpc.CallOption) (*HistorySeekReply, error)
@@ -166,6 +168,16 @@ func (c *kVClient) Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOpt
 	return out, nil
 }
 
+func (c *kVClient) Sequence(ctx context.Context, in *SequenceReq, opts ...grpc.CallOption) (*SequenceReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SequenceReply)
+	err := c.cc.Invoke(ctx, KV_Sequence_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *kVClient) GetLatest(ctx context.Context, in *GetLatestReq, opts ...grpc.CallOption) (*GetLatestReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetLatestReply)
@@ -238,6 +250,7 @@ type KVServer interface {
 	// Range(nil, to)   means [StartOfTable, to)
 	// If orderAscend=false server expecting `from`<`to`. Example: Range("B", "A")
 	Range(context.Context, *RangeReq) (*Pairs, error)
+	Sequence(context.Context, *SequenceReq) (*SequenceReply, error)
 	// Temporal methods
 	GetLatest(context.Context, *GetLatestReq) (*GetLatestReply, error)
 	HistorySeek(context.Context, *HistorySeekReq) (*HistorySeekReply, error)
@@ -265,6 +278,9 @@ func (UnimplementedKVServer) Snapshots(context.Context, *SnapshotsRequest) (*Sna
 }
 func (UnimplementedKVServer) Range(context.Context, *RangeReq) (*Pairs, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Range not implemented")
+}
+func (UnimplementedKVServer) Sequence(context.Context, *SequenceReq) (*SequenceReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Sequence not implemented")
 }
 func (UnimplementedKVServer) GetLatest(context.Context, *GetLatestReq) (*GetLatestReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetLatest not implemented")
@@ -395,6 +411,24 @@ func _KV_Range_Handler(srv interface{}, ctx context.Context, dec func(interface{
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KV_Sequence_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SequenceReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).Sequence(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KV_Sequence_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).Sequence(ctx, req.(*SequenceReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _KV_GetLatest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetLatestReq)
 	if err := dec(in); err != nil {
@@ -503,6 +537,10 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Range",
 			Handler:    _KV_Range_Handler,
+		},
+		{
+			MethodName: "Sequence",
+			Handler:    _KV_Sequence_Handler,
 		},
 		{
 			MethodName: "GetLatest",
