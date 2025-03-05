@@ -18,10 +18,10 @@ package snaptype
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -103,7 +103,7 @@ func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
 		dir.MustExist(baseDir)
 
 		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		binary.BigEndian.PutUint32(saltBytes, randUint32())
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return 0, err
 		}
@@ -116,7 +116,7 @@ func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
 		dir.MustExist(baseDir)
 
 		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		binary.BigEndian.PutUint32(saltBytes, randUint32())
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return 0, err
 		}
@@ -583,4 +583,13 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, ind
 	}
 
 	return lastKeyValue, nil
+}
+
+func randUint32() uint32 {
+	var buf [4]byte
+	_, err := rand.Read(buf[:])
+	if err != nil {
+		panic(err)
+	}
+	return binary.LittleEndian.Uint32(buf[:])
 }
