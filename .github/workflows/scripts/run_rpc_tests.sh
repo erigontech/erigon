@@ -4,8 +4,6 @@ set +e # Disable exit on error
 
 # Array of disabled tests
 disabled_tests=(
-    # Failing after the PR https://github.com/erigontech/erigon/pull/13903 - diff is only an error message in the result
-    eth_estimateGas/test_14.json
     # Failing after the PR https://github.com/erigontech/erigon/pull/13617 that fixed this incompatibility
     # issues https://hive.pectra-devnet-5.ethpandaops.io/suite.html?suiteid=1738266984-51ae1a2f376e5de5e9ba68f034f80e32.json&suitename=rpc-compat
     net_listening/test_1.json
