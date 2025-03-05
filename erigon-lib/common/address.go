@@ -176,3 +176,8 @@ func (a *Address) Scan(src interface{}) error {
 func (a Address) Value() (driver.Value, error) {
 	return a[:], nil
 }
+
+// Cmp compares two addresses.
+func (a Address) Cmp(other Address) int {
+	return bytes.Compare(a[:], other[:])
+}

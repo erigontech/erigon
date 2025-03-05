@@ -201,6 +201,22 @@ func prefixedRlpHash(prefix byte, x interface{}) (h libcommon.Hash) {
 	return h
 }
 
+// doublePrefixedRlpHash writes two prefixes into the hasher before rlp-encoding the
+// given interface. It's used for typed transactions.
+func doublePrefixedRlpHash(prefix1, prefix2 byte, x interface{}) (h libcommon.Hash) {
+	sha := crypto.NewKeccakState()
+	//nolint:errcheck
+	sha.Write([]byte{prefix1})
+	sha.Write([]byte{prefix2})
+	if err := rlp.Encode(sha, x); err != nil {
+		panic(err)
+	}
+	//nolint:errcheck
+	sha.Read(h[:])
+	cryptopool.ReturnToPoolKeccak256(sha)
+	return h
+}
+
 // prefixedSSZHash writes the prefix into the hasher before SSZ encoding x.  It's used for
 // computing the txn id & signing hashes of signed blob transactions.
 func prefixedSSZHash(prefix byte, obj codec.Serializable) (h libcommon.Hash) {

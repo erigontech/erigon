@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -678,6 +679,7 @@ type TxnSlot struct {
 	Creation            bool     // Set to true if "To" field of the transaction is not set
 	Type                byte     // Transaction type
 	Size                uint32   // Size of the payload (without the RLP string envelope for typed transactions)
+	ChainID             uint256.Int
 
 	// EIP-4844: Shard Blob Transactions
 	BlobFeeCap  uint256.Int // max_fee_per_blob_gas
@@ -689,12 +691,44 @@ type TxnSlot struct {
 	// EIP-7702: set code tx
 	Authorizations []Signature
 	AuthRaw        [][]byte // rlp encoded chainID+address+nonce, used to recover authorization address in txpool
+
+	// RIP-7560: account abstraction
+	SenderAddress, Paymaster, Deployer                              *common.Address
+	PaymasterData, DeployerData, ExecutionData                      []byte
+	PostOpGasLimit, ValidationGasLimit, PaymasterValidationGasLimit uint64
+	NonceKey, BuilderFee                                            uint256.Int
 }
 
 // nolint
 func (tx *TxnSlot) PrintDebug(prefix string) {
 	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,v=%d\n", prefix, tx.SenderID, tx.Nonce, tx.Tip, tx.Value.Uint64())
 	//fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,hash=%x\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.IdHash)
+}
+
+// ToProtoAccountAbstractionTxn converts a TxnSlot to a typesproto.AccountAbstractionTransaction
+func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstractionTransaction {
+	if tx == nil {
+		return nil
+	}
+
+	return &typesproto.AccountAbstractionTransaction{
+		Nonce:                       tx.Nonce,
+		ChainId:                     tx.ChainID.Bytes(),
+		Tip:                         tx.Tip.Bytes(),
+		FeeCap:                      tx.FeeCap.Bytes(),
+		Gas:                         tx.Gas,
+		SenderAddress:               tx.SenderAddress.Bytes(),
+		ExecutionData:               tx.ExecutionData,
+		Paymaster:                   tx.Paymaster.Bytes(),
+		PaymasterData:               tx.PaymasterData,
+		Deployer:                    tx.Deployer.Bytes(),
+		DeployerData:                tx.DeployerData,
+		BuilderFee:                  tx.BuilderFee.Bytes(),
+		ValidationGasLimit:          tx.ValidationGasLimit,
+		PaymasterValidationGasLimit: tx.PaymasterValidationGasLimit,
+		PostOpGasLimit:              tx.PostOpGasLimit,
+		NonceKey:                    tx.NonceKey.Bytes(),
+	}
 }
 
 type TxnSlots struct {
