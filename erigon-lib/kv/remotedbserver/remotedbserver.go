@@ -466,18 +466,13 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (rep
 }
 
 func (s *KvServer) Sequence(_ context.Context, req *remote.SequenceReq) (reply *remote.SequenceReply, err error) {
-	domainName, err := kv.String2Domain(req.Table)
-	if err != nil {
-		return nil, err
-	}
-	reply = &remote.GetLatestReply{}
+	reply = &remote.SequenceReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
 			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
-		reply.Value, err = ttx.ReadSequence(table)
-
+		reply.Value, err = ttx.ReadSequence(req.Table)
 		return nil
 	}); err != nil {
 		return nil, err
