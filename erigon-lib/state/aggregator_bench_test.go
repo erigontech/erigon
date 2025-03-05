@@ -137,7 +137,6 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	logger := log.New()
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
-	defer os.RemoveAll(tmp)
 	dataPath := "../../data/storage.256-288.kv"
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
@@ -249,8 +248,6 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
-
-	defer os.RemoveAll(tmp)
 
 	indexPath := dataPath + "i"
 	idx, err := recsplit.OpenIndex(indexPath)
