@@ -23,13 +23,17 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 const (
 	BLSPubKeyLen             = 48
 	WithdrawalCredentialsLen = 32 // withdrawalCredentials size
 	BLSSigLen                = 96 // signature size
+
 )
+
+var depositTopic = common.HexToHash("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")
 
 var (
 	// DepositABI is an ABI instance of beacon chain deposit events.
@@ -77,7 +81,7 @@ func ParseDepositLogs(logs []*types.Log, depositContractAddress libcommon.Addres
 	}
 	reqData := make([]byte, 0, len(logs)*types.DepositRequestDataLen)
 	for _, l := range logs {
-		if l.Address == depositContractAddress {
+		if l.Address == depositContractAddress && len(l.Topics) > 0 && l.Topics[0] == depositTopic {
 			d, err := unpackDepositLog(l.Data)
 			if err != nil {
 				return nil, fmt.Errorf("unable to parse deposit data: %v", err)
