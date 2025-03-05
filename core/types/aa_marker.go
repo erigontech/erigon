@@ -128,14 +128,8 @@ func (tx *AccountAbstractionBatchHeaderTransaction) RawSignatureValues() (*uint2
 	return nil, nil, nil
 }
 
-func (tx *AccountAbstractionBatchHeaderTransaction) payloadSize() (payloadSize int) {
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.ChainID)
-
-	payloadSize++
-	payloadSize += rlp.IntLenExcludingHead(tx.TransactionCount)
-
-	return
+func (tx *AccountAbstractionBatchHeaderTransaction) payloadSize() int {
+	return 2 + rlp.Uint256LenExcludingHead(tx.ChainID) + rlp.IntLenExcludingHead(tx.TransactionCount)
 }
 
 func (tx *AccountAbstractionBatchHeaderTransaction) EncodingSize() int {

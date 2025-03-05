@@ -307,6 +307,50 @@ func (c *MockKVClientRangeAsOfCall) DoAndReturn(f func(context.Context, *RangeAs
 	return c
 }
 
+// Sequence mocks base method.
+func (m *MockKVClient) Sequence(ctx context.Context, in *SequenceReq, opts ...grpc.CallOption) (*SequenceReply, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "Sequence", varargs...)
+	ret0, _ := ret[0].(*SequenceReply)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Sequence indicates an expected call of Sequence.
+func (mr *MockKVClientMockRecorder) Sequence(ctx, in any, opts ...any) *MockKVClientSequenceCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Sequence", reflect.TypeOf((*MockKVClient)(nil).Sequence), varargs...)
+	return &MockKVClientSequenceCall{Call: call}
+}
+
+// MockKVClientSequenceCall wrap *gomock.Call
+type MockKVClientSequenceCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockKVClientSequenceCall) Return(arg0 *SequenceReply, arg1 error) *MockKVClientSequenceCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockKVClientSequenceCall) Do(f func(context.Context, *SequenceReq, ...grpc.CallOption) (*SequenceReply, error)) *MockKVClientSequenceCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockKVClientSequenceCall) DoAndReturn(f func(context.Context, *SequenceReq, ...grpc.CallOption) (*SequenceReply, error)) *MockKVClientSequenceCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // Snapshots mocks base method.
 func (m *MockKVClient) Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error) {
 	m.ctrl.T.Helper()
