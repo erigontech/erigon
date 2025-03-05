@@ -30,6 +30,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -48,6 +49,7 @@ import (
 	ecrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/sync/errgroup"
 )
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -93,6 +95,84 @@ type HexPatriciaHashed struct {
 
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
+}
+
+type nibbleUpdate struct {
+	hashedKey, plainKey []byte
+	stateUpdate         *Update
+}
+
+type ParallelPatriciaHashed struct {
+	HexPatriciaHashed
+	rootLocker sync.Mutex
+}
+
+func (phph *ParallelPatriciaHashed) StartKeyProcessing(ctx context.Context, keyUpdates []*nibbleUpdate) error {
+	var (
+		update *Update
+		err    error
+	)
+	phph.rootLocker.Lock()
+	defer phph.rootLocker.Unlock()
+
+	for _, keyUpdate := range keyUpdates {
+		hashedKey := keyUpdate.hashedKey
+		plainKey := keyUpdate.plainKey
+		stateUpdate := keyUpdate.stateUpdate
+		// Keep folding until the currentKey is the prefix of the key we modify
+		for phph.needFolding(hashedKey) {
+			if err = phph.fold(); err != nil {
+				return err
+			}
+		}
+
+		// Now unfold until we step on an empty cell
+		for unfolding := phph.needUnfolding(hashedKey); unfolding > 0; unfolding = phph.needUnfolding(hashedKey) {
+			if err = phph.unfold(hashedKey, unfolding); err != nil {
+				return fmt.Errorf("unfold: %w", err)
+			}
+		}
+
+		if stateUpdate == nil {
+			// Update the cell
+			if len(plainKey) == phph.accountKeyLen {
+				update, err = phph.ctx.Account(plainKey)
+				if err != nil {
+					return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
+				}
+			} else {
+				update, err = phph.ctx.Storage(plainKey)
+				if err != nil {
+					return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
+				}
+			}
+		} else {
+			if update == nil {
+				update = stateUpdate
+			} else {
+				update.Reset()
+				update.Merge(stateUpdate)
+			}
+		}
+		phph.updateCell(plainKey, hashedKey, update)
+		mxTrieProcessedKeys.Inc()
+
+	}
+	return nil
+}
+
+func NewParallelHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *ParallelPatriciaHashed {
+	hph := &HexPatriciaHashed{
+		ctx:           ctx,
+		keccak:        sha3.NewLegacyKeccak256().(keccakState),
+		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
+		accountKeyLen: accountKeyLen,
+		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
+		hadToLoadL:    make(map[uint64]skipStat),
+		accValBuf:     make(rlp.RlpEncodedBytes, 128),
+	}
+	hph.branchEncoder = NewBranchEncoder(1024, filepath.Join(tmpdir, "branch-encoder"))
+	return &ParallelPatriciaHashed{HexPatriciaHashed: *hph}
 }
 
 func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
@@ -162,6 +242,7 @@ func (f loadFlags) addFlag(loadFlags loadFlags) loadFlags {
 }
 
 const (
+	TotalNibbles    = 16
 	cellLoadNone    = loadFlags(0)
 	cellLoadAccount = loadFlags(1)
 	cellLoadStorage = loadFlags(2)
@@ -1996,6 +2077,97 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	}
 
 	return witnessTrie, rootHash, nil
+}
+
+func (phph *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
+	var (
+		ki uint64
+
+		updatesCount = updates.Size()
+		start        = time.Now()
+		logEvery     = time.NewTicker(20 * time.Second)
+	)
+	defer logEvery.Stop()
+	//hph.trace = true
+	nibbleUpdates := make([]*nibbleUpdate, 0)
+	currentNibble := 16 // invalid nibble value
+
+	keyProcessing, ctx := errgroup.WithContext(ctx)
+	keyProcessing.SetLimit(TotalNibbles)
+
+	// collect updates for each starting nibble and submit it to goroutine for asynchronous unfolding/processing
+	updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+		if currentNibble != int(hashedKey[0]) {
+			nu := append([]*nibbleUpdate{}, nibbleUpdates...)
+			keyProcessing.Go(func() error {
+				return phph.StartKeyProcessing(ctx, nu)
+			})
+			nibbleUpdates = make([]*nibbleUpdate, 0)
+		}
+		currentNibble = int(hashedKey[0])
+		nibbleUpdates = append(nibbleUpdates, &nibbleUpdate{hashedKey: append([]byte{}, hashedKey...), plainKey: append([]byte{}, plainKey...), stateUpdate: stateUpdate})
+		return nil
+	})
+	// for the last nibble from the upadtes
+	keyProcessing.Go(func() error {
+		return phph.StartKeyProcessing(ctx, append([]*nibbleUpdate{}, nibbleUpdates...))
+	})
+
+	if err := keyProcessing.Wait(); err != nil {
+		return nil, fmt.Errorf("processing keys failed: %w", err)
+	}
+
+	// Folding everything up to the root
+	for phph.activeRows > 0 {
+		if err := phph.fold(); err != nil {
+			return nil, fmt.Errorf("final fold: %w", err)
+		}
+	}
+
+	rootHash, err = phph.RootHash()
+	if err != nil {
+		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
+	}
+	if phph.trace {
+		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
+	}
+	err = phph.branchEncoder.Load(phph.ctx, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return nil, fmt.Errorf("branch update failed: %w", err)
+	}
+	if dbg.KVReadLevelledMetrics {
+		log.Debug("commitment finished, counters updated (no reset)",
+			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
+			//"hadToReset", common.PrettyCounter(hadToReset.Load()),
+			"skip ratio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
+			"reset ratio", fmt.Sprintf("%.1f%%", 100*(float64(hadToReset.Load())/float64(hadToLoad.Load()))),
+			"keys", common.PrettyCounter(ki), "spent", time.Since(start),
+		)
+		ends := make([]uint64, 0, len(phph.hadToLoadL))
+		for k := range phph.hadToLoadL {
+			ends = append(ends, k)
+		}
+		sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+		var Li int
+		for _, k := range ends {
+			v := phph.hadToLoadL[k]
+			accs := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.accLoaded), common.PrettyCounter(v.accSkipped), 100*(float64(v.accSkipped)/float64(v.accLoaded+v.accSkipped)), 100*(float64(v.accReset)/float64(v.accReset+v.accSkipped)))
+			stors := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.storLoaded), common.PrettyCounter(v.storSkipped), 100*(float64(v.storSkipped)/float64(v.storLoaded+v.storSkipped)), 100*(float64(v.storReset)/float64(v.storReset+v.storSkipped)))
+			if k == 0 {
+				log.Debug("branchData memoization, new branches", "endStep", k, "accounts", accs, "storages", stors)
+			} else {
+				log.Debug("branchData memoization", "L", Li, "endStep", k, "accounts", accs, "storages", stors)
+				Li++
+
+				mxTrieStateLevelledSkipRatesAccount[min(Li, 5)].Add(float64(v.accSkipped))
+				mxTrieStateLevelledSkipRatesStorage[min(Li, 5)].Add(float64(v.storSkipped))
+				mxTrieStateLevelledLoadRatesAccount[min(Li, 5)].Add(float64(v.accLoaded))
+				mxTrieStateLevelledLoadRatesStorage[min(Li, 5)].Add(float64(v.storLoaded))
+			}
+		}
+	}
+
+	return rootHash, nil
 }
 
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {

@@ -22,11 +22,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"math/bits"
 	"sort"
 	"strings"
 	"unsafe"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/holiman/uint256"
 
@@ -136,7 +137,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 		fallthrough
 	default:
 
-		trie := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
+		trie := NewParallelHexPatriciaHashed(length.Addr, nil, tmpdir)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	}

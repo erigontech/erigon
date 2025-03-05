@@ -199,7 +199,7 @@ func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum 
 }
 
 func ExecV3(ctx context.Context,
-	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer,
+	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer, db kv.RwDB,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger,
@@ -255,7 +255,7 @@ func ExecV3(ctx context.Context,
 		doms = txc.Doms
 	} else {
 		var err error
-		doms, err = state2.NewSharedDomains(applyTx, log.New())
+		doms, err = state2.NewSharedDomains(applyTx, db, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, state2.ErrBehindCommitment) {

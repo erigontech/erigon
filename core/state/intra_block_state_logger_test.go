@@ -114,9 +114,9 @@ func TestStateLogger(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			_, tx, _ := NewTestTemporalDb(t)
+			db, tx, _ := NewTestTemporalDb(t)
 
-			domains, err := stateLib.NewSharedDomains(tx, log.New())
+			domains, err := stateLib.NewSharedDomains(tx, db, log.New())
 			require.NoError(t, err)
 			defer domains.Close()
 

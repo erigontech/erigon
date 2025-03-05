@@ -69,8 +69,8 @@ func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutc
 	}
 }
 
-func isDomainAheadOfBlocks(tx kv.RwTx) bool {
-	doms, err := state.NewSharedDomains(tx, log.New())
+func isDomainAheadOfBlocks(tx kv.RwTx, db kv.RoDB) bool {
+	doms, err := state.NewSharedDomains(tx, db, log.New())
 	if err != nil {
 		return errors.Is(err, state.ErrBehindCommitment)
 	}
@@ -395,7 +395,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 		}
 	}
-	if isDomainAheadOfBlocks(tx) {
+	if isDomainAheadOfBlocks(tx, e.db) {
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return

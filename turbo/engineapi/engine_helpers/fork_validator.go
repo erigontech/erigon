@@ -179,7 +179,7 @@ type HasDiff interface {
 // if the payload extends the canonical chain, then we stack it in extendingFork without any unwind.
 // if the payload is a fork then we unwind to the point where the fork meets the canonical chain, and there we check whether it is valid.
 // if for any reason none of the actions above can be performed due to lack of information, we accept the payload and avoid validation.
-func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, logger log.Logger) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
+func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, db kv.RwDB, header *types.Header, body *types.RawBody, logger log.Logger) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.validatePayload == nil {
@@ -264,7 +264,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	if fv.sharedDom != nil {
 		fv.sharedDom.Close()
 	}
-	fv.sharedDom, criticalError = state.NewSharedDomains(tx, logger)
+	fv.sharedDom, criticalError = state.NewSharedDomains(tx, db, logger)
 	if criticalError != nil {
 		criticalError = fmt.Errorf("failed to create shared domains: %w", criticalError)
 		return
