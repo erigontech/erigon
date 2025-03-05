@@ -1,6 +1,6 @@
 module github.com/erigontech/erigon-lib
 
-go 1.22.12
+go 1.23
 
 replace (
 	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.3-alpha-1
