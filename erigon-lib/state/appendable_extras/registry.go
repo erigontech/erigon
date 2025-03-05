@@ -1,8 +1,8 @@
 package entity_extras
 
 import (
+	"crypto/rand"
 	"encoding/binary"
-	"math/rand/v2"
 	"os"
 	"path"
 	"sync"
@@ -191,7 +191,10 @@ func readAndCreateSaltIfNeeded(saltFile string) (uint32, error) {
 		dir.MustExist(baseDir)
 
 		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		_, err := rand.Read(saltBytes)
+		if err != nil {
+			return 0, err
+		}
 		if err := dir.WriteFileWithFsync(saltFile, saltBytes, os.ModePerm); err != nil {
 			return 0, err
 		}
@@ -204,7 +207,10 @@ func readAndCreateSaltIfNeeded(saltFile string) (uint32, error) {
 		dir.MustExist(baseDir)
 
 		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		_, err := rand.Read(saltBytes)
+		if err != nil {
+			return 0, err
+		}
 		if err := dir.WriteFileWithFsync(saltFile, saltBytes, os.ModePerm); err != nil {
 			return 0, err
 		}
