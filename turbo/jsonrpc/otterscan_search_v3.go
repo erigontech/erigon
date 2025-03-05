@@ -69,7 +69,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 
 		// Avoid reading the same block multiple times; multiple matches in the same block
 		// may be common.
-		mustReadBlock = mustReadBlock || blockNumChanged
+		mustReadBlock = mustReadBlock || blockNumChanged || chainConfig.IsOptimism()
 
 		// it is necessary to track dirty/lazy-must-read block headers
 		// because we skip system txs like rewards (which are not "real" txs
@@ -94,13 +94,14 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			log.Warn("[rpc] txn not found", "blockNum", blockNum, "txIndex", txIndex)
 			continue
 		}
-		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), blockNum, uint64(txIndex), block.BaseFee())
-		txs = append(txs, rpcTx)
 
 		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block.HeaderNoCopy(), txn, txIndex, txNum+1)
 		if err != nil {
 			return nil, nil, false, err
 		}
+
+		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), blockNum, uint64(txIndex), block.BaseFee(), receipt)
+		txs = append(txs, rpcTx)
 
 		mReceipt := ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true)
 		mReceipt["timestamp"] = block.Time()

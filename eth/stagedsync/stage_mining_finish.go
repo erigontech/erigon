@@ -93,14 +93,26 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	cfg.miningState.PendingResultCh <- block
 
 	if block.Transactions().Len() > 0 {
-		logger.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
-			"block", block.NumberU64(),
-			"transactions", block.Transactions().Len(),
-			"gasUsed", block.GasUsed(),
-			"gasLimit", block.GasLimit(),
-			"difficulty", block.Difficulty(),
-			"header", block.Header(),
-		)
+		if cfg.chainConfig.IsOptimism() {
+			logger.Debug(fmt.Sprintf("[%s] block ready for seal", logPrefix),
+				"block", block.NumberU64(),
+				"transactions", block.Transactions().Len(),
+				"gasUsed", block.GasUsed(),
+				"gasLimit", block.GasLimit(),
+				"difficulty", block.Difficulty(),
+				"header", block.Header(),
+			)
+		} else {
+			logger.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
+				"block", block.NumberU64(),
+				"transactions", block.Transactions().Len(),
+				"gasUsed", block.GasUsed(),
+				"gasLimit", block.GasLimit(),
+				"difficulty", block.Difficulty(),
+				"header", block.Header(),
+			)
+		}
+
 	}
 	// interrupt aborts the in-flight sealing task.
 	select {

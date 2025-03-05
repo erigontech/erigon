@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/opstack"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -126,6 +127,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		data:       tx.Data,
 		accessList: tx.AccessList,
 		checkNonce: true,
+		l1CostGas:  tx.RollupCostData(),
 	}
 	if !rules.IsPrague {
 		return nil, errors.New("SetCodeTransaction is only supported in Prague")
@@ -163,6 +165,10 @@ func (tx *SetCodeTransaction) Sender(signer Signer) (libcommon.Address, error) {
 	}
 	tx.from.Store(&addr)
 	return addr, nil
+}
+
+func (tx *SetCodeTransaction) RollupCostData() opstack.RollupCostData {
+	return tx.computeRollupGas(tx)
 }
 
 func (tx *SetCodeTransaction) Hash() libcommon.Hash {
