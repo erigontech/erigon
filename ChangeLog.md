@@ -1,4 +1,11 @@
 ChangeLog
+---------
+
+## v2.61.3
+
+**Bugfixes:**
+* Pectra: fix bad deposit contract deposit unmarshalling by @Giulio2002 in https://github.com/erigontech/erigon/pull/14074
+
 ## v2.61.2
 
 **Improvements:**
