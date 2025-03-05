@@ -96,7 +96,7 @@ func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, common.HexToHash("0x0").String(), rpc.BlockNumberOrHashWithNumber(0))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithNumber(0))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, common.HexToHash("0x0").String(), rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), false))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), false))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, common.HexToHash("0x0").String(), rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), true))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), true))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError
 	}
 	offChainBlock := offChain.Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, common.HexToHash("0x0").String(), rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), false)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), false)); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("block %s not found", offChainBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -165,7 +165,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t 
 	}
 	offChainBlock := offChain.Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, common.HexToHash("0x0").String(), rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), true)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), true)); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("block %s not found", offChainBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -182,7 +182,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
-	result, err := api.GetStorageAt(context.Background(), addr, common.HexToHash("0x0").String(), rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false))
 	if err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
@@ -201,7 +201,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, common.HexToHash("0x0").String(), rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}

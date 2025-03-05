@@ -197,7 +197,6 @@ type NetworkConfig struct {
 	AttestationSubnetCount          uint64             `yaml:"ATTESTATION_SUBNET_COUNT" json:"ATTESTATION_SUBNET_COUNT,string"`                     // The number of attestation subnets used in the gossipsub protocol.
 	AttestationPropagationSlotRange uint64             `yaml:"ATTESTATION_PROPAGATION_SLOT_RANGE" json:"ATTESTATION_PROPAGATION_SLOT_RANGE,string"` // The maximum number of slots during which an attestation can be propagated.
 	AttestationSubnetPrefixBits     uint64             `yaml:"ATTESTATION_SUBNET_PREFIX_BITS" json:"ATTESTATION_SUBNET_PREFIX_BITS,string"`         // The number of bits in the subnet prefix.
-	BlobSidecarSubnetCount          uint64             `yaml:"BLOB_SIDECAR_SUBNET_COUNT" json:"BLOB_SIDECAR_SUBNET_COUNT,string"`                   // The number of blob sidecar subnets used in the gossipsub protocol.
 	MessageDomainInvalidSnappy      ConfigHex4Bytes    `yaml:"-" json:"MESSAGE_DOMAIN_INVALID_SNAPPY"`                                              // 4-byte domain for gossip message-id isolation of invalid snappy messages
 	MessageDomainValidSnappy        ConfigHex4Bytes    `yaml:"-" json:"MESSAGE_DOMAIN_VALID_SNAPPY"`                                                // 4-byte domain for gossip message-id isolation of valid snappy messages
 	MaximumGossipClockDisparity     ConfigDurationMSec `yaml:"-" json:"MAXIMUM_GOSSIP_CLOCK_DISPARITY_MILLIS"`                                      // The maximum milliseconds of clock disparity assumed between honest nodes.
@@ -222,7 +221,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
-		BlobSidecarSubnetCount:          6,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
@@ -242,7 +240,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
-		BlobSidecarSubnetCount:          6,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
@@ -262,7 +259,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
-		BlobSidecarSubnetCount:          6,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
@@ -282,7 +278,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
-		BlobSidecarSubnetCount:          6,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
@@ -302,7 +297,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
-		BlobSidecarSubnetCount:          6,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
@@ -585,8 +579,10 @@ type BeaconChainConfig struct {
 	MaxBuilderConsecutiveMissedSlots uint64 `json:"-"` // MaxBuilderConsecutiveMissedSlots defines the number of consecutive skip slot to fallback from using relay/builder to local execution engine for block construction.
 	MaxBuilderEpochMissedSlots       uint64 `json:"-"` // MaxBuilderEpochMissedSlots is defines the number of total skip slot (per epoch rolling windows) to fallback from using relay/builder to local execution engine for block construction.
 
-	MaxBlobGasPerBlock uint64 `yaml:"MAX_BLOB_GAS_PER_BLOCK" json:"MAX_BLOB_GAS_PER_BLOCK,string"` // MaxBlobGasPerBlock defines the maximum gas limit for blob sidecar per block.
-	MaxBlobsPerBlock   uint64 `yaml:"MAX_BLOBS_PER_BLOCK" json:"MAX_BLOBS_PER_BLOCK,string"`       // MaxBlobsPerBlock defines the maximum number of blobs per block.
+	MaxBlobGasPerBlock     uint64 `yaml:"MAX_BLOB_GAS_PER_BLOCK" json:"MAX_BLOB_GAS_PER_BLOCK,string"`       // MaxBlobGasPerBlock defines the maximum gas limit for blob sidecar per block.
+	MaxBlobsPerBlock       uint64 `yaml:"MAX_BLOBS_PER_BLOCK" json:"MAX_BLOBS_PER_BLOCK,string"`             // MaxBlobsPerBlock defines the maximum number of blobs per block.
+	BlobSidecarSubnetCount uint64 `yaml:"BLOB_SIDECAR_SUBNET_COUNT" json:"BLOB_SIDECAR_SUBNET_COUNT,string"` // BlobSidecarSubnetCount defines the number of sidecars in the blob subnet.
+
 	// Whisk
 	WhiskEpochsPerShufflingPhase uint64 `yaml:"WHISK_EPOCHS_PER_SHUFFLING_PHASE" spec:"true" json:"WHISK_EPOCHS_PER_SHUFFLING_PHASE,string"` // WhiskEpochsPerShufflingPhase defines the number of epochs per shuffling phase.
 	WhiskProposerSelectionGap    uint64 `yaml:"WHISK_PROPOSER_SELECTION_GAP" spec:"true" json:"WHISK_PROPOSER_SELECTION_GAP,string"`         // WhiskProposerSelectionGap defines the proposer selection gap.
@@ -614,6 +610,8 @@ type BeaconChainConfig struct {
 	PendingPartialWithdrawalsLimit        uint64 `yaml:"PENDING_PARTIAL_WITHDRAWALS_LIMIT" spec:"true" json:"PENDING_PARTIAL_WITHDRAWALS_LIMIT,string"`                   // PendingPartialWithdrawalsLimit defines the maximum number of pending partial withdrawals.
 	PendingConsolidationsLimit            uint64 `yaml:"PENDING_CONSOLIDATIONS_LIMIT" spec:"true" json:"PENDING_CONSOLIDATIONS_LIMIT,string"`                             // PendingConsolidationsLimit defines the maximum number of pending consolidations.
 	MaxBlobsPerBlockElectra               uint64 `yaml:"MAX_BLOBS_PER_BLOCK_ELECTRA" spec:"true" json:"MAX_BLOBS_PER_BLOCK_ELECTRA,string"`                               // MaxBlobsPerBlockElectra defines the maximum number of blobs per block for Electra.
+	BlobSidecarSubnetCountElectra         uint64 `yaml:"BLOB_SIDECAR_SUBNET_COUNT_ELECTRA" spec:"true" json:"BLOB_SIDECAR_SUBNET_COUNT_ELECTRA,string"`                   // BlobSidecarSubnetCountElectra defines the number of sidecars in the blob subnet for Electra.
+
 	// Constants for the Electra fork.
 	UnsetDepositRequestsStartIndex uint64     `yaml:"UNSET_DEPOSIT_REQUESTS_START_INDEX" spec:"true" json:"UNSET_DEPOSIT_REQUESTS_START_INDEX,string"` // UnsetDepositRequestsStartIndex defines the start index for unset deposit requests.
 	FullExitRequestAmount          uint64     `yaml:"FULL_EXIT_REQUEST_AMOUNT" spec:"true" json:"FULL_EXIT_REQUEST_AMOUNT,string"`                     // FullExitRequestAmount defines the amount for a full exit request.
@@ -874,8 +872,9 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxBuilderConsecutiveMissedSlots: 3,
 	MaxBuilderEpochMissedSlots:       8,
 
-	MaxBlobGasPerBlock: 786432,
-	MaxBlobsPerBlock:   6,
+	MaxBlobGasPerBlock:     786432,
+	MaxBlobsPerBlock:       6,
+	BlobSidecarSubnetCount: 6,
 
 	WhiskEpochsPerShufflingPhase: 256,
 	WhiskProposerSelectionGap:    2,
@@ -902,6 +901,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	PendingPartialWithdrawalsLimit:        1 << 27,
 	PendingConsolidationsLimit:            1 << 18,
 	MaxBlobsPerBlockElectra:               9,
+	BlobSidecarSubnetCountElectra:         9,
 	// Electra constants.
 	UnsetDepositRequestsStartIndex: ^uint64(0), // 2**64 - 1
 	FullExitRequestAmount:          0,
@@ -1025,20 +1025,23 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.BellatrixForkVersion = 0x02000064
 	cfg.CapellaForkEpoch = 648704
 	cfg.CapellaForkVersion = 0x03000064
+	cfg.DenebForkEpoch = 889856
+	cfg.DenebForkVersion = 0x04000064
 	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
 	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
-	cfg.DenebForkEpoch = 889856
-	cfg.DenebForkVersion = 0x04000064
 	cfg.InactivityScoreRecoveryRate = 16
 	cfg.InactivityScoreBias = 4
 	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
 	cfg.MaxBlobsPerBlock = 2
+	cfg.MaxBlobsPerBlockElectra = 2
+	cfg.BlobSidecarSubnetCountElectra = 2
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
+	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -1065,6 +1068,8 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.CapellaForkVersion = 0x0300006f
 	cfg.DenebForkEpoch = 516608
 	cfg.DenebForkVersion = 0x0400006f
+	cfg.ElectraForkEpoch = 948224
+	cfg.ElectraForkVersion = 0x0500006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
 	cfg.BaseRewardFactor = 25
@@ -1073,8 +1078,11 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
 	cfg.MaxBlobsPerBlock = 2
+	cfg.MaxBlobsPerBlockElectra = 2
+	cfg.BlobSidecarSubnetCountElectra = 2
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
+	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -1183,6 +1191,16 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockByVersion(v StateVersion) uint64 {
 		return b.MaxBlobsPerBlock
 	case ElectraVersion:
 		return b.MaxBlobsPerBlockElectra
+	}
+	panic("invalid version")
+}
+
+func (b *BeaconChainConfig) BlobSidecarSubnetCountByVersion(v StateVersion) uint64 {
+	switch v {
+	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
+		return b.BlobSidecarSubnetCount
+	case ElectraVersion:
+		return b.BlobSidecarSubnetCountElectra
 	}
 	panic("invalid version")
 }

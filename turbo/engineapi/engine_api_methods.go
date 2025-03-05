@@ -6,6 +6,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/params"
 
@@ -171,7 +172,7 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 
 func (e *EngineServer) SignalSuperchainV1(ctx context.Context, signal *engine_types.SuperchainSignal) (params.ProtocolVersion, error) {
 	if signal == nil {
-		log.Info("Received empty superchain version signal", "local", params.OPStackSupport)
+		e.logger.Info("Received empty superchain version signal", "local", params.OPStackSupport)
 		return params.OPStackSupport, nil
 	}
 
@@ -181,9 +182,15 @@ func (e *EngineServer) SignalSuperchainV1(ctx context.Context, signal *engine_ty
 	LogProtocolVersionSupport(logger, params.OPStackSupport, signal.Required, "required")
 
 	if err := e.HandleRequiredProtocolVersion(signal.Required); err != nil {
-		log.Error("Failed to handle required protocol version", "err", err, "required", signal.Required)
+		e.logger.Error("Failed to handle required protocol version", "err", err, "required", signal.Required)
 		return params.OPStackSupport, err
 	}
 
 	return params.OPStackSupport, nil
+}
+
+func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []libcommon.Hash) ([]*txpoolproto.BlobAndProofV1, error) {
+	e.logger.Debug("[engine_getBlobsV1] Received Reuqust", "hashes", len(blobHashes))
+	return e.getBlobs(ctx, blobHashes)
+
 }

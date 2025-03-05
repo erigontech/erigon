@@ -843,12 +843,12 @@ var (
 	CaplinMaxInboundTrafficPerPeerFlag = cli.StringFlag{
 		Name:  "caplin.max-inbound-traffic-per-peer",
 		Usage: "Max inbound traffic per second per peer",
-		Value: "256KB",
+		Value: "1MB",
 	}
 	CaplinMaxOutboundTrafficPerPeerFlag = cli.StringFlag{
 		Name:  "caplin.max-outbound-traffic-per-peer",
 		Usage: "Max outbound traffic per second per peer",
-		Value: "256KB",
+		Value: "1MB",
 	}
 	CaplinAdaptableTrafficRequirementsFlag = cli.BoolFlag{
 		Name:  "caplin.adaptable-maximum-traffic-requirements",
@@ -878,7 +878,7 @@ var (
 	CaplinMaxPeerCount = cli.Uint64Flag{
 		Name:  "caplin.max-peer-count",
 		Usage: "Max number of peers to connect",
-		Value: 80,
+		Value: 128,
 	}
 
 	SentinelAddrFlag = cli.StringFlag{
@@ -1120,6 +1120,11 @@ var (
 	PolygonPosSingleSlotFinalityBlockAtFlag = cli.Int64Flag{
 		Name:  "polygon.pos.ssf.block",
 		Usage: "Enabling Polygon PoS Single Slot Finality since block",
+	}
+	GDBMeFlag = cli.BoolFlag{
+		Name:  "gdbme",
+		Usage: "restart erigon under gdb for debug purposes",
+		Value: false,
 	}
 )
 
@@ -1722,7 +1727,8 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	if chainConfig == nil {
 		chainConfig = params.ChainConfigByOpStackChainName(ctx.String(ChainFlag.Name))
 	}
-	if chainConfig.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {
+
+	if chainConfig != nil && chainConfig.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {
 		// override default max devp2p peers for polygon as per
 		// https://forum.polygon.technology/t/introducing-our-new-dns-discovery-for-polygon-pos-faster-smarter-more-connected/19871
 		// which encourages high peer count

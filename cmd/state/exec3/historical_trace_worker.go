@@ -23,10 +23,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -79,7 +79,7 @@ type HistoricalTraceWorker struct {
 type TraceConsumer struct {
 	NewTracer func() GenericTracer
 	//Reduce receiving results of execution. They are sorted and have no gaps.
-	Reduce func(task *state.TxTask, tx kv.Tx) error
+	Reduce func(task *state.TxTask, tx kv.TemporalTx) error
 }
 
 func NewHistoricalTraceWorker(
@@ -185,7 +185,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txTask.Error = err
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGas(), txTask.Tx.GetBlobGas())
+		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), txTask.Tx.GetBlobGas())
 		if tracer := rw.consumer.NewTracer(); tracer != nil {
 			rw.vmConfig.Debug = true
 			rw.vmConfig.Tracer = tracer

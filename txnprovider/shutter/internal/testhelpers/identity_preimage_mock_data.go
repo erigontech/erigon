@@ -33,7 +33,7 @@ func MockIdentityPreimagesWithSlotIp(t *testing.T, slot uint64, count uint64) sh
 }
 
 func MockIdentityPreimages(t *testing.T, count uint64) shutter.IdentityPreimages {
-	ips := make([]shutter.IdentityPreimage, count)
+	ips := make([]*shutter.IdentityPreimage, count)
 	for i := uint64(0); i < count; i++ {
 		ips[i] = Uint64ToIdentityPreimage(t, i)
 	}
@@ -41,7 +41,7 @@ func MockIdentityPreimages(t *testing.T, count uint64) shutter.IdentityPreimages
 	return ips
 }
 
-func MakeSlotIdentityPreimage(t *testing.T, slot uint64) shutter.IdentityPreimage {
+func MakeSlotIdentityPreimage(t *testing.T, slot uint64) *shutter.IdentityPreimage {
 	// 32 bytes of zeros plus the block number as 20 byte big endian (ie starting with lots of
 	// zeros as well). This ensures the block identity preimage is always alphanumerically before
 	// any transaction identity preimages, because sender addresses cannot be that small.
@@ -53,7 +53,7 @@ func MakeSlotIdentityPreimage(t *testing.T, slot uint64) shutter.IdentityPreimag
 	return ip
 }
 
-func Uint64ToIdentityPreimage(t *testing.T, i uint64) shutter.IdentityPreimage {
+func Uint64ToIdentityPreimage(t *testing.T, i uint64) *shutter.IdentityPreimage {
 	buf := make([]byte, 52)
 	binary.BigEndian.PutUint64(buf[:8], i)
 	ip, err := shutter.IdentityPreimageFromBytes(buf)

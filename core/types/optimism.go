@@ -153,6 +153,14 @@ func (tx OptimismDepositTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
+func (tx OptimismDepositTx) GetGasLimit() uint64 {
+	return tx.Gas
+}
+
+func (tx OptimismDepositTx) GetTipCap() *uint256.Int {
+	return uint256.NewInt(0)
+}
+
 func (tx OptimismDepositTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
 	// size of SourceHash
 	payloadSize += 33
@@ -448,7 +456,6 @@ func (tx OptimismDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.R
 		nonce:               0,
 		gasLimit:            tx.Gas,
 		gasPrice:            *uint256.NewInt(0),
-		tip:                 *uint256.NewInt(0),
 		feeCap:              *uint256.NewInt(0),
 		from:                tx.From,
 		to:                  tx.To,

@@ -33,7 +33,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/go-chi/chi/v5"
 
 	libcommon "github.com/erigontech/erigon-lib/common"

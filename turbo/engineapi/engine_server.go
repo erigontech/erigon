@@ -33,7 +33,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -72,6 +74,7 @@ type EngineServer struct {
 	test             bool
 	caplin           bool // we need to send errors for caplin.
 	executionService execution.ExecutionClient
+	txpool           txpool.TxpoolClient // needed for getBlobs
 
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
 	lock    sync.Mutex
@@ -126,11 +129,9 @@ func (e *EngineServer) Start(
 		e.engineLogSpamer.Start(ctx)
 	}
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil)
-
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
+	e.txpool = txPool
 
-	// engineImpl := NewEngineAPI(base, db, engineBackend)
-	// e.startEngineMessageHandler()
 	apiList := []rpc.API{
 		{
 			Namespace: "eth",
@@ -937,6 +938,22 @@ func (e *EngineServer) HandlesForkChoice(
 
 func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
+}
+
+func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash) ([]*txpoolproto.BlobAndProofV1, error) {
+	if len(blobHashes) > 128 {
+		return nil, &engine_helpers.TooLargeRequestErr
+	}
+	req := &txpool.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(blobHashes))}
+	for i := range blobHashes {
+		req.BlobHashes[i] = gointerfaces.ConvertHashToH256(blobHashes[i])
+	}
+	res, err := e.txpool.GetBlobs(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return res.BlobsAndProofs, nil
 }
 
 func waitForStuff(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {

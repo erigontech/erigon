@@ -116,17 +116,13 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 // GetStorageAt implements eth_getStorageAt. Returns the value from a storage position at a given address.
 func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	var empty []byte
-	indexBytes := hexutil.FromHex(index)
-	if len(indexBytes) < 32 {
-		return "", errors.New("unable to decode storage key: hex string invalid")
-	}
-	if len(indexBytes) > 32 {
-		return "", errors.New("unable to decode storage key: hex string too long, want at most 32 bytes")
+	if err := hexutil.IsValidQuantity(index); err != nil {
+		return "", errors.New("unable to decode storage key: " + err.Error())
 	}
 
-	tx, err1 := api.db.BeginTemporalRo(ctx)
-	if err1 != nil {
-		return hexutil.Encode(libcommon.LeftPadBytes(empty, 32)), err1
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return hexutil.Encode(libcommon.LeftPadBytes(empty, 32)), err
 	}
 	defer tx.Rollback()
 

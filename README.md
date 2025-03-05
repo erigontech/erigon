@@ -1,7 +1,7 @@
 # Erigon
 
 Documentation: **[docs.erigon.tech](https://docs.erigon.tech)**
-Blog: **[erigon.tech/news](https://erigon.tech/news/)**
+Blog: **[erigon.tech/blog](https://erigon.tech/blog/)**
 X/Twitter: **[x.com/ErigonEth](https://x.com/ErigonEth)**
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
@@ -62,8 +62,6 @@ frontier.
     - [Windows](#windows)
 - [Getting in touch](#getting-in-touch)
     - [Erigon Discord Server](#erigon-discord-server)
-    - [Blog](#blog)
-    - [Twitter](#twitter)
     - [Reporting security issues/concerns](#reporting-security-issuesconcerns)
 - [Known issues](#known-issues)
     - [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
@@ -82,7 +80,7 @@ Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if y
 System Requirements
 ===================
 
-RAM: >=32GB, [Golang >= 1.22](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
+RAM: >=32GB, [Golang >= 1.23](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
 architecture.
 
 - ArchiveNode Ethereum Mainnet: 2TB (April 2024). FullNode: 1.1TB (June 2024)
@@ -682,7 +680,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.22
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.23
     * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)

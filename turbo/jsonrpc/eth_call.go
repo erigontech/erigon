@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/params"
@@ -188,9 +187,8 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	// Binary search the gas requirement, as it may be higher than the amount used
 	var (
-		lo     = params.TxGas - 1
-		hi     uint64
-		gasCap uint64
+		lo uint64
+		hi uint64
 	)
 	// Use zero address if sender unspecified.
 	if args.From == nil {
@@ -203,6 +201,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	} else {
 		// Retrieve the block to act as the gas ceiling
 		hi = header.GasLimit
+	}
+	// Recap the highest gas allowance with specified gascap.
+	if hi > api.GasCap {
+		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", api.GasCap)
+		hi = api.GasCap
 	}
 
 	var feeCap *big.Int
@@ -247,65 +250,49 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 	}
 
-	// Recap the highest gas allowance with specified gascap.
-	if hi > api.GasCap {
-		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", api.GasCap)
-		hi = api.GasCap
-	}
-	gasCap = hi
-
 	caller, err := transactions.NewReusableCaller(engine, stateReader, overrides, header, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
 	if err != nil {
 		return 0, err
 	}
-	// Create a helper to check if a gas allowance results in an executable transaction
-	executable := func(gas uint64) (bool, *evmtypes.ExecutionResult, error) {
-		result, err := caller.DoCallWithNewGas(ctx, gas, engine, overrides)
-		if err != nil {
-			if errors.Is(err, core.ErrIntrinsicGas) {
-				// Special case, raise gas limit
-				return true, nil, nil
-			}
 
-			// Bail out
-			return true, nil, err
-		}
-		return result.Failed(), result, nil
+	// First try with highest gas possible
+	result, err := caller.DoCallWithNewGas(ctx, hi, engine, overrides)
+	if err != nil || result == nil {
+		return 0, err
 	}
+	if result.Failed() {
+		if !errors.Is(result.Err, vm.ErrOutOfGas) {
+			if len(result.Revert()) > 0 {
+				return 0, ethapi2.NewRevertError(result)
+			}
+			return 0, result.Err
+		}
+		// Otherwise, the specified gas cap is too low
+		return 0, fmt.Errorf("gas required exceeds allowance (%d)", hi)
+	}
+	// Assuming a contract can freely run all the instructions, we have
+	// the true amount of gas it wants to consume to execute fully.
+	// We want to ensure that the gas used doesn't fall below this
+	trueGas := result.EvmGasUsed // Must not fall below this
+	lo = min(trueGas+result.EvmRefund-1, params.TxGas-1)
 
+	i := 0
 	// Execute the binary search and hone in on an executable gas limit
 	for lo+1 < hi {
 		mid := (hi + lo) / 2
-		failed, _, err := executable(mid)
+		result, err := caller.DoCallWithNewGas(ctx, mid, engine, overrides)
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
 		// assigened. Return the error directly, don't struggle any more.
 		if err != nil {
 			return 0, err
 		}
-		if failed {
+		if result.Failed() || result.EvmGasUsed < trueGas {
 			lo = mid
 		} else {
 			hi = mid
 		}
-	}
-
-	// Reject the transaction as invalid if it still fails at the highest allowance
-	if hi == gasCap {
-		failed, result, err := executable(hi)
-		if err != nil {
-			return 0, err
-		}
-		if failed {
-			if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
-				if len(result.Revert()) > 0 {
-					return 0, ethapi2.NewRevertError(result)
-				}
-				return 0, result.Err
-			}
-			// Otherwise, the specified gas cap is too low
-			return 0, fmt.Errorf("gas required exceeds allowance (%d)", gasCap)
-		}
+		i++
 	}
 	return hexutil.Uint64(hi), nil
 }
@@ -625,7 +612,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 
 	// define these keys as "updates", but we are not really updating anything, we just want to load them into the grid,
 	// so this is just to satisfy the current hex patricia trie api.
-	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), commitment.KeyToHexNibbleHash)
+	updates := commitment.NewUpdates(commitment.ModeDirect, api.dirs.Tmp, commitment.KeyToHexNibbleHash)
 	for _, key := range touchedPlainKeys {
 		updates.TouchPlainKey(string(key), nil, updates.TouchAccount)
 	}

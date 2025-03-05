@@ -8,14 +8,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/tests/txpool/helper"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -60,11 +61,11 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 			signedTx, err := types.SignTx(
 				&types.LegacyTx{
 					CommonTx: types.CommonTx{
-						Nonce: uint64(i),
-						Gas:   21000,
-						To:    &addr2,
-						Value: uint256.NewInt(100),
-						Data:  nil,
+						Nonce:    uint64(i),
+						GasLimit: 21000,
+						To:       &addr2,
+						Value:    uint256.NewInt(100),
+						Data:     nil,
 					},
 					GasPrice: uint256.NewInt(1),
 				},
@@ -132,11 +133,11 @@ func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
 		signedTx, err := types.SignTx(
 			&types.LegacyTx{
 				CommonTx: types.CommonTx{
-					Nonce: uint64(i),
-					Gas:   21000,
-					To:    &addr2,
-					Value: uint256.NewInt(100),
-					Data:  nil,
+					Nonce:    uint64(i),
+					GasLimit: 21000,
+					To:       &addr2,
+					Value:    uint256.NewInt(100),
+					Data:     nil,
 				},
 				GasPrice: uint256.NewInt(1),
 			},

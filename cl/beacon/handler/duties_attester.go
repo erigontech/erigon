@@ -28,6 +28,8 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
+const maxEpochsLookaheadForDuties = 32
+
 type attesterDutyResponse struct {
 	Pubkey                  libcommon.Bytes48 `json:"pubkey"`
 	ValidatorIndex          uint64            `json:"validator_index,string"`
@@ -52,7 +54,7 @@ func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (libcommon.Ha
 			dependentRoot = a.syncedData.HeadRoot()
 			return nil
 		}
-		maxIterations := 2048
+		maxIterations := int(maxEpochsLookaheadForDuties * 2 * a.beaconChainCfg.SlotsPerEpoch)
 		for i := 0; i < maxIterations; i++ {
 			if dependentRootSlot > epoch*a.beaconChainCfg.SlotsPerEpoch {
 				return nil
@@ -107,8 +109,8 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if a.forkchoiceStore.LowestAvailableSlot() <= epoch*a.beaconChainCfg.SlotsPerEpoch {
 		// non-finality case
 		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-			if epoch > state.Epoch(s)+3 {
-				return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d is too far in the future", epoch))
+			if epoch > state.Epoch(s)+maxEpochsLookaheadForDuties {
+				return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is too far in the future", epoch))
 			}
 
 			// get active validator indicies
@@ -160,7 +162,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		return nil, err
 	}
 	if (epoch)*a.beaconChainCfg.SlotsPerEpoch >= stageStateProgress {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d is too far in the future", epoch))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is not yet reconstructed", epoch))
 	}
 
 	snRoTx := a.caplinStateSnapshots.View()

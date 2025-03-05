@@ -526,7 +526,7 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 				if err != nil {
 					return nil, err
 				}
-				txNum = txNumNextBlock - 1
+				txNum = txNumNextBlock
 			}
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)

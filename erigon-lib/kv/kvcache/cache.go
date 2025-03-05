@@ -125,13 +125,9 @@ type CoherentRoot struct {
 	cache           *btree2.BTreeG[*Element]
 	codeCache       *btree2.BTreeG[*Element]
 	ready           chan struct{} // close when ready
-	readyChanClosed atomic.Bool   // protecting `ready` field from double-close (on unwind). Consumers don't need check this field.
-
-	// Views marked as `Canonical` if it received onNewBlock message
-	// we may drop `Non-Canonical` views even if they had fresh keys
-	// keys added to `Non-Canonical` views SHOULD NOT be added to stateEvict
-	// cache.latestStateView is always `Canonical`
-	isCanonical bool
+	readyChanClosed atomic.Bool   // quick check if ready channel is closed
+	closeOnce       sync.Once     // protecting `ready` field from double-close
+	isCanonical     bool
 }
 
 // CoherentView - dumb object, which proxy all requests to Coherent object.
@@ -287,7 +283,6 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 			case remote.Action_UPSERT:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				v := sc.Changes[i].Data
-				//fmt.Printf("set: %x,%x\n", addr, v)
 				c.add(addr[:], v, r, id)
 			case remote.Action_UPSERT_CODE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
@@ -326,10 +321,10 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 		}
 	}
 
-	switched := r.readyChanClosed.CompareAndSwap(false, true)
-	if switched {
-		close(r.ready) //broadcast
-	}
+	r.closeOnce.Do(func() {
+		r.readyChanClosed.Store(true)
+		close(r.ready) // broadcast
+	})
 	//log.Info("on new block handled", "viewID", stateChanges.StateVersionID)
 }
 
@@ -338,30 +333,27 @@ func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	r := c.selectOrCreateRoot(id)
 
 	if !c.cfg.WaitForNewBlock || c.waitExceededCount.Load() >= MAX_WAITS {
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	}
 
-	select { // fast non-blocking path
-	case <-r.ready:
-		//fmt.Printf("recv broadcast: %d\n", id)
+	if r.readyChanClosed.Load() {
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
-	default:
 	}
 
-	select { // slow blocking path
+	select {
 	case <-r.ready:
-		//fmt.Printf("recv broadcast2: %d\n", tx.ViewID())
+		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	case <-ctx.Done():
 		return nil, fmt.Errorf("kvcache rootNum=%x, %w", tx.ViewID(), ctx.Err())
-	case <-time.After(c.cfg.NewBlockWait): //TODO: switch to timer to save resources
+	case <-time.After(c.cfg.NewBlockWait):
 		c.timeout.Inc()
 		c.waitExceededCount.Add(1)
-		//log.Info("timeout", "db_id", id, "has_btree", r.cache != nil)
+		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	}
-	return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 }
 
 func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *CoherentRoot, error) {
