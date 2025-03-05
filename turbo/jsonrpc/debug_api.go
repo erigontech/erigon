@@ -512,16 +512,10 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
 	// Private API returns 0 if transaction is not found.
+	isBorStateSyncTx := false
 	if blockNum == 0 && chainConfig.Bor != nil {
 		if api.useBridgeReader {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-			if ok {
-				txNumNextBlock, err := txNumsReader.Min(tx, blockNum+1)
-				if err != nil {
-					return nil, err
-				}
-				txNum = txNumNextBlock
-			}
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
 		}
@@ -529,6 +523,8 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 		if err != nil {
 			return nil, err
 		}
+
+		isBorStateSyncTx = true
 	}
 
 	if !ok {
@@ -540,11 +536,11 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 		return nil, err
 	}
 
-	if txNumMin+2 > txNum {
+	if txNumMin+2 > txNum && !isBorStateSyncTx {
 		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 
-	var txnIndex uint64 = txNum - txNumMin - 2
+	var txnIndex = txNum - txNumMin - 2
 
 	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txnIndex))
 	if err != nil {
