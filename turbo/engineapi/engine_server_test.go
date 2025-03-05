@@ -114,7 +114,7 @@ func TestGetBlobsV1(t *testing.T) {
 	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)
 	engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil)
 
-	err = wrappedTxn.MarshalBinary(buf)
+	err = wrappedTxn.MarshalBinaryWrapped(buf)
 	require.NoError(err)
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
