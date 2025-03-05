@@ -247,8 +247,6 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	}
 
 	rnd := newRnd(uint64(time.Now().UnixNano()))
-	tmp := b.TempDir()
-
 	indexPath := dataPath + "i"
 	idx, err := recsplit.OpenIndex(indexPath)
 	require.NoError(b, err)
