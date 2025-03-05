@@ -326,6 +326,19 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, batchState *BatchState, prop
 			if batchState.resequenceBatchJob.AtNewBlockBoundary() {
 				l1TreeUpdateIndex = uint64(batchState.resequenceBatchJob.CurrentBlock().L1InfoTreeIndex)
 			}
+			if infoTreeIndexProgress >= l1TreeUpdateIndex {
+				shouldWriteGerToContract = false
+			}
+			// l1TreeUpdateIndex->GER from datastream and hermezdb are not consistent, so we should instead get l1TreeUpdate with
+			// hermezDb.GetL1InfoTreeUpdateByGer(batchState.resequenceBatchJob.CurrentBlock().GlobalExitRoot),
+			// otherwise any l1info update will cause a mismatch of root during resequencing.
+			if l1TreeUpdateIndex > 0 {
+				infoTreeIndexProgress = l1TreeUpdateIndex
+				l1BlockHash = batchState.resequenceBatchJob.CurrentBlock().L1BlockHash
+				ger = batchState.resequenceBatchJob.CurrentBlock().GlobalExitRoot
+				l1TreeUpdate, _ = sdb.hermezDb.GetL1InfoTreeUpdateByGer(ger)
+			}
+			return
 		}
 		if l1TreeUpdate, err = sdb.hermezDb.GetL1InfoTreeUpdate(l1TreeUpdateIndex); err != nil {
 			return
