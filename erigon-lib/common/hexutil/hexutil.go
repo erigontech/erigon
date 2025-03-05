@@ -151,8 +151,8 @@ func IsValidQuantity(input string) error {
 	if len(input) > 64 {
 		return ErrTooBigHexString
 	}
-	if input[0] != '0' {
-		if _, err = hex.DecodeString(input); err != nil {
+	for _, b := range input {
+		if decodeNibble(byte(b)) == badNibble {
 			return ErrHexStringInvalid
 		}
 	}
