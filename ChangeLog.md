@@ -1,7 +1,48 @@
 ChangeLog
 ---------
 
-## v3.0.0-beta2 (in development)
+## v3.1.0 (in development)
+
+**Improvements:**
+
+TODO
+
+**Bugfixes:**
+
+TODO
+
+### TODO
+
+- milestones:
+https://github.com/erigontech/erigon/milestone/31
+
+
+## v3.0.0 (in development)
+
+**Improvements:**
+
+- Schedule Pectra for Chiado by @yperbasis in https://github.com/erigontech/erigon/pull/13898
+- stagedsync: dbg option to log receipts on receipts hash mismatch (#13905) by @taratorio in https://github.com/erigontech/erigon/pull/13940
+- Introduces a new method for estimating transaction gas that targets the maximum gas a contract could use (#13913). Fixes eth_estimateGas for historical blocks (#13903) by @somnathb1 in https://github.com/erigontech/erigon/pull/13916
+
+**Bugfixes:**
+
+- rpcdaemon: Show state sync transactions in eth_getLogs (#13924) by @shohamc1 in https://github.com/erigontech/erigon/pull/13951
+- polygon/heimdall: fix snapshot store last entity to check in snapshots too (#13845) by @taratorio in https://github.com/erigontech/erigon/pull/13938
+- Implemented wait if heimdall is not synced to the chain (#13807) by @taratorio in https://github.com/erigontech/erigon/pull/13939
+
+**Known Problems:**
+
+- polygon: `eth_getLogs` if search by filters - doesn't return state-sync (state-sync events are not indexed yet). Without filter can see state-sync events. In `eth_getReceipts` also can see. [Will](https://github.com/erigontech/erigon/issues/14003) release fixed files in E3.1
+- polygon: `eth_getLogs` state-sync events have incorrect `index` field. [Will](https://github.com/erigontech/erigon/issues/14003) release fixed files in E3.1
+
+### TODO
+
+- milestones:
+https://github.com/erigontech/erigon/milestone/34
+https://github.com/erigontech/erigon/milestone/30
+
+## v3.0.0-beta2
 
 ### Breaking changes
 - Reverts Optimize gas by default in eth_createAccessList #8337  

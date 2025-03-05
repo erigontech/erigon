@@ -6,6 +6,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/params"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -165,4 +166,10 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 	}
 
 	return ourCapabilities
+}
+
+func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []libcommon.Hash) ([]*txpoolproto.BlobAndProofV1, error) {
+	e.logger.Debug("[engine_getBlobsV1] Received Reuqust", "hashes", len(blobHashes))
+	return e.getBlobs(ctx, blobHashes)
+
 }
