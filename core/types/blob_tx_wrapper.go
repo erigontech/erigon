@@ -389,7 +389,7 @@ func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
 	payloadSize += l + rlp.ListPrefixLen(l)
 	return
 }
-func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
+func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// encode TxType
@@ -420,6 +420,9 @@ func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
 		return err
 	}
 	return nil
+}
+func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
+	return txw.Tx.MarshalBinary(w)
 }
 func (txw *BlobTxWrapper) EncodeRLP(w io.Writer) error {
 	return txw.Tx.EncodeRLP(w)
