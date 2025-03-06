@@ -76,7 +76,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, err
 		}
 
-		if txNumMin+2 > txNum && !isStateSyncTx { //TODO: what a magic is this "2" and how to avoid it
+		if txNumMin+1 > txNum && !isStateSyncTx { //TODO: what a magic is this "2" and how to avoid it
 			return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 		}
 

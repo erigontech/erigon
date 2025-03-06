@@ -494,7 +494,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	if txNumMin+2 > txNum && !isStateSync { //TODO: what a magic is this "2" and how to avoid it
+	if txNumMin+1 > txNum && !isStateSync { //TODO: what a magic is this "2" and how to avoid it
 		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 

@@ -536,7 +536,7 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 		return nil, err
 	}
 
-	if txNumMin+2 > txNum && !isBorStateSyncTx {
+	if txNumMin+1 > txNum && !isBorStateSyncTx {
 		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 

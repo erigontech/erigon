@@ -857,7 +857,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		return nil, err
 	}
 
-	if txNumMin+2 > txNum && !isBorStateSyncTxn {
+	if txNumMin+1 > txNum && !isBorStateSyncTxn {
 		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 
