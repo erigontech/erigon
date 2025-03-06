@@ -52,16 +52,38 @@ import (
 
 func TestShutterBlockBuilding(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(cancel)
+	uni := initBlockBuildingUniverse(ctx, t)
+
+	t.Run("deploy first keyper set", func(t *testing.T) {
+		currentBlock, err := uni.rpcDaemonClient.BlockNumber()
+		require.NoError(t, err)
+		ekg := testhelpers.MockEonKeyGeneration(t, shutter.EonIndex(1), 1, 2, currentBlock+1)
+		_, _, err = uni.contractsDeployer.DeployKeyperSet(ctx, uni.contractsDeployment.Ksm, ekg)
+		require.NoError(t, err)
+	})
+
+	err := uni.ethBackend.Stop()
+	require.NoError(t, err)
+}
+
+type blockBuildingUniverse struct {
+	rpcDaemonClient     requests.RequestGenerator
+	contractsDeployer   testhelpers.ContractsDeployer
+	contractsDeployment testhelpers.ContractsDeployment
+	ethBackend          *eth.Ethereum
+}
+
+func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingUniverse {
 	logger := testlog.Logger(t, log.LvlDebug)
 	dataDir := t.TempDir()
 	dirs := datadir.New(dataDir)
 	p2pPort, cleanP2pPort := testhelpers.ConsumeFreeTcpPort(t)
-	defer cleanP2pPort()
+	t.Cleanup(cleanP2pPort)
 	engineApiPort, cleanEngineApiPort := testhelpers.ConsumeFreeTcpPort(t)
-	defer cleanEngineApiPort()
+	t.Cleanup(cleanEngineApiPort)
 	jsonRpcPort, cleanJsonRpcPort := testhelpers.ConsumeFreeTcpPort(t)
-	defer cleanJsonRpcPort()
+	t.Cleanup(cleanJsonRpcPort)
 	sentryPort, cleanSentryPort := testhelpers.ConsumeFreeTcpPort(t)
 	defer cleanSentryPort()
 
@@ -109,7 +131,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 		},
 	}
 
-	stack, err := node.New(ctx, &nodeConfig, logger)
+	ethNode, err := node.New(ctx, &nodeConfig, logger)
 	require.NoError(t, err)
 
 	chainConfig := *params.ChiadoChainConfig
@@ -124,16 +146,16 @@ func TestShutterBlockBuilding(t *testing.T) {
 	// 1_000 ETH in wei in the bank
 	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))
 	bank.RegisterGenesisAlloc(genesis)
-	chainDB, err := node.OpenDatabase(ctx, stack.Config(), kv.ChainDB, "", false, logger)
+	chainDB, err := node.OpenDatabase(ctx, ethNode.Config(), kv.ChainDB, "", false, logger)
 	require.NoError(t, err)
-	_, gensisBlock, err := core.CommitGenesisBlock(chainDB, genesis, stack.Config().Dirs, logger)
+	_, gensisBlock, err := core.CommitGenesisBlock(chainDB, genesis, ethNode.Config().Dirs, logger)
 	require.NoError(t, err)
 	chainDB.Close()
 
-	ethBackend, err := eth.New(ctx, stack, &ethConfig, logger)
+	ethBackend, err := eth.New(ctx, ethNode, &ethConfig, logger)
 	require.NoError(t, err)
 
-	err = ethBackend.Init(stack, &ethConfig, &chainConfig)
+	err = ethBackend.Init(ethNode, &ethConfig, &chainConfig)
 	require.NoError(t, err)
 
 	err = ethBackend.Start()
@@ -153,15 +175,13 @@ func TestShutterBlockBuilding(t *testing.T) {
 	require.NoError(t, err)
 
 	deployer := testhelpers.NewContractsDeployer(contractBackend, cl, bank, chainConfig.ChainID)
-	shutterContractsDeployment, err := deployer.DeployCore(ctx)
+	contractsDeployment, err := deployer.DeployCore(ctx)
 	require.NoError(t, err)
 
-	currentBlock, err := rpcDaemonClient.BlockNumber()
-	require.NoError(t, err)
-	ekg := testhelpers.MockEonKeyGeneration(t, shutter.EonIndex(1), 1, 2, currentBlock+1)
-	_, _, err = deployer.DeployKeyperSet(ctx, shutterContractsDeployment.Ksm, ekg)
-	require.NoError(t, err)
-
-	err = ethBackend.Stop()
-	require.NoError(t, err)
+	return blockBuildingUniverse{
+		ethBackend:          ethBackend,
+		rpcDaemonClient:     rpcDaemonClient,
+		contractsDeployer:   deployer,
+		contractsDeployment: contractsDeployment,
+	}
 }
