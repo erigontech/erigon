@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/contracts"
@@ -55,7 +57,9 @@ import (
 	"github.com/erigontech/erigon/turbo/engineapi"
 	enginetypes "github.com/erigontech/erigon/turbo/engineapi/engine_types"
 	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon/txnprovider/shutter"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
+	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -121,9 +125,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 	stack, err := node.New(ctx, &nodeConfig, logger)
 	require.NoError(t, err)
 
-	bankPrivKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	bank := NativeTokenBank{privKey: bankPrivKey}
+	// 1_000 ETH in wei in the bank
+	bank := NewNativeTokenBank(new(big.Int).Mul(big.NewInt(1_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)))
 	chainConfig := *params.ChiadoChainConfig
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.ChainID = big.NewInt(987656789)
@@ -133,10 +136,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 	chainConfig.PragueTime = big.NewInt(0)
 	genesis := core.ChiadoGenesisBlock()
 	genesis.Config = &chainConfig
-	genesis.Alloc[bank.Address()] = types.GenesisAccount{
-		// 1_000 ETH in wei
-		Balance: new(big.Int).Mul(big.NewInt(1_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)),
-	}
+	genesis.Alloc[bank.Address()] = types.GenesisAccount{Balance: bank.InitialBalance()}
 	chainDB, err := node.OpenDatabase(ctx, stack.Config(), kv.ChainDB, "", false, logger)
 	require.NoError(t, err)
 	_, gensisBlock, err := core.CommitGenesisBlock(chainDB, genesis, stack.Config().Dirs, logger)
@@ -153,6 +153,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 	require.NoError(t, err)
 
 	rpcDaemonHttpUrl := fmt.Sprintf("%s:%d", httpConfig.HttpListenAddress, httpConfig.HttpPort)
+	rpcDaemonClient := requests.NewRequestGenerator(rpcDaemonHttpUrl, logger)
 	contractBackend := contracts.NewJsonRpcBackend(rpcDaemonHttpUrl, logger)
 	jwtSecret, err := cli.ObtainJWTSecret(&httpConfig, logger)
 	require.NoError(t, err)
@@ -160,25 +161,20 @@ func TestShutterBlockBuilding(t *testing.T) {
 	engineApiUrl := fmt.Sprintf("http://%s:%d", httpConfig.AuthRpcHTTPListenAddress, httpConfig.AuthRpcPort)
 	engineApiClient, err := engineapi.DialJsonRpcClient(engineApiUrl, jwtSecret, logger)
 	require.NoError(t, err)
-	cl := MockCl{
-		engineApiClient:       engineApiClient,
-		suggestedFeeRecipient: bank.Address(),
-		prevBlockHash:         gensisBlock.Hash(),
-		prevRandao:            big.NewInt(0),
-		prevBeaconBlockRoot:   big.NewInt(10_000),
-	}
+	cl := NewMockCl(engineApiClient, bank.Address(), gensisBlock.Hash())
 	_, err = cl.BuildBlock(ctx)
 	require.NoError(t, err)
 
-	deployer := ShutterContractsDeployer{
-		contractBackend: contractBackend,
-		cl:              cl,
-		bank:            bank,
-		chainId:         ethBackend.ChainConfig().ChainID,
-	}
-
-	err = deployer.DeploySequencer(ctx)
+	deployer := NewShutterContractsDeployer(contractBackend, cl, bank, chainConfig.ChainID)
+	shutterContractsDeployment, err := deployer.DeployCoreContracts(ctx)
 	require.NoError(t, err)
+
+	currentBlock, err := rpcDaemonClient.BlockNumber()
+	require.NoError(t, err)
+	eonKeyGeneration := testhelpers.MockEonKeyGeneration(t, shutter.EonIndex(1), 1, 2, currentBlock+1)
+	_, _, err = deployer.DeployKeyperSet(ctx, shutterContractsDeployment.Ksm, eonKeyGeneration.ActivationBlock)
+	require.NoError(t, err)
+
 	err = ethBackend.Stop()
 	require.NoError(t, err)
 }
@@ -219,6 +215,18 @@ type NativeTokenBank struct {
 	initialBalance *big.Int
 }
 
+func NewNativeTokenBank(initialBalance *big.Int) NativeTokenBank {
+	privKey, err := crypto.GenerateKey()
+	if err != nil {
+		panic(err)
+	}
+
+	return NativeTokenBank{
+		privKey:        privKey,
+		initialBalance: initialBalance,
+	}
+}
+
 func (b NativeTokenBank) Address() libcommon.Address {
 	return crypto.PubkeyToAddress(b.privKey.PublicKey)
 }
@@ -228,45 +236,125 @@ func (b NativeTokenBank) InitialBalance() *big.Int {
 }
 
 type ShutterContractsDeployer struct {
-	contractBackend bind.ContractBackend
-	cl              MockCl
-	bank            NativeTokenBank
-	chainId         *big.Int
+	contractBackend   bind.ContractBackend
+	cl                *MockCl
+	bank              NativeTokenBank
+	chainId           *big.Int
+	ksmInitializer    libcommon.Address
+	ksmInitializerKey *ecdsa.PrivateKey
 }
 
-func (d ShutterContractsDeployer) DeploySequencer(ctx context.Context) error {
-	transactOpts := bind.TransactOpts{
+func NewShutterContractsDeployer(cb bind.ContractBackend, cl *MockCl, bank NativeTokenBank, chainId *big.Int) ShutterContractsDeployer {
+	ksmInitializer, err := crypto.GenerateKey()
+	if err != nil {
+		panic(err)
+	}
+
+	return ShutterContractsDeployer{
+		contractBackend:   cb,
+		cl:                cl,
+		bank:              bank,
+		chainId:           chainId,
+		ksmInitializer:    crypto.PubkeyToAddress(ksmInitializer.PublicKey),
+		ksmInitializerKey: ksmInitializer,
+	}
+}
+
+func (d ShutterContractsDeployer) DeployCoreContracts(ctx context.Context) (ShutterContractsDeployment, error) {
+	transactOpts := d.transactOpts()
+	sequencerAddr, sequencerDeployTxn, sequencer, err := shuttercontracts.DeploySequencer(
+		transactOpts,
+		d.contractBackend,
+	)
+	if err != nil {
+		return ShutterContractsDeployment{}, err
+	}
+
+	ksmAddr, ksmDeployTxn, ksm, err := shuttercontracts.DeployKeyperSetManager(
+		transactOpts,
+		d.contractBackend,
+		d.ksmInitializer,
+	)
+	if err != nil {
+		return ShutterContractsDeployment{}, err
+	}
+
+	keyBroadcastAddr, keyBroadcastDeployTxn, keyBroadcast, err := shuttercontracts.DeployKeyBroadcastContract(
+		transactOpts,
+		d.contractBackend,
+		ksmAddr,
+	)
+	if err != nil {
+		return ShutterContractsDeployment{}, err
+	}
+
+	deployTxns := []libcommon.Hash{
+		sequencerDeployTxn.Hash(),
+		ksmDeployTxn.Hash(),
+		keyBroadcastDeployTxn.Hash(),
+	}
+	err = d.cl.IncludeTxns(ctx, deployTxns)
+	if err != nil {
+		return ShutterContractsDeployment{}, err
+	}
+
+	res := ShutterContractsDeployment{
+		Sequencer:        sequencer,
+		SequencerAddr:    sequencerAddr,
+		Ksm:              ksm,
+		KsmAddr:          ksmAddr,
+		KeyBroadcast:     keyBroadcast,
+		KeyBroadcastAddr: keyBroadcastAddr,
+	}
+
+	return res, nil
+}
+
+func (d ShutterContractsDeployer) DeployKeyperSet(
+	ctx context.Context,
+	ksm *shuttercontracts.KeyperSetManager,
+	activationBlock uint64,
+) (libcommon.Address, *shuttercontracts.KeyperSet, error) {
+	transactOpts := d.transactOpts()
+	keyperSetAddr, keyperSetDeployTxn, keyperSet, err := shuttercontracts.DeployKeyperSet(transactOpts, d.contractBackend)
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	err = d.cl.IncludeTxns(ctx, []libcommon.Hash{keyperSetDeployTxn.Hash()})
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	addKeyperSetTxn, err := ksm.AddKeyperSet(transactOpts, activationBlock, keyperSetAddr)
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	err = d.cl.IncludeTxns(ctx, []libcommon.Hash{addKeyperSetTxn.Hash()})
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	return keyperSetAddr, keyperSet, nil
+}
+
+func (d ShutterContractsDeployer) transactOpts() *bind.TransactOpts {
+	return &bind.TransactOpts{
 		From: d.bank.Address(),
 		Signer: func(address libcommon.Address, txn types.Transaction) (types.Transaction, error) {
 			return types.SignTx(txn, *types.LatestSignerForChainID(d.chainId), d.bank.privKey)
 		},
 	}
-	_, deployTxn, _, err := shuttercontracts.DeploySequencer(&transactOpts, d.contractBackend)
-	if err != nil {
-		return err
-	}
+}
 
-	block, err := d.cl.BuildBlock(ctx)
-	if err != nil {
-		return err
-	}
-
-	var found bool
-	for _, txnBytes := range block.Transactions {
-		txn, err := types.DecodeTransaction(txnBytes)
-		if err != nil {
-			return err
-		}
-		if txn.Hash() == deployTxn.Hash() {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return errors.New("deploy txn not found in block")
-	}
-
-	return nil
+type ShutterContractsDeployment struct {
+	Sequencer        *shuttercontracts.Sequencer
+	SequencerAddr    libcommon.Address
+	Ksm              *shuttercontracts.KeyperSetManager
+	KsmAddr          libcommon.Address
+	KeyBroadcast     *shuttercontracts.KeyBroadcastContract
+	KeyBroadcastAddr libcommon.Address
 }
 
 type MockCl struct {
@@ -275,6 +363,44 @@ type MockCl struct {
 	prevBlockHash         libcommon.Hash
 	prevRandao            *big.Int
 	prevBeaconBlockRoot   *big.Int
+}
+
+func NewMockCl(elClient *engineapi.JsonRpcClient, feeRecipient libcommon.Address, elGenesis libcommon.Hash) *MockCl {
+	return &MockCl{
+		engineApiClient:       elClient,
+		suggestedFeeRecipient: feeRecipient,
+		prevBlockHash:         elGenesis,
+		prevRandao:            big.NewInt(0),
+		prevBeaconBlockRoot:   big.NewInt(10_000),
+	}
+}
+
+func (cl *MockCl) IncludeTxns(ctx context.Context, txns []libcommon.Hash) error {
+	block, err := cl.BuildBlock(ctx)
+	if err != nil {
+		return err
+	}
+
+	txnHashes := mapset.NewSet[libcommon.Hash](txns...)
+	for _, txnBytes := range block.Transactions {
+		txn, err := types.DecodeTransaction(txnBytes)
+		if err != nil {
+			return err
+		}
+
+		txnHashes.Remove(txn.Hash())
+	}
+
+	if txnHashes.Cardinality() == 0 {
+		return nil
+	}
+
+	err = errors.New("deploy txn not found in block")
+	txnHashes.Each(func(txnHash libcommon.Hash) bool {
+		err = fmt.Errorf("%w: %s", err, txnHash)
+		return true // continue
+	})
+	return err
 }
 
 func (cl *MockCl) BuildBlock(ctx context.Context) (*enginetypes.ExecutionPayload, error) {

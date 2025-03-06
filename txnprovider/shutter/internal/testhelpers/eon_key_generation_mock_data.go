@@ -101,7 +101,7 @@ func (k Keyper) EpochSecretKeyShare(ip *shutter.IdentityPreimage) *shuttercrypto
 	return shuttercrypto.ComputeEpochSecretKeyShare(k.EonSecretKeyShare, id)
 }
 
-func MockEonKeyGeneration(t *testing.T, idx shutter.EonIndex, threshold, numKeypers uint64) EonKeyGeneration {
+func MockEonKeyGeneration(t *testing.T, idx shutter.EonIndex, threshold, numKeypers, activationBlock uint64) EonKeyGeneration {
 	keypers := make([]Keyper, numKeypers)
 	polynomials := make([]*shuttercrypto.Polynomial, numKeypers)
 	gammas := make([]*shuttercrypto.Gammas, numKeypers)
@@ -154,7 +154,7 @@ func MockEonKeyGeneration(t *testing.T, idx shutter.EonIndex, threshold, numKeyp
 
 	return EonKeyGeneration{
 		EonIndex:        idx,
-		ActivationBlock: 32123,
+		ActivationBlock: activationBlock,
 		Threshold:       threshold,
 		Keypers:         keypers,
 		MaliciousKeyper: maliciousKeyper,
