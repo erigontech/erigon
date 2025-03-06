@@ -190,14 +190,20 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		rs = make(types.FlatRequests, 0)
 		allLogs := make(types.Logs, 0)
 		skipEvaluation := false
+
 		for _, rec := range receipts {
-			// handle corner-case of in-beetwen block execution (some logs are nil)
+			// VERY UGLY HACK: We need to skip evaluation if we have a nil receipt
+
+			// Check for nil receipt to handle a special corner case:
+			// This scenario occurs when a transaction is part of an incomplete or partially executed block,
+			// causing some transaction receipts to be unavailable (nil). In such cases,
+			// evaluation must be skipped to prevent accessing logs from an invalid receipt.
 			if rec == nil {
 				skipEvaluation = true
 				break
 			}
 			allLogs = append(allLogs, rec.Logs...)
-		} 
+		}
 
 		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
 		if err != nil {
