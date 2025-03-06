@@ -526,12 +526,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			return nil, err
 		}
 
-		fmt.Printf("[dbg] here2 isStateSync=%t txNum=%d, txNumMin=%d, txnIndex=%d, txxsAmount=%d\n", isStateSync, txNum, txNumMin, txnIndex, header.t)
+		fmt.Printf("[dbg] here2 isStateSync=%t txNum=%d, txNumMin=%d, txsAmount=%d\n", isStateSync, txNum, txNumMin, len(block.Transactions()))
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
 	var txnIndex = int(txNum - txNumMin - 2)
-	fmt.Printf("[dbg] here1 isStateSync=%t txNum=%d, txNumMin=%d, txnIndex=%d, txxsAmount=%d\n", isStateSync, txNum, txNumMin, txnIndex, header.t)
+	fmt.Printf("[dbg] here1 isStateSync=%t txNum=%d, txNumMin=%d, txnIndex=%d\n", isStateSync, txNum, txNumMin, txnIndex)
 
 	txn, err := api._blockReader.TxnByIdxInBlock(ctx, tx, header.Number.Uint64(), txnIndex)
 	if err != nil {
