@@ -106,7 +106,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return ethapi.NewRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(txCount), chainConfig.ChainID), nil
 		}
 
-		var txnIndex = txNum - txNumMin - 2
+		var txnIndex = txNum - txNumMin - 1
 
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txnIndex))
 		if err != nil {

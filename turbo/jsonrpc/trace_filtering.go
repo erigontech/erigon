@@ -112,7 +112,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNumber)
 	}
 
-	var txIndex = int(txNum - txNumMin - 2)
+	var txIndex = int(txNum - txNumMin - 1)
 
 	if isBorStateSyncTxn {
 		txIndex = -1
