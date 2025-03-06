@@ -171,8 +171,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 
 	currentBlock, err := rpcDaemonClient.BlockNumber()
 	require.NoError(t, err)
-	eonKeyGeneration := testhelpers.MockEonKeyGeneration(t, shutter.EonIndex(1), 1, 2, currentBlock+1)
-	_, _, err = deployer.DeployKeyperSet(ctx, shutterContractsDeployment.Ksm, eonKeyGeneration.ActivationBlock)
+	ekg := testhelpers.MockEonKeyGeneration(t, shutter.EonIndex(1), 1, 2, currentBlock+1)
+	_, _, err = deployer.DeployKeyperSet(ctx, shutterContractsDeployment.Ksm, ekg)
 	require.NoError(t, err)
 
 	err = ethBackend.Stop()
@@ -236,27 +236,18 @@ func (b NativeTokenBank) InitialBalance() *big.Int {
 }
 
 type ShutterContractsDeployer struct {
-	contractBackend   bind.ContractBackend
-	cl                *MockCl
-	bank              NativeTokenBank
-	chainId           *big.Int
-	ksmInitializer    libcommon.Address
-	ksmInitializerKey *ecdsa.PrivateKey
+	contractBackend bind.ContractBackend
+	cl              *MockCl
+	bank            NativeTokenBank
+	chainId         *big.Int
 }
 
 func NewShutterContractsDeployer(cb bind.ContractBackend, cl *MockCl, bank NativeTokenBank, chainId *big.Int) ShutterContractsDeployer {
-	ksmInitializer, err := crypto.GenerateKey()
-	if err != nil {
-		panic(err)
-	}
-
 	return ShutterContractsDeployer{
-		contractBackend:   cb,
-		cl:                cl,
-		bank:              bank,
-		chainId:           chainId,
-		ksmInitializer:    crypto.PubkeyToAddress(ksmInitializer.PublicKey),
-		ksmInitializerKey: ksmInitializer,
+		contractBackend: cb,
+		cl:              cl,
+		bank:            bank,
+		chainId:         chainId,
 	}
 }
 
@@ -273,7 +264,7 @@ func (d ShutterContractsDeployer) DeployCoreContracts(ctx context.Context) (Shut
 	ksmAddr, ksmDeployTxn, ksm, err := shuttercontracts.DeployKeyperSetManager(
 		transactOpts,
 		d.contractBackend,
-		d.ksmInitializer,
+		d.bank.Address(),
 	)
 	if err != nil {
 		return ShutterContractsDeployment{}, err
@@ -298,6 +289,16 @@ func (d ShutterContractsDeployer) DeployCoreContracts(ctx context.Context) (Shut
 		return ShutterContractsDeployment{}, err
 	}
 
+	ksmInitTxn, err := ksm.Initialize(transactOpts, d.bank.Address(), d.bank.Address())
+	if err != nil {
+		return ShutterContractsDeployment{}, err
+	}
+
+	err = d.cl.IncludeTxns(ctx, []libcommon.Hash{ksmInitTxn.Hash()})
+	if err != nil {
+		return ShutterContractsDeployment{}, err
+	}
+
 	res := ShutterContractsDeployment{
 		Sequencer:        sequencer,
 		SequencerAddr:    sequencerAddr,
@@ -313,7 +314,7 @@ func (d ShutterContractsDeployer) DeployCoreContracts(ctx context.Context) (Shut
 func (d ShutterContractsDeployer) DeployKeyperSet(
 	ctx context.Context,
 	ksm *shuttercontracts.KeyperSetManager,
-	activationBlock uint64,
+	ekg testhelpers.EonKeyGeneration,
 ) (libcommon.Address, *shuttercontracts.KeyperSet, error) {
 	transactOpts := d.transactOpts()
 	keyperSetAddr, keyperSetDeployTxn, keyperSet, err := shuttercontracts.DeployKeyperSet(transactOpts, d.contractBackend)
@@ -326,7 +327,37 @@ func (d ShutterContractsDeployer) DeployKeyperSet(
 		return libcommon.Address{}, nil, err
 	}
 
-	addKeyperSetTxn, err := ksm.AddKeyperSet(transactOpts, activationBlock, keyperSetAddr)
+	setPublisherTxn, err := keyperSet.SetPublisher(transactOpts, d.bank.Address())
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	setThresholdTxn, err := keyperSet.SetThreshold(transactOpts, ekg.Threshold)
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	addMembersTxn, err := keyperSet.AddMembers(transactOpts, ekg.Members())
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	setFinalizedTxn, err := keyperSet.SetFinalized(transactOpts)
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	err = d.cl.IncludeTxns(ctx, []libcommon.Hash{
+		setPublisherTxn.Hash(),
+		setThresholdTxn.Hash(),
+		addMembersTxn.Hash(),
+		setFinalizedTxn.Hash(),
+	})
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	addKeyperSetTxn, err := ksm.AddKeyperSet(transactOpts, ekg.ActivationBlock, keyperSetAddr)
 	if err != nil {
 		return libcommon.Address{}, nil, err
 	}

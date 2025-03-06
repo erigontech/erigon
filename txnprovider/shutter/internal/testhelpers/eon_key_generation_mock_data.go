@@ -81,6 +81,14 @@ func (ekg EonKeyGeneration) EpochSecretKey(t *testing.T, signers []Keyper, ip *s
 	return epochSecretKey
 }
 
+func (ekg EonKeyGeneration) Members() []libcommon.Address {
+	members := make([]libcommon.Address, len(ekg.Keypers))
+	for i, keyper := range ekg.Keypers {
+		members[i] = keyper.Address()
+	}
+	return members
+}
+
 type Keyper struct {
 	Index             int
 	PrivateKey        *ecdsa.PrivateKey
