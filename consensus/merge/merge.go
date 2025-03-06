@@ -189,9 +189,16 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	if config.IsPrague(header.Time) {
 		rs = make(types.FlatRequests, 0)
 		allLogs := make(types.Logs, 0)
+		skipEvaluation := false
 		for _, rec := range receipts {
+			// handle corner-case of in-beetwen block execution (some logs are nil)
+			if rec == nil {
+				skipEvaluation = true
+				break
+			}
 			allLogs = append(allLogs, rec.Logs...)
-		}
+		} 
+
 		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
@@ -207,7 +214,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if consolidations != nil {
 			rs = append(rs, *consolidations)
 		}
-		if header.RequestsHash != nil {
+		if header.RequestsHash != nil && !skipEvaluation {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {
 				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
