@@ -18,7 +18,13 @@ var AccountAbstractionABIJSON string
 
 const AccountAbstractionABIVersion = 0
 
-var AccountAbstractionABI, _ = abi.JSON(strings.NewReader(AccountAbstractionABIJSON))
+var AccountAbstractionABI = func() abi.ABI {
+	abi, err := abi.JSON(strings.NewReader(AccountAbstractionABIJSON))
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse Account Abstraction ABI: %v", err))
+	}
+	return abi
+}()
 
 /// DECODING
 
