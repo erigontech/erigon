@@ -184,6 +184,8 @@ func (r DiscardReason) String() string {
 		return "EIP-7702 transactions with an empty authorization list are invalid"
 	case GasLimitTooHigh:
 		return "gas limit is too high"
+	case BlobHashCheckFail:
+		return "KZGcommitment's versioned hash has to be equal to blob_versioned_hash at the same index"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
