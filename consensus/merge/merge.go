@@ -200,7 +200,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			// evaluation must be skipped to prevent accessing logs from an invalid receipt.
 			if rec == nil {
 				skipEvaluation = true
-				logger.Info("nil receipt found in block receipts, skipping evaluation")
+				logger.Info("nil receipt found in block receipts, skipping evaluation of receiptsHash")
 				break
 			}
 			allLogs = append(allLogs, rec.Logs...)
