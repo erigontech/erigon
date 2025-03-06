@@ -512,8 +512,8 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
 	// Private API returns 0 if transaction is not found.
-	isBorStateSyncTx := false
-	if blockNum == 0 && chainConfig.Bor != nil {
+	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
+	if isBorStateSyncTx {
 		if api.useBridgeReader {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
 		} else {
@@ -523,8 +523,6 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 		if err != nil {
 			return nil, err
 		}
-
-		isBorStateSyncTx = true
 	}
 
 	if !ok {
