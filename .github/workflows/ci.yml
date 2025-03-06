@@ -12,6 +12,7 @@ on:
       - reopened
       - synchronize
       - ready_for_review
+    
   workflow_dispatch:
 
 concurrency:
@@ -19,6 +20,7 @@ concurrency:
   cancel-in-progress: ${{ !contains(fromJSON('[
       "refs/heads/release/2.60",
       "refs/heads/release/2.61",
+      "refs/heads/release/3.0",
       "refs/heads/main"
     ]'), github.ref) }}
 
@@ -44,6 +46,7 @@ jobs:
           cache: ${{ contains(fromJSON('[
             "refs/heads/release/2.60",
             "refs/heads/release/2.61",
+            "refs/heads/release/3.0",
             "refs/heads/main"
             ]'), github.ref) }}
 
@@ -94,6 +97,7 @@ jobs:
           cache: ${{ contains(fromJSON('[
             "refs/heads/release/2.60",
             "refs/heads/release/2.61",
+            "refs/heads/release/3.0",
             "refs/heads/main"
             ]'), github.ref) }}
 

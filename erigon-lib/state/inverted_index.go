@@ -82,6 +82,7 @@ type iiCfg struct {
 	aggregationStep uint64 // amount of transactions inside single aggregation step
 	keysTable       string // bucket name for index keys;    txnNum_u64 -> key (k+auto_increment)
 	valuesTable     string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
+	name            kv.InvertedIdx
 
 	withExistence bool                // defines if existence index should be built
 	compression   seg.FileCompression // compression type for inverted index keys and values
@@ -214,22 +215,15 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false, toTxNum))
 }
 
-func (ii *InvertedIndex) missedAccessors() (l []*filesItem) {
-	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-			exists, err := dir.FileExist(ii.efAccessorFilePath(fromStep, toStep))
-			if err != nil {
-				_, fName := filepath.Split(ii.efAccessorFilePath(fromStep, toStep))
-				ii.logger.Warn("[agg] InvertedIndex missedAccessors", "err", err, "f", fName)
-			}
-			if !exists {
-				l = append(l, item)
-			}
+func (ii *InvertedIndex) missedMapAccessors() (l []*filesItem) {
+	if !ii.indexList.Has(AccessorHashMap) {
+		return nil
+	}
+	return fileItemsWithMissingAccessors(ii.dirtyFiles, ii.aggregationStep, func(fromStep, toStep uint64) []string {
+		return []string{
+			ii.efAccessorFilePath(fromStep, toStep),
 		}
-		return true
 	})
-	return l
 }
 
 func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
@@ -242,7 +236,7 @@ func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *filesItem, p
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	for _, item := range ii.missedAccessors() {
+	for _, item := range ii.missedMapAccessors() {
 		item := item
 		g.Go(func() error {
 			return ii.buildEfAccessor(ctx, item, ps)
@@ -381,6 +375,7 @@ type invertedIndexBufferedWriter struct {
 	txNum           uint64
 	aggregationStep uint64
 	txNumBytes      [8]byte
+	name            kv.InvertedIdx
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -455,6 +450,7 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIn
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
 		indexKeys: etl.NewCollector(iit.ii.filenameBase+".flush.ii.keys", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
 		index:     etl.NewCollector(iit.ii.filenameBase+".flush.ii.vals", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
+		name:      iit.name,
 	}
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
@@ -472,6 +468,7 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		ii:      ii,
 		visible: ii._visible,
 		files:   files,
+		name:    ii.name,
 	}
 }
 func (iit *InvertedIndexRoTx) Close() {
@@ -503,9 +500,14 @@ func (iit *InvertedIndexRoTx) Close() {
 }
 
 type MergeRange struct {
+	name      string // entity name
 	needMerge bool
 	from      uint64
 	to        uint64
+}
+
+func NewMergeRange(name string, needMerge bool, from uint64, to uint64) *MergeRange {
+	return &MergeRange{name: name, needMerge: needMerge, from: from, to: to}
 }
 
 func (mr *MergeRange) FromTo() (uint64, uint64) {
@@ -516,7 +518,7 @@ func (mr *MergeRange) String(prefix string, aggStep uint64) string {
 	if prefix != "" {
 		prefix += "="
 	}
-	return fmt.Sprintf("%s%d-%d", prefix, mr.from/aggStep, mr.to/aggStep)
+	return fmt.Sprintf("%s%s%d-%d", prefix, mr.name, mr.from/aggStep, mr.to/aggStep)
 }
 
 func (mr *MergeRange) Equal(other *MergeRange) bool {
@@ -525,6 +527,7 @@ func (mr *MergeRange) Equal(other *MergeRange) bool {
 
 type InvertedIndexRoTx struct {
 	ii      *InvertedIndex
+	name    kv.InvertedIdx
 	files   visibleFiles
 	visible *iiVisible
 	getters []*seg.Reader
@@ -731,7 +734,7 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 				break
 			}
 			if iit.files[i].src.index == nil { // assert
-				err := fmt.Errorf("why file has not index: %s\n", iit.files[i].src.decompressor.FileName())
+				err := fmt.Errorf("why file has not index: %s", iit.files[i].src.decompressor.FileName())
 				panic(err)
 			}
 			if iit.files[i].src.index.KeyCount() == 0 {
@@ -853,8 +856,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 	defer idxDelCursor.Close()
 
-	sortableBuffer := sortableBuffersPoolForPruning.Get().(etl.Buffer)
-	sortableBuffer.Reset()
+	sortableBuffer := sortableBufferForPruning()
 	defer sortableBuffersPoolForPruning.Put(sortableBuffer)
 
 	collector := etl.NewCollector(ii.filenameBase+".prune.ii", ii.dirs.Tmp, sortableBuffer, ii.logger)
@@ -1220,18 +1222,14 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	ii.dirtyFiles.Set(fi)
 }
 
-func (ii *InvertedIndex) stepsRangeInDBAsStr(tx kv.Tx) string {
-	a1, a2 := ii.stepsRangeInDB(tx)
-	return fmt.Sprintf("%s: %.1f", ii.filenameBase, a2-a1)
-}
-func (ii *InvertedIndex) stepsRangeInDB(tx kv.Tx) (from, to float64) {
-	fst, _ := kv.FirstKey(tx, ii.keysTable)
+func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	fst, _ := kv.FirstKey(tx, iit.ii.keysTable)
 	if len(fst) > 0 {
-		from = float64(binary.BigEndian.Uint64(fst)) / float64(ii.aggregationStep)
+		from = float64(binary.BigEndian.Uint64(fst)) / float64(iit.ii.aggregationStep)
 	}
-	lst, _ := kv.LastKey(tx, ii.keysTable)
+	lst, _ := kv.LastKey(tx, iit.ii.keysTable)
 	if len(lst) > 0 {
-		to = float64(binary.BigEndian.Uint64(lst)) / float64(ii.aggregationStep)
+		to = float64(binary.BigEndian.Uint64(lst)) / float64(iit.ii.aggregationStep)
 	}
 	if to == 0 {
 		to = from

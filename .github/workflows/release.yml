@@ -1,10 +1,14 @@
 name: Release
-run-name: Build release ${{ inputs.release_version}} from branch ${{ inputs.checkout_ref }} by @${{ github.actor }}
+run-name: Build release ${{ inputs.release_version}} from branch ${{ inputs.checkout_ref }}, Skip tests=${{ inputs.skip_tests }}
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "golang:1.22-bookworm"
-  DOCKER_BASE_IMAGE: "debian:12.8-slim"
+  APPLICATION_VERSION: "Erigon3"
+  TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
+  TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
+  TEST_CHAIN: "mainnet"
+  BUILDER_IMAGE: "golang:1.23-bookworm"
+  DOCKER_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
@@ -33,6 +37,11 @@ on:
         type: boolean
         default: false
         description: 'publish_latest_tag: when set then docker image with tag :latest will be also published'
+      skip_tests:
+        required: false
+        type: boolean
+        default: false
+        description: 'Skip tests during release build (not recommended)'
 
 jobs:
 
@@ -126,7 +135,7 @@ jobs:
           -w /erigon --entrypoint /bin/bash
           ${{ env.BUILDER_IMAGE }}
           -c "git config --global --add safe.directory /erigon;
-          make GOARCH=amd64 GOAMD64=v1 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
+          make GOARCH=amd64 GOAMD64=v1 GOAMD64_VERSION=v1 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
           erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
           if [ ${WITH_SILKWORM} ]; then find / -name libsilkworm_capi.so -exec install {} /erigon-build \; ; fi;"
 
@@ -193,9 +202,93 @@ jobs:
           if-no-files-found: error
 
 
+  test-release:
+    name: test on ${{ matrix.id }}
+    if: ${{ ! inputs.skip_tests }}
+    runs-on: [ self-hosted, Release, "${{ matrix.runner-arch }}" ]
+    timeout-minutes: 7200  # 5 days
+    needs: [ build-release ]
+    strategy:
+      matrix:
+        include:
+          - id: linux/amd64
+            runner-arch: X64
+            artifact: linux_amd64
+          - id: linux/arm64
+            runner-arch: ARM64
+            artifact: linux_arm64
+
+    steps:
+
+      - name: Cleanup working directory
+        run: rm -drfv *
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+          path: .
+
+      - name: Extract artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+        run: |
+          pwd
+          ls -l ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+          tar xzvf ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar.gz
+          ls -lR
+      - name: Fast checkout git repository erigontech/erigon-qa
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
+        with:
+          token: ${{ secrets.ORG_GITHUB_ERIGONTECH_ERIGON_QA_READ }}
+          repository: erigontech/erigon-qa
+          fetch-depth: 1
+          ref: main
+          path: erigon-qa
+
+      - name: Checkout QA Tests Repository & Install Requirements
+        run: |
+          cd ./erigon-qa/test_system
+          pwd
+          ls -lao
+          pip3 install -r requirements.txt   
+          ln -s $(pwd)/base_library $(pwd)/qa-tests/tip-tracking/base_library
+          echo "DEBUG -- content of directory $(pwd) :"
+          ls -l
+          echo "DEBUG -- content of directory $(pwd)/qa-tests/tip-tracking/"
+          ls -l $(pwd)/qa-tests/tip-tracking/
+          echo "DEBUG -- content of directory GITHUB_WORKSPACE ${GITHUB_WORKSPACE} :"
+          ls -l ${GITHUB_WORKSPACE}
+          echo "DEBUG -- end."
+          rm -rf ${RUNNER_WORKSPACE}/erigon-data || true
+          mkdir ${RUNNER_WORKSPACE}/erigon-data
+          # Run Erigon, wait sync and check ability to maintain sync
+          python3 qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+            ${GITHUB_WORKSPACE}/${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }} \
+              ${RUNNER_WORKSPACE}/erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }}
+          # Capture monitoring script exit status
+          test_exit_status=$?
+          # Save the subsection reached status
+          echo "::set-output name=test_executed::true"
+          # Check test runner script exit status
+          if [ $test_exit_status -eq 0 ]; then
+            echo "Tests completed successfully"
+            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "Error detected during tests"
+            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cleanup working directory
+        run: rm -drfv *
+
   build-debian-pkg:
     name: Debian packages
-    needs: [ build-release ]
+    needs: [ build-release, test-release ]
+    if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
     uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@main
     with:
       application: ${{ needs.build-release.outputs.application }}
@@ -203,7 +296,8 @@ jobs:
 
 
   publish-docker-image:
-    needs: [ build-release ]
+    needs: [ build-release, test-release ]
+    if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     name: Docker image        
@@ -282,6 +376,7 @@ jobs:
 
   publish-release:
     needs: [ build-debian-pkg, publish-docker-image, build-release ]
+    if: always() && contains(needs.build-release.result, 'success') && contains(needs.build-debian-pkg.result, 'success') && contains(needs.publish-docker-image.result, 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     name: Publish release notes
@@ -339,8 +434,8 @@ jobs:
 
   In-case-of-failure:
     name: "In case of failure: remove remote git tag pointing to the new version."
-    needs: [ publish-release, build-release ]
-    if: always() && !contains(needs.build-release.result, 'success')
+    needs: [ publish-release, build-release, test-release, build-debian-pkg, publish-docker-image ]
+    if: always() && !contains(needs.build-release.result, 'success') && contains(needs.test-release.result, 'failure') && !contains(needs.publish-release.result, 'success') && !contains(needs.build-debian-pkg.result, 'success') && !contains(needs.publish-docker-image.result, 'success')
     runs-on: ubuntu-22.04
 
     steps:

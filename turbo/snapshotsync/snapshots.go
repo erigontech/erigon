@@ -29,6 +29,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tidwall/btree"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	common2 "github.com/erigontech/erigon-lib/common"
@@ -43,9 +46,6 @@ import (
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-	"github.com/erigontech/erigon/turbo/silkworm"
-	"github.com/tidwall/btree"
-	"golang.org/x/sync/errgroup"
 )
 
 type SortedRange interface {
@@ -569,6 +569,10 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	s.segmentsMin.Store(segmentsMin)
 	s.recalcVisibleFiles()
 
+	if cfg.NoDownloader {
+		s.DownloadComplete()
+	}
+
 	return s
 }
 
@@ -598,9 +602,10 @@ func (s *RoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
 
 func (s *RoSnapshots) DownloadComplete() {
 	wasReady := s.downloadReady.Swap(true)
-
-	if !wasReady && s.SegmentsReady() {
-		s.ready.set()
+	if !wasReady {
+		if s.SegmentsReady() {
+			s.ready.set()
+		}
 	}
 }
 
@@ -981,7 +986,12 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 	}
 
 	s.recalcVisibleFiles()
-	s.segmentsReady.Store(true)
+	wasReady := s.segmentsReady.Swap(true)
+	if !wasReady {
+		if s.downloadReady.Load() {
+			s.ready.set()
+		}
+	}
 
 	return nil
 }
@@ -1146,7 +1156,12 @@ func (s *RoSnapshots) OpenFolder() error {
 	}
 
 	s.recalcVisibleFiles()
-	s.segmentsReady.Store(true)
+	wasReady := s.segmentsReady.Swap(true)
+	if !wasReady {
+		if s.downloadReady.Load() {
+			s.ready.set()
+		}
+	}
 	return nil
 }
 
@@ -1442,76 +1457,6 @@ func (s *RoSnapshots) PrintDebug() {
 			return true
 		})
 	}
-}
-
-func mappedHeaderSnapshot(sn *DirtySegment) *silkworm.MappedHeaderSnapshot {
-	segmentRegion := silkworm.NewMemoryMappedRegion(sn.FilePath(), sn.DataHandle(), sn.Size())
-	idxRegion := silkworm.NewMemoryMappedRegion(sn.Index().FilePath(), sn.Index().DataHandle(), sn.Index().Size())
-	return silkworm.NewMappedHeaderSnapshot(segmentRegion, idxRegion)
-}
-
-func mappedBodySnapshot(sn *DirtySegment) *silkworm.MappedBodySnapshot {
-	segmentRegion := silkworm.NewMemoryMappedRegion(sn.FilePath(), sn.DataHandle(), sn.Size())
-	idxRegion := silkworm.NewMemoryMappedRegion(sn.Index().FilePath(), sn.Index().DataHandle(), sn.Index().Size())
-	return silkworm.NewMappedBodySnapshot(segmentRegion, idxRegion)
-}
-
-func mappedTxnSnapshot(sn *DirtySegment) *silkworm.MappedTxnSnapshot {
-	segmentRegion := silkworm.NewMemoryMappedRegion(sn.FilePath(), sn.DataHandle(), sn.Size())
-	idxTxnHash := sn.Index(coresnaptype.Indexes.TxnHash)
-	idxTxnHashRegion := silkworm.NewMemoryMappedRegion(idxTxnHash.FilePath(), idxTxnHash.DataHandle(), idxTxnHash.Size())
-	idxTxnHash2BlockNum := sn.Index(coresnaptype.Indexes.TxnHash2BlockNum)
-	idxTxnHash2BlockRegion := silkworm.NewMemoryMappedRegion(idxTxnHash2BlockNum.FilePath(), idxTxnHash2BlockNum.DataHandle(), idxTxnHash2BlockNum.Size())
-	return silkworm.NewMappedTxnSnapshot(segmentRegion, idxTxnHashRegion, idxTxnHash2BlockRegion)
-}
-
-func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm) error {
-	v := s.View()
-	defer v.Close()
-
-	s.visibleLock.RLock()
-	defer s.visibleLock.RUnlock()
-
-	mappedHeaderSnapshots := make([]*silkworm.MappedHeaderSnapshot, 0)
-	if vis := v.segments[coresnaptype.Enums.Headers]; vis != nil {
-		for _, headerSegment := range vis.Segments {
-			mappedHeaderSnapshots = append(mappedHeaderSnapshots, mappedHeaderSnapshot(headerSegment.src))
-		}
-	}
-
-	mappedBodySnapshots := make([]*silkworm.MappedBodySnapshot, 0)
-	if vis := v.segments[coresnaptype.Enums.Bodies]; vis != nil {
-		for _, bodySegment := range vis.Segments {
-			mappedBodySnapshots = append(mappedBodySnapshots, mappedBodySnapshot(bodySegment.src))
-		}
-		return nil
-
-	}
-
-	mappedTxnSnapshots := make([]*silkworm.MappedTxnSnapshot, 0)
-	if txs := v.segments[coresnaptype.Enums.Transactions]; txs != nil {
-		for _, txnSegment := range txs.Segments {
-			mappedTxnSnapshots = append(mappedTxnSnapshots, mappedTxnSnapshot(txnSegment.src))
-		}
-	}
-
-	if len(mappedHeaderSnapshots) != len(mappedBodySnapshots) || len(mappedBodySnapshots) != len(mappedTxnSnapshots) {
-		return errors.New("addSnapshots: the number of headers/bodies/txs snapshots must be the same")
-	}
-
-	for i := 0; i < len(mappedHeaderSnapshots); i++ {
-		mappedSnapshot := &silkworm.MappedChainSnapshot{
-			Headers: mappedHeaderSnapshots[i],
-			Bodies:  mappedBodySnapshots[i],
-			Txs:     mappedTxnSnapshots[i],
-		}
-		err := silkwormInstance.AddSnapshot(mappedSnapshot)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 type View struct {

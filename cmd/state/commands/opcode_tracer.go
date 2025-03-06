@@ -374,7 +374,7 @@ func (ot *opcodeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tra
 
 		lseg := len(currentEntry.Bblocks)
 		isFirstBblock := lseg == 0
-		isContinuous := pc16 == currentEntry.lastPc16+1 || currentEntry.lastOp.IsPush()
+		isContinuous := pc16 == currentEntry.lastPc16+1 || currentEntry.lastOp.IsPushWithImmediateArgs()
 		if isFirstBblock || !isContinuous {
 			// Record the end of the past bblock, if there is one
 			if !isFirstBblock {
@@ -735,7 +735,7 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	chainConfig *chain2.Config, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config, trace bool, logger log.Logger) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
 	var receipts types.Receipts

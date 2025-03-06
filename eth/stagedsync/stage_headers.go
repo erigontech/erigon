@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -437,7 +437,7 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 		}
 		defer headerCursor.Close()
 		var k, v []byte
-		for k, v, err = headerCursor.Seek(hexutility.EncodeTs(u.UnwindPoint + 1)); err == nil && k != nil; k, v, err = headerCursor.Next() {
+		for k, v, err = headerCursor.Seek(hexutil.EncodeTs(u.UnwindPoint + 1)); err == nil && k != nil; k, v, err = headerCursor.Next() {
 			var h types.Header
 			if err = rlp.DecodeBytes(v, &h); err != nil {
 				return err

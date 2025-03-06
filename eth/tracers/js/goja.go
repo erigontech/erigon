@@ -29,7 +29,7 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
@@ -234,7 +234,7 @@ func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from 
 	rules := env.ChainConfig.Rules(env.BlockNumber, env.Time)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 	t.ctx["block"] = t.vm.ToValue(t.env.BlockNumber)
-	t.ctx["gas"] = t.vm.ToValue(tx.GetGas())
+	t.ctx["gas"] = t.vm.ToValue(tx.GetGasLimit())
 	gasPriceBig, err := t.toBig(t.vm, env.GasPrice.String())
 	if err != nil {
 		t.err = err
@@ -424,7 +424,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return ""
 		}
-		return hexutility.Encode(b)
+		return hexutil.Encode(b)
 	})
 	vm.Set("toWord", func(v goja.Value) goja.Value {
 		// TODO: add test with []byte len < 32 or > 32
@@ -573,7 +573,7 @@ func (o *opObj) ToString() string {
 }
 
 func (o *opObj) IsPush() bool {
-	return o.op.IsPush()
+	return o.op == vm.PUSH0 || o.op.IsPushWithImmediateArgs()
 }
 
 func (o *opObj) setupObject() *goja.Object {

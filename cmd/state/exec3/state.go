@@ -21,8 +21,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -103,7 +104,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 
 		isMining: isMining,
 	}
-	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
+	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0))
 	w.vmCfg = vm.Config{Debug: true, Tracer: w.callTracer.Tracer().Hooks}
 	w.ibs = state.New(w.stateReader)
 	return w
@@ -266,19 +267,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			}
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGas(), rw.chainConfig.GetMaxBlobGasPerBlock())
+		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
 		tx := txTask.Tx
 		msg := txTask.TxAsMessage
-		if msg.FeeCap().IsZero() && rw.engine != nil {
-			// Only zero-gas transactions may be service ones
-			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, true /* constCall */, nil)
-			}
-			msg.SetIsFree(rw.engine.IsServiceTransaction(msg.From(), syscall))
-		}
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
@@ -286,7 +280,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			rw.hooks.OnTxStart(rw.evm.GetVMContext(), tx, msg.From())
 		}
 		// MA applytx
-		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
+		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.engine)
 		if err != nil {
 			txTask.Error = err
 			if rw.hooks != nil && rw.hooks.OnTxEnd != nil {

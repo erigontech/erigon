@@ -26,8 +26,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
@@ -49,7 +49,7 @@ import (
 const API_LEVEL = 8
 
 type TransactionsWithReceipts struct {
-	Txs       []*RPCTransaction        `json:"txs"`
+	Txs       []*ethapi.RPCTransaction `json:"txs"`
 	Receipts  []map[string]interface{} `json:"receipts"`
 	FirstPage bool                     `json:"firstPage"`
 	LastPage  bool                     `json:"lastPage"`
@@ -65,7 +65,7 @@ type OtterscanAPI interface {
 	GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error)
 	HasCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error)
 	TraceTransaction(ctx context.Context, hash common.Hash) ([]*TraceEntry, error)
-	GetTransactionError(ctx context.Context, hash common.Hash) (hexutility.Bytes, error)
+	GetTransactionError(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 	GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error)
 	GetContractCreator(ctx context.Context, addr common.Address) (*ContractCreatorData, error)
 }
@@ -170,7 +170,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	if tracer != nil && tracer.Hooks.OnTxStart != nil {
 		tracer.Hooks.OnTxStart(vmenv.GetVMContext(), txn, msg.From())
 	}
-	result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */)
+	result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */, engine)
 	if err != nil {
 		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
 			tracer.Hooks.OnTxEnd(nil, err)
@@ -350,7 +350,7 @@ func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, sender
 		txn := block.Transactions()[receipt.TransactionIndex]
 		var effectiveGasPrice uint64
 		if !chainConfig.IsLondon(block.NumberU64()) {
-			effectiveGasPrice = txn.GetPrice().Uint64()
+			effectiveGasPrice = txn.GetTipCap().Uint64()
 		} else {
 			baseFee, _ := uint256.FromBig(block.BaseFee())
 			gasPrice := new(big.Int).Add(block.BaseFee(), txn.GetEffectiveGasTip(baseFee).ToBig())

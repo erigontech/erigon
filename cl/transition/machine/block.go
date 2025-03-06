@@ -21,11 +21,11 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/pkg/errors"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -117,8 +117,22 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 
 // ProcessOperations is called by ProcessBlock and processes the block body operations
 func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (signatures [][]byte, messages [][]byte, publicKeys [][]byte, err error) {
-	if blockBody.GetDeposits().Len() != int(maximumDeposits(s)) {
-		return nil, nil, nil, errors.New("outstanding deposits do not match maximum deposits")
+	maxDepositsAllowed := int(min(s.BeaconConfig().MaxDeposits, s.Eth1Data().DepositCount-s.Eth1DepositIndex()))
+	if s.Version() <= clparams.DenebVersion {
+		if blockBody.GetDeposits().Len() != maxDepositsAllowed {
+			return nil, nil, nil, errors.New("outstanding deposits do not match maximum deposits")
+		}
+	} else if s.Version() >= clparams.ElectraVersion {
+		eth1DepositIndexLimit := min(s.Eth1Data().DepositCount, s.GetDepositRequestsStartIndex())
+		if s.Eth1DepositIndex() < eth1DepositIndexLimit {
+			if uint64(blockBody.GetDeposits().Len()) != min(s.BeaconConfig().MaxDeposits, eth1DepositIndexLimit-s.Eth1DepositIndex()) {
+				return nil, nil, nil, errors.New("outstanding deposits do not match maximum deposits")
+			}
+		} else {
+			if blockBody.GetDeposits().Len() != 0 {
+				return nil, nil, nil, errors.New("no deposits allowed after deposit contract limit")
+			}
+		}
 	}
 
 	// Process each proposer slashing
@@ -330,13 +344,5 @@ func processBlsToExecutionChanges(impl BlockOperationProcessor, s abstract.Beaco
 		return nil
 	})
 
-	return
-}
-
-func maximumDeposits(s abstract.BeaconState) (maxDeposits uint64) {
-	maxDeposits = s.Eth1Data().DepositCount - s.Eth1DepositIndex()
-	if maxDeposits > s.BeaconConfig().MaxDeposits {
-		maxDeposits = s.BeaconConfig().MaxDeposits
-	}
 	return
 }

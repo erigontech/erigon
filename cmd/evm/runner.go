@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	common2 "github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -234,7 +234,7 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Printf("Invalid input length for hex data (%d)\n", len(hexcode))
 			os.Exit(1)
 		}
-		code = hexutility.MustDecodeHex(string(hexcode))
+		code = hexutil.MustDecodeHex(string(hexcode))
 	} else if fn := ctx.Args().First(); len(fn) > 0 {
 		// EASM-file to compile
 		src, err := os.ReadFile(fn)
@@ -298,7 +298,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		hexInput = []byte(ctx.String(InputFlag.Name))
 	}
-	input := hexutility.MustDecodeHex(string(bytes.TrimSpace(hexInput)))
+	input := hexutil.MustDecodeHex(string(bytes.TrimSpace(hexInput)))
 
 	var execFunc func() ([]byte, uint64, error)
 	if ctx.Bool(CreateFlag.Name) {

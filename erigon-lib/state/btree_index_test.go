@@ -19,7 +19,6 @@ package state
 import (
 	"bytes"
 	"fmt"
-	"path"
 	"path/filepath"
 	"testing"
 
@@ -83,7 +82,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 
 	t.Run("empty index", func(t *testing.T) {
 		dataPath := generateKV(t, tmp, 52, 180, 0, logger, 0)
-		indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+		indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 		buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
@@ -94,7 +93,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	})
 	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
 
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
@@ -169,7 +168,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 	require.NoError(t, err)
 
@@ -222,7 +221,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	compressFlags := seg.CompressKeys | seg.CompressVals
 	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
 
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)

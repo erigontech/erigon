@@ -101,7 +101,7 @@ func ExecuteBlockEphemerally(
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
+	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time()))
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockStart != nil {
 		td := chainReader.GetTd(block.ParentHash(), block.NumberU64()-1)
@@ -267,7 +267,19 @@ func rlpHash(x interface{}) (h libcommon.Hash) {
 	return h
 }
 
-func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, tracing *tracing.Hooks) (result []byte, err error) {
+func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, tracing *tracing.Hooks) (result []byte, err error) {
+	isBor := chainConfig.Bor != nil
+	var author *libcommon.Address
+	if isBor {
+		author = &header.Coinbase
+	} else {
+		author = &state.SystemAddress
+	}
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
+	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, engine, constCall, tracing)
+}
+
+func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, blockContext evmtypes.BlockContext, engine consensus.EngineReader, constCall bool, tracing *tracing.Hooks) (result []byte, err error) {
 	if tracing != nil {
 		if tracing.OnSystemCallStart != nil {
 			tracing.OnSystemCallStart()
@@ -292,15 +304,11 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 	// Create a new context to be used in the EVM environment
 	isBor := chainConfig.Bor != nil
 	var txContext evmtypes.TxContext
-	var author *libcommon.Address
 	if isBor {
-		author = &header.Coinbase
 		txContext = evmtypes.TxContext{}
 	} else {
-		author = &state.SystemAddress
 		txContext = NewEVMTxContext(msg)
 	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.Call(
@@ -363,7 +371,6 @@ func FinalizeBlockExecution(
 	if isMining {
 		newBlock, newTxs, newReceipt, retRequests, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
 	} else {
-		// var rss types.Requests
 		newTxs, newReceipt, retRequests, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, logger)
 	}
 	if err != nil {
@@ -395,7 +402,7 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	return nil
 }
 
-func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool) error {
+func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
 	if gasUsed != h.GasUsed {
 		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
 			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
@@ -414,6 +421,9 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 			if isMining {
 				h.ReceiptHash = receiptHash
 				return nil
+			}
+			if dbg.LogHashMismatchReason() {
+				logReceipts(receipts, txns, chainConfig, h, logger)
 			}
 			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
 				receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())

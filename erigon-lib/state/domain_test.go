@@ -34,10 +34,12 @@ import (
 	"testing"
 	"time"
 
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
@@ -46,7 +48,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -918,7 +919,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 		require.EqualValues(t, v[:], storedV, label)
 	}
 
-	from, to := d.stepsRangeInDB(tx)
+	from, to := dc.stepsRangeInDB(tx)
 	require.Equal(t, 3, int(from))
 	require.Equal(t, 4, int(to))
 
@@ -1031,6 +1032,7 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.hist.iiCfg.salt = &salt
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.aggregationStep = aggStep
+	cfg.hist.iiCfg.name = kv.InvertedIdx("dummy")
 
 	d, err := NewDomain(cfg, log.New())
 	if err != nil {
@@ -1183,7 +1185,13 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		writer.SetTxNum(uint64(i))
 
 		for j := 0; j < len(keys); j++ {
-			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			acc := accounts3.Account{
+				Nonce:       uint64(i),
+				Balance:     *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts3.SerialiseV3(&acc)
 
 			err = writer.PutWithPrev(keys[j], nil, buf, prev, 0)
 			require.NoError(t, err)
@@ -1394,7 +1402,13 @@ func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	for i := uint64(0); i < keyTxsLimit; i++ {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 		jitter := r.IntN(10e7)
-		value := types.EncodeAccountBytesV3(i, uint256.NewInt(i*10e4+uint64(jitter)), nil, 0)
+		acc := accounts3.Account{
+			Nonce:       i,
+			Balance:     *uint256.NewInt(i*10e4 + uint64(jitter)),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		value := accounts3.SerialiseV3(&acc)
 
 		updates = append(updates, upd{txNum: txNum, value: value})
 		usedTxNums[txNum] = true
@@ -1429,10 +1443,14 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 
 	for i := uint64(0); i < keyTxsLimit; i++ {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
-		value := make([]byte, 10)
-		r.Read(value)
+		up := upd{txNum: txNum, value: []byte{}}
 
-		updates = append(updates, upd{txNum: txNum, value: value})
+		if r.Rand.IntN(100) < 85 || i == keyTxsLimit-1 { // 15% rate for delete, last tx is never a deletion
+			up.value = make([]byte, 10)
+			r.Read(up.value)
+		}
+
+		updates = append(updates, up)
 		usedTxNums[txNum] = true
 	}
 	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
@@ -1476,11 +1494,13 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
-		p := []byte{}
+		pv, ps := []byte{}, uint64(0)
 		for i := 0; i < len(updates); i++ {
 			writer.SetTxNum(updates[i].txNum)
-			writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
-			p = common.Copy(updates[i].value)
+			if i > 0 {
+				pv, ps = updates[i-1].value, updates[i-1].txNum/d.aggregationStep
+			}
+			writer.PutWithPrev([]byte(key), nil, updates[i].value, pv, ps)
 		}
 	}
 	writer.SetTxNum(totalTx)
@@ -1506,6 +1526,11 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		for i := 1; i < len(updates); i++ {
 			v, ok, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
 			require.NoError(err)
+			if len(updates[i-1].value) == 0 {
+				require.False(ok)
+				require.Empty(v, "value was deleted, expected empty slice, got %x", v)
+				continue
+			}
 			require.True(ok)
 			require.EqualValuesf(updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}
@@ -1540,18 +1565,32 @@ func TestDomainRange(t *testing.T) {
 	keySize1 := uint64(2)
 	keySize2 := uint64(2)
 	totalTx := uint64(300)
-	keyTxsLimit := uint64(2)
+	keyTxsLimit := uint64(3)
 	keyLimit := uint64(10)
 
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	cutoffTxnum := uint64(190)
+	keysLeftAfterCutoff := make(map[string]struct{})
+	keysLatest := make(map[string]struct{})
+
 	for key, updates := range data {
-		p := []byte{}
+		pv, ps := []byte{}, uint64(0)
 		for i := 0; i < len(updates); i++ {
 			writer.SetTxNum(updates[i].txNum)
-			err = writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
+			if i > 0 {
+				pv, ps = updates[i-1].value, updates[i-1].txNum/d.aggregationStep
+			}
+			err = writer.PutWithPrev([]byte(key), nil, updates[i].value, pv, ps)
 			require.NoError(err)
-			p = common.Copy(updates[i].value)
+
+			if updates[i].txNum >= cutoffTxnum && len(updates[i].value) > 0 {
+				keysLeftAfterCutoff[key] = struct{}{}
+			}
+			keysLatest[key] = struct{}{}
+			if len(updates[i].value) == 0 {
+				delete(keysLatest, key)
+			}
 		}
 	}
 	writer.SetTxNum(totalTx)
@@ -1572,13 +1611,13 @@ func TestDomainRange(t *testing.T) {
 	defer dc.Close()
 
 	{
-		it, err := dc.ht.RangeAsOf(ctx, 190, nil, nil, order.Asc, -1, tx)
+		it, err := dc.ht.RangeAsOf(ctx, cutoffTxnum, nil, nil, order.Asc, -1, tx)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(3, len(keys))
-		require.Equal(3, len(vals))
+		require.Equal(len(keysLeftAfterCutoff), len(keys))
+		require.Equal(len(keysLeftAfterCutoff), len(vals))
 	}
 
 	{
@@ -1587,28 +1626,31 @@ func TestDomainRange(t *testing.T) {
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(5, len(keys))
-		require.Equal(5, len(vals))
+		require.Equal(len(keysLatest), len(keys))
+		require.Equal(len(keysLatest), len(vals))
 	}
 
 	{
-		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, 190, order.Asc, -1)
+		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, cutoffTxnum, order.Asc, -1)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(5, len(keys))
-		require.Equal(5, len(vals))
+
+		// we expect here more keys than len(keysLeftAfterCutoff) because we are query Domain here, not History
+		require.Equal(len(keysLatest), len(keys))
+		require.Equal(len(keysLatest), len(vals))
 	}
 
 	{
-		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, 190, order.Asc, 4)
+		lim := len(keysLatest) - 1
+		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, cutoffTxnum, order.Asc, lim)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(4, len(keys))
-		require.Equal(4, len(vals))
+		require.Equal(lim, len(keys))
+		require.Equal(lim, len(vals))
 	}
 }
 
@@ -1768,8 +1810,14 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	for key, updates := range data {
 		kc++
 		for i := 1; i < len(updates); i++ {
-			v, _, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
+			v, ok, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
 			require.NoError(t, err)
+			if len(updates[i-1].value) == 0 { // was deleted
+				require.False(t, ok)
+				require.Empty(t, v, "value was deleted, expected empty slice, got %x", v)
+				continue
+			}
+			require.True(t, ok)
 			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}
 		if len(updates) == 0 {
@@ -2528,5 +2576,5 @@ func TestCanBuild(t *testing.T) {
 	canBuild = dc.canBuild(tx)
 	require.NoError(t, err)
 	require.True(t, canBuild)
-	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep*2+1), nil, 0)
+	_ = writer.PutWithPrev(k, nil, hexutil.EncodeTs(d.aggregationStep*2+1), nil, 0)
 }

@@ -159,7 +159,7 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 }
 
 func isStateSnapshot(name string) bool {
-	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor") || strings.HasPrefix(name, "domain")
 }
 
 func canSnapshotBePruned(name string) bool {

@@ -18,6 +18,7 @@ package types
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -25,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gballet/go-verkle"
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -77,8 +79,27 @@ func (tr *TRand) RandHash() libcommon.Hash {
 	return libcommon.Hash(tr.RandBytes(32))
 }
 
+func (tr *TRand) RandBoolean() bool {
+	return tr.rnd.Intn(2) == 0
+}
+
 func (tr *TRand) RandBloom() Bloom {
 	return Bloom(tr.RandBytes(BloomByteLength))
+}
+
+func (tr *TRand) RandVerkleKeyValuePairs(count int) []verkle.KeyValuePair {
+	res := make([]verkle.KeyValuePair, count)
+	for i := 0; i < count; i++ {
+		res[i] = tr.RandVerkleKeyValuePair()
+	}
+	return res
+}
+
+func (tr *TRand) RandVerkleKeyValuePair() verkle.KeyValuePair {
+	return verkle.KeyValuePair{
+		Key:   tr.RandBytes(tr.RandIntInRange(1, 32)),
+		Value: tr.RandBytes(tr.RandIntInRange(1, 32)),
+	}
 }
 
 func (tr *TRand) RandWithdrawal() *Withdrawal {
@@ -117,6 +138,60 @@ func (tr *TRand) RandHeader() *Header {
 	}
 }
 
+func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
+	skipSet := make(map[string]struct{}, len(skipFields))
+	for _, field := range skipFields {
+		skipSet[field] = struct{}{}
+	}
+
+	emptyUint64 := uint64(0)
+	h := &Header{}
+	// note unexported fields are skipped in reflection auto-assign as they are not assignable
+	h.mutable = tr.RandBoolean()
+	headerValue := reflect.ValueOf(h)
+	headerElem := headerValue.Elem()
+	numField := headerElem.Type().NumField()
+	for i := 0; i < numField; i++ {
+		field := headerElem.Field(i)
+		if !field.CanSet() {
+			continue
+		}
+
+		if _, skip := skipSet[headerElem.Type().Field(i).Name]; skip {
+			continue
+		}
+
+		switch field.Type() {
+		case reflect.TypeOf(libcommon.Hash{}):
+			field.Set(reflect.ValueOf(tr.RandHash()))
+		case reflect.TypeOf(&libcommon.Hash{}):
+			randHash := tr.RandHash()
+			field.Set(reflect.ValueOf(&randHash))
+		case reflect.TypeOf(libcommon.Address{}):
+			field.Set(reflect.ValueOf(tr.RandAddress()))
+		case reflect.TypeOf(Bloom{}):
+			field.Set(reflect.ValueOf(tr.RandBloom()))
+		case reflect.TypeOf(BlockNonce{}):
+			field.Set(reflect.ValueOf(BlockNonce(tr.RandBytes(8))))
+		case reflect.TypeOf(&big.Int{}):
+			field.Set(reflect.ValueOf(tr.RandBig()))
+		case reflect.TypeOf(uint64(0)):
+			field.Set(reflect.ValueOf(*tr.RandUint64()))
+		case reflect.TypeOf(&emptyUint64):
+			field.Set(reflect.ValueOf(tr.RandUint64()))
+		case reflect.TypeOf([]byte{}):
+			field.Set(reflect.ValueOf(tr.RandBytes(tr.RandIntInRange(128, 1024))))
+		case reflect.TypeOf(false):
+			field.Set(reflect.ValueOf(tr.RandBoolean()))
+		case reflect.TypeOf([]verkle.KeyValuePair{}):
+			field.Set(reflect.ValueOf(tr.RandVerkleKeyValuePairs(tr.RandIntInRange(1, 3))))
+		default:
+			panic(fmt.Sprintf("don't know how to generate rand value for Header field type %v - please add handler", field.Type()))
+		}
+	}
+	return h
+}
+
 func (tr *TRand) RandAccessTuple() AccessTuple {
 	n := tr.RandIntInRange(1, 5)
 	sk := make([]libcommon.Hash, n)
@@ -141,7 +216,7 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 	auths := make([]Authorization, size)
 	for i := 0; i < size; i++ {
 		auths[i] = Authorization{
-			ChainID: *tr.RandUint64(),
+			ChainID: *tr.RandUint256(),
 			Address: tr.RandAddress(),
 			Nonce:   *tr.RandUint64(),
 			YParity: uint8(*tr.RandUint64()),
@@ -159,16 +234,22 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	} else {
 		txType = _type
 	}
-	to := tr.RandAddress()
+	var to *libcommon.Address
+	if tr.RandIntInRange(0, 10)%2 == 0 {
+		_to := tr.RandAddress()
+		to = &_to
+	} else {
+		to = nil
+	}
 	commonTx := CommonTx{
-		Nonce: *tr.RandUint64(),
-		Gas:   *tr.RandUint64(),
-		To:    &to,
-		Value: uint256.NewInt(*tr.RandUint64()), // wei amount
-		Data:  tr.RandBytes(tr.RandIntInRange(128, 1024)),
-		V:     *tr.RandUint256(),
-		R:     *tr.RandUint256(),
-		S:     *tr.RandUint256(),
+		Nonce:    *tr.RandUint64(),
+		GasLimit: *tr.RandUint64(),
+		To:       to,
+		Value:    uint256.NewInt(*tr.RandUint64()), // wei amount
+		Data:     tr.RandBytes(tr.RandIntInRange(128, 1024)),
+		V:        *tr.RandUint256(),
+		R:        *tr.RandUint256(),
+		S:        *tr.RandUint256(),
 	}
 	switch txType {
 	case LegacyTxType:
@@ -189,7 +270,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		return &DynamicFeeTransaction{
 			CommonTx:   commonTx, //nolint
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
-			Tip:        uint256.NewInt(*tr.RandUint64()),
+			TipCap:     uint256.NewInt(*tr.RandUint64()),
 			FeeCap:     uint256.NewInt(*tr.RandUint64()),
 			AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 		}
@@ -199,7 +280,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			DynamicFeeTransaction: DynamicFeeTransaction{
 				CommonTx:   commonTx, //nolint
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
-				Tip:        uint256.NewInt(*tr.RandUint64()),
+				TipCap:     uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
 				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 			},
@@ -211,7 +292,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			DynamicFeeTransaction: DynamicFeeTransaction{
 				CommonTx:   commonTx, //nolint
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
-				Tip:        uint256.NewInt(*tr.RandUint64()),
+				TipCap:     uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
 				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 			},
@@ -360,11 +441,10 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 	check(t, "Tx.Type", a.Type(), b.Type())
 	check(t, "Tx.GetChainID", a.GetChainID(), b.GetChainID())
 	check(t, "Tx.GetNonce", a.GetNonce(), b.GetNonce())
-	check(t, "Tx.GetPrice", a.GetPrice(), b.GetPrice())
-	check(t, "Tx.GetTip", a.GetTip(), b.GetTip())
+	check(t, "Tx.GetTipCap", a.GetTipCap(), b.GetTipCap())
 	check(t, "Tx.GetFeeCap", a.GetFeeCap(), b.GetFeeCap())
 	check(t, "Tx.GetBlobHashes", a.GetBlobHashes(), b.GetBlobHashes())
-	check(t, "Tx.GetGas", a.GetGas(), b.GetGas())
+	check(t, "Tx.GetGasLimit", a.GetGasLimit(), b.GetGasLimit())
 	check(t, "Tx.GetBlobGas", a.GetBlobGas(), b.GetBlobGas())
 	check(t, "Tx.GetValue", a.GetValue(), b.GetValue())
 	check(t, "Tx.GetTo", a.GetTo(), b.GetTo())
@@ -441,6 +521,9 @@ func TestTransactionEncodeDecodeRLP(t *testing.T) {
 		enc := tr.RandTransaction(-1)
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
+			if enc.Type() >= BlobTxType && errors.Is(err, ErrNilToFieldTx) {
+				continue
+			}
 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
 		}
 
@@ -507,6 +590,9 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 		enc := tr.RandBody()
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
+			if errors.Is(err, ErrNilToFieldTx) {
+				continue
+			}
 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
 		}
 

@@ -171,6 +171,7 @@ func (tx *Tx) ForceReopenAggCtx() {
 	tx.filesTx.Close()
 	tx.filesTx = tx.Agg().BeginFilesRo()
 }
+func (tx *Tx) FreezeInfo() kv.FreezeInfo { return tx.filesTx }
 
 func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
 func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
@@ -225,7 +226,7 @@ func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err er
 	return v, step, nil
 }
 func (tx *Tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.filesTx.GetAsOf(tx.MdbxTx, name, k, ts)
+	return tx.filesTx.GetAsOf(name, k, ts, tx.MdbxTx)
 }
 
 func (tx *Tx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {

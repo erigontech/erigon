@@ -486,11 +486,10 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	}
 
 	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
-		// TODO @somnathb1 - if later iterations and/or tests don't need this from genesis.json, remove the following
 		if g.RequestsHash != nil {
 			head.RequestsHash = g.RequestsHash
 		} else {
-			head.RequestsHash = &types.EmptyRootHash
+			head.RequestsHash = &types.EmptyRequestsHash
 		}
 	}
 

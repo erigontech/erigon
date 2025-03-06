@@ -72,6 +72,8 @@ type ExecutionResult struct {
 	SenderInitBalance   *uint256.Int
 	CoinbaseInitBalance *uint256.Int
 	FeeTipped           *uint256.Int
+	EvmRefund           uint64 // Gas refunded by EVM without considering refundQuotient
+	EvmGasUsed          uint64 // Gas used by the execution of all instructions only
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -136,7 +138,6 @@ type IntraBlockState interface {
 	// eip-7702; delegated designations
 	ResolveCodeHash(common.Address) (common.Hash, error)
 	ResolveCode(common.Address) ([]byte, error)
-	ResolveCodeSize(common.Address) (int, error)
 	GetDelegatedDesignation(common.Address) (common.Address, bool, error)
 
 	AddRefund(uint64)

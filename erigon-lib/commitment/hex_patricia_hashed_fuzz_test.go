@@ -65,13 +65,13 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 		err = ms2.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		upds := WrapKeyUpdates(t, ModeDirect, hph.HashAndNibblizeKey, nil, nil)
+		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, nil, nil)
 		rootHashDirect, err := hph.Process(ctx, upds, "")
 		require.NoError(t, err)
 		require.Len(t, rootHashDirect, length.Hash, "invalid root hash length")
 		upds.Close()
 
-		anotherUpds := WrapKeyUpdates(t, ModeUpdate, hphAnother.HashAndNibblizeKey, nil, nil)
+		anotherUpds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, nil, nil)
 		rootHashUpdate, err := hphAnother.Process(ctx, anotherUpds, "")
 		require.NoError(t, err)
 		require.Len(t, rootHashUpdate, length.Hash, "invalid root hash length")
@@ -149,7 +149,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 			err := ms.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 			require.NoError(t, err)
 
-			updsDirect := WrapKeyUpdates(t, ModeDirect, hph.HashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+			updsDirect := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 			rootHashDirect, err := hph.Process(ctx, updsDirect, "")
 			updsDirect.Close()
 			require.NoError(t, err)
@@ -158,7 +158,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 			err = ms2.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 			require.NoError(t, err)
 
-			upds := WrapKeyUpdates(t, ModeUpdate, hphAnother.HashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+			upds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
 			rootHashAnother, err := hphAnother.Process(ctx, upds, "")
 			upds.Close()
 			require.NoError(t, err)
@@ -213,7 +213,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 			t.Fatal(err)
 		}
 
-		upds := WrapKeyUpdates(t, ModeDirect, hph.HashAndNibblizeKey, plainKeys, updates)
+		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 		defer upds.Close()
 
 		rootHash, err := hph.Process(ctx, upds, "")

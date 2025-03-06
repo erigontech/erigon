@@ -23,7 +23,7 @@ import (
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/temporal/historyv2"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -78,7 +78,7 @@ func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	marker := NewVerkleMarker(tmpdir)
 	defer marker.Rollback()
 
-	for k, v, err := accountCursor.Seek(hexutility.EncodeTs(from)); k != nil; k, v, err = accountCursor.Next() {
+	for k, v, err := accountCursor.Seek(hexutil.EncodeTs(from)); k != nil; k, v, err = accountCursor.Next() {
 		if err != nil {
 			return err
 		}

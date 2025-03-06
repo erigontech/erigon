@@ -41,12 +41,3 @@ var All = []string{
 	Chiado,
 	Test,
 }
-
-func IsKnownNetwork(s string) bool {
-	for _, n := range All {
-		if n == s {
-			return true
-		}
-	}
-	return false
-}

@@ -326,9 +326,6 @@ func enable7516(jt *JumpTable) {
 }
 
 func enable7702(jt *JumpTable) {
-	jt[EXTCODECOPY].dynamicGas = gasExtCodeCopyEIP7702
-	jt[EXTCODESIZE].dynamicGas = gasEip7702CodeCheck
-	jt[EXTCODEHASH].dynamicGas = gasEip7702CodeCheck
 	jt[CALL].dynamicGas = gasCallEIP7702
 	jt[CALLCODE].dynamicGas = gasCallCodeEIP7702
 	jt[STATICCALL].dynamicGas = gasStaticCallEIP7702

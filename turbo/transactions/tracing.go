@@ -83,15 +83,8 @@ func ComputeTxContext(statedb *state.IntraBlockState, engine consensus.EngineRea
 	txn := block.Transactions()[txIndex]
 	statedb.SetTxContext(txIndex)
 	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
-	if msg.FeeCap().IsZero() && engine != nil {
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, cfg, statedb, block.HeaderNoCopy(), engine, true /* constCall */, nil)
-		}
-		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
-	}
-
-	TxContext := core.NewEVMTxContext(msg)
-	return msg, TxContext, nil
+	txContext := core.NewEVMTxContext(msg)
+	return msg, txContext, nil
 }
 
 // TraceTx configures a new tracer according to the provided configuration, and
@@ -99,6 +92,7 @@ func ComputeTxContext(statedb *state.IntraBlockState, engine consensus.EngineRea
 // be tracer dependent.
 func TraceTx(
 	ctx context.Context,
+	engine consensus.EngineReader,
 	tx types.Transaction,
 	message core.Message,
 	blockCtx evmtypes.BlockContext,
@@ -124,7 +118,7 @@ func TraceTx(
 		if tracer != nil && tracer.OnTxStart != nil {
 			tracer.OnTxStart(evm.GetVMContext(), tx, message.From())
 		}
-		result, err := core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */)
+		result, err := core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */, engine)
 		if err != nil {
 			if tracer != nil && tracer.OnTxEnd != nil {
 				tracer.OnTxEnd(nil, err)

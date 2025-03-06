@@ -33,7 +33,7 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/kv"
@@ -176,7 +176,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingBlock = blockChain.Blocks[0]
 	b.pendingReceipts = blockChain.Receipts[0]
 	b.pendingHeader = blockChain.Headers[0]
-	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit).AddBlobGas(b.m.ChainConfig.GetMaxBlobGasPerBlock())
+	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit).AddBlobGas(b.m.ChainConfig.GetMaxBlobGasPerBlock(b.pendingHeader.Time))
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
 	}
@@ -529,7 +529,7 @@ func newRevertError(result *evmtypes.ExecutionResult) *revertError {
 	}
 	return &revertError{
 		error:  err,
-		reason: hexutility.Encode(result.Revert()),
+		reason: hexutil.Encode(result.Revert()),
 	}
 }
 
@@ -717,8 +717,8 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	if call.FeeCap == nil {
 		call.FeeCap = uint256.NewInt(baseFeeUpperLimit)
 	}
-	if call.Tip == nil {
-		call.Tip = uint256.NewInt(baseFeeUpperLimit)
+	if call.TipCap == nil {
+		call.TipCap = uint256.NewInt(baseFeeUpperLimit)
 	}
 	if call.Gas == 0 {
 		call.Gas = 50000000
@@ -849,13 +849,14 @@ func (m callMsg) CheckNonce() bool                      { return false }
 func (m callMsg) To() *libcommon.Address                { return m.CallMsg.To }
 func (m callMsg) GasPrice() *uint256.Int                { return m.CallMsg.GasPrice }
 func (m callMsg) FeeCap() *uint256.Int                  { return m.CallMsg.FeeCap }
-func (m callMsg) Tip() *uint256.Int                     { return m.CallMsg.Tip }
+func (m callMsg) TipCap() *uint256.Int                  { return m.CallMsg.TipCap }
 func (m callMsg) Gas() uint64                           { return m.CallMsg.Gas }
 func (m callMsg) Value() *uint256.Int                   { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                          { return m.CallMsg.Data }
 func (m callMsg) AccessList() types.AccessList          { return m.CallMsg.AccessList }
 func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
 func (m callMsg) IsFree() bool                          { return false }
+func (m callMsg) SetIsFree(_ bool)                      {}
 
 func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
 func (m callMsg) MaxFeePerBlobGas() *uint256.Int { return m.CallMsg.MaxFeePerBlobGas }

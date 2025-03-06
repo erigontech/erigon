@@ -58,32 +58,11 @@ func (ac *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 		if err != nil {
 			return err
 		}
-	//case kv.GasUsedHistoryIdx:
-	//	err := ac.d[kv.GasUsedDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx)
-	//	if err != nil {
-	//		return err
-	//	}
-	case kv.TracesFromIdx:
-		err := ac.iis[kv.TracesFromIdxPos].IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
-		if err != nil {
-			return err
-		}
-	case kv.TracesToIdx:
-		err := ac.iis[kv.TracesToIdxPos].IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
-		if err != nil {
-			return err
-		}
-	case kv.LogAddrIdx:
-		err := ac.iis[kv.LogAddrIdxPos].IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
-		if err != nil {
-			return err
-		}
-	case kv.LogTopicIdx:
-		err := ac.iis[kv.LogTopicIdxPos].IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
-		if err != nil {
-			return err
-		}
 	default:
+		// check the ii
+		if v := ac.searchII(name); v != nil {
+			return v.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		}
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
 	return nil

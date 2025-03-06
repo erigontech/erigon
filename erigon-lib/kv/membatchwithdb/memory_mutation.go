@@ -141,6 +141,10 @@ func (m *MemoryMutation) ReadSequence(bucket string) (uint64, error) {
 	return m.memTx.ReadSequence(bucket)
 }
 
+func (m *MemoryMutation) ResetSequence(bucket string, newValue uint64) error {
+	return m.memTx.ResetSequence(bucket, newValue)
+}
+
 func (m *MemoryMutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
 	if amount == 0 {
 		return nil
@@ -745,4 +749,7 @@ func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc orde
 
 func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
 	return m.db.(kv.TemporalTx).HistoryStartFrom(name)
+}
+func (m *MemoryMutation) FreezeInfo() kv.FreezeInfo {
+	panic("not supported")
 }

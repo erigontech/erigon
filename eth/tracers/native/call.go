@@ -29,7 +29,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
@@ -47,7 +46,7 @@ type callLog struct {
 	Index   uint64            `json:"index"`
 	Address libcommon.Address `json:"address"`
 	Topics  []libcommon.Hash  `json:"topics"`
-	Data    hexutility.Bytes  `json:"data"`
+	Data    hexutil.Bytes     `json:"data"`
 }
 
 type callFrame struct {
@@ -102,8 +101,8 @@ type callFrameMarshaling struct {
 	Gas        hexutil.Uint64
 	GasUsed    hexutil.Uint64
 	Value      *hexutil.Big
-	Input      hexutility.Bytes
-	Output     hexutility.Bytes
+	Input      hexutil.Bytes
+	Output     hexutil.Bytes
 }
 
 type callTracer struct {
@@ -263,7 +262,7 @@ func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, revert
 }
 
 func (t *callTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
-	t.gasLimit = tx.GetGas()
+	t.gasLimit = tx.GetGasLimit()
 	t.logIndex = 0
 	t.logGaps = make(map[uint64]int)
 }

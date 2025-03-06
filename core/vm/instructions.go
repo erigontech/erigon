@@ -375,7 +375,8 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 
 func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
-	codeSize, err := interpreter.evm.IntraBlockState().ResolveCodeSize(slot.Bytes20())
+	addr := slot.Bytes20()
+	codeSize, err := interpreter.evm.IntraBlockState().GetCodeSize(addr)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
@@ -416,10 +417,11 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	addr := libcommon.Address(a.Bytes20())
 	len64 := length.Uint64()
 
-	code, err := interpreter.evm.IntraBlockState().ResolveCode(addr)
+	code, err := interpreter.evm.IntraBlockState().GetCode(addr)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
+
 	codeCopy := getDataBig(code, &codeOffset, len64)
 	scope.Memory.Set(memOffset.Uint64(), len64, codeCopy)
 	return nil, nil
@@ -473,9 +475,10 @@ func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	if empty {
 		slot.Clear()
 	} else {
-		codeHash, err := interpreter.evm.IntraBlockState().ResolveCodeHash(address)
+		var codeHash libcommon.Hash
+		codeHash, err = interpreter.evm.IntraBlockState().GetCodeHash(address)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		slot.SetBytes(codeHash.Bytes())
 	}
@@ -765,7 +768,6 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -799,7 +801,6 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -829,7 +830,6 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
@@ -859,7 +859,6 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 

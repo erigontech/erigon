@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/tracers"
-	"github.com/holiman/uint256"
 )
 
 func init() {
@@ -44,7 +45,7 @@ func newPrinter(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, err
 
 // OnExit is called after the call finishes to finalize the tracing.
 func (p *Printer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	fmt.Printf("OnExit: output=%s, gasUsed=%v, err=%v\n", hexutility.Bytes(output), gasUsed, err)
+	fmt.Printf("OnExit: output=%s, gasUsed=%v, err=%v\n", hexutil.Bytes(output), gasUsed, err)
 }
 
 // OnOpcode implements the EVMLogger interface to trace a single step of VM execution.
@@ -58,7 +59,7 @@ func (p *Printer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpCont
 }
 
 func (p *Printer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	fmt.Printf("CaptureEnter: depth=%v, typ=%v from=%v, to=%v, input=%s, gas=%v, value=%v\n", depth, typ, from, to, hexutility.Bytes(input), gas, value)
+	fmt.Printf("CaptureEnter: depth=%v, typ=%v from=%v, to=%v, input=%s, gas=%v, value=%v\n", depth, typ, from, to, hexutil.Bytes(input), gas, value)
 }
 
 func (p *Printer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
@@ -109,7 +110,7 @@ func (p *Printer) OnNonceChange(a libcommon.Address, prev, new uint64) {
 }
 
 func (p *Printer) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
-	fmt.Printf("OnCodeChange: a=%v, prevCodeHash=%v, prev=%s, codeHash=%v, code=%s\n", a, prevCodeHash, hexutility.Bytes(prev), codeHash, hexutility.Bytes(code))
+	fmt.Printf("OnCodeChange: a=%v, prevCodeHash=%v, prev=%s, codeHash=%v, code=%s\n", a, prevCodeHash, hexutil.Bytes(prev), codeHash, hexutil.Bytes(code))
 }
 
 func (p *Printer) OnStorageChange(a libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {

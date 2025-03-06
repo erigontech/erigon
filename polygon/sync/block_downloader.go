@@ -89,16 +89,16 @@ type BlockDownloader struct {
 	blockLimit         uint
 }
 
-func (d *BlockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (*types.Header, error) {
+func (d *BlockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64, end *uint64) (*types.Header, error) {
 	checkpoints, err := d.waypointReader.CheckpointsFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(checkpoints), d.checkpointVerifier)
+	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(checkpoints), d.checkpointVerifier, end)
 }
 
-func (d *BlockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (*types.Header, error) {
+func (d *BlockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64, end *uint64) (*types.Header, error) {
 	milestones, err := d.waypointReader.MilestonesFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
@@ -124,19 +124,21 @@ func (d *BlockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, sta
 		milestones[0].Fields.StartBlock = new(big.Int).SetUint64(start)
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(milestones), d.milestoneVerifier)
+	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(milestones), d.milestoneVerifier, end)
 }
 
 func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 	ctx context.Context,
 	waypoints heimdall.Waypoints,
 	verifier WaypointHeadersVerifier,
+	end *uint64,
 ) (*types.Header, error) {
 	if len(waypoints) == 0 {
 		return nil, nil
 	}
 
 	waypoints = d.limitWaypoints(waypoints)
+	waypoints = limitWaypointsEndBlock(waypoints, end)
 
 	d.logger.Info(
 		syncLogPrefix("downloading blocks using waypoints"),
@@ -292,6 +294,15 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 			"blks/sec", float64(len(blocks))/math.Max(time.Since(batchFetchStartTime).Seconds(), 0.0001),
 		)
 
+		if end != nil {
+			for i := range blocks {
+				if blocks[i].Number().Uint64() > *end {
+					blocks = blocks[:i]
+					break
+				}
+			}
+		}
+
 		batchFetchStartTime = time.Now() // reset for next time
 
 		d.logger.Info(
@@ -384,6 +395,21 @@ func (d *BlockDownloader) limitWaypoints(waypoints []heimdall.Waypoint) []heimda
 
 		waypoints = waypoints[:i+1]
 		break
+	}
+
+	return waypoints
+}
+
+func limitWaypointsEndBlock(waypoints []heimdall.Waypoint, end *uint64) []heimdall.Waypoint {
+	if end == nil {
+		return waypoints
+	}
+
+	for i, waypoint := range waypoints {
+		if waypoint.StartBlock().Uint64() > *end {
+			waypoints = waypoints[:i]
+			break
+		}
 	}
 
 	return waypoints

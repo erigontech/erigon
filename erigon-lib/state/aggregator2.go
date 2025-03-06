@@ -37,16 +37,16 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, aggregationStep, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
+	if err := a.registerII(kv.LogAddrIdx, salt, dirs, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogTopicIdxPos, salt, dirs, aggregationStep, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger); err != nil {
+	if err := a.registerII(kv.LogTopicIdx, salt, dirs, aggregationStep, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesFromIdxPos, salt, dirs, aggregationStep, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger); err != nil {
+	if err := a.registerII(kv.TracesFromIdx, salt, dirs, aggregationStep, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
+	if err := a.registerII(kv.TracesToIdx, salt, dirs, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
 		return nil, err
 	}
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
@@ -60,7 +60,7 @@ var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
 func init() {
 	if dbgCommBtIndex {
 		cfg := Schema[kv.CommitmentDomain]
-		cfg.IndexList = AccessorBTree | AccessorExistence
+		cfg.AccessorList = AccessorBTree | AccessorExistence
 		Schema[kv.CommitmentDomain] = cfg
 	}
 }
@@ -69,7 +69,7 @@ var Schema = map[kv.Domain]domainCfg{
 	kv.AccountsDomain: {
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 
-		IndexList:            AccessorBTree | AccessorExistence,
+		AccessorList:         AccessorBTree | AccessorExistence,
 		crossDomainIntegrity: domainIntegrityCheck,
 		Compression:          seg.CompressNone,
 		CompressCfg:          DomainCompressCfg,
@@ -80,6 +80,7 @@ var Schema = map[kv.Domain]domainCfg{
 
 			historyLargeValues: false,
 			filenameBase:       kv.AccountsDomain.String(), //TODO: looks redundant
+			historyIdx:         kv.AccountsHistoryIdx,
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
@@ -91,9 +92,9 @@ var Schema = map[kv.Domain]domainCfg{
 	kv.StorageDomain: {
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 
-		IndexList:   AccessorBTree | AccessorExistence,
-		Compression: seg.CompressKeys,
-		CompressCfg: DomainCompressCfg,
+		AccessorList: AccessorBTree | AccessorExistence,
+		Compression:  seg.CompressKeys,
+		CompressCfg:  DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblStorageHistoryVals,
@@ -101,6 +102,7 @@ var Schema = map[kv.Domain]domainCfg{
 
 			historyLargeValues: false,
 			filenameBase:       kv.StorageDomain.String(),
+			historyIdx:         kv.StorageHistoryIdx,
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
@@ -112,10 +114,10 @@ var Schema = map[kv.Domain]domainCfg{
 	kv.CodeDomain: {
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
 
-		IndexList:   AccessorBTree | AccessorExistence,
-		Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
-		CompressCfg: DomainCompressCfg,
-		largeValues: true,
+		AccessorList: AccessorBTree | AccessorExistence,
+		Compression:  seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+		CompressCfg:  DomainCompressCfg,
+		largeValues:  true,
 
 		hist: histCfg{
 			valuesTable: kv.TblCodeHistoryVals,
@@ -123,6 +125,7 @@ var Schema = map[kv.Domain]domainCfg{
 
 			historyLargeValues: true,
 			filenameBase:       kv.CodeDomain.String(),
+			historyIdx:         kv.CodeHistoryIdx,
 
 			iiCfg: iiCfg{
 				withExistence: false, compressorCfg: seg.DefaultCfg,
@@ -134,9 +137,10 @@ var Schema = map[kv.Domain]domainCfg{
 	kv.CommitmentDomain: {
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 
-		IndexList:   AccessorHashMap,
-		Compression: seg.CompressKeys,
-		CompressCfg: DomainCompressCfg,
+		AccessorList:        AccessorHashMap,
+		Compression:         seg.CompressKeys,
+		CompressCfg:         DomainCompressCfg,
+		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
 
 		hist: histCfg{
 			valuesTable: kv.TblCommitmentHistoryVals,
@@ -145,6 +149,8 @@ var Schema = map[kv.Domain]domainCfg{
 			snapshotsDisabled:  true,
 			historyLargeValues: false,
 			filenameBase:       kv.CommitmentDomain.String(),
+			historyIdx:         kv.CommitmentHistoryIdx,
+			historyDisabled:    true,
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
@@ -156,9 +162,9 @@ var Schema = map[kv.Domain]domainCfg{
 	kv.ReceiptDomain: {
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
 
-		IndexList:   AccessorBTree | AccessorExistence,
-		Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-		CompressCfg: DomainCompressCfg,
+		AccessorList: AccessorBTree | AccessorExistence,
+		Compression:  seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		CompressCfg:  DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblReceiptHistoryVals,
@@ -166,6 +172,7 @@ var Schema = map[kv.Domain]domainCfg{
 
 			historyLargeValues: false,
 			filenameBase:       kv.ReceiptDomain.String(),
+			historyIdx:         kv.ReceiptHistoryIdx,
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,

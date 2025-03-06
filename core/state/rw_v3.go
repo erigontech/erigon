@@ -211,23 +211,23 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 
 func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedDomains) error {
 	for addr := range txTask.TraceFroms {
-		if err := domains.IndexAdd(kv.TblTracesFromIdx, addr[:]); err != nil {
+		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:]); err != nil {
 			return err
 		}
 	}
 
 	for addr := range txTask.TraceTos {
-		if err := domains.IndexAdd(kv.TblTracesToIdx, addr[:]); err != nil {
+		if err := domains.IndexAdd(kv.TracesToIdx, addr[:]); err != nil {
 			return err
 		}
 	}
 
 	for _, lg := range txTask.Logs {
-		if err := domains.IndexAdd(kv.TblLogAddressIdx, lg.Address[:]); err != nil {
+		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
 			return err
 		}
 		for _, topic := range lg.Topics {
-			if err := domains.IndexAdd(kv.TblLogTopicsIdx, topic[:]); err != nil {
+			if err := domains.IndexAdd(kv.LogTopicIdx, topic[:]); err != nil {
 				return err
 			}
 		}
@@ -258,8 +258,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 				var address common.Address
 				copy(address[:], k)
 
-				newV := make([]byte, acc.EncodingLengthForStorage())
-				acc.EncodeForStorage(newV)
+				newV := accounts.SerialiseV3(&acc)
 				if accumulator != nil {
 					accumulator.ChangeAccount(address, acc.Incarnation, newV)
 				}

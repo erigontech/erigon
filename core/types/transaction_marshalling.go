@@ -30,7 +30,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -38,17 +37,17 @@ type txJSON struct {
 	Type hexutil.Uint64 `json:"type"`
 
 	// Common transaction fields:
-	Nonce    *hexutil.Uint64    `json:"nonce"`
-	GasPrice *hexutil.Big       `json:"gasPrice"`
-	FeeCap   *hexutil.Big       `json:"maxFeePerGas"`
-	Tip      *hexutil.Big       `json:"maxPriorityFeePerGas"`
-	Gas      *hexutil.Uint64    `json:"gas"`
-	Value    *hexutil.Big       `json:"value"`
-	Data     *hexutility.Bytes  `json:"input"`
-	V        *hexutil.Big       `json:"v"`
-	R        *hexutil.Big       `json:"r"`
-	S        *hexutil.Big       `json:"s"`
-	To       *libcommon.Address `json:"to"`
+	Nonce                *hexutil.Uint64    `json:"nonce"`
+	GasPrice             *hexutil.Big       `json:"gasPrice"`
+	MaxFeePerGas         *hexutil.Big       `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas *hexutil.Big       `json:"maxPriorityFeePerGas"`
+	Gas                  *hexutil.Uint64    `json:"gas"`
+	Value                *hexutil.Big       `json:"value"`
+	Data                 *hexutil.Bytes     `json:"input"`
+	V                    *hexutil.Big       `json:"v"`
+	R                    *hexutil.Big       `json:"r"`
+	S                    *hexutil.Big       `json:"s"`
+	To                   *libcommon.Address `json:"to"`
 
 	// Access list transaction fields:
 	ChainID        *hexutil.Big         `json:"chainId,omitempty"`
@@ -68,20 +67,20 @@ type txJSON struct {
 }
 
 type JsonAuthorization struct {
-	ChainID hexutil.Uint64    `json:"chainId"`
+	ChainID hexutil.Big       `json:"chainId"`
 	Address libcommon.Address `json:"address"`
 	Nonce   hexutil.Uint64    `json:"nonce"`
-	V       hexutil.Uint64    `json:"v"`
+	YParity hexutil.Uint64    `json:"yParity"`
 	R       hexutil.Big       `json:"r"`
 	S       hexutil.Big       `json:"s"`
 }
 
 func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAuthorization {
-	a.ChainID = (hexutil.Uint64)(authorization.ChainID)
+	a.ChainID = hexutil.Big(*authorization.ChainID.ToBig())
 	a.Address = authorization.Address
 	a.Nonce = (hexutil.Uint64)(authorization.Nonce)
 
-	a.V = (hexutil.Uint64)(authorization.YParity)
+	a.YParity = (hexutil.Uint64)(authorization.YParity)
 	a.R = hexutil.Big(*authorization.R.ToBig())
 	a.S = hexutil.Big(*authorization.S.ToBig())
 	return a
@@ -89,11 +88,15 @@ func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAu
 
 func (a JsonAuthorization) ToAuthorization() (Authorization, error) {
 	auth := Authorization{
-		ChainID: a.ChainID.Uint64(),
 		Address: a.Address,
 		Nonce:   a.Nonce.Uint64(),
 	}
-	yParity := a.V.Uint64()
+	chainId, overflow := uint256.FromBig((*big.Int)(&a.ChainID))
+	if overflow {
+		return auth, errors.New("chainId in authorization does not fit in 256 bits")
+	}
+	auth.ChainID = *chainId
+	yParity := a.YParity.Uint64()
 	if yParity >= 1<<8 {
 		return auth, errors.New("y parity in authorization does not fit in 8 bits")
 	}
@@ -117,10 +120,10 @@ func (tx *LegacyTx) MarshalJSON() ([]byte, error) {
 	enc.Hash = tx.Hash()
 	enc.Type = hexutil.Uint64(tx.Type())
 	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
-	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
+	enc.Gas = (*hexutil.Uint64)(&tx.GasLimit)
 	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutility.Bytes)(&tx.Data)
+	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -139,10 +142,10 @@ func (tx *AccessListTx) MarshalJSON() ([]byte, error) {
 	enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
 	enc.AccessList = &tx.AccessList
 	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
-	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
+	enc.Gas = (*hexutil.Uint64)(&tx.GasLimit)
 	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutility.Bytes)(&tx.Data)
+	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -158,11 +161,11 @@ func (tx *DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
 	enc.AccessList = &tx.AccessList
 	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
-	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
-	enc.FeeCap = (*hexutil.Big)(tx.FeeCap.ToBig())
-	enc.Tip = (*hexutil.Big)(tx.Tip.ToBig())
+	enc.Gas = (*hexutil.Uint64)(&tx.GasLimit)
+	enc.MaxFeePerGas = (*hexutil.Big)(tx.FeeCap.ToBig())
+	enc.MaxPriorityFeePerGas = (*hexutil.Big)(tx.TipCap.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutility.Bytes)(&tx.Data)
+	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -178,11 +181,11 @@ func toBlobTxJSON(tx *BlobTx) *txJSON {
 	enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
 	enc.AccessList = &tx.AccessList
 	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
-	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
-	enc.FeeCap = (*hexutil.Big)(tx.FeeCap.ToBig())
-	enc.Tip = (*hexutil.Big)(tx.Tip.ToBig())
+	enc.Gas = (*hexutil.Uint64)(&tx.GasLimit)
+	enc.MaxFeePerGas = (*hexutil.Big)(tx.FeeCap.ToBig())
+	enc.MaxPriorityFeePerGas = (*hexutil.Big)(tx.TipCap.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutility.Bytes)(&tx.Data)
+	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -279,7 +282,7 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	if dec.Gas == nil {
 		return errors.New("missing required field 'gas' in transaction")
 	}
-	tx.Gas = uint64(*dec.Gas)
+	tx.GasLimit = uint64(*dec.Gas)
 	if dec.Value == nil {
 		return errors.New("missing required field 'value' in transaction")
 	}
@@ -358,7 +361,7 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	if dec.Gas == nil {
 		return errors.New("missing required field 'gas' in transaction")
 	}
-	tx.Gas = uint64(*dec.Gas)
+	tx.GasLimit = uint64(*dec.Gas)
 	if dec.Value == nil {
 		return errors.New("missing required field 'value' in transaction")
 	}
@@ -423,18 +426,18 @@ func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 	if dec.GasPrice == nil {
 		return errors.New("missing required field 'gasPrice' in transaction")
 	}
-	tx.Tip, overflow = uint256.FromBig(dec.Tip.ToInt())
+	tx.TipCap, overflow = uint256.FromBig(dec.MaxPriorityFeePerGas.ToInt())
 	if overflow {
 		return errors.New("'tip' in transaction does not fit in 256 bits")
 	}
-	tx.FeeCap, overflow = uint256.FromBig(dec.FeeCap.ToInt())
+	tx.FeeCap, overflow = uint256.FromBig(dec.MaxFeePerGas.ToInt())
 	if overflow {
 		return errors.New("'feeCap' in transaction does not fit in 256 bits")
 	}
 	if dec.Gas == nil {
 		return errors.New("missing required field 'gas' in transaction")
 	}
-	tx.Gas = uint64(*dec.Gas)
+	tx.GasLimit = uint64(*dec.Gas)
 	if dec.Value == nil {
 		return errors.New("missing required field 'value' in transaction")
 	}
@@ -534,18 +537,18 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 		return nil, errors.New("missing required field 'nonce' in transaction")
 	}
 	tx.Nonce = uint64(*dec.Nonce)
-	tx.Tip, overflow = uint256.FromBig(dec.Tip.ToInt())
+	tx.TipCap, overflow = uint256.FromBig(dec.MaxPriorityFeePerGas.ToInt())
 	if overflow {
 		return nil, errors.New("'tip' in transaction does not fit in 256 bits")
 	}
-	tx.FeeCap, overflow = uint256.FromBig(dec.FeeCap.ToInt())
+	tx.FeeCap, overflow = uint256.FromBig(dec.MaxFeePerGas.ToInt())
 	if overflow {
 		return nil, errors.New("'feeCap' in transaction does not fit in 256 bits")
 	}
 	if dec.Gas == nil {
 		return nil, errors.New("missing required field 'gas' in transaction")
 	}
-	tx.Gas = uint64(*dec.Gas)
+	tx.GasLimit = uint64(*dec.Gas)
 	if dec.Value == nil {
 		return nil, errors.New("missing required field 'value' in transaction")
 	}

@@ -55,7 +55,6 @@ func Assemble(
 	}
 
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	maxBlobsPerBlock := chainConfig.GetMaxBlobsPerBlock()
 
 	shanghaiTime := chainConfig.ShanghaiTime
 	var agraBlock *big.Int
@@ -82,7 +81,7 @@ func Assemble(
 		agraBlock,
 		cancunTime,
 		pragueTime,
-		maxBlobsPerBlock,
+		chainConfig.BlobSchedule,
 		sentryClients,
 		stateChangesClient,
 		builderNotifyNewTxns,
@@ -107,7 +106,7 @@ var defaultPoolDBInitializer = func(ctx context.Context, cfg txpoolcfg.Config, l
 		WriteMergeThreshold(3 * 8192).
 		PageSize(16 * datasize.KB).
 		GrowthStep(16 * datasize.MB).
-		DirtySpace(uint64(128 * datasize.MB)).
+		DirtySpace(uint64(64 * datasize.MB)).
 		MapSize(1 * datasize.TB).
 		WriteMap(cfg.MdbxWriteMap)
 	if cfg.MdbxPageSize > 0 {

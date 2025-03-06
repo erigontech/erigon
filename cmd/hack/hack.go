@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -260,7 +260,7 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 		return err
 	}
 	defer c.Close()
-	blockEncoded := hexutility.EncodeTs(block)
+	blockEncoded := hexutil.EncodeTs(block)
 	blockTotal := getBlockTotal(tx, block, blockTotalOrOffset)
 	for k, v, err := c.Seek(blockEncoded); k != nil && blockTotal > 0; k, v, err = c.Next() {
 		if err != nil {

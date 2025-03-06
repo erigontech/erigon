@@ -3,8 +3,8 @@ run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images bas
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "golang:1.23.3-alpine3.20"
-  TARGET_BASE_IMAGE: "alpine:3.20.3"
+  BUILDER_IMAGE: "golang:1.23-alpine"
+  TARGET_BASE_IMAGE: "alpine:3.21"
   APP_REPO: "erigontech/erigon"
   CHECKOUT_REF: "main"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
@@ -28,7 +28,7 @@ on:
 jobs:
 
   Build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04 ## revert it to "ubuntu-latest" once https://github.com/actions/runner-images/issues/11471 fixed
     timeout-minutes: 45
     outputs:
       docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}

@@ -36,9 +36,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/urfave/cli/v2"
+
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/urfave/cli/v2"
 
 	"golang.org/x/sync/semaphore"
 
@@ -537,14 +538,28 @@ func doIntegrity(cliCtx *cli.Context) error {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	_, _, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	_, borSnaps, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
 	if err != nil {
 		return err
 	}
 	defer clean()
 
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	checks := append([]integrity.Check{}, integrity.AllChecks...)
+	nonDefaultCheck := requestedCheck != "" &&
+		!slices.Contains(integrity.AllChecks, requestedCheck) &&
+		slices.Contains(integrity.NonDefaultChecks, requestedCheck)
+	if nonDefaultCheck {
+		checks = append(checks, integrity.NonDefaultChecks...)
+	}
+
 	blockReader, _ := blockRetire.IO()
-	for _, chk := range integrity.AllChecks {
+	for _, chk := range checks {
 		if requestedCheck != "" && requestedCheck != chk {
 			continue
 		}
@@ -554,22 +569,37 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.Blocks:
-			if err := integrity.SnapBlocksRead(ctx, chainDB, blockReader, 0, 0, failFast); err != nil {
+			if err := integrity.SnapBlocksRead(ctx, db, blockReader, 0, 0, failFast); err != nil {
 				return err
 			}
 		case integrity.InvertedIndex:
-			if err := integrity.E3EfFiles(ctx, chainDB, agg, failFast, fromStep); err != nil {
+			if err := integrity.E3EfFiles(ctx, db, failFast, fromStep); err != nil {
 				return err
 			}
 		case integrity.HistoryNoSystemTxs:
-			if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, blockReader, agg); err != nil {
+			if err := integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader); err != nil {
 				return err
 			}
-		case integrity.NoBorEventGaps:
-			if err := integrity.NoGapsInBorEvents(ctx, chainDB, blockReader, 0, 0, failFast); err != nil {
+		case integrity.BorEvents:
+			if err := integrity.ValidateBorEvents(ctx, db, blockReader, 0, 0, failFast); err != nil {
 				return err
 			}
-
+		case integrity.BorSpans:
+			if err := integrity.ValidateBorSpans(logger, dirs, borSnaps, failFast); err != nil {
+				return err
+			}
+		case integrity.BorCheckpoints:
+			if err := integrity.ValidateBorCheckpoints(logger, dirs, borSnaps, failFast); err != nil {
+				return err
+			}
+		case integrity.BorMilestones:
+			if err := integrity.ValidateBorMilestones(logger, dirs, borSnaps, failFast); err != nil {
+				return err
+			}
+		case integrity.ReceiptsNoDups:
+			if err := integrity.ReceiptsNoDuplicates(ctx, db, blockReader, failFast); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
@@ -684,7 +714,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName))
 			}
 			// check that the index file exist
-			if libstate.Schema[snapType].IndexList.Has(libstate.AccessorBTree) {
+			if libstate.Schema[snapType].AccessorList.Has(libstate.AccessorBTree) {
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
 				if err != nil {
@@ -694,7 +724,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if libstate.Schema[snapType].IndexList.Has(libstate.AccessorExistence) {
+			if libstate.Schema[snapType].AccessorList.Has(libstate.AccessorExistence) {
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
 				if err != nil {
@@ -704,7 +734,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if libstate.Schema[snapType].IndexList.Has(libstate.AccessorHashMap) {
+			if libstate.Schema[snapType].AccessorList.Has(libstate.AccessorHashMap) {
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
 				if err != nil {
@@ -1118,6 +1148,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	}
 	blockSnaps.LogStat("block")
 
+	heimdall.RecordWayPoints(true) // needed to load checkpoints and milestones snapshots
 	borSnaps = heimdall.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = borSnaps.OpenFolder(); err != nil {
 		return
@@ -1137,10 +1168,10 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	var bridgeStore bridge.Store
 	var heimdallStore heimdall.Store
 	if chainConfig.Bor != nil {
-		const PolygonSync = false
+		const PolygonSync = true
 		if PolygonSync {
-			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, 0), borSnaps, chainConfig.Bor)
-			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, 0), borSnaps)
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), borSnaps, chainConfig.Bor)
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
 		} else {
 			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(chainDB), borSnaps, chainConfig.Bor)
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(chainDB), borSnaps)
@@ -1354,10 +1385,12 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		if ok {
 			from, to, every = from2, to2, to2-from2
 		}
+	} else {
+		forwardProgress = to
 	}
 
 	logger.Info("Params", "from", from, "to", to, "every", every)
-	if err := br.RetireBlocks(ctx, 0, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
+	if err := br.RetireBlocks(ctx, from, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
 

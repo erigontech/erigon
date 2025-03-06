@@ -17,6 +17,7 @@
 package raw
 
 import (
+	"fmt"
 	"sync"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -41,6 +42,13 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	}
 	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves[:endIndex], out[:])
 	return
+}
+
+func (b *BeaconState) PrintLeaves() {
+	fmt.Println("TRACE: BeaconState leaves:")
+	for i := 0; i < len(b.leaves); i += 32 {
+		fmt.Println(i/32, libcommon.BytesToHash(b.leaves[i:i+32]))
+	}
 }
 
 func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {

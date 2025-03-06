@@ -17,7 +17,7 @@ import (
 )
 
 type Authorization struct {
-	ChainID uint64
+	ChainID uint256.Int
 	Address libcommon.Address
 	Nonce   uint64
 	YParity uint8
@@ -41,7 +41,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
 	}
 
-	authLen := rlp.U64Len(ath.ChainID)
+	authLen := (1 + rlp.Uint256LenExcludingHead(&ath.ChainID))
 	authLen += 1 + length.Addr
 	authLen += rlp.U64Len(ath.Nonce)
 
@@ -50,7 +50,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 	}
 
 	// chainId, address, nonce
-	if err := rlp.EncodeInt(ath.ChainID, data, b); err != nil {
+	if err := rlp.EncodeUint256(&ath.ChainID, data, b); err != nil {
 		return nil, err
 	}
 
@@ -99,7 +99,7 @@ func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.In
 }
 
 func authorizationSize(auth Authorization) (authLen int) {
-	authLen = rlp.U64Len(auth.ChainID)
+	authLen = (1 + rlp.Uint256LenExcludingHead(&auth.ChainID))
 	authLen += rlp.U64Len(auth.Nonce)
 	authLen += 1 + length.Addr
 
@@ -127,10 +127,11 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		auth := Authorization{}
 
-		// chainId
-		if auth.ChainID, err = s.Uint(); err != nil {
+		var chainId []byte
+		if chainId, err = s.Uint256Bytes(); err != nil {
 			return err
 		}
+		auth.ChainID.SetBytes(chainId)
 
 		// address
 		if b, err = s.Bytes(); err != nil {
@@ -193,7 +194,7 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 		}
 
 		// 1. encode ChainId
-		if err := rlp.EncodeInt(authorizations[i].ChainID, w, b); err != nil {
+		if err := rlp.EncodeUint256(&authorizations[i].ChainID, w, b); err != nil {
 			return err
 		}
 		// 2. encode Address
