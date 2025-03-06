@@ -186,6 +186,12 @@ func (r DiscardReason) String() string {
 		return "gas limit is too high"
 	case BlobHashCheckFail:
 		return "KZGcommitment's versioned hash has to be equal to blob_versioned_hash at the same index"
+	case UnmatchedBlobTxExt:
+		return "KZGcommitments must match the corresponding blobs and proofs"
+	case UnequalBlobTxExt:
+		return "blob_versioned_hashes, blobs, commitments and proofs must have equal number"
+	case ErrAuthorityReserved:
+		return "EIP-7702 transaction with authority already reserved"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
