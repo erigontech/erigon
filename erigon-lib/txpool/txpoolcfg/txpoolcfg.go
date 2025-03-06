@@ -183,6 +183,14 @@ func (r DiscardReason) String() string {
 		return "EIP-7702 transactions with an empty authorization list are invalid"
 	case ErrAuthorityReserved:
 		return "authority already reserved"
+	case BlobHashCheckFail:
+		return "KZGcommitment's versioned hash has to be equal to blob_versioned_hash at the same index"
+	case UnmatchedBlobTxExt:
+		return "KZGcommitments must match the corresponding blobs and proofs"
+	case UnequalBlobTxExt:
+		return "blob_versioned_hashes, blobs, commitments and proofs must have equal number"
+	case ErrAuthorityReserved:
+		return "EIP-7702 transaction with authority already reserved"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
