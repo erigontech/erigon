@@ -79,7 +79,7 @@ func EncodeRIP7560TransactionEvent(
 	executionStatus, nonce uint64,
 	nonceKey *uint256.Int,
 	paymaster, deployer, sender *common.Address,
-) (topics []common.Hash, data []byte, error error) {
+) (topics []common.Hash, data []byte, err error) {
 	id := AccountAbstractionABI.Events["RIP7560TransactionEvent"].ID
 	if paymaster == nil {
 		paymaster = &common.Address{}
@@ -88,15 +88,15 @@ func EncodeRIP7560TransactionEvent(
 		deployer = &common.Address{}
 	}
 	inputs := AccountAbstractionABI.Events["RIP7560TransactionEvent"].Inputs
-	data, error = inputs.NonIndexed().Pack(
+	data, err = inputs.NonIndexed().Pack(
 		nonceKey,
 		big.NewInt(int64(nonce)),
 		big.NewInt(int64(executionStatus)),
 	)
-	if error != nil {
-		return nil, nil, error
+	if err != nil {
+		return nil, nil, err
 	}
-	topics = []common.Hash{id, {}, {}}
+	topics = []common.Hash{id, {}, {}, {}}
 	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes(), 32))
 	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes(), 32))
 	topics[3] = [32]byte(common.LeftPadBytes(deployer.Bytes(), 32))
@@ -123,16 +123,16 @@ func EncodeRIP7560TransactionRevertReasonEvent(
 	nonce uint64,
 	nonceKey *uint256.Int,
 	sender *common.Address,
-) (topics []common.Hash, data []byte, error error) {
+) (topics []common.Hash, data []byte, err error) {
 	id := AccountAbstractionABI.Events["RIP7560TransactionRevertReason"].ID
 	inputs := AccountAbstractionABI.Events["RIP7560TransactionRevertReason"].Inputs
-	data, error = inputs.NonIndexed().Pack(
+	data, err = inputs.NonIndexed().Pack(
 		nonceKey,
 		big.NewInt(int64(nonce)),
 		revertData,
 	)
-	if error != nil {
-		return nil, nil, error
+	if err != nil {
+		return nil, nil, err
 	}
 	topics = []common.Hash{id, {}}
 	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes(), 32))
@@ -144,19 +144,19 @@ func EncodeRIP7560TransactionPostOpRevertReasonEvent(
 	nonce uint64,
 	nonceKey *uint256.Int,
 	paymaster, sender *common.Address,
-) (topics []common.Hash, data []byte, error error) {
+) (topics []common.Hash, data []byte, err error) {
 	id := AccountAbstractionABI.Events["RIP7560TransactionPostOpRevertReason"].ID
 	if paymaster == nil {
 		paymaster = &common.Address{}
 	}
 	inputs := AccountAbstractionABI.Events["RIP7560TransactionPostOpRevertReason"].Inputs
-	data, error = inputs.NonIndexed().Pack(
+	data, err = inputs.NonIndexed().Pack(
 		nonceKey,
 		big.NewInt(int64(nonce)),
 		revertData,
 	)
-	if error != nil {
-		return nil, nil, error
+	if err != nil {
+		return nil, nil, err
 	}
 	topics = []common.Hash{id, {}, {}}
 	topics[1] = [32]byte(common.LeftPadBytes(sender.Bytes(), 32))
