@@ -189,8 +189,6 @@ func (r DiscardReason) String() string {
 		return "KZGcommitments must match the corresponding blobs and proofs"
 	case UnequalBlobTxExt:
 		return "blob_versioned_hashes, blobs, commitments and proofs must have equal number"
-	case ErrAuthorityReserved:
-		return "EIP-7702 transaction with authority already reserved"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
