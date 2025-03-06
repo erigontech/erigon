@@ -140,6 +140,7 @@ func (u *BitList) removeMsb() {
 // addMsb adds a most significant bit to the list, but doesn't change the length l.
 func (u *BitList) addMsb() int {
 	byteLen := len(u.u)
+	found := false
 	for i := len(u.u) - 1; i >= 0; i-- {
 		if u.u[i] != 0 {
 			msb := bits.Len8(u.u[i])
@@ -152,10 +153,16 @@ func (u *BitList) addMsb() int {
 			} else {
 				u.u[i] |= 1 << uint(msb)
 			}
+			found = true
 			break
 		}
 		byteLen--
 	}
+	if !found {
+		u.u[0] = 1
+		byteLen = 1
+	}
+	u.l = byteLen
 	return byteLen
 }
 
@@ -267,7 +274,7 @@ func (u *BitList) Merge(other *BitList) (*BitList, error) {
 	}
 	// copy by the longer one
 	var ret, unionFrom *BitList
-	if u.l < other.l {
+	if u.Bits() < other.Bits() {
 		ret = other.Copy()
 		unionFrom = u
 	} else {
@@ -276,13 +283,10 @@ func (u *BitList) Merge(other *BitList) (*BitList, error) {
 	}
 	// union
 	unionFrom.removeMsb()
-	ret.removeMsb()
 	for i := 0; i < unionFrom.l; i++ {
 		ret.u[i] |= unionFrom.u[i]
 	}
 	unionFrom.addMsb()
-	byteLen := ret.addMsb()
-	ret.l = byteLen
 	return ret, nil
 }
 

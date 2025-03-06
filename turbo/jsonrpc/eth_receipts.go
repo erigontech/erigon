@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/v2"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -295,6 +296,39 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		if isFinalTxn {
+			if chainConfig.Bor != nil {
+				// check for state sync event logs
+				events, err := api.stateSyncEvents(ctx, tx, header.Hash(), blockNum, chainConfig)
+				if err != nil {
+					return logs, err
+				}
+
+				if len(events) == 0 {
+					continue
+				}
+
+				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, txNumsReader, tx, header, chainConfig, txIndex, len(logs))
+				if err != nil {
+					return logs, err
+				}
+
+				borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
+				for _, filteredLog := range borLogs {
+					logs = append(logs, &types.ErigonLog{
+						Address:     filteredLog.Address,
+						Topics:      filteredLog.Topics,
+						Data:        filteredLog.Data,
+						BlockNumber: filteredLog.BlockNumber,
+						TxHash:      filteredLog.TxHash,
+						TxIndex:     filteredLog.TxIndex,
+						BlockHash:   filteredLog.BlockHash,
+						Index:       filteredLog.Index,
+						Removed:     filteredLog.Removed,
+						Timestamp:   header.Time,
+					})
+				}
+			}
+
 			continue
 		}
 
@@ -451,7 +485,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 				if err != nil {
 					return nil, err
 				}
-				txNum = txNumNextBlock - 1
+				txNum = txNumNextBlock
 			}
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
