@@ -802,6 +802,7 @@ func NewPolygonSyncStages(
 	statusDataProvider *sentry.StatusDataProvider,
 	stopNode func() error,
 	engineAPISwitcher sync.EngineAPISwitcher,
+	minedBlockReg sync.MinedBlockObserverRegistrar,
 	tracer *tracers.Tracer,
 ) []*stagedsync.Stage {
 	var tracingHooks *tracing.Hooks
@@ -843,6 +844,7 @@ func NewPolygonSyncStages(
 			nil, /* userUnwindTypeOverrides */
 			notifications,
 			engineAPISwitcher,
+			minedBlockReg,
 		),
 		stagedsync.StageSendersCfg(db, chainConfig, config.Sync, false, config.Dirs.Tmp, config.Prune, blockReader, nil),
 		stagedsync.StageExecuteBlocksCfg(db, config.Prune, config.BatchSize, chainConfig, consensusEngine, &vm.Config{Tracer: tracingHooks}, notifications, config.StateStream, false, config.Dirs, blockReader, nil, config.Genesis, config.Sync, SilkwormForExecutionStage(silkworm, config)),

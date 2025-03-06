@@ -236,8 +236,12 @@ func (tx *tx) CollectMetrics() {}
 func (tx *tx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	panic("not implemented yet")
 }
-func (tx *tx) ReadSequence(bucket string) (uint64, error) {
-	panic("not implemented yet")
+func (tx *tx) ReadSequence(table string) (uint64, error) {
+	reply, err := tx.db.remoteKV.Sequence(tx.ctx, &remote.SequenceReq{TxId: tx.id, Table: table})
+	if err != nil {
+		return 0, err
+	}
+	return reply.Value, nil
 }
 func (tx *tx) Append(bucket string, k, v []byte) error    { panic("no write methods") }
 func (tx *tx) AppendDup(bucket string, k, v []byte) error { panic("no write methods") }

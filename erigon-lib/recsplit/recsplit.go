@@ -482,6 +482,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		}
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
+			fmt.Printf("a: %d\n", j)
 			rs.offsetBuffer[j] = offsets[i]
 		}
 		for _, offset := range rs.offsetBuffer[:m] {
