@@ -2,8 +2,9 @@ package txpool
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"time"
+
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 var PoolMetrics = map[string]metrics.Gauge{}

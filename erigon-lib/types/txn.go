@@ -110,7 +110,7 @@ type TxSlot struct {
 	Proofs      []gokzg4844.KZGProof
 
 	// EIP-7702: set code tx
-	To          common.Address
+	To             common.Address
 	Authorizations []Signature
 	AuthRaw        [][]byte // rlp encoded chainID+address+nonce, used to recover authorization address in txpool
 }

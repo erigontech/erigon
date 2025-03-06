@@ -2,7 +2,7 @@ package types
 
 /*
 
-import "github.com/ledgerwatch/erigon/zkevm/aggregator/pb"
+import "github.com/erigontech/erigon/zkevm/aggregator/pb"
 
 // FinalProofInputs struct
 type FinalProofInputs struct {

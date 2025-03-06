@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 
 	"bytes"
 	"encoding/binary"
@@ -12,9 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/erigontech/erigon/cl/utils"
+	ethTypes "github.com/erigontech/erigon/core/types"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/cl/utils"
-	ethTypes "github.com/ledgerwatch/erigon/core/types"
 )
 
 const EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED = 0

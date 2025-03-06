@@ -417,6 +417,8 @@ type RPCTransaction struct {
 	YParity             *hexutil.Big               `json:"yParity,omitempty"`
 	R                   *hexutil.Big               `json:"r"`
 	S                   *hexutil.Big               `json:"s"`
+
+	L2Hash *libcommon.Hash `json:"l2Hash,omitempty"` // TODO Add another method to get L2 hash?
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC

@@ -7,11 +7,12 @@
 package sentinel
 
 import (
+	reflect "reflect"
+	sync "sync"
+
 	types "github.com/erigontech/erigon-lib/gointerfaces/types"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	reflect "reflect"
-	sync "sync"
 )
 
 const (

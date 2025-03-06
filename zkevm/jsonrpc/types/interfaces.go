@@ -5,10 +5,10 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/jackc/pgx/v4"
-	"github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 //// PoolInterface contains the methods required to interact with the tx pool.

@@ -7,6 +7,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 
 	"github.com/stretchr/testify/require"

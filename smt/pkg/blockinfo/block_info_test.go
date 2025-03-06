@@ -5,12 +5,12 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	ethTypes "github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/smt/pkg/smt"
-	smtutils "github.com/ledgerwatch/erigon/smt/pkg/utils"
-	"github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types"
+	ethTypes "github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/smt/pkg/smt"
+	smtutils "github.com/erigontech/erigon/smt/pkg/utils"
+	"github.com/erigontech/erigon/zk/utils"
 )
 
 /*

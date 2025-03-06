@@ -101,8 +101,8 @@ var (
 )
 
 // Type returns underlying consensus engine
-func (ethash *Ethash) Type() erigonchain.ConsensusName {
-	return erigonchain.EtHashConsensus
+func (ethash *Ethash) Type() chain.ConsensusName {
+	return chain.EtHashConsensus
 }
 
 // Author implements consensus.Engine, returning the header's coinbase as the

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/smt/pkg/smt"
-	"github.com/ledgerwatch/erigon/smt/pkg/utils"
+	"github.com/erigontech/erigon/smt/pkg/smt"
+	"github.com/erigontech/erigon/smt/pkg/utils"
 	"gotest.tools/v3/assert"
 )
 

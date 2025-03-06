@@ -535,9 +535,6 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		head.AuRaSeal = g.AuRaSeal.AuthorityRound.Signature
 		head.AuRaStep = uint64(g.AuRaSeal.AuthorityRound.Step)
 	}
-	if g.GasLimit == 0 {
-		head.GasLimit = params.GenesisGasLimit
-	}
 
 	// [zkevm] - do not override the gas limit for the genesis block
 	//if g.GasLimit == 0 {
@@ -583,6 +580,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 			head.RequestsHash = g.RequestsHash
 		} else {
 			head.RequestsHash = &types.EmptyRequestsHash
+			// head.RequestsHash = &types.EmptyRootHash
 		}
 	}
 

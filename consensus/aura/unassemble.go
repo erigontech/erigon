@@ -2,6 +2,7 @@ package aura
 
 import (
 	"container/list"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
 

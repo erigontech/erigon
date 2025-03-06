@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	smtdb "github.com/ledgerwatch/erigon/smt/pkg/db"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	smtdb "github.com/erigontech/erigon/smt/pkg/db"
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 )

@@ -1,8 +1,8 @@
 package smt_test
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types/accounts"
 )
 
 type BatchInsertDataHolder struct {

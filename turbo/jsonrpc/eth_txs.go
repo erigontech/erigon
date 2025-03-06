@@ -20,7 +20,7 @@ import (
 )
 
 // GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
-func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Hash) (*ethapi.RPCTransaction, error) {
+func (api *APIImpl) GetTransactionByHash_deprecated(ctx context.Context, txnHash common.Hash) (*ethapi.RPCTransaction, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -75,15 +75,10 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 				return nil, nil
 			}
 			borTx := bortypes.NewBorTransaction()
-			return ethapi.NewRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), chainConfig.ChainID), nil
+			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee, chainConfig.ChainID), nil
 		}
 
-		return ethapi.NewRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
-	}
-
-	if !sequencer.IsSequencer() {
-		// forward the request on to the sequencer at this point as it is the only node with an active txpool
-		return api.forwardGetTransactionByHash(api.l2RpcUrl, txnHash, nil)
+		return NewRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
 	}
 
 	curHeader := rawdb.ReadCurrentHeader(tx)

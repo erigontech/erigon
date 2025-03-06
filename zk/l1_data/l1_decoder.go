@@ -8,13 +8,13 @@ import (
 
 	"encoding/binary"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/zk/contracts"
-	"github.com/ledgerwatch/erigon/zk/da"
-	zktx "github.com/ledgerwatch/erigon/zk/tx"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/zk/contracts"
+	"github.com/erigontech/erigon/zk/da"
+	zktx "github.com/erigontech/erigon/zk/tx"
 )
 
 type RollupBaseEtrogBatchData struct {

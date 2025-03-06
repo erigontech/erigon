@@ -16,7 +16,7 @@ import (
 
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/zk"
+	"github.com/erigontech/erigon/zk"
 )
 
 type Sync struct {

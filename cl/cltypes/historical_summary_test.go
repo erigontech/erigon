@@ -1,8 +1,9 @@
 package cltypes_test
 
 import (
-	"github.com/erigontech/erigon-lib/common"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"

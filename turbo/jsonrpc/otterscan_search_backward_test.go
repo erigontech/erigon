@@ -5,8 +5,9 @@ package jsonrpc
 
 import (
 	"bytes"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	libcommon "github.com/erigontech/erigon-lib/common"

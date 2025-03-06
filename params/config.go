@@ -20,9 +20,10 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_chain"
 	"math/big"
 	"path"
+
+	"github.com/erigontech/erigon/zk/zk_config/cfg_chain"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"

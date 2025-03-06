@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/zkevm/encoding"
-	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/zkevm/encoding"
+	"github.com/erigontech/erigon/zkevm/jsonrpc/client"
 )
 
 type L1GasPrice struct {

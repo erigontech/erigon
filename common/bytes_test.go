@@ -18,8 +18,9 @@ package common
 
 import (
 	"bytes"
-	"github.com/erigontech/erigon-lib/common"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func TestCopyBytes(t *testing.T) {

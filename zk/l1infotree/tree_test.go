@@ -6,10 +6,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/zk/l1infotree"
-	l1infotree2 "github.com/ledgerwatch/erigon/zk/tests/vectors/l1infotree"
-	"github.com/ledgerwatch/erigon/zkevm/log"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/zk/l1infotree"
+	l1infotree2 "github.com/erigontech/erigon/zk/tests/vectors/l1infotree"
+	"github.com/erigontech/erigon/zkevm/log"
 	"github.com/stretchr/testify/require"
 )
 

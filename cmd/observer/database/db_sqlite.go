@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common"
 	"net"
 	"strings"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common"
 
 	_ "modernc.org/sqlite"
 )

@@ -12,12 +12,12 @@ import (
 
 	"net/url"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon/core/types"
-	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
-	jsonClient "github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
-	jsonTypes "github.com/ledgerwatch/erigon/zkevm/jsonrpc/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/core/types"
+	db2 "github.com/erigontech/erigon/smt/pkg/db"
+	jsonClient "github.com/erigontech/erigon/zkevm/jsonrpc/client"
+	jsonTypes "github.com/erigontech/erigon/zkevm/jsonrpc/types"
 )
 
 const (

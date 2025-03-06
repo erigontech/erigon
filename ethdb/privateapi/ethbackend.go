@@ -18,7 +18,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"

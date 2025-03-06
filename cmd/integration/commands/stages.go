@@ -19,7 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	chain2 "github.com/erigontech/erigon-lib/chain"
-	chain3 "github.com/ledgerwatch/erigon-lib/chain"
+	chain3 "github.com/erigontech/erigon-lib/chain"
 	common2 "github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"

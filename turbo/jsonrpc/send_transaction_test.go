@@ -24,12 +24,13 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common/u256"
 
-	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpool"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/stages"
@@ -91,7 +92,7 @@ func TestSendRawTransaction(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
-	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, 1e18, 100_000, false, 100_000, 128, logger, nil, 1000, false)
+	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, 1e18, 100_000, &ethconfig.Defaults, false, 100_000, 128, logger, nil, 1000, false)
 	api.BadTxAllowance = 1
 
 	buf := bytes.NewBuffer(nil)
@@ -116,7 +117,7 @@ func TestSendRawTransaction(t *testing.T) {
 		t.Log("Timeout waiting for txn from channel")
 		jsonTx, err := api.GetTransactionByHash(ctx, txHash, nil)
 		require.NoError(err)
-		jsonTxRPCTransaction, ok := jsonTx.(jsonrpc.RPCTransaction)
+		jsonTxRPCTransaction, ok := jsonTx.(ethapi.RPCTransaction)
 		require.True(ok)
 		require.Equal(expectedValue, jsonTxRPCTransaction.Value.Uint64())
 	}
@@ -150,7 +151,7 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := txpool.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx,  rpchelper.DefaultFiltersConfig, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, 1e18, 100_000, &ethconfig.Defaults, false, 100_000, 128, logger, nil, 1000, false)
 	api.BadTxAllowance = 1
 
@@ -177,7 +178,7 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 		t.Log("Timeout waiting for txn from channel")
 		jsonTx, err := api.GetTransactionByHash(ctx, txHash, nil)
 		require.NoError(err)
-		jsonTxRPCTransaction, ok := jsonTx.(jsonrpc.RPCTransaction)
+		jsonTxRPCTransaction, ok := jsonTx.(ethapi.RPCTransaction)
 		require.True(ok)
 		require.Equal(expectedTxValue, jsonTxRPCTransaction.Value.Uint64())
 	}

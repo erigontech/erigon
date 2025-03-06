@@ -26,13 +26,13 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	math2 "github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/common/u256"
@@ -325,35 +325,6 @@ func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config
 		contract,
 	)
 	return ret, err
-}
-
-func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
-	gp := new(GasPool)
-	gp.AddGas(50_000_000)
-	var gasUsed, blobGasUsed uint64
-	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
-	noop := state.NewNoopWriter()
-	tx, err := CallContractTx(contract, data, ibs)
-	if err != nil {
-		return nil, fmt.Errorf("SysCallContract: %w ", err)
-	}
-	vmConfig := vm.Config{NoReceipts: true}
-	// todo: upstream merge
-	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, &blobGasUsed, vmConfig, zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED)
-	if err != nil {
-		return result, fmt.Errorf("SysCallContract: %w ", err)
-	}
-	return result, nil
-}
-
-// from the null sender, with 50M gas.
-func CallContractTx(contract libcommon.Address, data []byte, ibs *state.IntraBlockState) (tx types.Transaction, err error) {
-	from := libcommon.Address{}
-	nonce := ibs.GetNonce(from)
-	tx = types.NewTransaction(nonce, contract, u256.Num0, 50_000_000, u256.Num0, data)
-	return tx.FakeSign(from)
 }
 
 func FinalizeBlockExecution(

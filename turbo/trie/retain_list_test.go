@@ -1,8 +1,9 @@
 package trie
 
 import (
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types/accounts"

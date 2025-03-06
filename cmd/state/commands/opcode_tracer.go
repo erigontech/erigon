@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	zktypes "github.com/ledgerwatch/erigon/zk/types"
+	zktypes "github.com/erigontech/erigon/zk/types"
 )
 
 var (

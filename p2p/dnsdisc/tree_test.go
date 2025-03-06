@@ -17,9 +17,10 @@
 package dnsdisc
 
 import (
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"reflect"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/erigontech/erigon/p2p/enode"

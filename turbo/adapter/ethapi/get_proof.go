@@ -2,6 +2,7 @@ package ethapi
 
 import (
 	"bytes"
+
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	libcommon "github.com/erigontech/erigon-lib/common"

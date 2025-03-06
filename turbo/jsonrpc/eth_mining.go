@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"errors"
+
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	libcommon "github.com/erigontech/erigon-lib/common"

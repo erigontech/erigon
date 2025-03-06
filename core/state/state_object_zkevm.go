@@ -1,8 +1,8 @@
 package state
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func (so *stateObject) registerKeyReadForWitness(key *libcommon.Hash) {

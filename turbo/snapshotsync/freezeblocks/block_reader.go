@@ -14,10 +14,10 @@ import (
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon/zk/hermez_db"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"

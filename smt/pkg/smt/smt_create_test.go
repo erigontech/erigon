@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/smt/pkg/utils"
+	"github.com/erigontech/erigon/smt/pkg/utils"
 )
 
 func TestSMT_Create_Insert(t *testing.T) {

@@ -7,13 +7,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ledgerwatch/erigon/cmd/acl/list"
-	"github.com/ledgerwatch/erigon/cmd/acl/mode"
-	"github.com/ledgerwatch/erigon/cmd/acl/update"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/zkevm/log"
-	loglvl "github.com/ledgerwatch/log/v3"
+	loglvl "github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/acl/list"
+	"github.com/erigontech/erigon/cmd/acl/mode"
+	"github.com/erigontech/erigon/cmd/acl/update"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/zkevm/log"
 	"github.com/urfave/cli/v2"
 )
 

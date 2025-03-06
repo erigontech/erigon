@@ -5,25 +5,25 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/rpc"
+	db2 "github.com/erigontech/erigon/smt/pkg/db"
+	"github.com/erigontech/erigon/smt/pkg/smt"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/eth/tracers"
-	"github.com/ledgerwatch/erigon/rpc"
-	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
-	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/zk/hermez_db"
 )
 
 const (
@@ -155,7 +155,7 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 
 	ibs := state.New(stateReader)
 
-	blockCtx := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), engine, nil)
+	blockCtx := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), engine, nil, chainConfig)
 
 	rules := chainConfig.Rules(block.NumberU64(), header.Time)
 
@@ -203,6 +203,9 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 	ibs.Init(tx.Hash(), header.Hash(), 0)
 
 	execResult, oocError := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	if oocError != nil {
+		return nil, oocError
+	}
 
 	l1InfoIndex, err := hermezDb.GetBlockL1InfoTreeIndex(block.NumberU64())
 	if err != nil {
@@ -257,7 +260,7 @@ type revertInfo struct {
 	Data    []byte `json:"data"`
 }
 
-func populateCounters(collected *vm.Counters, execResult *core.ExecutionResult, gasLimit uint64, oocError error) (json.RawMessage, error) {
+func populateCounters(collected *vm.Counters, execResult *evmtypes.ExecutionResult, gasLimit uint64, oocError error) (json.RawMessage, error) {
 	var revInfo revertInfo
 	var usedGas uint64
 	if execResult != nil {
@@ -445,7 +448,7 @@ func (api *ZkEvmAPIImpl) GetBatchCountersByNumber(ctx context.Context, batchNumR
 
 		header := block.Header()
 		ibs := state.New(stateReader)
-		blockCtx := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), engine, nil)
+		blockCtx := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), engine, nil, chainConfig)
 		rules := chainConfig.Rules(blockNum, header.Time)
 		signer := types.MakeSigner(chainConfig, blockNum, 0)
 		if receipts, err = rawdb.ReadReceiptsByHash(dbtx, header.Hash()); err != nil {
@@ -485,7 +488,7 @@ func (api *ZkEvmAPIImpl) execTransaction(
 ) (gasUsed uint64, err error) {
 	var (
 		msg        core.Message
-		execResult *core.ExecutionResult
+		execResult *evmtypes.ExecutionResult
 	)
 	txCounters := vm.NewTransactionCounter(tx, smtDepth, forkId, api.config.Zk.VirtualCountersSmtReduction, false)
 

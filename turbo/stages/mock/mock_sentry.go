@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/txpool"
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
@@ -69,7 +68,7 @@ import (
 	"github.com/erigontech/erigon/turbo/stages/bodydownload"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 	"github.com/erigontech/erigon/turbo/trie"
-	"github.com/ledgerwatch/erigon/zk/txpool"
+	"github.com/erigontech/erigon/zk/txpool"
 )
 
 const MockInsertAsInitialCycle = false
@@ -320,6 +319,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
 		londonBlock := mock.ChainConfig.LondonBlock
 		shanghaiTime := mock.ChainConfig.ShanghaiTime
+		var agraBlock *big.Int
+		if mock.ChainConfig.Bor != nil {
+			agraBlock = mock.ChainConfig.Bor.GetAgraBlock()
+		}
 
 		// we want to enable gossip testing for the majority of tests even though in a zk context we don't want it enabled - having it disabled stops the
 		// p2p sentry pickup on events from the txpool
@@ -328,7 +331,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		pragueTime := mock.ChainConfig.PragueTime
 		blobSchedule := mock.ChainConfig.BlobSchedule
 
-		mock.TxPool, err = txpool.New(newTxs, mock.DB, poolCfg, &ethconfig.Defaults, kvcache.NewDummy(), *chainID, shanghaiTime, nil /* agraBlock */, cancunTime, pragueTime, blobSchedule, nil, logger, aclDB kv.RwDB)
+		mock.TxPool, err = txpool.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID, shanghaiTime, agraBlock, cancunTime, pragueTime, blobSchedule, londonBlock, &ethconfig.Defaults, mock.DB)
 		if err != nil {
 			tb.Fatal(err)
 		}

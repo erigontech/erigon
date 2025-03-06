@@ -1,14 +1,15 @@
 package test
 
 import (
-	"github.com/ledgerwatch/erigon/zk/zk_config"
-	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_allocs"
-	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_chain"
-	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_dynamic_genesis"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/erigontech/erigon/zk/zk_config"
+	"github.com/erigontech/erigon/zk/zk_config/cfg_allocs"
+	"github.com/erigontech/erigon/zk/zk_config/cfg_chain"
+	"github.com/erigontech/erigon/zk/zk_config/cfg_dynamic_genesis"
 )
 
 const configsDir = "./test_configs"

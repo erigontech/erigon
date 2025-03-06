@@ -4,10 +4,10 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/ethclient"
-	"github.com/ledgerwatch/erigon/zk/debug_tools"
+	"github.com/erigontech/erigon/ethclient"
+	"github.com/erigontech/erigon/zk/debug_tools"
 )
 
 func main() {

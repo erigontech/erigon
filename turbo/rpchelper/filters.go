@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/txpool"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	txpool2 "github.com/erigontech/erigon-lib/txpool"
+	txpool2 "github.com/erigontech/erigon/zk/txpool"
 
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/filters"

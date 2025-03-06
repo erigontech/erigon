@@ -5,6 +5,7 @@ package types
 import (
 	"encoding/json"
 	"errors"
+
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	libcommon "github.com/erigontech/erigon-lib/common"

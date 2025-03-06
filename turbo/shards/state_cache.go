@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"container/heap"
 	"fmt"
-	"github.com/erigontech/erigon-lib/metrics"
 	"unsafe"
+
+	"github.com/erigontech/erigon-lib/metrics"
 
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/erigontech/erigon-lib/common"

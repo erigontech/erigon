@@ -8,14 +8,14 @@ import (
 	"os"
 	"time"
 
-	ethTypes "github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethclient"
+	ethTypes "github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/ethclient"
 
-	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/zk/contracts"
-	"github.com/ledgerwatch/erigon/zk/debug_tools"
-	"github.com/ledgerwatch/erigon/zk/types"
+	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/zk/contracts"
+	"github.com/erigontech/erigon/zk/debug_tools"
+	"github.com/erigontech/erigon/zk/types"
 )
 
 func main() {

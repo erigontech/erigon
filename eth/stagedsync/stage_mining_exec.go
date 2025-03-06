@@ -18,9 +18,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatch"
 	types2 "github.com/erigontech/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/zk/txpool"
+	"github.com/erigontech/erigon/zk/txpool"
 
-	zktypes "github.com/ledgerwatch/erigon/zk/types"
+	zktypes "github.com/erigontech/erigon/zk/types"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"

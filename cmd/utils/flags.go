@@ -27,8 +27,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon/zk/zk_config"
-	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_dynamic_genesis"
+	"github.com/erigontech/erigon/zk/zk_config"
+	"github.com/erigontech/erigon/zk/zk_config/cfg_dynamic_genesis"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/log/v3"

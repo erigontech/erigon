@@ -3,11 +3,11 @@ package stages
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/state"
-	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
-	smtNs "github.com/ledgerwatch/erigon/smt/pkg/smt"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/state"
+	db2 "github.com/erigontech/erigon/smt/pkg/db"
+	smtNs "github.com/erigontech/erigon/smt/pkg/smt"
+	"github.com/erigontech/erigon/zk/hermez_db"
 )
 
 type stageDb struct {

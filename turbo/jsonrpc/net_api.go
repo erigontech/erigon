@@ -3,8 +3,9 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"strconv"
+
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon/turbo/rpchelper"
 )

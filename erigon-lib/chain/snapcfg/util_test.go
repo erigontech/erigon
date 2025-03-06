@@ -1,8 +1,9 @@
 package snapcfg
 
 import (
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 )
 
 func TestNameToParts(t *testing.T) {

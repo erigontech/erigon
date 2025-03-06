@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/ledgerwatch/erigon/zk/debug_tools"
+	"github.com/erigontech/erigon/zk/debug_tools"
 )
 
 func main() {

@@ -6,16 +6,16 @@ import (
 	"math"
 	"sort"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 
 	"encoding/json"
 
 	"time"
 
-	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
-	"github.com/ledgerwatch/erigon/zk/types"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	dstypes "github.com/erigontech/erigon/zk/datastream/types"
+	"github.com/erigontech/erigon/zk/types"
 )
 
 const L1VERIFICATIONS = "hermez_l1Verifications"                        // l1blockno, batchno -> l1txhash

@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"sync"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var ErrLimboState = errors.New("Calculating limbo state")

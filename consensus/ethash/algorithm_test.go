@@ -19,10 +19,11 @@ package ethash
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"io"
 	"reflect"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon-lib/common/length"
 )

@@ -1,15 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
-	"io"
-	"fmt"
-	"encoding/json"
 
-	hcLog "github.com/hashicorp/go-hclog"
 	"github.com/google/go-cmp/cmp"
+	hcLog "github.com/hashicorp/go-hclog"
 )
 
 var (

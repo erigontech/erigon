@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/zk/txpool"
 	"github.com/erigontech/erigon/zkevm/jsonrpc/client"
 )
 

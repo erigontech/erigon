@@ -1,9 +1,9 @@
 package utils
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/smt/pkg/db"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/smt/pkg/db"
+	"github.com/erigontech/erigon/zk/hermez_db"
 )
 
 func PopulateMemoryMutationTables(batch kv.RwTx) error {

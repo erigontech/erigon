@@ -23,6 +23,7 @@ import (
 type MockSpanner struct {
 	ctrl     *gomock.Controller
 	recorder *MockSpannerMockRecorder
+	isgomock struct{}
 }
 
 // MockSpannerMockRecorder is the mock recorder for MockSpanner.
@@ -43,17 +44,17 @@ func (m *MockSpanner) EXPECT() *MockSpannerMockRecorder {
 }
 
 // CommitSpan mocks base method.
-func (m *MockSpanner) CommitSpan(arg0 heimdall.Span, arg1 consensus.SystemCall) error {
+func (m *MockSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CommitSpan", arg0, arg1)
+	ret := m.ctrl.Call(m, "CommitSpan", heimdallSpan, syscall)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // CommitSpan indicates an expected call of CommitSpan.
-func (mr *MockSpannerMockRecorder) CommitSpan(arg0, arg1 any) *MockSpannerCommitSpanCall {
+func (mr *MockSpannerMockRecorder) CommitSpan(heimdallSpan, syscall any) *MockSpannerCommitSpanCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitSpan", reflect.TypeOf((*MockSpanner)(nil).CommitSpan), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitSpan", reflect.TypeOf((*MockSpanner)(nil).CommitSpan), heimdallSpan, syscall)
 	return &MockSpannerCommitSpanCall{Call: call}
 }
 
@@ -81,18 +82,18 @@ func (c *MockSpannerCommitSpanCall) DoAndReturn(f func(heimdall.Span, consensus.
 }
 
 // GetCurrentProducers mocks base method.
-func (m *MockSpanner) GetCurrentProducers(arg0 uint64, arg1 common.Address, arg2 consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+func (m *MockSpanner) GetCurrentProducers(spanId uint64, signer common.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetCurrentProducers", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "GetCurrentProducers", spanId, signer, chain)
 	ret0, _ := ret[0].([]*valset.Validator)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetCurrentProducers indicates an expected call of GetCurrentProducers.
-func (mr *MockSpannerMockRecorder) GetCurrentProducers(arg0, arg1, arg2 any) *MockSpannerGetCurrentProducersCall {
+func (mr *MockSpannerMockRecorder) GetCurrentProducers(spanId, signer, chain any) *MockSpannerGetCurrentProducersCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentProducers", reflect.TypeOf((*MockSpanner)(nil).GetCurrentProducers), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentProducers", reflect.TypeOf((*MockSpanner)(nil).GetCurrentProducers), spanId, signer, chain)
 	return &MockSpannerGetCurrentProducersCall{Call: call}
 }
 
@@ -120,18 +121,18 @@ func (c *MockSpannerGetCurrentProducersCall) DoAndReturn(f func(uint64, common.A
 }
 
 // GetCurrentSpan mocks base method.
-func (m *MockSpanner) GetCurrentSpan(arg0 consensus.SystemCall) (*heimdall.Span, error) {
+func (m *MockSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.Span, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetCurrentSpan", arg0)
+	ret := m.ctrl.Call(m, "GetCurrentSpan", syscall)
 	ret0, _ := ret[0].(*heimdall.Span)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetCurrentSpan indicates an expected call of GetCurrentSpan.
-func (mr *MockSpannerMockRecorder) GetCurrentSpan(arg0 any) *MockSpannerGetCurrentSpanCall {
+func (mr *MockSpannerMockRecorder) GetCurrentSpan(syscall any) *MockSpannerGetCurrentSpanCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentSpan", reflect.TypeOf((*MockSpanner)(nil).GetCurrentSpan), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentSpan", reflect.TypeOf((*MockSpanner)(nil).GetCurrentSpan), syscall)
 	return &MockSpannerGetCurrentSpanCall{Call: call}
 }
 
@@ -159,18 +160,18 @@ func (c *MockSpannerGetCurrentSpanCall) DoAndReturn(f func(consensus.SystemCall)
 }
 
 // GetCurrentValidators mocks base method.
-func (m *MockSpanner) GetCurrentValidators(arg0 uint64, arg1 common.Address, arg2 consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+func (m *MockSpanner) GetCurrentValidators(spanId uint64, signer common.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetCurrentValidators", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "GetCurrentValidators", spanId, signer, chain)
 	ret0, _ := ret[0].([]*valset.Validator)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetCurrentValidators indicates an expected call of GetCurrentValidators.
-func (mr *MockSpannerMockRecorder) GetCurrentValidators(arg0, arg1, arg2 any) *MockSpannerGetCurrentValidatorsCall {
+func (mr *MockSpannerMockRecorder) GetCurrentValidators(spanId, signer, chain any) *MockSpannerGetCurrentValidatorsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentValidators", reflect.TypeOf((*MockSpanner)(nil).GetCurrentValidators), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentValidators", reflect.TypeOf((*MockSpanner)(nil).GetCurrentValidators), spanId, signer, chain)
 	return &MockSpannerGetCurrentValidatorsCall{Call: call}
 }
 

@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon/zk/hermez_db"
 )
 
 type BlockGetter interface {
@@ -68,7 +68,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 			return nil, blockContext, evmtypes.TxContext{}, statedb, reader, nil
 		}
 
-		rules := cfg.Rules(BlockContext.BlockNumber, BlockContext.Time)
+		rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
 		txn := block.Transactions()[txIndex]
 		statedb.Init(txn.Hash(), block.Hash(), txIndex)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
@@ -80,9 +80,9 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		}
 
 		TxContext := core.NewEVMTxContext(msg)
-		return msg, BlockContext, TxContext, statedb, reader, nil
+		return msg, blockContext, TxContext, statedb, reader, nil
 	}
-	vmenv := vm.NewEVM(BlockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
+	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
 	rules := vmenv.ChainRules()
 
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, logger)
@@ -114,7 +114,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 		TxContext := core.NewEVMTxContext(msg)
 		if idx == txIndex {
-			return msg, BlockContext, TxContext, statedb, reader, nil
+			return msg, blockContext, TxContext, statedb, reader, nil
 		}
 		vmenv.Reset(TxContext, statedb)
 		// Not yet the searched for transaction, execute on top of the current state
@@ -127,7 +127,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 		if idx+1 == len(block.Transactions()) {
 			// Return the state from evaluating all txs in the block, note no msg or TxContext in this case
-			return nil, BlockContext, evmtypes.TxContext{}, statedb, reader, nil
+			return nil, blockContext, evmtypes.TxContext{}, statedb, reader, nil
 		}
 	}
 
@@ -231,7 +231,7 @@ func TraceTx(
 		stream.WriteArrayStart()
 	}
 
-	var result *core.ExecutionResult
+	var result *evmtypes.ExecutionResult
 	result, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
 
 	if err != nil {
@@ -290,18 +290,6 @@ func TraceTx(
 		}
 	}
 	return nil
-}
-
-func prepareCallMessage(msg core.Message) ethereum.CallMsg {
-	return ethereum.CallMsg{
-		From:       msg.From(),
-		To:         msg.To(),
-		Gas:        msg.Gas(),
-		GasPrice:   msg.GasPrice(),
-		Value:      msg.Value(),
-		Data:       msg.Data(),
-		AccessList: msg.AccessList(),
-	}
 }
 
 func AssembleTracer(

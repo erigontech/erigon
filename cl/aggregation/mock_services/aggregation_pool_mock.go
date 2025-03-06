@@ -21,6 +21,7 @@ import (
 type MockAggregationPool struct {
 	ctrl     *gomock.Controller
 	recorder *MockAggregationPoolMockRecorder
+	isgomock struct{}
 }
 
 // MockAggregationPoolMockRecorder is the mock recorder for MockAggregationPool.
@@ -41,17 +42,17 @@ func (m *MockAggregationPool) EXPECT() *MockAggregationPoolMockRecorder {
 }
 
 // AddAttestation mocks base method.
-func (m *MockAggregationPool) AddAttestation(arg0 *solid.Attestation) error {
+func (m *MockAggregationPool) AddAttestation(att *solid.Attestation) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AddAttestation", arg0)
+	ret := m.ctrl.Call(m, "AddAttestation", att)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // AddAttestation indicates an expected call of AddAttestation.
-func (mr *MockAggregationPoolMockRecorder) AddAttestation(arg0 any) *MockAggregationPoolAddAttestationCall {
+func (mr *MockAggregationPoolMockRecorder) AddAttestation(att any) *MockAggregationPoolAddAttestationCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddAttestation", reflect.TypeOf((*MockAggregationPool)(nil).AddAttestation), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddAttestation", reflect.TypeOf((*MockAggregationPool)(nil).AddAttestation), att)
 	return &MockAggregationPoolAddAttestationCall{Call: call}
 }
 
@@ -79,17 +80,17 @@ func (c *MockAggregationPoolAddAttestationCall) DoAndReturn(f func(*solid.Attest
 }
 
 // GetAggregatationByRoot mocks base method.
-func (m *MockAggregationPool) GetAggregatationByRoot(arg0 common.Hash) *solid.Attestation {
+func (m *MockAggregationPool) GetAggregatationByRoot(root common.Hash) *solid.Attestation {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetAggregatationByRoot", arg0)
+	ret := m.ctrl.Call(m, "GetAggregatationByRoot", root)
 	ret0, _ := ret[0].(*solid.Attestation)
 	return ret0
 }
 
 // GetAggregatationByRoot indicates an expected call of GetAggregatationByRoot.
-func (mr *MockAggregationPoolMockRecorder) GetAggregatationByRoot(arg0 any) *MockAggregationPoolGetAggregatationByRootCall {
+func (mr *MockAggregationPoolMockRecorder) GetAggregatationByRoot(root any) *MockAggregationPoolGetAggregatationByRootCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAggregatationByRoot", reflect.TypeOf((*MockAggregationPool)(nil).GetAggregatationByRoot), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAggregatationByRoot", reflect.TypeOf((*MockAggregationPool)(nil).GetAggregatationByRoot), root)
 	return &MockAggregationPoolGetAggregatationByRootCall{Call: call}
 }
 

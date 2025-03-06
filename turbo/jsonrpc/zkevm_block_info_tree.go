@@ -7,16 +7,16 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	zktx "github.com/ledgerwatch/erigon/zk/tx"
+	"github.com/erigontech/erigon-lib/common"
+	zktx "github.com/erigontech/erigon/zk/tx"
 
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/zk/hermez_db"
 
 	"github.com/holiman/uint256"
 )

@@ -22,8 +22,6 @@ import (
 	"math/big"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"

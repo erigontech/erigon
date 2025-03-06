@@ -2,9 +2,10 @@ package statechange_test
 
 import (
 	"encoding/binary"
+	"testing"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
-	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"

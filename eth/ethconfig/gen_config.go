@@ -33,7 +33,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Miner                          params.MiningConfig
 		Ethash                         ethashcfg.Config
 		Clique                         params.ConsensusSnapshotConfig
-		Aura                           erigonchain.AuRaConfig
+		Aura                           chain.AuRaConfig
 		TxPool                         DeprecatedTxPoolConfig
 		GPO                            gaspricecfg.Config
 		RPCGasCap                      uint64  `toml:",omitempty"`
@@ -82,7 +82,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Miner                          *params.MiningConfig
 		Ethash                         *ethashcfg.Config
 		Clique                         *params.ConsensusSnapshotConfig
-		Aura                           *erigonchain.AuRaConfig
+		Aura                           *chain.AuRaConfig
 		TxPool                         *DeprecatedTxPoolConfig
 		GPO                            *gaspricecfg.Config
 		RPCGasCap                      *uint64  `toml:",omitempty"`

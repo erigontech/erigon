@@ -17,7 +17,7 @@ import (
 	borfinality "github.com/erigontech/erigon/polygon/bor/finality"
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/ledgerwatch/erigon/zk/sequencer"
+	"github.com/erigontech/erigon/zk/sequencer"
 )
 
 // unable to decode supplied params, or an invalid number of parameters

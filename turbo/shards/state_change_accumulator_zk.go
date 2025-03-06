@@ -1,7 +1,7 @@
 package shards
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func (a *Accumulator) ChangeTransactions(txs [][]byte) {

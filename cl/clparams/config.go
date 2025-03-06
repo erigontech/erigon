@@ -28,7 +28,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/erigontech/erigon/cl/utils"
-	zkUtils "github.com/ledgerwatch/erigon/zk/utils"
+	zkUtils "github.com/erigontech/erigon/zk/utils"
 )
 
 type CaplinConfig struct {

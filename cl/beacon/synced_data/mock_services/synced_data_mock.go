@@ -20,6 +20,7 @@ import (
 type MockSyncedData struct {
 	ctrl     *gomock.Controller
 	recorder *MockSyncedDataMockRecorder
+	isgomock struct{}
 }
 
 // MockSyncedDataMockRecorder is the mock recorder for MockSyncedData.
@@ -154,17 +155,17 @@ func (c *MockSyncedDataHeadStateReaderCall) DoAndReturn(f func() state.BeaconSta
 }
 
 // OnHeadState mocks base method.
-func (m *MockSyncedData) OnHeadState(arg0 *state.CachingBeaconState) error {
+func (m *MockSyncedData) OnHeadState(newState *state.CachingBeaconState) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "OnHeadState", arg0)
+	ret := m.ctrl.Call(m, "OnHeadState", newState)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // OnHeadState indicates an expected call of OnHeadState.
-func (mr *MockSyncedDataMockRecorder) OnHeadState(arg0 any) *MockSyncedDataOnHeadStateCall {
+func (mr *MockSyncedDataMockRecorder) OnHeadState(newState any) *MockSyncedDataOnHeadStateCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnHeadState", reflect.TypeOf((*MockSyncedData)(nil).OnHeadState), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnHeadState", reflect.TypeOf((*MockSyncedData)(nil).OnHeadState), newState)
 	return &MockSyncedDataOnHeadStateCall{Call: call}
 }
 
@@ -174,8 +175,8 @@ type MockSyncedDataOnHeadStateCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSyncedDataOnHeadStateCall) Return(arg0 error) *MockSyncedDataOnHeadStateCall {
-	c.Call = c.Call.Return(arg0)
+func (c *MockSyncedDataOnHeadStateCall) Return(err error) *MockSyncedDataOnHeadStateCall {
+	c.Call = c.Call.Return(err)
 	return c
 }
 

@@ -6,9 +6,9 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/params"
-	cli2 "github.com/ledgerwatch/erigon/turbo/cli"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon/params"
+	cli2 "github.com/erigontech/erigon/turbo/cli"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 func main() {

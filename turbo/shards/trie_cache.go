@@ -3,9 +3,10 @@ package shards
 import (
 	"bytes"
 	"fmt"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"math/bits"
 	"unsafe"
+
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/google/btree"

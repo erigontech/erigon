@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/stretchr/testify/assert"
 
 	libcommon "github.com/erigontech/erigon-lib/common"

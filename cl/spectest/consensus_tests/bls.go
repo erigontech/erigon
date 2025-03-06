@@ -1,9 +1,10 @@
 package consensus_tests
 
 import (
-	"github.com/erigontech/erigon/spectest"
 	"io/fs"
 	"testing"
+
+	"github.com/erigontech/erigon/spectest"
 )
 
 type BlsAggregateVerify struct {

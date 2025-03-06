@@ -2,10 +2,11 @@ package consensus_tests
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon/spectest"
 	"io/fs"
 	"os"
 	"testing"
+
+	"github.com/erigontech/erigon/spectest"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"

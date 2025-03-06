@@ -1,6 +1,6 @@
 package chain
 
-import "github.com/ledgerwatch/erigon-lib/chain/networkname"
+import "github.com/erigontech/erigon-lib/chain/networkname"
 
 var chainIds = []uint64{
 	195,    // xlayer-testnet

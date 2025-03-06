@@ -106,11 +106,6 @@ type Config struct {
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
 
-	// For not pruning the logs of these contracts
-	// For deposit contract logs are needed by CL to validate/produce blocks.
-	// All logs should be available to a validating node through eth_getLogs
-	NoPruneContracts map[common.Address]bool `json:"noPruneContracts,omitempty"`
-
 	//zkEVM updates
 	ForkID4Block            *big.Int `json:"forkID4Block,omitempty"`
 	ForkID5DragonfruitBlock *big.Int `json:"forkID5DragonfruitBlock,omitempty"`
@@ -191,7 +186,7 @@ type BorConfig interface {
 func (c *Config) String() string {
 	engine := c.getEngine()
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Normalcy: %v, Engine: %v, NoPruneContracts: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Normalcy: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -214,7 +209,6 @@ func (c *Config) String() string {
 		c.OsakaTime,
 		c.NormalcyBlock,
 		engine,
-		c.NoPruneContracts,
 	)
 }
 
@@ -388,8 +382,6 @@ func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
 	}
 	return b.MaxBlobsPerBlock(c.IsPrague(time))
 }
-
-
 
 func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
 	var b *BlobSchedule

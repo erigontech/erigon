@@ -11,7 +11,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/admin"
-	"github.com/erigontech/erigon/cmd/devnet/contracts/steps"
+	contracts_steps "github.com/erigontech/erigon/cmd/devnet/contracts/steps"
 	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/cmd/devnet/services"
 	"github.com/erigontech/erigon/cmd/devnet/transactions"

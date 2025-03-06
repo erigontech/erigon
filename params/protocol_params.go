@@ -161,8 +161,8 @@ const (
 	Bls12381PairingPerPairGas uint64 = 32600 // Per-point pair gas price for BLS12-381 elliptic curve pairing check
 
 	// todo: upstream merge
-	Bls12381MapFpToG1Gas      uint64 = 5500  // Gas price for BLS12-381 mapping field element to G1 operation
-	Bls12381MapFp2ToG2Gas     uint64 = 23800 // Gas price for BLS12-381 mapping field element to G2 operation
+	Bls12381MapFpToG1Gas  uint64 = 5500  // Gas price for BLS12-381 mapping field element to G1 operation
+	Bls12381MapFp2ToG2Gas uint64 = 23800 // Gas price for BLS12-381 mapping field element to G2 operation
 
 	// The Refund Quotient is the cap on how much of the used gas can be refunded. Before EIP-3529,
 	// up to half the consumed gas could be refunded.

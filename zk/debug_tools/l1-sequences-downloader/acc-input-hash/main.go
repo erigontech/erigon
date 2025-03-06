@@ -6,9 +6,9 @@ import (
 	"math/big"
 	"os"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/zk/syncer"
-	"github.com/ledgerwatch/erigon/zk/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/zk/syncer"
+	"github.com/erigontech/erigon/zk/types"
 )
 
 func main() {

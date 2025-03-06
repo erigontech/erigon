@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
+	stageszk "github.com/erigontech/erigon/zk/stages"
 )
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.

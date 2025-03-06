@@ -21,6 +21,7 @@ import (
 type MockStorage struct {
 	ctrl     *gomock.Controller
 	recorder *MockStorageMockRecorder
+	isgomock struct{}
 }
 
 // MockStorageMockRecorder is the mock recorder for MockStorage.
@@ -41,17 +42,17 @@ func (m *MockStorage) EXPECT() *MockStorageMockRecorder {
 }
 
 // Flush mocks base method.
-func (m *MockStorage) Flush(arg0 context.Context) error {
+func (m *MockStorage) Flush(ctx context.Context) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Flush", arg0)
+	ret := m.ctrl.Call(m, "Flush", ctx)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Flush indicates an expected call of Flush.
-func (mr *MockStorageMockRecorder) Flush(arg0 any) *MockStorageFlushCall {
+func (mr *MockStorageMockRecorder) Flush(ctx any) *MockStorageFlushCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Flush", reflect.TypeOf((*MockStorage)(nil).Flush), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Flush", reflect.TypeOf((*MockStorage)(nil).Flush), ctx)
 	return &MockStorageFlushCall{Call: call}
 }
 
@@ -79,17 +80,17 @@ func (c *MockStorageFlushCall) DoAndReturn(f func(context.Context) error) *MockS
 }
 
 // InsertBlocks mocks base method.
-func (m *MockStorage) InsertBlocks(arg0 context.Context, arg1 []*types.Block) error {
+func (m *MockStorage) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "InsertBlocks", arg0, arg1)
+	ret := m.ctrl.Call(m, "InsertBlocks", ctx, blocks)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // InsertBlocks indicates an expected call of InsertBlocks.
-func (mr *MockStorageMockRecorder) InsertBlocks(arg0, arg1 any) *MockStorageInsertBlocksCall {
+func (mr *MockStorageMockRecorder) InsertBlocks(ctx, blocks any) *MockStorageInsertBlocksCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertBlocks", reflect.TypeOf((*MockStorage)(nil).InsertBlocks), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertBlocks", reflect.TypeOf((*MockStorage)(nil).InsertBlocks), ctx, blocks)
 	return &MockStorageInsertBlocksCall{Call: call}
 }
 
@@ -117,17 +118,17 @@ func (c *MockStorageInsertBlocksCall) DoAndReturn(f func(context.Context, []*typ
 }
 
 // Run mocks base method.
-func (m *MockStorage) Run(arg0 context.Context) error {
+func (m *MockStorage) Run(ctx context.Context) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Run", arg0)
+	ret := m.ctrl.Call(m, "Run", ctx)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Run indicates an expected call of Run.
-func (mr *MockStorageMockRecorder) Run(arg0 any) *MockStorageRunCall {
+func (mr *MockStorageMockRecorder) Run(ctx any) *MockStorageRunCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Run", reflect.TypeOf((*MockStorage)(nil).Run), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Run", reflect.TypeOf((*MockStorage)(nil).Run), ctx)
 	return &MockStorageRunCall{Call: call}
 }
 

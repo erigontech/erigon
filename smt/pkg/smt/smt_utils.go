@@ -3,7 +3,7 @@ package smt
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/smt/pkg/utils"
+	"github.com/erigontech/erigon/smt/pkg/utils"
 )
 
 var (

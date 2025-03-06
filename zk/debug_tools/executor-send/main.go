@@ -1,13 +1,14 @@
 package main
 
 import (
-	"flag"
-	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
-	"os"
-	"fmt"
-	"encoding/json"
-	"time"
 	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/erigontech/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

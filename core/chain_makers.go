@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/trie"
+	zktypes "github.com/erigontech/erigon/zk/types"
 )
 
 // BlockGen creates blocks for testing.

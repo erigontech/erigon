@@ -19,8 +19,11 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
+	db2 "github.com/erigontech/erigon/smt/pkg/db"
+	"github.com/erigontech/erigon/smt/pkg/smt"
 	ethapi2 "github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/zk/hermez_db"
 )
 
 func DoCall(
@@ -276,7 +279,7 @@ func NewReusableCaller(
 	}, nil
 }
 
-func (r *ReusableCaller) CheckCountersOverflow(result *core.ExecutionResult) (bool, error) {
+func (r *ReusableCaller) CheckCountersOverflow(result *evmtypes.ExecutionResult) (bool, error) {
 	if r.batchCounters == nil || r.txCounters == nil {
 		return false, nil
 	}

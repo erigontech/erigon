@@ -169,7 +169,7 @@ type EngineWriter interface {
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
 	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainReader, syscall SystemCall, call Call, logger log.Logger,
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainReader, syscall SystemCall, call1 Call, logger log.Logger,
 	) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
@@ -187,7 +187,7 @@ type EngineWriter interface {
 	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64,
 		parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
 
-	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
+	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call1 Call) []byte
 
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API

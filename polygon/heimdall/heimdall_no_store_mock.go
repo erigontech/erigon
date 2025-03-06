@@ -20,6 +20,7 @@ import (
 type MockHeimdallNoStore struct {
 	ctrl     *gomock.Controller
 	recorder *MockHeimdallNoStoreMockRecorder
+	isgomock struct{}
 }
 
 // MockHeimdallNoStoreMockRecorder is the mock recorder for MockHeimdallNoStore.
@@ -40,18 +41,18 @@ func (m *MockHeimdallNoStore) EXPECT() *MockHeimdallNoStoreMockRecorder {
 }
 
 // FetchCheckpoints mocks base method.
-func (m *MockHeimdallNoStore) FetchCheckpoints(arg0 context.Context, arg1, arg2 CheckpointId) ([]*Checkpoint, error) {
+func (m *MockHeimdallNoStore) FetchCheckpoints(ctx context.Context, start, end CheckpointId) ([]*Checkpoint, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchCheckpoints", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "FetchCheckpoints", ctx, start, end)
 	ret0, _ := ret[0].([]*Checkpoint)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchCheckpoints indicates an expected call of FetchCheckpoints.
-func (mr *MockHeimdallNoStoreMockRecorder) FetchCheckpoints(arg0, arg1, arg2 any) *MockHeimdallNoStoreFetchCheckpointsCall {
+func (mr *MockHeimdallNoStoreMockRecorder) FetchCheckpoints(ctx, start, end any) *MockHeimdallNoStoreFetchCheckpointsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpoints", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchCheckpoints), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpoints", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchCheckpoints), ctx, start, end)
 	return &MockHeimdallNoStoreFetchCheckpointsCall{Call: call}
 }
 
@@ -79,18 +80,18 @@ func (c *MockHeimdallNoStoreFetchCheckpointsCall) DoAndReturn(f func(context.Con
 }
 
 // FetchCheckpointsFromBlock mocks base method.
-func (m *MockHeimdallNoStore) FetchCheckpointsFromBlock(arg0 context.Context, arg1 uint64) (Waypoints, error) {
+func (m *MockHeimdallNoStore) FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchCheckpointsFromBlock", arg0, arg1)
+	ret := m.ctrl.Call(m, "FetchCheckpointsFromBlock", ctx, startBlock)
 	ret0, _ := ret[0].(Waypoints)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchCheckpointsFromBlock indicates an expected call of FetchCheckpointsFromBlock.
-func (mr *MockHeimdallNoStoreMockRecorder) FetchCheckpointsFromBlock(arg0, arg1 any) *MockHeimdallNoStoreFetchCheckpointsFromBlockCall {
+func (mr *MockHeimdallNoStoreMockRecorder) FetchCheckpointsFromBlock(ctx, startBlock any) *MockHeimdallNoStoreFetchCheckpointsFromBlockCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpointsFromBlock", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchCheckpointsFromBlock), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpointsFromBlock", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchCheckpointsFromBlock), ctx, startBlock)
 	return &MockHeimdallNoStoreFetchCheckpointsFromBlockCall{Call: call}
 }
 
@@ -118,18 +119,18 @@ func (c *MockHeimdallNoStoreFetchCheckpointsFromBlockCall) DoAndReturn(f func(co
 }
 
 // FetchLatestSpan mocks base method.
-func (m *MockHeimdallNoStore) FetchLatestSpan(arg0 context.Context) (*Span, error) {
+func (m *MockHeimdallNoStore) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchLatestSpan", arg0)
+	ret := m.ctrl.Call(m, "FetchLatestSpan", ctx)
 	ret0, _ := ret[0].(*Span)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchLatestSpan indicates an expected call of FetchLatestSpan.
-func (mr *MockHeimdallNoStoreMockRecorder) FetchLatestSpan(arg0 any) *MockHeimdallNoStoreFetchLatestSpanCall {
+func (mr *MockHeimdallNoStoreMockRecorder) FetchLatestSpan(ctx any) *MockHeimdallNoStoreFetchLatestSpanCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchLatestSpan", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchLatestSpan), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchLatestSpan", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchLatestSpan), ctx)
 	return &MockHeimdallNoStoreFetchLatestSpanCall{Call: call}
 }
 
@@ -157,18 +158,18 @@ func (c *MockHeimdallNoStoreFetchLatestSpanCall) DoAndReturn(f func(context.Cont
 }
 
 // FetchMilestones mocks base method.
-func (m *MockHeimdallNoStore) FetchMilestones(arg0 context.Context, arg1, arg2 MilestoneId) ([]*Milestone, error) {
+func (m *MockHeimdallNoStore) FetchMilestones(ctx context.Context, start, end MilestoneId) ([]*Milestone, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchMilestones", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "FetchMilestones", ctx, start, end)
 	ret0, _ := ret[0].([]*Milestone)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchMilestones indicates an expected call of FetchMilestones.
-func (mr *MockHeimdallNoStoreMockRecorder) FetchMilestones(arg0, arg1, arg2 any) *MockHeimdallNoStoreFetchMilestonesCall {
+func (mr *MockHeimdallNoStoreMockRecorder) FetchMilestones(ctx, start, end any) *MockHeimdallNoStoreFetchMilestonesCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestones", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchMilestones), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestones", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchMilestones), ctx, start, end)
 	return &MockHeimdallNoStoreFetchMilestonesCall{Call: call}
 }
 
@@ -196,18 +197,18 @@ func (c *MockHeimdallNoStoreFetchMilestonesCall) DoAndReturn(f func(context.Cont
 }
 
 // FetchMilestonesFromBlock mocks base method.
-func (m *MockHeimdallNoStore) FetchMilestonesFromBlock(arg0 context.Context, arg1 uint64) (Waypoints, error) {
+func (m *MockHeimdallNoStore) FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchMilestonesFromBlock", arg0, arg1)
+	ret := m.ctrl.Call(m, "FetchMilestonesFromBlock", ctx, startBlock)
 	ret0, _ := ret[0].(Waypoints)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchMilestonesFromBlock indicates an expected call of FetchMilestonesFromBlock.
-func (mr *MockHeimdallNoStoreMockRecorder) FetchMilestonesFromBlock(arg0, arg1 any) *MockHeimdallNoStoreFetchMilestonesFromBlockCall {
+func (mr *MockHeimdallNoStoreMockRecorder) FetchMilestonesFromBlock(ctx, startBlock any) *MockHeimdallNoStoreFetchMilestonesFromBlockCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestonesFromBlock", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchMilestonesFromBlock), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestonesFromBlock", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchMilestonesFromBlock), ctx, startBlock)
 	return &MockHeimdallNoStoreFetchMilestonesFromBlockCall{Call: call}
 }
 
@@ -235,18 +236,18 @@ func (c *MockHeimdallNoStoreFetchMilestonesFromBlockCall) DoAndReturn(f func(con
 }
 
 // FetchSpans mocks base method.
-func (m *MockHeimdallNoStore) FetchSpans(arg0 context.Context, arg1, arg2 SpanId) ([]*Span, error) {
+func (m *MockHeimdallNoStore) FetchSpans(ctx context.Context, start, end SpanId) ([]*Span, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchSpans", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "FetchSpans", ctx, start, end)
 	ret0, _ := ret[0].([]*Span)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchSpans indicates an expected call of FetchSpans.
-func (mr *MockHeimdallNoStoreMockRecorder) FetchSpans(arg0, arg1, arg2 any) *MockHeimdallNoStoreFetchSpansCall {
+func (mr *MockHeimdallNoStoreMockRecorder) FetchSpans(ctx, start, end any) *MockHeimdallNoStoreFetchSpansCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpans", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchSpans), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpans", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchSpans), ctx, start, end)
 	return &MockHeimdallNoStoreFetchSpansCall{Call: call}
 }
 
@@ -274,18 +275,18 @@ func (c *MockHeimdallNoStoreFetchSpansCall) DoAndReturn(f func(context.Context, 
 }
 
 // FetchSpansFromBlock mocks base method.
-func (m *MockHeimdallNoStore) FetchSpansFromBlock(arg0 context.Context, arg1 uint64) ([]*Span, error) {
+func (m *MockHeimdallNoStore) FetchSpansFromBlock(ctx context.Context, startBlock uint64) ([]*Span, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchSpansFromBlock", arg0, arg1)
+	ret := m.ctrl.Call(m, "FetchSpansFromBlock", ctx, startBlock)
 	ret0, _ := ret[0].([]*Span)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchSpansFromBlock indicates an expected call of FetchSpansFromBlock.
-func (mr *MockHeimdallNoStoreMockRecorder) FetchSpansFromBlock(arg0, arg1 any) *MockHeimdallNoStoreFetchSpansFromBlockCall {
+func (mr *MockHeimdallNoStoreMockRecorder) FetchSpansFromBlock(ctx, startBlock any) *MockHeimdallNoStoreFetchSpansFromBlockCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpansFromBlock", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchSpansFromBlock), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpansFromBlock", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchSpansFromBlock), ctx, startBlock)
 	return &MockHeimdallNoStoreFetchSpansFromBlockCall{Call: call}
 }
 
@@ -313,9 +314,9 @@ func (c *MockHeimdallNoStoreFetchSpansFromBlockCall) DoAndReturn(f func(context.
 }
 
 // LastCheckpointId mocks base method.
-func (m *MockHeimdallNoStore) LastCheckpointId(arg0 context.Context) (CheckpointId, bool, error) {
+func (m *MockHeimdallNoStore) LastCheckpointId(ctx context.Context) (CheckpointId, bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "LastCheckpointId", arg0)
+	ret := m.ctrl.Call(m, "LastCheckpointId", ctx)
 	ret0, _ := ret[0].(CheckpointId)
 	ret1, _ := ret[1].(bool)
 	ret2, _ := ret[2].(error)
@@ -323,9 +324,9 @@ func (m *MockHeimdallNoStore) LastCheckpointId(arg0 context.Context) (Checkpoint
 }
 
 // LastCheckpointId indicates an expected call of LastCheckpointId.
-func (mr *MockHeimdallNoStoreMockRecorder) LastCheckpointId(arg0 any) *MockHeimdallNoStoreLastCheckpointIdCall {
+func (mr *MockHeimdallNoStoreMockRecorder) LastCheckpointId(ctx any) *MockHeimdallNoStoreLastCheckpointIdCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastCheckpointId", reflect.TypeOf((*MockHeimdallNoStore)(nil).LastCheckpointId), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastCheckpointId", reflect.TypeOf((*MockHeimdallNoStore)(nil).LastCheckpointId), ctx)
 	return &MockHeimdallNoStoreLastCheckpointIdCall{Call: call}
 }
 
@@ -353,9 +354,9 @@ func (c *MockHeimdallNoStoreLastCheckpointIdCall) DoAndReturn(f func(context.Con
 }
 
 // LastMilestoneId mocks base method.
-func (m *MockHeimdallNoStore) LastMilestoneId(arg0 context.Context) (MilestoneId, bool, error) {
+func (m *MockHeimdallNoStore) LastMilestoneId(ctx context.Context) (MilestoneId, bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "LastMilestoneId", arg0)
+	ret := m.ctrl.Call(m, "LastMilestoneId", ctx)
 	ret0, _ := ret[0].(MilestoneId)
 	ret1, _ := ret[1].(bool)
 	ret2, _ := ret[2].(error)
@@ -363,9 +364,9 @@ func (m *MockHeimdallNoStore) LastMilestoneId(arg0 context.Context) (MilestoneId
 }
 
 // LastMilestoneId indicates an expected call of LastMilestoneId.
-func (mr *MockHeimdallNoStoreMockRecorder) LastMilestoneId(arg0 any) *MockHeimdallNoStoreLastMilestoneIdCall {
+func (mr *MockHeimdallNoStoreMockRecorder) LastMilestoneId(ctx any) *MockHeimdallNoStoreLastMilestoneIdCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastMilestoneId", reflect.TypeOf((*MockHeimdallNoStore)(nil).LastMilestoneId), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastMilestoneId", reflect.TypeOf((*MockHeimdallNoStore)(nil).LastMilestoneId), ctx)
 	return &MockHeimdallNoStoreLastMilestoneIdCall{Call: call}
 }
 
@@ -393,9 +394,9 @@ func (c *MockHeimdallNoStoreLastMilestoneIdCall) DoAndReturn(f func(context.Cont
 }
 
 // LastSpanId mocks base method.
-func (m *MockHeimdallNoStore) LastSpanId(arg0 context.Context) (SpanId, bool, error) {
+func (m *MockHeimdallNoStore) LastSpanId(ctx context.Context) (SpanId, bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "LastSpanId", arg0)
+	ret := m.ctrl.Call(m, "LastSpanId", ctx)
 	ret0, _ := ret[0].(SpanId)
 	ret1, _ := ret[1].(bool)
 	ret2, _ := ret[2].(error)
@@ -403,9 +404,9 @@ func (m *MockHeimdallNoStore) LastSpanId(arg0 context.Context) (SpanId, bool, er
 }
 
 // LastSpanId indicates an expected call of LastSpanId.
-func (mr *MockHeimdallNoStoreMockRecorder) LastSpanId(arg0 any) *MockHeimdallNoStoreLastSpanIdCall {
+func (mr *MockHeimdallNoStoreMockRecorder) LastSpanId(ctx any) *MockHeimdallNoStoreLastSpanIdCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastSpanId", reflect.TypeOf((*MockHeimdallNoStore)(nil).LastSpanId), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastSpanId", reflect.TypeOf((*MockHeimdallNoStore)(nil).LastSpanId), ctx)
 	return &MockHeimdallNoStoreLastSpanIdCall{Call: call}
 }
 
@@ -433,17 +434,17 @@ func (c *MockHeimdallNoStoreLastSpanIdCall) DoAndReturn(f func(context.Context) 
 }
 
 // OnCheckpointEvent mocks base method.
-func (m *MockHeimdallNoStore) OnCheckpointEvent(arg0 context.Context, arg1 func(*Checkpoint)) error {
+func (m *MockHeimdallNoStore) OnCheckpointEvent(ctx context.Context, callback func(*Checkpoint)) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "OnCheckpointEvent", arg0, arg1)
+	ret := m.ctrl.Call(m, "OnCheckpointEvent", ctx, callback)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // OnCheckpointEvent indicates an expected call of OnCheckpointEvent.
-func (mr *MockHeimdallNoStoreMockRecorder) OnCheckpointEvent(arg0, arg1 any) *MockHeimdallNoStoreOnCheckpointEventCall {
+func (mr *MockHeimdallNoStoreMockRecorder) OnCheckpointEvent(ctx, callback any) *MockHeimdallNoStoreOnCheckpointEventCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnCheckpointEvent", reflect.TypeOf((*MockHeimdallNoStore)(nil).OnCheckpointEvent), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnCheckpointEvent", reflect.TypeOf((*MockHeimdallNoStore)(nil).OnCheckpointEvent), ctx, callback)
 	return &MockHeimdallNoStoreOnCheckpointEventCall{Call: call}
 }
 
@@ -471,17 +472,17 @@ func (c *MockHeimdallNoStoreOnCheckpointEventCall) DoAndReturn(f func(context.Co
 }
 
 // OnMilestoneEvent mocks base method.
-func (m *MockHeimdallNoStore) OnMilestoneEvent(arg0 context.Context, arg1 func(*Milestone)) error {
+func (m *MockHeimdallNoStore) OnMilestoneEvent(ctx context.Context, callback func(*Milestone)) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "OnMilestoneEvent", arg0, arg1)
+	ret := m.ctrl.Call(m, "OnMilestoneEvent", ctx, callback)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // OnMilestoneEvent indicates an expected call of OnMilestoneEvent.
-func (mr *MockHeimdallNoStoreMockRecorder) OnMilestoneEvent(arg0, arg1 any) *MockHeimdallNoStoreOnMilestoneEventCall {
+func (mr *MockHeimdallNoStoreMockRecorder) OnMilestoneEvent(ctx, callback any) *MockHeimdallNoStoreOnMilestoneEventCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnMilestoneEvent", reflect.TypeOf((*MockHeimdallNoStore)(nil).OnMilestoneEvent), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnMilestoneEvent", reflect.TypeOf((*MockHeimdallNoStore)(nil).OnMilestoneEvent), ctx, callback)
 	return &MockHeimdallNoStoreOnMilestoneEventCall{Call: call}
 }
 
@@ -509,17 +510,17 @@ func (c *MockHeimdallNoStoreOnMilestoneEventCall) DoAndReturn(f func(context.Con
 }
 
 // OnSpanEvent mocks base method.
-func (m *MockHeimdallNoStore) OnSpanEvent(arg0 context.Context, arg1 func(*Span)) error {
+func (m *MockHeimdallNoStore) OnSpanEvent(ctx context.Context, callback func(*Span)) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "OnSpanEvent", arg0, arg1)
+	ret := m.ctrl.Call(m, "OnSpanEvent", ctx, callback)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // OnSpanEvent indicates an expected call of OnSpanEvent.
-func (mr *MockHeimdallNoStoreMockRecorder) OnSpanEvent(arg0, arg1 any) *MockHeimdallNoStoreOnSpanEventCall {
+func (mr *MockHeimdallNoStoreMockRecorder) OnSpanEvent(ctx, callback any) *MockHeimdallNoStoreOnSpanEventCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnSpanEvent", reflect.TypeOf((*MockHeimdallNoStore)(nil).OnSpanEvent), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnSpanEvent", reflect.TypeOf((*MockHeimdallNoStore)(nil).OnSpanEvent), ctx, callback)
 	return &MockHeimdallNoStoreOnSpanEventCall{Call: call}
 }
 

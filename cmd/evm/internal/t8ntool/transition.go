@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/tests"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon/zk/hermez_db"
 )
 
 const (

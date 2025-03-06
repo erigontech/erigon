@@ -3,8 +3,9 @@ package verify
 import (
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"time"
+
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/mdbx"

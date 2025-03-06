@@ -11,9 +11,9 @@ import (
 
 	"io"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/ethclient"
-	"github.com/ledgerwatch/erigon/zk/debug_tools"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/ethclient"
+	"github.com/erigontech/erigon/zk/debug_tools"
 )
 
 type HTTPResponse struct {

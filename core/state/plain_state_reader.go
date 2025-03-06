@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
