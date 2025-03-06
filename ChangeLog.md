@@ -3,10 +3,21 @@ ChangeLog
 
 ## v3.0.0 (in development)
 
-
 ### Milestone
 
 https://github.com/erigontech/erigon/milestone/30
+
+
+## v3.0.0-rc3
+
+**Bugfixes:**
+
+- fixed txPool panics by @somnathb1 in https://github.com/erigontech/erigon/pull/14096
+- fixed sendRawTransaction and eth_getTransactionByHash by @shohamc1 in https://github.com/erigontech/erigon/pull/14077
+
+### Milestone
+
+https://github.com/erigontech/erigon/milestone/37
 
 ## v3.0.0-rc2
 
