@@ -5,26 +5,33 @@ package jsonrpc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"math/big"
 	"reflect"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/erigontech/erigon-lib/log/v3"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/tracers"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common/u256"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/iter"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
 var dumper = spew.ConfigState{Indent: "    "}
@@ -329,7 +336,7 @@ func TestAccountRange(t *testing.T) {
 		n = rpc.BlockNumber(7)
 		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
 		require.NoError(t, err)
-		require.Equal(t, 0, len(result.Accounts[addr].Storage))
+		require.Equal(t, 35, len(result.Accounts[addr].Storage))
 
 		n = rpc.BlockNumber(10)
 		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
@@ -506,4 +513,69 @@ func TestAccountAt(t *testing.T) {
 		require.NoError(err)
 		require.Equal(0, int(results.Nonce))
 	})
+}
+
+func TestGetBadBlocks(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 5000000)
+	ctx := context.Background()
+
+	require := require.New(t)
+	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+
+	mustSign := func(tx types.Transaction, s types.Signer) types.Transaction {
+		r, err := types.SignTx(tx, s, testKey)
+		require.NoError(err)
+		return r
+	}
+
+	tx, err := m.DB.BeginRw(ctx)
+	if err != nil {
+		t.Errorf("could not begin read write transaction: %s", err)
+	}
+
+	putBlock := func(number uint64) common.Hash {
+		// prepare db so it works with our test
+		signer1 := types.MakeSigner(params.MainnetChainConfig, number, number-1)
+		body := &types.Body{
+			Transactions: []types.Transaction{
+				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number+1, testAddr, u256.Num1, 2, u256.Num1, nil), *signer1),
+			},
+			Uncles: []*types.Header{{Extra: []byte("test header")}},
+		}
+
+		header := &types.Header{Number: big.NewInt(int64(number))}
+		require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), number))
+		require.NoError(rawdb.WriteHeader(tx, header))
+		require.NoError(rawdb.WriteBody(tx, header.Hash(), number, body))
+
+		return header.Hash()
+	}
+
+	number := *rawdb.ReadCurrentBlockNumber(tx)
+
+	// put some blocks
+	i := number
+	for i <= number+6 {
+		putBlock(i)
+		i++
+	}
+	hash1 := putBlock(i)
+	hash2 := putBlock(i + 1)
+	hash3 := putBlock(i + 2)
+	hash4 := putBlock(i + 3)
+	require.NoError(rawdb.TruncateCanonicalHash(tx, i, true)) // trim since i
+
+	tx.Commit()
+
+	data, err := api.GetBadBlocks(ctx)
+	require.NoError(err)
+
+	require.Len(data, 4)
+	require.Equal(data[0]["hash"], hash4)
+	require.Equal(data[1]["hash"], hash3)
+	require.Equal(data[2]["hash"], hash2)
+	require.Equal(data[3]["hash"], hash1)
 }

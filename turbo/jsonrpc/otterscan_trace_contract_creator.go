@@ -3,11 +3,11 @@ package jsonrpc
 import (
 	"context"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
 )
 
 type CreateTracer struct {

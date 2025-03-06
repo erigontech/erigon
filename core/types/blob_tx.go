@@ -8,13 +8,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	types2 "github.com/erigontech/erigon-lib/types"
 )
 
 type BlobTx struct {
@@ -81,23 +79,22 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 }
 
 func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := stx.from.Load(); sc != nil {
-		zeroAddr := libcommon.Address{}
-		if sc.(libcommon.Address) != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return sc.(libcommon.Address), nil
+	if from := stx.from.Load(); from != nil {
+		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return *from, nil
 		}
 	}
 	addr, err := signer.Sender(stx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	stx.from.Store(addr)
+	stx.from.Store(&addr)
 	return addr, nil
 }
 
 func (stx *BlobTx) Hash() libcommon.Hash {
 	if hash := stx.hash.Load(); hash != nil {
-		return *hash.(*libcommon.Hash)
+		return *hash
 	}
 	hash := prefixedRlpHash(BlobTxType, []interface{}{
 		stx.ChainID,
@@ -145,7 +142,7 @@ func (stx *BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, 
 	payloadSize, nonceLen, gasLen, accessListLen = stx.DynamicFeeTransaction.payloadSize()
 	// size of MaxFeePerBlobGas
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxFeePerBlobGas)
+	payloadSize += rlp2.Uint256LenExcludingHead(stx.MaxFeePerBlobGas)
 	// size of BlobVersionedHashes
 	blobHashesLen = blobVersionedHashesSize(stx.BlobVersionedHashes)
 	payloadSize += rlp2.ListPrefixLen(blobHashesLen) + blobHashesLen
@@ -158,7 +155,7 @@ func blobVersionedHashesSize(hashes []libcommon.Hash) int {
 
 func encodeBlobVersionedHashes(hashes []libcommon.Hash, w io.Writer, b []byte) error {
 	for _, h := range hashes {
-		if err := rlp.EncodeString(h[:], w, b); err != nil {
+		if err := rlp2.EncodeString(h[:], w, b); err != nil {
 			return err
 		}
 	}
@@ -175,7 +172,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode Nonce
-	if err := rlp.EncodeInt(stx.Nonce, w, b); err != nil {
+	if err := rlp2.EncodeInt(stx.Nonce, w, b); err != nil {
 		return err
 	}
 	// encode MaxPriorityFeePerGas
@@ -187,7 +184,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode Gas
-	if err := rlp.EncodeInt(stx.Gas, w, b); err != nil {
+	if err := rlp2.EncodeInt(stx.Gas, w, b); err != nil {
 		return err
 	}
 	// encode To
@@ -203,7 +200,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode Data
-	if err := rlp.EncodeString(stx.Data, w, b); err != nil {
+	if err := rlp2.EncodeString(stx.Data, w, b); err != nil {
 		return err
 	}
 	// prefix
@@ -247,7 +244,7 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
 	var b [33]byte
 	// envelope
-	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+	if err := rlp2.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType
@@ -275,7 +272,7 @@ func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
+func (stx *BlobTx) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err
@@ -359,7 +356,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func decodeBlobVersionedHashes(hashes *[]libcommon.Hash, s *rlp.Stream) error {
+func decodeBlobVersionedHashes(hashes *[]libcommon.Hash, s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open BlobVersionedHashes: %w", err)

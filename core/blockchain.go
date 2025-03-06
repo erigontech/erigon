@@ -23,27 +23,27 @@ import (
 	"slices"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	zktypes "github.com/ledgerwatch/erigon/zk/types"
+	math2 "github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/eth/ethutils"
-	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/cmp"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/consensus"
+
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/ethutils"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
 var (
@@ -67,16 +67,16 @@ type RejectedTx struct {
 type RejectedTxs []*RejectedTx
 
 type EphemeralExecResult struct {
-	StateRoot        libcommon.Hash        `json:"stateRoot"`
-	TxRoot           libcommon.Hash        `json:"txRoot"`
-	ReceiptRoot      libcommon.Hash        `json:"receiptsRoot"`
-	LogsHash         libcommon.Hash        `json:"logsHash"`
-	Bloom            types.Bloom           `json:"logsBloom"        gencodec:"required"`
-	Receipts         types.Receipts        `json:"receipts"`
-	Rejected         RejectedTxs           `json:"rejected,omitempty"`
-	Difficulty       *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
-	GasUsed          math.HexOrDecimal64   `json:"gasUsed"`
-	StateSyncReceipt *types.Receipt        `json:"-"`
+	StateRoot        libcommon.Hash         `json:"stateRoot"`
+	TxRoot           libcommon.Hash         `json:"txRoot"`
+	ReceiptRoot      libcommon.Hash         `json:"receiptsRoot"`
+	LogsHash         libcommon.Hash         `json:"logsHash"`
+	Bloom            types.Bloom            `json:"logsBloom"        gencodec:"required"`
+	Receipts         types.Receipts         `json:"receipts"`
+	Rejected         RejectedTxs            `json:"rejected,omitempty"`
+	Difficulty       *math2.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
+	GasUsed          math.HexOrDecimal64    `json:"gasUsed"`
+	StateSyncReceipt *types.Receipt         `json:"-"`
 }
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
@@ -102,7 +102,7 @@ func ExecuteBlockEphemerally(
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
+	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time()))
 
 	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger); err != nil {
 		return nil, err
@@ -176,9 +176,10 @@ func ExecuteBlockEphemerally(
 		//	return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		//}
 	}
+
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, logger); err != nil {
+		if _, _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, logger); err != nil {
 			return nil, err
 		}
 	}
@@ -189,7 +190,7 @@ func ExecuteBlockEphemerally(
 		Bloom:       bloom,
 		LogsHash:    rlpHash(blockLogs),
 		Receipts:    receipts,
-		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty),
+		Difficulty:  (*math2.HexOrDecimal256)(header.Difficulty),
 		GasUsed:     math.HexOrDecimal64(*usedGas),
 		Rejected:    rejectedTxs,
 	}
@@ -278,7 +279,7 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 		author = &state.SystemAddress
 		txContext = NewEVMTxContext(msg)
 	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.Call(
@@ -313,7 +314,7 @@ func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config
 	// Create a new context to be used in the EVM environment
 	author := &contract
 	txContext := NewEVMTxContext(msg)
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, &chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, &chainConfig, vmConfig)
 
 	ret, _, err := evm.SysCreate(
@@ -363,17 +364,17 @@ func FinalizeBlockExecution(
 	withdrawals []*types.Withdrawal, chainReader consensus.ChainReader,
 	isMining bool,
 	logger log.Logger,
-) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, err error) {
+) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, retRequests types.FlatRequests, err error) {
 	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
 	}
 	if isMining {
-		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
+		newBlock, newTxs, newReceipt, retRequests, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
 	} else {
-		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, logger)
+		newTxs, newReceipt, retRequests, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, logger)
 	}
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	//err = ibs.ScalableSetSmtRootHash(ibs.DbTx, true)
@@ -382,13 +383,13 @@ func FinalizeBlockExecution(
 	//}
 
 	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64(), header.Time), stateWriter); err != nil {
-		return nil, nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
+		return nil, nil, nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
 	if err := stateWriter.WriteChangeSets(); err != nil {
-		return nil, nil, nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
+		return nil, nil, nil, nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
 	}
-	return newBlock, newTxs, newReceipt, nil
+	return newBlock, newTxs, newReceipt, retRequests, nil
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header,

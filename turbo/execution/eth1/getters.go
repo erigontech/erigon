@@ -7,16 +7,16 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/erigontech/erigon-lib/gointerfaces/execution"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/types"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 )
 
 var errNotFound = errors.New("notfound")
@@ -144,6 +144,10 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalTransactionsBinary error %w", err)
 		}
+
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalRequestsBinary error %w", err)
+		}
 		bodies = append(bodies, &execution.BlockBody{
 			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
@@ -185,6 +189,10 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 		txs, err := types.MarshalTransactionsBinary(body.Transactions)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: MarshalTransactionsBinary error %w", err)
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalRequestsBinary error %w", err)
 		}
 		bodies = append(bodies, &execution.BlockBody{
 			Transactions: txs,
@@ -259,6 +267,9 @@ func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.
 	defer tx.Rollback()
 	hash := rawdb.ReadHeadHeaderHash(tx)
 	number := rawdb.ReadHeaderNumber(tx, hash)
+	if number == nil {
+		return nil, errors.New("ethereumExecutionModule.CurrentHeader: no current header yet - probabably node not synced yet")
+	}
 	h, err := e.blockReader.Header(ctx, tx, hash, *number)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: blockReader.Header error %w", err)

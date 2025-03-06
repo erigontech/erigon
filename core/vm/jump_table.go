@@ -19,8 +19,8 @@ package vm
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/core/vm/stack"
+	"github.com/erigontech/erigon/params"
 )
 
 type (
@@ -92,6 +92,7 @@ func validateAndFillMaxStack(jt *JumpTable) {
 // cancun, and prague instructions.
 func newPragueInstructionSet() JumpTable {
 	instructionSet := newCancunInstructionSet()
+	enable7702(&instructionSet) // EIP-7702: set code tx
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

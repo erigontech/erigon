@@ -8,12 +8,12 @@ import (
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	erigonlibtypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	erigonlibtypes "github.com/erigontech/erigon-lib/gointerfaces/types"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/eth/protocols/eth"
 )
 
 func TestMessageSenderSendGetBlockHeaders(t *testing.T) {

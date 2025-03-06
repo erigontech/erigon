@@ -30,29 +30,29 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	eridb "github.com/ledgerwatch/erigon/smt/pkg/db"
-	"github.com/ledgerwatch/erigon/smt/pkg/smt"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
+	eridb "github.com/erigontech/erigon/smt/pkg/db"
+	"github.com/erigontech/erigon/smt/pkg/smt"
 )
 
 // CommitGenesisBlock writes or updates the genesis block in db.
@@ -463,7 +463,7 @@ func GnosisGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.GnosisChainConfig,
 		Timestamp:  0,
-		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/gnosis.json"),
@@ -474,7 +474,7 @@ func ChiadoGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.ChiadoChainConfig,
 		Timestamp:  0,
-		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/chiado.json"),
@@ -529,8 +529,14 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		BaseFee:       g.BaseFee,
 		BlobGasUsed:   g.BlobGasUsed,
 		ExcessBlobGas: g.ExcessBlobGas,
-		AuRaStep:      g.AuRaStep,
-		AuRaSeal:      g.AuRaSeal,
+		RequestsHash:  g.RequestsHash,
+	}
+	if g.AuRaSeal != nil && len(g.AuRaSeal.AuthorityRound.Signature) > 0 {
+		head.AuRaSeal = g.AuRaSeal.AuthorityRound.Signature
+		head.AuRaStep = uint64(g.AuRaSeal.AuthorityRound.Step)
+	}
+	if g.GasLimit == 0 {
+		head.GasLimit = params.GenesisGasLimit
 	}
 
 	// [zkevm] - do not override the gas limit for the genesis block
@@ -569,6 +575,14 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
 		} else {
 			head.ParentBeaconBlockRoot = &libcommon.Hash{}
+		}
+	}
+
+	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
+		if g.RequestsHash != nil {
+			head.RequestsHash = g.RequestsHash
+		} else {
+			head.RequestsHash = &types.EmptyRequestsHash
 		}
 	}
 

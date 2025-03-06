@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
 )
 
 type SimulationContext struct {

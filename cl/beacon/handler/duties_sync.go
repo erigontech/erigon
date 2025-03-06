@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strconv"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 )
 
 type syncDutyResponse struct {

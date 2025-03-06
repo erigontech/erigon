@@ -20,15 +20,16 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 // VerifyEip1559Header verifies some header attributes which were changed in EIP-1559,
@@ -83,11 +84,13 @@ func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) 
 		}
 
 		if currentHeader.ExcessBlobGas != nil {
-			excessBlobGas := CalcExcessBlobGas(chainConfig, currentHeader)
-			b, err := GetBlobGasPrice(chainConfig, excessBlobGas)
-			if err == nil {
-				blobFee = b.Uint64()
+			nextBlockTime := currentHeader.Time + chainConfig.SecondsPerSlot()
+			excessBlobGas := CalcExcessBlobGas(chainConfig, currentHeader, nextBlockTime)
+			b, err := GetBlobGasPrice(chainConfig, excessBlobGas, nextBlockTime)
+			if err != nil {
+				return 0, 0, 0, 0, err
 			}
+			blobFee = b.Uint64()
 		}
 	}
 

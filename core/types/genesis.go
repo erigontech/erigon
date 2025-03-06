@@ -24,17 +24,19 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	math2 "github.com/erigontech/erigon-lib/common/math"
 
-	common2 "github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon-lib/common/math"
+	common2 "github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/params"
 )
 
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
 //go:generate gencodec -type GenesisAccount -field-override genesisAccountMarshaling -out gen_genesis_account.go
+//go:generate gencodec -type AuRaSeal -out gen_aura_seal.go
 
 var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 
@@ -51,8 +53,7 @@ type Genesis struct {
 	Coinbase   common.Address `json:"coinbase"`
 	Alloc      GenesisAlloc   `json:"alloc"      gencodec:"required"`
 
-	AuRaStep uint64 `json:"auRaStep"`
-	AuRaSeal []byte `json:"auRaSeal"`
+	AuRaSeal *AuRaSeal `json:"seal"`
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
@@ -65,6 +66,21 @@ type Genesis struct {
 	BlobGasUsed           *uint64      `json:"blobGasUsed"`           // EIP-4844
 	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
+	RequestsHash          *common.Hash `json:"requestsHash"`          // EIP-7685
+}
+
+type AuRaSeal struct {
+	AuthorityRound struct {
+		Step      math.HexOrDecimal64 `json:"step"`
+		Signature hexutility.Bytes    `json:"signature"`
+	} `json:"authorityRound"`
+}
+
+func NewAuraSeal(step uint64, signature []byte) *AuRaSeal {
+	a := AuRaSeal{}
+	a.AuthorityRound.Step = math.HexOrDecimal64(step)
+	a.AuthorityRound.Signature = append([]byte{}, signature...)
+	return &a
 }
 
 // GenesisAlloc specifies the initial state that is part of the genesis block.
@@ -116,8 +132,8 @@ type genesisSpecMarshaling struct {
 	GasLimit      math.HexOrDecimal64
 	GasUsed       math.HexOrDecimal64
 	Number        math.HexOrDecimal64
-	Difficulty    *math.HexOrDecimal256
-	BaseFee       *math.HexOrDecimal256
+	Difficulty    *math2.HexOrDecimal256
+	BaseFee       *math2.HexOrDecimal256
 	BlobGasUsed   *math.HexOrDecimal64
 	ExcessBlobGas *math.HexOrDecimal64
 	Alloc         map[common2.UnprefixedAddress]GenesisAccount
@@ -126,7 +142,7 @@ type genesisSpecMarshaling struct {
 type genesisAccountMarshaling struct {
 	Constructor hexutility.Bytes
 	Code        hexutility.Bytes
-	Balance     *math.HexOrDecimal256
+	Balance     *math2.HexOrDecimal256
 	Nonce       math.HexOrDecimal64
 	Storage     map[storageJSON]storageJSON
 	PrivateKey  hexutility.Bytes

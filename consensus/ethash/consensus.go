@@ -26,21 +26,21 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
-	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
+
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 // Ethash proof-of-work protocol constants.
@@ -248,6 +248,10 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 
 	if header.WithdrawalsHash != nil {
 		return consensus.ErrUnexpectedWithdrawals
+	}
+
+	if header.RequestsHash != nil {
+		return consensus.ErrUnexpectedRequests
 	}
 
 	// If all checks passed, validate any special fields for hard forks
@@ -562,10 +566,10 @@ func (ethash *Ethash) Initialize(config *chain.Config, chain consensus.ChainHead
 func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, error) {
+) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(config, state, header, uncles)
-	return txs, r, nil
+	return txs, r, nil, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, accumulating the block and
@@ -573,15 +577,15 @@ func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state
 func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
-) (*types.Block, types.Transactions, types.Receipts, error) {
+) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 
 	// Finalize block
-	outTxs, outR, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, chain, syscall, logger)
+	outTxs, outR, _, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, chain, syscall, logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	// Header seems complete, assemble into a block and return
-	return types.NewBlock(header, outTxs, uncles, outR, withdrawals), outTxs, outR, nil
+	return types.NewBlock(header, outTxs, uncles, outR, withdrawals), outTxs, outR, nil, nil
 }
 
 // SealHash returns the hash of a block prior to it being sealed.

@@ -21,14 +21,15 @@ import (
 	"fmt"
 	"io"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
 	"github.com/protolambda/ztyp/codec"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/cryptopool"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/rlphacks"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto/cryptopool"
+	"github.com/erigontech/erigon/turbo/rlphacks"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
 type DerivableList interface {
@@ -134,7 +135,7 @@ func retain(_ []byte) bool {
 
 func encodeUint(i uint, buffer bytesWriter) {
 	if i == 0 {
-		_ = buffer.WriteByte(byte(rlp.EmptyStringCode))
+		_ = buffer.WriteByte(byte(rlp2.EmptyStringCode))
 		return
 	}
 
@@ -144,7 +145,7 @@ func encodeUint(i uint, buffer bytesWriter) {
 	}
 
 	size := intsize(i)
-	_ = buffer.WriteByte(rlp.EmptyStringCode + byte(size))
+	_ = buffer.WriteByte(rlp2.EmptyStringCode + byte(size))
 	for j := 1; j <= size; j++ {
 		shift := uint((size - j) * 8)
 		w := byte(i >> shift)
@@ -161,7 +162,7 @@ func intsize(i uint) (size int) {
 	}
 }
 
-func RawRlpHash(rawRlpData rlp.RawValue) (h libcommon.Hash) {
+func RawRlpHash(rawRlpData rlp2.RawValue) (h libcommon.Hash) {
 	sha := crypto.NewKeccakState()
 	sha.Write(rawRlpData) //nolint:errcheck
 	sha.Read(h[:])        //nolint:errcheck
@@ -171,8 +172,8 @@ func RawRlpHash(rawRlpData rlp.RawValue) (h libcommon.Hash) {
 
 func rlpHash(x interface{}) (h libcommon.Hash) {
 	sha := crypto.NewKeccakState()
-	rlp.Encode(sha, x) //nolint:errcheck
-	sha.Read(h[:])     //nolint:errcheck
+	rlp2.Encode(sha, x) //nolint:errcheck
+	sha.Read(h[:])      //nolint:errcheck
 	cryptopool.ReturnToPoolKeccak256(sha)
 	return h
 }
@@ -183,7 +184,7 @@ func prefixedRlpHash(prefix byte, x interface{}) (h libcommon.Hash) {
 	sha := crypto.NewKeccakState()
 	//nolint:errcheck
 	sha.Write([]byte{prefix})
-	if err := rlp.Encode(sha, x); err != nil {
+	if err := rlp2.Encode(sha, x); err != nil {
 		panic(err)
 	}
 	//nolint:errcheck

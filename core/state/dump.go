@@ -21,18 +21,18 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
 type Dumper struct {
@@ -153,12 +153,11 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	if d.historyV3 {
 		ttx := d.db.(kv.TemporalTx)
 		var err error
-		// Why only account does +1?
 		txNum, err = rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
 		if err != nil {
 			return nil, err
 		}
-		txNumForStorage, err = rawdbv3.TxNums.Min(ttx, d.blockNumber)
+		txNumForStorage, err = rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
 		if err != nil {
 			return nil, err
 		}
@@ -282,7 +281,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					addr,
 					incarnation,
 					libcommon.Hash{}, /* startLocation */
-					d.blockNumber,
+					d.blockNumber+1,
 					func(_, loc, vs []byte) (bool, error) {
 						account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
 						h, _ := libcommon.HashData(loc)

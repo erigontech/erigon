@@ -10,13 +10,14 @@
 package heimdall
 
 import (
-	context "context"
-	reflect "reflect"
+	"context"
+	"reflect"
 
-	common "github.com/ledgerwatch/erigon-lib/common"
-	kv "github.com/ledgerwatch/erigon-lib/kv"
-	rlp "github.com/ledgerwatch/erigon/rlp"
-	gomock "go.uber.org/mock/gomock"
+	"go.uber.org/mock/gomock"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 // MockSpanReader is a mock of SpanReader interface.

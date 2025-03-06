@@ -16,12 +16,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/erigontech/erigon-lib/gointerfaces/remote"
+	"github.com/erigontech/erigon-lib/gointerfaces/types"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/gorilla/websocket"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 )
 
@@ -393,6 +393,37 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 						Offset: offset,
 						Size:   size,
 						Data:   buffer.Bytes(),
+					})
+
+					buffer = bytes.NewBuffer(data)
+
+					if err != nil {
+						return codec.WriteJSON(ctx1, &nodeResponse{
+							Id: requestId,
+							Error: &responseError{
+								Code:    int64(http.StatusInternalServerError),
+								Message: fmt.Sprintf("Can't copy metrics response for [%s]: %s", debugURL, err),
+							},
+							Last: true,
+						})
+					}
+
+				case "aplication/profile":
+					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
+						return codec.WriteJSON(ctx1, &nodeResponse{
+							Id: requestId,
+							Error: &responseError{
+								Code:    http.StatusInternalServerError,
+								Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
+							},
+							Last: true,
+						})
+					}
+
+					data, err := json.Marshal(struct {
+						Data []byte `json:"chunk"`
+					}{
+						Data: buffer.Bytes(),
 					})
 
 					buffer = bytes.NewBuffer(data)

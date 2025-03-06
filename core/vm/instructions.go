@@ -17,18 +17,19 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"math"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 func opAdd(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -374,7 +375,9 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 
 func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
-	slot.SetUint64(uint64(interpreter.evm.IntraBlockState().GetCodeSize(slot.Bytes20())))
+	addr := slot.Bytes20()
+	codeSize := interpreter.evm.IntraBlockState().GetCodeSize(addr)
+	slot.SetUint64(uint64(codeSize))
 	return nil, nil
 }
 
@@ -410,14 +413,15 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	)
 	addr := libcommon.Address(a.Bytes20())
 	len64 := length.Uint64()
-	codeCopy := getDataBig(interpreter.evm.IntraBlockState().GetCode(addr), &codeOffset, len64)
+	code := interpreter.evm.IntraBlockState().GetCode(addr)
+	codeCopy := getDataBig(code, &codeOffset, len64)
 	scope.Memory.Set(memOffset.Uint64(), len64, codeCopy)
 	return nil, nil
 }
 
 // opExtCodeHash returns the code hash of a specified account.
 // There are several cases when the function is called, while we can relay everything
-// to `state.GetCodeHash` function to ensure the correctness.
+// to `state.ResolveCodeHash` function to ensure the correctness.
 //
 //	(1) Caller tries to get the code hash of a normal contract account, state
 //
@@ -448,13 +452,20 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 //	(6) Caller tries to get the code hash for an account which is marked as deleted,
 //
 // this account should be regarded as a non-existent account and zero should be returned.
+//
+//	(7) Caller tries to get the code hash of a delegated account, the result should be
+//
+// equal the result of calling extcodehash on the account directly.
 func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
 	address := libcommon.Address(slot.Bytes20())
+
 	if interpreter.evm.IntraBlockState().Empty(address) {
 		slot.Clear()
 	} else {
-		slot.SetBytes(interpreter.evm.IntraBlockState().GetCodeHash(address).Bytes())
+		var codeHash libcommon.Hash
+		codeHash = interpreter.evm.IntraBlockState().GetCodeHash(address)
+		slot.SetBytes(codeHash.Bytes())
 	}
 	return nil, nil
 }
@@ -464,24 +475,25 @@ func opGasprice(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	return nil, nil
 }
 
+// opBlockhash executes the BLOCKHASH opcode
 func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	num := scope.Stack.Peek()
-	num64, overflow := num.Uint64WithOverflow()
+	arg := scope.Stack.Peek()
+	arg64, overflow := arg.Uint64WithOverflow()
 	if overflow {
-		num.Clear()
+		arg.Clear()
 		return nil, nil
 	}
 	var upper, lower uint64
 	upper = interpreter.evm.Context.BlockNumber
-	if upper < 257 {
+	if upper <= params.BlockHashOldWindow {
 		lower = 0
 	} else {
-		lower = upper - 256
+		lower = upper - params.BlockHashOldWindow
 	}
-	if num64 >= lower && num64 < upper {
-		num.SetBytes(interpreter.evm.Context.GetHash(num64).Bytes())
+	if arg64 >= lower && arg64 < upper {
+		arg.SetBytes(interpreter.evm.Context.GetHash(arg64).Bytes())
 	} else {
-		num.Clear()
+		arg.Clear()
 	}
 	return nil, nil
 }
@@ -512,7 +524,7 @@ func opDifficulty(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 		var overflow bool
 		v, overflow = uint256.FromBig(interpreter.evm.Context.Difficulty)
 		if overflow {
-			return nil, fmt.Errorf("interpreter.evm.Context.Difficulty higher than 2^256-1")
+			return nil, errors.New("interpreter.evm.Context.Difficulty higher than 2^256-1")
 		}
 	}
 	scope.Stack.Push(v)
@@ -654,7 +666,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 
 	scope.Contract.UseGas(gas)
 
-	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value, 0)
+	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value, false, 0)
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -694,7 +706,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	scope.Contract.UseGas(gas)
 	// reuse size int for stackvalue
 	stackValue := size
-	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt, gas)
+	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt, false, gas)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {

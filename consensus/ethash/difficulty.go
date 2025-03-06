@@ -19,8 +19,8 @@ package ethash
 import (
 	"math/big"
 
+	"github.com/erigontech/erigon/core/types"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 const (

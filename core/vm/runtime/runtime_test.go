@@ -27,18 +27,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/asm"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/rlp"
+
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/asm"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/tracers/logger"
 )
 
 func TestDefaults(t *testing.T) {
@@ -234,18 +236,56 @@ func BenchmarkEVM_CREATE2_1200(bench *testing.B) {
 }
 
 func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
-	header := types.Header{
+	return &types.Header{
 		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
 		Number:     big.NewInt(int64(n)),
 		ParentHash: parentHash,
-		Time:       1000,
+		Time:       n,
 		Nonce:      types.BlockNonce{0x1},
 		Extra:      []byte{},
 		Difficulty: big.NewInt(0),
 		GasLimit:   100000,
 	}
-	return &header
 }
+
+// FakeChainHeaderReader implements consensus.ChainHeaderReader interface
+type FakeChainHeaderReader struct{}
+
+func (cr *FakeChainHeaderReader) GetHeaderByHash(hash libcommon.Hash) *types.Header {
+	return nil
+}
+func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
+	return cr.GetHeaderByHash(libcommon.BigToHash(big.NewInt(int64(number))))
+}
+func (cr *FakeChainHeaderReader) Config() *chain.Config        { return nil }
+func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header { return nil }
+
+// GetHeader returns a fake header with the parentHash equal to the number - 1
+func (cr *FakeChainHeaderReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
+	return &types.Header{
+		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
+		Number:     big.NewInt(int64(number)),
+		ParentHash: libcommon.BigToHash(big.NewInt(int64(number - 1))),
+		Time:       number,
+		Nonce:      types.BlockNonce{0x1},
+		Extra:      []byte{},
+		Difficulty: big.NewInt(0),
+		GasLimit:   100000,
+	}
+}
+func (cr *FakeChainHeaderReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
+	return nil
+}
+func (cr *FakeChainHeaderReader) HasBlock(hash libcommon.Hash, number uint64) bool  { return false }
+func (cr *FakeChainHeaderReader) GetTd(hash libcommon.Hash, number uint64) *big.Int { return nil }
+func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                              { return 0 }
+func (cr *FakeChainHeaderReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+	return nil
+}
+func (cr *FakeChainHeaderReader) BorStartEventID(hash libcommon.Hash, number uint64) uint64 {
+	return 0
+}
+func (cr *FakeChainHeaderReader) BorSpan(spanId uint64) []byte { return nil }
 
 type dummyChain struct {
 	counter int
@@ -316,10 +356,14 @@ func TestBlockhash(t *testing.T) {
 	// The method call to 'test()'
 	input := libcommon.Hex2Bytes("f8a8fd6d")
 	chain := &dummyChain{}
-	ret, _, err := Execute(data, input, &Config{
+	cfg := &Config{
 		GetHashFn:   core.GetHashFn(header, chain.GetHeader),
 		BlockNumber: new(big.Int).Set(header.Number),
-	}, header.Number.Uint64())
+		Time:        new(big.Int),
+	}
+	setDefaults(cfg)
+	cfg.ChainConfig.PragueTime = big.NewInt(1)
+	ret, _, err := Execute(data, input, cfg, header.Number.Uint64())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -524,14 +568,16 @@ func TestEip2929Cases(t *testing.T) {
 		fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
 			comment,
 			code, ops)
-		//nolint:errcheck
-		Execute(code, nil, &Config{
+		cfg := &Config{
 			EVMConfig: vm.Config{
 				Debug:     true,
 				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout),
 				ExtraEips: []int{2929},
 			},
-		}, 0)
+		}
+		setDefaults(cfg)
+		//nolint:errcheck
+		Execute(code, nil, cfg, 0)
 	}
 
 	{ // First eip testcase

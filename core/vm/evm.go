@@ -21,13 +21,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/params"
 )
 
 // emptyCodeHash is used by create to ensure deployment is disallowed to already
@@ -201,7 +201,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	p, isPrecompile := evm.precompile(addr)
 	var code []byte
 	if !isPrecompile {
-		code = evm.intraBlockState.GetCode(addr)
+		code = evm.intraBlockState.ResolveCode(addr)
 	}
 
 	snapshot := evm.intraBlockState.Snapshot()
@@ -273,7 +273,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		addrCopy := addr
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
-		codeHash := evm.intraBlockState.GetCodeHash(addrCopy)
+		codeHash := evm.intraBlockState.ResolveCodeHash(addrCopy)
 		var contract *Contract
 		if typ == CALLCODE {
 			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis)
@@ -358,11 +358,11 @@ func (c *codeAndHash) Hash() libcommon.Hash {
 }
 
 func (evm *EVM) OverlayCreate(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool) ([]byte, libcommon.Address, uint64, error) {
-	return evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce, 0)
+	return evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce, false, 0)
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool, intrinsicGas uint64) ([]byte, libcommon.Address, uint64, error) {
+func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool, bailout bool, intrinsicGas) ([]byte, libcommon.Address, uint64, error) {
 	if !evm.ChainRules().IsNormalcy {
 		return evm.createZkEvm(caller, codeAndHash, gasRemaining, value, address, typ, incrementNonce, intrinsicGas)
 	}
@@ -393,8 +393,10 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		return nil, libcommon.Address{}, gasRemaining, err
 	}
 	if !evm.Context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
-		err = ErrInsufficientBalance
-		return nil, libcommon.Address{}, gasRemaining, err
+		if !bailout {
+			err = ErrInsufficientBalance
+			return nil, libcommon.Address{}, gasRemaining, err
+		}
 	}
 	if incrementNonce {
 		nonce := evm.intraBlockState.GetNonce(caller.Address())
@@ -411,7 +413,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// 	evm.intraBlockState.AddAddressToAccessList(address)
 	// }
 	// Ensure there's no existing contract already at the designated address
-	contractHash := evm.intraBlockState.GetCodeHash(address)
+	contractHash := evm.intraBlockState.ResolveCodeHash(address)
 	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (libcommon.Hash{}) && contractHash != emptyCodeHash) {
 		err = ErrContractAddressCollision
 		return nil, libcommon.Address{}, 0, err
@@ -427,7 +429,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
 	}
-	evm.Context.Transfer(evm.intraBlockState, caller.Address(), address, value, false /* bailout */)
+	evm.Context.Transfer(evm.intraBlockState, caller.Address(), address, value, bailout)
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
@@ -441,7 +443,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	ret, err = run(evm, contract, nil, false)
 
 	// EIP-170: Contract code size limit
-	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > params.MaxCodeSize {
+	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {
 		// Gnosis Chain prior to Shanghai didn't have EIP-170 enabled,
 		// but EIP-3860 (part of Shanghai) requires EIP-170.
 		if !evm.chainRules.IsAura || evm.config.HasEip3860(evm.chainRules) {
@@ -482,11 +484,18 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	return ret, address, contract.Gas, err
 }
 
+func (evm *EVM) maxCodeSize() int {
+	if evm.chainConfig.Bor != nil && evm.chainConfig.Bor.IsAhmedabad(evm.Context.BlockNumber) {
+		return params.MaxCodeSizePostAhmedabad
+	}
+	return params.MaxCodeSize
+}
+
 // Create creates a new contract using code as deployment code.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, intrinsicGas uint64) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
+func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, bailout bool, intrinsicGas uint64) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
-	return evm.create(caller, &codeAndHash{code: code}, gasRemaining, endowment, contractAddr, CREATE, true /* incrementNonce */, intrinsicGas)
+	return evm.create(caller, &codeAndHash{code: code}, gasRemaining, endowment, contractAddr, CREATE, true /* incrementNonce */, bailout, intrinsicGas)
 }
 
 // Create2 creates a new contract using code as deployment code.
@@ -494,16 +503,16 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, end
 // The different between Create2 with Create is Create2 uses keccak256(0xff ++ msg.sender ++ salt ++ keccak256(init_code))[12:]
 // instead of the usual sender-and-nonce-hash as the address where the contract is initialized at.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create2(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, salt *uint256.Int, intrinsicGas uint64) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
+func (evm *EVM) Create2(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool, intrinsicGas uint64) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
 	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
-	return evm.create(caller, codeAndHash, gasRemaining, endowment, contractAddr, CREATE2, true /* incrementNonce */, 0 /* intrinsicGas is zero here*/)
+	return evm.create(caller, codeAndHash, gasRemaining, endowment, contractAddr, CREATE2, true /* incrementNonce */, bailout, 0 /* intrinsicGas is zero here*/)
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
 // Unlike the normal Create & Create2, it doesn't increment caller's nonce.
 func (evm *EVM) SysCreate(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, contractAddr libcommon.Address) (ret []byte, leftOverGas uint64, err error) {
-	ret, _, leftOverGas, err = evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, false /* incrementNonce */, 0 /* intrinsicGas is zero here*/)
+	ret, _, leftOverGas, err = evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, false /* incrementNonce */, false, 0 /* intrinsicGas is zero here*/)
 	return
 }
 

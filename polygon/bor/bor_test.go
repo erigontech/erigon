@@ -11,26 +11,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/heimdall"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 type test_heimdall struct {
@@ -151,7 +151,7 @@ func (h test_heimdall) Close() {}
 type test_genesisContract struct {
 }
 
-func (g test_genesisContract) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
+func (g test_genesisContract) CommitState(event rlp2.RawValue, syscall consensus.SystemCall) error {
 	return nil
 }
 
@@ -242,12 +242,12 @@ func (v validator) IsProposer(block *types.Block) (bool, error) {
 	return v.Engine.(*bor.Bor).IsProposer(block.Header())
 }
 
-func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
+func (v validator) sealBlocks(blocks []*types.Block, receipts []types.Receipts) ([]*types.Block, error) {
 	sealedBlocks := make([]*types.Block, 0, len(blocks))
 
 	hr := headerReader{v}
 
-	for _, block := range blocks {
+	for i, block := range blocks {
 		header := block.HeaderNoCopy()
 
 		if err := v.Engine.Prepare(hr, header, nil); err != nil {
@@ -258,15 +258,16 @@ func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
 			header.ParentHash = parent.Hash()
 		}
 
-		sealResults := make(chan *types.Block, 1)
+		sealResults := make(chan *types.BlockWithReceipts, 1)
 
-		if err := v.Engine.Seal(hr, block, sealResults, nil); err != nil {
+		blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: receipts[i]}
+		if err := v.Engine.Seal(hr, blockWithReceipts, sealResults, nil); err != nil {
 			return nil, err
 		}
 
 		sealedBlock := <-sealResults
-		v.blocks[sealedBlock.NumberU64()] = sealedBlock
-		sealedBlocks = append(sealedBlocks, sealedBlock)
+		v.blocks[sealedBlock.Block.NumberU64()] = sealedBlock.Block
+		sealedBlocks = append(sealedBlocks, sealedBlock.Block)
 	}
 
 	return sealedBlocks, nil
@@ -352,7 +353,7 @@ func TestVerifyHeader(t *testing.T) {
 		t.Fatalf("generate blocks failed: %v", err)
 	}
 
-	sealedBlocks, err := v.sealBlocks(chain.Blocks)
+	sealedBlocks, err := v.sealBlocks(chain.Blocks, chain.Receipts)
 
 	if err != nil {
 		t.Fatalf("seal block failed: %v", err)
@@ -406,6 +407,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 	for bi := 0; bi < chainLength; bi++ {
 		for vi, v := range validators {
 			block := chains[vi].Blocks[bi]
+			receipts := chains[vi].Receipts[bi]
 
 			isProposer, err := v.IsProposer(block)
 
@@ -423,7 +425,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 					lastProposerIndex = vi
 				}
 
-				sealedBlocks, err := v.sealBlocks([]*types.Block{block})
+				sealedBlocks, err := v.sealBlocks([]*types.Block{block}, []types.Receipts{receipts})
 
 				if err != nil {
 					t.Fatalf("seal block failed: %v", err)
@@ -452,7 +454,7 @@ func TestSendBlock(t *testing.T) {
 		t.Fatalf("generate blocks failed: %v", err)
 	}
 
-	sealedBlocks, err := s.sealBlocks(chain.Blocks)
+	sealedBlocks, err := s.sealBlocks(chain.Blocks, chain.Receipts)
 
 	if err != nil {
 		t.Fatalf("seal block failed: %v", err)
@@ -464,7 +466,7 @@ func TestSendBlock(t *testing.T) {
 		t.Fatalf("verify blocks failed: %v", err)
 	}
 
-	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
+	b, err := rlp2.EncodeToBytes(&eth.NewBlockPacket{
 		Block: sealedBlocks[0],
 		TD:    big.NewInt(1), // This is ignored anyway
 	})

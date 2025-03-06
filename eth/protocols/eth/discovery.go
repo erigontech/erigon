@@ -19,11 +19,11 @@ package eth
 import (
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 
-	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/core/forkid"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 // enrEntry is the ENR entry which advertises `eth` protocol on the discovery.

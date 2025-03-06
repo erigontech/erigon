@@ -4,12 +4,12 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-	"github.com/ledgerwatch/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/types"
 )
 
 type FakeEthash struct {
@@ -113,12 +113,14 @@ func (f *FakeEthash) VerifySeal(_ consensus.ChainHeaderReader, header *types.Hea
 }
 
 // If we're running a fake PoW, simply return a 0 nonce immediately
-func (f *FakeEthash) Seal(_ consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
+func (f *FakeEthash) Seal(_ consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+	block := blockWithReceipts.Block
+	receipts := blockWithReceipts.Receipts
 	header := block.Header()
 	header.Nonce, header.MixDigest = types.BlockNonce{}, libcommon.Hash{}
 
 	select {
-	case results <- block.WithSeal(header):
+	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts}:
 	default:
 		f.Ethash.config.Log.Warn("Sealing result is not read by miner", "mode", "fake", "sealhash", f.SealHash(block.Header()))
 	}

@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"math/big"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/execution"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/types"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 func HeaderToHeaderRPC(header *types.Header) *execution.Header {
@@ -55,6 +55,10 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 
 	if header.ParentBeaconBlockRoot != nil {
 		h.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*header.ParentBeaconBlockRoot)
+	}
+
+	if header.RequestsHash != nil {
+		h.RequestsHash = gointerfaces.ConvertHashToH256(*header.RequestsHash)
 	}
 
 	if len(header.AuRaSeal) > 0 {
@@ -130,6 +134,10 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 	if header.ParentBeaconBlockRoot != nil {
 		h.ParentBeaconBlockRoot = new(libcommon.Hash)
 		*h.ParentBeaconBlockRoot = gointerfaces.ConvertH256ToHash(header.ParentBeaconBlockRoot)
+	}
+	if header.RequestsHash != nil {
+		h.RequestsHash = new(libcommon.Hash)
+		*h.RequestsHash = gointerfaces.ConvertH256ToHash(header.RequestsHash)
 	}
 	blockHash := gointerfaces.ConvertH256ToHash(header.BlockHash)
 	if blockHash != h.Hash() {

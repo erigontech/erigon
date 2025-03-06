@@ -22,13 +22,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/params"
 )
 
 var activators = map[int]func(*JumpTable){
+	7702: enable7702,
 	7516: enable7516,
 	6780: enable6780,
 	5656: enable5656,
@@ -297,22 +297,12 @@ func opMcopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 
 // enable6780 applies EIP-6780 (deactivate SELFDESTRUCT)
 func enable6780(jt *JumpTable) {
-	jt[SELFDESTRUCT] = &operation{
-		execute:     opSelfdestruct6780,
-		dynamicGas:  gasSelfdestructEIP3529,
-		constantGas: params.SelfdestructGasEIP150,
-		numPop:      1,
-		numPush:     0,
-	}
+	jt[SELFDESTRUCT].execute = opSelfdestruct6780
 }
 
 // opBlobBaseFee implements the BLOBBASEFEE opcode
 func opBlobBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
-	excessBlobGas := interpreter.evm.Context.ExcessBlobGas
-	blobBaseFee, err := misc.GetBlobGasPrice(interpreter.evm.ChainConfig(), *excessBlobGas)
-	if err != nil {
-		return nil, err
-	}
+	blobBaseFee := interpreter.evm.Context.BlobBaseFee
 	callContext.Stack.Push(blobBaseFee)
 	return nil, nil
 }
@@ -326,4 +316,11 @@ func enable7516(jt *JumpTable) {
 		numPop:      0,
 		numPush:     1,
 	}
+}
+
+func enable7702(jt *JumpTable) {
+	jt[CALL].dynamicGas = gasCallEIP7702
+	jt[CALLCODE].dynamicGas = gasCallCodeEIP7702
+	jt[STATICCALL].dynamicGas = gasStaticCallEIP7702
+	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP7702
 }

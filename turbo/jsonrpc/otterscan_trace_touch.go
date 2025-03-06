@@ -3,10 +3,10 @@ package jsonrpc
 import (
 	"bytes"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm"
 )
 
 type TouchTracer struct {

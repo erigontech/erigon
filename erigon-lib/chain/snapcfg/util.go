@@ -3,16 +3,17 @@ package snapcfg
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	snapshothashes "github.com/ledgerwatch/erigon-snapshot"
-	"github.com/ledgerwatch/erigon-snapshot/webseed"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	snapshothashes "github.com/erigontech/erigon-snapshot"
+	"github.com/erigontech/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
 )
@@ -21,8 +22,6 @@ var (
 	Mainnet = fromToml(snapshothashes.Mainnet)
 	// Holesky    = fromToml(snapshothashes.Holesky)
 	Sepolia    = fromToml(snapshothashes.Sepolia)
-	Goerli     = fromToml(snapshothashes.Goerli)
-	Mumbai     = fromToml(snapshothashes.Mumbai)
 	Amoy       = fromToml(snapshothashes.Amoy)
 	BorMainnet = fromToml(snapshothashes.BorMainnet)
 	Gnosis     = fromToml(snapshothashes.Gnosis)
@@ -77,11 +76,22 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		var preferredVersion, minVersion snaptype.Version
 
-		parts := strings.Split(name, "-")
-		if len(parts) < 3 {
+		countSep := 0
+		var lastSep, dot int
+		for i := range name {
+			if name[i] == '-' {
+				countSep++
+				lastSep = i
+			}
+			if name[i] == '.' {
+				dot = i
+			}
+		}
+
+		if countSep < 2 {
 			continue
 		}
-		typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
+		typeName := name[lastSep+1 : dot]
 		include := false
 
 		for _, typ := range types {
@@ -204,18 +214,13 @@ func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 		if ext != ".seg" {
 			continue
 		}
-		onlyName := fileName[:len(fileName)-len(ext)]
-		parts := strings.Split(onlyName, "-")
 
-		to, err := strconv.ParseUint(parts[2], 10, 64)
+		to, err := ExtractBlockFromName(fileName[:len(fileName)-len(ext)], version)
 		if err != nil {
-			return 0, err
-		}
-
-		if version != 0 {
-			if v, err := snaptype.ParseVersion(parts[0]); err != nil || v != version {
+			if errors.Is(err, errWrongVersion) {
 				continue
 			}
+			return 0, err
 		}
 
 		if max < to {
@@ -228,6 +233,53 @@ func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 	}
 
 	return max*1_000 - 1, nil
+}
+
+var errWrongVersion = errors.New("wrong version")
+
+func ExtractBlockFromName(name string, v snaptype.Version) (block uint64, err error) {
+	i := 0
+	for i < len(name) && name[i] != '-' {
+		i++
+	}
+
+	version, err := snaptype.ParseVersion(name[:i])
+	if err != nil {
+		return 0, err
+	}
+
+	if v != 0 && v != version {
+		return 0, errWrongVersion
+	}
+
+	i++
+
+	for i < len(name) && name[i] != '-' { // skipping parts[1]
+		i++
+	}
+
+	i++
+	start := i
+	if start > len(name)-1 {
+		return 0, errors.New("invalid name")
+	}
+
+	for i < len(name) && name[i] != '-' {
+		i++
+	}
+
+	end := i
+
+	if i > len(name) {
+		end = len(name)
+	}
+
+	block, err = strconv.ParseUint(name[start:end], 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return block, nil
 }
 
 func (p Preverified) MarshalJSON() ([]byte, error) {
@@ -329,8 +381,6 @@ var knownPreverified = map[string]Preverified{
 	networkname.MainnetChainName: Mainnet,
 	// networkname.HoleskyChainName:    HoleskyChainSnapshotCfg,
 	networkname.SepoliaChainName:    Sepolia,
-	networkname.GoerliChainName:     Goerli,
-	networkname.MumbaiChainName:     Mumbai,
 	networkname.AmoyChainName:       Amoy,
 	networkname.BorMainnetChainName: BorMainnet,
 	networkname.GnosisChainName:     Gnosis,
@@ -350,8 +400,8 @@ func Seedable(networkName string, info snaptype.FileInfo) bool {
 	return KnownCfg(networkName).Seedable(info)
 }
 
-func MergeLimit(networkName string, snapType snaptype.Enum, fromBlock uint64) uint64 {
-	return KnownCfg(networkName).MergeLimit(snapType, fromBlock)
+func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {
+	return cfg.MergeLimit(snapType, fromBlock)
 }
 
 func MaxSeedableSegment(chain string, dir string) uint64 {
@@ -370,8 +420,8 @@ func MaxSeedableSegment(chain string, dir string) uint64 {
 
 var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
 
-func MergeSteps(networkName string, snapType snaptype.Enum, fromBlock uint64) []uint64 {
-	mergeLimit := MergeLimit(networkName, snapType, fromBlock)
+func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) []uint64 {
+	mergeLimit := MergeLimitFromCfg(cfg, snapType, fromBlock)
 
 	if mergeLimit == snaptype.Erigon2OldMergeLimit {
 		return oldMergeSteps
@@ -404,8 +454,6 @@ func VersionedCfg(networkName string, preferred snaptype.Version, min snaptype.V
 var KnownWebseeds = map[string][]string{
 	networkname.MainnetChainName:    webseedsParse(webseed.Mainnet),
 	networkname.SepoliaChainName:    webseedsParse(webseed.Sepolia),
-	networkname.GoerliChainName:     webseedsParse(webseed.Goerli),
-	networkname.MumbaiChainName:     webseedsParse(webseed.Mumbai),
 	networkname.AmoyChainName:       webseedsParse(webseed.Amoy),
 	networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
 	networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),

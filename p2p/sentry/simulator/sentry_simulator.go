@@ -6,27 +6,28 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	isentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
-	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
-	coretypes "github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/sentry"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	isentry "github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	"github.com/erigontech/erigon-lib/gointerfaces/types"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
+	coresnaptype "github.com/erigontech/erigon/core/snaptype"
+	coretypes "github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/discover/v4wire"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type server struct {
@@ -213,7 +214,7 @@ func (s *server) sendMessageById(ctx context.Context, peerId [64]byte, messageDa
 	switch messageData.Id {
 	case isentry.MessageId_GET_BLOCK_HEADERS_65:
 		packet := &eth.GetBlockHeadersPacket{}
-		if err := rlp.DecodeBytes(messageData.Data, packet); err != nil {
+		if err := rlp2.DecodeBytes(messageData.Data, packet); err != nil {
 			return fmt.Errorf("failed to decode packet: %w", err)
 		}
 
@@ -221,7 +222,7 @@ func (s *server) sendMessageById(ctx context.Context, peerId [64]byte, messageDa
 
 	case isentry.MessageId_GET_BLOCK_HEADERS_66:
 		packet := &eth.GetBlockHeadersPacket66{}
-		if err := rlp.DecodeBytes(messageData.Data, packet); err != nil {
+		if err := rlp2.DecodeBytes(messageData.Data, packet); err != nil {
 			return fmt.Errorf("failed to decode packet: %w", err)
 		}
 
@@ -309,7 +310,7 @@ func (s *server) processGetBlockHeaders(ctx context.Context, peer *p2p.Peer, req
 		if len(r65) > 0 {
 			var data bytes.Buffer
 
-			err := rlp.Encode(&data, headers)
+			err := rlp2.Encode(&data, headers)
 
 			if err != nil {
 				s.logger.Warn("Can't encode headers", "error", err)
@@ -328,7 +329,7 @@ func (s *server) processGetBlockHeaders(ctx context.Context, peer *p2p.Peer, req
 		if len(r66) > 0 {
 			var data bytes.Buffer
 
-			err := rlp.Encode(&data, &eth.BlockHeadersPacket66{
+			err := rlp2.Encode(&data, &eth.BlockHeadersPacket66{
 				RequestId:          requestId,
 				BlockHeadersPacket: headers,
 			})

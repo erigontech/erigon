@@ -12,31 +12,33 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	proto_types "github.com/erigontech/erigon-lib/gointerfaces/types"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p/sentry"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/bodydownload"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 type (
@@ -360,7 +362,7 @@ func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.I
 	}
 	//cs.logger.Info(fmt.Sprintf("NewBlockHashes from [%s]", ConvertH256ToPeerID(req.PeerId)))
 	var request eth.NewBlockHashesPacket
-	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
+	if err := rlp2.DecodeBytes(req.Data, &request); err != nil {
 		return fmt.Errorf("decode NewBlockHashes66: %w", err)
 	}
 	for _, announce := range request {
@@ -369,7 +371,7 @@ func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.I
 			continue
 		}
 		//cs.logger.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
-		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
+		b, err := rlp2.EncodeToBytes(&eth.GetBlockHeadersPacket66{
 			RequestId: rand.Uint64(), // nolint: gosec
 			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
 				Amount:  1,
@@ -402,12 +404,12 @@ func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.I
 func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	// Parse the entire packet from scratch
 	var pkt eth.BlockHeadersPacket66
-	if err := rlp.DecodeBytes(in.Data, &pkt); err != nil {
+	if err := rlp2.DecodeBytes(in.Data, &pkt); err != nil {
 		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
 	}
 
 	// Prepare to extract raw headers from the block
-	rlpStream := rlp.NewStream(bytes.NewReader(in.Data), uint64(len(in.Data)))
+	rlpStream := rlp2.NewStream(bytes.NewReader(in.Data), uint64(len(in.Data)))
 	if _, err := rlpStream.List(); err != nil { // Now stream is at the beginning of 66 object
 		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
 	}
@@ -419,7 +421,7 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 	return cs.blockHeaders(ctx, pkt.BlockHeadersPacket, rlpStream, in.PeerId, sentry)
 }
 
-func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentryClient direct.SentryClient) error {
+func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp2.Stream, peerID *proto_types.H512, sentryClient direct.SentryClient) error {
 	if cs.disableBlockDownload {
 		return nil
 	}
@@ -504,7 +506,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 	}
 
 	// Extract header from the block
-	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
+	rlpStream := rlp2.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
 	_, err := rlpStream.List() // Now stream is at the beginning of the block record
 	if err != nil {
 		return fmt.Errorf("decode 1 NewBlockMsg: %w", err)
@@ -519,7 +521,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 	}
 	// Parse the entire request from scratch
 	request := &eth.NewBlockPacket{}
-	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
+	if err := rlp2.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode 4 NewBlockMsg: %w", err)
 	}
 	if err := request.SanityCheck(); err != nil {
@@ -582,7 +584,7 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 	}
 
 	var request eth.BlockRawBodiesPacket66
-	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
+	if err := rlp2.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles, withdrawals := request.BlockRawBodiesPacket.Unpack()
@@ -600,7 +602,7 @@ func (cs *MultiClient) receipts66(_ context.Context, _ *proto_sentry.InboundMess
 
 func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetBlockHeadersPacket66
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+	if err := rlp2.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockHeaders66: %w, data: %x", err, inreq.Data)
 	}
 
@@ -621,7 +623,7 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentr
 	// is useful as currently with no response, we're anyways getting kicked due
 	// to request timeout and EOF.
 
-	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+	b, err := rlp2.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          query.RequestId,
 		BlockHeadersPacket: headers,
 	})
@@ -648,7 +650,7 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentr
 
 func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetBlockBodiesPacket66
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+	if err := rlp2.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockBodies66: %w, data: %x", err, inreq.Data)
 	}
 	tx, err := cs.db.BeginRo(ctx)
@@ -658,7 +660,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 	defer tx.Rollback()
 	response := eth.AnswerGetBlockBodiesQuery(tx, query.GetBlockBodiesPacket, cs.blockReader)
 	tx.Rollback()
-	b, err := rlp.EncodeToBytes(&eth.BlockBodiesRLPPacket66{
+	b, err := rlp2.EncodeToBytes(&eth.BlockBodiesRLPPacket66{
 		RequestId:            query.RequestId,
 		BlockBodiesRLPPacket: response,
 	})
@@ -689,7 +691,7 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 	}
 
 	var query eth.GetReceiptsPacket66
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+	if err := rlp2.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
 	}
 	tx, err := cs.db.BeginRo(ctx)
@@ -702,7 +704,7 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 		return err
 	}
 	tx.Rollback()
-	b, err := rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+	b, err := rlp2.EncodeToBytes(&eth.ReceiptsRLPPacket66{
 		RequestId:         query.RequestId,
 		ReceiptsRLPPacket: receipts,
 	})
@@ -740,7 +742,7 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_
 
 	err = cs.handleInboundMessage(ctx, message, sentry)
 
-	if (err != nil) && rlp.IsInvalidRLPError(err) {
+	if (err != nil) && rlp2.IsInvalidRLPError(err) {
 		cs.logger.Debug("Kick peer for invalid RLP", "err", err)
 		penalizeRequest := proto_sentry.PenalizePeerRequest{
 			PeerId:  message.PeerId,

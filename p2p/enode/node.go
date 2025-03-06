@@ -26,8 +26,8 @@ import (
 	"net"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/erigon/rlp"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 var errMissingPrefix = errors.New("missing 'enr:' prefix for base64-encoded record")
@@ -73,7 +73,7 @@ func Parse(validSchemes enr.IdentityScheme, input string) (*Node, error) {
 		return nil, err
 	}
 	var r enr.Record
-	if err := rlp.DecodeBytes(bin, &r); err != nil {
+	if err := rlp2.DecodeBytes(bin, &r); err != nil {
 		return nil, err
 	}
 	return New(validSchemes, &r)
@@ -167,7 +167,7 @@ func (n *Node) String() string {
 	if isNewV4(n) {
 		return n.URLv4() // backwards-compatibility glue for NewV4 nodes
 	}
-	enc, _ := rlp.EncodeToBytes(&n.r) // always succeeds because record is valid
+	enc, _ := rlp2.EncodeToBytes(&n.r) // always succeeds because record is valid
 	b64 := base64.RawURLEncoding.EncodeToString(enc)
 	return "enr:" + b64
 }

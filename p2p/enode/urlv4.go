@@ -26,8 +26,8 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/enr"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 var (

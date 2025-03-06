@@ -24,22 +24,23 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/params"
 )
 
 func TestDecodeEmptyTypedReceipt(t *testing.T) {
 	t.Parallel()
 	input := []byte{0x80}
 	var r Receipt
-	err := rlp.DecodeBytes(input, &r)
-	if !errors.Is(err, rlp.EOL) {
+	err := rlp2.DecodeBytes(input, &r)
+	if !errors.Is(err, rlp2.EOL) {
 		t.Fatal("wrong error:", err)
 	}
 }
@@ -88,7 +89,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 				t.Fatalf("Error encoding receipt: %v", err)
 			}
 			var dec ReceiptForStorage
-			if err := rlp.DecodeBytes(enc, &dec); err != nil {
+			if err := rlp2.DecodeBytes(enc, &dec); err != nil {
 				t.Fatalf("Error decoding RLP receipt: %v", err)
 			}
 			// Check whether all consensus fields are correct.
@@ -125,7 +126,7 @@ func encodeAsStoredReceiptRLP(want *Receipt) ([]byte, error) {
 	for i, log := range want.Logs {
 		stored.Logs[i] = (*LogForStorage)(log)
 	}
-	return rlp.EncodeToBytes(stored)
+	return rlp2.EncodeToBytes(stored)
 }
 
 // Tests that receipt data can be correctly derived from the contextual infos
@@ -279,7 +280,7 @@ func TestTypedReceiptEncodingDecoding(t *testing.T) {
 	}
 	{
 		var bundle []*Receipt
-		if err := rlp.DecodeBytes(payload, &bundle); err != nil {
+		if err := rlp2.DecodeBytes(payload, &bundle); err != nil {
 			t.Fatal(err)
 		}
 		check(bundle)
@@ -287,7 +288,7 @@ func TestTypedReceiptEncodingDecoding(t *testing.T) {
 	{
 		var bundle []*Receipt
 		r := bytes.NewReader(payload)
-		s := rlp.NewStream(r, uint64(len(payload)))
+		s := rlp2.NewStream(r, uint64(len(payload)))
 		if err := s.Decode(&bundle); err != nil {
 			t.Fatal(err)
 		}

@@ -28,32 +28,31 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	trace_logger "github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/tests"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
+	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/tests"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
 const (
@@ -239,7 +238,7 @@ func Main(ctx *cli.Context) error {
 	}
 
 	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
-		return NewError(ErrorVMConfig, errors.New("Shanghai config but missing 'withdrawals' in env section"))
+		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
 	}
 
 	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
@@ -314,7 +313,6 @@ func Main(ctx *cli.Context) error {
 	t8logger := log.New("t8ntool")
 	chainReader := stagedsync.NewChainReaderImpl(chainConfig, tx, nil, t8logger)
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, tx, hermezDb, t8logger)
-
 	if hashError != nil {
 		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
 	}
@@ -369,7 +367,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	}
 
 	// Now, read the transaction itself
-	var txJson jsonrpc.RPCTransaction
+	var txJson ethapi.RPCTransaction
 
 	if err := json.Unmarshal(input, &txJson); err != nil {
 		return err
@@ -384,93 +382,105 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
+func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
 	var overflow bool
 	var chainId *uint256.Int
 
 	if txJson.Value != nil {
-		value, overflow = uint256.FromBig((*big.Int)(txJson.Value))
+		value, overflow = uint256.FromBig(txJson.Value.ToInt())
 		if overflow {
 			return nil, fmt.Errorf("value field caused an overflow (uint256)")
 		}
 	}
 
 	if txJson.GasPrice != nil {
-		gasPrice, overflow = uint256.FromBig((*big.Int)(txJson.GasPrice))
+		gasPrice, overflow = uint256.FromBig(txJson.GasPrice.ToInt())
 		if overflow {
 			return nil, fmt.Errorf("gasPrice field caused an overflow (uint256)")
 		}
 	}
 
 	if txJson.ChainID != nil {
-		chainId, overflow = uint256.FromBig((*big.Int)(txJson.ChainID))
+		chainId, overflow = uint256.FromBig(txJson.ChainID.ToInt())
 		if overflow {
 			return nil, fmt.Errorf("chainId field caused an overflow (uint256)")
 		}
 	}
 
-	switch txJson.Type {
-	case types.LegacyTxType, types.AccessListTxType:
-		var toAddr = libcommon.Address{}
-		if txJson.To != nil {
-			toAddr = *txJson.To
-		}
-		legacyTx := types.NewTransaction(uint64(txJson.Nonce), toAddr, value, uint64(txJson.Gas), gasPrice, txJson.Input)
-		legacyTx.V.SetFromBig(txJson.V.ToInt())
-		legacyTx.S.SetFromBig(txJson.S.ToInt())
-		legacyTx.R.SetFromBig(txJson.R.ToInt())
+	commonTx := types.CommonTx{
+		Nonce: uint64(txJson.Nonce),
+		To:    txJson.To,
+		Value: value,
+		Gas:   uint64(txJson.Gas),
+		Data:  txJson.Input,
+	}
 
-		if txJson.Type == types.AccessListTxType {
-			accessListTx := types.AccessListTx{
-				LegacyTx:   *legacyTx,
-				ChainID:    chainId,
-				AccessList: *txJson.Accesses,
-			}
-
-			return &accessListTx, nil
-		} else {
-			return legacyTx, nil
+	commonTx.V.SetFromBig(txJson.V.ToInt())
+	commonTx.R.SetFromBig(txJson.R.ToInt())
+	commonTx.S.SetFromBig(txJson.S.ToInt())
+	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
+		legacyTx := types.LegacyTx{
+			//it's ok to copy here - because it's constructor of object - no parallel access yet
+			CommonTx: commonTx, //nolint
+			GasPrice: gasPrice,
 		}
 
-	case types.DynamicFeeTxType:
+		if txJson.Type == types.LegacyTxType {
+			return &legacyTx, nil
+		}
+
+		return &types.AccessListTx{
+			//it's ok to copy here - because it's constructor of object - no parallel access yet
+			LegacyTx:   legacyTx, //nolint
+			ChainID:    chainId,
+			AccessList: *txJson.Accesses,
+		}, nil
+	} else if txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType {
 		var tip *uint256.Int
 		var feeCap *uint256.Int
 		if txJson.Tip != nil {
-			tip, overflow = uint256.FromBig((*big.Int)(txJson.Tip))
+			tip, overflow = uint256.FromBig(txJson.Tip.ToInt())
 			if overflow {
 				return nil, fmt.Errorf("maxPriorityFeePerGas field caused an overflow (uint256)")
 			}
 		}
 
 		if txJson.FeeCap != nil {
-			feeCap, overflow = uint256.FromBig((*big.Int)(txJson.FeeCap))
+			feeCap, overflow = uint256.FromBig(txJson.FeeCap.ToInt())
 			if overflow {
 				return nil, fmt.Errorf("maxFeePerGas field caused an overflow (uint256)")
 			}
 		}
 
 		dynamicFeeTx := types.DynamicFeeTransaction{
-			CommonTx: types.CommonTx{
-				Nonce: uint64(txJson.Nonce),
-				To:    txJson.To,
-				Value: value,
-				Gas:   uint64(txJson.Gas),
-				Data:  txJson.Input,
-			},
+			//it's ok to copy here - because it's constructor of object - no parallel access yet
+			CommonTx:   commonTx, //nolint
 			ChainID:    chainId,
 			Tip:        tip,
 			FeeCap:     feeCap,
 			AccessList: *txJson.Accesses,
 		}
 
-		dynamicFeeTx.V.SetFromBig(txJson.V.ToInt())
-		dynamicFeeTx.S.SetFromBig(txJson.S.ToInt())
-		dynamicFeeTx.R.SetFromBig(txJson.R.ToInt())
+		if txJson.Type == types.DynamicFeeTxType {
+			return &dynamicFeeTx, nil
+		}
 
-		return &dynamicFeeTx, nil
+		auths := make([]types.Authorization, 0)
+		for _, auth := range *txJson.Authorizations {
+			a, err := auth.ToAuthorization()
+			if err != nil {
+				return nil, err
+			}
+			auths = append(auths, a)
+		}
 
-	default:
+		return &types.SetCodeTransaction{
+			// it's ok to copy here - because it's constructor of object - no parallel access yet
+			DynamicFeeTransaction: dynamicFeeTx, //nolint
+			Authorizations:        auths,
+		}, nil
+	} else {
 		return nil, nil
 	}
 }
@@ -602,6 +612,7 @@ func NewHeader(env stEnv) *types.Header {
 
 	header.UncleHash = env.UncleHash
 	header.WithdrawalsHash = env.WithdrawalsHash
+	header.RequestsHash = env.RequestsHash
 
 	return &header
 }

@@ -6,27 +6,23 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto/cryptopool"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto/cryptopool"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 func (api *APIImpl) deprecated_CallBundle(ctx context.Context, txHashes []common.Hash, stateBlockNumberOrHash rpc.BlockNumberOrHash, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
@@ -71,7 +67,7 @@ func (api *APIImpl) deprecated_CallBundle(ctx context.Context, txHashes []common
 			}
 		}
 		if txn == nil {
-			return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+			return nil, nil // not error, see https://github.com/erigontech/turbo-geth/issues/1645
 		}
 		txs = append(txs, txn)
 	}
@@ -103,7 +99,7 @@ func (api *APIImpl) deprecated_CallBundle(ctx context.Context, txHashes []common
 
 	blockNumber := stateBlockNumber + 1
 
-	timestamp := parent.Time + clparams.MainnetBeaconConfig.SecondsPerSlot
+	timestamp := parent.Time + chainConfig.SecondsPerSlot()
 
 	coinbase := parent.Coinbase
 	header := &types.Header{
@@ -122,7 +118,7 @@ func (api *APIImpl) deprecated_CallBundle(ctx context.Context, txHashes []common
 		return nil, err
 	}
 
-	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	txCtx := core.NewEVMTxContext(firstMsg)
 	// Get a new instance of the EVM
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: false})
@@ -225,13 +221,6 @@ func (api *APIImpl) GetBlockByNumber_deprecated(ctx context.Context, number rpc.
 		return nil, nil
 	}
 	additionalFields := make(map[string]interface{})
-	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
-	if err != nil {
-		return nil, err
-	}
-	if td != nil {
-		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
-	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -253,6 +242,7 @@ func (api *APIImpl) GetBlockByNumber_deprecated(ctx context.Context, number rpc.
 			response[field] = nil
 		}
 	}
+
 	return response, err
 }
 
@@ -263,7 +253,7 @@ func (api *APIImpl) GetBlockByHash_deprecated(ctx context.Context, numberOrHash 
 		// eth_getBlockByHash with a block number as a parameter
 		// so no matter how weird that is, we would love to support that.
 		if numberOrHash.BlockNumber == nil {
-			return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 		}
 		return api.GetBlockByNumber(ctx, *numberOrHash.BlockNumber, nil)
 	}
@@ -282,15 +272,9 @@ func (api *APIImpl) GetBlockByHash_deprecated(ctx context.Context, numberOrHash 
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 	number := block.NumberU64()
-
-	td, err := rawdb.ReadTd(tx, hash, number)
-	if err != nil {
-		return nil, err
-	}
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -306,18 +290,13 @@ func (api *APIImpl) GetBlockByHash_deprecated(ctx context.Context, numberOrHash 
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
-
-	if chainConfig.Bor != nil {
-		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-		response["miner"], _ = ecrecover(block.Header(), borConfig)
-	}
-
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
 		}
 	}
+
 	return response, err
 }
 

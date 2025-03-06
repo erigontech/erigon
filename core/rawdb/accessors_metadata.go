@@ -17,14 +17,16 @@
 package rawdb
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
@@ -81,4 +83,16 @@ func WriteChainConfig(db kv.Putter, hash libcommon.Hash, cfg *chain.Config) erro
 // DeleteChainConfig retrieves the consensus settings based on the given genesis hash.
 func DeleteChainConfig(db kv.Deleter, hash libcommon.Hash) error {
 	return db.Delete(kv.ConfigTable, hash[:])
+}
+
+func AllSegmentsDownloadComplete(tx kv.Getter) (allSegmentsDownloadComplete bool, err error) {
+	snapshotsStageProgress, err := stages.GetStageProgress(tx, stages.Snapshots)
+	return snapshotsStageProgress > 0, err
+}
+func AllSegmentsDownloadCompleteFromDB(db kv.RoDB) (allSegmentsDownloadComplete bool, err error) {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		allSegmentsDownloadComplete, err = AllSegmentsDownloadComplete(tx)
+		return err
+	})
+	return allSegmentsDownloadComplete, err
 }

@@ -3,7 +3,7 @@ package cli
 import (
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils"
 )
 
 // DefaultFlags contains all flags that are used and supported by Erigon binary.
@@ -98,6 +98,12 @@ var DefaultFlags = []cli.Flag{
 	&EvmCallTimeoutFlag,
 	&OverlayGetLogsFlag,
 	&OverlayReplayBlockFlag,
+
+	&RpcSubscriptionFiltersMaxLogsFlag,
+	&RpcSubscriptionFiltersMaxHeadersFlag,
+	&RpcSubscriptionFiltersMaxTxsFlag,
+	&RpcSubscriptionFiltersMaxAddressesFlag,
+	&RpcSubscriptionFiltersMaxTopicsFlag,
 
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,

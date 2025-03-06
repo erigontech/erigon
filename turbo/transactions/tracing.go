@@ -8,24 +8,24 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 
-	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/tracers"
-	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
@@ -38,7 +38,7 @@ type BlockGetter interface {
 }
 
 // ComputeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex int, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
+func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex int, historyV3, isBorStateSyncTxn bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, historyV3, cfg.ChainName)
 	if err != nil {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
@@ -48,20 +48,26 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	// Create the parent state database
 	statedb := state.New(reader)
 
-	if txIndex == 0 && len(block.Transactions()) == 0 {
+	if !isBorStateSyncTxn && txIndex == 0 && len(block.Transactions()) == 0 {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, reader, nil
 	}
+
 	getHeader := func(hash libcommon.Hash, n uint64) *types.Header {
 		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
 		return h
 	}
 	header := block.HeaderNoCopy()
 
-	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
 
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, block.NumberU64(), 0)
 	if historyV3 {
+		if isBorStateSyncTxn && txIndex == len(block.Transactions()) {
+			// tx is a state sync transaction
+			return nil, blockContext, evmtypes.TxContext{}, statedb, reader, nil
+		}
+
 		rules := cfg.Rules(BlockContext.BlockNumber, BlockContext.Time)
 		txn := block.Transactions()[txIndex]
 		statedb.Init(txn.Hash(), block.Hash(), txIndex)
@@ -124,6 +130,12 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 			return nil, BlockContext, evmtypes.TxContext{}, statedb, reader, nil
 		}
 	}
+
+	if isBorStateSyncTxn && txIndex == len(block.Transactions()) {
+		// we can reach here if the block has 0 normal transactions but has state sync transactions
+		return nil, blockContext, evmtypes.TxContext{}, statedb, reader, nil
+	}
+
 	return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, block.Hash())
 }
 
@@ -348,7 +360,7 @@ func ExecuteTraceTx(
 	stream *jsoniter.Stream,
 	tracer vm.EVMLogger,
 	streaming bool,
-	execCb func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error),
+	execCb func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error),
 ) error {
 	// Run the transaction with tracing enabled.
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer, NoBaseFee: true})

@@ -23,13 +23,11 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	types2 "github.com/erigontech/erigon-lib/types"
 )
 
 type CommonTx struct {
@@ -70,13 +68,13 @@ func (ct *CommonTx) GetData() []byte {
 
 func (ct *CommonTx) GetSender() (libcommon.Address, bool) {
 	if sc := ct.from.Load(); sc != nil {
-		return sc.(libcommon.Address), true
+		return *sc, true
 	}
 	return libcommon.Address{}, false
 }
 
 func (ct *CommonTx) SetSender(addr libcommon.Address) {
-	ct.from.Store(addr)
+	ct.from.Store(&addr)
 }
 
 func (ct *CommonTx) Protected() bool {
@@ -192,28 +190,28 @@ func (tx *LegacyTx) EncodingSize() int {
 
 func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	payloadSize++
-	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
+	nonceLen = rlp2.IntLenExcludingHead(tx.Nonce)
 	payloadSize += nonceLen
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.GasPrice)
+	payloadSize += rlp2.Uint256LenExcludingHead(tx.GasPrice)
 	payloadSize++
-	gasLen = rlp.IntLenExcludingHead(tx.Gas)
+	gasLen = rlp2.IntLenExcludingHead(tx.Gas)
 	payloadSize += gasLen
 	payloadSize++
 	if tx.To != nil {
 		payloadSize += 20
 	}
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
+	payloadSize += rlp2.Uint256LenExcludingHead(tx.Value)
 	// size of Data
 	payloadSize += rlp2.StringLen(tx.Data)
 	// size of V
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
+	payloadSize += rlp2.Uint256LenExcludingHead(&tx.V)
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.R)
+	payloadSize += rlp2.Uint256LenExcludingHead(&tx.R)
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
+	payloadSize += rlp2.Uint256LenExcludingHead(&tx.S)
 	return payloadSize, nonceLen, gasLen
 }
 
@@ -246,7 +244,7 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 	if err := tx.GasPrice.EncodeRLP(w); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+	if err := rlp2.EncodeInt(tx.Gas, w, b); err != nil {
 		return err
 	}
 	if tx.To == nil {
@@ -265,7 +263,7 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 	if err := tx.Value.EncodeRLP(w); err != nil {
 		return err
 	}
-	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+	if err := rlp2.EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
 	if err := tx.V.EncodeRLP(w); err != nil {
@@ -290,10 +288,11 @@ func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-// DecodeRLP decodes LegacyTx but with the list token already consumed and encodingSize being presented
-func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
-	var err error
-	s.NewList(encodingSize)
+func (tx *LegacyTx) DecodeRLP(s *rlp2.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return fmt.Errorf("legacy tx must be a list: %w", err)
+	}
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Nonce: %w", err)
 	}
@@ -372,19 +371,10 @@ func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error
 	return cpy, nil
 }
 
-func (tx *LegacyTx) FakeSign(address libcommon.Address) (Transaction, error) {
-	cpy := tx.copy()
-	cpy.R.Set(u256.Num1)
-	cpy.S.Set(u256.Num1)
-	cpy.V.Set(u256.Num4)
-	cpy.from.Store(address)
-	return cpy, nil
-}
-
 // Hash computes the hash (but not for signatures!)
 func (tx *LegacyTx) Hash() libcommon.Hash {
 	if hash := tx.hash.Load(); hash != nil {
-		return *hash.(*libcommon.Hash)
+		return *hash
 	}
 	hash := rlpHash([]interface{}{
 		tx.Nonce,
@@ -432,16 +422,16 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 }
 
 func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := tx.from.Load(); sc != nil {
-		zeroAddr := libcommon.Address{}
-		if sc.(libcommon.Address) != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return sc.(libcommon.Address), nil
+	if from := tx.from.Load(); from != nil {
+		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return *from, nil
 		}
 	}
+
 	addr, err := signer.Sender(tx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	tx.from.Store(addr)
+	tx.from.Store(&addr)
 	return addr, nil
 }

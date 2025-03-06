@@ -5,7 +5,7 @@ package disk
 import (
 	"runtime"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 var cgoCount = metrics.NewGauge(`go_cgo_calls_count`)

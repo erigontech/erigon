@@ -25,10 +25,11 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/erigontech/erigon-lib/crypto"
 	"golang.org/x/crypto/hkdf"
+
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 const (

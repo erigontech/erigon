@@ -8,20 +8,20 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethutils"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 type MiningBlock struct {
@@ -32,32 +32,22 @@ type MiningBlock struct {
 	Receipts         types.Receipts
 	Withdrawals      []*types.Withdrawal
 	PreparedTxs      types.TransactionsStream
+	Requests         types.FlatRequests
 }
 
 type MiningState struct {
-	MiningConfig      *params.MiningConfig
-	PendingResultCh   chan *types.Block
-	MiningResultCh    chan *types.Block
-	MiningResultPOSCh chan *types.BlockWithReceipts
-	MiningBlock       *MiningBlock
+	MiningConfig    *params.MiningConfig
+	PendingResultCh chan *types.Block
+	MiningResultCh  chan *types.BlockWithReceipts
+	MiningBlock     *MiningBlock
 }
 
 func NewMiningState(cfg *params.MiningConfig) MiningState {
 	return MiningState{
 		MiningConfig:    cfg,
 		PendingResultCh: make(chan *types.Block, 1),
-		MiningResultCh:  make(chan *types.Block, 1),
+		MiningResultCh:  make(chan *types.BlockWithReceipts, 1),
 		MiningBlock:     &MiningBlock{},
-	}
-}
-
-func NewProposingState(cfg *params.MiningConfig) MiningState {
-	return MiningState{
-		MiningConfig:      cfg,
-		PendingResultCh:   make(chan *types.Block, 1),
-		MiningResultCh:    make(chan *types.Block, 1),
-		MiningResultPOSCh: make(chan *types.BlockWithReceipts, 1),
-		MiningBlock:       &MiningBlock{},
 	}
 }
 

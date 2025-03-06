@@ -3,7 +3,7 @@ package heimdall
 import (
 	"context"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 //go:generate mockgen -typed=true -destination=./heimdall_no_store_mock.go -package=heimdall . HeimdallNoStore

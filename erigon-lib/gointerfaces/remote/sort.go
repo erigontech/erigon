@@ -3,7 +3,7 @@ package remote
 import (
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/erigontech/erigon-lib/gointerfaces/types"
 )
 
 func NodeInfoReplyCmp(i, j *types.NodeInfoReply) int {

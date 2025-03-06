@@ -1,10 +1,12 @@
 GO ?= go # if using docker, should not need to be installed/linked
+GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
 GOBINREL = build/bin
 GOBIN = $(CURDIR)/$(GOBINREL)
 UNAME = $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
+SHORT_COMMIT := $(shell echo $(GIT_COMMIT) | cut -c 1-8)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --all)
 ERIGON_USER ?= erigon
@@ -34,6 +36,11 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
+# Configure GOAMD64 env.variable for AMD64 architecture:
+ifeq ($(shell uname -m),x86_64)
+	CPU_ARCH= GOAMD64=${GOAMD64_VERSION}
+endif
+
 # about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
 BUILD_TAGS = nosqlite,noboltdb
 
@@ -45,14 +52,14 @@ GOPRIVATE = github.com/erigontech/silkworm-go
 
 # about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125
 BUILD_TAGS = nosqlite,noboltdb,netgo
-PACKAGE = github.com/ledgerwatch/erigon
+PACKAGE = github.com/erigontech/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
 GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
 
-GOBUILD = CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build $(GO_FLAGS)
-GO_DBG_BUILD = CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) -coverprofile=coverage.out ./... -p 2
+GOBUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build $(GO_FLAGS)
+GO_DBG_BUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
+GOTEST = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) -coverprofile=coverage.out ./... -p 2
 
 default: all
 
@@ -185,6 +192,71 @@ test-integration: test-erigon-lib
 
 test3-integration: test-erigon-lib
 	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration,e3
+
+## test-hive						run the hive tests locally off nektos/act workflows simulator
+test-hive:	
+	@if ! command -v act >/dev/null 2>&1; then \
+		echo "act command not found in PATH, please source it in PATH. If nektosact is not installed, install it by visiting https://nektosact.com/installation/index.html"; \
+	elif [ -z "$(GITHUB_TOKEN)"]; then \
+		echo "Please export GITHUB_TOKEN var in the environment" ; \
+	elif [ "$(SUITE)" = "eest" ]; then \
+		act -j test-hive-eest -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
+	else \
+		act -j test-hive -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
+	fi
+
+
+# Define the run_suite function
+define run_suite
+    printf "\n\n============================================================"; \
+    echo "Running test: $1-$2"; \
+    printf "\n"; \
+    ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --client erigon $3 2>&1 | tee output.log; \
+    if [ $$? -gt 0 ]; then \
+        echo "Exitcode gt 0"; \
+    fi; \
+    status_line=$$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g"); \
+    suites=$$(echo "$$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p'); \
+    if [ -z "$$suites" ]; then \
+        status_line=$$(tail -1 output.log | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g"); \
+        suites=$$(echo "$$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p'); \
+    fi; \
+    tests=$$(echo "$$status_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p'); \
+    failed=$$(echo "$$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p'); \
+    printf "\n"; \
+    echo "-----------   Results for $1-$2    -----------"; \
+    echo "Tests: $$tests, Failed: $$failed"; \
+    printf "\n\n============================================================"
+endef
+
+hive-local:
+	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
+	rm -rf "hive-local-$(SHORT_COMMIT)" && mkdir "hive-local-$(SHORT_COMMIT)"
+	cd "hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+
+	cd "hive-local-$(SHORT_COMMIT)/hive" && \
+	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
+	cd "hive-local-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
+	cd "hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,exchange-capabilities)
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,withdrawals)
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,cancun)
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,api)
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
+
+eest-hive:
+	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
+	rm -rf "eest-hive-$(SHORT_COMMIT)" && mkdir "eest-hive-$(SHORT_COMMIT)"
+	cd "eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+
+	cd "eest-hive-$(SHORT_COMMIT)/hive" && \
+	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
+	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
+	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
+	cd "eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/pectra-devnet-6%40v1.0.0/fixtures_pectra-devnet-6.tar.gz)
 
 ## lint-deps:                         install lint dependencies
 lint-deps:
@@ -326,7 +398,6 @@ release: git-submodules
 		--clean --skip-validate
 
 	@docker image push --all-tags thorax/erigon
-	@docker image push --all-tags ghcr.io/ledgerwatch/erigon
 
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.

@@ -14,35 +14,34 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/pion/randutil"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/blocks"
+	"github.com/erigontech/erigon/cmd/devnet/requests"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 type requestGenerator struct {
@@ -106,11 +105,11 @@ func (rg *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.B
 	if bn := int(blockNum.Uint64()); bn < len(rg.chain.Blocks) {
 		block := rg.chain.Blocks[bn]
 
-		transactions := make([]*jsonrpc.RPCTransaction, len(block.Transactions()))
+		transactions := make([]*ethapi.RPCTransaction, len(block.Transactions()))
 
-		for i, tx := range block.Transactions() {
-			rg.txBlockMap[tx.Hash()] = block
-			transactions[i] = jsonrpc.NewRPCTransaction(tx, block.Hash(), blockNum.Uint64(), uint64(i), block.BaseFee())
+		for i, txn := range block.Transactions() {
+			rg.txBlockMap[txn.Hash()] = block
+			transactions[i] = ethapi.NewRPCTransaction(txn, block.Hash(), blockNum.Uint64(), uint64(i), block.BaseFee())
 		}
 
 		return &requests.Block{
@@ -148,7 +147,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 	}
 	defer tx.Rollback()
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, reader, tx, 0, false)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, reader, tx, 0, false, false)
 
 	if err != nil {
 		return nil, err
@@ -157,11 +156,11 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 	var usedGas uint64
 	var usedBlobGas uint64
 
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Header().Time))
 
 	noopWriter := state.NewNoopWriter()
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
+	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 		h, e := reader.Header(ctx, tx, hash, number)
 		if e != nil {
 			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
@@ -269,7 +268,7 @@ func TestBlockGeneration(t *testing.T) {
 type genesisContract struct {
 }
 
-func (g genesisContract) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
+func (g genesisContract) CommitState(event rlp2.RawValue, syscall consensus.SystemCall) error {
 	return nil
 }
 
@@ -377,7 +376,7 @@ func TestReceiptProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parentNodesBytes, err := rlp.EncodeToBytes(receiptProof.parentNodes)
+	parentNodesBytes, err := rlp2.EncodeToBytes(receiptProof.parentNodes)
 
 	if err != nil {
 		t.Fatal(err)

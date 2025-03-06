@@ -22,7 +22,7 @@ import (
 	"math/bits"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/bitutil"
+	"github.com/erigontech/erigon-lib/common/bitutil"
 )
 
 // Optimal Golomb-Rice parameters for leaves

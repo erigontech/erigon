@@ -3,7 +3,7 @@ package building
 import (
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 type State struct {

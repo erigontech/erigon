@@ -19,8 +19,8 @@ package vm
 import (
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/common"
 )
 
 // calcMemSize64 calculates the required memory size, and returns

@@ -21,14 +21,13 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/direct"
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 
-	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/core/forkid"
+	"github.com/erigontech/erigon/core/types"
 )
 
 var ProtocolToString = map[uint]string{
@@ -206,25 +205,25 @@ type HashOrNumber struct {
 // two contained union fields.
 func (hn *HashOrNumber) EncodeRLP(w io.Writer) error {
 	if hn.Hash == (libcommon.Hash{}) {
-		return rlp.Encode(w, hn.Number)
+		return rlp2.Encode(w, hn.Number)
 	}
 	if hn.Number != 0 {
 		return fmt.Errorf("both origin hash (%x) and number (%d) provided", hn.Hash, hn.Number)
 	}
-	return rlp.Encode(w, hn.Hash)
+	return rlp2.Encode(w, hn.Hash)
 }
 
 // DecodeRLP is a specialized decoder for HashOrNumber to decode the contents
 // into either a block hash or a block number.
-func (hn *HashOrNumber) DecodeRLP(s *rlp.Stream) error {
+func (hn *HashOrNumber) DecodeRLP(s *rlp2.Stream) error {
 	_, size, _ := s.Kind()
 	origin, err := s.Raw()
 	if err == nil {
 		switch {
 		case size == 32:
-			err = rlp.DecodeBytes(origin, &hn.Hash)
+			err = rlp2.DecodeBytes(origin, &hn.Hash)
 		case size <= 8:
-			err = rlp.DecodeBytes(origin, &hn.Number)
+			err = rlp2.DecodeBytes(origin, &hn.Number)
 		default:
 			err = fmt.Errorf("invalid input size %d for origin", size)
 		}
@@ -291,7 +290,7 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
+func (nbp *NewBlockPacket) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err
@@ -348,7 +347,7 @@ type BlockRawBodiesPacket66 struct {
 // BlockBodiesRLPPacket is used for replying to block body requests, in cases
 // where we already have them RLP-encoded, and thus can avoid the decode-encode
 // roundtrip.
-type BlockBodiesRLPPacket []rlp.RawValue
+type BlockBodiesRLPPacket []rlp2.RawValue
 
 // BlockBodiesRLPPacket66 is the BlockBodiesRLPPacket over eth/66
 type BlockBodiesRLPPacket66 struct {
@@ -356,7 +355,7 @@ type BlockBodiesRLPPacket66 struct {
 	BlockBodiesRLPPacket
 }
 
-// Unpack retrieves the transactions, uncles, and withdrawals from the range packet and returns
+// Unpack retrieves the transactions, uncles, withdrawals from the range packet and returns
 // them in a split flat format that's more consistent with the internal data structures.
 func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.Withdrawals) {
 	var (
@@ -389,7 +388,7 @@ type ReceiptsPacket66 struct {
 }
 
 // ReceiptsRLPPacket is used for receipts, when we already have it encoded
-type ReceiptsRLPPacket []rlp.RawValue
+type ReceiptsRLPPacket []rlp2.RawValue
 
 // ReceiptsPacket66 is the eth-66 version of ReceiptsRLPPacket
 type ReceiptsRLPPacket66 struct {

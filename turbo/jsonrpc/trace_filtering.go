@@ -6,32 +6,34 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/erigontech/erigon-lib/log/v3"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/tracers"
-	"github.com/ledgerwatch/erigon/ethdb"
-	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/bitmapdb"
+	"github.com/erigontech/erigon-lib/kv/iter"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/ethdb"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 // Transaction implements trace_transaction
@@ -789,13 +791,13 @@ func (api *TraceAPIImpl) filterV3_deprecated(ctx context.Context, dbtx kv.Tempor
 		vmConfig.Tracer = &ot
 		ibs := state.New(cachedReader)
 
-		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader)
+		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
 		txCtx := core.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(txHash, lastBlockHash, txIndex)
-		var execResult *core.ExecutionResult
+		var execResult *evmtypes.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			if first {
@@ -933,21 +935,32 @@ func (api *TraceAPIImpl) callManyTransactions_deprecated(
 	}
 
 	callParams := make([]TraceCallParam, 0, len(txs))
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNumber, txIndex, api.historyV3(dbtx), cfg.ChainName)
-	if err != nil {
-		return nil, nil, err
+
+	parentHash := block.ParentHash()
+	parentNrOrHash := rpc.BlockNumberOrHash{
+		BlockNumber:      &parentNo,
+		BlockHash:        &parentHash,
+		RequireCanonical: true,
 	}
 
-	initialState := state.New(reader)
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, parentNrOrHash, 0, api.filters, api.stateCache, api.historyV3(dbtx), cfg.ChainName)
 	if err != nil {
 		return nil, nil, err
 	}
+	stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+	cachedReader := state.NewCachedReader(stateReader, stateCache)
+	noop := state.NewNoopWriter()
+	cachedWriter := state.NewCachedWriter(noop, stateCache)
+	ibs := state.New(cachedReader)
 
 	engine := api.engine()
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, initialState, logger)
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, logger)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err = ibs.CommitBlock(rules, cachedWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -977,7 +990,7 @@ func (api *TraceAPIImpl) callManyTransactions_deprecated(
 			// gnosis might have a fee free account here
 			if msg.FeeCap().IsZero() && engine != nil {
 				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					return core.SysCallContract(contract, data, cfg, initialState, header, engine, true /* constCall */)
+					return core.SysCallContract(contract, data, cfg, ibs, header, engine, true /* constCall */)
 				}
 				msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 			}
@@ -992,20 +1005,15 @@ func (api *TraceAPIImpl) callManyTransactions_deprecated(
 		msgs[i] = msg
 	}
 
-	parentHash := block.ParentHash()
-
-	traces, lastState, cmErr := api.doCallMany(ctx, dbtx, msgs, callParams, &rpc.BlockNumberOrHash{
-		BlockNumber:      &parentNo,
-		BlockHash:        &parentHash,
-		RequireCanonical: true,
-	}, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
+	traces, cmErr := api.doCallMany(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msgs, callParams,
+		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
 
 	if cmErr != nil {
 		return nil, nil, cmErr
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg, lastState, header, engine, false /* constCall */)
+		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */)
 	}
 
 	return traces, syscall, nil

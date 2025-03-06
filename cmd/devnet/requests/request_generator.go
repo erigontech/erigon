@@ -13,16 +13,15 @@ import (
 	"sync"
 	"time"
 
-	ethereum "github.com/ledgerwatch/erigon"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/log/v3"
+	ethereum "github.com/erigontech/erigon"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/valyala/fastjson"
 )
 
@@ -57,7 +56,7 @@ type RequestGenerator interface {
 	GetBalance(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error)
 	AdminNodeInfo() (p2p.NodeInfo, error)
 	GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*Block, error)
-	GetTransactionByHash(hash libcommon.Hash) (*jsonrpc.RPCTransaction, error)
+	GetTransactionByHash(hash libcommon.Hash) (*ethapi.RPCTransaction, error)
 	GetTransactionReceipt(ctx context.Context, hash libcommon.Hash) (*types.Receipt, error)
 	TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error)
 	GetTransactionCount(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error)

@@ -29,11 +29,12 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/ecies"
-	"github.com/ledgerwatch/erigon/p2p/simulations/pipes"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto/ecies"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/p2p/simulations/pipes"
 )
 
 type message struct {
@@ -136,7 +137,7 @@ func TestFrameReadWrite(t *testing.T) {
 	`)
 	msgCode := uint64(8)
 	msg := []uint{1, 2, 3, 4}
-	msgEnc, _ := rlp.EncodeToBytes(msg)
+	msgEnc, _ := rlp2.EncodeToBytes(msg)
 
 	// Check writeFrame. The frame that's written should be equal to the test vector.
 	buf := new(bytes.Buffer)
@@ -169,7 +170,7 @@ func (h fakeHash) Sum(b []byte) []byte       { return append(b, h...) }
 type handshakeAuthTest struct {
 	input       string
 	wantVersion uint
-	wantRest    []rlp.RawValue
+	wantRest    []rlp2.RawValue
 }
 
 var eip8HandshakeAuthTests = []handshakeAuthTest{
@@ -189,7 +190,7 @@ var eip8HandshakeAuthTests = []handshakeAuthTest{
 			3bf7678318e2d5b5340c9e488eefea198576344afbdf66db5f51204a6961a63ce072c8926c
 		`,
 		wantVersion: 4,
-		wantRest:    []rlp.RawValue{},
+		wantRest:    []rlp2.RawValue{},
 	},
 	// (Auth₃) RLPx v4 EIP-8 encoding with version 56, additional list elements
 	{
@@ -208,14 +209,14 @@ var eip8HandshakeAuthTests = []handshakeAuthTest{
 			d490
 		`,
 		wantVersion: 56,
-		wantRest:    []rlp.RawValue{{0x01}, {0x02}, {0xC2, 0x04, 0x05}},
+		wantRest:    []rlp2.RawValue{{0x01}, {0x02}, {0xC2, 0x04, 0x05}},
 	},
 }
 
 type handshakeAckTest struct {
 	input       string
 	wantVersion uint
-	wantRest    []rlp.RawValue
+	wantRest    []rlp2.RawValue
 }
 
 var eip8HandshakeRespTests = []handshakeAckTest{
@@ -237,7 +238,7 @@ var eip8HandshakeRespTests = []handshakeAckTest{
 			5833c2464c805246155289f4
 		`,
 		wantVersion: 4,
-		wantRest:    []rlp.RawValue{},
+		wantRest:    []rlp2.RawValue{},
 	},
 	// (Ack₃) EIP-8 encoding with version 57, additional list elements
 	{
@@ -257,7 +258,7 @@ var eip8HandshakeRespTests = []handshakeAckTest{
 			35b9593b48b9d3ca4c13d245d5f04169b0b1
 		`,
 		wantVersion: 57,
-		wantRest:    []rlp.RawValue{{0x06}, {0xC2, 0x07, 0x08}, {0x81, 0xFA}},
+		wantRest:    []rlp2.RawValue{{0x06}, {0xC2, 0x07, 0x08}, {0x81, 0xFA}},
 	},
 }
 

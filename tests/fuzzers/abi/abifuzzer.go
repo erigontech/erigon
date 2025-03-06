@@ -21,8 +21,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/erigontech/erigon/accounts/abi"
 	fuzz "github.com/google/gofuzz"
-	"github.com/ledgerwatch/erigon/accounts/abi"
 )
 
 var (

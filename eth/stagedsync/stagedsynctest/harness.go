@@ -11,31 +11,31 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
@@ -47,7 +47,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	borConsensusDB := memdb.NewTestDB(t)
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	miningState := stagedsync.NewProposingState(&ethconfig.Defaults.Miner)
+	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
 	bhCfg := stagedsync.StageBorHeimdallCfg(
 		chainDataDB,
 		borConsensusDB,
@@ -481,13 +481,13 @@ func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.
 
 func (h *Harness) seal(t *testing.T, chr consensus.ChainHeaderReader, eng consensus.Engine, block *types.Block) {
 	h.logger.Info("Sealing mock block", "blockNum", block.Number())
-	sealRes, sealStop := make(chan *types.Block, 1), make(chan struct{}, 1)
-	if err := eng.Seal(chr, block, sealRes, sealStop); err != nil {
+	sealRes, sealStop := make(chan *types.BlockWithReceipts, 1), make(chan struct{}, 1)
+	if err := eng.Seal(chr, &types.BlockWithReceipts{Block: block}, sealRes, sealStop); err != nil {
 		t.Fatal(err)
 	}
 
 	sealedParentBlock := <-sealRes
-	h.sealedHeaders[sealedParentBlock.Number().Uint64()] = sealedParentBlock.Header()
+	h.sealedHeaders[sealedParentBlock.Block.Number().Uint64()] = sealedParentBlock.Block.Header()
 }
 
 func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine {

@@ -22,7 +22,7 @@ import (
 	"math/bits"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/erigontech/erigon-lib/kv/iter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

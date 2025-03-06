@@ -7,21 +7,21 @@ import (
 	"sync/atomic"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/cl/antiquary"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/block_collector"
-	"github.com/ledgerwatch/erigon/cl/phase1/network"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/cl/antiquary"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
+	"github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 )
 
 type StageHistoryReconstructionCfg struct {
@@ -204,18 +204,18 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		close(finishCh)
 		if cfg.blobsBackfilling {
 			go func() {
-				if err := downloadBlobHistoryWorker(cfg, ctx, logger); err != nil {
+				if err := downloadBlobHistoryWorker(cfg, ctx, true, logger); err != nil {
 					logger.Error("Error downloading blobs", "err", err)
 				}
-				// set a timer every 1 hour as a failsafe
-				ticker := time.NewTicker(time.Hour)
+				// set a timer every 15 minutes as a failsafe
+				ticker := time.NewTicker(15 * time.Minute)
 				defer ticker.Stop()
 				for {
 					select {
 					case <-ctx.Done():
 						return
 					case <-ticker.C:
-						if err := downloadBlobHistoryWorker(cfg, ctx, logger); err != nil {
+						if err := downloadBlobHistoryWorker(cfg, ctx, false, logger); err != nil {
 							logger.Error("Error downloading blobs", "err", err)
 						}
 					}
@@ -249,7 +249,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 }
 
 // downloadBlobHistoryWorker is a worker that downloads the blob history by using the already downloaded beacon blocks
-func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
+func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Context, shouldLog bool, logger log.Logger) error {
 	currentSlot := cfg.startingSlot + 1
 	blocksBatchSize := uint64(8) // requests 8 blocks worth of blobs at a time
 	tx, err := cfg.indiciesDB.BeginRo(ctx)
@@ -263,7 +263,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 	prevLogSlot := currentSlot
 	prevTime := time.Now()
 	targetSlot := cfg.beaconCfg.DenebForkEpoch * cfg.beaconCfg.SlotsPerEpoch
-	cfg.logger.Info("Downloading blobs backwards", "from", currentSlot, "to", targetSlot)
+
 	for currentSlot >= targetSlot {
 		if currentSlot <= cfg.sn.FrozenBlobs() {
 			break
@@ -312,7 +312,9 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logInterval.C:
-
+			if !shouldLog {
+				continue
+			}
 			blkSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
 			blkSecStr := fmt.Sprintf("%.1f", blkSec)
 			// round to 1 decimal place  and convert to string
@@ -353,7 +355,9 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			continue
 		}
 	}
-	log.Info("Blob history download finished successfully")
+	if shouldLog {
+		logger.Info("Blob history download finished successfully")
+	}
 	cfg.antiquary.NotifyBlobBackfilled()
 	return nil
 }

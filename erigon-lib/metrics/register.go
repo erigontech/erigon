@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // NewCounter registers and returns new counter with the given name.
@@ -86,6 +87,26 @@ func GetOrCreateGauge(name string) Gauge {
 	}
 
 	return &gauge{g}
+}
+
+// GetOrCreateGaugeVec returns registered GaugeVec with the given name
+// or creates a new GaugeVec if the registry doesn't contain a GaugeVec with
+// the given name and labels.
+//
+// name must be a valid Prometheus-compatible metric with possible labels.
+// labels are the names of the dimensions associated with the gauge vector.
+// For instance,
+//
+//   - foo, with labels []string{"bar", "baz"}
+//
+// The returned GaugeVec is safe to use from concurrent goroutines.
+func GetOrCreateGaugeVec(name string, labels []string, help ...string) *prometheus.GaugeVec {
+	gv, err := defaultSet.GetOrCreateGaugeVec(name, labels, help...)
+	if err != nil {
+		panic(fmt.Errorf("could not get or create new gaugevec: %w", err))
+	}
+
+	return gv
 }
 
 // NewSummary creates and returns new summary with the given name.

@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cmd/observer/database"
-	"github.com/ledgerwatch/erigon/cmd/observer/observer"
-	"github.com/ledgerwatch/erigon/cmd/observer/reports"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/observer/database"
+	"github.com/erigontech/erigon/cmd/observer/observer"
+	"github.com/erigontech/erigon/cmd/observer/reports"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/params"
 )
 
 func mainWithFlags(ctx context.Context, flags observer.CommandFlags, logger log.Logger) error {

@@ -3,14 +3,15 @@ package aura
 import (
 	"context"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb"
 )
 
 type NonTransactionalEpochReader struct {
-	db kv.RwDB
+	db       kv.RwDB
+	readonly bool
 }
 
 func newEpochReader(db kv.RwDB) *NonTransactionalEpochReader {
@@ -24,6 +25,9 @@ func (cr *NonTransactionalEpochReader) GetEpoch(hash libcommon.Hash, number uint
 	})
 }
 func (cr *NonTransactionalEpochReader) PutEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
+	if cr.readonly {
+		return nil
+	}
 	return cr.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
 		return rawdb.WriteEpoch(tx, number, hash, proof)
 	})
@@ -35,6 +39,9 @@ func (cr *NonTransactionalEpochReader) GetPendingEpoch(hash libcommon.Hash, numb
 	})
 }
 func (cr *NonTransactionalEpochReader) PutPendingEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
+	if cr.readonly {
+		return nil
+	}
 	return cr.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
 		return rawdb.WritePendingEpoch(tx, number, hash, proof)
 	})

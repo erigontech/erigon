@@ -7,11 +7,11 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
+	"github.com/erigontech/erigon-lib/crypto"
 )
 
 // Account is the Ethereum consensus representation of accounts.
@@ -84,7 +84,7 @@ func (a *Account) EncodingLengthForHashing() uint {
 		balanceBytes = a.Balance.ByteLen()
 	}
 
-	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
+	nonceBytes := rlp2.IntLenExcludingHead(a.Nonce)
 
 	structLength := balanceBytes + nonceBytes + 2
 
@@ -199,7 +199,7 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 		balanceBytes = a.Balance.ByteLen()
 	}
 
-	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
+	nonceBytes := rlp2.IntLenExcludingHead(a.Nonce)
 
 	var structLength = uint(balanceBytes + nonceBytes + 2)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
@@ -566,7 +566,7 @@ func (a *Account) SelfCopy() *Account {
 	return &newAcc
 }
 
-func (a *Account) DecodeRLP(s *rlp.Stream) error {
+func (a *Account) DecodeRLP(s *rlp2.Stream) error {
 	raw, err := s.Raw()
 	if err != nil {
 		return err

@@ -3,8 +3,8 @@ package aura
 import (
 	"sync/atomic"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types"
 )
 
 type StepDurationInfo struct {

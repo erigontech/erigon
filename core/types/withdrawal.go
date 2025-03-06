@@ -21,11 +21,11 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types/clonable"
 )
 
 //go:generate gencodec -type Withdrawal -field-override withdrawalMarshaling -out gen_withdrawal_json.go
@@ -42,11 +42,11 @@ type Withdrawal struct {
 func (obj *Withdrawal) EncodingSize() int {
 	encodingSize := 21 /* Address */
 	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Index)
+	encodingSize += rlp2.IntLenExcludingHead(obj.Index)
 	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Validator)
+	encodingSize += rlp2.IntLenExcludingHead(obj.Validator)
 	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Amount)
+	encodingSize += rlp2.IntLenExcludingHead(obj.Amount)
 	return encodingSize
 }
 
@@ -58,10 +58,10 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	if err := rlp.EncodeInt(obj.Index, w, b[:]); err != nil {
+	if err := rlp2.EncodeInt(obj.Index, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(obj.Validator, w, b[:]); err != nil {
+	if err := rlp2.EncodeInt(obj.Validator, w, b[:]); err != nil {
 		return err
 	}
 
@@ -73,10 +73,10 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	return rlp.EncodeInt(obj.Amount, w, b[:])
+	return rlp2.EncodeInt(obj.Amount, w, b[:])
 }
 
-func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
+func (obj *Withdrawal) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err
@@ -125,5 +125,5 @@ func (s Withdrawals) Len() int { return len(s) }
 // because we assume that *Withdrawal will only ever contain valid withdrawals that were either
 // constructed by decoding or via public API in this package.
 func (s Withdrawals) EncodeIndex(i int, w *bytes.Buffer) {
-	rlp.Encode(w, s[i])
+	rlp2.Encode(w, s[i])
 }

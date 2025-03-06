@@ -29,13 +29,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/turbo/testlog"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/turbo/testlog"
 
-	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/p2p/discover/v5wire"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 func startLocalhostV5(t *testing.T, cfg Config, logger log.Logger) *UDPv5 {
@@ -506,7 +506,7 @@ type testCodecFrame struct {
 	NodeID  enode.ID
 	AuthTag v5wire.Nonce
 	Ptype   byte
-	Packet  rlp.RawValue
+	Packet  rlp2.RawValue
 }
 
 func (c *testCodec) Encode(toID enode.ID, addr string, p v5wire.Packet, _ *v5wire.Whoareyou) ([]byte, v5wire.Nonce, error) {
@@ -514,11 +514,11 @@ func (c *testCodec) Encode(toID enode.ID, addr string, p v5wire.Packet, _ *v5wir
 	var authTag v5wire.Nonce
 	binary.BigEndian.PutUint64(authTag[:], c.ctr)
 
-	penc, err := rlp.EncodeToBytes(p)
+	penc, err := rlp2.EncodeToBytes(p)
 	if err != nil {
 		panic(err)
 	}
-	frame, err := rlp.EncodeToBytes(testCodecFrame{c.id, authTag, p.Kind(), penc})
+	frame, err := rlp2.EncodeToBytes(testCodecFrame{c.id, authTag, p.Kind(), penc})
 	return frame, authTag, err
 }
 
@@ -531,17 +531,17 @@ func (c *testCodec) Decode(input []byte, addr string) (enode.ID, *enode.Node, v5
 }
 
 func (c *testCodec) decodeFrame(input []byte) (frame testCodecFrame, p v5wire.Packet, err error) {
-	if err = rlp.DecodeBytes(input, &frame); err != nil {
+	if err = rlp2.DecodeBytes(input, &frame); err != nil {
 		return frame, nil, fmt.Errorf("invalid frame: %w", err)
 	}
 	switch frame.Ptype {
 	case v5wire.UnknownPacket:
 		dec := new(v5wire.Unknown)
-		err = rlp.DecodeBytes(frame.Packet, &dec)
+		err = rlp2.DecodeBytes(frame.Packet, &dec)
 		p = dec
 	case v5wire.WhoareyouPacket:
 		dec := new(v5wire.Whoareyou)
-		err = rlp.DecodeBytes(frame.Packet, &dec)
+		err = rlp2.DecodeBytes(frame.Packet, &dec)
 		p = dec
 	default:
 		p, err = v5wire.DecodeMessage(frame.Ptype, frame.Packet)

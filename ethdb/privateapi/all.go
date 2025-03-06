@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	"github.com/erigontech/erigon-lib/gointerfaces/remote"
 
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	"github.com/ledgerwatch/log/v3"
+	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpool"
+	"github.com/erigontech/erigon-lib/kv/remotedbserver"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"

@@ -24,7 +24,7 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/rlp"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 )
 
 // RLPTest is the JSON structure of a single RLP test.
@@ -69,7 +69,7 @@ func (t *RLPTest) Run() error {
 
 	// Check whether encoding the value produces the same bytes.
 	in := translateJSON(t.In)
-	b, err := rlp.EncodeToBytes(in)
+	b, err := rlp2.EncodeToBytes(in)
 	if err != nil {
 		return fmt.Errorf("encode failed: %w", err)
 	}
@@ -77,12 +77,12 @@ func (t *RLPTest) Run() error {
 		return fmt.Errorf("encode produced %x, want %x", b, outb)
 	}
 	// Test stream decoding.
-	s := rlp.NewStream(bytes.NewReader(outb), 0)
+	s := rlp2.NewStream(bytes.NewReader(outb), 0)
 	return checkDecodeFromJSON(s, in)
 }
 
 func checkDecodeInterface(b []byte, isValid bool) error {
-	err := rlp.DecodeBytes(b, new(interface{}))
+	err := rlp2.DecodeBytes(b, new(interface{}))
 	switch {
 	case isValid && err != nil:
 		return fmt.Errorf("decoding failed: %w", err)
@@ -121,7 +121,7 @@ func translateJSON(v interface{}) interface{} {
 // Stream by invoking decoding operations (Uint, Big, List, ...) based
 // on the type of each value. The value decoded from the RLP stream
 // must match the JSON value.
-func checkDecodeFromJSON(s *rlp.Stream, exp interface{}) error {
+func checkDecodeFromJSON(s *rlp2.Stream, exp interface{}) error {
 	switch exp := exp.(type) {
 	case uint64:
 		i, err := s.Uint()

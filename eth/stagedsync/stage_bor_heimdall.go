@@ -11,30 +11,31 @@ import (
 	"sort"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/dataflow"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
-	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/dataflow"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/finality"
+	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
+	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 const (
@@ -250,6 +251,7 @@ func BorHeimdallForward(
 			return err
 		}
 		if header == nil {
+			_, _ = cfg.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, blockNum)
 			return fmt.Errorf("header not found: %d", blockNum)
 		}
 
@@ -286,10 +288,15 @@ func BorHeimdallForward(
 				return err
 			}
 
+			// this will happen if for example chaindb is removed
+			if lastPersistedBlockNum > blockNum {
+				lastPersistedBlockNum = blockNum
+			}
+
 			// if the last time we persisted snapshots is too far away re-run the forward
 			// initialization process - this is to avoid memory growth due to recusrion
 			// in persistValidatorSets
-			if snap == nil && blockNum-lastPersistedBlockNum > (snapshotPersistInterval*5) {
+			if snap == nil && (blockNum == 1 || blockNum-lastPersistedBlockNum > (snapshotPersistInterval*5)) {
 				snap, err = initValidatorSets(
 					ctx,
 					tx,

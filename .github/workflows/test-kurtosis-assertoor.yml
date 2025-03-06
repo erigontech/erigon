@@ -1,0 +1,41 @@
+name: Kurtosis Assertoor GitHub Action
+
+env:
+  DOCKERHUB_REPOSITORY: "erigontech/erigon"
+  APP_REPO: "erigontech/erigon"
+
+on:
+  push:
+    branches:
+        - release/*
+        - pectra_e2
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  assertoor_test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fast checkout git repository
+        uses: actions/checkout@v4
+
+      - name: Docker build current branch
+        run: |
+          docker build -t test/erigon:current .
+
+      - name: Run regular Kurtosis + assertoor tests
+        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        with:
+            enclave_name: "kurtosis-run1-${{ github.run_id }}"
+            ethereum_package_args: ".github/workflows/kurtosis/regular-assertoor.io"
+            kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+            persistent_logs: "true"
+
+      # - name: Run Pectra Kurtosis + assertoor tests
+      #   uses: ethpandaops/kurtosis-assertoor-github-action@v1
+      #   with:
+      #       enclave_name: "kurtosis-run2-${{ github.run_id }}"
+      #       ethereum_package_args: ".github/workflows/kurtosis/pectra.io"
+      #       kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+      #       persistent_logs: "true"

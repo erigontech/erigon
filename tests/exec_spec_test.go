@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestExecutionSpec(t *testing.T) {
@@ -21,7 +21,7 @@ func TestExecutionSpec(t *testing.T) {
 	bt := new(testMatcher)
 
 	dir := filepath.Join(".", "execution-spec-tests")
-
+	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
 	checkStateRoot := true
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {

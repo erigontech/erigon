@@ -25,12 +25,12 @@ import (
 	"strings"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
 )
 
 var jsonEventTransfer = []byte(`{
@@ -355,7 +355,7 @@ func unpackTestEventData(dest interface{}, hexData string, jsonEvent []byte, ass
 
 /*
 Taken from
-https://github.com/ledgerwatch/erigon/pull/15568
+https://github.com/erigontech/erigon/pull/15568
 */
 
 // TestEventUnpackIndexed verifies that indexed field will be skipped by event decoder.

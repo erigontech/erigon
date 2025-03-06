@@ -27,10 +27,11 @@ import (
 	"net"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/crypto"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 // RPC packet types
@@ -52,7 +53,7 @@ type (
 		ENRSeq     uint64 `rlp:"optional"` // Sequence number of local record, added by EIP-868.
 
 		// Ignore additional fields (for forward compatibility).
-		Rest []rlp.RawValue `rlp:"tail"`
+		Rest []rlp2.RawValue `rlp:"tail"`
 	}
 
 	// Pong is the reply to ping.
@@ -66,7 +67,7 @@ type (
 		ENRSeq     uint64 `rlp:"optional"` // Sequence number of local record, added by EIP-868.
 
 		// Ignore additional fields (for forward compatibility).
-		Rest []rlp.RawValue `rlp:"tail"`
+		Rest []rlp2.RawValue `rlp:"tail"`
 	}
 
 	// Findnode is a query for nodes close to the given target.
@@ -74,7 +75,7 @@ type (
 		Target     Pubkey
 		Expiration uint64
 		// Ignore additional fields (for forward compatibility).
-		Rest []rlp.RawValue `rlp:"tail"`
+		Rest []rlp2.RawValue `rlp:"tail"`
 	}
 
 	// Neighbors is the reply to findnode.
@@ -82,14 +83,14 @@ type (
 		Nodes      []Node
 		Expiration uint64
 		// Ignore additional fields (for forward compatibility).
-		Rest []rlp.RawValue `rlp:"tail"`
+		Rest []rlp2.RawValue `rlp:"tail"`
 	}
 
 	// enrRequest queries for the remote node's record.
 	ENRRequest struct {
 		Expiration uint64
 		// Ignore additional fields (for forward compatibility).
-		Rest []rlp.RawValue `rlp:"tail"`
+		Rest []rlp2.RawValue `rlp:"tail"`
 	}
 
 	// enrResponse is the reply to enrRequest.
@@ -97,7 +98,7 @@ type (
 		ReplyTok []byte // Hash of the enrRequest packet.
 		Record   enr.Record
 		// Ignore additional fields (for forward compatibility).
-		Rest []rlp.RawValue `rlp:"tail"`
+		Rest []rlp2.RawValue `rlp:"tail"`
 	}
 )
 
@@ -231,7 +232,7 @@ func Decode(input []byte) (Packet, Pubkey, []byte, error) {
 	default:
 		return nil, fromKey, hash, fmt.Errorf("unknown type: %d", ptype)
 	}
-	s := rlp.NewStream(bytes.NewReader(sigdata[1:]), 0)
+	s := rlp2.NewStream(bytes.NewReader(sigdata[1:]), 0)
 	err = s.Decode(req)
 	return req, fromKey, hash, err
 }
@@ -241,7 +242,7 @@ func Encode(priv *ecdsa.PrivateKey, req Packet) (packet, hash []byte, err error)
 	b := new(bytes.Buffer)
 	b.Write(headSpace)
 	b.WriteByte(req.Kind())
-	if err = rlp.Encode(b, req); err != nil {
+	if err = rlp2.Encode(b, req); err != nil {
 		return nil, nil, err
 	}
 	packet = b.Bytes()

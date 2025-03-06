@@ -22,14 +22,14 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
 )
 
 // Config is a basic type specifying certain configuration flags for running
@@ -111,8 +111,8 @@ func setDefaults(cfg *Config) {
 func Execute(code, input []byte, cfg *Config, bn uint64) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
+		setDefaults(cfg)
 	}
-	setDefaults(cfg)
 
 	externalState := cfg.State != nil
 	var tx kv.RwTx
@@ -135,7 +135,7 @@ func Execute(code, input []byte, cfg *Config, bn uint64) ([]byte, *state.IntraBl
 		sender  = vm.AccountRef(cfg.Origin)
 		rules   = vmenv.ChainRules()
 	)
-	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil)
+	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil, nil)
 	cfg.State.CreateAccount(address, true)
 	// set the receiver's (the executing contract) code for execution.
 	cfg.State.SetCode(address, code)
@@ -180,7 +180,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 		sender = vm.AccountRef(cfg.Origin)
 		rules  = vmenv.ChainRules()
 	)
-	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, nil, vm.ActivePrecompiles(rules), nil)
+	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, nil, vm.ActivePrecompiles(rules), nil, nil)
 
 	// Call the code with the given configuration.
 	code, address, leftOverGas, err := vmenv.Create(
@@ -188,6 +188,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 		input,
 		cfg.GasLimit,
 		cfg.Value,
+		false,
 		0,
 	)
 	return code, address, leftOverGas, err
@@ -206,7 +207,7 @@ func Call(address libcommon.Address, input []byte, cfg *Config) ([]byte, uint64,
 	sender := cfg.State.GetOrNewStateObject(cfg.Origin)
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
-	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil)
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil, nil)
 
 	// Call the code with the given configuration.
 	ret, leftOverGas, err := vmenv.Call(

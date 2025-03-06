@@ -9,13 +9,12 @@ import (
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	types2 "github.com/erigontech/erigon-lib/types"
 )
 
 const (
@@ -65,14 +64,14 @@ func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	}
 
 	for _, cmtmt := range li {
-		if err := rlp.EncodeString(cmtmt[:], w, b); err != nil {
+		if err := rlp2.EncodeString(cmtmt[:], w, b); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (li *BlobKzgs) DecodeRLP(s *rlp.Stream) error {
+func (li *BlobKzgs) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open BlobKzgs (Commitments): %w", err)
@@ -115,14 +114,14 @@ func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 	}
 
 	for _, proof := range li {
-		if err := rlp.EncodeString(proof[:], w, b); err != nil {
+		if err := rlp2.EncodeString(proof[:], w, b); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (li *KZGProofs) DecodeRLP(s *rlp.Stream) error {
+func (li *KZGProofs) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 
 	if err != nil {
@@ -169,7 +168,7 @@ func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	}
 
 	for _, blob := range blobs {
-		if err := rlp.EncodeString(blob[:], w, b); err != nil {
+		if err := rlp2.EncodeString(blob[:], w, b); err != nil {
 			return err
 		}
 	}
@@ -177,7 +176,7 @@ func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	return nil
 }
 
-func (blobs *Blobs) DecodeRLP(s *rlp.Stream) error {
+func (blobs *Blobs) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open Blobs: %w", err)
@@ -256,8 +255,7 @@ func (c KZGCommitment) ComputeVersionedHash() libcommon.Hash {
 
 // validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
 func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
-	blobTx := txw.Tx
-	l1 := len(blobTx.BlobVersionedHashes)
+	l1 := len(txw.Tx.BlobVersionedHashes)
 	if l1 == 0 {
 		return fmt.Errorf("a blob tx must contain at least one blob")
 	}
@@ -267,18 +265,12 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	if l1 != l2 || l1 != l3 || l1 != l4 {
 		return fmt.Errorf("lengths don't match %v %v %v %v", l1, l2, l3, l4)
 	}
-	// the following check isn't strictly necessary as it would be caught by blob gas processing
-	// (and hence it is not explicitly in the spec for this function), but it doesn't hurt to fail
-	// early in case we are getting spammed with too many blobs or there is a bug somewhere:
-	if uint64(l1) > fixedgas.DefaultMaxBlobsPerBlock {
-		return fmt.Errorf("number of blobs exceeds max: %v", l1)
-	}
 	kzgCtx := libkzg.Ctx()
 	err := kzgCtx.VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.Commitments), toProofs(txw.Proofs))
 	if err != nil {
 		return fmt.Errorf("error during proof verification: %v", err)
 	}
-	for i, h := range blobTx.BlobVersionedHashes {
+	for i, h := range txw.Tx.BlobVersionedHashes {
 		if computed := txw.Commitments[i].ComputeVersionedHash(); computed != h {
 			return fmt.Errorf("versioned hash %d supposedly %s but does not match computed %s", i, h, computed)
 		}
@@ -311,10 +303,6 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 	return txw.Tx.WithSignature(signer, sig)
 }
 
-func (txw *BlobTxWrapper) FakeSign(address libcommon.Address) (Transaction, error) {
-	return txw.Tx.FakeSign(address)
-}
-
 func (txw *BlobTxWrapper) Hash() libcommon.Hash { return txw.Tx.Hash() }
 
 func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) libcommon.Hash {
@@ -341,7 +329,7 @@ func (txw *BlobTxWrapper) IsContractDeploy() bool { return txw.Tx.IsContractDepl
 
 func (txw *BlobTxWrapper) Unwrap() Transaction { return &txw.Tx }
 
-func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
+func (txw *BlobTxWrapper) DecodeRLP(s *rlp2.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err

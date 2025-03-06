@@ -21,14 +21,15 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844
-func CalcExcessBlobGas(config *chain.Config, parent *types.Header) uint64 {
+// Updated for EIP-7691: currentHeaderTime is used to determine the fork, and hence params
+func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeaderTime uint64) uint64 {
 	var excessBlobGas, blobGasUsed uint64
 	if parent.ExcessBlobGas != nil {
 		excessBlobGas = *parent.ExcessBlobGas
@@ -37,10 +38,10 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header) uint64 {
 		blobGasUsed = *parent.BlobGasUsed
 	}
 
-	if excessBlobGas+blobGasUsed < config.GetTargetBlobGasPerBlock() {
+	if excessBlobGas+blobGasUsed < config.GetTargetBlobGasPerBlock(currentHeaderTime) {
 		return 0
 	}
-	return excessBlobGas + blobGasUsed - config.GetTargetBlobGasPerBlock()
+	return excessBlobGas + blobGasUsed - config.GetTargetBlobGasPerBlock(currentHeaderTime)
 }
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
@@ -99,8 +100,8 @@ func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
 	return nil
 }
 
-func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64) (*uint256.Int, error) {
-	return FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction()), excessBlobGas)
+func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint64) (*uint256.Int, error) {
+	return FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction(headerTime)), excessBlobGas)
 }
 
 func GetBlobGasUsed(numBlobs int) uint64 {

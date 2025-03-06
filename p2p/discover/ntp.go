@@ -25,8 +25,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/debug"
 )
 
 const (

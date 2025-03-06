@@ -40,7 +40,7 @@ import (
 	"io"
 	"sort"
 
-	"github.com/ledgerwatch/erigon/rlp"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 )
 
 const SizeLimit = 300 // maximum encoded size of a node record in bytes
@@ -92,7 +92,7 @@ type Record struct {
 // pair is a key/value pair in a record.
 type pair struct {
 	k string
-	v rlp.RawValue
+	v rlp2.RawValue
 }
 
 // Seq returns the sequence number.
@@ -117,7 +117,7 @@ func (r *Record) SetSeq(s uint64) {
 func (r *Record) Load(e Entry) error {
 	i := sort.Search(len(r.pairs), func(i int) bool { return r.pairs[i].k >= e.ENRKey() })
 	if i < len(r.pairs) && r.pairs[i].k == e.ENRKey() {
-		if err := rlp.DecodeBytes(r.pairs[i].v, e); err != nil {
+		if err := rlp2.DecodeBytes(r.pairs[i].v, e); err != nil {
 			return &KeyError{Key: e.ENRKey(), Err: err}
 		}
 		return nil
@@ -129,7 +129,7 @@ func (r *Record) Load(e Entry) error {
 // encoded. If the record is signed, Set increments the sequence number and invalidates
 // the sequence number.
 func (r *Record) Set(e Entry) {
-	blob, err := rlp.EncodeToBytes(e)
+	blob, err := rlp2.EncodeToBytes(e)
 	if err != nil {
 		panic(fmt.Errorf("enr: can't encode %s: %w", e.ENRKey(), err))
 	}
@@ -184,7 +184,7 @@ func (r Record) EncodeRLP(w io.Writer) error {
 }
 
 // DecodeRLP implements rlp.Decoder. Decoding doesn't verify the signature.
-func (r *Record) DecodeRLP(s *rlp.Stream) error {
+func (r *Record) DecodeRLP(s *rlp2.Stream) error {
 	dec, raw, err := decodeRecord(s)
 	if err != nil {
 		return err
@@ -194,7 +194,7 @@ func (r *Record) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
-func decodeRecord(s *rlp.Stream) (dec Record, raw []byte, err error) {
+func decodeRecord(s *rlp2.Stream) (dec Record, raw []byte, err error) {
 	raw, err = s.Raw()
 	if err != nil {
 		return dec, raw, err
@@ -204,7 +204,7 @@ func decodeRecord(s *rlp.Stream) (dec Record, raw []byte, err error) {
 	}
 
 	// Decode the RLP container.
-	s = rlp.NewStream(bytes.NewReader(raw), 0)
+	s = rlp2.NewStream(bytes.NewReader(raw), 0)
 	if _, e := s.List(); e != nil {
 		return dec, raw, e
 	}
@@ -219,13 +219,13 @@ func decodeRecord(s *rlp.Stream) (dec Record, raw []byte, err error) {
 	for i := 0; ; i++ {
 		var kv pair
 		if err := s.Decode(&kv.k); err != nil {
-			if err == rlp.EOL {
+			if err == rlp2.EOL {
 				break
 			}
 			return dec, raw, err
 		}
 		if err := s.Decode(&kv.v); err != nil {
-			if err == rlp.EOL {
+			if err == rlp2.EOL {
 				return dec, raw, errIncompletePair
 			}
 			return dec, raw, err
@@ -300,7 +300,7 @@ func (r *Record) encode(sig []byte) (raw []byte, err error) {
 	list := make([]interface{}, 1, 2*len(r.pairs)+1)
 	list[0] = sig
 	list = r.AppendElements(list)
-	if raw, err = rlp.EncodeToBytes(list); err != nil {
+	if raw, err = rlp2.EncodeToBytes(list); err != nil {
 		return nil, err
 	}
 	if len(raw) > SizeLimit {

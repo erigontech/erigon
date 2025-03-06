@@ -8,13 +8,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigonwatch"
+	"github.com/erigontech/erigonwatch"
 
+	"github.com/erigontech/erigon/cmd/diag/flags"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/ledgerwatch/erigon/cmd/diag/flags"
 	"github.com/urfave/cli/v2"
 )
 
@@ -23,7 +23,7 @@ var (
 		Name:     "ui.addr",
 		Usage:    "URL to serve UI web application",
 		Required: false,
-		Value:    "127.0.0.1:6060",
+		Value:    "127.0.0.1:5137",
 	}
 )
 

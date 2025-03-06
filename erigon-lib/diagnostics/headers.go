@@ -1,9 +1,27 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package diagnostics
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func (d *DiagnosticClient) setupHeadersDiagnostics(rootCtx context.Context) {
@@ -13,8 +31,12 @@ func (d *DiagnosticClient) setupHeadersDiagnostics(rootCtx context.Context) {
 	d.runProcessedListener(rootCtx)
 }
 
-func (d *DiagnosticClient) GetHeaders() Headers {
-	return d.headers
+func (d *DiagnosticClient) HeadersJson(w io.Writer) {
+	d.headerMutex.Lock()
+	defer d.headerMutex.Unlock()
+	if err := json.NewEncoder(w).Encode(d.headers); err != nil {
+		log.Debug("[diagnostics] HeadersJson", "err", err)
+	}
 }
 
 func (d *DiagnosticClient) runHeadersWaitingListener(rootCtx context.Context) {

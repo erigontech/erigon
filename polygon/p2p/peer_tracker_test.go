@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func TestPeerTracker(t *testing.T) {

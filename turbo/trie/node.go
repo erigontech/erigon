@@ -20,11 +20,10 @@ import (
 	"bytes"
 	"io"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/core/types/accounts"
 )
 
 const codeSizeUncached = -1

@@ -24,9 +24,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 )
 
 var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -149,7 +150,7 @@ func TestSortedGetAndSet(t *testing.T) {
 func TestDirty(t *testing.T) {
 	var r Record
 
-	if _, err := rlp.EncodeToBytes(r); err != errEncodeUnsigned {
+	if _, err := rlp2.EncodeToBytes(r); err != errEncodeUnsigned {
 		t.Errorf("expected errEncodeUnsigned, got %#v", err)
 	}
 
@@ -157,14 +158,14 @@ func TestDirty(t *testing.T) {
 	if len(r.signature) == 0 {
 		t.Error("record is not signed")
 	}
-	_, err := rlp.EncodeToBytes(r)
+	_, err := rlp2.EncodeToBytes(r)
 	assert.NoError(t, err)
 
 	r.SetSeq(3)
 	if len(r.signature) != 0 {
 		t.Error("signature still set after modification")
 	}
-	if _, err := rlp.EncodeToBytes(r); err != errEncodeUnsigned {
+	if _, err := rlp2.EncodeToBytes(r); err != errEncodeUnsigned {
 		t.Errorf("expected errEncodeUnsigned, got %#v", err)
 	}
 }
@@ -203,14 +204,14 @@ func TestSignEncodeAndDecode(t *testing.T) {
 	r.Set(IPv4{127, 0, 0, 1})
 	require.NoError(t, signTest([]byte{5}, &r))
 
-	blob, err := rlp.EncodeToBytes(r)
+	blob, err := rlp2.EncodeToBytes(r)
 	require.NoError(t, err)
 
 	var r2 Record
-	require.NoError(t, rlp.DecodeBytes(blob, &r2))
+	require.NoError(t, rlp2.DecodeBytes(blob, &r2))
 	assert.Equal(t, r, r2)
 
-	blob2, err := rlp.EncodeToBytes(r2)
+	blob2, err := rlp2.EncodeToBytes(r2)
 	require.NoError(t, err)
 	assert.Equal(t, blob, blob2)
 }
@@ -245,7 +246,7 @@ func TestSignEncodeAndDecodeRandom(t *testing.T) {
 	}
 
 	require.NoError(t, signTest([]byte{5}, &r))
-	_, err := rlp.EncodeToBytes(r)
+	_, err := rlp2.EncodeToBytes(r)
 	require.NoError(t, err)
 
 	for k, v := range pairs {
