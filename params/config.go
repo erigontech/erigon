@@ -113,6 +113,7 @@ var (
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  big.NewInt(0),
 		CancunTime:                    big.NewInt(0),
+		PragueTime:                    big.NewInt(0),
 		Ethash:                        new(chain.EthashConfig),
 	}
 

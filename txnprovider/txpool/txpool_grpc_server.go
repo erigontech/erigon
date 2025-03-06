@@ -59,6 +59,7 @@ type txPool interface {
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
+	GetBlobs(blobhashes []common.Hash) (blobs [][]byte, proofs [][]byte)
 }
 
 var _ txpool_proto.TxpoolServer = (*GrpcServer)(nil)   // compile-time interface check
@@ -222,6 +223,26 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 		reply.Imported[i] = mapDiscardReasonToProto(discardReasons[j])
 		reply.Errors[i] = discardReasons[j].String()
 		j++
+	}
+	return reply, nil
+}
+
+func (s *GrpcServer) GetBlobs(ctx context.Context, in *txpool_proto.GetBlobsRequest) (*txpool_proto.GetBlobsReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	hashes := make([]common.Hash, len(in.BlobHashes))
+	for i := range in.BlobHashes {
+		hashes[i] = gointerfaces.ConvertH256ToHash(in.BlobHashes[i])
+	}
+	blobs, proofs := s.txPool.GetBlobs(hashes)
+	reply := &txpool_proto.GetBlobsReply{BlobsAndProofs: make([]*txpool_proto.BlobAndProofV1, len(blobs))}
+
+	for i := range blobs {
+		reply.BlobsAndProofs[i] = &txpool_proto.BlobAndProofV1{Blob: blobs[i], Proof: proofs[i]}
 	}
 	return reply, nil
 }
