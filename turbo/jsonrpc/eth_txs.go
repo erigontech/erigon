@@ -58,8 +58,8 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
 	// Private API returns 0 if transaction is not found.
-	isStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
-	if isStateSyncTx {
+	isBorStateSyncTxn := blockNum == 0 && chainConfig.Bor != nil
+	if isBorStateSyncTxn {
 		if api.useBridgeReader {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
 		} else {
@@ -76,7 +76,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, err
 		}
 
-		if txNumMin+2 > txNum && !isStateSyncTx { //TODO: what a magic is this "2" and how to avoid it
+		if txNumMin+1 > txNum && !isBorStateSyncTxn {
 			return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 		}
 
@@ -97,7 +97,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 
 		// if no transaction was found then we return nil
-		if isStateSyncTx {
+		if isBorStateSyncTxn {
 			borTx := bortypes.NewBorTransaction()
 			_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 			if err != nil {
@@ -106,7 +106,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return ethapi.NewRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(txCount), chainConfig.ChainID), nil
 		}
 
-		var txnIndex = txNum - txNumMin - 2
+		var txnIndex = txNum - txNumMin - 1
 
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txnIndex))
 		if err != nil {
