@@ -347,7 +347,7 @@ func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
 	return b.MinValidatorWithdrawabilityDelay + (b.ChurnLimitQuotient)/2
 }
 
-// MinSlotsForBlobRequests  equal to MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS * SLOTS_PER_EPOCH
+// MinSlotsForBlobsSidecarsRequest  equal to MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS * SLOTS_PER_EPOCH
 func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
 	return b.MinEpochsForBlobSidecarsRequests * b.SlotsPerEpoch
 }
