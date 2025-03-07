@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 
@@ -26,6 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"google.golang.org/grpc"
@@ -117,9 +117,12 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	var empty []byte
 	if err := hexutil.IsValidQuantity(index); err != nil {
-		return "", errors.New("unable to decode storage key: " + err.Error())
+		log.Debug("GetStorageAt: Skipped quantity validation error " + "unable to decode storage key: " + err.Error())
 	}
-
+	indexBytes := hexutil.FromHex(index)
+	if len(indexBytes) > 32 {
+		return "", hexutil.ErrTooBigHexString
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return hexutil.Encode(libcommon.LeftPadBytes(empty, 32)), err
