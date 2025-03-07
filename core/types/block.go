@@ -1315,6 +1315,7 @@ func (b *Block) Body() *Body {
 	return bd
 }
 func (b *Block) SendersToTxs(senders []libcommon.Address) {
+	return
 	if len(senders) == 0 {
 		return
 	}

@@ -403,6 +403,8 @@ type Message struct {
 }
 
 func (msg *Message) SetGasPrice(f *uint256.Int) { msg.gasPrice.Set(f) }
+func (msg *Message) SetFeeCap(f *uint256.Int)   { msg.feeCap.Set(f) }
+func (msg *Message) SetTip(f *uint256.Int)      { msg.tip.Set(f) }
 
 type MessageRunMode uint8
 
