@@ -19,6 +19,7 @@ package shutter
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -90,8 +91,23 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 	//
 
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error { return dkl.listenLoop(ctx, pubSub) })
-	eg.Go(func() error { return dkl.peerInfoLoop(ctx, pubSub) })
+
+	eg.Go(func() error {
+		err := dkl.listenLoop(ctx, pubSub)
+		if err != nil {
+			return fmt.Errorf("decryptiom keys listen loop failure: %w", err)
+		}
+		return nil
+	})
+
+	eg.Go(func() error {
+		err := dkl.peerInfoLoop(ctx, pubSub)
+		if err != nil {
+			return fmt.Errorf("decryptiom keys peer info loop failure: %w", err)
+		}
+		return nil
+	})
+
 	return eg.Wait()
 }
 
