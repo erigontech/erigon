@@ -112,11 +112,13 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 	start := time.Now()
 
+	fmt.Println("BeginRO")
 	tx, err := a.indiciesDB.BeginRo(r.Context())
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+	fmt.Println("EndRO")
 
 	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
 	if err != nil {
@@ -132,7 +134,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is in the future"))
 	}
 
+	fmt.Println("waitForHeadSlot")
 	a.waitForHeadSlot(*slot)
+	fmt.Println("End waitForHeadSlot")
 
 	attestationData, ok, err := a.attestationProducer.CachedAttestationData(*slot, *committeeIndex)
 	if err != nil {
@@ -161,7 +165,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		committeeIndex = &zero
 	}
 
+	fmt.Println("Enter ViewHeadState")
 	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		fmt.Println("In ViewHeadState")
 		attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
 			tx,
 			headState,
@@ -182,6 +188,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}); err != nil {
 		return nil, err
 	}
+	fmt.Println("Out ViewHeadState")
 
 	return newBeaconResponse(attestationData), nil
 }
