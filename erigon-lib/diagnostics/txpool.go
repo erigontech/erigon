@@ -41,6 +41,9 @@ type DiagTxn struct {
 	AccessListStorCount int           `json:"accessListStorCount"`
 	BlobHashes          []common.Hash `json:"blobHashes"`
 	Blobs               [][]byte      `json:"blobs"`
+	IsLocal             bool          `json:"isLocal"`
+	DiscardReason       string        `json:"discardReason"`
+	Pool                string        `json:"pool"`
 }
 
 type IncomingTxnUpdate struct {

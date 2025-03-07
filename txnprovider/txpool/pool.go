@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/u256"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -514,6 +515,8 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		return err
 	}
 
+	diagTxns := make([]diagnostics.DiagTxn, len(newTxns.Txns))
+
 	announcements, reasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
 		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
 	if err != nil {
@@ -524,8 +527,40 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 
 	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
 	for i, reason := range reasons {
+		txn := newTxns.Txns[i]
+
+		subpool := "Unknown"
+		found := p.all.get(txn.SenderID, txn.Nonce)
+		if found != nil {
+			subpool = found.currentSubPool.String()
+		}
+
+		fmt.Println("reason", reason, "txhash", newTxns.Txns[i].IDHash)
+		diagTxn := diagnostics.DiagTxn{
+			IDHash:              txn.IDHash,
+			SenderID:            txn.SenderID,
+			Nonce:               txn.Nonce,
+			Value:               txn.Value,
+			Gas:                 txn.Gas,
+			FeeCap:              txn.FeeCap,
+			Tip:                 txn.Tip,
+			Size:                txn.Size,
+			Type:                txn.Type,
+			Creation:            txn.Creation,
+			DataLen:             txn.DataLen,
+			AccessListAddrCount: txn.AccessListAddrCount,
+			AccessListStorCount: txn.AccessListStorCount,
+			BlobHashes:          txn.BlobHashes,
+			Blobs:               txn.Blobs,
+			IsLocal:             false,
+			DiscardReason:       reason.String(),
+			Pool:                subpool,
+		}
+
+		diagTxns = append(diagTxns, diagTxn)
+
 		if reason == txpoolcfg.Success {
-			txn := newTxns.Txns[i]
+
 			if txn.Traced {
 				p.logger.Info(fmt.Sprintf("TX TRACING: processRemoteTxns promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
 			}
@@ -542,8 +577,17 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		}
 	}
 
+	//diagnostics.ProcessedRemoteTxnsUpdate(len(p.unprocessedRemoteTxns.Txns), len(newTxns.Txns), len(p.promoted.Txns))
+
 	p.unprocessedRemoteTxns.Resize(0)
 	p.unprocessedRemoteByHash = map[string]int{}
+
+	diagnostics.Send(diagnostics.IncomingTxnUpdate{
+		Txns:      diagTxns,
+		Senders:   nil,
+		IsLocal:   nil,
+		KnownTxns: nil,
+	})
 
 	return nil
 }
@@ -602,6 +646,7 @@ func (p *TxPool) AppendRemoteAnnouncements(types []byte, sizes []uint32, hashes 
 		sizes = append(sizes, txnSlot.Size)
 		hashes = append(hashes, hash...)
 	}
+
 	return types, sizes, hashes
 }
 
