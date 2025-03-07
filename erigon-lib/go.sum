@@ -160,8 +160,8 @@ github.com/erigontech/interfaces v0.0.0-20250304065538-03fcc1da2237 h1:W5Zr2xifo
 github.com/erigontech/interfaces v0.0.0-20250304065538-03fcc1da2237/go.mod h1:N7OUkhkcagp9+7yb4ycHsG2VWCOmuJ1ONBecJshxtLE=
 github.com/erigontech/mdbx-go v0.38.10 h1:Nxqxu9QNOU9Bvgs9pq6SKkNYysbjt6b9n929daVNfcU=
 github.com/erigontech/mdbx-go v0.38.10/go.mod h1:lkqHAZqXtFaIPlvTaGAx3VUDuGYZcuhve1l4JVVN1Z0=
-github.com/erigontech/secp256k1 v1.1.0 h1:mO3YJMUSoASE15Ya//SoHiisptUhdXExuMUN1M0X9qY=
-github.com/erigontech/secp256k1 v1.1.0/go.mod h1:GokhPepsMB+EYDs7I5JZCprxHW6+yfOcJKaKtoZ+Fls=
+github.com/erigontech/secp256k1 v1.1.1-0.20250307160128-4c4d6b693d68 h1:9Z0LbYq/5j56AAIYjk7i61pwtDlRLF7+K4sGKkR2qS4=
+github.com/erigontech/secp256k1 v1.1.1-0.20250307160128-4c4d6b693d68/go.mod h1:GokhPepsMB+EYDs7I5JZCprxHW6+yfOcJKaKtoZ+Fls=
 github.com/erigontech/speedtest v0.0.2 h1:W9Cvky/8AMUtUONwkLA/dZjeQ2XfkBdYfJzvhMZUO+U=
 github.com/erigontech/speedtest v0.0.2/go.mod h1:vulsRNiM51BmSTbVtch4FWxKxx53pS2D35lZTtao0bw=
 github.com/erigontech/torrent v1.54.3-alpha-1 h1:oyT9YpMr82g566v0STVKW0ZTdX/eun03cW2mKmKuTAQ=
