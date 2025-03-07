@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -119,7 +120,9 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address,
 	if err := hexutil.IsValidQuantity(index); err != nil {
 		log.Debug("GetStorageAt: Skipped quantity validation error " + "unable to decode storage key: " + err.Error())
 	}
-
+	if len(index) > 32 {
+		return "", hexutil.ErrTooBigHexString
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return hexutil.Encode(libcommon.LeftPadBytes(empty, 32)), err
