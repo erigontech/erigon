@@ -345,16 +345,7 @@ func WriteOrTestGenesis(chainRwTx kv.TemporalRwTx, initData statetransfer.InitDa
 	if err != nil {
 		return err
 	}
-	err = WriteOrTestChainConfig(chainRwTx, chainConfig)
-	if err != nil {
-		return err
-	}
-	err = domains.Flush(context.Background(), chainRwTx)
-	if err != nil {
-		return err
-	}
-	domains.Close()
-	return chainRwTx.Commit()
+	return WriteOrTestChainConfig(chainRwTx, chainConfig)
 }
 
 // TODO remove

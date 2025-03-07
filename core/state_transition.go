@@ -28,6 +28,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
@@ -346,8 +347,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 
 	// Arbitrum: drop tip for delayed (and old) messages
 	if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(st.evm.Context.BaseFee) > 0 {
-		st.msg.(*types.Message).SetGasPrice(st.evm.Context.BaseFee)
-		// st.msg.GasTipCap = common.Big0
+		mmsg := st.msg.(types.Message)
+		(&mmsg).SetGasPrice(st.evm.Context.BaseFee)
+		(&mmsg).SetFeeCap(common.Num0)
+		(&mmsg).SetTip(common.Num0)
+		st.msg = mmsg
 	}
 	// Check clauses 1-3 and 6, buy gas if everything is correct
 	if err := st.preCheck(gasBailout); err != nil {
@@ -506,7 +510,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		ret   []byte
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
 
-		deployedContract *libcommon.Address
+		deployedContract = new(libcommon.Address)
 	)
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
@@ -545,9 +549,15 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-	if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+	fmt.Printf("tip amount %v to %x\n", amount.String(), coinbase)
+	if st.evm.Config().NoBaseFee && msg.FeeCap().Sign() == 0 && msg.Tip().Sign() == 0 {
+	} else {
+
+		if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+		}
 	}
+
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if burntContractAddress != nil {
@@ -615,7 +625,10 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	}
 
 	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
+	remaining := uint256.NewInt(st.gasRemaining)
+	remaining = remaining.Mul(remaining, st.gasPrice)
+
+	fmt.Printf("refund remaining gas %d to %x\n", remaining, st.msg.From())
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
 
 	// Arbitrum: record the gas refund
