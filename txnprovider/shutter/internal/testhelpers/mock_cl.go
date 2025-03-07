@@ -18,12 +18,9 @@ package testhelpers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"time"
-
-	mapset "github.com/deckarep/golang-set/v2"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -48,34 +45,6 @@ func NewMockCl(elClient *engineapi.JsonRpcClient, feeRecipient libcommon.Address
 		prevRandao:            big.NewInt(0),
 		prevBeaconBlockRoot:   big.NewInt(10_000),
 	}
-}
-
-func (cl *MockCl) IncludeTxns(ctx context.Context, txns []libcommon.Hash) error {
-	block, err := cl.BuildBlock(ctx)
-	if err != nil {
-		return err
-	}
-
-	txnHashes := mapset.NewSet[libcommon.Hash](txns...)
-	for _, txnBytes := range block.Transactions {
-		txn, err := types.DecodeTransaction(txnBytes)
-		if err != nil {
-			return err
-		}
-
-		txnHashes.Remove(txn.Hash())
-	}
-
-	if txnHashes.Cardinality() == 0 {
-		return nil
-	}
-
-	err = errors.New("deploy txn not found in block")
-	txnHashes.Each(func(txnHash libcommon.Hash) bool {
-		err = fmt.Errorf("%w: %s", err, txnHash)
-		return true // continue
-	})
-	return err
 }
 
 func (cl *MockCl) BuildBlock(ctx context.Context) (*enginetypes.ExecutionPayload, error) {

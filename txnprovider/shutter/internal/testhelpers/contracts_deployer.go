@@ -70,12 +70,12 @@ func (d ContractsDeployer) DeployCore(ctx context.Context) (ContractsDeployment,
 		return ContractsDeployment{}, err
 	}
 
-	deployTxns := []libcommon.Hash{
-		sequencerDeployTxn.Hash(),
-		ksmDeployTxn.Hash(),
-		keyBroadcastDeployTxn.Hash(),
+	block, err := d.cl.BuildBlock(ctx)
+	if err != nil {
+		return ContractsDeployment{}, err
 	}
-	err = d.cl.IncludeTxns(ctx, deployTxns)
+
+	err = VerifyTxnsInclusion(block, sequencerDeployTxn.Hash(), ksmDeployTxn.Hash(), keyBroadcastDeployTxn.Hash())
 	if err != nil {
 		return ContractsDeployment{}, err
 	}
@@ -85,7 +85,12 @@ func (d ContractsDeployer) DeployCore(ctx context.Context) (ContractsDeployment,
 		return ContractsDeployment{}, err
 	}
 
-	err = d.cl.IncludeTxns(ctx, []libcommon.Hash{ksmInitTxn.Hash()})
+	block, err = d.cl.BuildBlock(ctx)
+	if err != nil {
+		return ContractsDeployment{}, err
+	}
+
+	err = VerifyTxnsInclusion(block, ksmInitTxn.Hash())
 	if err != nil {
 		return ContractsDeployment{}, err
 	}
@@ -113,7 +118,12 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return libcommon.Address{}, nil, err
 	}
 
-	err = d.cl.IncludeTxns(ctx, []libcommon.Hash{keyperSetDeployTxn.Hash()})
+	block, err := d.cl.BuildBlock(ctx)
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	err = VerifyTxnsInclusion(block, keyperSetDeployTxn.Hash())
 	if err != nil {
 		return libcommon.Address{}, nil, err
 	}
@@ -138,12 +148,12 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return libcommon.Address{}, nil, err
 	}
 
-	err = d.cl.IncludeTxns(ctx, []libcommon.Hash{
-		setPublisherTxn.Hash(),
-		setThresholdTxn.Hash(),
-		addMembersTxn.Hash(),
-		setFinalizedTxn.Hash(),
-	})
+	block, err = d.cl.BuildBlock(ctx)
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	err = VerifyTxnsInclusion(block, setPublisherTxn.Hash(), setThresholdTxn.Hash(), addMembersTxn.Hash(), setFinalizedTxn.Hash())
 	if err != nil {
 		return libcommon.Address{}, nil, err
 	}
@@ -153,7 +163,12 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return libcommon.Address{}, nil, err
 	}
 
-	err = d.cl.IncludeTxns(ctx, []libcommon.Hash{addKeyperSetTxn.Hash()})
+	block, err = d.cl.BuildBlock(ctx)
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	err = VerifyTxnsInclusion(block, addKeyperSetTxn.Hash())
 	if err != nil {
 		return libcommon.Address{}, nil, err
 	}

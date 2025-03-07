@@ -20,6 +20,7 @@ package shutter_test
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"math/big"
 	"path"
@@ -27,7 +28,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/kv"
@@ -56,11 +59,56 @@ func TestShutterBlockBuilding(t *testing.T) {
 	uni := initBlockBuildingUniverse(ctx, t)
 
 	t.Run("deploy first keyper set", func(t *testing.T) {
-		currentBlock, err := uni.rpcDaemonClient.BlockNumber()
+		currentBlock, err := uni.rpcApiClient.BlockNumber()
 		require.NoError(t, err)
 		ekg := testhelpers.MockEonKeyGeneration(t, shutter.EonIndex(1), 1, 2, currentBlock+1)
 		_, _, err = uni.contractsDeployer.DeployKeyperSet(ctx, uni.contractsDeployment.Ksm, ekg)
 		require.NoError(t, err)
+		uni.eons[ekg.EonIndex] = ekg.Eon()
+	})
+
+	t.Run("build shutter block", func(t *testing.T) {
+		sender1 := uni.acc1PrivKey
+		sender2 := uni.acc2PrivKey
+		receiver := uni.acc3
+		amount := big.NewInt(1)
+
+		// submit 1 shutter txn
+		eon := uni.eons[1]
+		encryptedSubmissionTxn, baseTxn, err := uni.transactor.SubmitEncryptedTransfer(ctx, sender1, receiver, amount, eon)
+		require.NoError(t, err)
+		block, err := uni.cl.BuildBlock(ctx)
+		require.NoError(t, err)
+		err = testhelpers.VerifyTxnsInclusion(block, encryptedSubmissionTxn.Hash())
+		require.NoError(t, err)
+
+		// submit 1 non shutter txn
+		simpleTxn, err := uni.transactor.SubmitSimpleTransfer(sender2, receiver, amount)
+		require.NoError(t, err)
+
+		// build block and verify both txns are included
+		block, err = uni.cl.BuildBlock(ctx)
+		require.NoError(t, err)
+		err = testhelpers.VerifyTxnsInclusion(block, baseTxn.Hash(), simpleTxn.Hash())
+		require.NoError(t, err)
+	})
+
+	t.Run("build shutter block after eon change", func(t *testing.T) {
+		//
+		// TODO
+		//
+	})
+
+	t.Run("build shutter block without breaching encrypted gas limit", func(t *testing.T) {
+		//
+		// TODO
+		//
+	})
+
+	t.Run("build shutter block without blob txns", func(t *testing.T) {
+		//
+		// TODO
+		//
 	})
 
 	err := uni.ethBackend.Stop()
@@ -68,10 +116,20 @@ func TestShutterBlockBuilding(t *testing.T) {
 }
 
 type blockBuildingUniverse struct {
-	rpcDaemonClient     requests.RequestGenerator
+	rpcApiClient        requests.RequestGenerator
 	contractsDeployer   testhelpers.ContractsDeployer
 	contractsDeployment testhelpers.ContractsDeployment
 	ethBackend          *eth.Ethereum
+	bank                testhelpers.Bank
+	cl                  *testhelpers.MockCl
+	transactor          testhelpers.Transactor
+	eons                map[shutter.EonIndex]shutter.Eon
+	acc1PrivKey         *ecdsa.PrivateKey
+	acc1                libcommon.Address
+	acc2PrivKey         *ecdsa.PrivateKey
+	acc2                libcommon.Address
+	acc3PrivKey         *ecdsa.PrivateKey
+	acc3                libcommon.Address
 }
 
 func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingUniverse {
@@ -162,7 +220,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 
 	rpcDaemonHttpUrl := fmt.Sprintf("%s:%d", httpConfig.HttpListenAddress, httpConfig.HttpPort)
-	rpcDaemonClient := requests.NewRequestGenerator(rpcDaemonHttpUrl, logger)
+	rpcApiClient := requests.NewRequestGenerator(rpcDaemonHttpUrl, logger)
 	contractBackend := contracts.NewJsonRpcBackend(rpcDaemonHttpUrl, logger)
 	jwtSecret, err := cli.ObtainJWTSecret(&httpConfig, logger)
 	require.NoError(t, err)
@@ -178,10 +236,42 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	contractsDeployment, err := deployer.DeployCore(ctx)
 	require.NoError(t, err)
 
+	transactor := testhelpers.NewTransactor(rpcApiClient, chainConfig.ChainID, contractsDeployment.Sequencer)
+	acc1PrivKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	acc1 := crypto.PubkeyToAddress(acc1PrivKey.PublicKey)
+	acc2PrivKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	acc2 := crypto.PubkeyToAddress(acc2PrivKey.PublicKey)
+	acc3PrivKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	acc3 := crypto.PubkeyToAddress(acc3PrivKey.PublicKey)
+	oneEth := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	topUp1, err := transactor.SubmitSimpleTransfer(bank.PrivKey(), acc1, oneEth)
+	require.NoError(t, err)
+	topUp2, err := transactor.SubmitSimpleTransfer(bank.PrivKey(), acc2, oneEth)
+	require.NoError(t, err)
+	topUp3, err := transactor.SubmitSimpleTransfer(bank.PrivKey(), acc3, oneEth)
+	require.NoError(t, err)
+	block, err := cl.BuildBlock(ctx)
+	require.NoError(t, err)
+	err = testhelpers.VerifyTxnsInclusion(block, topUp1.Hash(), topUp2.Hash(), topUp3.Hash())
+	require.NoError(t, err)
+
 	return blockBuildingUniverse{
 		ethBackend:          ethBackend,
-		rpcDaemonClient:     rpcDaemonClient,
+		rpcApiClient:        rpcApiClient,
 		contractsDeployer:   deployer,
 		contractsDeployment: contractsDeployment,
+		bank:                bank,
+		cl:                  cl,
+		transactor:          transactor,
+		eons:                map[shutter.EonIndex]shutter.Eon{},
+		acc1PrivKey:         acc1PrivKey,
+		acc1:                acc1,
+		acc2PrivKey:         acc2PrivKey,
+		acc2:                acc2,
+		acc3PrivKey:         acc3PrivKey,
+		acc3:                acc3,
 	}
 }
