@@ -201,12 +201,16 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, err
 	}()
 
 	callOpts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNum)}
-	numKeyperSets, err := et.ksmContract.GetNumKeyperSets(callOpts)
-	if err != nil {
-		return Eon{}, false, fmt.Errorf("get num keyper sets: %w", err)
-	}
-	if numKeyperSets == 0 {
-		return Eon{}, false, nil
+	if et.currentEon == nil {
+		numKeyperSets, err := et.ksmContract.GetNumKeyperSets(callOpts)
+		if err != nil {
+			return Eon{}, false, fmt.Errorf("get num keyper sets: %w", err)
+		}
+		// wait until we have at least one keyper set added to avoid
+		// execution reverts for GetKeyperSetIndexByBlock
+		if numKeyperSets == 0 {
+			return Eon{}, false, nil
+		}
 	}
 
 	eonIndex, err := et.ksmContract.GetKeyperSetIndexByBlock(callOpts, blockNum)
@@ -216,7 +220,7 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, err
 
 	if eon, ok := et.recentEon(EonIndex(eonIndex)); ok {
 		cached = true
-		return eon, false, nil
+		return eon, true, nil
 	}
 
 	keyperSetAddress, err := et.ksmContract.GetKeyperSetAddress(&bind.CallOpts{}, eonIndex)
