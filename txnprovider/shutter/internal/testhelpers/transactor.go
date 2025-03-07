@@ -39,19 +39,17 @@ import (
 type Transactor struct {
 	rpcApiClient requests.RequestGenerator
 	chainId      *big.Int
-	sequencer    *shuttercontracts.Sequencer
 }
 
-func NewTransactor(rpcApiClient requests.RequestGenerator, chainId *big.Int, sequencer *shuttercontracts.Sequencer) Transactor {
+func NewTransactor(rpcApiClient requests.RequestGenerator, chainId *big.Int) Transactor {
 	return Transactor{
 		rpcApiClient: rpcApiClient,
 		chainId:      chainId,
-		sequencer:    sequencer,
 	}
 }
 
 func (t Transactor) SubmitSimpleTransfer(from *ecdsa.PrivateKey, to libcommon.Address, amount *big.Int) (types.Transaction, error) {
-	signedTxn, err := t.CreateSimpleTransfer(from, to, amount)
+	signedTxn, err := t.createSimpleTransfer(from, to, amount)
 	if err != nil {
 		return nil, err
 	}
@@ -64,73 +62,7 @@ func (t Transactor) SubmitSimpleTransfer(from *ecdsa.PrivateKey, to libcommon.Ad
 	return signedTxn, nil
 }
 
-func (t Transactor) SubmitEncryptedTransfer(
-	ctx context.Context,
-	from *ecdsa.PrivateKey,
-	to libcommon.Address,
-	amount *big.Int,
-	eon shutter.Eon,
-) (types.Transaction, types.Transaction, error) {
-	signedTxn, err := t.CreateSimpleTransfer(from, to, amount)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var signedTxnBuf bytes.Buffer
-	err = signedTxn.MarshalBinary(&signedTxnBuf)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	sigma, err := shuttercrypto.RandomSigma(rand.Reader)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	identityPrefix, err := shuttercrypto.RandomSigma(rand.Reader)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	eonPublicKey, err := eon.PublicKey()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	block, err := t.rpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	fromAddr := crypto.PubkeyToAddress(from.PublicKey)
-	ip := shutter.IdentityPreimageFromSenderPrefix(identityPrefix, fromAddr)
-	epochId := shuttercrypto.ComputeEpochID(ip[:])
-	encryptedTxn := shuttercrypto.Encrypt(signedTxnBuf.Bytes(), eonPublicKey, epochId, sigma)
-	gasLimit := new(big.Int).SetUint64(signedTxn.GetGasLimit())
-	opts := bind.TransactOpts{
-		From: fromAddr,
-		Signer: func(address libcommon.Address, txn types.Transaction) (types.Transaction, error) {
-			return types.SignTx(txn, *types.LatestSignerForChainID(t.chainId), from)
-		},
-		Value: new(big.Int).Mul(block.BaseFee, gasLimit),
-	}
-
-	eonIndex := uint64(eon.Index)
-	encryptedSubmissionTxn, err := t.sequencer.SubmitEncryptedTransaction(
-		&opts,
-		eonIndex,
-		identityPrefix,
-		encryptedTxn.Marshal(),
-		gasLimit,
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return encryptedSubmissionTxn, signedTxn, nil
-}
-
-func (t Transactor) CreateSimpleTransfer(
+func (t Transactor) createSimpleTransfer(
 	from *ecdsa.PrivateKey,
 	to libcommon.Address,
 	amount *big.Int,
@@ -161,4 +93,87 @@ func (t Transactor) CreateSimpleTransfer(
 
 	signer := types.LatestSignerForChainID(t.chainId)
 	return types.SignTx(txn, *signer, from)
+}
+
+type EncryptedTransactor struct {
+	Transactor
+	sequencer *shuttercontracts.Sequencer
+}
+
+func NewEncryptedTransactor(base Transactor, sequencerAddr string, cb bind.ContractBackend) EncryptedTransactor {
+	sequencer, err := shuttercontracts.NewSequencer(libcommon.HexToAddress(sequencerAddr), cb)
+	if err != nil {
+		panic(err)
+	}
+
+	return EncryptedTransactor{
+		Transactor: base,
+		sequencer:  sequencer,
+	}
+}
+
+func (et EncryptedTransactor) SubmitEncryptedTransfer(
+	ctx context.Context,
+	from *ecdsa.PrivateKey,
+	to libcommon.Address,
+	amount *big.Int,
+	eon shutter.Eon,
+) (types.Transaction, types.Transaction, error) {
+	signedTxn, err := et.createSimpleTransfer(from, to, amount)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var signedTxnBuf bytes.Buffer
+	err = signedTxn.MarshalBinary(&signedTxnBuf)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sigma, err := shuttercrypto.RandomSigma(rand.Reader)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	identityPrefix, err := shuttercrypto.RandomSigma(rand.Reader)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	eonPublicKey, err := eon.PublicKey()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	block, err := et.rpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	fromAddr := crypto.PubkeyToAddress(from.PublicKey)
+	ip := shutter.IdentityPreimageFromSenderPrefix(identityPrefix, fromAddr)
+	epochId := shuttercrypto.ComputeEpochID(ip[:])
+	encryptedTxn := shuttercrypto.Encrypt(signedTxnBuf.Bytes(), eonPublicKey, epochId, sigma)
+	gasLimit := new(big.Int).SetUint64(signedTxn.GetGasLimit())
+	opts := bind.TransactOpts{
+		From: fromAddr,
+		Signer: func(address libcommon.Address, txn types.Transaction) (types.Transaction, error) {
+			return types.SignTx(txn, *types.LatestSignerForChainID(et.chainId), from)
+		},
+		Value: new(big.Int).Mul(block.BaseFee, gasLimit),
+	}
+
+	eonIndex := uint64(eon.Index)
+	encryptedSubmissionTxn, err := et.sequencer.SubmitEncryptedTransaction(
+		&opts,
+		eonIndex,
+		identityPrefix,
+		encryptedTxn.Marshal(),
+		gasLimit,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return encryptedSubmissionTxn, signedTxn, nil
 }

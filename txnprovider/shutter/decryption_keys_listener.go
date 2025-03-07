@@ -18,6 +18,7 @@ package shutter
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -220,7 +221,7 @@ func (dkl DecryptionKeysListener) listenLoop(ctx context.Context, pubSub *pubsub
 		return err
 	}
 	defer func() {
-		if err := topic.Close(); err != nil {
+		if err := topic.Close(); err != nil && !errors.Is(err, context.Canceled) {
 			dkl.logger.Error("failed to close decryption keys topic", "err", err)
 		}
 	}()

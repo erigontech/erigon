@@ -18,26 +18,30 @@ package testhelpers
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/core/types"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
 type ContractsDeployer struct {
+	key             *ecdsa.PrivateKey
+	address         libcommon.Address
 	contractBackend bind.ContractBackend
 	cl              *MockCl
-	bank            Bank
 	chainId         *big.Int
 }
 
-func NewContractsDeployer(cb bind.ContractBackend, cl *MockCl, bank Bank, chainId *big.Int) ContractsDeployer {
+func NewContractsDeployer(key *ecdsa.PrivateKey, cb bind.ContractBackend, cl *MockCl, chainId *big.Int) ContractsDeployer {
 	return ContractsDeployer{
+		key:             key,
+		address:         crypto.PubkeyToAddress(key.PublicKey),
 		contractBackend: cb,
 		cl:              cl,
-		bank:            bank,
 		chainId:         chainId,
 	}
 }
@@ -55,7 +59,7 @@ func (d ContractsDeployer) DeployCore(ctx context.Context) (ContractsDeployment,
 	ksmAddr, ksmDeployTxn, ksm, err := shuttercontracts.DeployKeyperSetManager(
 		transactOpts,
 		d.contractBackend,
-		d.bank.Address(),
+		d.address,
 	)
 	if err != nil {
 		return ContractsDeployment{}, err
@@ -80,7 +84,7 @@ func (d ContractsDeployer) DeployCore(ctx context.Context) (ContractsDeployment,
 		return ContractsDeployment{}, err
 	}
 
-	ksmInitTxn, err := ksm.Initialize(transactOpts, d.bank.Address(), d.bank.Address())
+	ksmInitTxn, err := ksm.Initialize(transactOpts, d.address, d.address)
 	if err != nil {
 		return ContractsDeployment{}, err
 	}
@@ -128,7 +132,7 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return libcommon.Address{}, nil, err
 	}
 
-	setPublisherTxn, err := keyperSet.SetPublisher(transactOpts, d.bank.Address())
+	setPublisherTxn, err := keyperSet.SetPublisher(transactOpts, d.address)
 	if err != nil {
 		return libcommon.Address{}, nil, err
 	}
@@ -178,9 +182,9 @@ func (d ContractsDeployer) DeployKeyperSet(
 
 func (d ContractsDeployer) transactOpts() *bind.TransactOpts {
 	return &bind.TransactOpts{
-		From: d.bank.Address(),
+		From: d.address,
 		Signer: func(address libcommon.Address, txn types.Transaction) (types.Transaction, error) {
-			return types.SignTx(txn, *types.LatestSignerForChainID(d.chainId), d.bank.PrivKey())
+			return types.SignTx(txn, *types.LatestSignerForChainID(d.chainId), d.key)
 		},
 	}
 }

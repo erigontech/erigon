@@ -27,25 +27,62 @@ import (
 	enginetypes "github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
-func VerifyTxnsInclusion(payload *enginetypes.ExecutionPayload, txns ...libcommon.Hash) error {
-	txnHashes := mapset.NewSet[libcommon.Hash](txns...)
+func VerifyTxnsInclusion(payload *enginetypes.ExecutionPayload, inclusions ...libcommon.Hash) error {
+	inclusionHashes := mapset.NewSet[libcommon.Hash](inclusions...)
 	for _, txnBytes := range payload.Transactions {
 		txn, err := types.DecodeTransaction(txnBytes)
 		if err != nil {
 			return err
 		}
 
-		txnHashes.Remove(txn.Hash())
+		inclusionHashes.Remove(txn.Hash())
 	}
 
-	if txnHashes.Cardinality() == 0 {
+	if inclusionHashes.Cardinality() == 0 {
 		return nil
 	}
 
 	err := errors.New("txns not found in block")
-	txnHashes.Each(func(txnHash libcommon.Hash) bool {
+	inclusionHashes.Each(func(txnHash libcommon.Hash) bool {
 		err = fmt.Errorf("%w: %s", err, txnHash)
 		return true // continue
 	})
 	return err
+}
+
+type OrderedInclusion struct {
+	TxnHash  libcommon.Hash
+	TxnIndex uint64
+}
+
+func VerifyTxnsOrderedInclusion(payload *enginetypes.ExecutionPayload, inclusions ...OrderedInclusion) error {
+	orderedInclusions := make(map[uint64]libcommon.Hash, len(inclusions))
+	for _, inclusion := range inclusions {
+		orderedInclusions[inclusion.TxnIndex] = inclusion.TxnHash
+	}
+
+	var accErr error
+	for i, txnBytes := range payload.Transactions {
+		txn, err := types.DecodeTransaction(txnBytes)
+		if err != nil {
+			return err
+		}
+
+		inclusionHash, ok := orderedInclusions[uint64(i)]
+		if !ok {
+			continue
+		}
+
+		if txn.Hash() == inclusionHash {
+			continue
+		}
+
+		if accErr == nil {
+			accErr = errors.New("txns missing")
+		}
+
+		accErr = fmt.Errorf("%w: (%d,%s)", accErr, i, inclusionHash)
+	}
+
+	return accErr
 }

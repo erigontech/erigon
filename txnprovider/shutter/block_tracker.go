@@ -24,20 +24,24 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
+type currentBlockNumReader func(ctx context.Context) (*uint64, error)
+
 type BlockTracker struct {
-	logger          log.Logger
-	blockListener   BlockListener
-	blockChangeCond *sync.Cond
-	currentBlockNum uint64
-	stopped         bool
+	logger                log.Logger
+	blockListener         BlockListener
+	blockChangeCond       *sync.Cond
+	currentBlockNum       uint64
+	stopped               bool
+	currentBlockNumReader currentBlockNumReader
 }
 
-func NewBlockTracker(logger log.Logger, blockListener BlockListener) BlockTracker {
+func NewBlockTracker(logger log.Logger, blockListener BlockListener, bnReader currentBlockNumReader) *BlockTracker {
 	var blockChangeMu sync.Mutex
-	return BlockTracker{
-		logger:          logger,
-		blockListener:   blockListener,
-		blockChangeCond: sync.NewCond(&blockChangeMu),
+	return &BlockTracker{
+		logger:                logger,
+		blockListener:         blockListener,
+		blockChangeCond:       sync.NewCond(&blockChangeMu),
+		currentBlockNumReader: bnReader,
 	}
 }
 
@@ -52,6 +56,18 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 		bt.blockChangeCond.Broadcast()
 		bt.blockChangeCond.L.Unlock()
 	}()
+
+	bn, err := bt.currentBlockNumReader(ctx)
+	if err != nil {
+		return err
+	}
+	if bn != nil {
+		bt.logger.Debug("block tracker setting initial block num", "blockNum", *bn)
+		bt.blockChangeCond.L.Lock()
+		bt.currentBlockNum = *bn
+		bt.blockChangeCond.Broadcast()
+		bt.blockChangeCond.L.Unlock()
+	}
 
 	blockEventC := make(chan BlockEvent)
 	unregisterBlockEventObserver := bt.blockListener.RegisterObserver(func(blockEvent BlockEvent) {

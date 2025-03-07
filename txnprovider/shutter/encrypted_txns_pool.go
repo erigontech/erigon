@@ -65,8 +65,23 @@ func (etp *EncryptedTxnsPool) Run(ctx context.Context) error {
 	etp.logger.Info("running encrypted txns pool")
 
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error { return etp.watchSubmissions(ctx) })
-	eg.Go(func() error { return etp.loadSubmissionsOnInit(ctx) })
+
+	eg.Go(func() error {
+		err := etp.watchSubmissions(ctx)
+		if err != nil {
+			return fmt.Errorf("watch submissions failed: %w", err)
+		}
+		return nil
+	})
+
+	eg.Go(func() error {
+		err := etp.loadSubmissionsOnInit(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to load submissions on init: %w", err)
+		}
+		return nil
+	})
+
 	return eg.Wait()
 }
 
