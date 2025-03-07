@@ -117,7 +117,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	var empty []byte
 	if err := hexutil.IsValidQuantity(index); err != nil {
-		log.Warn("unable to decode storage key: " + err.Error())
+		log.Debug("GetStorageAt: Skipped quantity validation error " + "unable to decode storage key: " + err.Error())
 	}
 
 	tx, err := api.db.BeginTemporalRo(ctx)
