@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"sync/atomic"
@@ -90,7 +91,7 @@ func (pt *patternTable) condensedTableSearch(code uint16) *codeword {
 		if d&1 != 0 {
 			continue
 		}
-		if checkDistance(int(cur.len), int(d)) {
+		if slices.Contains(condensedWordDistances[int(cur.len)], int(d)) {
 			return cur
 		}
 	}
@@ -625,15 +626,6 @@ func (g *Getter) nextPattern() []byte {
 }
 
 var condensedWordDistances = buildCondensedWordDistances()
-
-func checkDistance(power int, d int) bool {
-	for _, dist := range condensedWordDistances[power] {
-		if dist == d {
-			return true
-		}
-	}
-	return false
-}
 
 func buildCondensedWordDistances() [][]int {
 	dist2 := make([][]int, 10)
