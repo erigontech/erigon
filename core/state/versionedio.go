@@ -471,14 +471,14 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 	switch res.Status() {
 	case MVReadResultDone:
 
-		if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) RD %s (%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, v))
-		}
-
 		vr.Source = MapRead
 
 		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 			if pr.Version == vr.Version {
+				if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+					fmt.Printf("%d (%d.%d) RD %s (%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, pr.Val))
+				}
+
 				return pr.Val.(T), MapRead, nil
 			}
 
@@ -503,6 +503,10 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 		var ok bool
 		if v, ok = res.Value().(T); !ok {
 			return defaultV, MapRead, fmt.Errorf("unexpected type: %T", res.Value())
+		}
+
+		if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
+			fmt.Printf("%d (%d.%d) RD %s (%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, v))
 		}
 
 		if copyV == nil {
