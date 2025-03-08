@@ -1434,7 +1434,10 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			defer ac.Close()
 			ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
 				_, histBlockNumProgress, err := txNums.FindBlockNum(tx, endTxNumMinimax)
-				return histBlockNumProgress, fmt.Errorf("findBlockNum(%d) fails: %w", endTxNumMinimax, err)
+				if err != nil {
+					return histBlockNumProgress, fmt.Errorf("findBlockNum(%d) fails: %w", endTxNumMinimax, err)
+				}
+				return histBlockNumProgress, nil
 			})
 			return nil
 		})
