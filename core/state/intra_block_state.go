@@ -872,6 +872,7 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (*stateObject
 
 	if readAccount != nil && sdb.blockNum == 66929801 && sdb.txIndex == 134 {
 		fmt.Printf("%d (%d.%d) Account RD (reader) %x: %+v\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, readAccount)
+		readAccount = nil
 	}
 
 	if readAccount == nil {
