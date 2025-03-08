@@ -311,6 +311,12 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.Equal(t, shutterConfig.SequencerContractAddress, contractsDeployment.SequencerAddr.String())
 	require.Equal(t, shutterConfig.KeyperSetManagerContractAddress, contractsDeployment.KsmAddr.String())
 	require.Equal(t, shutterConfig.KeyBroadcastContractAddress, contractsDeployment.KeyBroadcastAddr.String())
+	logger.Debug(
+		"shutter contracts deployed",
+		"sequencer", contractsDeployment.SequencerAddr,
+		"ksm", contractsDeployment.KsmAddr,
+		"keyBroadcast", contractsDeployment.KeyBroadcastAddr,
+	)
 
 	// now that we've deployed all shutter contracts - we can restart erigon with shutter enabled
 	err = ethNode.Close()
