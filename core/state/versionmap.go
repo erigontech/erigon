@@ -139,6 +139,8 @@ func (vm *VersionMap) Write(addr libcommon.Address, path AccountPath, key libcom
 	}
 }
 
+var tra = libcommon.HexToAddress("dd03baefb005dadba5234e2954d23e5f9cbf57a9")
+
 func (vm *VersionMap) Read(addr libcommon.Address, path AccountPath, key libcommon.Hash, txIdx int) (res ReadResult) {
 	if vm == nil {
 		return res
@@ -153,6 +155,10 @@ func (vm *VersionMap) Read(addr libcommon.Address, path AccountPath, key libcomm
 	cells := vm.getKeyCells(addr, path, key, func(_ libcommon.Address, _ AccountPath, _ libcommon.Hash) *btree.Map[int, *WriteCell] {
 		return nil
 	})
+
+	if addr == tra {
+		fmt.Printf("%d, %x: %v\n", txIdx, addr, cells)
+	}
 
 	if cells == nil {
 		return
@@ -170,17 +176,20 @@ func (vm *VersionMap) Read(addr libcommon.Address, path AccountPath, key libcomm
 
 	fk, fv := floor(txIdx - 1)
 
+	if addr == tra {
+		fmt.Printf("%d, %x: fk=%d, fv=%v\n", txIdx, addr, fk, fv)
+	}
+
 	if fk != -1 && fv != nil {
-		c := fv
-		switch c.flag {
+		switch fv.flag {
 		case FlagEstimate:
 			res.depIdx = fk
-			res.value = c.data
+			res.value = fv.data
 		case FlagDone:
 			{
 				res.depIdx = fk
-				res.incarnation = c.incarnation
-				res.value = c.data
+				res.incarnation = fv.incarnation
+				res.value = fv.data
 			}
 		default:
 			panic(fmt.Errorf("should not happen - unknown flag value"))
