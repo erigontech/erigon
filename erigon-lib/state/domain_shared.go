@@ -475,7 +475,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		len(branch) == 0 ||
 		sd.aggTx.TxNumsInFiles(kv.StateDomains...) == 0 ||
 		bytes.Equal(prefix, keyCommitmentState) ||
-		((fEndTxNum-fStartTxNum)/sd.aggTx.a.StepSize())%2 != 0 { // this checks if file has even number of steps, singular files does not transform values.
+		((fEndTxNum-fStartTxNum)/sd.aggTx.StepSize())%2 != 0 { // this checks if file has even number of steps, singular files does not transform values.
 
 		return branch, nil // do not transform, return as is
 	}
@@ -517,7 +517,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 			// Optimised key referencing a state file record (file number and offset within the file)
 			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
 			if !found {
-				s0, s1 := fStartTxNum/sd.aggTx.a.StepSize(), fEndTxNum/sd.aggTx.a.StepSize()
+				s0, s1 := fStartTxNum/sd.aggTx.StepSize(), fEndTxNum/sd.aggTx.StepSize()
 				sd.logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
 					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 				return nil, fmt.Errorf("replace back lost storage full key: %x", key)

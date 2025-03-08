@@ -117,19 +117,19 @@ func (at *AggregatorRoTx) SqueezeCommitmentFiles() error {
 				name:    kv.AccountsDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: at.a.StepSize(),
+				aggStep: at.StepSize(),
 			},
 			kv.StorageDomain: {
 				name:    kv.StorageDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: at.a.StepSize(),
+				aggStep: at.StepSize(),
 			},
 			kv.CommitmentDomain: {
 				name:    kv.CommitmentDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: at.a.StepSize(),
+				aggStep: at.StepSize(),
 			},
 		},
 	}

@@ -80,8 +80,23 @@ func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
 	dkp.logger.Info("running decryption keys processor")
 
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error { return dkp.processKeys(ctx) })
-	eg.Go(func() error { return dkp.cleanupLoop(ctx) })
+
+	eg.Go(func() error {
+		err := dkp.processKeys(ctx)
+		if err != nil {
+			return fmt.Errorf("decryption keys processing loop: %w", err)
+		}
+		return nil
+	})
+
+	eg.Go(func() error {
+		err := dkp.cleanupLoop(ctx)
+		if err != nil {
+			return fmt.Errorf("decryption keys processor cleanup loop: %w", err)
+		}
+		return nil
+	})
+
 	return eg.Wait()
 }
 
@@ -251,6 +266,7 @@ func (dkp DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub 
 		return nil, fmt.Errorf("txn gas limit mismatch: txn=%d, encryptedTxnSubmission=%d", txn.GetGasLimit(), subGasLimit)
 	}
 
+	txn.SetSender(sender)
 	return txn, nil
 }
 

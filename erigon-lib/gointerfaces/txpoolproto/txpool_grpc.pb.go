@@ -30,6 +30,7 @@ const (
 	Txpool_OnAdd_FullMethodName        = "/txpool.Txpool/OnAdd"
 	Txpool_Status_FullMethodName       = "/txpool.Txpool/Status"
 	Txpool_Nonce_FullMethodName        = "/txpool.Txpool/Nonce"
+	Txpool_GetBlobs_FullMethodName     = "/txpool.Txpool/GetBlobs"
 )
 
 // TxpoolClient is the client API for Txpool service.
@@ -55,6 +56,8 @@ type TxpoolClient interface {
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusReply, error)
 	// returns nonce for given account
 	Nonce(ctx context.Context, in *NonceRequest, opts ...grpc.CallOption) (*NonceReply, error)
+	// returns the list of blobs and proofs for a given list of blob hashes
+	GetBlobs(ctx context.Context, in *GetBlobsRequest, opts ...grpc.CallOption) (*GetBlobsReply, error)
 }
 
 type txpoolClient struct {
@@ -164,6 +167,16 @@ func (c *txpoolClient) Nonce(ctx context.Context, in *NonceRequest, opts ...grpc
 	return out, nil
 }
 
+func (c *txpoolClient) GetBlobs(ctx context.Context, in *GetBlobsRequest, opts ...grpc.CallOption) (*GetBlobsReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBlobsReply)
+	err := c.cc.Invoke(ctx, Txpool_GetBlobs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TxpoolServer is the server API for Txpool service.
 // All implementations must embed UnimplementedTxpoolServer
 // for forward compatibility.
@@ -187,6 +200,8 @@ type TxpoolServer interface {
 	Status(context.Context, *StatusRequest) (*StatusReply, error)
 	// returns nonce for given account
 	Nonce(context.Context, *NonceRequest) (*NonceReply, error)
+	// returns the list of blobs and proofs for a given list of blob hashes
+	GetBlobs(context.Context, *GetBlobsRequest) (*GetBlobsReply, error)
 	mustEmbedUnimplementedTxpoolServer()
 }
 
@@ -223,6 +238,9 @@ func (UnimplementedTxpoolServer) Status(context.Context, *StatusRequest) (*Statu
 }
 func (UnimplementedTxpoolServer) Nonce(context.Context, *NonceRequest) (*NonceReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Nonce not implemented")
+}
+func (UnimplementedTxpoolServer) GetBlobs(context.Context, *GetBlobsRequest) (*GetBlobsReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBlobs not implemented")
 }
 func (UnimplementedTxpoolServer) mustEmbedUnimplementedTxpoolServer() {}
 func (UnimplementedTxpoolServer) testEmbeddedByValue()                {}
@@ -400,6 +418,24 @@ func _Txpool_Nonce_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Txpool_GetBlobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBlobsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TxpoolServer).GetBlobs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Txpool_GetBlobs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TxpoolServer).GetBlobs(ctx, req.(*GetBlobsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Txpool_ServiceDesc is the grpc.ServiceDesc for Txpool service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -438,6 +474,10 @@ var Txpool_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Nonce",
 			Handler:    _Txpool_Nonce_Handler,
+		},
+		{
+			MethodName: "GetBlobs",
+			Handler:    _Txpool_GetBlobs_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

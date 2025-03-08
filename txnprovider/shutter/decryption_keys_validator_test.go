@@ -43,7 +43,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 	eonIndex := shutter.EonIndex(76)
 	threshold := uint64(2)
 	numKeypers := uint64(3)
-	ekg := testhelpers.MockEonKeyGeneration(t, eonIndex, threshold, numKeypers)
+	ekg := testhelpers.MockEonKeyGeneration(t, eonIndex, threshold, numKeypers, 32123)
 	eon := ekg.Eon()
 	slot := uint64(6336)
 	txnPointer := uint64(556)

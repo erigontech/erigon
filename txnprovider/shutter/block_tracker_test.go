@@ -38,7 +38,11 @@ func TestBlockTracker(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlTrace)
 	recvC := make(chan *remoteproto.StateChangeBatch)
 	bl := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, recvC))
-	bt := shutter.NewBlockTracker(logger, bl)
+	bnReader := func(ctx context.Context) (*uint64, error) {
+		start := uint64(10)
+		return &start, nil
+	}
+	bt := shutter.NewBlockTracker(logger, bl, bnReader)
 	eg, egCtx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return bl.Run(egCtx) })
 	eg.Go(func() error { return bt.Run(egCtx) })

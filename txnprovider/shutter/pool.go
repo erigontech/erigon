@@ -38,9 +38,9 @@ var _ txnprovider.TxnProvider = (*Pool)(nil)
 type Pool struct {
 	logger                  log.Logger
 	config                  Config
-	secondaryTxnProvider    txnprovider.TxnProvider
+	baseTxnProvider         txnprovider.TxnProvider
 	blockListener           BlockListener
-	blockTracker            BlockTracker
+	blockTracker            *BlockTracker
 	eonTracker              EonTracker
 	decryptionKeysListener  DecryptionKeysListener
 	decryptionKeysProcessor DecryptionKeysProcessor
@@ -52,14 +52,15 @@ type Pool struct {
 func NewPool(
 	logger log.Logger,
 	config Config,
-	secondaryTxnProvider txnprovider.TxnProvider,
+	baseTxnProvider txnprovider.TxnProvider,
 	contractBackend bind.ContractBackend,
 	stateChangesClient stateChangesClient,
+	currentBlockNumReader currentBlockNumReader,
 ) *Pool {
 	logger = logger.New("component", "shutter")
 	slotCalculator := NewBeaconChainSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot)
 	blockListener := NewBlockListener(logger, stateChangesClient)
-	blockTracker := NewBlockTracker(logger, blockListener)
+	blockTracker := NewBlockTracker(logger, blockListener, currentBlockNumReader)
 	eonTracker := NewKsmEonTracker(logger, config, blockListener, contractBackend)
 	decryptionKeysValidator := NewDecryptionKeysExtendedValidator(logger, config, slotCalculator, eonTracker)
 	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysValidator)
@@ -79,7 +80,7 @@ func NewPool(
 		blockListener:           blockListener,
 		blockTracker:            blockTracker,
 		eonTracker:              eonTracker,
-		secondaryTxnProvider:    secondaryTxnProvider,
+		baseTxnProvider:         baseTxnProvider,
 		decryptionKeysListener:  decryptionKeysListener,
 		decryptionKeysProcessor: decryptionKeysProcessor,
 		encryptedTxnsPool:       encryptedTxnsPool,
@@ -98,12 +99,55 @@ func (p Pool) Run(ctx context.Context) error {
 	defer unregisterDkpObserver()
 
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error { return p.blockListener.Run(ctx) })
-	eg.Go(func() error { return p.blockTracker.Run(ctx) })
-	eg.Go(func() error { return p.eonTracker.Run(ctx) })
-	eg.Go(func() error { return p.decryptionKeysListener.Run(ctx) })
-	eg.Go(func() error { return p.decryptionKeysProcessor.Run(ctx) })
-	eg.Go(func() error { return p.encryptedTxnsPool.Run(ctx) })
+
+	eg.Go(func() error {
+		err := p.blockListener.Run(ctx)
+		if err != nil {
+			return fmt.Errorf("block listener issue: %w", err)
+		}
+		return nil
+	})
+
+	eg.Go(func() error {
+		err := p.blockTracker.Run(ctx)
+		if err != nil {
+			return fmt.Errorf("block tracker issue: %w", err)
+		}
+		return nil
+	})
+
+	eg.Go(func() error {
+		err := p.eonTracker.Run(ctx)
+		if err != nil {
+			return fmt.Errorf("eon tracker issue: %w", err)
+		}
+		return nil
+	})
+
+	eg.Go(func() error {
+		err := p.decryptionKeysListener.Run(ctx)
+		if err != nil {
+			return fmt.Errorf("decryption keys listener issue: %w", err)
+		}
+		return nil
+	})
+
+	eg.Go(func() error {
+		err := p.decryptionKeysProcessor.Run(ctx)
+		if err != nil {
+			return fmt.Errorf("decryption keys processor issue: %w", err)
+		}
+		return nil
+	})
+
+	eg.Go(func() error {
+		err := p.encryptedTxnsPool.Run(ctx)
+		if err != nil {
+			return fmt.Errorf("encrypted txns pool issue: %w", err)
+		}
+		return nil
+	})
+
 	return eg.Wait()
 }
 
@@ -134,7 +178,8 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 
 	eon, ok := p.eonTracker.EonByBlockNum(parentBlockNum)
 	if !ok {
-		return nil, fmt.Errorf("unknown eon for block num %d", parentBlockNum)
+		p.logger.Warn("unknown eon for block num, falling back to base txn provider", "blockNum", parentBlockNum)
+		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	}
 
 	slot, err := p.slotCalculator.CalcSlot(blockTime)
@@ -153,6 +198,7 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 		if errors.Is(err, context.DeadlineExceeded) {
 			p.logger.Warn(
 				"decryption mark wait timeout, falling back to secondary txn provider",
+				"blockNum", parentBlockNum+1,
 				"slot", slot,
 				"age", slotAge,
 				"timeout", decryptionMarkWaitTimeout,
@@ -168,7 +214,7 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 			// work stream item for the Shutter team. For now, we follow what Nethermind does
 			// and fallback to the public devp2p mempool - any changes to this should be
 			// co-ordinated with them.
-			return p.secondaryTxnProvider.ProvideTxns(ctx, opts...)
+			return p.baseTxnProvider.ProvideTxns(ctx, opts...)
 		}
 
 		return nil, err
@@ -200,7 +246,7 @@ func (p Pool) provide(ctx context.Context, mark DecryptionMark, opts ...txnprovi
 
 	remGasTarget := totalGasTarget - decryptedTxnsGas
 	opts = append(opts, txnprovider.WithGasTarget(remGasTarget)) // overrides option
-	additionalTxns, err := p.secondaryTxnProvider.ProvideTxns(ctx, opts...)
+	additionalTxns, err := p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
