@@ -157,7 +157,7 @@ func (vm *VersionMap) Read(addr libcommon.Address, path AccountPath, key libcomm
 	})
 
 	if addr == tra {
-		fmt.Printf("(%d), %x: %v\n", txIdx, addr, cells)
+		fmt.Printf("(%d), %x: %+v\n", txIdx, addr, cells)
 	}
 
 	if cells == nil {
@@ -177,7 +177,7 @@ func (vm *VersionMap) Read(addr libcommon.Address, path AccountPath, key libcomm
 	fk, fv := floor(txIdx - 1)
 
 	if addr == tra {
-		fmt.Printf("(%d), %x: fk=%d, fv=%v\n", txIdx, addr, fk, fv)
+		fmt.Printf("(%d), %x: fk=%d, fv=%+v\n", txIdx, addr, fk, fv)
 	}
 
 	if fk != -1 && fv != nil {
