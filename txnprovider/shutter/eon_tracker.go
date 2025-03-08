@@ -174,7 +174,7 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 		return fmt.Errorf("read eon at new block event: %w", err)
 	}
 	if !ok {
-		et.logger.Warn("no keyper sets found", "blockNum", blockNum)
+		et.logger.Warn("no eon at", "blockNum", blockNum)
 		return nil
 	}
 
@@ -209,6 +209,7 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, err
 		// wait until we have at least one keyper set added to avoid
 		// execution reverts for GetKeyperSetIndexByBlock
 		if numKeyperSets == 0 {
+			et.logger.Warn("no keyper sets found", "blockNum", blockNum)
 			return Eon{}, false, nil
 		}
 	}
@@ -246,6 +247,10 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, err
 	key, err := et.keyBroadcastContract.GetEonKey(callOpts, eonIndex)
 	if err != nil {
 		return Eon{}, false, fmt.Errorf("get eon key: %w", err)
+	}
+	if len(key) == 0 {
+		et.logger.Warn("empty eon key at", "blockNum", blockNum, "eonIndex", eonIndex)
+		return Eon{}, false, nil
 	}
 
 	activationBlock, err := et.ksmContract.GetKeyperSetActivationBlock(callOpts, eonIndex)
@@ -353,16 +358,20 @@ func (et *KsmEonTracker) handleKeyperSetAddedEvent(event *contracts.KeyperSetMan
 		return nil
 	}
 
-	eon, err := et.readEonAtKeyperSetAddedEvent(event)
+	eon, ok, err := et.readEonAtKeyperSetAddedEvent(event)
 	if err != nil {
 		return fmt.Errorf("read eon at keyper set added event: %w", err)
+	}
+	if !ok {
+		et.logger.Warn("no eon at keyper set added event", "eon", event.Eon)
+		return nil
 	}
 
 	et.recentEons.ReplaceOrInsert(eon)
 	return nil
 }
 
-func (et *KsmEonTracker) readEonAtKeyperSetAddedEvent(event *contracts.KeyperSetManagerKeyperSetAdded) (Eon, error) {
+func (et *KsmEonTracker) readEonAtKeyperSetAddedEvent(event *contracts.KeyperSetManagerKeyperSetAdded) (Eon, bool, error) {
 	callOpts := &bind.CallOpts{
 		BlockNumber: new(big.Int).SetUint64(event.Raw.BlockNumber),
 	}
@@ -370,7 +379,16 @@ func (et *KsmEonTracker) readEonAtKeyperSetAddedEvent(event *contracts.KeyperSet
 	eonIndex := event.Eon
 	key, err := et.keyBroadcastContract.GetEonKey(callOpts, eonIndex)
 	if err != nil {
-		return Eon{}, fmt.Errorf("get eon key: %w", err)
+		return Eon{}, false, fmt.Errorf("get eon key: %w", err)
+	}
+	if len(key) == 0 {
+		et.logger.Warn(
+			"empty eon key for keyper set added event",
+			"blockNum", event.Raw.BlockNumber,
+			"eonIndex", eonIndex,
+			"activationBlock", event.ActivationBlock,
+		)
+		return Eon{}, false, nil
 	}
 
 	eon := Eon{
@@ -381,5 +399,5 @@ func (et *KsmEonTracker) readEonAtKeyperSetAddedEvent(event *contracts.KeyperSet
 		Members:         event.Members,
 	}
 
-	return eon, nil
+	return eon, true, nil
 }

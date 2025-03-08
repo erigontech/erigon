@@ -24,7 +24,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/core/types"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
@@ -47,7 +46,11 @@ func NewContractsDeployer(key *ecdsa.PrivateKey, cb bind.ContractBackend, cl *Mo
 }
 
 func (d ContractsDeployer) DeployCore(ctx context.Context) (ContractsDeployment, error) {
-	transactOpts := d.transactOpts()
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(d.key, d.chainId)
+	if err != nil {
+		return ContractsDeployment{}, err
+	}
+
 	sequencerAddr, sequencerDeployTxn, sequencer, err := shuttercontracts.DeploySequencer(
 		transactOpts,
 		d.contractBackend,
@@ -113,10 +116,14 @@ func (d ContractsDeployer) DeployCore(ctx context.Context) (ContractsDeployment,
 
 func (d ContractsDeployer) DeployKeyperSet(
 	ctx context.Context,
-	ksm *shuttercontracts.KeyperSetManager,
+	dep ContractsDeployment,
 	ekg EonKeyGeneration,
 ) (libcommon.Address, *shuttercontracts.KeyperSet, error) {
-	transactOpts := d.transactOpts()
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(d.key, d.chainId)
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
 	keyperSetAddr, keyperSetDeployTxn, keyperSet, err := shuttercontracts.DeployKeyperSet(transactOpts, d.contractBackend)
 	if err != nil {
 		return libcommon.Address{}, nil, err
@@ -162,7 +169,7 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return libcommon.Address{}, nil, err
 	}
 
-	addKeyperSetTxn, err := ksm.AddKeyperSet(transactOpts, ekg.ActivationBlock, keyperSetAddr)
+	addKeyperSetTxn, err := dep.Ksm.AddKeyperSet(transactOpts, ekg.ActivationBlock, keyperSetAddr)
 	if err != nil {
 		return libcommon.Address{}, nil, err
 	}
@@ -177,16 +184,22 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return libcommon.Address{}, nil, err
 	}
 
-	return keyperSetAddr, keyperSet, nil
-}
-
-func (d ContractsDeployer) transactOpts() *bind.TransactOpts {
-	return &bind.TransactOpts{
-		From: d.address,
-		Signer: func(address libcommon.Address, txn types.Transaction) (types.Transaction, error) {
-			return types.SignTx(txn, *types.LatestSignerForChainID(d.chainId), d.key)
-		},
+	broadcastKeyTxn, err := dep.KeyBroadcast.BroadcastEonKey(transactOpts, uint64(ekg.EonIndex), ekg.EonPublicKey.Marshal())
+	if err != nil {
+		return libcommon.Address{}, nil, err
 	}
+
+	block, err = d.cl.BuildBlock(ctx)
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	err = VerifyTxnsInclusion(block, broadcastKeyTxn.Hash())
+	if err != nil {
+		return libcommon.Address{}, nil, err
+	}
+
+	return keyperSetAddr, keyperSet, nil
 }
 
 type ContractsDeployment struct {

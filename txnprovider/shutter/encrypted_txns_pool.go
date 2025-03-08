@@ -69,15 +69,15 @@ func (etp *EncryptedTxnsPool) Run(ctx context.Context) error {
 	eg.Go(func() error {
 		err := etp.watchSubmissions(ctx)
 		if err != nil {
-			return fmt.Errorf("watch submissions failed: %w", err)
+			return fmt.Errorf("failed to handle encrypted txn submissions: %w", err)
 		}
 		return nil
 	})
 
 	eg.Go(func() error {
-		err := etp.loadSubmissionsOnInit(ctx)
+		err := etp.watchFirstBlockAfterInit(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to load submissions on init: %w", err)
+			return fmt.Errorf("failed to handle first block after init: %w", err)
 		}
 		return nil
 	})
@@ -90,9 +90,6 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 		return nil, fmt.Errorf("invalid encrypted txns requests range: %d >= %d", from, to)
 	}
 
-	etp.mu.RLock()
-	defer etp.mu.RUnlock()
-
 	fromKey := EncryptedTxnSubmission{EonIndex: eon, TxnIndex: from}
 	toKey := EncryptedTxnSubmission{EonIndex: eon, TxnIndex: to}
 	count := to - from
@@ -101,6 +98,8 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 	var totalGasLimit uint64
 	var idxOffset TxnIndex
 	var err error
+	etp.mu.RLock()
+	defer etp.mu.RUnlock()
 	etp.submissions.AscendRange(fromKey, toKey, func(item EncryptedTxnSubmission) bool {
 		newTotalGasLimit := totalGasLimit + item.GasLimit.Uint64()
 		if newTotalGasLimit > gasLimit {
@@ -175,17 +174,17 @@ func (etp *EncryptedTxnsPool) DeleteUpTo(eon EonIndex, to TxnIndex) {
 }
 
 func (etp *EncryptedTxnsPool) watchSubmissions(ctx context.Context) error {
+	submissionEventC := make(chan *contracts.SequencerTransactionSubmitted)
+	submissionEventSub, err := etp.sequencerContract.WatchTransactionSubmitted(&bind.WatchOpts{}, submissionEventC)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to sequencer TransactionSubmitted event: %w", err)
+	}
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-etp.initialLoadDone:
 		// continue
-	}
-
-	submissionEventC := make(chan *contracts.SequencerTransactionSubmitted)
-	submissionEventSub, err := etp.sequencerContract.WatchTransactionSubmitted(&bind.WatchOpts{}, submissionEventC)
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to sequencer TransactionSubmitted event: %w", err)
 	}
 
 	defer submissionEventSub.Unsubscribe()
@@ -205,9 +204,6 @@ func (etp *EncryptedTxnsPool) watchSubmissions(ctx context.Context) error {
 }
 
 func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(event *contracts.SequencerTransactionSubmitted) error {
-	etp.mu.Lock()
-	defer etp.mu.Unlock()
-
 	encryptedTxnSubmission := EncryptedTxnSubmissionFromLogEvent(event)
 	etp.logger.Debug(
 		"received encrypted txn submission event",
@@ -216,14 +212,24 @@ func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(event *contracts
 		"unwind", event.Raw.Removed,
 	)
 
+	etp.mu.Lock()
+	defer etp.mu.Unlock()
+
 	if event.Raw.Removed {
 		etp.submissions.Delete(encryptedTxnSubmission)
 		return nil
 	}
 
-	etp.addSubmission(encryptedTxnSubmission)
-
 	lastEncryptedTxnSubmission, ok := etp.submissions.Max()
+	if ok && encryptedTxnSubmission.TxnIndex <= lastEncryptedTxnSubmission.TxnIndex {
+		return fmt.Errorf(
+			"unexpected new encrypted txn submission index is lte last: %d >= %d",
+			lastEncryptedTxnSubmission.TxnIndex,
+			encryptedTxnSubmission.TxnIndex,
+		)
+	}
+
+	etp.addSubmission(encryptedTxnSubmission)
 	if ok && !EncryptedTxnSubmissionsAreConsecutive(lastEncryptedTxnSubmission, encryptedTxnSubmission) {
 		return etp.fillSubmissionGap(lastEncryptedTxnSubmission, encryptedTxnSubmission)
 	}
@@ -235,10 +241,6 @@ func (etp *EncryptedTxnsPool) fillSubmissionGap(last, new EncryptedTxnSubmission
 	fromTxnIndex := last.TxnIndex + 1
 	startBlockNum := last.BlockNum + 1
 	endBlockNum := new.BlockNum
-	if endBlockNum > 0 {
-		endBlockNum--
-	}
-
 	etp.logger.Info(
 		"filling submission gap",
 		"startBlockNum", startBlockNum,
@@ -247,10 +249,15 @@ func (etp *EncryptedTxnsPool) fillSubmissionGap(last, new EncryptedTxnSubmission
 		"toTxnIndex", new.TxnIndex,
 	)
 
+	if endBlockNum-startBlockNum > etp.config.EncryptedTxnsLookBackDistance {
+		startBlockNum = endBlockNum - etp.config.EncryptedTxnsLookBackDistance
+		etp.logger.Info("adjusted gap as it is too big", "startBlockNum", startBlockNum, "endBlockNum", endBlockNum)
+	}
+
 	return etp.loadSubmissions(startBlockNum, endBlockNum, stopAtTxnIndexSubmissionsContinuer(fromTxnIndex))
 }
 
-func (etp *EncryptedTxnsPool) loadSubmissionsOnInit(ctx context.Context) error {
+func (etp *EncryptedTxnsPool) watchFirstBlockAfterInit(ctx context.Context) error {
 	blockEventC := make(chan BlockEvent)
 	unregister := etp.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
 		select {
@@ -261,6 +268,7 @@ func (etp *EncryptedTxnsPool) loadSubmissionsOnInit(ctx context.Context) error {
 		}
 	})
 
+	defer close(etp.initialLoadDone)
 	defer unregister()
 	for {
 		select {
@@ -271,22 +279,29 @@ func (etp *EncryptedTxnsPool) loadSubmissionsOnInit(ctx context.Context) error {
 				continue
 			}
 
-			var start uint64
-			end := blockEvent.LatestBlockNum
-			if end > etp.config.EncryptedTxnsLookBackDistance {
-				start = end - etp.config.EncryptedTxnsLookBackDistance
-			}
-
-			etp.logger.Info("loading submissions on init", "start", start, "end", end)
-			err := etp.loadSubmissions(start, end, alwaysContinueSubmissionsContinuer)
-			if err != nil {
-				return fmt.Errorf("failed to load submissions on init: %w", err)
-			}
-
-			close(etp.initialLoadDone)
-			return nil // we are done
+			// load submissions and complete
+			return etp.loadPastSubmissionsOnFirstBlock(blockEvent.LatestBlockNum)
 		}
 	}
+}
+
+func (etp *EncryptedTxnsPool) loadPastSubmissionsOnFirstBlock(blockNum uint64) error {
+	etp.mu.Lock()
+	defer etp.mu.Unlock()
+
+	var start uint64
+	end := blockNum
+	if end > etp.config.EncryptedTxnsLookBackDistance {
+		start = end - etp.config.EncryptedTxnsLookBackDistance
+	}
+
+	etp.logger.Info("loading past submissions on first block", "start", start, "end", end)
+	err := etp.loadSubmissions(start, end, alwaysContinueSubmissionsContinuer)
+	if err != nil {
+		return fmt.Errorf("failed to load submissions on init: %w", err)
+	}
+
+	return nil // we are done
 }
 
 func (etp *EncryptedTxnsPool) loadSubmissions(start, end uint64, cont submissionsContinuer) error {
@@ -313,8 +328,6 @@ func (etp *EncryptedTxnsPool) loadSubmissions(start, end uint64, cont submission
 		}
 	}()
 
-	etp.mu.Lock()
-	defer etp.mu.Unlock()
 	for submissionsIter.Next() {
 		if !cont(submissionsIter.Event) {
 			return nil

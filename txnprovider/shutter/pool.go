@@ -190,6 +190,8 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 				"decryption keys wait timeout, falling back to base txn provider",
 				"slot", slot,
 				"age", slotAge,
+				"blockNum", parentBlockNum+1,
+				"timeout", keysWaitTime,
 			)
 
 			// Note: specs say to produce empty block in case decryption keys do not arrive on time.
@@ -223,6 +225,7 @@ func (p Pool) provide(ctx context.Context, mark DecryptionMark, opts ...txnprovi
 		return nil, fmt.Errorf("decrypted txns gas gt target: %d > %d", decryptedTxnsGas, totalGasTarget)
 	}
 
+	p.logger.Debug("providing decrypted txns", "count", len(decryptedTxns.Transactions), "gas", decryptedTxnsGas)
 	if decryptedTxnsGas == totalGasTarget {
 		return decryptedTxns.Transactions, nil
 	}
@@ -234,5 +237,6 @@ func (p Pool) provide(ctx context.Context, mark DecryptionMark, opts ...txnprovi
 		return nil, err
 	}
 
+	p.logger.Debug("providing additional public txns", "count", len(additionalTxns))
 	return append(decryptedTxns.Transactions, additionalTxns...), nil
 }
