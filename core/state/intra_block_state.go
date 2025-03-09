@@ -987,7 +987,8 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 	}
 	newobj.newlyCreated = true
 	sdb.setStateObject(addr, newobj)
-	sdb.versionWritten(addr, AddressPath, libcommon.Hash{}, newobj.deepCopy(nil))
+	data := newObj.data
+	sdb.versionWritten(addr, AddressPath, libcommon.Hash{}, &data)
 	return newobj
 }
 
@@ -1034,13 +1035,13 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 		newObj.selfdestructed = false
 	}
 
-	account := newObj.data
+	data := newObj.data
 	// for newly created files these synthetic reads are used so that account
 	// creation clashes between trnascations get detected
-	sdb.versionRead(addr, AddressPath, libcommon.Hash{}, StorageRead, &account)
+	sdb.versionRead(addr, AddressPath, libcommon.Hash{}, StorageRead, &data)
 	sdb.versionRead(addr, BalancePath, libcommon.Hash{}, StorageRead, newObj.Balance())
 
-	sdb.versionWritten(addr, AddressPath, libcommon.Hash{}, &account)
+	sdb.versionWritten(addr, AddressPath, libcommon.Hash{}, &data)
 	sdb.versionWritten(addr, BalancePath, libcommon.Hash{}, newObj.Balance())
 	return nil
 }
@@ -1430,7 +1431,8 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 		// re-reads will return a complete account - note
 		// this is not used by the version map wich works
 		// at the level of individual account elements
-		s.versionRead(addr, AddressPath, libcommon.Hash{}, StorageRead, *account)
+		data := *account
+		s.versionRead(addr, AddressPath, libcommon.Hash{}, StorageRead, &data)
 	}
 }
 
