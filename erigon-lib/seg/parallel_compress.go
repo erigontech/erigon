@@ -39,6 +39,22 @@ import (
 	"github.com/erigontech/erigon-lib/seg/sais"
 )
 
+// MinPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
+const MinPatternScore = 1024
+
+const (
+	None         = 0b0
+	CompressKeys = 0b1
+	CompressVals = 0b10
+)
+
+var V1Enabled = false
+
+const (
+	V0 = 0b0
+	V1 = 0b1
+)
+
 func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
 	matches := mf2.FindLongestMatches(input)
 
@@ -301,6 +317,15 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	}
 	defer intermediateFile.Close()
 	intermediateW := bufio.NewWriterSize(intermediateFile, 8*etl.BufIOSize)
+	if V1Enabled {
+		if err = intermediateW.WriteByte(V1); err != nil {
+			return err
+		}
+		if err = intermediateW.WriteByte(None); err != nil {
+			return err
+		}
+		outputSize.Add(2)
+	}
 
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
@@ -649,6 +674,10 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	var hc BitWriter
 	hc.w = cw
 	r := bufio.NewReaderSize(intermediateFile, 2*etl.BufIOSize)
+	if V1Enabled {
+		_, _ = r.ReadByte() // read version //TODO: maybe special logic here, huh?
+		_, _ = r.ReadByte() // read specific flag
+	}
 	var l uint64
 	var e error
 	for l, e = binary.ReadUvarint(r); e == nil; l, e = binary.ReadUvarint(r) {
