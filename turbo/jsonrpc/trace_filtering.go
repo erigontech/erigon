@@ -604,7 +604,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 		ot.traceAddr = []int{}
 		vmConfig.Debug = true
-		vmConfig.Tracer = &ot
+		vmConfig.Tracer = ot.Tracer().Hooks
 		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
@@ -613,9 +613,18 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(txIndex)
+		ibs.SetHooks(ot.Tracer().Hooks)
+
+		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
+			ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
+		}
+
 		var execResult *evmtypes.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
 		if err != nil {
+			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+				ot.Tracer().OnTxEnd(nil, err)
+			}
 			if first {
 				first = false
 			} else {
@@ -625,6 +634,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			rpc.HandleError(err, stream)
 			stream.WriteObjectEnd()
 			continue
+		}
+		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
 		}
 		traceResult.Output = common.Copy(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
@@ -815,7 +827,7 @@ func (api *TraceAPIImpl) callBlock(
 		msgs[i] = msg
 	}
 
-	traces, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msgs, callParams,
+	traces, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
 		&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
 
 	if cmErr != nil {
@@ -823,7 +835,7 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */)
+		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, nil)
 	}
 
 	return traces, syscall, nil
@@ -934,7 +946,7 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */)
+		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, nil)
 	}
 
 	return trace, syscall, nil

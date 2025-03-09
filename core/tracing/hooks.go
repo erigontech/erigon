@@ -45,11 +45,11 @@ type OpContext interface {
 
 // IntraBlockState gives tracers access to the whole state.
 type IntraBlockState interface {
-	GetBalance(libcommon.Address) *uint256.Int
-	GetNonce(libcommon.Address) uint64
-	GetCode(libcommon.Address) []byte
-	GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int)
-	Exist(libcommon.Address) bool
+	GetBalance(libcommon.Address) (*uint256.Int, error)
+	GetNonce(libcommon.Address) (uint64, error)
+	GetCode(libcommon.Address) ([]byte, error)
+	GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) error
+	Exist(libcommon.Address) (bool, error)
 	GetRefund() uint64
 }
 

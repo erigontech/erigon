@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -203,11 +204,11 @@ func ExecV3(ctx context.Context,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger,
+	hooks *tracing.Hooks,
 	initialCycle bool,
 	isMining bool,
-) error {
+) (execErr error) {
 	inMemExec := txc.Doms != nil
-
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
 	if parallel && cfg.chainConfig.ChainName == networkname.Gnosis {
@@ -238,6 +239,8 @@ func ExecV3(ctx context.Context,
 			}()
 		}
 	}
+
+	chainReader := ChainReaderImpl{config: cfg.chainConfig, tx: applyTx, blockReader: blockReader, logger: logger}
 	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	if !inMemExec && !isMining {
 		if initialCycle {
@@ -489,6 +492,22 @@ Loop:
 			return fmt.Errorf("nil block %d", blockNum)
 		}
 
+		if b.NumberU64() == 0 {
+			if hooks != nil && hooks.OnGenesisBlock != nil {
+				hooks.OnGenesisBlock(b, cfg.genesis.Alloc)
+			}
+		} else {
+			if hooks != nil && hooks.OnBlockStart != nil {
+				td := chainReader.GetTd(b.ParentHash(), b.NumberU64()-1)
+				hooks.OnBlockStart(tracing.BlockEvent{
+					Block:     b,
+					TD:        td,
+					Finalized: chainReader.CurrentFinalizedHeader(),
+					Safe:      chainReader.CurrentSafeHeader(),
+				})
+			}
+		}
+
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
@@ -505,11 +524,17 @@ Loop:
 		// print type of engine
 		if parallel {
 			if err := executor.status(ctx, commitThreshold); err != nil {
+				if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+					hooks.OnBlockEnd(err)
+				}
 				return err
 			}
 		} else if accumulator != nil {
 			txs, err := blockReader.RawTransactions(context.Background(), executor.tx(), b.NumberU64(), b.NumberU64())
 			if err != nil {
+				if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+					hooks.OnBlockEnd(err)
+				}
 				return err
 			}
 			accumulator.StartChange(header, txs, false)
@@ -551,6 +576,9 @@ Loop:
 			if txTask.HistoryExecution && usedGas == 0 {
 				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
 				if err != nil {
+					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+						hooks.OnBlockEnd(err)
+					}
 					return err
 				}
 			}
@@ -571,6 +599,9 @@ Loop:
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
 				if err != nil {
+					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+						hooks.OnBlockEnd(err)
+					}
 					return err
 				}
 			}
@@ -582,6 +613,9 @@ Loop:
 
 		if parallel {
 			if _, err := executor.execute(ctx, txTasks); err != nil {
+				if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+					hooks.OnBlockEnd(err)
+				}
 				return err
 			}
 			agg.BuildFilesInBackground(outputTxNum.Load())
@@ -591,6 +625,9 @@ Loop:
 			se.skipPostEvaluation = skipPostEvaluation
 
 			continueLoop, err := se.execute(ctx, txTasks)
+			if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+				hooks.OnBlockEnd(err)
+			}
 
 			if err != nil {
 				return err
