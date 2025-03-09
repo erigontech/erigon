@@ -74,7 +74,7 @@ jobs:
               echo "failed" > failed.log
               exit 1
             fi
-            if (( failed*2 > tests )); then
+            if (( failed > 3 )); then
               echo "Too many failures for suite ${1} - ${failed} failed out of ${tests}"
               echo "failed" > failed.log
               exit 1
