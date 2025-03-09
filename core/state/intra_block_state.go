@@ -987,7 +987,7 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 	}
 	newobj.newlyCreated = true
 	sdb.setStateObject(addr, newobj)
-	data := newObj.data
+	data := newobj.data
 	sdb.versionWritten(addr, AddressPath, libcommon.Hash{}, &data)
 	return newobj
 }
