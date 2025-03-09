@@ -1432,7 +1432,7 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 		// this is not used by the version map wich works
 		// at the level of individual account elements
 		data := *account
-		s.versionRead(addr, AddressPath, libcommon.Hash{}, StorageRead, &data)
+		s.versionRead(addr, AddressPath, libcommon.Hash{}, StorageRead, data)
 	}
 }
 
