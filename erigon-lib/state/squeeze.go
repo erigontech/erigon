@@ -457,7 +457,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 				}
 				defer rwTx.Rollback()
 
-				domains, err = NewSharedDomains(rwTx, log.New())
+				domains, err = NewSharedDomains(rwTx, rwDb, log.New())
 				if err != nil {
 					return nil, err
 				}
@@ -472,7 +472,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 				// case when we do testing and temporal db with aggtx is not available
 				ac = a.BeginFilesRo()
 
-				domains, err = NewSharedDomains(wrapTxWithCtxForTest(roTx, ac), log.New())
+				domains, err = NewSharedDomains(wrapTxWithCtxForTest(roTx, ac), a.db, log.New())
 				if err != nil {
 					ac.Close()
 					return nil, err

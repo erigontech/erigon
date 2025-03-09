@@ -89,9 +89,9 @@ func TestAccessList(t *testing.T) {
 	addr := common.HexToAddress
 	slot := common.HexToHash
 
-	_, tx, _ := NewTestTemporalDb(t)
+	db, tx, _ := NewTestTemporalDb(t)
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := stateLib.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
