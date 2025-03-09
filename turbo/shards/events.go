@@ -278,3 +278,12 @@ func (r *RecentLogs) Add(receipts types.Receipts) {
 		}
 	}
 }
+
+func (r *RecentLogs) CopyAndReset(target *RecentLogs) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, receipts := range r.receipts {
+		target.Add(receipts)
+	}
+	r.receipts = make(map[uint64]types.Receipts, r.limit)
+}

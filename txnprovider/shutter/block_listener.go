@@ -18,6 +18,7 @@ package shutter
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -76,5 +77,9 @@ func (bl BlockListener) Run(ctx context.Context) error {
 		bl.events.NotifySync(blockEvent)
 	}
 
-	return err
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	return fmt.Errorf("block listener sub.Recv: %w", err)
 }

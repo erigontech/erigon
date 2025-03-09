@@ -18,9 +18,12 @@ package shutter
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
@@ -69,6 +72,13 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 		return err
 	}
 
+	defer func() {
+		err := p2pHost.Close()
+		if err != nil {
+			dkl.logger.Error("failed to close p2p host", "err", err)
+		}
+	}()
+
 	pubSub, err := dkl.initGossipSub(ctx, p2pHost)
 	if err != nil {
 		return err
@@ -89,8 +99,23 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 	//
 
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error { return dkl.listenLoop(ctx, pubSub) })
-	eg.Go(func() error { return dkl.peerInfoLoop(ctx, pubSub) })
+
+	eg.Go(func() error {
+		err := dkl.listenLoop(ctx, pubSub)
+		if err != nil {
+			return fmt.Errorf("decryptiom keys listen loop failure: %w", err)
+		}
+		return nil
+	})
+
+	eg.Go(func() error {
+		err := dkl.peerInfoLoop(ctx, pubSub)
+		if err != nil {
+			return fmt.Errorf("decryptiom keys peer info loop failure: %w", err)
+		}
+		return nil
+	})
+
 	return eg.Wait()
 }
 
@@ -100,7 +125,9 @@ func (dkl DecryptionKeysListener) initP2pHost() (host.Host, error) {
 		return nil, err
 	}
 
-	privKey, err := libp2pcrypto.UnmarshalSecp256k1PrivateKey(dkl.config.PrivateKey.D.Bytes())
+	privKeyBytes := make([]byte, 32)
+	dkl.config.PrivateKey.D.FillBytes(privKeyBytes)
+	privKey, err := libp2pcrypto.UnmarshalSecp256k1PrivateKey(privKeyBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -195,13 +222,27 @@ func (dkl DecryptionKeysListener) connectBootstrapNodes(ctx context.Context, hos
 		return err
 	}
 
+	if len(nodes) == 0 {
+		return errors.New("no shutter bootstrap nodes configured")
+	}
+
 	wg, ctx := errgroup.WithContext(ctx)
 	for _, node := range nodes {
 		wg.Go(func() error {
-			err := host.Connect(ctx, node)
+			connect := func() error {
+				dkl.logger.Info("connecting to bootstrap node", "node", node)
+				err := host.Connect(ctx, node)
+				if err != nil {
+					dkl.logger.Warn("failed to connect to bootstrap node, trying again", "node", node, "err", err)
+				}
+				return err
+			}
+			err = backoff.Retry(connect, backoff.NewExponentialBackOff())
 			if err != nil {
 				dkl.logger.Error("failed to connect to bootstrap node", "node", node, "err", err)
 			}
+
+			dkl.logger.Info("connected to bootstrap node", "node", node)
 			return nil
 		})
 	}
@@ -220,7 +261,7 @@ func (dkl DecryptionKeysListener) listenLoop(ctx context.Context, pubSub *pubsub
 		return err
 	}
 	defer func() {
-		if err := topic.Close(); err != nil {
+		if err := topic.Close(); err != nil && !errors.Is(err, context.Canceled) {
 			dkl.logger.Error("failed to close decryption keys topic", "err", err)
 		}
 	}()

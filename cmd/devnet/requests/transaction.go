@@ -103,7 +103,6 @@ func (reqGen *requestGenerator) EstimateGas(args ethereum.CallMsg, blockRef Bloc
 		return 0, fmt.Errorf("EstimateGas rpc failed: %w", b.Error)
 	}
 
-	fmt.Println("EST GAS", b.Number)
 	return uint64(b.Number), nil
 }
 
