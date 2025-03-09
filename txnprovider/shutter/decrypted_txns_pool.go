@@ -31,6 +31,7 @@ type DecryptionMark struct {
 type TxnBatch struct {
 	Transactions  []types.Transaction
 	TotalGasLimit uint64
+	TotalBytes    int64
 }
 
 type DecryptedTxnsPool struct {
@@ -83,19 +84,28 @@ func (p *DecryptedTxnsPool) AddDecryptedTxns(mark DecryptionMark, txnBatch TxnBa
 	defer p.decryptionCond.L.Unlock()
 	p.decryptedTxns[mark] = txnBatch
 	p.decryptionCond.Broadcast()
+	txnsLen := float64(len(txnBatch.Transactions))
+	decryptedTxnsPoolAdded.Add(txnsLen)
+	decryptedTxnsPoolTotalCount.Add(txnsLen)
+	decryptedTxnsPoolTotalBytes.Add(float64(txnBatch.TotalBytes))
 }
 
-func (p *DecryptedTxnsPool) DeleteDecryptedTxnsUpToSlot(slot uint64) uint64 {
+func (p *DecryptedTxnsPool) DeleteDecryptedTxnsUpToSlot(slot uint64) (markDeletions, txnDeletions uint64) {
 	p.decryptionCond.L.Lock()
 	defer p.decryptionCond.L.Unlock()
 
-	var deletions uint64
-	for mark := range p.decryptedTxns {
+	var totalBytes int64
+	for mark, txnBatch := range p.decryptedTxns {
 		if mark.Slot <= slot {
-			deletions++
+			markDeletions++
+			txnDeletions += uint64(len(txnBatch.Transactions))
+			totalBytes += txnBatch.TotalBytes
 			delete(p.decryptedTxns, mark)
 		}
 	}
 
-	return deletions
+	decryptedTxnsPoolDeleted.Add(float64(txnDeletions))
+	decryptedTxnsPoolTotalCount.Sub(float64(txnDeletions))
+	decryptedTxnsPoolTotalBytes.Sub(float64(totalBytes))
+	return markDeletions, txnDeletions
 }

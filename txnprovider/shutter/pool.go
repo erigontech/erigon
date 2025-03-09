@@ -159,13 +159,22 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 	}
 
 	parentBlockNum := provideOpts.ParentBlockNum
-	parentBlockWaitTime := time.Second * time.Duration(p.slotCalculator.SecondsPerSlot())
-	parentBlockWaitCtx, parentBlockWaitCtxCancel := context.WithTimeout(ctx, parentBlockWaitTime)
+	parentBlockWaitTimeout := time.Second * time.Duration(p.slotCalculator.SecondsPerSlot())
+	parentBlockWaitCtx, parentBlockWaitCtxCancel := context.WithTimeout(ctx, parentBlockWaitTimeout)
 	defer parentBlockWaitCtxCancel()
+	parentBlockWaitStart := time.Now()
 	err := p.blockTracker.Wait(parentBlockWaitCtx, parentBlockNum)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			parentBlockWaitSecs.ObserveDuration(parentBlockWaitStart)
+			parentBlockMissed.Inc()
+		}
+
 		return nil, fmt.Errorf("issue while waiting for parent block %d: %w", parentBlockNum, err)
 	}
+
+	parentBlockWaitSecs.ObserveDuration(parentBlockWaitStart)
+	parentBlockOnTime.Inc()
 
 	eon, ok := p.eonTracker.EonByBlockNum(parentBlockNum)
 	if !ok {
@@ -180,20 +189,23 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 
 	decryptionMark := DecryptionMark{Slot: slot, Eon: eon.Index}
 	slotAge := p.slotCalculator.CalcSlotAge(slot)
-	keysWaitTime := p.config.MaxDecryptionKeysDelay - slotAge
-	decryptionWaitCtx, decryptionWaitCtxCancel := context.WithTimeout(ctx, keysWaitTime)
-	defer decryptionWaitCtxCancel()
-	err = p.decryptedTxnsPool.Wait(decryptionWaitCtx, decryptionMark)
+	decryptionMarkWaitTimeout := p.config.MaxDecryptionKeysDelay - slotAge
+	decryptionMarkWaitCtx, decryptionMarkWaitCtxCancel := context.WithTimeout(ctx, decryptionMarkWaitTimeout)
+	defer decryptionMarkWaitCtxCancel()
+	decryptionMarkWaitStart := time.Now()
+	err = p.decryptedTxnsPool.Wait(decryptionMarkWaitCtx, decryptionMark)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			p.logger.Warn(
-				"decryption keys wait timeout, falling back to base txn provider",
+				"decryption mark wait timeout, falling back to secondary txn provider",
+				"blockNum", parentBlockNum+1,
 				"slot", slot,
 				"age", slotAge,
-				"blockNum", parentBlockNum+1,
-				"timeout", keysWaitTime,
+				"timeout", decryptionMarkWaitTimeout,
 			)
 
+			decryptionMarkWaitSecs.ObserveDuration(decryptionMarkWaitStart)
+			decryptionMarkMissed.Inc()
 			// Note: specs say to produce empty block in case decryption keys do not arrive on time.
 			// However, upon discussion with Shutter and Nethermind it was agreed that this is not
 			// practical at this point in time as it can hurt validator rewards across the network,
@@ -208,6 +220,8 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 		return nil, err
 	}
 
+	decryptionMarkWaitSecs.ObserveDuration(decryptionMarkWaitStart)
+	decryptionMarkOnTime.Inc()
 	return p.provide(ctx, decryptionMark, opts...)
 }
 
