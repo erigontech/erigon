@@ -148,6 +148,9 @@ func (vr VersionedWrite) String() string {
 }
 
 func valueString(path AccountPath, value any) string {
+	if value == nil {
+		return "<nil>"
+	}
 	switch path {
 	case AddressPath:
 		return fmt.Sprintf("%+v", value)
@@ -189,8 +192,8 @@ func (vr *versionedStateReader) SetStateReader(stateReader StateReader) {
 
 func (vr *versionedStateReader) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
-		if account, ok := r.Val.(accounts.Account); ok {
-			updated := vr.applyVersionedUpdates(address, account)
+		if account, ok := r.Val.(*accounts.Account); ok {
+			updated := vr.applyVersionedUpdates(address, *account)
 			return &updated, nil
 		}
 	}
@@ -238,8 +241,8 @@ func (vr versionedStateReader) applyVersionedUpdates(address libcommon.Address, 
 
 func (vr versionedStateReader) ReadAccountDataForDebug(address libcommon.Address) (*accounts.Account, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
-		if account, ok := r.Val.(accounts.Account); ok {
-			updated := vr.applyVersionedUpdates(address, account)
+		if account, ok := r.Val.(*accounts.Account); ok {
+			updated := vr.applyVersionedUpdates(address, *account)
 			return &updated, nil
 		}
 	}
@@ -301,7 +304,7 @@ func (vr versionedStateReader) ReadAccountCodeSize(address libcommon.Address, in
 
 func (vr versionedStateReader) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
-		return r.Val.(accounts.Account).Incarnation, nil
+		return r.Val.(*accounts.Account).Incarnation, nil
 	}
 
 	if vr.stateReader != nil {
