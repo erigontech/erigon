@@ -471,19 +471,12 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 		},
 	}
 
-	if addr == tra {
-		fmt.Printf("(%d) VRD(0), %x: %s\n", s.txIndex, addr, vr.String())
-	}
-
 	switch res.Status() {
 	case MVReadResultDone:
 
 		vr.Source = MapRead
 
 		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
-			if addr == tra {
-				fmt.Printf("(%d) VRD(1), %x: pr=%s, vr=%s\n", s.txIndex, addr, pr, vr)
-			}
 			if pr.Version == vr.Version {
 				if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
 					fmt.Printf("%d (%d.%d) RD %s (%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, pr.Val))
