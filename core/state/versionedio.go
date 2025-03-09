@@ -469,7 +469,7 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 	}
 
 	if addr == tra {
-		fmt.Printf("(%d) VRD(0), %x: %+v\n", txIdx, addr, vr)
+		fmt.Printf("(%d) VRD(0), %x: %+v\n", s.txIndex, addr, vr)
 	}
 
 	switch res.Status() {
@@ -479,7 +479,7 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 
 		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 			if addr == tra {
-				fmt.Printf("(%d) VRD(1), %x: pr=%+v, vr=%+v\n", txIdx, addr, vr)
+				fmt.Printf("(%d) VRD(1), %x: pr=%+v, vr=%+v\n", s.txIndex, addr, vr)
 			}
 			if pr.Version == vr.Version {
 				if dbg.TraceTransactionIO && (s.trace || traceAccount(addr)) {
