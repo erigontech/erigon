@@ -492,7 +492,7 @@ Loop:
 		executor.domains().SetBlockNum(blockNum)
 
 		b, err = blockWithSenders(ctx, cfg.db, executor.tx(), blockReader, blockNum)
-		// fmt.Println("JG block received", blockNum, b.Hash())
+		fmt.Printf("JG executing block %d expected gas used %d\n", blockNum, b.GasUsed())
 		if err != nil {
 			return err
 		}
@@ -560,6 +560,7 @@ Loop:
 
 				Config: chainConfig,
 			}
+
 			if txTask.HistoryExecution && usedGas == 0 {
 				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
 				if err != nil {

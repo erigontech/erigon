@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/eth/consensuschain"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -280,6 +281,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool, silkwormI
 		msg := txTask.TxAsMessage
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
+
+		sender, _ := txTask.Txs[txTask.TxIndex].GetSender()
+
+		fmt.Println("JG RunTxTaskNoLock", "BlockNum", txTask.BlockNum, "BlockHash", hexutil.Encode(txTask.BlockHash.Bytes()),
+			"TxIndex", txTask.TxIndex, "TxNum", txTask.TxNum, "TxnHash", txTask.Txs[txTask.TxIndex].Hash(), "Sender", sender)
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.engine)
