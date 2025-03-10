@@ -509,7 +509,7 @@ type CmpFunc func(k1, k2, v1, v2 []byte) int
 type TableCfg map[string]TableCfgItem
 type Bucket string
 
-type DBI uint
+type DBI uint32
 type TableFlags uint
 
 const (
