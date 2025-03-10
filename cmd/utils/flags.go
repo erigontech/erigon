@@ -2018,7 +2018,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(TrustedSetupFile.Name) {
 		libkzg.SetTrustedSetupFilePath(ctx.String(TrustedSetupFile.Name))
 	}
-	panic(cfg.Snapshot.DownloaderAddr)
 
 	// Do this after chain config as there are chain type registration
 	// dependencies for know config which need to be set-up
