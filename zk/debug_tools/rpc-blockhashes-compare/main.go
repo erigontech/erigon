@@ -75,7 +75,7 @@ func main() {
 	}
 
 	// get blocks
-	blockRemote, blockLocal, err = getBlocks(ctx, rpcClientLocal, rpcClientRemote, checkBlockNumber)
+	blockLocal, blockRemote, err = getBlocks(ctx, rpcClientLocal, rpcClientRemote, checkBlockNumber)
 	if err != nil {
 		log.Error(fmt.Sprintf("blockNum: %d, error getBlocks: %s", checkBlockNumber, err))
 		return
