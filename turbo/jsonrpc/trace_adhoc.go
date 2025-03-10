@@ -491,7 +491,7 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 		ignoreError = !deep && topTrace.Type == CREATE
 	}
 	if err != nil && !ignoreError {
-		if err == vm.ErrExecutionReverted {
+		if errors.Is(err, vm.ErrExecutionReverted) {
 			topTrace.Error = "Reverted"
 			switch topTrace.Type {
 			case CALL:
@@ -567,7 +567,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			}
 			for i := showStack - 1; i >= 0; i-- {
 				if len(st) > i {
-					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, tracers.StackBack(st, i).String())
+					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, tracers.StackBack(st, i).Hex())
 				}
 			}
 			// Set the "mem" of the last operation
@@ -588,7 +588,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 		if ot.lastOffStack != nil {
 			ot.lastOffStack.Ex.Used = int(gas)
 			if len(st) > 0 {
-				ot.lastOffStack.Ex.Push = []string{tracers.StackBack(st, 0).String()}
+				ot.lastOffStack.Ex.Push = []string{tracers.StackBack(st, 0).Hex()}
 			} else {
 				ot.lastOffStack.Ex.Push = []string{}
 			}
@@ -660,7 +660,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			ot.memLenStack = append(ot.memLenStack, 0)
 		case vm.SSTORE:
 			if len(st) > 1 {
-				ot.lastVmOp.Ex.Store = &VmTraceStore{Key: tracers.StackBack(st, 0).String(), Val: tracers.StackBack(st, 1).String()}
+				ot.lastVmOp.Ex.Store = &VmTraceStore{Key: tracers.StackBack(st, 0).Hex(), Val: tracers.StackBack(st, 1).Hex()}
 			}
 		}
 		if ot.lastVmOp.Ex.Used < 0 {
