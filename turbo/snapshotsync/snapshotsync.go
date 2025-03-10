@@ -287,6 +287,9 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 
+	freezingCfg := blockReader.FreezingCfg()
+	fmt.Printf("[dbg] ProduceE2: %t, ProduceE3: %t, snapshotDownloader is nil %t, noDownloader %t\n", freezingCfg.ProduceE2, freezingCfg.ProduceE3, snapshotDownloader == nil, blockReader.FreezingCfg().NoDownloader)
+
 	// Find minimum block to download.
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
 		if err := snapshots.OpenFolder(); err != nil {
