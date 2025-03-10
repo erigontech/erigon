@@ -181,30 +181,31 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 //
 // Listen for incoming requests from diagnostics system and send them to the incommitg request channel
 func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
-	ctx1, cancel1 := context.WithCancel(ctx)
-	defer cancel1()
-
 	go func() {
 		select {
 		case <-sigs:
 			logger.Info("Got interrupt, shutting down...")
-			cancel1()
-		case <-ctx1.Done():
-			logger.Info("Context done")
+			cancel() // Cancel the outer context
+		case <-ctx.Done():
 			return
 		}
 	}()
 
-	codec, err := createCodec(ctx1, diagnosticsUrl)
+	codec, err := createCodec(ctx, diagnosticsUrl)
 	if err != nil {
 		return err
 	}
 	defer codec.Close()
 
+	go func() {
+		<-ctx.Done()
+		codec.Close()
+	}()
+
 	metricsClient := &http.Client{}
 	defer metricsClient.CloseIdleConnections()
 
-	connections, err := createConnections(ctx1, codec, metricsClient, debugURLs)
+	connections, err := createConnections(ctx, codec, metricsClient, debugURLs)
 	if err != nil {
 		return err
 	}
@@ -213,7 +214,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		return nil
 	}
 
-	err = sendNodesInfoToDiagnostics(ctx1, codec, sessionIds, connections)
+	err = sendNodesInfoToDiagnostics(ctx, codec, sessionIds, connections)
 	if err != nil {
 		return err
 	}
@@ -223,7 +224,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	for {
 		requests, _, err := codec.ReadBatch()
 		select {
-		case <-ctx1.Done():
+		case <-ctx.Done():
 			return nil
 		default:
 			if err != nil {

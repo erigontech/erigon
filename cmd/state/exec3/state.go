@@ -156,7 +156,7 @@ func (rw *Worker) Run() (err error) {
 func (rw *Worker) RunTxTask(txTask *state.TxTask, isMining bool) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	rw.RunTxTaskNoLock(txTask, isMining)
+	rw.RunTxTaskNoLock(txTask, isMining, false)
 }
 
 // Needed to set history reader when need to offset few txs from block beginning and does not break processing,
@@ -178,7 +178,7 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
-func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
+func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvaluaion bool) {
 	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
@@ -242,7 +242,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			break
 		}
 
-		//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		// End of block transaction in a block
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, nil)
@@ -251,7 +250,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		if isMining {
 			_, txTask.Txs, txTask.BlockReceipts, _, err = rw.engine.FinalizeAndAssemble(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, nil, rw.logger)
 		} else {
-			_, _, _, err = rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, rw.logger)
+			_, _, _, err = rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
 		}
 		if err != nil {
 			txTask.Error = err

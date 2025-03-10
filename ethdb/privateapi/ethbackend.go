@@ -24,6 +24,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -32,11 +33,17 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/cmd/state/commands"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 // EthBackendAPIVersion
@@ -59,8 +66,9 @@ type EthBackendServer struct {
 	blockReader           services.FullBlockReader
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 
-	logsFilter *LogsFilterAggregator
-	logger     log.Logger
+	logsFilter  *LogsFilterAggregator
+	logger      log.Logger
+	chainConfig *chain.Config
 }
 
 type EthBackend interface {
@@ -418,4 +426,34 @@ func (s *EthBackendServer) BorEvents(ctx context.Context, req *remote.BorEventsR
 	return &remote.BorEventsReply{
 		EventRlps: eventsRaw,
 	}, nil
+}
+
+func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValidationRequest) (*remote.AAValidationReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	aaTxn := types.FromProto(req.Tx)
+	stateReader := state.NewHistoryReaderV3()
+	stateReader.SetTx(tx.(kv.TemporalTx))
+	ibs := state.New(stateReader)
+
+	currentBlock, err := s.blockReader.CurrentBlock(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	header := currentBlock.HeaderNoCopy()
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, nil, s.chainConfig)
+	_, txContext, err := transactions.ComputeTxContext(ibs, nil, nil, nil, currentBlock, s.chainConfig, 0)
+
+	ot := commands.NewOpcodeTracer(header.Number.Uint64(), true, false)
+	_ = vm.NewEVM(blockContext, txContext, ibs, s.chainConfig, vm.Config{Tracer: ot.Tracer().Hooks, ReadOnly: true})
+	_ = aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit
+
+	// call validation and read tracer
+
+	return &remote.AAValidationReply{Valid: err == nil}, nil
 }

@@ -182,7 +182,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			return core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, false /* constCall */, tracer.TracingHooks())
 		}
 
-		_, _, _, err := rw.execArgs.Engine.Finalize(rw.execArgs.ChainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, rw.logger)
+		_, _, _, err := rw.execArgs.Engine.Finalize(rw.execArgs.ChainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, true /* skipReceiptsEval */, rw.logger)
 		if err != nil {
 			txTask.Error = err
 		}
