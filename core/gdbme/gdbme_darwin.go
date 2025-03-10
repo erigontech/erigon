@@ -14,7 +14,7 @@ import (
 const lldbPath = "/usr/bin/lldb"
 
 // RestartUnderLLDB restart erigon under lldb, keeping all the arguments.
-func RestartUnderLLDB() {
+func RestartUnderGDB() {
 	exePath, err := os.Executable()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error: could not determine executable path:", err)

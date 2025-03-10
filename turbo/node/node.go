@@ -27,17 +27,15 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/gdbme"
-	"github.com/urfave/cli/v2"
-	"runtime"
-
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core/gdbme"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
+	"github.com/urfave/cli/v2"
 )
 
 // ErigonNode represents a single node, that runs sync and p2p network.
@@ -121,12 +119,7 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, e
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig, logger)
 
 	if ctx.Bool(utils.GDBMeFlag.Name) {
-		switch runtime.GOOS {
-		case "darwin":
-			gdbme.RestartUnderLLDB()
-		default:
-			gdbme.RestartUnderGDB()
-		}
+		gdbme.RestartUnderGDB()
 	}
 
 	return nodeConfig, nil
