@@ -1146,7 +1146,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	blockCtx.GasLimit = math.MaxUint64
 	blockCtx.MaxGasLimit = true
 
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: ot.Tracer().Hooks})
+	hooks := ot.Tracer().Hooks
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: hooks})
 
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
@@ -1158,20 +1159,20 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
 	ibs.SetTxContext(0)
-	ibs.SetHooks(ot.Tracer().Hooks)
+	ibs.SetHooks(hooks)
 
-	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
-		ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
+	if hooks != nil && hooks.OnTxStart != nil {
+		hooks.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
 	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
-		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-			ot.Tracer().OnTxEnd(nil, err)
+		if hooks != nil && hooks.OnTxEnd != nil {
+			hooks.OnTxEnd(nil, err)
 		}
 		return nil, err
 	}
-	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+	if hooks != nil && hooks.OnTxEnd != nil {
+		hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
 	}
 	traceResult.Output = libcommon.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
@@ -1400,9 +1401,9 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			if traceTypeVmTrace {
 				traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 			}
-			vmConfig.Debug = true
-			vmConfig.Tracer = ot.Tracer().Hooks
 			tracer = ot.Tracer()
+			vmConfig.Debug = true
+			vmConfig.Tracer = tracer.Hooks
 		}
 
 		if useParent {
