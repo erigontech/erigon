@@ -292,7 +292,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		historicalSummaries.Append(historicalSummary)
 	}
 	ret.SetHistoricalSummaries(historicalSummaries)
-	if ret.Version() < clparams.DenebVersion {
+	if ret.Version() < clparams.ElectraVersion {
 		return ret, nil
 	}
 	ret.SetDepositRequestsStartIndex(slotData.DepositRequestsStartIndex)
