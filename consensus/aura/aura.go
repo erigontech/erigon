@@ -242,6 +242,7 @@ type AuRa struct {
 
 	certifier     *libcommon.Address // certifies service transactions
 	certifierLock sync.Mutex
+	db            kv.RwDB
 }
 
 func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
@@ -317,6 +318,7 @@ func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 		cfg:                auraParams,
 		receivedStepHashes: ReceivedStepHashes{},
 		EpochManager:       NewEpochManager(),
+		db:                 db,
 	}
 	c.step.canPropose.Store(true)
 
@@ -1040,6 +1042,7 @@ func (c *AuRa) IsServiceTransaction(sender libcommon.Address, syscall consensus.
 
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *AuRa) Close() error {
+	c.db.Close()
 	libcommon.SafeClose(c.exitCh)
 	return nil
 }

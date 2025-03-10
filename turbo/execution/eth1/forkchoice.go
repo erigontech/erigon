@@ -438,7 +438,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				ValidationError: validationError,
 			}, false)
 		}
-		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
+		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator, e.recentLogs); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			return
 		}
