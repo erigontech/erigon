@@ -122,12 +122,10 @@ func createBackwardTxNumIter(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader
 	if err != nil {
 		return nil, err
 	}
-	itTo = stream.NewUnoLogger[uint64](itTo, "itTo")
 	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], fromTxNum, -1, order.Desc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
-	itFrom = stream.NewUnoLogger[uint64](itFrom, "itFrom")
 	txNums := stream.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
 	return rawdbv3.TxNums2BlockNums(tx, txNumsReader, txNums, order.Desc), nil
 }

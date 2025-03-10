@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
@@ -392,7 +391,6 @@ func (w *invertedIndexBufferedWriter) SetTxNum(txNum uint64) {
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (w *invertedIndexBufferedWriter) Add(key []byte) error {
-	fmt.Printf("ADD %s\n", hexutil.Encode(key))
 	return w.add(key, key)
 }
 
@@ -652,7 +650,7 @@ func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc
 	if err != nil {
 		return nil, err
 	}
-	return stream.Union[uint64](stream.NewUnoLogger(frozenIt, "frozenIt"), stream.NewUnoLogger(recentIt, "recentIt"), asc, limit), nil
+	return stream.Union[uint64](frozenIt, recentIt, asc, limit), nil
 }
 
 func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
