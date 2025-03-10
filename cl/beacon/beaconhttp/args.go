@@ -171,7 +171,7 @@ func HashFromQueryParams(r *http.Request, name string) (*common.Hash, error) {
 	return &hash, nil
 }
 
-// uint64FromQueryParams retrieves a number from the query params, in base 10.
+// Uint64FromQueryParams retrieves a number from the query params, in base 10.
 func Uint64FromQueryParams(r *http.Request, name string) (*uint64, error) {
 	str := r.URL.Query().Get(name)
 	if str == "" {
