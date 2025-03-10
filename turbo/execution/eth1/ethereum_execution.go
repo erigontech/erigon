@@ -74,6 +74,7 @@ type EthereumExecutionModule struct {
 	// Changes accumulator
 	hook                *stages.Hook
 	accumulator         *shards.Accumulator
+	recentLogs          *shards.RecentLogs
 	stateChangeConsumer shards.StateChangeConsumer
 
 	// configuration
@@ -95,6 +96,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 	executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
 	config *chain.Config, builderFunc builder.BlockBuilderFunc,
 	hook *stages.Hook, accumulator *shards.Accumulator,
+	recentLogs *shards.RecentLogs,
 	stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine consensus.Engine,
 	syncCfg ethconfig.Sync,
@@ -112,11 +114,11 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		semaphore:           semaphore.NewWeighted(1),
 		hook:                hook,
 		accumulator:         accumulator,
+		recentLogs:          recentLogs,
 		stateChangeConsumer: stateChangeConsumer,
 		engine:              engine,
-
-		syncCfg:      syncCfg,
-		bacgroundCtx: ctx,
+		syncCfg:             syncCfg,
+		bacgroundCtx:        ctx,
 	}
 }
 
