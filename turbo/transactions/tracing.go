@@ -123,11 +123,14 @@ func TraceTx(
 			if tracer != nil && tracer.OnTxEnd != nil {
 				tracer.OnTxEnd(nil, err)
 			}
+
+			return result, err
 		} else {
 			if tracer != nil && tracer.OnTxEnd != nil {
 				tracer.OnTxEnd(&types.Receipt{GasUsed: result.UsedGas}, nil)
 			}
 		}
+
 		usedGas = result.UsedGas
 		return result, err
 	}
