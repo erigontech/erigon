@@ -1017,7 +1017,7 @@ func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("label: %s, table: %s, %w", tx.db.opts.label, bucket, err)
 	}
-	return v, err
+	return v, nil
 }
 
 func (tx *MdbxTx) Has(bucket string, key []byte) (bool, error) {
@@ -1127,7 +1127,7 @@ func (tx *MdbxTx) DBSize() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return info.Geo.Current, err
+	return info.Geo.Current, nil
 }
 
 func (tx *MdbxTx) RwCursor(bucket string) (kv.RwCursor, error) {
