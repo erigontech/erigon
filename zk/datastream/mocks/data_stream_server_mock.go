@@ -325,6 +325,10 @@ func (m *MockDataStreamServer) ReadBatches(arg0, arg1 uint64) ([][]*types0.FullL
 	return ret0, ret1
 }
 
+func (m *MockDataStreamServer) ReadBatchesWithConcurrency(arg0, arg1 uint64) ([][]*types0.FullL2Block, error) {
+	return m.ReadBatches(arg0, arg1)
+}
+
 // ReadBatches indicates an expected call of ReadBatches.
 func (mr *MockDataStreamServerMockRecorder) ReadBatches(arg0, arg1 any) *MockDataStreamServerReadBatchesCall {
 	mr.mock.ctrl.T.Helper()
