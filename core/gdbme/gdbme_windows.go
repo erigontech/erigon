@@ -1,3 +1,5 @@
 package gdbme
 
-func RestartUnderGDB() {}
+func RestartUnderGDB() {
+	println("no windows support for gdbme for now...")
+}
