@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -226,6 +227,7 @@ func (dkl DecryptionKeysListener) connectBootstrapNodes(ctx context.Context, hos
 		return errors.New("no shutter bootstrap nodes configured")
 	}
 
+	var connected atomic.Int32
 	wg, ctx := errgroup.WithContext(ctx)
 	for _, node := range nodes {
 		wg.Go(func() error {
@@ -237,17 +239,28 @@ func (dkl DecryptionKeysListener) connectBootstrapNodes(ctx context.Context, hos
 				}
 				return err
 			}
-			err = backoff.Retry(connect, backoff.NewExponentialBackOff())
+
+			err = backoff.Retry(connect, backoff.WithContext(backoff.NewExponentialBackOff(), ctx))
 			if err != nil {
 				dkl.logger.Error("failed to connect to bootstrap node", "node", node, "err", err)
 			}
 
 			dkl.logger.Info("connected to bootstrap node", "node", node)
+			connected.Add(1)
 			return nil
 		})
 	}
 
-	return wg.Wait()
+	err = wg.Wait()
+	if err != nil {
+		return err
+	}
+
+	if connected.Load() == 0 {
+		return errors.New("failed to connect to any bootstrap node")
+	}
+
+	return nil
 }
 
 func (dkl DecryptionKeysListener) listenLoop(ctx context.Context, pubSub *pubsub.PubSub) error {
