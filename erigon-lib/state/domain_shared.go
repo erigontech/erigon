@@ -109,14 +109,17 @@ type HasAgg interface {
 	Agg() any
 }
 
-func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
+func NewSharedDomains(tx kv.Tx, db kv.RoDB, logger log.Logger) (*SharedDomains, error) {
 
 	sd := &SharedDomains{
 		logger:  logger,
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
 	}
-	sd.SetTx(tx)
+
+	if err := sd.SetTx(tx); err != nil {
+		return nil, err
+	}
 	sd.iiWriters = make([]*invertedIndexBufferedWriter, len(sd.aggTx.iis))
 
 	for id, ii := range sd.aggTx.iis {
@@ -670,21 +673,22 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 	panic(fmt.Errorf("unknown index %s", table))
 }
 
-func (sd *SharedDomains) SetTx(tx kv.Tx) {
+func (sd *SharedDomains) SetTx(tx kv.Tx) error {
 	if tx == nil {
-		panic("tx is nil")
+		return errors.New("tx is nil")
 	}
 	sd.roTx = tx
 
 	casted, ok := tx.(HasAggTx)
 	if !ok {
-		panic(fmt.Errorf("type %T need AggTx method", tx))
+		return fmt.Errorf("type %T need AggTx method", tx)
 	}
 
 	sd.aggTx = casted.AggTx().(*AggregatorRoTx)
 	if sd.aggTx == nil {
-		panic(errors.New("aggtx is nil"))
+		return errors.New("aggtx is nil")
 	}
+	return nil
 }
 
 func (sd *SharedDomains) StepSize() uint64 { return sd.aggTx.StepSize() }
@@ -1181,6 +1185,11 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expected
 		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, nil, expectedRoot, logPrefix)
 	}
 
+	parallelHexPatriciaHashed, ok := sdc.Trie().(*commitment.ParallelPatriciaHashed)
+	if ok {
+		return parallelHexPatriciaHashed.HexPatriciaHashed.GenerateWitness(ctx, sdc.updates, nil, expectedRoot, logPrefix)
+	}
+
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 }
 
@@ -1256,6 +1265,11 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 
 	switch trie := (sdc.patriciaTrie).(type) {
 	case *commitment.HexPatriciaHashed:
+		state, err = trie.EncodeCurrentState(nil)
+		if err != nil {
+			return nil, err
+		}
+	case *commitment.ParallelPatriciaHashed:
 		state, err = trie.EncodeCurrentState(nil)
 		if err != nil {
 			return nil, err
@@ -1337,10 +1351,25 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 			}
 			fmt.Printf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash)
 		}
-	} else {
-		return 0, 0, errors.New("state storing is only supported hex patricia trie")
+		return cs.blockNum, cs.txNum, nil
 	}
-	return cs.blockNum, cs.txNum, nil
+
+	if hext, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok {
+		if err := hext.SetState(cs.trieState); err != nil {
+			return 0, 0, fmt.Errorf("failed restore state : %w", err)
+		}
+		sdc.justRestored.Store(true) // to prevent double reset
+		if sdc.sharedDomains.trace {
+			rootHash, err := hext.RootHash()
+			if err != nil {
+				return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
+			}
+			fmt.Printf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash)
+		}
+		return cs.blockNum, cs.txNum, nil
+	}
+
+	return 0, 0, errors.New("state storing is only supported hex patricia trie or parallel hex patricia trie")
 }
 
 func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }

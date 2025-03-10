@@ -930,7 +930,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			tx, err := coreDB.BeginTemporalRw(ctx)
 			defer tx.Rollback()
 			asrt.NoError(err)
-			sd, err := state.NewSharedDomains(tx, logger)
+			sd, err := state.NewSharedDomains(tx, coreDB, logger)
 			asrt.NoError(err)
 			defer sd.Close()
 			cache := kvcache.NewDummy()
@@ -1052,7 +1052,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	tx, err := coreDB.BeginRw(ctx)
 	defer tx.Rollback()
 	assert.NoError(t, err)
-	sd, err := state.NewSharedDomains(tx, logger)
+	sd, err := state.NewSharedDomains(tx, coreDB, logger)
 	assert.NoError(t, err)
 	defer sd.Close()
 

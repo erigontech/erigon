@@ -923,8 +923,8 @@ func TestReproduceCrash(t *testing.T) {
 	storageKey2 := libcommon.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
 	value2 := uint256.NewInt(0x58c00a51)
 
-	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := state3.NewSharedDomains(tx, log.New())
+	db, tx, _ := state.NewTestTemporalDb(t)
+	sd, err := state3.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -1343,8 +1343,8 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	t.Parallel()
 	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
-	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := state3.NewSharedDomains(tx, log.New())
+	db, tx, _ := state.NewTestTemporalDb(t)
+	sd, err := state3.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -1393,8 +1393,8 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	//root := libcommon.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := state3.NewSharedDomains(tx, log.New())
+	db, tx, _ := state.NewTestTemporalDb(t)
+	sd, err := state3.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -1431,8 +1431,8 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	root := libcommon.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := state3.NewSharedDomains(tx, log.New())
+	db, tx, _ := state.NewTestTemporalDb(t)
+	sd, err := state3.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 

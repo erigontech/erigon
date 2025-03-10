@@ -307,7 +307,7 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := libstate.NewSharedDomains(tx, log.New())
+	sd, err := libstate.NewSharedDomains(tx, db, log.New())
 	if err != nil {
 		return err
 	}
@@ -330,7 +330,7 @@ func Main(ctx *cli.Context) error {
 	}
 
 	// state root calculation
-	root, err := CalculateStateRoot(tx)
+	root, err := CalculateStateRoot(tx, db)
 	if err != nil {
 		return err
 	}
@@ -621,7 +621,7 @@ func NewHeader(env stEnv) *types.Header {
 	return &header
 }
 
-func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
+func CalculateStateRoot(tx kv.RwTx, db kv.RoDB) (*libcommon.Hash, error) {
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
 	if err != nil {
@@ -630,7 +630,7 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	defer c.Close()
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
-	domains, err := libstate.NewSharedDomains(tx, log.New())
+	domains, err := libstate.NewSharedDomains(tx, db, log.New())
 	if err != nil {
 		return nil, fmt.Errorf("NewSharedDomains: %w", err)
 	}
