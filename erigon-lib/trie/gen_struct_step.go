@@ -104,6 +104,19 @@ func (GenStructStepHashData) GenStructStepData() {}
 // Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
+func GenStructStep(
+	retain func(prefix []byte) bool,
+	curr, succ []byte,
+	e structInfoReceiver,
+	h HashCollector2,
+	data GenStructStepData,
+	groups []uint16,
+	hasTree []uint16,
+	hasHash []uint16,
+	trace bool,
+) ([]uint16, []uint16, []uint16, error) {
+	return GenStructStepEx(retain, curr, succ, e, h, data, groups, hasTree, hasHash, trace, nil, false)
+}
 
 // GenStructStepEx is extended to support optional generation of an Account Proof during trie_root.go CalcTrieRoot().
 // The wrapper below calls it with nil/false defaults so that other callers do not need to be modified.
@@ -344,19 +357,6 @@ func GenStructStepEx(
 		}
 	}
 	return nil, nil, nil, nil
-}
-func GenStructStep(
-	retain func(prefix []byte) bool,
-	curr, succ []byte,
-	e structInfoReceiver,
-	h HashCollector2,
-	data GenStructStepData,
-	groups []uint16,
-	hasTree []uint16,
-	hasHash []uint16,
-	trace bool,
-) ([]uint16, []uint16, []uint16, error) {
-	return GenStructStepEx(retain, curr, succ, e, h, data, groups, hasTree, hasHash, trace, nil, false)
 }
 
 func GenStructStepOld(
