@@ -139,8 +139,6 @@ func (vm *VersionMap) Write(addr libcommon.Address, path AccountPath, key libcom
 	}
 }
 
-var tra = libcommon.HexToAddress("dd03baefb005dadba5234e2954d23e5f9cbf57a9")
-
 func (vm *VersionMap) Read(addr libcommon.Address, path AccountPath, key libcommon.Hash, txIdx int) (res ReadResult) {
 	if vm == nil {
 		return res
@@ -155,10 +153,6 @@ func (vm *VersionMap) Read(addr libcommon.Address, path AccountPath, key libcomm
 	cells := vm.getKeyCells(addr, path, key, func(_ libcommon.Address, _ AccountPath, _ libcommon.Hash) *btree.Map[int, *WriteCell] {
 		return nil
 	})
-
-	if addr == tra {
-		fmt.Printf("(%d) MRD, %x: %+v\n", txIdx, addr, cells)
-	}
 
 	if cells == nil {
 		return
@@ -175,14 +169,6 @@ func (vm *VersionMap) Read(addr libcommon.Address, path AccountPath, key libcomm
 	}
 
 	fk, fv := floor(txIdx - 1)
-
-	if addr == tra {
-		if fv != nil {
-			fmt.Printf("(%d) MRD, %x: fk=%d, fv=%+v, data=(%T) %+v\n", txIdx, addr, fk, fv, fv.data, fv.data)
-		} else {
-			fmt.Printf("(%d) MRD, %x: fk=%d, fv=<nill>\n", txIdx, addr, fk)
-		}
-	}
 
 	if fk != -1 && fv != nil {
 		switch fv.flag {
