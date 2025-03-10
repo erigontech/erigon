@@ -67,11 +67,12 @@ func SlotDataFromBeaconState(s *state.CachingBeaconState) *SlotData {
 		ValidatorLength: uint64(s.ValidatorLength()),
 		Eth1DataLength:  uint64(s.Eth1DataVotes().Len()),
 
-		Version:                       s.Version(),
-		Eth1Data:                      s.Eth1Data(),
-		Eth1DepositIndex:              s.Eth1DepositIndex(),
-		NextWithdrawalIndex:           s.NextWithdrawalIndex(),
-		NextWithdrawalValidatorIndex:  s.NextWithdrawalValidatorIndex(),
+		Version:                      s.Version(),
+		Eth1Data:                     s.Eth1Data(),
+		Eth1DepositIndex:             s.Eth1DepositIndex(),
+		NextWithdrawalIndex:          s.NextWithdrawalIndex(),
+		NextWithdrawalValidatorIndex: s.NextWithdrawalValidatorIndex(),
+		// Electra
 		DepositRequestsStartIndex:     s.DepositRequestsStartIndex(),
 		DepositBalanceToConsume:       s.DepositBalanceToConsume(),
 		ExitBalanceToConsume:          s.ExitBalanceToConsume(),

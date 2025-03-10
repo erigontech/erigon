@@ -292,6 +292,17 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		historicalSummaries.Append(historicalSummary)
 	}
 	ret.SetHistoricalSummaries(historicalSummaries)
+	if ret.Version() < clparams.ElectraVersion {
+		ret.SetDepositRequestsStartIndex(slotData.DepositRequestsStartIndex)
+		ret.SetDepositBalanceToConsume(slotData.DepositBalanceToConsume)
+		ret.SetExitBalanceToConsume(slotData.ExitBalanceToConsume)
+		ret.SetEarliestExitEpoch(slotData.EarliestExitEpoch)
+		ret.SetConsolidationBalanceToConsume(slotData.ConsolidationBalanceToConsume)
+		ret.SetEarlistConsolidationEpoch(slotData.EarliestConsolidationEpoch)
+		ret.SetPendingDeposits(slotData.PendingDeposits)
+		ret.SetPendingPartialWithdrawals(slotData.PendingPartialWithdrawals)
+		ret.SetPendingConsolidations(slotData.PendingConsolidations)
+	}
 	return ret, nil
 }
 
