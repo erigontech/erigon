@@ -1,0 +1,3 @@
+package gdbme
+
+func RestartUnderGDB() {}
