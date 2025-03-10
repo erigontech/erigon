@@ -87,7 +87,7 @@ pushes a leaf with specified parameters to the stack; if flags show, before that
 
 format: `OpAccountLeaf key:[]byte flags [nonce:uint64] [balance:[]byte]` 
 
-encoded as `[ 0x05 CBOR(key|[]byte)... flags /CBOR(nonce).../ /CBOR(balance).../ ]`
+encoded as `[ 0x05 CBOR(key:[]byte)... flags /CBOR(nonce).../ /CBOR(balance).../ ]`
   
 *flags* is a bitset encoded in a single bit (see [`witness_operators_test.go`](../../trie/witness_operators_test.go) to see flags in action).
 * bit 0 defines if **code** is present; if set to 1 it assumes that either `OpCode` or `OpHash` already put something on the stack;
