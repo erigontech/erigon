@@ -677,6 +677,17 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 			if eb1 != eb2 {
 				return fmt.Errorf("effective balance mismatch: got %d, want %d", eb1, eb2)
 			}
+			pvkey, err := haveState.ValidatorPublicKey(i)
+			if err != nil {
+				panic(err)
+			}
+			wvkey, err := wantState.ValidatorPublicKey(i)
+			if err != nil {
+				panic(err)
+			}
+			if pvkey != wvkey {
+				return fmt.Errorf("pubkey mismatch: got %s, want %s", pvkey, wvkey)
+			}
 		}
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}
