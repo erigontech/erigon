@@ -56,6 +56,10 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, header, txn, index, txNum)
 }
 
+func (api *BaseAPI) getReceiptsGasUsed(tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
+	return api.receiptsGenerator.GetReceiptsGasUsed(tx, block)
+}
+
 func (api *BaseAPI) getCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
 	return api.receiptsGenerator.GetCachedReceipt(ctx, hash)
 }
