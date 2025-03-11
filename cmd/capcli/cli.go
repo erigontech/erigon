@@ -715,7 +715,19 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 			withdrawalCreds := haveState.ValidatorSet().Get(i).WithdrawalCredentials()
 			wwithdrawalCreds := wantState.ValidatorSet().Get(i).WithdrawalCredentials()
 			if withdrawalCreds != wwithdrawalCreds {
-				return fmt.Errorf("withdrawal creds mismatch: got %s, want %s", withdrawalCreds, wwithdrawalCreds)
+				log.Warn("withdrawal creds mismatch", "got", withdrawalCreds, "want", wwithdrawalCreds)
+			}
+
+			slashed := haveState.ValidatorSet().Get(i).Slashed()
+			wslashed := wantState.ValidatorSet().Get(i).Slashed()
+			if slashed != wslashed {
+				log.Warn("slashed mismatch", "got", slashed, "want", wslashed)
+			}
+
+			withdrawableEpoch := haveState.ValidatorSet().Get(i).WithdrawableEpoch()
+			wwithdrawableEpoch := wantState.ValidatorSet().Get(i).WithdrawableEpoch()
+			if withdrawableEpoch != wwithdrawableEpoch {
+				log.Warn("withdrawable epoch mismatch", "got", withdrawableEpoch, "want", wwithdrawableEpoch)
 			}
 
 		}
