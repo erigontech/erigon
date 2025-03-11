@@ -345,7 +345,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer progressTimer.Stop()
 	prevSlot := slot
 	first := false
-	blocksBeforeCommit := 35_000
+	blocksBeforeCommit := 3_500_000
 	blocksProcessed := 0
 
 	for ; slot < to && blocksProcessed < blocksBeforeCommit; slot++ {
