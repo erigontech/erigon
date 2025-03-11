@@ -706,6 +706,13 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 			if activationEpoch != wactivationEpoch {
 				return fmt.Errorf("activation epoch mismatch: got %d, want %d", activationEpoch, wactivationEpoch)
 			}
+
+			activationEligibilityEpoch := haveState.ValidatorSet().Get(i).ActivationEligibilityEpoch()
+			wactivationEligibilityEpoch := wantState.ValidatorSet().Get(i).ActivationEligibilityEpoch()
+			if activationEligibilityEpoch != wactivationEligibilityEpoch {
+				return fmt.Errorf("activation eligibility epoch mismatch: got %d, want %d", activationEligibilityEpoch, wactivationEligibilityEpoch)
+			}
+
 		}
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}
