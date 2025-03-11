@@ -665,9 +665,17 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	if hRoot != wRoot {
-		for i := 0; i < haveState.PreviousEpochParticipation().Length(); i++ {
-			if haveState.BlockRoots().Get(i) != wantState.BlockRoots().Get(i) {
-				log.Info("block roots mismatch", "index", i, "have", haveState.BlockRoots().Get(i), "want", wantState.BlockRoots().Get(i))
+		for i := 0; i < haveState.ValidatorLength(); i++ {
+			eb1, err := haveState.ValidatorEffectiveBalance(i)
+			if err != nil {
+				panic(err)
+			}
+			eb2, err := wantState.ValidatorEffectiveBalance(i)
+			if err != nil {
+				panic(err)
+			}
+			if eb1 != eb2 {
+				return fmt.Errorf("effective balance mismatch: got %d, want %d", eb1, eb2)
 			}
 		}
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
