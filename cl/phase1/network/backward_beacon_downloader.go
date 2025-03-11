@@ -142,16 +142,20 @@ Loop:
 				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
 					return
 				}
-				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
+
+				responses, _, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
 					return
 				}
-				if responses == nil {
-					return
-				}
+
 				if len(responses) == 0 {
-					b.rpc.BanPeer(peerId)
-					return
+					responses, _, err = b.rpc.SendBeaconBlocksByRootReq(ctx, [][32]byte{b.expectedRoot})
+					if err != nil {
+						return
+					}
+					if len(responses) == 0 {
+						return
+					}
 				}
 				atomicResp.Store(responses)
 			}()
