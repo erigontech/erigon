@@ -143,16 +143,16 @@ Loop:
 					return
 				}
 
-				responses, _, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
-				if err != nil {
-					return
-				}
+				responses, _, _ := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
+				// if err != nil {
+				// 	return
+				// }
 
 				if len(responses) == 0 {
-					responses, _, err = b.rpc.SendBeaconBlocksByRootReq(ctx, [][32]byte{b.expectedRoot})
-					if err != nil {
-						return
-					}
+					responses, _, _ = b.rpc.SendBeaconBlocksByRootReq(ctx, [][32]byte{b.expectedRoot})
+					// if err != nil {
+					// 	return
+					// }
 					if len(responses) == 0 {
 						return
 					}
