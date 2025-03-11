@@ -688,6 +688,24 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 			if pvkey != wvkey {
 				return fmt.Errorf("pubkey mismatch: got %s, want %s", pvkey, wvkey)
 			}
+
+			exitEpoch, err := haveState.ValidatorExitEpoch(i)
+			if err != nil {
+				panic(err)
+			}
+			wexitEpoch, err := wantState.ValidatorExitEpoch(i)
+			if err != nil {
+				panic(err)
+			}
+			if exitEpoch != wexitEpoch {
+				return fmt.Errorf("exit epoch mismatch: got %d, want %d", exitEpoch, wexitEpoch)
+			}
+
+			activationEpoch := haveState.ValidatorSet().Get(i).ActivationEpoch()
+			wactivationEpoch := wantState.ValidatorSet().Get(i).ActivationEpoch()
+			if activationEpoch != wactivationEpoch {
+				return fmt.Errorf("activation epoch mismatch: got %d, want %d", activationEpoch, wactivationEpoch)
+			}
 		}
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}
