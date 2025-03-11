@@ -665,71 +665,10 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	if hRoot != wRoot {
-		for i := 0; i < haveState.ValidatorLength(); i++ {
-			eb1, err := haveState.ValidatorEffectiveBalance(i)
-			if err != nil {
-				panic(err)
+		for i := 0; i < haveState.PreviousEpochParticipation().Length(); i++ {
+			if haveState.BlockRoots().Get(i) != wantState.BlockRoots().Get(i) {
+				log.Info("block roots mismatch", "index", i, "have", haveState.BlockRoots().Get(i), "want", wantState.BlockRoots().Get(i))
 			}
-			eb2, err := wantState.ValidatorEffectiveBalance(i)
-			if err != nil {
-				panic(err)
-			}
-			if eb1 != eb2 {
-				return fmt.Errorf("effective balance mismatch: got %d, want %d", eb1, eb2)
-			}
-			pvkey, err := haveState.ValidatorPublicKey(i)
-			if err != nil {
-				panic(err)
-			}
-			wvkey, err := wantState.ValidatorPublicKey(i)
-			if err != nil {
-				panic(err)
-			}
-			if pvkey != wvkey {
-				return fmt.Errorf("pubkey mismatch: got %s, want %s", pvkey, wvkey)
-			}
-
-			exitEpoch, err := haveState.ValidatorExitEpoch(i)
-			if err != nil {
-				panic(err)
-			}
-			wexitEpoch, err := wantState.ValidatorExitEpoch(i)
-			if err != nil {
-				panic(err)
-			}
-			if exitEpoch != wexitEpoch {
-				return fmt.Errorf("exit epoch mismatch: got %d, want %d", exitEpoch, wexitEpoch)
-			}
-
-			activationEpoch := haveState.ValidatorSet().Get(i).ActivationEpoch()
-			wactivationEpoch := wantState.ValidatorSet().Get(i).ActivationEpoch()
-			if activationEpoch != wactivationEpoch {
-				return fmt.Errorf("activation epoch mismatch: got %d, want %d", activationEpoch, wactivationEpoch)
-			}
-
-			activationEligibilityEpoch := haveState.ValidatorSet().Get(i).ActivationEligibilityEpoch()
-			wactivationEligibilityEpoch := wantState.ValidatorSet().Get(i).ActivationEligibilityEpoch()
-			if activationEligibilityEpoch != wactivationEligibilityEpoch {
-				return fmt.Errorf("activation eligibility epoch mismatch: got %d, want %d", activationEligibilityEpoch, wactivationEligibilityEpoch)
-			}
-			withdrawalCreds := haveState.ValidatorSet().Get(i).WithdrawalCredentials()
-			wwithdrawalCreds := wantState.ValidatorSet().Get(i).WithdrawalCredentials()
-			if withdrawalCreds != wwithdrawalCreds {
-				log.Warn("withdrawal creds mismatch", "got", withdrawalCreds, "want", wwithdrawalCreds)
-			}
-
-			slashed := haveState.ValidatorSet().Get(i).Slashed()
-			wslashed := wantState.ValidatorSet().Get(i).Slashed()
-			if slashed != wslashed {
-				log.Warn("slashed mismatch", "got", slashed, "want", wslashed)
-			}
-
-			withdrawableEpoch := haveState.ValidatorSet().Get(i).WithdrawableEpoch()
-			wwithdrawableEpoch := wantState.ValidatorSet().Get(i).WithdrawableEpoch()
-			if withdrawableEpoch != wwithdrawableEpoch {
-				log.Warn("withdrawable epoch mismatch", "got", withdrawableEpoch, "want", wwithdrawableEpoch)
-			}
-
 		}
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}

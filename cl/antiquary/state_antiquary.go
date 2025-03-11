@@ -345,7 +345,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer progressTimer.Stop()
 	prevSlot := slot
 	first := false
-	blocksBeforeCommit := 3_500_000
+	blocksBeforeCommit := 35_000
 	blocksProcessed := 0
 
 	for ; slot < to && blocksProcessed < blocksBeforeCommit; slot++ {
@@ -389,9 +389,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := transition.TransitionState(s.currentState, block, blockRewardsCollector, fullValidation); err != nil {
 			return err
 		}
-		if s.currentState.Slot() == 7144161 {
-			s.dumpFullBeaconState()
-		}
+		// if s.currentState.Slot() == 3000010 {
+		// 	s.dumpFullBeaconState()
+		// }
 		blocksProcessed++
 
 		first = false

@@ -19,7 +19,6 @@ package antiquary
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"os"
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -75,17 +74,17 @@ func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
 	return list
 }
 
-func (s *Antiquary) dumpFullBeaconState() {
-	b, err := s.currentState.EncodeSSZ(nil)
-	if err != nil {
-		s.logger.Error("Failed to encode full beacon state", "err", err)
-		return
-	}
-	// just dump it in a.txt like an idiot without afero
-	if err := os.WriteFile("bab.txt", b, 0644); err != nil {
-		s.logger.Error("Failed to write full beacon state", "err", err)
-	}
-}
+// func (s *Antiquary) dumpFullBeaconState() {
+// 	b, err := s.currentState.EncodeSSZ(nil)
+// 	if err != nil {
+// 		s.logger.Error("Failed to encode full beacon state", "err", err)
+// 		return
+// 	}
+// 	// just dump it in a.txt like an idiot without afero
+// 	if err := os.WriteFile("bab.txt", b, 0644); err != nil {
+// 		s.logger.Error("Failed to write full beacon state", "err", err)
+// 	}
+// }
 
 func findNearestSlotBackwards(tx kv.Tx, cfg *clparams.BeaconChainConfig, slot uint64) (uint64, error) {
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
