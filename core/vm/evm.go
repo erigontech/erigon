@@ -448,14 +448,21 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// fixes JUMPF tests but brakes EOFCREATE tests
 	if isInitcodeEOF {
 		if allowEOF { // TODO(racytech): Handle Legacy calling EOF better
-			var c Container
-			if err := c.UnmarshalBinary(codeAndHash.code, isInitcodeEOF); err != nil {
+			// var c Container
+			// if err := c.UnmarshalBinary(codeAndHash.code, isInitcodeEOF); err != nil {
+			// 	return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
+			// }
+			// if err := c.ValidateCode(evm.config.JumpTableEOF); err != nil {
+			// 	return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
+			// }
+			// contract.Container = &c
+			fmt.Printf("0x%x\n", codeAndHash.code)
+			// TODO(racytech): set the `initcide` and `runtime` properly
+			if c, err := UnmarshalEOF(codeAndHash.code, 0, 0, evm.config.JumpTableEOF, true); err != nil {
 				return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
+			} else {
+				contract.Container = c
 			}
-			if err := c.ValidateCode(evm.config.JumpTableEOF); err != nil {
-				return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
-			}
-			contract.Container = &c
 		} else {
 			// Don't allow EOF contract to execute legacy initcode.
 			fmt.Println("HITTING THIS Legacy creating EOF")
@@ -679,17 +686,24 @@ func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 }
 
 // parseContainer tries to parse an EOF container if the Cancun fork is active. It expects the code to already be validated.
-func (evm *EVM) parseContainer(b []byte) *Container {
+func (evm *EVM) parseContainer(b []byte) *EOFContainer {
 	if evm.chainRules.IsOsaka && hasEOFMagic(b) {
-		var c Container
-		if err := c.UnmarshalBinary(b, false); err != nil {
-			// Code was already validated, so no other errors should be possible.
-			panic(fmt.Sprintf("unexpected error: %v\ncode: %s\n", err, libcommon.Bytes2Hex(b)))
-		}
-		if err := c.ValidateCode(evm.interpreter.Config().JumpTableEOF); err != nil {
+		// var c Container
+		// if err := c.UnmarshalBinary(b, false); err != nil {
+		// 	// Code was already validated, so no other errors should be possible.
+		// 	panic(fmt.Sprintf("unexpected error: %v\ncode: %s\n", err, libcommon.Bytes2Hex(b)))
+		// }
+		// if err := c.ValidateCode(evm.interpreter.Config().JumpTableEOF); err != nil {
+		// 	panic(fmt.Sprintf("error validating container: %v", err))
+		// }
+		// return &c
+
+		// TODO(racytech): set the `initcode` or `runtime` properly!
+		if c, err := UnmarshalEOF(b, 0, 0, evm.interpreter.Config().JumpTableEOF, true); err != nil {
 			panic(fmt.Sprintf("error validating container: %v", err))
+		} else {
+			return c
 		}
-		return &c
 	}
 	return nil
 }

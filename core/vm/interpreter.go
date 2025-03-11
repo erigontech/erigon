@@ -250,7 +250,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	var initcode []byte // TODO(racytech): temp solution, condsider a better way, this will not work with JUMPF
 	if contract.IsEOF() {
 		jt = in.cfg.JumpTableEOF
-		initcode = contract.Container.Code[callContext.CodeSection]
+		initcode = contract.Container._code[callContext.CodeSection]
 	} else {
 		jt = in.cfg.JumpTable
 		initcode = contract.Code
@@ -293,7 +293,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	for {
 		// required by CALLF to set the initcode to appropirate code section
 		if contract.IsEOF() { // TODO(racytech): re-do this, find a better way
-			initcode = contract.Container.Code[callContext.CodeSection]
+			initcode = contract.Container._code[callContext.CodeSection]
 		}
 
 		steps++

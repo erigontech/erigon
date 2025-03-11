@@ -487,7 +487,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	// err = host.SetOption("validate_eof", "true")
 	// fmt.Println("Setoption err asdas: ", err)
 	// if contractCreation {
-	// 	ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Create, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to(), nil)
+	// 	ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.EofCreate, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to(), nil)
 	// 	st.gasRemaining = uint64(gasLeft)
 	// } else {
 	// 	// Increment the nonce for the next transaction
@@ -504,10 +504,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
 		fmt.Println("CALLING CREATE")
+		// TODO(racytech): separate EOFCreate from basic CREATE?
 		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout, rules.IsOsaka)
-		nonce, vmerr := st.state.GetNonce(sender.Address())
 		if errors.Is(vmerr, vm.ErrInvalidEOFInitcode) {
-			st.state.SetNonce(msg.From(), nonce+1)
+			if nonce, _err := st.state.GetNonce(sender.Address()); _err != nil {
+				return nil, _err
+			} else {
+				st.state.SetNonce(msg.From(), nonce+1)
+			}
 		}
 	} else {
 		// Increment the nonce for the next transaction

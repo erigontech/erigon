@@ -25,11 +25,12 @@ var (
 
 // EOFContainer represents the structure of the EOF container.
 type EOFContainer struct {
-	_header       *header
-	_types        []*eofMetaData
-	_code         [][]byte
-	_subContainer []*EOFContainer
-	_data         []byte
+	_header        *header
+	_types         []*eofMetaData
+	_code          [][]byte
+	_subContainers []*EOFContainer
+	_data          []byte
+	rawData        []byte
 }
 
 type eofMetaData struct {
@@ -49,7 +50,7 @@ type header struct {
 	dataLength        uint16
 }
 
-var jumpTables = []JumpTable{NewEOFInstructionSet()}
+// var jumpTables = []JumpTable{NewEOFInstructionSet()}
 
 // MarshalEOF serializes theEOFContainer into a byte array.
 func MarshalEOF(container *EOFContainer, depth int) ([]byte, error) {
@@ -81,14 +82,14 @@ func MarshalEOF(container *EOFContainer, depth int) ([]byte, error) {
 		}
 	}
 	var encodedContainers [][]byte
-	if len(container._subContainer) > 0 {
+	if len(container._subContainers) > 0 {
 		if err := binary.Write(buf, binary.BigEndian, _kindContainer); err != nil { // type container section
 			return nil, err
 		}
-		if err := binary.Write(buf, binary.BigEndian, uint16(len(container._subContainer))); err != nil { // num container sections
+		if err := binary.Write(buf, binary.BigEndian, uint16(len(container._subContainers))); err != nil { // num container sections
 			return nil, err
 		}
-		for _, subcontainer := range container._subContainer {
+		for _, subcontainer := range container._subContainers {
 			if encoded, err := MarshalEOF(subcontainer, depth+1); err != nil {
 				return nil, err
 			} else {
@@ -338,7 +339,7 @@ func readMetaData(buf *bytes.Reader, numTypes int) ([]*eofMetaData, int64, error
 	return _types, buf.Size() - int64(buf.Len()), nil
 }
 
-func readCodeSection(buf *bytes.Reader, jt *JumpTable, header *header, _types []*eofMetaData, start int64, numCodeSections, numSubContainers uint16, containerKind byte) ([][]byte, []bool, []bool, int64, error) {
+func readCodeSection(buf *bytes.Reader, jt *JumpTable, header *header, _types []*eofMetaData, start int64, numCodeSections, numSubContainers uint16, containerKind byte, validateCode bool) ([][]byte, []bool, []bool, int64, error) {
 
 	referencedByEofCreate := make([]bool, numSubContainers)
 	referencedByReturnContract := make([]bool, numSubContainers)
@@ -367,31 +368,32 @@ func readCodeSection(buf *bytes.Reader, jt *JumpTable, header *header, _types []
 		if _, err := buf.ReadAt(code, offset); err != nil {
 			return nil, nil, nil, -1, fmt.Errorf("%w: %w", err, ErrInvalidCode)
 		}
-
-		if subcontainerRefs, accessCodeSections, err = validateInstructions(code, _types, jt, int(codeIdx), int(header.dataLength), int(numSubContainers), containerKind); err != nil {
-			return nil, nil, nil, -1, err
-		} else {
-			for _, arr := range subcontainerRefs { // arr[0] - container index, arr[1] - EOFCREATE || RETURNCONTRACT
-				if OpCode(arr[1]) == EOFCREATE {
-					referencedByEofCreate[arr[0]] = true
-				} else if OpCode(arr[1]) == RETURNCONTRACT {
-					referencedByReturnContract[arr[0]] = true
-				} else {
-					panic("unexpected OpCode")
+		if validateCode {
+			if subcontainerRefs, accessCodeSections, err = validateInstructions(code, _types, jt, int(codeIdx), int(header.dataLength), int(numSubContainers), containerKind); err != nil {
+				return nil, nil, nil, -1, err
+			} else {
+				for _, arr := range subcontainerRefs { // arr[0] - container index, arr[1] - EOFCREATE || RETURNCONTRACT
+					if OpCode(arr[1]) == EOFCREATE {
+						referencedByEofCreate[arr[0]] = true
+					} else if OpCode(arr[1]) == RETURNCONTRACT {
+						referencedByReturnContract[arr[0]] = true
+					} else {
+						panic("unexpected OpCode")
+					}
 				}
 			}
-		}
-		for idx, _ := range accessCodeSections {
-			codeSectionsQueue = append(codeSectionsQueue, idx)
-		}
-		if err := validateRjumpDestinations(code, jt); err != nil {
-			return nil, nil, nil, -1, err
-		}
-		if maxStackHeight, err := validateMaxStackHeight(code, _types, jt, int(codeIdx)); err != nil {
-			return nil, nil, nil, -1, err
-		} else {
-			if maxStackHeight != int(_types[codeIdx].maxStackHeight) {
-				return nil, nil, nil, -1, ErrInvalidMaxStackHeight
+			for idx, _ := range accessCodeSections {
+				codeSectionsQueue = append(codeSectionsQueue, idx)
+			}
+			if err := validateRjumpDestinations(code, jt); err != nil {
+				return nil, nil, nil, -1, err
+			}
+			if maxStackHeight, err := validateMaxStackHeight(code, _types, jt, int(codeIdx)); err != nil {
+				return nil, nil, nil, -1, err
+			} else {
+				if maxStackHeight != int(_types[codeIdx].maxStackHeight) {
+					return nil, nil, nil, -1, ErrInvalidMaxStackHeight
+				}
 			}
 		}
 		_code[codeIdx] = code
@@ -405,7 +407,7 @@ func readCodeSection(buf *bytes.Reader, jt *JumpTable, header *header, _types []
 
 }
 
-func readSubContainer(buf *bytes.Reader, header *header, referencedByEofCreate, referencedByReturnContract []bool, numSubContainers, depth int) ([]*EOFContainer, int64, error) {
+func readSubContainer(buf *bytes.Reader, header *header, jt *JumpTable, referencedByEofCreate, referencedByReturnContract []bool, numSubContainers, depth int) ([]*EOFContainer, int64, error) {
 	_subContainer := make([]*EOFContainer, numSubContainers)
 	for i := 0; i < numSubContainers; i++ {
 
@@ -425,9 +427,9 @@ func readSubContainer(buf *bytes.Reader, header *header, referencedByEofCreate, 
 		var subContainer *EOFContainer
 		var err error
 		if eofcreate {
-			subContainer, err = UnmarshalEOF(subContainerData, depth+1, initcode)
+			subContainer, err = UnmarshalEOF(subContainerData, depth+1, initcode, jt, true)
 		} else {
-			subContainer, err = UnmarshalEOF(subContainerData, depth+1, runtime)
+			subContainer, err = UnmarshalEOF(subContainerData, depth+1, runtime, jt, true)
 		}
 		if err != nil {
 			return nil, 0, err
@@ -438,13 +440,14 @@ func readSubContainer(buf *bytes.Reader, header *header, referencedByEofCreate, 
 }
 
 // UnmarshalEOF deserializes a byte array into an EOFContainer object.
-func UnmarshalEOF(data []byte, depth int, containerKind byte) (*EOFContainer, error) {
+func UnmarshalEOF(data []byte, depth int, containerKind byte, jt *JumpTable, validateCode bool) (*EOFContainer, error) {
 	// if depth >= MaxContainerDepth {
 	// 	return nil, errors.New("depth >= MaxContainerDepth")
 	// }
 	fmt.Println("initcodeSize: ", len(data))
 	buf := bytes.NewReader(data)
 	container := &EOFContainer{}
+	container.rawData = data
 	header, bytesRead, err := readHeader(buf)
 	if err != nil {
 		return nil, err
@@ -454,7 +457,7 @@ func UnmarshalEOF(data []byte, depth int, containerKind byte) (*EOFContainer, er
 		return nil, err
 	}
 
-	jt := jumpTables[header.version-1]
+	// jt := jumpTables[header.version-1]
 
 	_types, codeBodyOffset, err := readMetaData(buf, int(header.numTypeSections)/4)
 	if err != nil {
@@ -462,18 +465,18 @@ func UnmarshalEOF(data []byte, depth int, containerKind byte) (*EOFContainer, er
 	}
 	container._types = _types
 
-	_code, referencedByEofCreate, referencedByReturnContract, subContainerBodyOffset, err := readCodeSection(buf, &jt, header, _types, codeBodyOffset, header.numCodeSections, header.numSubContainers, containerKind)
+	_code, referencedByEofCreate, referencedByReturnContract, subContainerBodyOffset, err := readCodeSection(buf, jt, header, _types, codeBodyOffset, header.numCodeSections, header.numSubContainers, containerKind, validateCode)
 	if err != nil {
 		return nil, err
 	}
 	container._code = _code
 
 	buf.Seek(subContainerBodyOffset, io.SeekStart)
-	_subContainer, _, err := readSubContainer(buf, header, referencedByEofCreate, referencedByReturnContract, int(header.numSubContainers), depth)
+	_subContainer, _, err := readSubContainer(buf, header, jt, referencedByEofCreate, referencedByReturnContract, int(header.numSubContainers), depth)
 	if err != nil {
 		return nil, err
 	}
-	container._subContainer = _subContainer
+	container._subContainers = _subContainer
 
 	if header.dataLength > 0 {
 		container._data = make([]byte, header.dataLength)

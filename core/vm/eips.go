@@ -577,7 +577,7 @@ func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	fmt.Println(code[*pc+1:])
 	var a uint64 = 0xFFFFFFFF_FFFFFFFF
 	fmt.Println(a + 1)
-	typ := scope.Contract.Container.Types[idx]
+	typ := scope.Contract.Container._types[idx]
 	// fmt.Println("CODE SECTION", scope.CodeSection)
 	// fmt.Println(scope.Contract.CodeAt(scope.CodeSection))
 	// fmt.Println(scope.Contract.CodeAt(scope.CodeSection)[*pc+1:])
@@ -588,8 +588,8 @@ func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	// )
 
 	// fmt.Printf("StackLen: %v, typ.MaxStackHeight: %v, typ.Inputs: %v\n", scope.Stack.Len(), typ.MaxStackHeight, typ.Inputs)
-	if scope.Stack.Len()+int(typ.MaxStackHeight)-int(typ.Inputs) > 1024 {
-		return nil, fmt.Errorf("CALLF stack overflow: StackLen: %v, typ.MaxStackHeight: %v, typ.Inputs: %v", scope.Stack.Len(), typ.MaxStackHeight, typ.Inputs)
+	if scope.Stack.Len()+int(typ.maxStackHeight)-int(typ.inputs) > 1024 {
+		return nil, fmt.Errorf("CALLF stack overflow: StackLen: %v, typ.MaxStackHeight: %v, typ.Inputs: %v", scope.Stack.Len(), typ.maxStackHeight, typ.inputs)
 	}
 	if len(scope.ReturnStack) > 1024 {
 		return nil, fmt.Errorf("CALLF return_stack limit reached")
@@ -598,7 +598,7 @@ func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	retCtx := &ReturnContext{
 		Section:     scope.CodeSection,
 		Pc:          *pc + 3,
-		StackHeight: scope.Stack.Len() - int(typ.Inputs),
+		StackHeight: scope.Stack.Len() - int(typ.inputs),
 	}
 	scope.ReturnStack = append(scope.ReturnStack, retCtx)
 	scope.CodeSection = uint64(idx)
@@ -627,11 +627,11 @@ func opJumpf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	var (
 		code = scope.Contract.CodeAt(scope.CodeSection)
 		idx  = binary.BigEndian.Uint16(code[*pc+1:])
-		typ  = scope.Contract.Container.Types[idx]
+		typ  = scope.Contract.Container._types[idx]
 	)
 	fmt.Println("JUMPF index: ", idx)
-	if scope.Stack.Len()+int(typ.MaxStackHeight)-int(typ.Inputs) > 1024 {
-		return nil, fmt.Errorf("JUMPF stack overflow: StackLen: %v, typ.MaxStackHeight: %v, typ.Inputs: %v", scope.Stack.Len(), typ.MaxStackHeight, typ.Inputs)
+	if scope.Stack.Len()+int(typ.maxStackHeight)-int(typ.inputs) > 1024 {
+		return nil, fmt.Errorf("JUMPF stack overflow: StackLen: %v, typ.MaxStackHeight: %v, typ.Inputs: %v", scope.Stack.Len(), typ.maxStackHeight, typ.inputs)
 	}
 	scope.CodeSection = uint64(idx)
 	*pc = 0xFFFFFFFF_FFFFFFFF
@@ -872,9 +872,10 @@ func opReturnContract(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		offset256          = scope.Stack.Pop()
 		size256            = scope.Stack.Pop()
 	)
-	if deployContainerIdx >= len(scope.Contract.Container.SubContainers) {
-		return nil, fmt.Errorf("invalid subcontainer index: deployContainerIdx=%v, len(scope.Contract.Container.SubContainers)=%v", deployContainerIdx, len(scope.Contract.Container.SubContainers))
+	if deployContainerIdx >= len(scope.Contract.Container._subContainers) {
+		return nil, fmt.Errorf("invalid subcontainer index: deployContainerIdx=%v, len(scope.Contract.Container.SubContainers)=%v", deployContainerIdx, len(scope.Contract.Container._subContainers))
 	}
+	fmt.Println("deploy container idx:", deployContainerIdx)
 	*pc += 1
 	offset := int64(offset256.Uint64())
 	size := int64(size256.Uint64())
@@ -890,20 +891,37 @@ func opReturnContract(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		return nil, fmt.Errorf("len(deployContainer) == 0")
 	}
 	// // Validate the subcontainer
-	var c Container
-	if err := c.UnmarshalBinary(deployContainer, true); err != nil {
+	// var c Container
+	// if err := c.UnmarshalBinary(deployContainer, true); err != nil {
+	// 	return nil, err
+	// }
+	// if err := c.ValidateCode(interpreter.cfg.JumpTableEOF); err != nil {
+	// 	return nil, err
+	// }
+	// if len(c.Data) < c.DataSize {
+	// 	return nil, fmt.Errorf("RETURNCONTRACT: len(c.Data=%v) < c.DataSize=%v", len(c.Data), c.DataSize)
+	// }
+	// fmt.Printf("Aux Data size: %v, len aux data: %v\n", size, len(auxData))
+	// c.DataSize = len(c.Data)
+	// // c.Data = append(c.Data, auxData...)
+	// fmt.Printf("c.Data: 0x%x\n", c.Data)
+	if c, err := UnmarshalEOF(deployContainer, 0, 1, interpreter.cfg.JumpTableEOF, false); err != nil {
 		return nil, err
+	} else {
+		if d, err := MarshalEOF(c, 0); err != nil {
+			return nil, err
+		} else {
+			var (
+				last   = len(scope.ReturnStack) - 1
+				retCtx = scope.ReturnStack[last]
+			)
+			scope.ReturnStack = scope.ReturnStack[:last]
+			scope.CodeSection = retCtx.Section
+			*pc = retCtx.Pc - 1
+			fmt.Printf("deployContainer_1: 0x%x, deployContainer_2: 0x%x\n", deployContainer, d)
+			return d, errStopToken
+		}
 	}
-	if err := c.ValidateCode(interpreter.cfg.JumpTableEOF); err != nil {
-		return nil, err
-	}
-	if len(c.Data) < c.DataSize {
-		return nil, fmt.Errorf("RETURNCONTRACT: len(c.Data=%v) < c.DataSize=%v", len(c.Data), c.DataSize)
-	}
-	fmt.Printf("Aux Data size: %v, len aux data: %v\n", size, len(auxData))
-	c.DataSize = len(c.Data)
-	// c.Data = append(c.Data, auxData...)
-	fmt.Printf("c.Data: 0x%x\n", c.Data)
 	// // Restore context
 
 	// var (
@@ -918,8 +936,8 @@ func opReturnContract(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 	// scope.CodeSection = retCtx.Section
 	// *pc = retCtx.Pc - 1 // account for interpreter loop
 	// return c.MarshalBinary(), errStopToken
-	fmt.Printf("deployContainer_1: 0x%x, deployContainer_2: 0x%x\n", deployContainer, c.MarshalBinary())
-	return c.MarshalBinary(), errStopToken
+	// fmt.Printf("deployContainer_1: 0x%x, deployContainer_2: 0x%x\n", deployContainer, c.MarshalBinary())
+	// return c.MarshalBinary(), errStopToken
 }
 
 func opReturnDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {

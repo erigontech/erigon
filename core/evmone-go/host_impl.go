@@ -394,17 +394,49 @@ func (h *HostImpl) handleCreate(kind CallKind,
 	if h.evm.ChainRules().IsBerlin {
 		h.ibs.AddAddressToAccessList(recipient)
 	}
+
+	// if incrementNonce {
+	// 	nonce, err := evm.intraBlockState.GetNonce(caller.Address())
+	// 	if err != nil {
+	// 		return nil, libcommon.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	// 	}
+	// 	if nonce+1 < nonce {
+	// 		err = ErrNonceUintOverflow
+	// 		return nil, libcommon.Address{}, gasRemaining, err
+	// 	}
+	// 	evm.intraBlockState.SetNonce(caller.Address(), nonce+1)
+	// }
+	// // We add this to the access list _before_ taking a snapshot. Even if the creation fails,
+	// // the access-list change should not be rolled back
+	// if evm.chainRules.IsBerlin {
+	// 	evm.intraBlockState.AddAddressToAccessList(address)
+	// }
+	// // Ensure there's no existing contract already at the designated address
+	// contractHash, err := evm.intraBlockState.ResolveCodeHash(address)
+	// if err != nil {
+	// 	return nil, libcommon.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	// }
+	// nonce, err := evm.intraBlockState.GetNonce(address)
+	// if err != nil {
+	// 	return nil, libcommon.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	// }
+	// if nonce != 0 || (contractHash != (libcommon.Hash{}) && contractHash != trie.EmptyCodeHash) {
+	// 	fmt.Println("Hitting this error")
+	// 	err = ErrContractAddressCollision
+	// 	return nil, libcommon.Address{}, 0, err
+	// }
+
 	// Ensure there's no existing contract already at the designated address
-	contractHash, err := h.ibs.GetCodeHash(recipient)
+	contractHash, err := h.ibs.ResolveCodeHash(recipient)
 	if err != nil {
 		panic(err)
 	}
-	nonce, err = h.ibs.GetNonce(sender)
+	nonce, err = h.ibs.GetNonce(recipient)
 	if err != nil {
 		panic(err)
 	}
 	if nonce != 0 || (contractHash != (common.Hash{}) && contractHash != emptyCodeHash) {
-		// fmt.Println("Hitting this error")
+		fmt.Println("Hitting this error")
 		err = vm.ErrContractAddressCollision
 		return nil, int64(gas), 0, common.Address{}, err
 	}

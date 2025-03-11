@@ -22,20 +22,20 @@ const (
 	REL_OFFSET_SIZE = 2 // size of uint16
 )
 
-func ValidateEOFContainer(c *EOFContainer, jt *JumpTable) error {
+// func ValidateEOFContainer(c *EOFContainer, jt *JumpTable) error {
 
-	for i, code := range c._code {
-		if err := _validateCode(code, c._types, jt, i, len(c._data), len(c._subContainer)); err != nil {
-			return err
-		}
-	}
-	for _, subContainer := range c._subContainer {
-		if err := ValidateEOFContainer(subContainer, jt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+// 	for i, code := range c._code {
+// 		if err := _validateCode(code, c._types, jt, i, len(c._data), len(c._subContainers)); err != nil {
+// 			return err
+// 		}
+// 	}
+// 	for _, subContainer := range c._subContainers {
+// 		if err := ValidateEOFContainer(subContainer, jt); err != nil {
+// 			return err
+// 		}
+// 	}
+// 	return nil
+// }
 
 // TODO(racytech): split validate code into validate_instructions and validate_rjump_destinations
 

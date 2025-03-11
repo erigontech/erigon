@@ -62,8 +62,9 @@ type Contract struct {
 	analysis      bitvec         // Locally cached result of JUMPDEST analysis
 	skipAnalysis  bool
 
-	Code      []byte
-	Container *Container
+	Code []byte
+	// Container *Container
+	Container *EOFContainer
 	CodeHash  libcommon.Hash
 	CodeAddr  *libcommon.Address
 	Input     []byte
@@ -235,31 +236,31 @@ func (c *Contract) CodeAt(section uint64) []byte {
 	if c.Container == nil {
 		return c.Code
 	}
-	return c.Container.Code[section]
+	return c.Container._code[section]
 }
 
 func (c *Contract) SubcontainerAt(idx int) []byte {
-	if c.Container.SubContainers == nil {
+	if c.Container._subContainers == nil {
 		fmt.Errorf("Contract.SubcontainerAt: Container.SubContainers == nil") // TODO(racytech): handle errors better, maybe return error, []byte?
 		return nil
 	}
-	if idx >= len(c.Container.SubContainers) {
-		fmt.Errorf("Contract.SetSubcontainer: idx out of range: idx: %v, subcontainer_size: %v", idx, len(c.Container.SubContainers))
+	if idx >= len(c.Container._subContainers) {
+		fmt.Errorf("Contract.SetSubcontainer: idx out of range: idx: %v, subcontainer_size: %v", idx, len(c.Container._subContainers))
 		return nil
 	}
-	return c.Container.SubContainers[idx]
+	return c.Container._subContainers[idx].rawData
 }
 
 func (c *Contract) Data() []byte {
 	// if c.Container == nil {
 	// 	return nil
 	// }
-	return c.Container.Data
+	return c.Container._data
 }
 
 // SetCallCode sets the code of the contract and address of the backing data
 // object
-func (c *Contract) SetCallCode(addr *libcommon.Address, hash libcommon.Hash, code []byte, container *Container) {
+func (c *Contract) SetCallCode(addr *libcommon.Address, hash libcommon.Hash, code []byte, container *EOFContainer) {
 	c.Code = code
 	c.Container = container
 	c.CodeHash = hash
