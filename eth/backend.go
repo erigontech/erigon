@@ -36,6 +36,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/prune"
+	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
@@ -101,8 +103,6 @@ import (
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/ethdb/privateapi"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/ethstats"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -165,10 +165,10 @@ type Ethereum struct {
 
 	eth1ExecutionServer *eth1.EthereumExecutionModule
 
-	ethBackendRPC       *privateapi.EthBackendServer
+	ethBackendRPC       *privateapi2.EthBackendServer
 	ethRpcClient        rpchelper.ApiBackend
 	engineBackendRPC    *engineapi.EngineServer
-	miningRPC           *privateapi.MiningServer
+	miningRPC           *privateapi2.MiningServer
 	miningRpcClient     txpoolproto.MiningClient
 	stateDiffClient     *direct.StateDiffClientDirect
 	rpcFilters          *rpchelper.Filters
@@ -685,8 +685,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	backend.miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi, logger)
-	backend.ethBackendRPC = privateapi.NewEthBackendServer(
+	backend.miningRPC = privateapi2.NewMiningServer(ctx, backend, ethashApi, logger)
+	backend.ethBackendRPC = privateapi2.NewEthBackendServer(
 		ctx,
 		backend,
 		backend.chainDB,
@@ -871,7 +871,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				return nil, err
 			}
 		}
-		backend.privateAPI, err = privateapi.StartGrpc(
+		backend.privateAPI, err = privateapi2.StartGrpc(
 			kvRPC,
 			backend.ethBackendRPC,
 			backend.txPoolGrpcServer,
