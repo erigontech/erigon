@@ -66,7 +66,7 @@ func NewBorStateSyncTxnTracer(
 // to think that they are running in the same transaction as sub-calls. This is needed since when bor executes the
 // state sync events at end of each sprint these are synthetically executed as if they were sub-calls of the
 // state sync events bor transaction.
-type borStateSyncTxnTracer struct {
+type borStateSyncTxnTracer struct { /// LOOKS WRONG
 	Tracer                       *tracers.Tracer
 	captureStartCalledOnce       bool
 	stateSyncEventsCount         int
@@ -88,7 +88,7 @@ func (bsstt *borStateSyncTxnTracer) OnTxEnd(receipt *types.Receipt, err error) {
 func (bsstt *borStateSyncTxnTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
 	if bsstt.stateSyncEventsCount == 0 {
 		// guard against unexpected use
-		panic("unexpected extra call to borStateSyncTxnTracer.CaptureEnd")
+		panic("unexpected extra call to borStateSyncTxnTracer.OnExit")
 	}
 
 	// finished executing 1 event
@@ -98,9 +98,19 @@ func (bsstt *borStateSyncTxnTracer) OnExit(depth int, output []byte, gasUsed uin
 		// trick tracer to think it is a CaptureExit
 		bsstt.Tracer.OnExit(depth, output, gasUsed, err, reverted)
 	}
+
+	if bsstt.stateSyncEventsCount == 0 && bsstt.Tracer.OnTxEnd != nil {
+		bsstt.Tracer.OnTxEnd()
+	}
 }
 
 func (bsstt *borStateSyncTxnTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	if !bsstt.captureStartCalledOnce {
+		if bsstt.Tracer.OnTxStart != nil {
+			bsstt.Tracer.OnTxStart()
+		}
+		bsstt.captureStartCalledOnce = true
+	}
 	if bsstt.Tracer.OnEnter != nil {
 		bsstt.Tracer.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
 	}

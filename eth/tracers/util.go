@@ -13,6 +13,7 @@
 //
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+
 package tracers
 
 import (
@@ -74,7 +75,7 @@ func MemoryPtr(m []byte, offset, size int64) []byte {
 	return nil
 }
 
-// Back returns the n'th item in stack
+// StackBack returns the n'th item in stack
 func StackBack(st []uint256.Int, n int) *uint256.Int {
 	return &st[len(st)-n-1]
 }

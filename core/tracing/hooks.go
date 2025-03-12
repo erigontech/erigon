@@ -84,7 +84,7 @@ type (
 	// TxStartHook is called before the execution of a transaction starts.
 	// Call simulations don't come with a valid signature. `from` field
 	// to be used for address of the caller.
-	TxStartHook = func(vm *VMContext, txn types.Transaction, from libcommon.Address)
+	TxStartHook = func(vm *VMContext, txn types.Transaction, from libcommon.Address) // i think txn should be message, we can get rid of `ToTransaction` in callargs (api.go)
 
 	// TxEndHook is called after the execution of a transaction ends.
 	TxEndHook = func(receipt *types.Receipt, err error)

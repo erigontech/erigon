@@ -163,7 +163,7 @@ func AssembleTracer(
 
 		// Construct the JavaScript tracer to execute with
 		cfg := json.RawMessage("{}")
-		if config != nil && config.TracerConfig != nil {
+		if config.TracerConfig != nil {
 			cfg = *config.TracerConfig
 		}
 		tracer, err := tracers.New(*config.Tracer, &tracers.Context{TxHash: txHash, TxIndex: txnIndex, BlockHash: blockHash}, cfg)

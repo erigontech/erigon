@@ -162,45 +162,6 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 	}
 }
 
-// // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-// func (t *prestateTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-// 	t.env = env
-// 	t.create = create
-// 	t.to = to
-
-// 	t.lookupAccount(from)
-// 	t.lookupAccount(to)
-// 	t.lookupAccount(env.Context.Coinbase)
-
-// 	// The sender balance is after reducing: gasLimit.
-// 	// We need to re-add it to get the pre-tx balance.
-// 	consumedGas := new(big.Int).Mul(env.GasPrice.ToBig(), new(big.Int).SetUint64(t.gasLimit))
-// 	fromBal := t.pre[from].Balance
-// 	fromBal.Add(fromBal, consumedGas)
-
-// 	if !create {
-// 		valueBig := value.ToBig()
-// 		// The recipient balance includes the value transferred.
-// 		toBal := t.pre[to].Balance
-// 		toBal.Sub(toBal, valueBig)
-
-// 		// The sender balance is after reducing: value.
-// 		// We need to re-add it to get the pre-tx balance.
-// 		fromBal.Add(fromBal, valueBig)
-
-// 		// Nonce has been incremented before reaching here
-// 		// when txn is not a "create".
-// 		// We need to decrement it to get the pre-tx nonce.
-// 		if t.pre[from].Nonce > 0 {
-// 			t.pre[from].Nonce--
-// 		}
-// 	}
-
-// 	if create && t.config.DiffMode {
-// 		t.created[to] = true
-// 	}
-// }
-
 func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
 	t.env = env
 

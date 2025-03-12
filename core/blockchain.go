@@ -91,7 +91,6 @@ func ExecuteBlockEphemerally(
 	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash libcommon.Hash) (*tracing.Hooks, error),
 	logger log.Logger,
 ) (res *EphemeralExecResult, executeBlockErr error) {
-
 	defer blockExecutionTimer.ObserveDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
@@ -119,8 +118,7 @@ func ExecuteBlockEphemerally(
 		}()
 	}
 
-	// TODO: send the new tracer once we switch to the tracing.Hook
-	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, stateWriter, logger, nil); err != nil {
+	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, stateWriter, logger, vmConfig.Tracer); err != nil {
 		return nil, err
 	}
 
@@ -139,7 +137,7 @@ func ExecuteBlockEphemerally(
 			// writeTrace = true
 		}
 		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, *vmConfig)
-		// Todo: check how to implement flushable tracer
+		// TODO: check how to implement flushable tracer
 		// if writeTrace {
 		// 	if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 		// 		ftracer.Flush(txn)
@@ -393,7 +391,7 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
 ) error {
 	engine.Initialize(cc, chain, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-		return SysCallContract(contract, data, cc, ibState, header, engine, constCall, tracer)
+		return SysCallContract(contract, data, cc, ibState, header, engine, constCall, nil)
 	}, logger, tracer)
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()

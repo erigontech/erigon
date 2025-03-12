@@ -60,6 +60,7 @@ func TraceBorStateSyncTxnDebugAPI(
 
 	defer cancel()
 	stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
+	tracer.OnTxStart()
 	tracer = NewBorStateSyncTxnTracer(tracer, len(msgs), stateReceiverContract)
 	rules := chainConfig.Rules(blockNum, blockTime)
 	stateWriter := state.NewNoopWriter()
