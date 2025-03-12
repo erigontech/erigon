@@ -28,6 +28,7 @@ func RestartUnderGDB() {
 	}
 
 	gdbCommands := []string{
+		"set debuginfod enabled off",
 		"set pagination off",
 		"set confirm off",
 		"set width 200",
