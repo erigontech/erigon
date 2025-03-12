@@ -527,13 +527,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		if rules.IsLondon {
 			refundQuotient = params.RefundQuotientEIP3529
 		}
-		// gasUsed := st.gasUsed() // TODO conflicts with arb logic
-		// refund := min(gasUsed/refundQuotient, st.state.GetRefund())
-		// gasUsed = gasUsed - refund
-		// if rules.IsPrague {
-		// 	gasUsed = max(floorGas7623, gasUsed)
-		// }
-		// st.gasRemaining = st.initialGas - gasUsed
 		st.refundGas(refundQuotient)
 	} else if rules.IsPrague {
 		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())

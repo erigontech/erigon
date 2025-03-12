@@ -633,6 +633,8 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 
 	if c.IsArbitrum() {
 		rules.IsLondon = isBlockForked(new(big.Int).SetUint64(c.ArbitrumChainParams.GenesisBlockNum), big.NewInt(int64(num)))
+		rules.IsArbitrum = true
+		rules.ArbOSVersion = c.ArbitrumChainParams.InitialArbOSVersion
 		// 	rules.IsCancun = c.arbosver
 		// isCancun := st.evm.ChainRules().IsCancun
 		// // st.evm.ChainConfig().IsCancun(st.evm.Context.Time)
