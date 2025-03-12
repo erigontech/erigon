@@ -24,8 +24,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/params"
 )
 
 var DefaultMode = Mode{
@@ -104,7 +104,7 @@ type Distance uint64
 
 func (p Distance) Enabled() bool         { return p != math.MaxUint64 }
 func (p Distance) toValue() uint64       { return uint64(p) }
-func (p Distance) useDefaultValue() bool { return uint64(p) == params.FullImmutabilityThreshold }
+func (p Distance) useDefaultValue() bool { return uint64(p) == config3.FullImmutabilityThreshold }
 func (p Distance) dbType() []byte        { return kv.PruneTypeOlder }
 
 func (p Distance) PruneTo(stageHead uint64) uint64 {
@@ -118,7 +118,7 @@ func (m Mode) String() string {
 	if !m.Initialised {
 		return "default"
 	}
-	const defaultVal uint64 = params.FullImmutabilityThreshold
+	const defaultVal uint64 = config3.FullImmutabilityThreshold
 	long := ""
 	short := ""
 	if m.History.Enabled() {
@@ -269,35 +269,6 @@ func setOnEmpty(db kv.GetPut, key []byte, blockAmount BlockAmount) error {
 			return err
 		}
 		if err = db.Put(kv.DatabaseInfo, keyType(key), blockAmount.dbType()); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func setMode(db kv.RwTx, key []byte, currentValue bool) error {
-	val := []byte{2}
-	if currentValue {
-		val = []byte{1}
-	}
-	if err := db.Put(kv.DatabaseInfo, key, val); err != nil {
-		return err
-	}
-	return nil
-}
-
-func setModeOnEmpty(db kv.GetPut, key []byte, currentValue bool) error {
-	mode, err := db.GetOne(kv.DatabaseInfo, key)
-	if err != nil {
-		return err
-	}
-	if len(mode) == 0 {
-		val := []byte{2}
-		if currentValue {
-			val = []byte{1}
-		}
-		if err = db.Put(kv.DatabaseInfo, key, val); err != nil {
 			return err
 		}
 	}

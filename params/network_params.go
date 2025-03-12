@@ -55,10 +55,4 @@ const (
 
 	// CheckpointProcessConfirmations is the number before a checkpoint is generated
 	CheckpointProcessConfirmations = 256
-
-	// FullImmutabilityThreshold is the number of blocks after which a chain segment is
-	// considered immutable (i.e. soft finality). It is used by the downloader as a
-	// hard limit against deep ancestors, by the blockchain against deep reorgs, by
-	// the freezer as the cutoff threshold and by clique as the snapshot trust limit.
-	FullImmutabilityThreshold = 10_000
 )
