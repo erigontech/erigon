@@ -193,7 +193,7 @@ func (c *Contract) Caller() libcommon.Address {
 }
 
 // UseGas attempts the use gas and subtracts it and returns true on success
-func (c *Contract) UseGas(gas uint64, logger *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
+func (c *Contract) UseGas(gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
 	// We collect the gas change reason today, future changes will add gas change(s) tracking with reason
 	_ = reason
 
@@ -201,23 +201,23 @@ func (c *Contract) UseGas(gas uint64, logger *tracing.Hooks, reason tracing.GasC
 		return false
 	}
 
-	if logger != nil && logger.OnGasChange != nil && reason != tracing.GasChangeIgnored {
-		logger.OnGasChange(c.Gas, c.Gas-gas, reason)
+	if tracer != nil && tracer.OnGasChange != nil && reason != tracing.GasChangeIgnored {
+		tracer.OnGasChange(c.Gas, c.Gas-gas, reason)
 	}
 	c.Gas -= gas
 	return true
 }
 
 // RefundGas refunds gas to the contract
-func (c *Contract) RefundGas(gas uint64, logger *tracing.Hooks, reason tracing.GasChangeReason) {
+func (c *Contract) RefundGas(gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) {
 	// We collect the gas change reason today, future changes will add gas change(s) tracking with reason
 	_ = reason
 
 	if gas == 0 {
 		return
 	}
-	if logger != nil && logger.OnGasChange != nil && reason != tracing.GasChangeIgnored {
-		logger.OnGasChange(c.Gas, c.Gas+gas, reason)
+	if tracer != nil && tracer.OnGasChange != nil && reason != tracing.GasChangeIgnored {
+		tracer.OnGasChange(c.Gas, c.Gas+gas, reason)
 	}
 	c.Gas += gas
 }

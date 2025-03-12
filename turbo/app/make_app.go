@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/params"
 	cli2 "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/tracing"
 )
 
 // MakeApp creates a cli application (based on `github.com/urlfave/cli` package).
@@ -93,7 +92,6 @@ func appFlags(cliFlags []cli.Flag) []cli.Flag {
 	flags := append(cliFlags, debug.Flags...) // debug flags are required
 	flags = append(flags, utils.MetricFlags...)
 	flags = append(flags, logging.Flags...)
-	flags = append(flags, tracing.Flags...)
 	flags = append(flags, &utils.ConfigFlag)
 
 	// remove exact duplicate flags, keeping only the first one. this will allow easier composition later down the line

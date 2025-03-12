@@ -36,11 +36,11 @@ func init() {
 
 // noopTracer is a go implementation of the Tracer interface which
 // performs no action. It's mostly useful for testing purposes.
-type NoopTracer struct{}
+type noopTracer struct{}
 
 // newNoopTracer returns a new noop tracer.
 func newNoopTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer, error) {
-	t := &NoopTracer{}
+	t := &noopTracer{}
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart:       t.OnTxStart,
@@ -61,41 +61,41 @@ func newNoopTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer, er
 	}, nil
 }
 
-func (t *NoopTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (t *noopTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 }
 
-func (t *NoopTracer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpContext, depth int, err error) {
+func (t *noopTracer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpContext, depth int, err error) {
 }
 
-func (t *NoopTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {}
+func (t *noopTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {}
 
-func (t *NoopTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *noopTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
-func (t *NoopTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *noopTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
 }
 
-func (*NoopTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+func (*noopTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
 }
 
-func (*NoopTracer) OnTxEnd(receipt *types.Receipt, err error) {}
+func (*noopTracer) OnTxEnd(receipt *types.Receipt, err error) {}
 
-func (*NoopTracer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+func (*noopTracer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
 }
 
-func (*NoopTracer) OnNonceChange(a libcommon.Address, prev, new uint64) {}
+func (*noopTracer) OnNonceChange(a libcommon.Address, prev, new uint64) {}
 
-func (*NoopTracer) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
+func (*noopTracer) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
 }
 
-func (*NoopTracer) OnStorageChange(a libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {}
+func (*noopTracer) OnStorageChange(a libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {}
 
-func (*NoopTracer) OnLog(log *types.Log) {}
+func (*noopTracer) OnLog(log *types.Log) {}
 
-func (t *NoopTracer) GetResult() (json.RawMessage, error) {
+func (t *noopTracer) GetResult() (json.RawMessage, error) {
 	return json.RawMessage(`{}`), nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
-func (t *NoopTracer) Stop(err error) {
+func (t *noopTracer) Stop(err error) {
 }

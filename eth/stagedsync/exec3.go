@@ -240,7 +240,7 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	chainReader := ChainReaderImpl{config: cfg.chainConfig, tx: applyTx, blockReader: blockReader, logger: logger}
+	chainReader := NewChainReaderImpl(cfg.chainConfig, applyTx, blockReader, logger)
 	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	if !inMemExec && !isMining {
 		if initialCycle {
@@ -492,17 +492,15 @@ Loop:
 			return fmt.Errorf("nil block %d", blockNum)
 		}
 
-
 		if b.NumberU64() == 0 {
 			if hooks != nil && hooks.OnGenesisBlock != nil {
 				hooks.OnGenesisBlock(b, cfg.genesis.Alloc)
 			}
 		} else {
 			if hooks != nil && hooks.OnBlockStart != nil {
-				td := chainReader.GetTd(b.ParentHash(), b.NumberU64()-1)
 				hooks.OnBlockStart(tracing.BlockEvent{
 					Block:     b,
-					TD:        td,
+					TD:        chainReader.GetTd(b.ParentHash(), b.NumberU64()-1),
 					Finalized: chainReader.CurrentFinalizedHeader(),
 					Safe:      chainReader.CurrentSafeHeader(),
 				})
@@ -615,7 +613,7 @@ Loop:
 		if parallel {
 			if _, err := executor.execute(ctx, txTasks); err != nil {
 				if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
-					hooks.OnBlockEnd(err)
+					hooks.OnBlockEnd(err) // can we replace these with the defer pattern on other tracers?
 				}
 				return err
 			}

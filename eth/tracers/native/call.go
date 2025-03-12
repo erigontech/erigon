@@ -66,11 +66,11 @@ type callFrame struct {
 	Value *big.Int `json:"value,omitempty" rlp:"optional"`
 }
 
-func (f callFrame) TypeString() string {
+func (f *callFrame) TypeString() string {
 	return f.Type.String()
 }
 
-func (f callFrame) failed() bool {
+func (f *callFrame) failed() bool {
 	return len(f.Error) > 0
 }
 

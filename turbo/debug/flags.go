@@ -41,10 +41,18 @@ import (
 	"github.com/erigontech/erigon-lib/common/fdlimit"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/turbo/logging"
-	"github.com/erigontech/erigon/turbo/tracing"
 )
 
 var (
+	vMTraceFlag = cli.StringFlag{
+		Name:  "vmtrace",
+		Usage: "Set the provider tracer",
+	}
+
+	vMTraceJsonConfigFlag = cli.StringFlag{
+		Name:  "vmtrace.jsonconfig",
+		Usage: "Set the config of the tracer",
+	}
 	//nolint
 	vmoduleFlag = cli.StringFlag{
 		Name:  "vmodule",
@@ -93,7 +101,7 @@ var (
 // Flags holds all command-line flags required for debugging.
 var Flags = []cli.Flag{
 	&pprofFlag, &pprofAddrFlag, &pprofPortFlag,
-	&cpuprofileFlag, &traceFlag,
+	&cpuprofileFlag, &traceFlag, &vMTraceFlag, &vMTraceJsonConfigFlag,
 }
 
 // SetupCobra sets up logging, profiling and tracing for cobra commands
@@ -188,6 +196,19 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 	return logger
 }
 
+// SetupTracerCtx performs the tracing setup according to the parameters
+// containted in the given urfave context.
+func SetupTracerCtx(ctx *cli.Context) (*tracers.Tracer, error) {
+	tracerName := ctx.String(vMTraceFlag.Name)
+	if tracerName == "" {
+		return nil, nil
+	}
+
+	cfg := ctx.String(vMTraceJsonConfigFlag.Name)
+
+	return tracers.New(tracerName, &tracers.Context{}, []byte(cfg))
+}
+
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
 func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *http.ServeMux, *http.ServeMux, error) {
@@ -199,7 +220,7 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 	RaiseFdLimit()
 
 	logger := logging.SetupLoggerCtx("erigon", ctx, log.LvlInfo, log.LvlInfo, rootLogger)
-	tracer, err := tracing.SetupTracerCtx(ctx)
+	tracer, err := SetupTracerCtx(ctx)
 	if err != nil {
 		return logger, tracer, nil, nil, err
 	}

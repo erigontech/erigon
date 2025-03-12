@@ -37,7 +37,7 @@ import (
 
 // Config are the configuration options for the Interpreter
 type Config struct {
-	Debug         bool // Enables debugging
+	Debug         bool // Enables debugging, DO WE NEED THIS IF WE CAN CHECK TRACER == NIL
 	Tracer        *tracing.Hooks
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
@@ -92,7 +92,7 @@ func (ctx *ScopeContext) MemoryData() []byte {
 	return ctx.Memory.Data()
 }
 
-// MemoryData returns the stack data. Callers must not modify the contents
+// StackData returns the stack data. Callers must not modify the contents
 // of the returned data.
 func (ctx *ScopeContext) StackData() []uint256.Int {
 	if ctx.Stack == nil {
@@ -300,7 +300,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if steps%1000 == 0 && in.evm.Cancelled() {
 			break
 		}
-		if in.cfg.Debug || in.cfg.Tracer != nil {
+		if in.cfg.Debug || in.cfg.Tracer != nil { // dont check for debug, remove debug if possible
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, _pc, contract.Gas
 		}

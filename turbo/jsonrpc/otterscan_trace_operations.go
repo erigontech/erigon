@@ -69,6 +69,10 @@ func (t *OperationsTracer) Tracer() *tracers.Tracer {
 }
 
 func (t *OperationsTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	if depth == 0 {
+		return
+	}
+
 	if vm.OpCode(typ) == vm.CALL && value.Uint64() != 0 {
 		t.Results = append(t.Results, &InternalOperation{OP_TRANSFER, from, to, (*hexutil.Big)(value.ToBig())})
 		return

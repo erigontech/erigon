@@ -196,6 +196,10 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 			AccessList: al,
 		}
 	case args.AccessList != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
 		tx = &types.AccessListTx{
 			LegacyTx: types.LegacyTx{
 				CommonTx: types.CommonTx{
@@ -208,7 +212,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 				GasPrice: msg.GasPrice(),
 			},
 			ChainID:    chainID,
-			AccessList: *args.AccessList,
+			AccessList: al,
 		}
 	default:
 		tx = &types.LegacyTx{

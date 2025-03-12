@@ -66,7 +66,7 @@ func NewBorStateSyncTxnTracer(
 // to think that they are running in the same transaction as sub-calls. This is needed since when bor executes the
 // state sync events at end of each sprint these are synthetically executed as if they were sub-calls of the
 // state sync events bor transaction.
-type borStateSyncTxnTracer struct {
+type borStateSyncTxnTracer struct { /// LOOKS WRONG
 	Tracer                       *tracers.Tracer
 	captureStartCalledOnce       bool
 	stateSyncEventsCount         int
