@@ -19,6 +19,7 @@ package stagedsync_test
 import (
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -66,10 +66,10 @@ func TestSenders(t *testing.T) {
 			mustSign(&types.AccessListTx{
 				LegacyTx: types.LegacyTx{
 					CommonTx: types.CommonTx{
-						Nonce: 1,
-						To:    &testAddr,
-						Value: u256.Num1,
-						Gas:   1,
+						Nonce:    1,
+						To:       &testAddr,
+						Value:    u256.Num1,
+						GasLimit: 1,
 					},
 					GasPrice: u256.Num1,
 				},
@@ -77,10 +77,10 @@ func TestSenders(t *testing.T) {
 			mustSign(&types.AccessListTx{
 				LegacyTx: types.LegacyTx{
 					CommonTx: types.CommonTx{
-						Nonce: 2,
-						To:    &testAddr,
-						Value: u256.Num1,
-						Gas:   2,
+						Nonce:    2,
+						To:       &testAddr,
+						Value:    u256.Num1,
+						GasLimit: 2,
 					},
 					GasPrice: u256.Num1,
 				},
@@ -98,10 +98,10 @@ func TestSenders(t *testing.T) {
 			mustSign(&types.AccessListTx{
 				LegacyTx: types.LegacyTx{
 					CommonTx: types.CommonTx{
-						Nonce: 3,
-						To:    &testAddr,
-						Value: u256.Num1,
-						Gas:   3,
+						Nonce:    3,
+						To:       &testAddr,
+						Value:    u256.Num1,
+						GasLimit: 3,
 					},
 					GasPrice: u256.Num1,
 				},
@@ -109,10 +109,10 @@ func TestSenders(t *testing.T) {
 			mustSign(&types.AccessListTx{
 				LegacyTx: types.LegacyTx{
 					CommonTx: types.CommonTx{
-						Nonce: 4,
-						To:    &testAddr,
-						Value: u256.Num1,
-						Gas:   4,
+						Nonce:    4,
+						To:       &testAddr,
+						Value:    u256.Num1,
+						GasLimit: 4,
 					},
 					GasPrice: u256.Num1,
 				},
@@ -120,10 +120,10 @@ func TestSenders(t *testing.T) {
 			mustSign(&types.AccessListTx{
 				LegacyTx: types.LegacyTx{
 					CommonTx: types.CommonTx{
-						Nonce: 5,
-						To:    &testAddr,
-						Value: u256.Num1,
-						Gas:   5,
+						Nonce:    5,
+						To:       &testAddr,
+						Value:    u256.Num1,
+						GasLimit: 5,
 					},
 					GasPrice: u256.Num1,
 				},

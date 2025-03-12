@@ -20,6 +20,7 @@ import (
 	"sort"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -240,5 +241,6 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		}
 		return true
 	})
+	log.Info("Upgrade to Electra complete")
 	return nil
 }

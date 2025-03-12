@@ -3,7 +3,7 @@ run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images bas
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "golang:1.23-bookworm"
+  BUILDER_IMAGE: "golang:1.24-bookworm"
   TARGET_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   CHECKOUT_REF: "main"
@@ -45,7 +45,7 @@ jobs:
       - name: Setup go env and cache
         uses: actions/setup-go@v5
         with:
-          go-version: '>=1.23'
+          go-version: '>=1.24'
           cache: ${{ contains(fromJSON('["refs/heads/main","refs/heads/docker_pectra"]'), github.ref) }}
           cache-dependency-path: |
             erigon/go.sum

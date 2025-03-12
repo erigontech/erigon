@@ -85,13 +85,14 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 		return b.verifyAndStoreBlobSidecar(msg)
 	}
 
+	sidecarVersion := b.beaconCfg.GetCurrentStateVersion(msg.SignedBlockHeader.Header.Slot / b.beaconCfg.SlotsPerEpoch)
 	// [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
-	blockVersion := b.beaconCfg.GetCurrentStateVersion(msg.SignedBlockHeader.Header.Slot / b.beaconCfg.SlotsPerEpoch)
-	maxBlobsPerBlock := b.beaconCfg.MaxBlobsPerBlockByVersion(blockVersion)
+	maxBlobsPerBlock := b.beaconCfg.MaxBlobsPerBlockByVersion(sidecarVersion)
 	if msg.Index >= maxBlobsPerBlock {
 		return errors.New("blob index out of range")
 	}
-	sidecarSubnetIndex := msg.Index % maxBlobsPerBlock
+	// [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_blob_sidecar(blob_sidecar.index) == subnet_id
+	sidecarSubnetIndex := msg.Index % b.beaconCfg.BlobSidecarSubnetCountByVersion(sidecarVersion)
 	if sidecarSubnetIndex != *subnetId {
 		return ErrBlobIndexOutOfRange
 	}
@@ -103,6 +104,7 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 		return ErrIgnore
 	}
 
+	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
 	if b.forkchoiceStore.FinalizedSlot() >= sidecarSlot {
 		return ErrIgnore
 	}

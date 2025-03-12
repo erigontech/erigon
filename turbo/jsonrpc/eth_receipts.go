@@ -303,6 +303,10 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 					return logs, err
 				}
 
+				if len(events) == 0 {
+					continue
+				}
+
 				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, txNumsReader, tx, header, chainConfig, txIndex, len(logs))
 				if err != nil {
 					return logs, err
@@ -481,7 +485,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 				if err != nil {
 					return nil, err
 				}
-				txNum = txNumNextBlock - 1
+				txNum = txNumNextBlock
 			}
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)

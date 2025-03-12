@@ -18,10 +18,10 @@
 
 
 ARG RELEASE_DOCKER_BASE_IMAGE="debian:12-slim" \
-    CI_CD_MAIN_BUILDER_IMAGE="golang:1.23-bookworm" \
-    CI_CD_MAIN_TARGET_BASE_IMAGE="alpine:3" \
+    CI_CD_MAIN_BUILDER_IMAGE="golang:1.24-bookworm" \
+    CI_CD_MAIN_TARGET_BASE_IMAGE="debian:12-slim" \
     BUILDER_IMAGE="golang" \
-    BUILDER_TAG="1.23-bookworm" \
+    BUILDER_TAG="1.24-bookworm" \
     TARGET_IMAGE="debian" \
     TARGET_TAG="12-slim" \
     TARGETARCH \

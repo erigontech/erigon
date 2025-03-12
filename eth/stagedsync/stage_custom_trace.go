@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -36,14 +37,13 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type CustomTraceCfg struct {
 	tmpdir   string
-	db       kv.RwDB
+	db       kv.TemporalRwDB
 	prune    prune.Mode
 	execArgs *exec3.ExecArgs
 }
@@ -125,17 +125,22 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	return nil
 }
 
-func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	var lastTxNum uint64
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ttx := tx.(kv.TemporalRwTx)
+	{
+		tx, err := db.BeginTemporalRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
 		doms, err := state2.NewSharedDomains(tx, logger)
 		if err != nil {
 			return err
 		}
 		defer doms.Close()
 
-		if err := customTraceBatch(ctx, cfg, ttx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
+		if err := customTraceBatch(ctx, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
 			return err
 		}
 
@@ -145,7 +150,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		}
 
 		if cfg.ChainConfig.Bor == nil { //assert
-			if err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
+			if err = AssertReceipts(ctx, cfg, tx, fromBlock, toBlock); err != nil {
 				return err
 			}
 		}
@@ -154,9 +159,6 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 
 	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
@@ -262,7 +264,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 	var m runtime.MemStats
 	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
 		NewTracer: func() exec3.GenericTracer { return nil },
-		Reduce: func(txTask *state.TxTask, tx kv.Tx) error {
+		Reduce: func(txTask *state.TxTask, tx kv.TemporalTx) error {
 			if txTask.Error != nil {
 				return txTask.Error
 			}

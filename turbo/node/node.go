@@ -17,22 +17,25 @@
 // Package node contains classes for running an Erigon node.
 package node
 
+/*
+#include <stdlib.h>
+*/
+import "C"
+
 import (
 	"context"
-
-	"github.com/urfave/cli/v2"
-
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core/gdbme"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
+	"github.com/urfave/cli/v2"
 )
 
 // ErigonNode represents a single node, that runs sync and p2p network.
@@ -114,6 +117,11 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, e
 		return nil, err
 	}
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig, logger)
+
+	if ctx.Bool(utils.GDBMeFlag.Name) {
+		gdbme.RestartUnderGDB()
+	}
+
 	return nodeConfig, nil
 }
 func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
