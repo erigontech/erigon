@@ -445,6 +445,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := stateAntiquaryCollector.collectBalancesDiffs(ctx, slot, s.balances32, s.currentState.RawBalances()); err != nil {
 			return err
 		}
+
+		if s.currentState.Version() >= clparams.ElectraVersion {
+			if err := stateAntiquaryCollector.collectElectraQueuesDiffs(slot, s.currentState.PendingDeposits(), s.currentState.PendingConsolidations(), s.currentState.PendingPartialWithdrawals()); err != nil {
+				return err
+			}
+		}
 		// If we find an epoch, we need to reset the diffs.
 		if slot%s.cfg.SlotsPerEpoch == 0 {
 			s.balances32 = s.balances32[:0]
