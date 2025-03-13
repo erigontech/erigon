@@ -293,9 +293,12 @@ const (
 	CurrentSyncCommittee = "CurrentSyncCommittee"
 	Eth1DataVotes        = "Eth1DataVotes"
 
-	IntraRandaoMixes = "IntraRandaoMixes" // [validator_index+slot] => [randao_mix]
-	RandaoMixes      = "RandaoMixes"      // [validator_index+slot] => [randao_mix]
-	Proposers        = "BlockProposers"   // epoch => proposers indicies
+	IntraRandaoMixes          = "IntraRandaoMixes"          // [validator_index+slot] => [randao_mix]
+	RandaoMixes               = "RandaoMixes"               // [validator_index+slot] => [randao_mix]
+	Proposers                 = "BlockProposers"            // epoch => proposers indicies
+	PendingDeposits           = "PendingDeposits"           // slot => queue_diffs
+	PendingPartialWithdrawals = "PendingPartialWithdrawals" // slot => queue_diffs
+	PendingConsolidations     = "PendingConsolidations"     // slot => queue_diffs
 
 	StatesProcessingProgress = "StatesProcessingProgress"
 
@@ -450,6 +453,9 @@ var ChaindataTables = []string{
 	CurrentSyncCommittee,
 	Eth1DataVotes,
 	IntraRandaoMixes,
+	PendingConsolidations,
+	PendingDeposits,
+	PendingPartialWithdrawals,
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
