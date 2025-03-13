@@ -146,8 +146,8 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	db, tx, _ := NewTestTemporalDb(t)
+	domains, err := stateLib.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	state := state.New(state.NewReaderV3(domains))
@@ -191,7 +191,7 @@ func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *stateLib.SharedD
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := stateLib.NewSharedDomains(tx, log.New())
+	sd, err := stateLib.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -243,7 +243,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	db := testTemporalDB(b)
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(b, err)
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := stateLib.NewSharedDomains(tx, db, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
@@ -467,7 +467,7 @@ func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name strin
 	db := testTemporalDB(b)
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(b, err)
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := stateLib.NewSharedDomains(tx, db, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 

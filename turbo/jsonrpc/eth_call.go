@@ -335,7 +335,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon
 		return nil, err
 	}
 
-	domains, err := libstate.NewSharedDomains(*roTx, log.New())
+	domains, err := libstate.NewSharedDomains(*roTx, db, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -579,7 +579,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 
 	// Unwind to blockNr
 	cfg := stagedsync.StageWitnessCfg(true, 0, chainConfig, engine, api._blockReader, api.dirs)
-	err = stagedsync.RewindStagesForWitness(txBatch2, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
+	err = stagedsync.RewindStagesForWitness(txBatch2, db, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -589,7 +589,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, err
 	}
 
-	domains, err := libstate.NewSharedDomains(txBatch2, log.New())
+	domains, err := libstate.NewSharedDomains(txBatch2, db, log.New())
 	if err != nil {
 		return nil, err
 	}

@@ -38,7 +38,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	require.NoError(tb, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), db, log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
 
@@ -88,7 +88,6 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	cfgd := &testAggConfig{stepSize: 32, disableCommitmentBranchTransform: true}
 	db, agg := testDbAggregatorWithFiles(t, cfgd)
 	defer db.Close()
-
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
@@ -96,10 +95,9 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), db, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-
 	// get latest commited root
 	latestRoot, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), "")
 	require.NoError(t, err)
@@ -118,7 +116,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), db, log.New())
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment

@@ -86,7 +86,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		false,
 		nil,
 	)
-	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, bhCfg, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
+	stateSyncStages := stagedsync.DefaultStages(ctx, m.DB, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, bhCfg, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
 	stateSync := stagedsync.New(
 		ethconfig.Defaults.Sync,
 		stateSyncStages,
