@@ -53,7 +53,6 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	salt := uint32(1)
 	cfg := Schema[kv.AccountsDomain]
 
-	cfg.hist.iiCfg.aggregationStep = 16
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt = &salt
 
