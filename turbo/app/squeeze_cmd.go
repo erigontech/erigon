@@ -156,7 +156,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	acOld := aggOld.BeginFilesRo()
 	defer acOld.Close()
 
-	if err = acOld.SqueezeCommitmentFiles(); err != nil {
+	if err = state.SqueezeCommitmentFiles(acOld, logger); err != nil {
 		return err
 	}
 	acOld.Close()
