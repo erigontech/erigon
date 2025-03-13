@@ -101,7 +101,7 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 	}
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	if err := ac.SqueezeCommitmentFiles(); err != nil {
+	if err := state.SqueezeCommitmentFiles(ac, logger); err != nil {
 		return err
 	}
 	ac.Close()
