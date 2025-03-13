@@ -23,11 +23,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/klauspost/compress/zstd"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
-	"github.com/erigontech/erigon-lib/etl"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -370,6 +367,17 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
 					return err
 				}
+				if s.currentState.Version() >= clparams.ElectraVersion {
+					if err := stateAntiquaryCollector.collectPendingDepositsDump(slot, s.currentState.PendingDeposits()); err != nil {
+						return err
+					}
+					if err := stateAntiquaryCollector.collectPendingConsolidationsDump(slot, s.currentState.PendingConsolidations()); err != nil {
+						return err
+					}
+					if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(slot, s.currentState.PendingPartialWithdrawals()); err != nil {
+						return err
+					}
+				}
 			}
 			if slot%s.cfg.SlotsPerEpoch == 0 {
 				if err := stateAntiquaryCollector.collectBalancesDiffs(ctx, slot, s.balances32, s.currentState.RawBalances()); err != nil {
@@ -420,6 +428,17 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 			if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
 				return err
+			}
+			if s.currentState.Version() >= clparams.ElectraVersion {
+				if err := stateAntiquaryCollector.collectPendingDepositsDump(slot, s.currentState.PendingDeposits()); err != nil {
+					return err
+				}
+				if err := stateAntiquaryCollector.collectPendingConsolidationsDump(slot, s.currentState.PendingConsolidations()); err != nil {
+					return err
+				}
+				if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(slot, s.currentState.PendingPartialWithdrawals()); err != nil {
+					return err
+				}
 			}
 		}
 		// collect current diffs.
@@ -555,20 +574,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 
 	return nil
-}
-
-func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
-	buffer.Reset()
-	compressor.Reset(buffer)
-
-	if _, err := compressor.Write(uncompressed); err != nil {
-		return err
-	}
-	if err := compressor.Close(); err != nil {
-		return err
-	}
-	roundedSlot := slot - (slot % clparams.SlotsPerDump)
-	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), buffer.Bytes())
 }
 
 func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.Tx) error {

@@ -301,9 +301,9 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetEarliestExitEpoch(slotData.EarliestExitEpoch)
 	ret.SetConsolidationBalanceToConsume(slotData.ConsolidationBalanceToConsume)
 	ret.SetEarlistConsolidationEpoch(slotData.EarliestConsolidationEpoch)
-	ret.SetPendingDeposits(slotData.PendingDeposits)
-	ret.SetPendingPartialWithdrawals(slotData.PendingPartialWithdrawals)
-	ret.SetPendingConsolidations(slotData.PendingConsolidations)
+	// ret.SetPendingDeposits(slotData.PendingDeposits)
+	// ret.SetPendingPartialWithdrawals(slotData.PendingPartialWithdrawals)
+	// ret.SetPendingConsolidations(slotData.PendingConsolidations)
 
 	return ret, nil
 }

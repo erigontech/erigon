@@ -76,6 +76,13 @@ type beaconStatesCollector struct {
 	activeValidatorIndiciesCollector *etl.Collector
 	balancesDumpsCollector           *etl.Collector
 	effectiveBalancesDumpCollector   *etl.Collector
+	// electra -- collectors
+	pendingDepositsCollector           *etl.Collector
+	pendingConsolidationsCollector     *etl.Collector
+	pendingWithdrawalsCollector        *etl.Collector
+	pendingDepositsCollectorDump       *etl.Collector
+	pendingConsolidationsCollectorDump *etl.Collector
+	pendingWithdrawalsCollectorDump    *etl.Collector
 
 	buffers []etl.Buffer
 
@@ -119,8 +126,16 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		activeValidatorIndiciesCollector: etl.NewCollector(kv.ActiveValidatorIndicies, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		balancesDumpsCollector:           etl.NewCollector(kv.BalancesDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		effectiveBalancesDumpCollector:   etl.NewCollector(kv.EffectiveBalancesDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		logger:                           logger,
-		beaconCfg:                        beaconCfg,
+		// electra
+		pendingDepositsCollector:           etl.NewCollector(kv.PendingDeposits, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		pendingConsolidationsCollector:     etl.NewCollector(kv.PendingConsolidations, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		pendingWithdrawalsCollector:        etl.NewCollector(kv.PendingPartialWithdrawals, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		pendingDepositsCollectorDump:       etl.NewCollector(kv.PendingDepositsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		pendingConsolidationsCollectorDump: etl.NewCollector(kv.PendingConsolidationsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		pendingWithdrawalsCollectorDump:    etl.NewCollector(kv.PendingPartialWithdrawalsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+
+		logger:    logger,
+		beaconCfg: beaconCfg,
 
 		buf:        buf,
 		compressor: compressor,
@@ -170,6 +185,17 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 
 		committee = *state.NextSyncCommittee()
 		if err := i.nextSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(committeeSlot), committee[:]); err != nil {
+			return err
+		}
+	}
+	if state.Version() >= clparams.ElectraVersion {
+		if err := antiquateListSSZ(ctx, slot, state.PendingDeposits(), i.buf, i.compressor, i.pendingDepositsCollector); err != nil {
+			return err
+		}
+		if err := antiquateListSSZ(ctx, slot, state.PendingConsolidations(), i.buf, i.compressor, i.pendingConsolidationsCollector); err != nil {
+			return err
+		}
+		if err := antiquateListSSZ(ctx, slot, state.PendingPartialWithdrawals(), i.buf, i.compressor, i.pendingWithdrawalsCollector); err != nil {
 			return err
 		}
 	}
@@ -230,6 +256,24 @@ func (i *beaconStatesCollector) collectBalancesDump(slot uint64, uncompressed []
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
 	return antiquateField(context.Background(), slot, uncompressed, i.buf, i.compressor, i.balancesDumpsCollector)
+}
+
+func (i *beaconStatesCollector) collectPendingDepositsDump(slot uint64, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit]) error {
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	return antiquateListSSZ(context.Background(), slot, pendingDeposits, i.buf, i.compressor, i.pendingDepositsCollector)
+}
+
+func (i *beaconStatesCollector) collectPendingConsolidationsDump(slot uint64, pendingConsolidations *solid.ListSSZ[*solid.PendingConsolidation]) error {
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	return antiquateListSSZ(context.Background(), slot, pendingConsolidations, i.buf, i.compressor, i.pendingConsolidationsCollector)
+}
+
+func (i *beaconStatesCollector) collectPendingWithdrawalsDump(slot uint64, pendingWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) error {
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	return antiquateListSSZ(context.Background(), slot, pendingWithdrawals, i.buf, i.compressor, i.pendingWithdrawalsCollector)
 }
 
 func (i *beaconStatesCollector) collectIntraEpochRandaoMix(slot uint64, randao libcommon.Hash) error {
@@ -293,6 +337,9 @@ func (i *beaconStatesCollector) collectBalancesDiffs(ctx context.Context, slot u
 func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(ctx context.Context, slot uint64, oldValidatorSetSSZ, newValidatorSetSSZ []byte) error {
 	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldValidatorSetSSZ, newValidatorSetSSZ, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff)
 }
+
+//	func (i *beaconStatesCollector) collectQueueDiffs(s *state.CachingBeaconState, slot uint64) error {
+//		if
 
 func (i *beaconStatesCollector) collectInactivityScores(slot uint64, inactivityScores []byte) error {
 	return antiquateFullUint64List(i.inactivityScoresCollector, slot, inactivityScores, i.buf, i.compressor)
@@ -374,6 +421,10 @@ func (i *beaconStatesCollector) close() {
 	i.activeValidatorIndiciesCollector.Close()
 	i.balancesDumpsCollector.Close()
 	i.effectiveBalancesDumpCollector.Close()
+	i.pendingDepositsCollector.Close()
+	i.pendingConsolidationsCollector.Close()
+	i.pendingWithdrawalsCollector.Close()
+
 	for _, b := range i.buffers {
 		b.Reset()
 	}
@@ -399,6 +450,24 @@ func antiquateField(ctx context.Context, slot uint64, uncompressed []byte, buffe
 	buffer.Reset()
 	compressor.Reset(buffer)
 
+	if _, err := compressor.Write(uncompressed); err != nil {
+		return err
+	}
+	if err := compressor.Close(); err != nil {
+		return err
+	}
+	roundedSlot := slot - (slot % clparams.SlotsPerDump)
+	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), buffer.Bytes())
+}
+
+func antiquateListSSZ[T solid.EncodableHashableSSZ](ctx context.Context, slot uint64, l *solid.ListSSZ[T], buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
+	buffer.Reset()
+	compressor.Reset(buffer)
+
+	uncompressed, err := l.EncodeSSZ(nil)
+	if err != nil {
+		return err
+	}
 	if _, err := compressor.Write(uncompressed); err != nil {
 		return err
 	}

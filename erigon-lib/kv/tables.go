@@ -293,12 +293,18 @@ const (
 	CurrentSyncCommittee = "CurrentSyncCommittee"
 	Eth1DataVotes        = "Eth1DataVotes"
 
-	IntraRandaoMixes          = "IntraRandaoMixes"          // [validator_index+slot] => [randao_mix]
-	RandaoMixes               = "RandaoMixes"               // [validator_index+slot] => [randao_mix]
-	Proposers                 = "BlockProposers"            // epoch => proposers indicies
-	PendingDeposits           = "PendingDeposits"           // slot => queue_diffs
-	PendingPartialWithdrawals = "PendingPartialWithdrawals" // slot => queue_diffs
-	PendingConsolidations     = "PendingConsolidations"     // slot => queue_diffs
+	IntraRandaoMixes = "IntraRandaoMixes" // [validator_index+slot] => [randao_mix]
+	RandaoMixes      = "RandaoMixes"      // [validator_index+slot] => [randao_mix]
+	Proposers        = "BlockProposers"   // epoch => proposers indicies
+
+	// Electra
+	PendingDepositsDump           = "PendingDepositsDump"           // block_num => dump
+	PendingPartialWithdrawalsDump = "PendingPartialWithdrawalsDump" // block_num => dump
+	PendingConsolidationsDump     = "PendingConsolidationsDump"     // block_num => dump
+	PendingDeposits               = "PendingDeposits"               // slot => queue_diffs
+	PendingPartialWithdrawals     = "PendingPartialWithdrawals"     // slot => queue_diffs
+	PendingConsolidations         = "PendingConsolidations"         // slot => queue_diffs
+	// End Electra
 
 	StatesProcessingProgress = "StatesProcessingProgress"
 
@@ -455,6 +461,9 @@ var ChaindataTables = []string{
 	IntraRandaoMixes,
 	PendingConsolidations,
 	PendingDeposits,
+	PendingDepositsDump,
+	PendingPartialWithdrawalsDump,
+	PendingConsolidationsDump,
 	PendingPartialWithdrawals,
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
