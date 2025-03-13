@@ -68,7 +68,7 @@ func init() {
 	purifyDomains.Flags().BoolVar(&replaceInDatadir, "replace-in-datadir", false, "replace the purified domains directly in datadir (will remove .kvei and .bt too)")
 	purifyDomains.Flags().Float64Var(&minSkipRatioL0, "min-skip-ratio-l0", 0.1, "minimum ratio of keys to skip in L0")
 	purifyDomains.Flags().Uint64Var(&fromStepPurification, "from", 0, "step from which domains would be purified")
-	purifyDomains.Flags().Uint64Var(&toStepPurification, "to", 1e38, "step to which domains would be purified")
+	purifyDomains.Flags().Uint64Var(&toStepPurification, "to", 1e18, "step to which domains would be purified")
 	rootCmd.AddCommand(purifyDomains)
 }
 
