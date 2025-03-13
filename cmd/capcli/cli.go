@@ -665,6 +665,8 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	if hRoot != wRoot {
+		haveState.PrintLeaves()
+		wantState.PrintLeaves()
 		for i := 0; i < haveState.PreviousEpochParticipation().Length(); i++ {
 			if haveState.BlockRoots().Get(i) != wantState.BlockRoots().Get(i) {
 				log.Info("block roots mismatch", "index", i, "have", haveState.BlockRoots().Get(i), "want", wantState.BlockRoots().Get(i))
