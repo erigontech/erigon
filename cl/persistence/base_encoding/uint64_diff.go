@@ -347,7 +347,7 @@ func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, rev
 		if n != 121 {
 			return nil, fmt.Errorf("read %d bytes, expected 121", n)
 		}
-		out = append(out, currValidator...)
+		out = append(out, currValidator...) // nozero
 	}
 
 	return out, nil
