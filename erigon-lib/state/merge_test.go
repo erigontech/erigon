@@ -39,7 +39,6 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 
 	cfg.salt = &salt
 	cfg.dirs = datadir.New(os.TempDir())
-	cfg.aggregationStep = aggStep
 
 	ii, err := NewInvertedIndex(cfg, log.New())
 	ii.indexList = 0
