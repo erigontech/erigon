@@ -193,10 +193,6 @@ func (g *Generator) GetReceiptsGasUsed(tx kv.TemporalTx, block *types.Block) (ty
 		return receipts, nil
 	}
 
-	if block == nil || len(block.Transactions()) == 0 {
-		return types.Receipts{}, nil
-	}
-
 	startTxNum, err := rawdbv3.TxNums.Min(tx, block.NumberU64())
 	if err != nil {
 		return nil, fmt.Errorf("get min tx num: %w", err)
@@ -216,6 +212,7 @@ func (g *Generator) GetReceiptsGasUsed(tx kv.TemporalTx, block *types.Block) (ty
 
 		receipt.GasUsed = cumGasUsed - prevCumGasUsed
 		receipts[i] = receipt
+		log.Info("eth_feeHistory", "blockNum", block.NumberU64(), "txIndex", i, "receipt.gasused", receipts[i].GasUsed, "txNum", currentTxNum, "cumGasUsed", cumGasUsed, "prevCumGasUsed", prevCumGasUsed)
 
 		prevCumGasUsed = cumGasUsed
 		currentTxNum++
