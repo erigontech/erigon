@@ -40,7 +40,7 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	cfg.salt = &salt
 	cfg.dirs = datadir.New(os.TempDir())
 
-	ii, err := NewInvertedIndex(cfg, log.New())
+	ii, err := NewInvertedIndex(cfg, aggStep, log.New())
 	ii.indexList = 0
 	if err != nil {
 		panic(err)
