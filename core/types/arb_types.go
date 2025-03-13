@@ -142,8 +142,8 @@ func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
 
-		TxRunMode: MessageRunMode,
-		Tx:        tx,
+		// TxRunMode: MessageRunMode, // must be set separately?
+		Tx: tx,
 	}
 	// if baseFee != nil {
 	// 	msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
