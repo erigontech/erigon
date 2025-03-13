@@ -37,10 +37,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
-
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon/polygon/bridge"
-
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -59,6 +55,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -72,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"

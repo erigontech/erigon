@@ -1654,6 +1654,21 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 
 // --- Domain part END ---
 
+func (at *AggregatorRoTx) madvNormal() {
+	for _, d := range at.d {
+		for _, f := range d.files {
+			f.src.decompressor.EnableMadvNormal()
+		}
+	}
+}
+func (at *AggregatorRoTx) disableReadAhead() {
+	for _, d := range at.d {
+		for _, f := range d.files {
+			f.src.decompressor.DisableReadAhead()
+		}
+	}
+}
+
 func (at *AggregatorRoTx) Close() {
 	if at == nil || at.a == nil { // invariant: it's safe to call Close multiple times
 		return
