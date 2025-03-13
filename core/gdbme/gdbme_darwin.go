@@ -4,11 +4,12 @@ package gdbme
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon/cmd/utils"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
+
+	"github.com/erigontech/erigon/cmd/utils"
 )
 
 const lldbPath = "/usr/bin/lldb"
@@ -25,12 +26,12 @@ func RestartUnderGDB() {
 	args := os.Args[1:]
 	filteredArgs := []string{}
 	for _, arg := range args {
-		if arg != "--"+utils.GDBMeFlag.Name {
+		if arg != fmt.Sprintf("--%s", utils.GDBMeFlag.Name) {
 			filteredArgs = append(filteredArgs, arg)
 		}
 	}
 
-	runCommand := "run " + formatArgsForLLDB(filteredArgs)
+	runCommand := fmt.Sprintf("run %s", formatArgsForLLDB(filteredArgs))
 
 	// maybe in future it would be a script in a separate file
 	//TODO: discover some more features from lldb and add it here
