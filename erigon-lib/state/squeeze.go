@@ -410,7 +410,7 @@ func RebuildCommitmentFiles(ctx context.Context, a *Aggregator, rwDb kv.RwDB, tx
 
 		logger.Info("beginning commitment", "range", r.String("", a.StepSize()), "shardSize", shardSize, "batch", batchSize)
 
-		var rebuiltCommit *RebuiltCommitment
+		var rebuiltCommit *rebuiltCommitment
 		var processed uint64
 
 		for shardFrom < lastShard {
@@ -484,13 +484,13 @@ func RebuildCommitmentFiles(ctx context.Context, a *Aggregator, rwDb kv.RwDB, tx
 			domains.SetTxNum(lastTxnumInShard - 1)
 			domains.sdCtx.SetLimitReadAsOfTxNum(domains.TxNum() + 1) // this helps to read state from correct file during commitment
 
-			rebuiltCommit, err = domains.RebuildCommitmentShard(ctx, nextKey, &RebuiltCommitment{
+			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
 				StepTo:   shardTo,
 				TxnFrom:  fromTxNumRange,
 				TxnTo:    toTxNumRange,
 				Keys:     totalKeys,
-			})
+			}, domains.logger)
 			if err != nil {
 				return nil, err
 			}
