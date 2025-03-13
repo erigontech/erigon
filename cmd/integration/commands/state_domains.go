@@ -67,6 +67,8 @@ func init() {
 	purifyDomains.Flags().BoolVar(&purifyOnlyCommitment, "only-commitment", true, "purify only commitment domain")
 	purifyDomains.Flags().BoolVar(&replaceInDatadir, "replace-in-datadir", false, "replace the purified domains directly in datadir (will remove .kvei and .bt too)")
 	purifyDomains.Flags().Float64Var(&minSkipRatioL0, "min-skip-ratio-l0", 0.1, "minimum ratio of keys to skip in L0")
+	purifyDomains.Flags().Uint64Var(&fromStepPurification, "from", 0, "step from which domains would be purified")
+	purifyDomains.Flags().Uint64Var(&toStepPurification, "to", 1e18, "step to which domains would be purified")
 	rootCmd.AddCommand(purifyDomains)
 }
 
@@ -78,6 +80,8 @@ var (
 	outDatadir           string
 	purifyOnlyCommitment bool
 	replaceInDatadir     bool
+	fromStepPurification uint64
+	toStepPurification   uint64
 )
 
 // write command to just seek and query state by addr and domain from state db and files (if any)
@@ -221,6 +225,15 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 			return nil
 		}
 
+		fromFileStep, toFileStep, err := statelib.ParseStepsFromFileName(info.Name())
+		if err != nil {
+			return err
+		}
+
+		if fromFileStep < fromStepPurification || toFileStep > toStepPurification {
+			return nil
+		}
+
 		fmt.Printf("Add file to indexing of %s: %s\n", domain, path)
 
 		filesNamesToIndex = append(filesNamesToIndex, info.Name())
@@ -299,16 +312,16 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 	compressCfg := statelib.Schema[domain].CompressCfg
 	compressCfg.Workers = runtime.NumCPU()
 	var tbl string
-	switch domainName {
-	case "account":
+	switch domain {
+	case kv.AccountsDomain:
 		tbl = kv.MaxTxNum
-	case "storage":
+	case kv.StorageDomain:
 		tbl = kv.HeaderNumber
-	case "code":
+	case kv.CodeDomain:
 		tbl = kv.HeaderCanonical
-	case "commitment":
+	case kv.CommitmentDomain:
 		tbl = kv.HeaderTD
-	case "receipt":
+	case kv.ReceiptDomain:
 		tbl = kv.BadHeaderNumber
 	default:
 		return fmt.Errorf("invalid domainName %s", domainName)
@@ -334,6 +347,15 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 		}
 
 		fmt.Printf("Add file to purification of %s: %s\n", domainName, path)
+
+		fromFileStep, toFileStep, err := statelib.ParseStepsFromFileName(info.Name())
+		if err != nil {
+			return err
+		}
+
+		if fromFileStep < fromStepPurification || toFileStep > toStepPurification {
+			return nil
+		}
 
 		filesNamesToPurify = append(filesNamesToPurify, info.Name())
 		return nil
