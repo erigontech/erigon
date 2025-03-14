@@ -319,6 +319,10 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if err := readQueueSSZ(tx, kvGetter, slot, kv.PendingPartialWithdrawalsDump, kv.PendingPartialWithdrawals, pendingWithdrawals); err != nil {
 		return nil, fmt.Errorf("failed to read pending withdrawals: %w", err)
 	}
+
+	ret.SetPendingConsolidations(pendingConsolidations)
+	ret.SetPendingDeposits(pendingDeposits)
+	ret.SetPendingPartialWithdrawals(pendingWithdrawals)
 	return ret, nil
 }
 
@@ -988,22 +992,10 @@ func readQueueSSZ[T solid.EncodableHashableSSZ](tx kv.Tx, kvGetter state_accesso
 	buffer.Reset()
 
 	var compressed []byte
-	currentStageProgress, err := state_accessors.GetStateProcessingProgress(tx)
+
+	compressed, err := kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot))
 	if err != nil {
 		return err
-	}
-	midpoint := uint64(clparams.SlotsPerDump / 2)
-	forward := remainder <= midpoint || currentStageProgress <= freshDumpSlot+clparams.SlotsPerDump
-	if forward {
-		compressed, err = kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot))
-		if err != nil {
-			return err
-		}
-	} else {
-		compressed, err = kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot+clparams.SlotsPerDump))
-		if err != nil {
-			return err
-		}
 	}
 
 	if len(compressed) == 0 {
