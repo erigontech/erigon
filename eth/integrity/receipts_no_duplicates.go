@@ -45,7 +45,6 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 		toBlock-- // [fromBlock,toBlock)
 	}
 
-	fromTxNum = 2763535659
 	ac := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
 	//toTxNum := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
 	toTxNum, err := txNumsReader.Max(tx, toBlock)
@@ -73,7 +72,7 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 		}
 		//_, blockNum, _ := txNumsReader.FindBlockNum(tx, txNum)
 		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
-		fmt.Printf("[dbg] cumGasUsed=%d, txNum=%d, blockNum=%d, prevCumGasUsed=%d\n", cumGasUsed, txNum, blockNum, prevCumGasUsed)
+		//fmt.Printf("[dbg] cumGasUsed=%d, txNum=%d, blockNum=%d, prevCumGasUsed=%d\n", cumGasUsed, txNum, blockNum, prevCumGasUsed)
 		if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
 			err := fmt.Errorf("bad receipt at txnum: %d, block: %d, cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, cumGasUsed, prevCumGasUsed)
 			panic(err)
