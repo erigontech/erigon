@@ -1001,22 +1001,24 @@ func readQueueSSZ[T solid.EncodableHashableSSZ](tx kv.Tx, kvGetter state_accesso
 	// if len(compressed) == 0 {
 	// 	return fmt.Errorf("queue dump not found for slot %d", freshDumpSlot)
 	// }
-	if _, err := buffer.Write(compressed); err != nil {
-		return err
-	}
-	zstdReader, err := zstd.NewReader(buffer)
-	if err != nil {
-		return err
-	}
-	defer zstdReader.Close()
+	if len(compressed) != 0 {
+		if _, err := buffer.Write(compressed); err != nil {
+			return err
+		}
+		zstdReader, err := zstd.NewReader(buffer)
+		if err != nil {
+			return err
+		}
+		defer zstdReader.Close()
 
-	sszEnc := make([]byte, 0)
-	if _, err = io.ReadFull(zstdReader, sszEnc); err != nil && err != io.ErrUnexpectedEOF {
-		return err
-	}
+		sszEnc, err := io.ReadAll(zstdReader)
+		if err != nil {
+			return err
+		}
 
-	if err := out.DecodeSSZ(sszEnc, 0); err != nil {
-		return err
+		if err := out.DecodeSSZ(sszEnc, 0); err != nil {
+			return err
+		}
 	}
 
 	for currSlot := freshDumpSlot + 1; currSlot <= slot; currSlot++ {

@@ -79,7 +79,6 @@ func ApplySSZQueueDiff[T solid.EncodableHashableSSZ](r io.Reader, queue *solid.L
 	if err := binary.Read(r, binary.LittleEndian, &lengthToTruncate); err != nil {
 		return err
 	}
-	fmt.Println(lengthToTruncate)
 	// truncate the queue
 	queue.Cut(int(lengthToTruncate))
 	fmt.Println(queue.Len(), lengthToTruncate)
