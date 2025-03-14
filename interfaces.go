@@ -178,7 +178,7 @@ type LogFilterer interface {
 // contract address after the transaction has been mined.
 //
 // The transaction must be signed and have a valid nonce to be included. Consumers of the
-// API can use package accounts to maintain local private keys and need can retrieve the
+// API can use package accounts to maintain local private keys and can retrieve the
 // next available nonce using PendingNonceAt.
 type TransactionSender interface {
 	SendTransaction(ctx context.Context, txn *types.Transaction) error
