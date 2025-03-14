@@ -197,13 +197,13 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 		}
 	}
 	if state.Version() >= clparams.ElectraVersion {
-		if err := antiquateListSSZ(ctx, slot, state.PendingDeposits(), i.buf, i.compressor, i.pendingDepositsCollector); err != nil {
+		if err := antiquateListSSZ(ctx, slot, state.PendingDeposits(), i.buf, i.compressor, i.pendingDepositsCollectorDump); err != nil {
 			return err
 		}
-		if err := antiquateListSSZ(ctx, slot, state.PendingConsolidations(), i.buf, i.compressor, i.pendingConsolidationsCollector); err != nil {
+		if err := antiquateListSSZ(ctx, slot, state.PendingConsolidations(), i.buf, i.compressor, i.pendingConsolidationsCollectorDump); err != nil {
 			return err
 		}
-		if err := antiquateListSSZ(ctx, slot, state.PendingPartialWithdrawals(), i.buf, i.compressor, i.pendingWithdrawalsCollector); err != nil {
+		if err := antiquateListSSZ(ctx, slot, state.PendingPartialWithdrawals(), i.buf, i.compressor, i.pendingWithdrawalsCollectorDump); err != nil {
 			return err
 		}
 	}
@@ -269,7 +269,7 @@ func (i *beaconStatesCollector) collectBalancesDump(slot uint64, uncompressed []
 func (i *beaconStatesCollector) collectPendingDepositsDump(slot uint64, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pendingDeposits, i.buf, i.compressor, i.pendingDepositsCollector)
+	return antiquateListSSZ(context.Background(), slot, pendingDeposits, i.buf, i.compressor, i.pendingDepositsCollectorDump)
 }
 
 func (i *beaconStatesCollector) preStateTransitionHook(preState *state.CachingBeaconState) {
@@ -307,13 +307,13 @@ func (i *beaconStatesCollector) collectElectraQueuesDiffs(slot uint64, pendingDe
 func (i *beaconStatesCollector) collectPendingConsolidationsDump(slot uint64, pendingConsolidations *solid.ListSSZ[*solid.PendingConsolidation]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pendingConsolidations, i.buf, i.compressor, i.pendingConsolidationsCollector)
+	return antiquateListSSZ(context.Background(), slot, pendingConsolidations, i.buf, i.compressor, i.pendingConsolidationsCollectorDump)
 }
 
 func (i *beaconStatesCollector) collectPendingWithdrawalsDump(slot uint64, pendingWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pendingWithdrawals, i.buf, i.compressor, i.pendingWithdrawalsCollector)
+	return antiquateListSSZ(context.Background(), slot, pendingWithdrawals, i.buf, i.compressor, i.pendingWithdrawalsCollectorDump)
 }
 
 func (i *beaconStatesCollector) collectIntraEpochRandaoMix(slot uint64, randao libcommon.Hash) error {
