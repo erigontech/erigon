@@ -188,12 +188,12 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	return receipts, nil
 }
 
-func (g *Generator) GetReceiptsGasUsed(tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
+func (g *Generator) GetReceiptsGasUsed(tx kv.TemporalTx, block *types.Block, txNumsReader rawdbv3.TxNumsReader) (types.Receipts, error) {
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
 		return receipts, nil
 	}
 
-	startTxNum, err := rawdbv3.TxNums.Min(tx, block.NumberU64())
+	startTxNum, err := txNumsReader.Min(tx, block.NumberU64())
 	if err != nil {
 		return nil, fmt.Errorf("get min tx num: %w", err)
 	}
