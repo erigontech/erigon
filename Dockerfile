@@ -34,7 +34,7 @@ ARG RELEASE_DOCKER_BASE_IMAGE="debian:12-slim" \
     GID_ERIGON=1000 \
     BUILD_SILKWORM="false" \
     VERSION=${VERSION} \
-    APPLICATION \
+    APPLICATION="erigon" \
     EXPOSED_PORTS="8545 \
        8551 \
        8546 \
