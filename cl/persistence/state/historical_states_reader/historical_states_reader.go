@@ -998,9 +998,9 @@ func readQueueSSZ[T solid.EncodableHashableSSZ](tx kv.Tx, kvGetter state_accesso
 		return err
 	}
 
-	if len(compressed) == 0 {
-		return fmt.Errorf("queue dump not found for slot %d", freshDumpSlot)
-	}
+	// if len(compressed) == 0 {
+	// 	return fmt.Errorf("queue dump not found for slot %d", freshDumpSlot)
+	// }
 	if _, err := buffer.Write(compressed); err != nil {
 		return err
 	}
