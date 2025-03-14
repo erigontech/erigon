@@ -439,6 +439,24 @@ func (i *beaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := i.effectiveBalancesDumpCollector.Load(tx, kv.EffectiveBalancesDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	if err := i.pendingDepositsCollector.Load(tx, kv.PendingDeposits, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.pendingConsolidationsCollector.Load(tx, kv.PendingConsolidations, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.pendingWithdrawalsCollector.Load(tx, kv.PendingPartialWithdrawals, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.pendingDepositsCollectorDump.Load(tx, kv.PendingDepositsDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.pendingConsolidationsCollectorDump.Load(tx, kv.PendingConsolidationsDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.pendingWithdrawalsCollectorDump.Load(tx, kv.PendingPartialWithdrawalsDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
 
 	return i.balancesDumpsCollector.Load(tx, kv.BalancesDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()})
 }
@@ -464,6 +482,9 @@ func (i *beaconStatesCollector) close() {
 	i.pendingDepositsCollector.Close()
 	i.pendingConsolidationsCollector.Close()
 	i.pendingWithdrawalsCollector.Close()
+	i.pendingConsolidationsCollectorDump.Close()
+	i.pendingDepositsCollectorDump.Close()
+	i.pendingWithdrawalsCollectorDump.Close()
 
 	for _, b := range i.buffers {
 		b.Reset()
