@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
+	"google.golang.org/grpc"
 
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -128,7 +129,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []DownloadReq
 	downloader.SetLogPrefix(ctx, preq)
 	// start seed large .seg of large size
 	req := BuildProtoRequest(downloadRequest)
-	if _, err := downloader.Add(ctx, req); err != nil {
+	if _, err := downloader.Add(ctx, req, grpc.WaitForReady(true)); err != nil {
 		return err
 	}
 	return nil
@@ -390,7 +391,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 	}
 
 	// Print download progress until all segments are available
-	for !completedResp.Completed {
+	for completedResp == nil || !completedResp.Completed {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
