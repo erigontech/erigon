@@ -131,12 +131,12 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		balancesDumpsCollector:           etl.NewCollector(kv.BalancesDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		effectiveBalancesDumpCollector:   etl.NewCollector(kv.EffectiveBalancesDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		// electra
-		pendingDepositsCollector:           etl.NewCollector(kv.PendingDeposits, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		pendingConsolidationsCollector:     etl.NewCollector(kv.PendingConsolidations, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		pendingWithdrawalsCollector:        etl.NewCollector(kv.PendingPartialWithdrawals, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		pendingDepositsCollectorDump:       etl.NewCollector(kv.PendingDepositsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		pendingConsolidationsCollectorDump: etl.NewCollector(kv.PendingConsolidationsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		pendingWithdrawalsCollectorDump:    etl.NewCollector(kv.PendingPartialWithdrawalsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		pendingDepositsCollector:           etl.NewCollector(kv.PendingDeposits, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
+		pendingConsolidationsCollector:     etl.NewCollector(kv.PendingConsolidations, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
+		pendingWithdrawalsCollector:        etl.NewCollector(kv.PendingPartialWithdrawals, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
+		pendingDepositsCollectorDump:       etl.NewCollector(kv.PendingDepositsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
+		pendingConsolidationsCollectorDump: etl.NewCollector(kv.PendingConsolidationsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
+		pendingWithdrawalsCollectorDump:    etl.NewCollector(kv.PendingPartialWithdrawalsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
 
 		pendingDepositsWriter:       base_encoding.NewSSZQueueEncoder[*solid.PendingDeposit](func(a, b *solid.PendingDeposit) bool { return *a == *b }),
 		pendingConsolidationsWriter: base_encoding.NewSSZQueueEncoder[*solid.PendingConsolidation](func(a, b *solid.PendingConsolidation) bool { return *a == *b }),
