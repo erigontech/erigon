@@ -2,7 +2,6 @@ package base_encoding
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -81,7 +80,6 @@ func ApplySSZQueueDiff[T solid.EncodableHashableSSZ](r io.Reader, queue *solid.L
 	}
 	// truncate the queue
 	queue.Cut(int(lengthToTruncate))
-	fmt.Println(queue.Len(), lengthToTruncate)
 
 	for {
 		var length uint32
