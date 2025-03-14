@@ -33,7 +33,7 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 		return [32]byte{}, err
 	}
 	// for i := 0; i < len(b.leaves); i += 32 {
-	//	fmt.Println(i/32, libcommon.BytesToHash(b.leaves[i:i+32]))
+	// 	fmt.Println(i/32, libcommon.BytesToHash(b.leaves[i:i+32]))
 	// }
 	// Pad to 32 of length
 	endIndex := StateLeafSize * 32
