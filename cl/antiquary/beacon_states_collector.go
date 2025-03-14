@@ -378,9 +378,6 @@ func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(ctx context.Contex
 	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldValidatorSetSSZ, newValidatorSetSSZ, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff)
 }
 
-//	func (i *beaconStatesCollector) collectQueueDiffs(s *state.CachingBeaconState, slot uint64) error {
-//		if
-
 func (i *beaconStatesCollector) collectInactivityScores(slot uint64, inactivityScores []byte) error {
 	return antiquateFullUint64List(i.inactivityScoresCollector, slot, inactivityScores, i.buf, i.compressor)
 }
