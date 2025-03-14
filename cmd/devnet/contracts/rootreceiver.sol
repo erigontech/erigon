@@ -17,7 +17,7 @@ contract ICheckpointManager {
 
     /**
      * @notice mapping of checkpoint header numbers to block details
-     * @dev These checkpoints are submited by plasma contracts
+     * @dev These checkpoints are submitted by plasma contracts
      */
     mapping(uint256 => HeaderBlock) public headerBlocks;
 }
@@ -64,20 +64,20 @@ contract RootReceiver {
                 payload.getReceiptLogIndex()
             )
         );
-        require(processedExits[exitHash] == false, "FxRootTunnel: EXIT_ALREADY_PROCESSED");
+        require(processedExits[exitHash] == false, "RootReceiver: EXIT_ALREADY_PROCESSED");
         processedExits[exitHash] = true;
 
         ExitPayloadReader.Receipt memory receipt = payload.getReceipt();
         ExitPayloadReader.Log memory log = receipt.getLog();
 
         // check child tunnel
-        //require(fxChildTunnel == log.getEmitter(), "FxRootTunnel: INVALID_FX_CHILD_TUNNEL");
+        //require(fxChildTunnel == log.getEmitter(), "RootReceiver: INVALID_FX_CHILD_TUNNEL");
 
         bytes32 receiptRoot = payload.getReceiptRoot();
         // verify receipt inclusion
         require(
             MerklePatriciaProof.verify(receipt.toBytes(), branchMaskBytes, payload.getReceiptProof(), receiptRoot),
-            "RootTunnel: INVALID_RECEIPT_PROOF"
+            "RootReceiver: INVALID_RECEIPT_PROOF"
         );
 
         // verify checkpoint inclusion
@@ -94,7 +94,7 @@ contract RootReceiver {
 
         require(
             bytes32(topics.getField(0).toUint()) == SEND_MESSAGE_EVENT_SIG, // topic0 is event sig
-            "FxRootTunnel: INVALID_SIGNATURE"
+            "RootReceiver: INVALID_SIGNATURE"
         );
 
         // received message data
@@ -118,7 +118,7 @@ contract RootReceiver {
                 headerRoot,
                 blockProof
             ),
-            "FxRootTunnel: INVALID_HEADER"
+            "RootReceiver: INVALID_HEADER"
         );
     }
 
