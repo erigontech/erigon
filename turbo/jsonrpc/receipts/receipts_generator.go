@@ -195,7 +195,7 @@ func (g *Generator) GetReceiptsGasUsed(tx kv.TemporalTx, block *types.Block, txN
 
 	startTxNum, err := txNumsReader.Min(tx, block.NumberU64())
 	if err != nil {
-		return nil, fmt.Errorf("ReceiptGen.GetReceiptsGasUsed: get  min tx of block %d: %w", block.NumberU64(), err)
+		return nil, err
 	}
 
 	receipts := make(types.Receipts, len(block.Transactions()))
