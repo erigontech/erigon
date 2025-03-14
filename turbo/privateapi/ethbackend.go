@@ -52,7 +52,7 @@ import (
 // 2.2.0 - add NodesInfo function
 // 3.0.0 - adding PoS interfaces
 // 3.1.0 - add Subscribe to logs
-// 3.2.0 - add EngineGetBlobsBundleV1
+// 3.2.0 - add EngineGetBlobsBundleV1k
 // 3.3.0 - merge EngineGetBlobsBundleV1 into EngineGetPayload
 var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 3, Patch: 0}
 

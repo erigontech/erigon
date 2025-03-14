@@ -706,7 +706,7 @@ Windows users may run erigon in 3 possible ways:
   those mount points use `DrvFS` which is
   a [network file system](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
   and, additionally, MDBX locks the db for exclusive access which implies only one process at a time can access data.
-  This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#for-remote-db) even if
+  This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#json-rpc-daemon) even if
   it is executed on the very same computer. If instead your data is hosted on the native Linux filesystem non
   limitations apply.
   **Please also note the default WSL2 environment has its own IP address which does not match the one of the network

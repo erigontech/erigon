@@ -192,36 +192,34 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	return salt, nil
 }
 
-func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, logger log.Logger) (err error) {
+func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
 	cfg := Schema[name]
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
 	cfg.hist.iiCfg.salt = salt
 	cfg.hist.iiCfg.dirs = dirs
-	cfg.hist.iiCfg.aggregationStep = aggregationStep
-	a.d[name], err = NewDomain(cfg, logger)
+	a.d[name], err = NewDomain(cfg, a.aggregationStep, logger)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
+func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
 	idxCfg := iiCfg{
 		salt: salt, dirs: dirs,
-		aggregationStep: aggregationStep,
-		filenameBase:    filenameBase,
-		keysTable:       indexKeysTable,
-		valuesTable:     indexTable,
-		compression:     seg.CompressNone,
-		name:            idx,
+		filenameBase: filenameBase,
+		keysTable:    indexKeysTable,
+		valuesTable:  indexTable,
+		compression:  seg.CompressNone,
+		name:         idx,
 	}
 
 	if ii := a.searchII(idx); ii != nil {
 		return fmt.Errorf("inverted index %s already registered", idx)
 	}
 
-	ii, err := NewInvertedIndex(idxCfg, logger)
+	ii, err := NewInvertedIndex(idxCfg, a.aggregationStep, logger)
 	if err != nil {
 		return err
 	}
@@ -1653,6 +1651,21 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 }
 
 // --- Domain part END ---
+
+func (at *AggregatorRoTx) madvNormal() {
+	for _, d := range at.d {
+		for _, f := range d.files {
+			f.src.decompressor.EnableMadvNormal()
+		}
+	}
+}
+func (at *AggregatorRoTx) disableReadAhead() {
+	for _, d := range at.d {
+		for _, f := range d.files {
+			f.src.decompressor.DisableReadAhead()
+		}
+	}
+}
 
 func (at *AggregatorRoTx) Close() {
 	if at == nil || at.a == nil { // invariant: it's safe to call Close multiple times

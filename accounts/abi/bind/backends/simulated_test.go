@@ -34,7 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -55,7 +55,7 @@ func TestSimulatedBackend(t *testing.T) {
 	sim := NewSimulatedBackend(t, genAlloc, gasLimit)
 
 	// should return an error if the txn is not found
-	txHash := libcommon.HexToHash("2")
+	txHash := common.HexToHash("2")
 	_, isPending, err := sim.TransactionByHash(context.Background(), txHash)
 
 	if isPending {
@@ -69,7 +69,7 @@ func TestSimulatedBackend(t *testing.T) {
 	code := `6060604052600a8060106000396000f360606040526008565b00`
 	var gas uint64 = 3000000
 	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-	var txn types.Transaction = types.NewContractCreation(0, u256.Num0, gas, u256.Num1, libcommon.FromHex(code))
+	var txn types.Transaction = types.NewContractCreation(0, u256.Num0, gas, u256.Num1, common.FromHex(code))
 	txn, _ = types.SignTx(txn, *signer, key)
 
 	err = sim.SendTransaction(context.Background(), txn)
@@ -116,7 +116,7 @@ const deployedCode = `60806040526004361061003b576000357c010000000000000000000000
 // expected return value contains "hello world"
 var expectedReturn = []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11, 104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 
-func simTestBackend(t *testing.T, testAddr libcommon.Address) *SimulatedBackend {
+func simTestBackend(t *testing.T, testAddr common.Address) *SimulatedBackend {
 	expectedBal := uint256.NewInt(10000000000)
 	return NewSimulatedBackend(t,
 		types.GenesisAlloc{
@@ -441,7 +441,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 	sim := NewSimulatedBackend(t, types.GenesisAlloc{addr: {Balance: big.NewInt(params.Ether)}}, 10000000)
 
 	parsed, _ := abi.JSON(strings.NewReader(contractAbi))
-	contractAddr, _, _, _ := bind.DeployContract(opts, parsed, libcommon.FromHex(contractBin), sim)
+	contractAddr, _, _, _ := bind.DeployContract(opts, parsed, common.FromHex(contractBin), sim)
 	sim.Commit()
 
 	var cases = []struct {
@@ -475,7 +475,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Gas:      0,
 			GasPrice: u256.Num0,
 			Value:    nil,
-			Data:     libcommon.Hex2Bytes("d8b98391"),
+			Data:     common.Hex2Bytes("d8b98391"),
 		}, 0, errors.New("execution reverted: revert reason"), "0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000d72657665727420726561736f6e00000000000000000000000000000000000000"},
 
 		{"PureRevert", ethereum.CallMsg{
@@ -484,7 +484,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Gas:      0,
 			GasPrice: u256.Num0,
 			Value:    nil,
-			Data:     libcommon.Hex2Bytes("aa8b1d30"),
+			Data:     common.Hex2Bytes("aa8b1d30"),
 		}, 0, errors.New("execution reverted"), nil},
 
 		{"OOG", ethereum.CallMsg{
@@ -493,7 +493,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Gas:      100000,
 			GasPrice: u256.Num0,
 			Value:    nil,
-			Data:     libcommon.Hex2Bytes("50f6fe34"),
+			Data:     common.Hex2Bytes("50f6fe34"),
 		}, 0, errors.New("gas required exceeds allowance (100000)"), nil},
 
 		{"Assert", ethereum.CallMsg{
@@ -502,7 +502,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Gas:      100000,
 			GasPrice: u256.Num0,
 			Value:    nil,
-			Data:     libcommon.Hex2Bytes("b9b046f9"),
+			Data:     common.Hex2Bytes("b9b046f9"),
 		}, 0, errors.New("invalid opcode: INVALID"), nil},
 
 		{"Valid", ethereum.CallMsg{
@@ -511,7 +511,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Gas:      100000,
 			GasPrice: u256.Num0,
 			Value:    nil,
-			Data:     libcommon.Hex2Bytes("e09fface"),
+			Data:     common.Hex2Bytes("e09fface"),
 		}, 21275, nil, nil},
 	}
 	for _, c := range cases {
@@ -544,7 +544,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 
 	sim := NewSimulatedBackend(t, types.GenesisAlloc{addr: {Balance: big.NewInt(params.Ether*2 + 2e17)}}, 10000000)
 
-	recipient := libcommon.HexToAddress("deadbeef")
+	recipient := common.HexToAddress("deadbeef")
 	var cases = []struct {
 		name        string
 		message     ethereum.CallMsg
@@ -907,7 +907,7 @@ func TestSimulatedBackend_PendingCodeAt(t *testing.T) {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
 	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
-	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(abiBin), sim)
+	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, txn, contract)
 	}
@@ -920,8 +920,8 @@ func TestSimulatedBackend_PendingCodeAt(t *testing.T) {
 		t.Errorf("did not get code for account that has contract code")
 	}
 	// ensure code received equals code deployed
-	if !bytes.Equal(code, libcommon.FromHex(deployedCode)) {
-		t.Errorf("code received did not match expected deployed code:\n expected %v\n actual %v", libcommon.FromHex(deployedCode), code)
+	if !bytes.Equal(code, common.FromHex(deployedCode)) {
+		t.Errorf("code received did not match expected deployed code:\n expected %v\n actual %v", common.FromHex(deployedCode), code)
 	}
 }
 
@@ -942,7 +942,7 @@ func TestSimulatedBackend_CodeAt(t *testing.T) {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
 	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
-	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(abiBin), sim)
+	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, txn, contract)
 	}
@@ -956,8 +956,8 @@ func TestSimulatedBackend_CodeAt(t *testing.T) {
 		t.Errorf("did not get code for account that has contract code")
 	}
 	// ensure code received equals code deployed
-	if !bytes.Equal(code, libcommon.FromHex(deployedCode)) {
-		t.Errorf("code received did not match expected deployed code:\n expected %v\n actual %v", libcommon.FromHex(deployedCode), code)
+	if !bytes.Equal(code, common.FromHex(deployedCode)) {
+		t.Errorf("code received did not match expected deployed code:\n expected %v\n actual %v", common.FromHex(deployedCode), code)
 	}
 }
 
@@ -974,7 +974,7 @@ func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
 	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
-	addr, _, _, err := bind.DeployContract(contractAuth, parsed, libcommon.FromHex(abiBin), sim)
+	addr, _, _, err := bind.DeployContract(contractAuth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v", err)
 	}
@@ -1060,7 +1060,7 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
 	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
-	addr, _, _, err := bind.DeployContract(contractAuth, parsed, libcommon.FromHex(reverterBin), sim)
+	addr, _, _, err := bind.DeployContract(contractAuth, parsed, common.FromHex(reverterBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v", err)
 	}

@@ -53,7 +53,6 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	salt := uint32(1)
 	cfg := Schema[kv.AccountsDomain]
 
-	cfg.hist.iiCfg.aggregationStep = 16
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt = &salt
 
@@ -63,7 +62,8 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.hist.iiCfg.withExistence = false
 	cfg.hist.iiCfg.compression = seg.CompressNone
 	cfg.hist.compression = seg.CompressNone
-	h, err := NewHistory(cfg.hist, logger)
+	aggregationStep := uint64(16)
+	h, err := NewHistory(cfg.hist, aggregationStep, logger)
 	require.NoError(tb, err)
 	h.DisableFsync()
 	tb.Cleanup(db.Close)

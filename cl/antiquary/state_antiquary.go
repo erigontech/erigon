@@ -146,6 +146,7 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 	logTicker := time.NewTicker(10 * time.Second)
 	defer logTicker.Stop()
 	start := time.Now()
+	var lastSlot uint64
 	for slot := uint64(0); slot <= stateSn.BlocksAvailable(); slot++ {
 		select {
 		case <-logTicker.C:
@@ -188,8 +189,9 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 			},
 			event,
 		)
-		validatorsTable.SetSlot(slot)
+		lastSlot = slot
 	}
+	validatorsTable.SetSlot(lastSlot)
 	logger.Info("[Antiquary] Filled static validators table", "slots", blocksAvaiable, "elapsed", time.Since(start))
 	return true, nil
 }
@@ -389,7 +391,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := transition.TransitionState(s.currentState, block, blockRewardsCollector, fullValidation); err != nil {
 			return err
 		}
-		// if s.currentState.Slot() == 3000010 {
+		// if s.currentState.Slot() == 3751254 {
 		// 	s.dumpFullBeaconState()
 		// }
 		blocksProcessed++

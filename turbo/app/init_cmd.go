@@ -42,6 +42,7 @@ var initCommand = cli.Command{
 	ArgsUsage: "<genesisPath>",
 	Flags: []cli.Flag{
 		&utils.DataDirFlag,
+		&utils.ChainFlag,
 	},
 	//Category: "BLOCKCHAIN COMMANDS",
 	Description: `
