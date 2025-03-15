@@ -308,15 +308,15 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		pendingWithdrawals    = solid.NewPendingWithdrawalList(r.cfg)
 	)
 
-	if err := readQueueSSZ(tx, kvGetter, slot, kv.PendingConsolidationsDump, kv.PendingConsolidations, pendingConsolidations); err != nil {
+	if err := readQueueSSZ(kvGetter, slot, kv.PendingConsolidationsDump, kv.PendingConsolidations, pendingConsolidations); err != nil {
 		return nil, fmt.Errorf("failed to read pending consolidations: %w", err)
 	}
 
-	if err := readQueueSSZ(tx, kvGetter, slot, kv.PendingDepositsDump, kv.PendingDeposits, pendingDeposits); err != nil {
+	if err := readQueueSSZ(kvGetter, slot, kv.PendingDepositsDump, kv.PendingDeposits, pendingDeposits); err != nil {
 		return nil, fmt.Errorf("failed to read pending deposits: %w", err)
 	}
 
-	if err := readQueueSSZ(tx, kvGetter, slot, kv.PendingPartialWithdrawalsDump, kv.PendingPartialWithdrawals, pendingWithdrawals); err != nil {
+	if err := readQueueSSZ(kvGetter, slot, kv.PendingPartialWithdrawalsDump, kv.PendingPartialWithdrawals, pendingWithdrawals); err != nil {
 		return nil, fmt.Errorf("failed to read pending withdrawals: %w", err)
 	}
 
@@ -983,7 +983,7 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, kvGetter 
 	return common.BytesToHash(mixBytes), nil
 }
 
-func readQueueSSZ[T solid.EncodableHashableSSZ](tx kv.Tx, kvGetter state_accessors.GetValFn, slot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
+func readQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
 	remainder := slot % clparams.SlotsPerDump
 	freshDumpSlot := slot - remainder
 
