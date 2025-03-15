@@ -637,11 +637,11 @@ func (h *handshakeState) sealEIP8(msg interface{}) ([]byte, error) {
 	// the message distinguishable from pre-EIP-8 handshakes.
 	h.wbuf.appendZero(mrand.Intn(100) + 100) //nolint:gosec
 
-	prefix := make([]byte, 2)
+	prefix := make([]byte, 2) // nozero
 	binary.BigEndian.PutUint16(prefix, uint16(len(h.wbuf.data)+eciesOverhead))
 
 	enc, err := ecies.Encrypt(rand.Reader, h.remote, h.wbuf.data, nil, prefix)
-	return append(prefix, enc...), err
+	return append(prefix, enc...), err // nozero
 }
 
 // importPublicKey unmarshals 64 or 65 bytes long public keys.

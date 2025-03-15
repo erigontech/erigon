@@ -60,7 +60,7 @@ func MerkleizeVectorFlat(in []byte, limit uint64) ([32]byte, error) {
 		// Sequential
 		layerLen := len(elements)
 		if layerLen%64 == 32 {
-			elements = append(elements, ZeroHashes[i][:]...)
+			elements = append(elements, ZeroHashes[i][:]...) // nozero
 		}
 		outputLen := len(elements) / 2
 		if err := HashByteSlice(elements, elements); err != nil {

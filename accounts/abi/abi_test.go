@@ -361,7 +361,7 @@ func TestInputVariableInputLength(t *testing.T) {
 	length := make([]byte, 32)
 	length[31] = byte(len(strin))
 	value := common.RightPadBytes([]byte(strin), 32)
-	exp := append(offset, append(length, value...)...)
+	exp := append(offset, append(length, value...)...) // nozero
 
 	// ignore first 4 bytes of the output. This is the function identifier
 	strpack = strpack[4:]
@@ -400,9 +400,9 @@ func TestInputVariableInputLength(t *testing.T) {
 	length2[31] = byte(len(str2))
 	value2 := common.RightPadBytes([]byte(str2), 32)
 
-	exp2 := append(offset1, offset2...)
-	exp2 = append(exp2, append(length1, value1...)...)
-	exp2 = append(exp2, append(length2, value2...)...)
+	exp2 := append(offset1, offset2...)                // nozero
+	exp2 = append(exp2, append(length1, value1...)...) // nozero
+	exp2 = append(exp2, append(length2, value2...)...) // nozero
 
 	// ignore first 4 bytes of the output. This is the function identifier
 	str2pack = str2pack[4:]
@@ -424,9 +424,9 @@ func TestInputVariableInputLength(t *testing.T) {
 	value1 = common.RightPadBytes([]byte(str1), 64)
 	offset2[31] = 160
 
-	exp2 = append(offset1, offset2...)
-	exp2 = append(exp2, append(length1, value1...)...)
-	exp2 = append(exp2, append(length2, value2...)...)
+	exp2 = append(offset1, offset2...)                 // nozero
+	exp2 = append(exp2, append(length1, value1...)...) // nozero
+	exp2 = append(exp2, append(length2, value2...)...) // nozero
 
 	// ignore first 4 bytes of the output. This is the function identifier
 	str2pack = str2pack[4:]
@@ -454,9 +454,9 @@ func TestInputVariableInputLength(t *testing.T) {
 	length2[31] = byte(len(str2))
 	value2 = common.RightPadBytes([]byte(str2), 64)
 
-	exp2 = append(offset1, offset2...)
-	exp2 = append(exp2, append(length1, value1...)...)
-	exp2 = append(exp2, append(length2, value2...)...)
+	exp2 = append(offset1, offset2...)                 // nozero
+	exp2 = append(exp2, append(length1, value1...)...) // nozero
+	exp2 = append(exp2, append(length2, value2...)...) // nozero
 
 	// ignore first 4 bytes of the output. This is the function identifier
 	str2pack = str2pack[4:]
@@ -487,9 +487,9 @@ func TestInputFixedArrayAndVariableInputLength(t *testing.T) {
 	strvalue := common.RightPadBytes([]byte(strin), 32)
 	arrinvalue1 := common.LeftPadBytes(arrin[0].Bytes(), 32)
 	arrinvalue2 := common.LeftPadBytes(arrin[1].Bytes(), 32)
-	exp := append(offset, arrinvalue1...)
+	exp := append(offset, arrinvalue1...) // nozero
 	exp = append(exp, arrinvalue2...)
-	exp = append(exp, append(length, strvalue...)...)
+	exp = append(exp, append(length, strvalue...)...) // nozero
 
 	// ignore first 4 bytes of the output. This is the function identifier
 	fixedArrStrPack = fixedArrStrPack[4:]
@@ -513,9 +513,9 @@ func TestInputFixedArrayAndVariableInputLength(t *testing.T) {
 	strvalue = common.RightPadBytes([]byte(strin), 32)
 	arrinvalue1 = common.LeftPadBytes(arrin[0].Bytes(), 32)
 	arrinvalue2 = common.LeftPadBytes(arrin[1].Bytes(), 32)
-	exp = append(offset, arrinvalue1...)
+	exp = append(offset, arrinvalue1...) // nozero
 	exp = append(exp, arrinvalue2...)
-	exp = append(exp, append(length, strvalue...)...)
+	exp = append(exp, append(length, strvalue...)...) // nozero
 
 	// ignore first 4 bytes of the output. This is the function identifier
 	fixedArrBytesPack = fixedArrBytesPack[4:]
@@ -547,11 +547,11 @@ func TestInputFixedArrayAndVariableInputLength(t *testing.T) {
 	dynarrinvalue1 := common.LeftPadBytes(dynarrin[0].Bytes(), 32)
 	dynarrinvalue2 := common.LeftPadBytes(dynarrin[1].Bytes(), 32)
 	dynarrinvalue3 := common.LeftPadBytes(dynarrin[2].Bytes(), 32)
-	exp = append(stroffset, fixedarrinvalue1...)
+	exp = append(stroffset, fixedarrinvalue1...) // nozero
 	exp = append(exp, fixedarrinvalue2...)
 	exp = append(exp, dynarroffset...)
-	exp = append(exp, append(strlength, strvalue...)...)
-	dynarrarg := append(dynarrlength, dynarrinvalue1...)
+	exp = append(exp, append(strlength, strvalue...)...) // nozero
+	dynarrarg := append(dynarrlength, dynarrinvalue1...) // nozero
 	dynarrarg = append(dynarrarg, dynarrinvalue2...)
 	dynarrarg = append(dynarrarg, dynarrinvalue3...)
 	exp = append(exp, dynarrarg...)
@@ -582,12 +582,12 @@ func TestInputFixedArrayAndVariableInputLength(t *testing.T) {
 	fixedarrin2value1 := common.LeftPadBytes(fixedarrin2[0].Bytes(), 32)
 	fixedarrin2value2 := common.LeftPadBytes(fixedarrin2[1].Bytes(), 32)
 	fixedarrin2value3 := common.LeftPadBytes(fixedarrin2[2].Bytes(), 32)
-	exp = append(stroffset, fixedarrin1value1...)
+	exp = append(stroffset, fixedarrin1value1...) // nozero
 	exp = append(exp, fixedarrin1value2...)
 	exp = append(exp, fixedarrin2value1...)
 	exp = append(exp, fixedarrin2value2...)
 	exp = append(exp, fixedarrin2value3...)
-	exp = append(exp, append(strlength, strvalue...)...)
+	exp = append(exp, append(strlength, strvalue...)...) // nozero
 
 	// ignore first 4 bytes of the output. This is the function identifier
 	doubleFixedArrStrPack = doubleFixedArrStrPack[4:]
@@ -621,14 +621,14 @@ func TestInputFixedArrayAndVariableInputLength(t *testing.T) {
 	fixedarrin2value1 = common.LeftPadBytes(fixedarrin2[0].Bytes(), 32)
 	fixedarrin2value2 = common.LeftPadBytes(fixedarrin2[1].Bytes(), 32)
 	fixedarrin2value3 = common.LeftPadBytes(fixedarrin2[2].Bytes(), 32)
-	exp = append(stroffset, fixedarrin1value1...)
+	exp = append(stroffset, fixedarrin1value1...) // nozero
 	exp = append(exp, fixedarrin1value2...)
 	exp = append(exp, dynarroffset...)
 	exp = append(exp, fixedarrin2value1...)
 	exp = append(exp, fixedarrin2value2...)
 	exp = append(exp, fixedarrin2value3...)
-	exp = append(exp, append(strlength, strvalue...)...)
-	dynarrarg = append(dynarrlength, dynarrinvalue1...)
+	exp = append(exp, append(strlength, strvalue...)...) // nozero
+	dynarrarg = append(dynarrlength, dynarrinvalue1...)  // nozero
 	dynarrarg = append(dynarrarg, dynarrinvalue2...)
 	exp = append(exp, dynarrarg...)
 
