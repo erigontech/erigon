@@ -3,8 +3,8 @@ run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images bas
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "golang:1.24-bookworm"
-  TARGET_BASE_IMAGE: "debian:12-slim"
+  BUILDER_IMAGE: "golang:1.24-alpine"
+  TARGET_BASE_IMAGE: "alpine:3.21"
   APP_REPO: "erigontech/erigon"
   CHECKOUT_REF: "main"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
@@ -45,7 +45,7 @@ jobs:
       - name: Setup go env and cache
         uses: actions/setup-go@v5
         with:
-          go-version: '>=1.24'
+          go-version: '>=1.23'
           cache: ${{ contains(fromJSON('["refs/heads/main","refs/heads/docker_pectra"]'), github.ref) }}
           cache-dependency-path: |
             erigon/go.sum
@@ -115,7 +115,7 @@ jobs:
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
-          -c "apt update -y; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
 
       - name: Build amd64
         env:
@@ -128,7 +128,7 @@ jobs:
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
-          -c "apt update -y; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
 
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ${{ GITHUB.BASE_REF }} branch
         id: built_tag_export
@@ -137,7 +137,7 @@ jobs:
           BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}${{ steps.def_docker_vars.outputs.latest_suffix }}"
           DOCKER_PUBLISH_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ', env.DOCKER_URL, env.BUILD_VERSION) || '' }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
-          DOCKERFILE_PATH: Dockerfile
+          DOCKERFILE_PATH: Dockerfile.release
         run: |
           echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
           cp -vr build-amd64 erigon/
