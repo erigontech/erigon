@@ -88,19 +88,36 @@ func ExecuteBlockEphemerally(
 	blockHashFunc func(n uint64) libcommon.Hash,
 	engine consensus.Engine, block *types.Block,
 	stateReader state.StateReader, stateWriter state.WriterWithChangeSets,
-	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
+	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash libcommon.Hash) (*tracing.Hooks, error),
 	logger log.Logger,
-) (*EphemeralExecResult, error) {
+) (res *EphemeralExecResult, executeBlockErr error) {
 
 	defer blockExecutionTimer.ObserveDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
+	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
 
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time()))
+
+	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockStart != nil {
+		td := chainReader.GetTd(block.ParentHash(), block.NumberU64()-1)
+		vmConfig.Tracer.OnBlockStart(tracing.BlockEvent{
+			Block:     block,
+			TD:        td,
+			Finalized: chainReader.CurrentFinalizedHeader(),
+			Safe:      chainReader.CurrentSafeHeader(),
+		})
+	}
+
+	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockEnd != nil {
+		defer func() {
+			vmConfig.Tracer.OnBlockEnd(executeBlockErr)
+		}()
+	}
 
 	// TODO: send the new tracer once we switch to the tracing.Hook
 	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, stateWriter, logger, nil); err != nil {
@@ -113,23 +130,23 @@ func ExecuteBlockEphemerally(
 	// noop := state.NewNoopWriter()
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(i)
-		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, txn.Hash())
 			if err != nil {
 				return nil, fmt.Errorf("could not obtain tracer: %w", err)
 			}
 			vmConfig.Tracer = tracer
-			writeTrace = true
+			// writeTrace = true
 		}
 		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, *vmConfig)
-		if writeTrace {
-			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
-				ftracer.Flush(txn)
-			}
+		// Todo: check how to implement flushable tracer
+		// if writeTrace {
+		// 	if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
+		// 		ftracer.Flush(txn)
+		// 	}
 
-			vmConfig.Tracer = nil
-		}
+		// 	vmConfig.Tracer = nil
+		// }
 		if err != nil {
 			if !vmConfig.StatelessExec {
 				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)
@@ -250,7 +267,7 @@ func rlpHash(x interface{}) (h libcommon.Hash) {
 	return h
 }
 
-func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool) (result []byte, err error) {
+func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, tracing *tracing.Hooks) (result []byte, err error) {
 	isBor := chainConfig.Bor != nil
 	var author *libcommon.Address
 	if isBor {
@@ -259,10 +276,19 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 		author = &state.SystemAddress
 	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
-	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, engine, constCall)
+	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, engine, constCall, tracing)
 }
 
-func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, blockContext evmtypes.BlockContext, engine consensus.EngineReader, constCall bool) (result []byte, err error) {
+func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, blockContext evmtypes.BlockContext, engine consensus.EngineReader, constCall bool, tracing *tracing.Hooks) (result []byte, err error) {
+	if tracing != nil {
+		if tracing.OnSystemCallStart != nil {
+			tracing.OnSystemCallStart()
+		}
+		if tracing.OnSystemCallEnd != nil {
+			defer tracing.OnSystemCallEnd()
+		}
+	}
+
 	msg := types.NewMessage(
 		state.SystemAddress,
 		&contract,
@@ -274,7 +300,7 @@ func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, ch
 		true, // isFree
 		nil,  // maxFeePerBlobGas
 	)
-	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall}
+	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall, Tracer: tracing}
 	// Create a new context to be used in the EVM environment
 	isBor := chainConfig.Bor != nil
 	var txContext evmtypes.TxContext
@@ -339,7 +365,7 @@ func FinalizeBlockExecution(
 	logger log.Logger,
 ) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, retRequests types.FlatRequests, err error) {
 	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
+		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, nil)
 	}
 
 	if isMining {
@@ -367,7 +393,7 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
 ) error {
 	engine.Initialize(cc, chain, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-		return SysCallContract(contract, data, cc, ibState, header, engine, constCall)
+		return SysCallContract(contract, data, cc, ibState, header, engine, constCall, tracer)
 	}, logger, tracer)
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()
