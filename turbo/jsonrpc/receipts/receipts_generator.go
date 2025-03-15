@@ -188,9 +188,9 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	return receipts, nil
 }
 
-func (g *Generator) GetReceiptsGasUsed(tx kv.TemporalTx, block *types.Block, txNumsReader rawdbv3.TxNumsReader) (types.Receipts, error) {
+func (g *Generator) GetReceiptsGasUsed(tx kv.TemporalTx, block *types.Block, txNumsReader rawdbv3.TxNumsReader) ([]uint64, error) {
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
-		return receipts, nil
+		return cumulativeGasUsedFromReceipts(receipts), nil
 	}
 
 	startTxNum, err := txNumsReader.Min(tx, block.NumberU64())
@@ -217,5 +217,20 @@ func (g *Generator) GetReceiptsGasUsed(tx kv.TemporalTx, block *types.Block, txN
 		currentTxNum++
 	}
 
-	return receipts, nil
+	res := make([]uint64, len(receipts))
+	for i := range receipts {
+		res[i] = receipts[i].CumulativeGasUsed
+	}
+	return res, nil
+}
+
+func cumulativeGasUsedFromReceipts(receipts types.Receipts) []uint64 {
+	if receipts == nil { // preserve nil
+		return nil
+	}
+	res := make([]uint64, len(receipts))
+	for i := range receipts {
+		res[i] = receipts[i].CumulativeGasUsed
+	}
+	return res
 }

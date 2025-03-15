@@ -281,6 +281,6 @@ func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.R
 	return nil, nil
 }
 
-func (b *GasPriceOracleBackend) GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error) {
+func (b *GasPriceOracleBackend) GetReceiptsGasUsed(ctx context.Context, block *types.Block) ([]uint64, error) {
 	return b.baseApi.getReceiptsGasUsed(ctx, b.tx, block)
 }
