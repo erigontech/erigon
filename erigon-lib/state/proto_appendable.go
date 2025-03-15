@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -73,7 +73,7 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 		}
 
 		log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
-		path := ae.SnapFilePath(a.a, snaptype.Version(1), calcFrom, calcTo)
+		path := ae.SnapFilePath(a.a, *semver.New(1, 0, 0, "", ""), calcFrom, calcTo)
 		sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, a.logger)
 		if err != nil {
 			return dirtyFiles, err

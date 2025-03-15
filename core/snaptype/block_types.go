@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -41,6 +42,9 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
+
+var v0 = *semver.New(0, 0, 0, "", "")
+var v1 = *semver.New(0, 0, 0, "", "")
 
 func init() {
 	ethereumTypes := append(BlockSnapshotTypes, snaptype.CaplinSnapshotTypes...)
@@ -93,8 +97,8 @@ var (
 		Enums.Domains,
 		"salt",
 		snaptype.Versions{
-			Current:      0, //2,
-			MinSupported: 0,
+			Current:      v0, //2,
+			MinSupported: v1,
 		},
 		nil,
 		nil,
@@ -104,8 +108,8 @@ var (
 		Enums.Headers,
 		"headers",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      v1, //2,
+			MinSupported: v1,
 		},
 		nil,
 		[]snaptype.Index{Indexes.HeaderHash},
@@ -148,8 +152,8 @@ var (
 		Enums.Bodies,
 		"bodies",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      v1, //2,
+			MinSupported: v1,
 		},
 		nil,
 		[]snaptype.Index{Indexes.BodyHash},
@@ -185,8 +189,8 @@ var (
 		Enums.Transactions,
 		"transactions",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      v1, //2,
+			MinSupported: v1,
 		},
 		nil,
 		[]snaptype.Index{Indexes.TxnHash, Indexes.TxnHash2BlockNum},
@@ -356,8 +360,8 @@ var (
 		Enums.Domains,
 		"domain",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      v1, //2,
+			MinSupported: v1,
 		},
 		nil,
 		nil,
@@ -367,8 +371,8 @@ var (
 		Enums.Histories,
 		"history",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      v1, //2,
+			MinSupported: v1,
 		},
 		nil,
 		nil,
@@ -378,8 +382,8 @@ var (
 		Enums.InvertedIndicies,
 		"idx",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      v1, //2,
+			MinSupported: v1,
 		},
 		nil,
 		nil,
@@ -390,8 +394,8 @@ var (
 		Enums.Accessor,
 		"accessor",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      v1, //2,
+			MinSupported: v1,
 		},
 		nil,
 		nil,
@@ -402,8 +406,8 @@ var (
 		Enums.Txt,
 		"txt",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      v1, //2,
+			MinSupported: v1,
 		},
 		nil,
 		nil,

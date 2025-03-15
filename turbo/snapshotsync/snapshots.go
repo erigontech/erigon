@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -250,7 +251,7 @@ type DirtySegment struct {
 	*seg.Decompressor
 	indexes []*recsplit.Index
 	segType snaptype.Type
-	version snaptype.Version
+	version semver.Version
 
 	frozen   bool
 	refcount atomic.Int32
@@ -261,7 +262,7 @@ type DirtySegment struct {
 	filePath string
 }
 
-func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
+func NewDirtySegment(segType snaptype.Type, version semver.Version, from uint64, to uint64, frozen bool) *DirtySegment {
 	return &DirtySegment{
 		segType: segType,
 		version: version,
@@ -313,14 +314,14 @@ func DirtySegmentLess(i, j *DirtySegment) bool {
 	if i.to != j.to {
 		return i.to < j.to
 	}
-	return int(i.version) < int(j.version)
+	return i.version.LessThan(&j.version)
 }
 
 func (s *DirtySegment) Type() snaptype.Type {
 	return s.segType
 }
 
-func (s *DirtySegment) Version() snaptype.Version {
+func (s *DirtySegment) Version() semver.Version {
 	return s.version
 }
 

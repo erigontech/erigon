@@ -28,6 +28,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -37,17 +38,17 @@ var (
 	ErrInvalidFileName = errors.New("invalid compressed file name")
 )
 
-func FileName(version Version, from, to uint64, fileType string) string {
-	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from/1_000, to/1_000, fileType)
+func FileName(version semver.Version, from, to uint64, fileType string) string {
+	return fmt.Sprintf("%s-%06d-%06d-%s", version.String(), from/1_000, to/1_000, fileType)
 }
 
-func SegmentFileName(version Version, from, to uint64, t Enum) string {
+func SegmentFileName(version semver.Version, from, to uint64, t Enum) string {
 	return FileName(version, from, to, t.String()) + ".seg"
 }
-func DatFileName(version Version, from, to uint64, fType string) string {
+func DatFileName(version semver.Version, from, to uint64, fType string) string {
 	return FileName(version, from, to, fType) + ".dat"
 }
-func IdxFileName(version Version, from, to uint64, fType string) string {
+func IdxFileName(version semver.Version, from, to uint64, fType string) string {
 	return FileName(version, from, to, fType) + ".idx"
 }
 
@@ -78,7 +79,7 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 			return -1
 		}
 
-		return int(a.Version) - int(b.Version)
+		return a.Version.Compare(&b.Version)
 	})
 
 	return out
@@ -261,7 +262,7 @@ var MergeSteps = []uint64{100_000, 10_000}
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
-	Version         Version
+	Version         semver.Version
 	From, To        uint64
 	name, Path, Ext string
 	Type            Type
@@ -290,7 +291,7 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 }
 
 func (f FileInfo) As(t Type) FileInfo {
-	name := fmt.Sprintf("v%d-%06d-%06d-%s%s", f.Version, f.From/1_000, f.To/1_000, t, f.Ext)
+	name := fmt.Sprintf("%s-%06d-%06d-%s%s", f.Version.String(), f.From/1_000, f.To/1_000, t, f.Ext)
 	return FileInfo{
 		Version: f.Version,
 		From:    f.From,
@@ -359,8 +360,8 @@ func ParseDir(name string) (res []FileInfo, err error) {
 	}
 	slices.SortFunc(res, func(i, j FileInfo) int {
 		switch {
-		case i.Version != j.Version:
-			return cmp.Compare(i.Version, j.Version)
+		case !i.Version.Equal(&j.Version):
+			return i.Version.Compare(&j.Version)
 
 		case i.From != j.From:
 			return cmp.Compare(i.From, j.From)

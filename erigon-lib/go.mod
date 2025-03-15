@@ -19,6 +19,7 @@ require (
 )
 
 require (
+	github.com/Masterminds/semver/v3 v3.3.1
 	github.com/RoaringBitmap/roaring/v2 v2.4.5
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/go-libutp v1.3.1

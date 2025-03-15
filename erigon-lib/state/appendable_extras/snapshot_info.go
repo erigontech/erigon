@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 )
@@ -82,7 +83,7 @@ func (s *SnapshotConfig) SetupConfig(id AppendableId, snapshotDir string, pre sn
 
 // parse snapshot file info
 type FileInfo struct {
-	Version  snaptype.Version
+	Version  semver.Version
 	From, To uint64
 	Name     string // filename
 	Path     string // full path
@@ -100,16 +101,16 @@ func (f *FileInfo) Dir() string { return filepath.Dir(f.Path) }
 
 // TODO: snaptype.Version should be replaced??
 
-func fileName(baseName string, version snaptype.Version, from, to uint64) string {
+func fileName(baseName string, version semver.Version, from, to uint64) string {
 	// from, to are in units of steps and not in number of entities
 	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from, to, baseName)
 }
 
-func SnapFilePath(id AppendableId, version snaptype.Version, from, to RootNum) string {
+func SnapFilePath(id AppendableId, version semver.Version, from, to RootNum) string {
 	return filepath.Join(id.SnapshotDir(), fileName(id.Name(), version, from.Step(id), to.Step(id))+".seg")
 }
 
-func IdxFilePath(id AppendableId, version snaptype.Version, from, to RootNum, idxNum uint64) string {
+func IdxFilePath(id AppendableId, version semver.Version, from, to RootNum, idxNum uint64) string {
 	return filepath.Join(id.SnapshotDir(), fileName(id.IndexPrefix()[idxNum], version, from.Step(id), to.Step(id))+".idx")
 }
 

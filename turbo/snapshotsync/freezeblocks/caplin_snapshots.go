@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/klauspost/compress/zstd"
 	"github.com/tidwall/btree"
 
@@ -422,7 +423,8 @@ func (v *CaplinView) BlobSidecarsSegment(slot uint64) (*snapshotsync.VisibleSegm
 func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.Snap
 
-	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
+	v0 := *semver.New(0, 0, 0, "", "")
+	segName := snaptype.BeaconBlocks.FileName(v0, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
 	compressCfg := seg.DefaultCfg
@@ -496,7 +498,8 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage.BlobStorage, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.Logger) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.Snap
 
-	segName := snaptype.BlobSidecars.FileName(0, fromSlot, toSlot)
+	v0 := *semver.New(0, 0, 0, "", "")
+	segName := snaptype.BlobSidecars.FileName(v0, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
 	compressCfg := seg.DefaultCfg

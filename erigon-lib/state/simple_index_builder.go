@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -126,7 +126,7 @@ func (s *SimpleAccessorBuilder) SetFirstEntityNumFetcher(fetcher FirstEntityNumF
 }
 
 func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
-	sgname := ae.SnapFilePath(s.id, snaptype.Version(1), from, to)
+	sgname := ae.SnapFilePath(s.id, *semver.New(1, 0, 0, "", ""), from, to)
 	decomp, _ := seg.NewDecompressor(sgname)
 	return &DecompressorIndexInputDataQuery{decomp: decomp, baseDataId: uint64(s.fetcher(from, to, decomp))}
 }
@@ -147,7 +147,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 	}()
 	iidq := s.GetInputDataQuery(from, to)
 	defer iidq.Close()
-	idxFile := ae.IdxFilePath(s.id, snaptype.Version(1), from, to, s.indexPos)
+	idxFile := ae.IdxFilePath(s.id, *semver.New(1, 0, 0, "", ""), from, to, s.indexPos)
 
 	keyCount := iidq.GetCount()
 	if p != nil {

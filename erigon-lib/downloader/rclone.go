@@ -38,6 +38,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"golang.org/x/time/rate"
 
 	"github.com/c2h5oh/datasize"
@@ -58,12 +59,11 @@ type rcloneInfo struct {
 	localInfo  fs.FileInfo
 }
 
-func (i *rcloneInfo) Version() snaptype.Version {
+func (i *rcloneInfo) Version() semver.Version {
 	if i.snapInfo != nil {
 		return i.snapInfo.Version
 	}
-
-	return 0
+	return *semver.New(0, 0, 0, "", "")
 }
 
 func (i *rcloneInfo) From() uint64 {
@@ -629,7 +629,7 @@ type remoteInfo struct {
 }
 
 type SnapInfo interface {
-	Version() snaptype.Version
+	Version() semver.Version
 	From() uint64
 	To() uint64
 	Type() snaptype.Type

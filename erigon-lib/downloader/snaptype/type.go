@@ -24,9 +24,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/Masterminds/semver/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/background"
@@ -38,33 +39,24 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-type Version uint8
-
-func ParseVersion(v string) (Version, error) {
-	if strings.HasPrefix(v, "v") {
-		v, err := strconv.ParseUint(v[1:], 10, 8)
-
-		if err != nil {
-			return 0, fmt.Errorf("invalid version: %w", err)
-		}
-
-		return Version(v), nil
-	}
-
+func ParseVersion(v string) (r semver.Version, err error) {
 	if len(v) == 0 {
-		return 0, errors.New("invalid version: no prefix")
+		return r, errors.New("invalid version: no prefix")
+	}
+	if v[0] != 'v' {
+		return r, fmt.Errorf("invalid version prefix: %s", v[0:1])
 	}
 
-	return 0, fmt.Errorf("invalid version prefix: %s", v[0:1])
-}
-
-func (v Version) String() string {
-	return "v" + strconv.Itoa(int(v))
+	a, err := semver.NewVersion(v)
+	if err != nil {
+		return r, err
+	}
+	return *a, nil
 }
 
 type Versions struct {
-	Current      Version
-	MinSupported Version
+	Current      semver.Version
+	MinSupported semver.Version
 }
 
 type FirstKeyGetter func(ctx context.Context) uint64
@@ -189,10 +181,10 @@ type Type interface {
 	Enum() Enum
 	Versions() Versions
 	Name() string
-	FileName(version Version, from uint64, to uint64) string
+	FileName(version semver.Version, from uint64, to uint64) string
 	FileInfo(dir string, from uint64, to uint64) FileInfo
-	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
-	IdxFileNames(version Version, from uint64, to uint64) []string
+	IdxFileName(version semver.Version, from uint64, to uint64, index ...Index) string
+	IdxFileNames(version semver.Version, from uint64, to uint64) []string
 	Indexes() []Index
 	HasIndexFiles(info FileInfo, logger log.Logger) bool
 	BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
@@ -253,8 +245,8 @@ func (s snapType) RangeExtractor() RangeExtractor {
 	return s.rangeExtractor
 }
 
-func (s snapType) FileName(version Version, from uint64, to uint64) string {
-	if version == 0 {
+func (s snapType) FileName(version semver.Version, from uint64, to uint64) string {
+	if version.Major() == 0 {
 		version = s.versions.Current
 	}
 
@@ -301,7 +293,7 @@ func (s snapType) HasIndexFiles(info FileInfo, logger log.Logger) bool {
 	return true
 }
 
-func (s snapType) IdxFileNames(version Version, from uint64, to uint64) []string {
+func (s snapType) IdxFileNames(version semver.Version, from uint64, to uint64) []string {
 	fileNames := make([]string, len(s.indexes))
 	for i, index := range s.indexes {
 		fileNames[i] = IdxFileName(version, from, to, index.Name)
@@ -310,7 +302,7 @@ func (s snapType) IdxFileNames(version Version, from uint64, to uint64) []string
 	return fileNames
 }
 
-func (s snapType) IdxFileName(version Version, from uint64, to uint64, index ...Index) string {
+func (s snapType) IdxFileName(version semver.Version, from uint64, to uint64, index ...Index) string {
 	if len(index) == 0 {
 		if len(s.indexes) == 0 {
 			return ""

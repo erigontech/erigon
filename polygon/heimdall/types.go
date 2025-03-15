@@ -27,6 +27,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -148,13 +149,16 @@ func (e EventRangeExtractor) Extract(ctx context.Context, blockFrom, blockTo uin
 	return lastEventId, nil
 }
 
+var v0 = *semver.New(0, 0, 0, "", "")
+var v1 = *semver.New(0, 0, 0, "", "")
+
 var (
 	Events = snaptype.RegisterType(
 		Enums.Events,
 		"borevents",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      v1, //2,
+			MinSupported: v1,
 		},
 		EventRangeExtractor{},
 		[]snaptype.Index{Indexes.BorTxnHash},
@@ -250,8 +254,8 @@ var (
 		Enums.Spans,
 		"borspans",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      v1, //2,
+			MinSupported: v1,
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
@@ -279,8 +283,8 @@ var (
 		Enums.Checkpoints,
 		"borcheckpoints",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      v1, //2,
+			MinSupported: v1,
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
@@ -364,8 +368,8 @@ var (
 		Enums.Milestones,
 		"bormilestones",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      v1, //2,
+			MinSupported: v1,
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {

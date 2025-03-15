@@ -40,6 +40,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
@@ -552,7 +553,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 	// above, but we use the matching version from the known config.  If there
 	// is no matching version just use the one discovered for the file
 
-	versionedCfg := map[snaptype.Version]*snapcfg.Cfg{}
+	versionedCfg := map[semver.Version]*snapcfg.Cfg{}
 	versionedCfgLock := sync.Mutex{}
 
 	snapDir := cfg.Dirs.Snap

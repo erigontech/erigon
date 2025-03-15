@@ -16,13 +16,18 @@
 
 package snaptype
 
+import (
+	"github.com/Masterminds/semver/v3"
+)
+
+var v1 = *semver.New(1, 0, 0, "", "")
 var (
 	BeaconBlocks = snapType{
 		enum: CaplinEnums.BeaconBlocks,
 		name: "beaconblocks",
 		versions: Versions{
-			Current:      1,
-			MinSupported: 1,
+			Current:      v1,
+			MinSupported: v1,
 		},
 		indexes: []Index{CaplinIndexes.BeaconBlockSlot},
 	}
@@ -30,8 +35,8 @@ var (
 		enum: CaplinEnums.BlobSidecars,
 		name: "blobsidecars",
 		versions: Versions{
-			Current:      1,
-			MinSupported: 1,
+			Current:      v1,
+			MinSupported: v1,
 		},
 		indexes: []Index{CaplinIndexes.BlobSidecarSlot},
 	}
