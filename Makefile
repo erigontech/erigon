@@ -13,9 +13,7 @@ ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
 DOCKER_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell id -g)
-DOCKER_BINARIES ?= 'erigon downloader'
-DOCKER_BUILD_DBTOOLS ?= 'false'
-DOCKER_TAG ?= 'local-erigon/erigon:latest'
+DOCKER_TAG ?= erigontech/erigon:latest
 
 # Variables below for building on host OS, and are ignored for docker
 #
@@ -88,20 +86,20 @@ validate_docker_build_args:
 	@if [ "$(UNAME)" = "Darwin" ]; then \
 		dscl . list /Users UniqueID | grep "$(DOCKER_UID)"; \
 	elif [ "$(UNAME)" = "Linux" ]; then \
-		grep "$(DOCKER_UID):$(DOCKER_GID)" /etc/passwd ; \
+		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"; \
 	fi
 	@echo "✔️ host OS user exists: $(shell id -nu $(DOCKER_UID))"
 
 ## docker:                            validate, update submodules and build with docker
 docker: validate_docker_build_args git-submodules
-	DOCKER_BUILDKIT=1 $(DOCKER) build \
-		--target erigon \
+	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
-		--build-arg "BINARIES=${shell echo '$(DOCKER_BINARIES)'}" \
-		--build-arg "BUILD_DBTOOLS=${shell echo '$(DOCKER_BUILD_DBTOOLS)'}" \
-		--progress plain \
-		-t ${DOCKER_TAG} .
+		--build-arg VERSION=${GIT_TAG} \
+		--build-arg UID=${DOCKER_UID} \
+		--build-arg GID=${DOCKER_GID} \
+		${DOCKER_FLAGS} \
+		.
 
 xdg_data_home :=  ~/.local/share
 ifdef XDG_DATA_HOME
@@ -351,10 +349,19 @@ GOLANG_CROSS_VERSION  ?= v1.21.5
 
 
 .PHONY: release-dry-run
-release-dry-run: 
-	@echo "Release process moved to github action"
-	@exit 1
-
+release-dry-run: git-submodules
+	@docker run \
+		--rm \
+		--privileged \
+		-e CGO_ENABLED=1 \
+		-e GITHUB_TOKEN \
+		-e DOCKER_USERNAME \
+		-e DOCKER_PASSWORD \
+		-v /var/run/docker.sock:/var/run/docker.sock \
+		-v `pwd`:/go/src/$(PACKAGE_NAME) \
+		-w /go/src/$(PACKAGE_NAME) \
+		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
+		--clean --skip=validate --skip=publish
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.
 ERIGON_USER_UID ?= 3473
