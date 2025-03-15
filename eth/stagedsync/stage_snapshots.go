@@ -36,6 +36,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -797,7 +798,7 @@ type snapInfo struct {
 	snaptype.FileInfo
 }
 
-func (i *snapInfo) Version() snaptype.Version {
+func (i *snapInfo) Version() semver.Version {
 	return i.FileInfo.Version
 }
 
