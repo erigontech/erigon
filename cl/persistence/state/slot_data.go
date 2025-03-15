@@ -23,7 +23,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
@@ -48,9 +47,6 @@ type SlotData struct {
 	EarliestExitEpoch             uint64
 	ConsolidationBalanceToConsume uint64
 	EarliestConsolidationEpoch    uint64
-	PendingDeposits               *solid.ListSSZ[*solid.PendingDeposit]
-	PendingPartialWithdrawals     *solid.ListSSZ[*solid.PendingPartialWithdrawal]
-	PendingConsolidations         *solid.ListSSZ[*solid.PendingConsolidation]
 
 	// BlockRewards for proposer
 	AttestationsRewards  uint64
@@ -79,9 +75,6 @@ func SlotDataFromBeaconState(s *state.CachingBeaconState) *SlotData {
 		EarliestExitEpoch:             s.EarliestExitEpoch(),
 		ConsolidationBalanceToConsume: s.ConsolidationBalanceToConsume(),
 		EarliestConsolidationEpoch:    s.EarliestConsolidationEpoch(),
-		PendingDeposits:               s.PendingDeposits(),
-		PendingPartialWithdrawals:     s.PendingPartialWithdrawals(),
-		PendingConsolidations:         s.PendingConsolidations(),
 		Fork:                          s.Fork(),
 	}
 }
@@ -119,12 +112,6 @@ func (m *SlotData) ReadFrom(r io.Reader, cfg *clparams.BeaconChainConfig) error 
 	}
 	m.Version = clparams.StateVersion(versionByte[0])
 
-	if m.Version >= clparams.ElectraVersion {
-		m.PendingDeposits = solid.NewPendingDepositList(cfg)
-		m.PendingPartialWithdrawals = solid.NewPendingWithdrawalList(cfg)
-		m.PendingConsolidations = solid.NewPendingConsolidationList(cfg)
-	}
-
 	lenB := make([]byte, 8)
 	if _, err = r.Read(lenB); err != nil {
 		return err
@@ -158,9 +145,6 @@ func (m *SlotData) getSchema() []interface{} {
 			&m.EarliestExitEpoch,
 			&m.ConsolidationBalanceToConsume,
 			&m.EarliestConsolidationEpoch,
-			m.PendingDeposits,
-			m.PendingPartialWithdrawals,
-			m.PendingConsolidations,
 		)
 	}
 	return schema
