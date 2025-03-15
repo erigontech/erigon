@@ -301,10 +301,28 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetEarliestExitEpoch(slotData.EarliestExitEpoch)
 	ret.SetConsolidationBalanceToConsume(slotData.ConsolidationBalanceToConsume)
 	ret.SetEarlistConsolidationEpoch(slotData.EarliestConsolidationEpoch)
-	ret.SetPendingDeposits(slotData.PendingDeposits)
-	ret.SetPendingPartialWithdrawals(slotData.PendingPartialWithdrawals)
-	ret.SetPendingConsolidations(slotData.PendingConsolidations)
 
+	var (
+		pendingConsolidations = solid.NewPendingConsolidationList(r.cfg)
+		pendingDeposits       = solid.NewPendingDepositList(r.cfg)
+		pendingWithdrawals    = solid.NewPendingWithdrawalList(r.cfg)
+	)
+
+	if err := readQueueSSZ(kvGetter, slot, kv.PendingConsolidationsDump, kv.PendingConsolidations, pendingConsolidations); err != nil {
+		return nil, fmt.Errorf("failed to read pending consolidations: %w", err)
+	}
+
+	if err := readQueueSSZ(kvGetter, slot, kv.PendingDepositsDump, kv.PendingDeposits, pendingDeposits); err != nil {
+		return nil, fmt.Errorf("failed to read pending deposits: %w", err)
+	}
+
+	if err := readQueueSSZ(kvGetter, slot, kv.PendingPartialWithdrawalsDump, kv.PendingPartialWithdrawals, pendingWithdrawals); err != nil {
+		return nil, fmt.Errorf("failed to read pending withdrawals: %w", err)
+	}
+
+	ret.SetPendingConsolidations(pendingConsolidations)
+	ret.SetPendingDeposits(pendingDeposits)
+	ret.SetPendingPartialWithdrawals(pendingWithdrawals)
 	return ret, nil
 }
 
@@ -963,4 +981,61 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, kvGetter 
 		return common.Hash{}, fmt.Errorf("invalid mix length %d", len(mixBytes))
 	}
 	return common.BytesToHash(mixBytes), nil
+}
+
+func readQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
+	remainder := slot % clparams.SlotsPerDump
+	freshDumpSlot := slot - remainder
+
+	buffer := buffersPool.Get().(*bytes.Buffer)
+	defer buffersPool.Put(buffer)
+	buffer.Reset()
+
+	var compressed []byte
+
+	compressed, err := kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot))
+	if err != nil {
+		return err
+	}
+
+	if len(compressed) != 0 {
+		if _, err := buffer.Write(compressed); err != nil {
+			return err
+		}
+		zstdReader, err := zstd.NewReader(buffer)
+		if err != nil {
+			return err
+		}
+		defer zstdReader.Close()
+
+		sszEnc, err := io.ReadAll(zstdReader)
+		if err != nil {
+			return err
+		}
+
+		if err := out.DecodeSSZ(sszEnc, 0); err != nil {
+			return err
+		}
+	}
+
+	for currSlot := freshDumpSlot + 1; currSlot <= slot; currSlot++ {
+		buffer.Reset()
+		key := base_encoding.Encode64ToBytes4(currSlot)
+		v, err := kvGetter(diffsTable, key)
+		if err != nil {
+			return err
+		}
+		if len(v) == 0 {
+			continue
+		}
+
+		if _, err := buffer.Write(v); err != nil {
+			return err
+		}
+
+		if err := base_encoding.ApplySSZQueueDiff(buffer, out, 0); err != nil {
+			return err
+		}
+	}
+	return nil
 }
