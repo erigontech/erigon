@@ -81,6 +81,8 @@ var (
 	ErrInvalidCode              = errors.New("invalid code: must not begin with 0xef")
 	ErrInvalidEOF               = errors.New("invalid eof")
 	ErrInvalidEOFInitcode       = errors.New("invalid eof initcode")
+	ErrAuxDataTooLarge          = errors.New("auxdata too large")
+	ErrAuxDataDecrease          = errors.New("auxdata decrease")
 )
 
 var (

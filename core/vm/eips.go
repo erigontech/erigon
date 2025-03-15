@@ -510,6 +510,7 @@ func opRjump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 // opRjumpi implements the RJUMPI opcode
 func opRjumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	condition := scope.Stack.Pop()
+	fmt.Println("condition: ", condition)
 	if condition.BitLen() == 0 {
 		// Not branching, just skip over immediate argument.
 		*pc += 2
@@ -773,7 +774,7 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 
 	initContainer := scope.Contract.SubcontainerAt(int(initContainerIdx))
 	// TODO(racytech): this should be done in `dynamicGas` func, leave it here for now
-	hashingCharge := uint64(6 * ((len(initContainer) + 31) / 32))
+	hashingCharge := uint64(6 * ((len(initContainer.rawData) + 31) / 32))
 	if ok := scope.Contract.UseGas(hashingCharge, tracing.GasChangeCallContractEOFCreation); !ok {
 		return nil, ErrOutOfGas
 	}
@@ -791,7 +792,7 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 		input = scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64())) // TODO(racytech): figure out why it's needed?
 	}
 	stackValue := size
-	res, addr, returnGas, suberr := interpreter.evm.EOFCreate(scope.Contract, input, initContainer, gas, &endowment, &salt, false)
+	res, addr, returnGas, suberr := interpreter.evm.EOFCreate(scope.Contract, input, initContainer.rawData, gas, &endowment, &salt, false)
 	// fmt.Printf("EOFCREATE out_data: 0x%x, addr: 0x%x, returnGas: %v, suberr: %v\n", res, addr, returnGas, suberr)
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -872,6 +873,8 @@ func opReturnContract(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		offset256          = scope.Stack.Pop()
 		size256            = scope.Stack.Pop()
 	)
+	// deployContainerIdx = 255
+	fmt.Println("len(scope.Contract.Container._subContainers): ", len(scope.Contract.Container._subContainers))
 	if deployContainerIdx >= len(scope.Contract.Container._subContainers) {
 		return nil, fmt.Errorf("invalid subcontainer index: deployContainerIdx=%v, len(scope.Contract.Container.SubContainers)=%v", deployContainerIdx, len(scope.Contract.Container._subContainers))
 	}
@@ -879,65 +882,25 @@ func opReturnContract(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 	*pc += 1
 	offset := int64(offset256.Uint64())
 	size := int64(size256.Uint64())
-	containerCode := scope.Contract.SubcontainerAt(deployContainerIdx)
+	container := scope.Contract.SubcontainerAt(deployContainerIdx)
+	fmt.Printf("deployContainer: 0x%x, len: %v\n", container._data, len(container._data))
 	auxData := scope.Memory.GetCopy(offset, size)
-
-	deployContainer := append(containerCode, auxData...)
-	fmt.Printf("deployContainer: 0x%x, len: %v\n", deployContainer, len(deployContainer))
-
-	// TODO(racytech): validate deployContainer?
-
-	if len(deployContainer) == 0 {
-		return nil, fmt.Errorf("len(deployContainer) == 0")
-	}
-	// // Validate the subcontainer
-	// var c Container
-	// if err := c.UnmarshalBinary(deployContainer, true); err != nil {
-	// 	return nil, err
-	// }
-	// if err := c.ValidateCode(interpreter.cfg.JumpTableEOF); err != nil {
-	// 	return nil, err
-	// }
-	// if len(c.Data) < c.DataSize {
-	// 	return nil, fmt.Errorf("RETURNCONTRACT: len(c.Data=%v) < c.DataSize=%v", len(c.Data), c.DataSize)
-	// }
-	// fmt.Printf("Aux Data size: %v, len aux data: %v\n", size, len(auxData))
-	// c.DataSize = len(c.Data)
-	// // c.Data = append(c.Data, auxData...)
-	// fmt.Printf("c.Data: 0x%x\n", c.Data)
-	if c, err := UnmarshalEOF(deployContainer, 0, 1, interpreter.cfg.JumpTableEOF, false); err != nil {
+	fmt.Printf("auxData: 0x%x, len: %v\n", auxData, len(auxData))
+	if err := container.updateData(auxData); err != nil {
 		return nil, err
-	} else {
-		if d, err := MarshalEOF(c, 0); err != nil {
-			return nil, err
-		} else {
-			var (
-				last   = len(scope.ReturnStack) - 1
-				retCtx = scope.ReturnStack[last]
-			)
-			scope.ReturnStack = scope.ReturnStack[:last]
-			scope.CodeSection = retCtx.Section
-			*pc = retCtx.Pc - 1
-			fmt.Printf("deployContainer_1: 0x%x, deployContainer_2: 0x%x\n", deployContainer, d)
-			return d, errStopToken
-		}
 	}
-	// // Restore context
+	fmt.Printf("deployContainer: 0x%x, len: %v\n", container._data, len(container._data))
 
-	// var (
-	// 	last   = len(scope.ReturnStack) - 1
-	// 	retCtx = scope.ReturnStack[last]
-	// )
-	// scope.ReturnStack = scope.ReturnStack[:last]
-	// scope.CodeSection = retCtx.Section
-	// *pc = retCtx.Pc - 1
+	if len(container.rawData) == 0 {
+		return nil, fmt.Errorf("len(container._data) == 0")
+	}
 
-	// retCtx := scope.ReturnStack[:len(scope.ReturnStack)-1]
-	// scope.CodeSection = retCtx.Section
-	// *pc = retCtx.Pc - 1 // account for interpreter loop
-	// return c.MarshalBinary(), errStopToken
-	// fmt.Printf("deployContainer_1: 0x%x, deployContainer_2: 0x%x\n", deployContainer, c.MarshalBinary())
-	// return c.MarshalBinary(), errStopToken
+	d, err := MarshalEOF(container, 0)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println("len(d): ", len(d))
+	return d, errStopToken
 }
 
 func opReturnDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {

@@ -367,10 +367,10 @@ func (h *HostImpl) handleCreate(kind CallKind,
 		code = codeEOF
 	}
 	recipient = createAddr
-	// fmt.Printf("sender: 0x%x\n", sender)
-	// fmt.Printf("salt: 0x%x\n", salt)
+	fmt.Printf("sender: 0x%x\n", sender)
+	fmt.Printf("salt: 0x%x\n", salt)
 	// fmt.Printf("input: 0x%x\n", input)
-	// fmt.Printf("recipient: 0x%x\n", recipient)
+	fmt.Printf("recipient: 0x%x\n", recipient)
 	canTransfer, err := h.evm.Context.CanTransfer(h.ibs, sender, value)
 	if err != nil {
 		panic(err)
@@ -449,7 +449,7 @@ func (h *HostImpl) handleCreate(kind CallKind,
 	h.evm.Context.Transfer(h.ibs, sender, recipient, value, false /* bailout */)
 	// // fmt.Println("GAS BEFORE EXECUTE: ", gas)
 	var evr Result
-	evr, err = h.Execute(kind, static, depth, int64(gas), recipient, sender, input, value.Bytes32(), code)
+	evr, err = h.Execute(EofCreate, static, depth, int64(gas), recipient, sender, input, value.Bytes32(), code)
 	// output := evr.Output
 	// gasLeft := evr.GasLeft
 	// gasRefund := evr.GasRefund
@@ -475,7 +475,7 @@ func (h *HostImpl) handleCreate(kind CallKind,
 		createDataGas := uint64(len(evr.Output)) * params.CreateDataGas
 		if evr.GasLeft >= int64(createDataGas) {
 			evr.GasLeft -= int64(createDataGas)
-			fmt.Printf("SETTING CODE: 0x%x\n", evr.Output)
+			fmt.Printf("SETTING CODEe: 0x%x\n", evr.Output)
 			h.ibs.SetCode(recipient, evr.Output)
 		} else if h.evm.ChainRules().IsHomestead {
 			err = vm.ErrCodeStoreOutOfGas

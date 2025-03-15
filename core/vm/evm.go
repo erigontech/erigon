@@ -457,8 +457,11 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 			// }
 			// contract.Container = &c
 			fmt.Printf("0x%x\n", codeAndHash.code)
-			// TODO(racytech): set the `initcide` and `runtime` properly
-			if c, err := UnmarshalEOF(codeAndHash.code, 0, 0, evm.config.JumpTableEOF, true); err != nil {
+			var containerKind byte = 1
+			if depth == 0 || typ == EOFCREATE {
+				containerKind = 0
+			}
+			if c, err := UnmarshalEOF(codeAndHash.code, 0, containerKind, evm.config.JumpTableEOF, true); err != nil {
 				return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
 			} else {
 				contract.Container = c
@@ -471,6 +474,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 
 	// contract.SetCallCode(&address, codeAndHash.hash, codeAndHash.code, evm.parseContainer(codeAndHash.code))
+	fmt.Println("incrementNonce111: ", incrementNonce)
 	if incrementNonce {
 		nonce, err := evm.intraBlockState.GetNonce(caller.Address())
 		if err != nil {
@@ -502,7 +506,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		return nil, libcommon.Address{}, 0, err
 	}
 
-	fmt.Println("incrementNonce: ", incrementNonce)
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
 	evm.intraBlockState.CreateAccount(address, true)
@@ -618,8 +621,10 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, end
 	if err != nil {
 		return nil, libcommon.Address{}, 0, err
 	}
+	fmt.Printf("\nsender: 0x%x\n", caller.Address())
 	// TODO(racytech): don't allow CREATE and CREATE2 to create EOF
 	contractAddr = crypto.CreateAddress(caller.Address(), nonce)
+	fmt.Printf("recepient: 0x%x\n", contractAddr)
 	return evm.create(caller, &codeAndHash{code: code}, gasRemaining, endowment, contractAddr, CREATE, nil, true /* incrementNonce */, bailout, allowEOF)
 }
 
@@ -699,7 +704,7 @@ func (evm *EVM) parseContainer(b []byte) *EOFContainer {
 		// return &c
 
 		// TODO(racytech): set the `initcode` or `runtime` properly!
-		if c, err := UnmarshalEOF(b, 0, 0, evm.interpreter.Config().JumpTableEOF, true); err != nil {
+		if c, err := UnmarshalEOF(b, 0, 1, evm.interpreter.Config().JumpTableEOF, true); err != nil {
 			panic(fmt.Sprintf("error validating container: %v", err))
 		} else {
 			return c

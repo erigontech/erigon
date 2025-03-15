@@ -239,7 +239,7 @@ func (c *Contract) CodeAt(section uint64) []byte {
 	return c.Container._code[section]
 }
 
-func (c *Contract) SubcontainerAt(idx int) []byte {
+func (c *Contract) SubcontainerAt(idx int) *EOFContainer {
 	if c.Container._subContainers == nil {
 		fmt.Errorf("Contract.SubcontainerAt: Container.SubContainers == nil") // TODO(racytech): handle errors better, maybe return error, []byte?
 		return nil
@@ -248,7 +248,7 @@ func (c *Contract) SubcontainerAt(idx int) []byte {
 		fmt.Errorf("Contract.SetSubcontainer: idx out of range: idx: %v, subcontainer_size: %v", idx, len(c.Container._subContainers))
 		return nil
 	}
-	return c.Container._subContainers[idx].rawData
+	return c.Container._subContainers[idx]
 }
 
 func (c *Contract) Data() []byte {

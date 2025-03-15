@@ -30,7 +30,7 @@ type EOFContainer struct {
 	_code          [][]byte
 	_subContainers []*EOFContainer
 	_data          []byte
-	rawData        []byte
+	rawData        []byte // think about not having this
 }
 
 type eofMetaData struct {
@@ -216,6 +216,10 @@ func readHeader(buf *bytes.Reader) (*header, int64, error) {
 		if err := binary.Read(buf, binary.BigEndian, &header.numSubContainers); err != nil {
 			return nil, 0, fmt.Errorf("%w: %w", err, ErrInvalidSectionCount)
 		}
+		// if len(containerSizes) > maxContainerSections {
+		// 	return fmt.Errorf("containers exceed allowed limit: %v: have %v", maxContainerSections, len(containerSizes))
+		// }
+		fmt.Println("numSubContainers: ", header.numSubContainers)
 		if header.numSubContainers > 256 {
 			return nil, 0, fmt.Errorf("%w: too many container sections: %d", ErrTooManyContainerSections, header.numSubContainers)
 		}
@@ -366,6 +370,7 @@ func readCodeSection(buf *bytes.Reader, jt *JumpTable, header *header, _types []
 			offset += int64(header.codeSectionSizes[i])
 		}
 		if _, err := buf.ReadAt(code, offset); err != nil {
+			fmt.Println("OFFSET: ", offset)
 			return nil, nil, nil, -1, fmt.Errorf("%w: %w", err, ErrInvalidCode)
 		}
 		if validateCode {
@@ -413,7 +418,7 @@ func readSubContainer(buf *bytes.Reader, header *header, jt *JumpTable, referenc
 
 		eofcreate := referencedByEofCreate[i]
 		returnContract := referencedByReturnContract[i]
-		fmt.Println("eofcreate, returnContract: ", eofcreate, returnContract)
+		// fmt.Println("eofcreate, returnContract: ", eofcreate, returnContract)
 		if eofcreate && returnContract {
 			return nil, 0, ErrAmbiguousContainer
 		}
@@ -444,7 +449,7 @@ func UnmarshalEOF(data []byte, depth int, containerKind byte, jt *JumpTable, val
 	// if depth >= MaxContainerDepth {
 	// 	return nil, errors.New("depth >= MaxContainerDepth")
 	// }
-	fmt.Println("initcodeSize: ", len(data))
+	// fmt.Println("initcodeSize: ", len(data))
 	buf := bytes.NewReader(data)
 	container := &EOFContainer{}
 	container.rawData = data
@@ -480,9 +485,78 @@ func UnmarshalEOF(data []byte, depth int, containerKind byte, jt *JumpTable, val
 
 	if header.dataLength > 0 {
 		container._data = make([]byte, header.dataLength)
-		if _, err := buf.Read(container._data); err != nil {
+		if _, err := buf.Read(container._data); err != nil && err != io.EOF {
 			return nil, fmt.Errorf("%w: %w", err, ErrInvalidEOF)
 		}
 	}
 	return container, nil
 }
+
+func (c *EOFContainer) updateData(auxData []byte) error {
+
+	// assert(container.size() <= header.data_offset + header.data_size);
+	// std::cout << "aux_data.size: " << aux_data.size() << std::endl;
+	// const auto new_data_size = container.size() - header.data_offset + aux_data.size();
+	// if (new_data_size > std::numeric_limits<uint16_t>::max())
+	//     return false;
+	// std::cout << "header.data_size: " << header.data_size << std::endl;
+	// std::cout << "new_data_size: " << new_data_size << std::endl;
+	// // Check that appended data size is greater or equal of what header declaration expects.
+	// if (new_data_size < header.data_size)
+	//     return false;
+
+	// // Appending aux_data to the end, assuming data section is always the last one.
+	// container.append(aux_data);
+
+	// Update data size
+	// const auto data_size_pos = header.data_size_position();
+	// container[data_size_pos] = static_cast<uint8_t>(new_data_size >> 8);
+	// container[data_size_pos + 1] = static_cast<uint8_t>(new_data_size);
+	// std::cout << "header.data_size: " << header.data_size << std::endl;
+
+	// aux_data.size: 0
+	// container.size(): 23
+	// header.data_offset: 20
+	// header.data_size: 4
+	// new_data_size: 3
+
+	// if newDataSize >= 1 {
+	// 	newDataSize--
+	// }
+	dataOffset := len(c.rawData) - len(c._data)
+	newDataSize := len(c.rawData) - dataOffset + len(auxData)
+	fmt.Println("container.size(): ", len(c.rawData))
+	fmt.Println("header.data_offset: ", len(c.rawData)-len(c._data))
+	fmt.Println("aux_data.size: ", len(auxData))
+	fmt.Println("header.data_size: ", c._header.dataLength)
+	fmt.Println("new_data_size: ", newDataSize)
+	if newDataSize > 65535 {
+		return ErrAuxDataTooLarge
+	}
+	if newDataSize < len(c._data) {
+		return ErrAuxDataDecrease
+	}
+
+	c._data = append(c._data, auxData...)
+	c._header.dataLength += uint16(len(auxData))
+
+	return nil
+}
+
+// auxData: 0x, len: 0
+// aux_data.size:  0
+// header.data_size:  4
+// new_data_size:  4
+
+// aux_data.size: 0
+// container.size(): 23
+// header.data_offset: 20
+// header.data_size: 4
+// new_data_size: 3
+
+// auxData: 0x, len: 0
+// container.size():  23
+// header.data_offset:  19
+// aux_data.size:  0
+// header.data_size:  4
+// new_data_size:  4

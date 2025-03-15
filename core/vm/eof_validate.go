@@ -164,7 +164,7 @@ func validateInstructions(code []byte, metadata []*eofMetaData, jt *JumpTable, s
 			pos += int(jt[op].immediateSize)
 		}
 	}
-	fmt.Println()
+	// fmt.Println()
 	// fmt.Println(accessCodeSections)
 	// Code sections may not "fall through" and require proper termination.
 	// Therefore, the last instruction must be considered terminal or RJUMP.
