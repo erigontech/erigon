@@ -344,10 +344,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer progressTimer.Stop()
 	prevSlot := slot
 	first := false
-	blocksBeforeCommit := 35_000
+	timeBeforeCommit := 30 * time.Minute
 	blocksProcessed := 0
 
-	for ; slot < to && blocksProcessed < blocksBeforeCommit; slot++ {
+	startLoop := time.Now()
+
+	for ; slot < to && startLoop.Add(timeBeforeCommit).After(time.Now()); slot++ {
 		slashingOccured = false // Set this to false at the beginning of each slot.
 
 		isDumpSlot := slot%clparams.SlotsPerDump == 0
