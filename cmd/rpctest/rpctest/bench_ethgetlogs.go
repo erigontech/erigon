@@ -23,6 +23,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // BenchEthGetLogs compares response of Erigon with Geth
@@ -139,6 +141,82 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 			}
 		}
 		fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(mag.Result))
+		prevBn = bn
+	}
+	return nil
+}
+
+func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64) error {
+	setRoutes(erigonURL, gethURL)
+	var client = &http.Client{
+		Timeout: time.Second * 600,
+	}
+
+	var res CallResult
+	reqGen := &RequestGenerator{
+		client: client,
+	}
+
+	reqGen.reqID++
+	var blockNumber EthBlockNumber
+	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
+	if res.Err != nil {
+		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	}
+	if blockNumber.Error != nil {
+		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+	}
+	fmt.Printf("EthGetLogsInvariants: starting %d-%d, latestBlock=%d\n", blockFrom, blockTo, blockNumber.Number)
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	prevBn := blockFrom
+	for bn := blockFrom; bn < blockTo; bn++ {
+		reqGen.reqID++
+		var resp EthGetLogs
+		res = reqGen.Erigon("eth_getLogs", reqGen.getLogsNoFilters(prevBn, bn), &resp)
+		if res.Err != nil {
+			return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+		}
+		if resp.Error != nil {
+			return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
+		}
+		for _, l := range resp.Result {
+			res = reqGen.Erigon("eth_getLogs", reqGen.getLogs(prevBn, bn, l.Address), &resp)
+			if res.Err != nil {
+				return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+			}
+			if resp.Error != nil {
+				return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
+			}
+			//invariant1: if `log` visible without filter - then must be visible with filter. (in another words: `address` must be indexed well)
+			if len(resp.Result) == 0 {
+				return fmt.Errorf("eth_getLogs: at blockNum=%d account %x not indexed", bn, l.Address)
+			}
+
+			if len(l.Topics) == 0 {
+				continue
+			}
+
+			//invariant2: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
+			res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(prevBn, bn, l.Address, l.Topics[0]), &resp)
+			if res.Err != nil {
+				return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+			}
+			if resp.Error != nil {
+				return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
+			}
+			if len(resp.Result) == 0 {
+				return fmt.Errorf("eth_getLogs: at blockNum=%d account %x, topic %x not indexed", bn, l.Address, l.Topics[0])
+			}
+		}
+
+		select {
+		case <-logEvery.C:
+			log.Info("[squeeze_migration]", "block_num", bn)
+		default:
+		}
+
 		prevBn = bn
 	}
 	return nil
