@@ -69,15 +69,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	var begin, end uint64
 	logs := types.Logs{}
 
-	println("crit:", fmt.Sprintf("%+v", crit))
-	println("topics:")
-	for idx, topics := range crit.Topics {
-		println("topics idx:", idx)
-		for _, topic := range topics {
-			println("topic hash:", topic.Hex())
-		}
-	}
-
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
 		return logs, beginErr
@@ -259,14 +250,12 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if out == nil {
 			out = addrBitmap
 		} else {
-			//out = stream.Intersect[uint64](out, addrBitmap, -1)
+			out = stream.Intersect[uint64](out, addrBitmap, -1)
 		}
 	}
 	if out == nil {
-		println("here")
 		out = stream.Range[uint64](fromTxNum, toTxNum)
 	}
-	println("hehe there")
 	return out, nil
 }
 
