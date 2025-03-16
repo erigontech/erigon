@@ -113,6 +113,8 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 				}
 				if it.startTxNum > 0 {
 					efiter.Seek(uint64(it.startTxNum))
+					fnd, _ := efiter.Next()
+					fmt.Printf("[dbg] it4.1: %d\n", fnd)
 				}
 				it.efIt = efiter
 			} else {
