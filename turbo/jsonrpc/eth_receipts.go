@@ -244,6 +244,7 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	}
 	toTxNum++
 
+	return stream.Range[uint64](fromTxNum, toTxNum), nil
 	topicsBitmap, err := getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum)
 	if err != nil {
 		return out, err
