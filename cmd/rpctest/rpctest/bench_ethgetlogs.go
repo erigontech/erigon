@@ -23,6 +23,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // BenchEthGetLogs compares response of Erigon with Geth
@@ -172,6 +174,8 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 
 	prevBn := blockFrom
 	for bn := blockFrom; bn < blockTo; bn++ {
@@ -208,7 +212,13 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		//		return err
 		//	}
 		//}
-		fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(resp.Result))
+
+		select {
+		case <-logEvery.C:
+			log.Info("[squeeze_migration]", "block_num", bn)
+		default:
+		}
+
 		prevBn = bn
 	}
 	return nil
