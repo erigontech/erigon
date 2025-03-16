@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/opstack"
 )
 
 type AccountAbstractionBatchHeaderTransaction struct {
@@ -214,4 +215,8 @@ func (tx *AccountAbstractionBatchHeaderTransaction) IsContractDeploy() bool {
 
 func (tx *AccountAbstractionBatchHeaderTransaction) Unwrap() Transaction {
 	return tx
+}
+
+func (tx *AccountAbstractionBatchHeaderTransaction) RollupCostData() opstack.RollupCostData {
+	return opstack.RollupCostData{}
 }

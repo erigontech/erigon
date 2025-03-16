@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/opstack"
 )
 
 const (
@@ -791,4 +792,8 @@ func convertProtoAuthorizations(auths []*typesproto.Authorization) []Authorizati
 	}
 
 	return goAuths
+}
+
+func (tx *AccountAbstractionTransaction) RollupCostData() opstack.RollupCostData {
+	return opstack.RollupCostData{}
 }

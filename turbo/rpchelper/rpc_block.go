@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 var UnknownBlockError = &rpc.CustomError{
@@ -36,7 +37,7 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
 	if forkchoiceHeadHash != (libcommon.Hash{}) {
 		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
-		if forkchoiceHeadNum != nil {
+		if forkchoiceHeadNum != nil && *forkchoiceHeadNum > 0 {
 			return *forkchoiceHeadNum, nil
 		}
 	}
@@ -49,27 +50,40 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 	return blockNum, nil
 }
 
-func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
+func GetFinalizedBlockNumber(tx kv.Tx, br services.FullBlockReader) (uint64, error) {
 	forkchoiceFinalizedHash := rawdb.ReadForkchoiceFinalized(tx)
 	if forkchoiceFinalizedHash != (libcommon.Hash{}) {
 		forkchoiceFinalizedNum := rawdb.ReadHeaderNumber(tx, forkchoiceFinalizedHash)
-		if forkchoiceFinalizedNum != nil {
+		if forkchoiceFinalizedNum != nil && *forkchoiceFinalizedNum > 0 {
+			if br != nil && br.FrozenBlocks() > *forkchoiceFinalizedNum {
+				return br.FrozenBlocks(), nil
+			}
 			return *forkchoiceFinalizedNum, nil
 		}
 	}
+	if br != nil && br.FrozenBlocks() > 0 {
+		return br.FrozenBlocks(), nil
+	}
 
-	return 0, UnknownBlockError
+	return 0, nil
 }
 
-func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {
+func GetSafeBlockNumber(tx kv.Tx, br services.FullBlockReader) (uint64, error) {
 	forkchoiceSafeHash := rawdb.ReadForkchoiceSafe(tx)
 	if forkchoiceSafeHash != (libcommon.Hash{}) {
 		forkchoiceSafeNum := rawdb.ReadHeaderNumber(tx, forkchoiceSafeHash)
-		if forkchoiceSafeNum != nil {
+		if forkchoiceSafeNum != nil && *forkchoiceSafeNum > 0 {
+			if br != nil && br.FrozenBlocks() > *forkchoiceSafeNum {
+				return br.FrozenBlocks(), nil
+			}
 			return *forkchoiceSafeNum, nil
 		}
 	}
-	return 0, UnknownBlockError
+	if br != nil && br.FrozenBlocks() > 0 {
+		return br.FrozenBlocks(), nil
+	}
+
+	return 0, nil
 }
 
 func GetLatestExecutedBlockNumber(tx kv.Tx) (uint64, error) {
@@ -77,5 +91,6 @@ func GetLatestExecutedBlockNumber(tx kv.Tx) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	fmt.Println("latestExecutedBn", blockNum)
 	return blockNum, err
 }

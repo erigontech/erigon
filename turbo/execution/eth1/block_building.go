@@ -20,9 +20,11 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
@@ -35,6 +37,18 @@ import (
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 )
+
+func (e *EthereumExecutionModule) isBusy() bool {
+	waitUntilBusySignal := 5 * time.Second
+	checkInterval := 10 * time.Millisecond
+	for i := 0; i < int(waitUntilBusySignal/checkInterval); i++ {
+		if e.semaphore.TryAcquire(1) {
+			return false
+		}
+		time.Sleep(checkInterval)
+	}
+	return !e.semaphore.TryAcquire(1)
+}
 
 func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
 	if !e.config.IsShanghai(time) && withdrawals != nil {
@@ -57,7 +71,7 @@ func (e *EthereumExecutionModule) evictOldBuilders() {
 
 // Missing: NewPayload, AssembleBlock
 func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execution.AssembleBlockRequest) (*execution.AssembleBlockResponse, error) {
-	if !e.semaphore.TryAcquire(1) {
+	if e.isBusy() {
 		return &execution.AssembleBlockResponse{
 			Id:   0,
 			Busy: true,
@@ -70,6 +84,12 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.SuggestedFeeRecipient),
 		Withdrawals:           eth1_utils.ConvertWithdrawalsFromRpc(req.Withdrawals),
+	}
+	if e.config.IsOptimism() {
+		param.Transactions = req.Transactions
+		param.NoTxPool = req.NoTxPool
+		param.GasLimit = req.GasLimit
+		param.HoloceneEIP1559Params = common.CopyBytes(req.Holocene_Eip1559Params)
 	}
 
 	if err := e.checkWithdrawalsPresence(param.Timestamp, param.Withdrawals); err != nil {
@@ -101,7 +121,11 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	e.lastParameters = &param
 
 	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param)
-	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
+	if e.config.IsOptimism() {
+		e.logger.Debug("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
+	} else {
+		e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
+	}
 
 	return &execution.AssembleBlockResponse{
 		Id:   e.nextPayloadId,
@@ -123,7 +147,7 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 }
 
 func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *execution.GetAssembledBlockRequest) (*execution.GetAssembledBlockResponse, error) {
-	if !e.semaphore.TryAcquire(1) {
+	if e.isBusy() {
 		return &execution.GetAssembledBlockResponse{
 			Busy: true,
 		}, nil
@@ -225,13 +249,19 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		requestsBundle.Requests = requests
 	}
 
+	data := &execution.AssembledBlockData{
+		ExecutionPayload: payload,
+		BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
+		BlobsBundle:      blobsBundle,
+		Requests:         requestsBundle,
+	}
+
+	if header.ParentBeaconBlockRoot != nil && e.config.IsOptimism() {
+		data.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*header.ParentBeaconBlockRoot)
+	}
+
 	return &execution.GetAssembledBlockResponse{
-		Data: &execution.AssembledBlockData{
-			ExecutionPayload: payload,
-			BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
-			BlobsBundle:      blobsBundle,
-			Requests:         requestsBundle,
-		},
+		Data: data,
 		Busy: false,
 	}, nil
 }

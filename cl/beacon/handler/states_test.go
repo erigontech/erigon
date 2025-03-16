@@ -160,7 +160,6 @@ func TestGetStateFullHistorical(t *testing.T) {
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
-	fmt.Println("AX")
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 

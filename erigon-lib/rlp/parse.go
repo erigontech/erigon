@@ -143,6 +143,10 @@ func ParseString(payload []byte, pos int) (dataPos, dataLen int, err error) {
 	}
 	return
 }
+func SkipString(payload []byte, pos int) (nextPos, dataLen int, err error) {
+	dataPos, dataLen, err := ParseString(payload, pos)
+	return dataPos + dataLen, dataLen, err
+}
 func StringOfLen(payload []byte, pos, expectedLen int) (dataPos int, err error) {
 	dataPos, dataLen, err := ParseString(payload, pos)
 	if err != nil {

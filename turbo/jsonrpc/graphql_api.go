@@ -147,9 +147,14 @@ func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.B
 	return block, block.Body().SendersFromTxs(), nil
 }
 
-func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
+func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.TemporalTx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
 	additionalFields := make(map[string]interface{})
-	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
+
+	receipts, err := api.getReceiptsForOptimismBlockMarshalling(context.TODO(), tx, b)
+	if err != nil {
+		return nil, err
+	}
+	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields, receipts)
 	if !inclTx {
 		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}

@@ -481,7 +481,9 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
 			h.notifications.Accumulator.StartChange(currentHeader, nil, false)
 		}
 
-		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
+		// Block time of every OP superchains is 2sec for now.
+		// Add 2 for next block. TODO: support custom block time for OP chain
+		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader, currentHeader.Time+2)
 		pendingBlobFee := h.chainConfig.GetMinBlobGasPrice()
 		if currentHeader.ExcessBlobGas != nil {
 			nextBlockTime := currentHeader.Time + h.chainConfig.SecondsPerSlot()
