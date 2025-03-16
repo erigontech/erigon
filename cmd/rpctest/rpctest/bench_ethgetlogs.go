@@ -210,15 +210,14 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 				return fmt.Errorf("eth_getLogs: at blockNum=%d account %x, topic %x not indexed", bn, l.Address, l.Topics[0])
 			}
 		}
-	}
 
-	select {
-	case <-logEvery.C:
-		log.Info("[squeeze_migration]", "block_num", bn)
-	default:
-	}
+		select {
+		case <-logEvery.C:
+			log.Info("[squeeze_migration]", "block_num", bn)
+		default:
+		}
 
-	prevBn = bn
-}
-return nil
+		prevBn = bn
+	}
+	return nil
 }
