@@ -130,7 +130,7 @@ func validateInstructions(code []byte, metadata []*eofMetaData, jt *JumpTable, s
 				if dataSize < 32 || index > dataSize-32 {
 					return nil, nil, makeEOFerr(0, pos, op, ErrInvalidDataLoadN)
 				}
-			} else if op == EOFCREATE || op == RETURNCONTRACT {
+			} else if op == EOFCREATE || op == RETURNCODE {
 
 				// const auto container_idx = code[i + 1];
 				// if (container_idx >= header.container_sizes.size())
@@ -149,7 +149,7 @@ func validateInstructions(code []byte, metadata []*eofMetaData, jt *JumpTable, s
 				if containerIDX >= containerCount {
 					return nil, nil, makeEOFerr(0, pos, op, ErrInvalidContainerArgument)
 				}
-				if op == RETURNCONTRACT {
+				if op == RETURNCODE {
 					if containerKind == runtime {
 						return nil, nil, makeEOFerr(0, pos, op, ErrIncompatibleContainer)
 					}

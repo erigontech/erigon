@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	evmonego "github.com/erigontech/erigon/core/evmone-go"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
@@ -475,54 +474,54 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
 	var (
-		ret       []byte
-		vmerr     error // vm errors do not effect consensus and are therefore not assigned to err
-		gasLeft   int64
-		gasRefund int64
+		ret   []byte
+		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
+		// gasLeft   int64
+		// gasRefund int64
 	)
 	fmt.Println("----------------> Start Transition")
 	fmt.Println("----------------> Start Gas: ", st.gasRemaining)
 	fmt.Println("Refunds: ", refunds)
 
-	host := evmonego.NewEvmOneHost(st, bailout) // TODO: may be we shouldn't recreate it and destroy it every time we do transition?
-	err = host.SetOption("validate_eof", "trues")
-	fmt.Println("Setoption err sus: ", err)
-	if contractCreation {
-		ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Create, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to(), nil)
-		st.gasRemaining = uint64(gasLeft)
-	} else {
-		// Increment the nonce for the next transaction
-		// st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
-		ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Call, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to(), nil)
-		st.gasRemaining = uint64(gasLeft)
-	}
-	host.DestroyVM() // TODO: should we destroy it everytime?
-	fmt.Println("GAS REFUND111", gasRefund)
-
+	// host := evmonego.NewEvmOneHost(st, bailout) // TODO: may be we shouldn't recreate it and destroy it every time we do transition?
+	// err = host.SetOption("validate_eof", "trues")
+	// fmt.Println("Setoption err suss: ", err)
 	// if contractCreation {
-	// 	// The reason why we don't increment nonce here is that we need the original
-	// 	// nonce to calculate the address of the contract that is being created
-	// 	// It does get incremented inside the `Create` call, after the computation
-	// 	// of the contract's address, but before the execution of the code.
-	// 	ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout, rules.IsOsaka)
-	// 	fmt.Println("CALLING CREATE")
-	// 	b, err := st.state.GetBalance(sender.Address())
-	// 	if err != nil {
-	// 		return nil, fmt.Errorf("st.state.GetBalance(sender.Address()): %w", ErrStateTransitionFailed, err)
-	// 	}
-	// 	fmt.Println("balance", b)
-	// 	if errors.Is(vmerr, vm.ErrInvalidEOFInitcode) {
-	// 		if nonce, _err := st.state.GetNonce(sender.Address()); _err != nil {
-	// 			return nil, _err
-	// 		} else {
-	// 			st.state.SetNonce(msg.From(), nonce+1)
-	// 		}
-	// 	}
+	// 	ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Create, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to(), nil)
+	// 	st.gasRemaining = uint64(gasLeft)
 	// } else {
 	// 	// Increment the nonce for the next transaction
-	// 	fmt.Println("CALLING CALL")
-	// 	ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+	// 	// st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
+	// 	ret, gasLeft, gasRefund, _, vmerr = host.Call(evmonego.Call, st.to(), sender.Address(), st.value.Bytes32(), st.data, int64(st.gasRemaining), 0, false, libcommon.Hash{}, st.to(), nil)
+	// 	st.gasRemaining = uint64(gasLeft)
 	// }
+	// host.DestroyVM() // TODO: should we destroy it everytime?
+	// fmt.Println("GAS REFUND111", gasRefund)
+
+	if contractCreation {
+		// The reason why we don't increment nonce here is that we need the original
+		// nonce to calculate the address of the contract that is being created
+		// It does get incremented inside the `Create` call, after the computation
+		// of the contract's address, but before the execution of the code.
+		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout, rules.IsOsaka)
+		fmt.Println("CALLING CREATE")
+		b, err := st.state.GetBalance(sender.Address())
+		if err != nil {
+			return nil, fmt.Errorf("st.state.GetBalance(sender.Address()): %w", ErrStateTransitionFailed, err)
+		}
+		fmt.Println("balance", b)
+		if errors.Is(vmerr, vm.ErrInvalidEOFInitcode) {
+			if nonce, _err := st.state.GetNonce(sender.Address()); _err != nil {
+				return nil, _err
+			} else {
+				st.state.SetNonce(msg.From(), nonce+1)
+			}
+		}
+	} else {
+		// Increment the nonce for the next transaction
+		fmt.Println("CALLING CALL")
+		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+	}
 
 	gasUsed := st.gasUsed()
 	fmt.Println("rules.IsOsaka: ", rules.IsOsaka)

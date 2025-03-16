@@ -449,8 +449,8 @@ func enableEOF(jt *JumpTable) {
 		immediateSize: 1,
 		memorySize:    memoryEOFCreate,
 	}
-	jt[RETURNCONTRACT] = &operation{
-		execute:       opReturnContract,
+	jt[RETURNCODE] = &operation{
+		execute:       opReturnCode,
 		dynamicGas:    pureMemoryGascost,
 		numPop:        2,
 		immediateSize: 1,
@@ -866,7 +866,7 @@ func opTxnCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	return nil, nil
 }
 
-func opReturnContract(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+func opReturnCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
 		code               = scope.Contract.CodeAt(scope.CodeSection)
 		deployContainerIdx = int(code[*pc+1])
@@ -895,12 +895,12 @@ func opReturnContract(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		return nil, fmt.Errorf("len(container._data) == 0")
 	}
 
-	d, err := MarshalEOF(container, 0)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println("len(d): ", len(d))
-	return d, errStopToken
+	// d, err := MarshalEOF(container, 0)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// fmt.Println("len(d): ", len(d))
+	return container.rawData, errStopToken
 }
 
 func opReturnDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {

@@ -47,7 +47,9 @@ type header struct {
 	codeSectionSizes  []uint16
 	numSubContainers  uint16
 	subContainerSizes []uint16
+	dataOffset        uint16
 	dataLength        uint16
+	dataSizePos       uint16
 }
 
 // var jumpTables = []JumpTable{NewEOFInstructionSet()}
@@ -247,6 +249,8 @@ func readHeader(buf *bytes.Reader) (*header, int64, error) {
 	if kind != _kindData {
 		return nil, 0, fmt.Errorf("%w: %v", ErrMissingDataHeader, "expected data section")
 	}
+	// fmt.Println("DATA SIZE POS: ", buf.Size()-int64(buf.Len()))
+	header.dataSizePos = uint16(buf.Size() - int64(buf.Len()))
 	if err := binary.Read(buf, binary.BigEndian, &header.dataLength); err != nil {
 		return nil, 0, fmt.Errorf("%w: %w", err, ErrMissingDataHeader)
 	}
@@ -380,7 +384,7 @@ func readCodeSection(buf *bytes.Reader, jt *JumpTable, header *header, _types []
 				for _, arr := range subcontainerRefs { // arr[0] - container index, arr[1] - EOFCREATE || RETURNCONTRACT
 					if OpCode(arr[1]) == EOFCREATE {
 						referencedByEofCreate[arr[0]] = true
-					} else if OpCode(arr[1]) == RETURNCONTRACT {
+					} else if OpCode(arr[1]) == RETURNCODE {
 						referencedByReturnContract[arr[0]] = true
 					} else {
 						panic("unexpected OpCode")
@@ -483,8 +487,10 @@ func UnmarshalEOF(data []byte, depth int, containerKind byte, jt *JumpTable, val
 	}
 	container._subContainers = _subContainer
 
+	header.dataOffset = uint16(buf.Size() - int64(buf.Len()))
 	if header.dataLength > 0 {
 		container._data = make([]byte, header.dataLength)
+		fmt.Println("bufSIZE: ", buf.Size())
 		if _, err := buf.Read(container._data); err != nil && err != io.EOF {
 			return nil, fmt.Errorf("%w: %w", err, ErrInvalidEOF)
 		}
@@ -505,6 +511,12 @@ func (c *EOFContainer) updateData(auxData []byte) error {
 	// if (new_data_size < header.data_size)
 	//     return false;
 
+	// container.size() = 26
+	// header.data_offset = 26
+	// header.data_size = 0
+	// aux_data.size() = 0
+	// new_data_size = 0
+
 	// // Appending aux_data to the end, assuming data section is always the last one.
 	// container.append(aux_data);
 
@@ -514,22 +526,17 @@ func (c *EOFContainer) updateData(auxData []byte) error {
 	// container[data_size_pos + 1] = static_cast<uint8_t>(new_data_size);
 	// std::cout << "header.data_size: " << header.data_size << std::endl;
 
-	// aux_data.size: 0
-	// container.size(): 23
-	// header.data_offset: 20
-	// header.data_size: 4
-	// new_data_size: 3
+	// rewrite c++ code into go code
 
-	// if newDataSize >= 1 {
-	// 	newDataSize--
-	// }
-	dataOffset := len(c.rawData) - len(c._data)
-	newDataSize := len(c.rawData) - dataOffset + len(auxData)
+	fmt.Println(c.rawData)
+	// dataOffset := len(c.rawData) - len(c._data)
+	newDataSize := len(c.rawData) - int(c._header.dataOffset) + len(auxData)
 	fmt.Println("container.size(): ", len(c.rawData))
-	fmt.Println("header.data_offset: ", len(c.rawData)-len(c._data))
-	fmt.Println("aux_data.size: ", len(auxData))
+	fmt.Println("header.data_offset: ", c._header.dataOffset)
 	fmt.Println("header.data_size: ", c._header.dataLength)
+	fmt.Println("aux_data.size: ", len(auxData))
 	fmt.Println("new_data_size: ", newDataSize)
+	fmt.Println("new_data_sizeasdas: ", newDataSize)
 	if newDataSize > 65535 {
 		return ErrAuxDataTooLarge
 	}
@@ -537,26 +544,63 @@ func (c *EOFContainer) updateData(auxData []byte) error {
 		return ErrAuxDataDecrease
 	}
 
-	c._data = append(c._data, auxData...)
-	c._header.dataLength += uint16(len(auxData))
+	// const auto data_size_pos = header.data_size_position();
+	// dataSizePo
+
+	fmt.Println(c.rawData)
+	c.rawData = append(c.rawData, auxData...)
+	fmt.Println(c.rawData)
+	c.rawData[c._header.dataSizePos] = byte(newDataSize >> 8)
+	c.rawData[c._header.dataSizePos+1] = byte(newDataSize)
+	fmt.Println(c.rawData)
+
+	// c._data = append(c._data, auxData...)
+	// fmt.Println(c._data)
+	// c._header.dataLength += uint16(len(auxData))
 
 	return nil
 }
 
-// auxData: 0x, len: 0
-// aux_data.size:  0
-// header.data_size:  4
-// new_data_size:  4
+// container: 239 0 1 1 0 4 2 0 1 0 7 4 0 0 0 0 128 0 2 97 32 21 96 1 85 0
+// aux_data:
+// container.size() = 26
+// header.data_offset = 26
+// header.data_size = 0
+// aux_data.size() = 0
+// new_data_size = 0
+// SETTING CODEe: 0xef00010100040200010007040000000080000261201560015500
 
-// aux_data.size: 0
-// container.size(): 23
-// header.data_offset: 20
-// header.data_size: 4
-// new_data_size: 3
-
-// auxData: 0x, len: 0
-// container.size():  23
-// header.data_offset:  19
+// container.size():  26
+// header.data_offset:  0
+// header.data_size:  0
 // aux_data.size:  0
-// header.data_size:  4
-// new_data_size:  4
+// new_data_size:  26
+// new_data_sizeasdas:  26
+// [239 0 1 1 0 4 2 0 1 0 7 4 0 0 0 0 128 0 2 97 32 21 96 1 85 0]
+// [239 0 1 1 0 4 2 0 1 0 7 4 0 0 0 0 128 0 2 97 32 21 96 1 85 0]
+// [239 0 1 1 0 4 2 0 1 0 7 4 0 26 0 0 128 0 2 97 32 21 96 1 85 0]
+// deployContainer: 0x, len: 0
+// ret:  [239 0 1 1 0 4 2 0 1 0 7 4 0 26 0 0 128 0 2 97 32 21 96 1 85 0]
+// DONE RUN
+// CHECK 4 FAIL
+// EVM ERROR <nil>
+// IN HERE
+// ========== setting code: 0xef0001010004020001000704001a000080000261201560015500
+
+// func (h *header) dataSizePos() uint16 {
+// 	// const auto num_code_sections = code_sizes.size();
+// 	// const auto num_container_sections = container_sizes.size();
+// 	// return std::size(EOF_MAGIC) + 1 +   // magic + version
+// 	// 	   3 +                          // type section kind + size
+// 	// 	   3 + 2 * num_code_sections +  // code sections kind + count + sizes
+// 	// 	   // container sections kind + count + sizes
+// 	// 	   (num_container_sections != 0 ? 3 + 2 * num_container_sections : 0) +
+// 	// 	   1;  // data section kind
+
+// 	pos := 2 + 1 + 3 + 3 + 2*h.numCodeSections
+// 	if h.numSubContainers != 0 {
+// 		pos += 3 + 2*h.numSubContainers
+// 	}
+// 	pos += 1
+// 	return pos
+// }
