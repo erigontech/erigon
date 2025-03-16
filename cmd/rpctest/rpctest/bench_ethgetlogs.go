@@ -182,7 +182,8 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 			return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 		}
 		for _, l := range resp.Result {
-			res = reqGen.Erigon("eth_getLogs", reqGen.getLogs(prevBn, bn, l.Address), &resp)
+			rStr := reqGen.getLogs(prevBn, bn, l.Address)
+			res = reqGen.Erigon("eth_getLogs", rStr, &resp)
 			if res.Err != nil {
 				return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
 			}
@@ -190,7 +191,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 				return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 			}
 			if len(res.Response) == 0 {
-				return fmt.Errorf("eth_getLogs: account is not indexed at blockNum=%d", bn)
+				return fmt.Errorf("eth_getLogs: account is not indexed at blockNum=%d, %s", bn, rStr)
 			}
 		}
 		//topics := getTopics(res.Result)
