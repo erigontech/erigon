@@ -143,3 +143,73 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 	}
 	return nil
 }
+
+func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
+	setRoutes(erigonURL, gethURL)
+	var client = &http.Client{
+		Timeout: time.Second * 600,
+	}
+
+	var resultsCh chan CallResult = nil
+	if !needCompare {
+		resultsCh = make(chan CallResult, 1000)
+		defer close(resultsCh)
+		go vegetaWrite(true, []string{"debug_getModifiedAccountsByNumber", "eth_getLogs"}, resultsCh)
+	}
+
+	var res CallResult
+	reqGen := &RequestGenerator{
+		client: client,
+	}
+
+	reqGen.reqID++
+	var blockNumber EthBlockNumber
+	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
+	if res.Err != nil {
+		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	}
+	if blockNumber.Error != nil {
+		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+	}
+	fmt.Printf("Last block: %d\n", blockNumber.Number)
+
+	prevBn := blockFrom
+	for bn := blockFrom; bn < blockTo; bn++ {
+		reqGen.reqID++
+		var resp EthGetLogs
+		res = reqGen.Erigon("eth_getLogs", reqGen.getLogsNoFilters(prevBn, bn), &resp)
+		if res.Err != nil {
+			return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+		}
+		if resp.Error != nil {
+			return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
+		}
+		for _, l := range resp.Result {
+			res = reqGen.Erigon("eth_getLogs", reqGen.getLogs(prevBn, bn, l.Address), &resp)
+			if res.Err != nil {
+				return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+			}
+			if resp.Error != nil {
+				return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
+			}
+			if len(res.Response) == 0 {
+				return fmt.Errorf("eth_getLogs: account is not indexed at blockNum=%d", bn)
+			}
+		}
+		//topics := getTopics(res.Result)
+		//// All combination of account and one topic
+		//for _, topic := range topics {
+		//	reqGen.reqID++
+		//	request = reqGen.getLogs1(prevBn, bn+10000, account, topic)
+		//	errCtx := fmt.Sprintf("account %x topic %x blocks %d-%d", account, topic, prevBn, bn)
+		//	if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh,
+		//		/* insertOnlyIfSuccess */ false); err != nil {
+		//		fmt.Println(err)
+		//		return err
+		//	}
+		//}
+		fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(resp.Result))
+		prevBn = bn
+	}
+	return nil
+}
