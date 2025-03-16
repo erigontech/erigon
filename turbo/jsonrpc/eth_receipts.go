@@ -69,6 +69,15 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	var begin, end uint64
 	logs := types.Logs{}
 
+	println("crit:", fmt.Sprintf("%+v", crit))
+	println("topics:")
+	for idx, topics := range crit.Topics {
+		println("topics idx:", idx)
+		for _, topic := range topics {
+			println("topic hash:", topic.Hex())
+		}
+	}
+
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
 		return logs, beginErr
@@ -367,16 +376,11 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		var filtered types.Logs
-		if r == nil { // if receipt data is not released yet. fallback to manual field filling. can remove in future.
-			filtered = rawLogs.Filter(addrMap, crit.Topics, 0)
-			for _, log := range filtered {
-				log.BlockNumber = blockNum
-				log.BlockHash = blockHash
-				log.TxHash = txn.Hash()
-			}
-		} else {
-			filtered = r.Logs.Filter(addrMap, crit.Topics, 0)
+		if r == nil {
+			return nil, errors.New("nil receipt w/o error")
 		}
+
+		filtered = r.Logs.Filter(addrMap, crit.Topics, 0)
 
 		for _, filteredLog := range filtered {
 			logs = append(logs, &types.ErigonLog{
