@@ -94,6 +94,7 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 			it.stack = it.stack[:len(it.stack)-1]
 			offset, ok := item.reader.TwoLayerLookup(it.key)
 			if !ok {
+				fmt.Printf("[dbg] it3.skip: %s, %x\n", item.getter.FileName(), it.key)
 				continue
 			}
 			g := item.getter
