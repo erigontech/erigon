@@ -74,11 +74,7 @@ func (d *DiagnosticClient) runFillDBListener(rootCtx context.Context) {
 					Progress:    progress,
 				}, "Fill DB from snapshots")
 
-				if err := d.SaveSnapshotStageStatsToDB(); err != nil {
-					log.Debug("[Diagnostics] Failed to save snapshot stage stats",
-						"err", err,
-						"stage", info.Stage.StageName)
-				}
+				d.SaveSnapshotStageStatsToDB()
 			}
 		}
 	}()
