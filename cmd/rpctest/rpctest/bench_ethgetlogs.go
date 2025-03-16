@@ -152,13 +152,6 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		Timeout: time.Second * 600,
 	}
 
-	var resultsCh chan CallResult = nil
-	if !needCompare {
-		resultsCh = make(chan CallResult, 1000)
-		defer close(resultsCh)
-		go vegetaWrite(true, []string{"debug_getModifiedAccountsByNumber", "eth_getLogs"}, resultsCh)
-	}
-
 	var res CallResult
 	reqGen := &RequestGenerator{
 		client: client,
