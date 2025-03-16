@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -50,7 +51,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"

@@ -25,6 +25,7 @@ import (
 	"io"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/turbo/privateapi"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -40,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/ethdb/privateapi"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
