@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"container/heap"
 	"encoding/binary"
-	"fmt"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 
@@ -94,7 +93,6 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 			it.stack = it.stack[:len(it.stack)-1]
 			offset, ok := item.reader.TwoLayerLookup(it.key)
 			if !ok {
-				fmt.Printf("[dbg] it3.skip: %s, %x\n", item.getter.FileName(), it.key)
 				continue
 			}
 			g := item.getter
@@ -105,20 +103,14 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 				it.ef.Reset(eliasVal)
 				var efiter *eliasfano32.EliasFanoIter
 				if it.orderAscend {
-					ar, _ := stream.ToArray(it.ef.Iterator())
-					fmt.Printf("[dbg] it4: %x, %d, %d\n", k, it.startTxNum, ar)
 					efiter = it.ef.Iterator()
 				} else {
 					efiter = it.ef.ReverseIterator()
 				}
 				if it.startTxNum > 0 {
 					efiter.Seek(uint64(it.startTxNum))
-					fnd, _ := efiter.Next()
-					fmt.Printf("[dbg] it4.1: %d\n", fnd)
 				}
 				it.efIt = efiter
-			} else {
-				fmt.Printf("[dbg] it3: %x, %x\n", k, it.key)
 			}
 		}
 
