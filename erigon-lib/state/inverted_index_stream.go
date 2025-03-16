@@ -101,11 +101,12 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 			g.Reset(offset)
 			k, _ := g.NextUncompressed()
 			if bytes.Equal(k, it.key) {
-				fmt.Printf("[dbg] it4: %x, %x\n", k, it.key)
 				eliasVal, _ := g.NextUncompressed()
 				it.ef.Reset(eliasVal)
 				var efiter *eliasfano32.EliasFanoIter
 				if it.orderAscend {
+					ar, _ := stream.ToArray(it.ef.Iterator())
+					fmt.Printf("[dbg] it4: %x, %d, %d\n", k, it.startTxNum, ar)
 					efiter = it.ef.Iterator()
 				} else {
 					efiter = it.ef.ReverseIterator()
