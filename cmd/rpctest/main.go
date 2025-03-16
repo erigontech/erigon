@@ -262,7 +262,7 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.EthGetLogsInvariants(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			err := rpctest.EthGetLogsInvariants(erigonURL, gethURL, needCompare, blockFrom, blockTo)
 			if err != nil {
 				logger.Error(err.Error())
 			}
