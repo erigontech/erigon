@@ -304,6 +304,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
+		println("it:", txNum, txIndex, isFinalTxn, blockNum, blockNumChanged)
 		if isFinalTxn {
 			if chainConfig.Bor != nil {
 				// check for state sync event logs
