@@ -443,8 +443,6 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 		if err != nil {
 			return nil, err
 		}
-		cnt, _ := stream.Count(it)
-		fmt.Printf("[dbg] here1: %x, %d\n", addr, cnt)
 		res = stream.Union[uint64](res, it, order.Asc, -1)
 	}
 	return res, nil
