@@ -190,8 +190,8 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 			if resp.Error != nil {
 				return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 			}
-			if len(res.Response) == 0 {
-				return fmt.Errorf("eth_getLogs: account is not indexed at blockNum=%d, %s", bn, rStr)
+			if len(resp.Result) == 0 {
+				return fmt.Errorf("eth_getLogs: account is not indexed at blockNum=%d, %s, resp: %+v", bn, rStr, resp)
 			}
 		}
 		//topics := getTopics(res.Result)
