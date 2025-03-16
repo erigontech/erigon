@@ -210,19 +210,6 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		}
 		//invariant: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
 
-		//topics := getTopics(res.Result)
-		//// All combination of account and one topic
-		//for _, topic := range topics {
-		//	reqGen.reqID++
-		//	request = reqGen.getLogs1(prevBn, bn+10000, account, topic)
-		//	errCtx := fmt.Sprintf("account %x topic %x blocks %d-%d", account, topic, prevBn, bn)
-		//	if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh,
-		//		/* insertOnlyIfSuccess */ false); err != nil {
-		//		fmt.Println(err)
-		//		return err
-		//	}
-		//}
-
 		select {
 		case <-logEvery.C:
 			log.Info("[squeeze_migration]", "block_num", bn)
