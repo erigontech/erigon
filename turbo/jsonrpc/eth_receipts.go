@@ -259,10 +259,12 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if out == nil {
 			out = addrBitmap
 		} else {
+			println("there")
 			out = stream.Intersect[uint64](out, addrBitmap, -1)
 		}
 	}
 	if out == nil {
+		println("here")
 		out = stream.Range[uint64](fromTxNum, toTxNum)
 	}
 	return out, nil
