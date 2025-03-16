@@ -208,7 +208,6 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 				}
 			}
 		}
-		//invariant: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
 
 		select {
 		case <-logEvery.C:
