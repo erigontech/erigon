@@ -56,6 +56,11 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, header, txn, index, txNum)
 }
 
+func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) ([]uint64, error) {
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	return api.receiptsGenerator.GetReceiptsGasUsed(tx, block, txNumsReader)
+}
+
 func (api *BaseAPI) getCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
 	return api.receiptsGenerator.GetCachedReceipt(ctx, hash)
 }
@@ -301,6 +306,10 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				events, err := api.stateSyncEvents(ctx, tx, header.Hash(), blockNum, chainConfig)
 				if err != nil {
 					return logs, err
+				}
+
+				if len(events) == 0 {
+					continue
 				}
 
 				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, txNumsReader, tx, header, chainConfig, txIndex, len(logs))
