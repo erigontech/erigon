@@ -225,9 +225,9 @@ const (
 	SWAPN    OpCode = 0xe7
 	EXCHANGE OpCode = 0xe8
 
-	EOFCREATE      OpCode = 0xec
-	TXCREATE       OpCode = 0xed
-	RETURNCONTRACT OpCode = 0xee
+	EOFCREATE  OpCode = 0xec
+	TXCREATE   OpCode = 0xed
+	RETURNCODE OpCode = 0xee
 )
 
 // 0xf0 range - closures.
@@ -427,7 +427,7 @@ var opCodeToString = map[OpCode]string{
 	EXCHANGE:  "EXCHANGE",
 	EOFCREATE: "EOFCREATE",
 	// TXCREATE : "TXCREATE",
-	RETURNCONTRACT: "RETURNCONTRACT",
+	RETURNCODE: "RETURNCONTRACT",
 
 	// 0xf0 range.
 	CREATE:          "CREATE",
@@ -612,7 +612,7 @@ var stringToOp = map[string]OpCode{
 	"EXCHANGE":       EXCHANGE,
 	"EOFCREATE":      EOFCREATE,
 	// "TXCREATE": TXCREATE,
-	"RETURNCONTRACT":  RETURNCONTRACT,
+	"RETURNCONTRACT":  RETURNCODE,
 	"CREATE":          CREATE,
 	"CREATE2":         CREATE2,
 	"CALL":            CALL,

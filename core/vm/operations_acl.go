@@ -21,6 +21,7 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -34,6 +35,7 @@ import (
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 	return func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+		fmt.Println("CALLING makeGasSStoreFunc")
 		// If we fail the minimum gas availability invariant, fail (0)
 		if contract.Gas <= params.SstoreSentryGasEIP2200 {
 			return 0, errors.New("not enough gas for reentrancy sentry")
@@ -52,6 +54,8 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		}
 		var value uint256.Int
 		value.Set(y)
+		fmt.Printf("x: 0x%x, y: 0x%x\n", x.Bytes32(), y.Bytes32())
+		fmt.Printf("address: 0x%x, current: 0x%x, value: 0x%x\n", contract.Address(), current.Bytes32(), value.Bytes32())
 		if current.Eq(&value) { // noop (1)
 			// EIP 2200 original clause:
 			//		return params.SloadGasEIP2200, nil

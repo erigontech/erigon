@@ -103,6 +103,7 @@ var (
 )
 
 func gasSStore(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	fmt.Println("CALLING gasSStore")
 	value, x := stack.Back(1), stack.Back(0)
 	key := libcommon.Hash(x.Bytes32())
 	var current uint256.Int
@@ -186,6 +187,7 @@ func gasSStore(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, me
 //     2.2.2.1. If original value is 0, add SSTORE_SET_GAS - SLOAD_GAS to refund counter.
 //     2.2.2.2. Otherwise, add SSTORE_RESET_GAS - SLOAD_GAS gas to refund counter.
 func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	fmt.Println("CALLING gasSStoreEIP2200")
 	// If we fail the minimum gas availability invariant, fail (0)
 	if contract.Gas <= params.SstoreSentryGasEIP2200 {
 		return 0, errors.New("not enough gas for reentrancy sentry")
@@ -207,6 +209,7 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *stack.Stack, mem *Mem
 			return params.SstoreSetGasEIP2200, nil
 		}
 		if value.IsZero() { // delete slot (2.1.2b)
+			fmt.Println("1")
 			evm.IntraBlockState().AddRefund(params.SstoreClearsScheduleRefundEIP2200)
 		}
 		return params.SstoreResetGasEIP2200, nil // write existing slot (2.1.2)
@@ -215,13 +218,16 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *stack.Stack, mem *Mem
 		if current.IsZero() { // recreate slot (2.2.1.1)
 			evm.IntraBlockState().SubRefund(params.SstoreClearsScheduleRefundEIP2200)
 		} else if value.IsZero() { // delete slot (2.2.1.2)
+			fmt.Println("2")
 			evm.IntraBlockState().AddRefund(params.SstoreClearsScheduleRefundEIP2200)
 		}
 	}
 	if original.Eq(value) {
 		if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
+			fmt.Println("3")
 			evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP2200 - params.SloadGasEIP2200)
 		} else { // reset to original existing slot (2.2.2.2)
+			fmt.Println("4")
 			evm.IntraBlockState().AddRefund(params.SstoreResetGasEIP2200 - params.SloadGasEIP2200)
 		}
 	}
@@ -547,14 +553,16 @@ func gasExtCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, m
 		address        = libcommon.Address(stack.Back(0).Bytes20())
 	)
 
+	fmt.Printf("address: 0x%x\n", address)
 	addrMod := evm.IntraBlockState().AddAddressToAccessList(address)
 	if addrMod {
 		gas += params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
 	}
+	fmt.Println("GAS 1: ", gas)
 	if transfersValue {
-		if exists, err := evm.IntraBlockState().Exist(address); err != nil {
+		if empty, err := evm.IntraBlockState().Empty(address); err != nil {
 			return 0, ErrIntraBlockStateFailed
-		} else if !exists {
+		} else if empty {
 			gas += params.CallNewAccountGas
 		}
 		gas += params.CallValueTransferGas
@@ -567,7 +575,24 @@ func gasExtCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, m
 	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
+	// fmt.Println("GAS 2:", gas)
+	// tempGas := contract.Gas - gas
+	// _max := max(tempGas/64, 5000)
+	// if _max > tempGas {
+	// 	fmt.Println("tempGAS: ", tempGas)
+	// 	evm.SetCallGasTemp(0)
+	// 	return contract.Gas, nil // charge everything
+	// }
+	// callGasTemp := tempGas - _max
+	// fmt.Println("CALL GASTMP: ", callGasTemp)
+	// evm.SetCallGasTemp(callGasTemp)
 
+	// if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
+	// 	fmt.Println("RETURNING FROM HERE")
+	// 	return 0, ErrGasUintOverflow
+	// }
+	// fmt.Println("GAS USED: ", gas)
+	// return gas, nil
 	evm.callGasTemp, err = extCallGas(contract.Gas, gas)
 	if err != nil {
 		return 0, err

@@ -441,7 +441,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, floorGas7623, overflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, uint64(len(auths)))
+	gas, floorGas7623, overflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, true /* hardcoded, add isOsaka */, uint64(len(auths)))
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
@@ -484,9 +484,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
 		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout, rules.IsOsaka)
-		nonce, vmerr := st.state.GetNonce(sender.Address())
 		if errors.Is(vmerr, vm.ErrInvalidEOFInitcode) {
-			st.state.SetNonce(msg.From(), nonce+1)
+			if nonce, _err := st.state.GetNonce(sender.Address()); _err != nil {
+				return nil, _err
+			} else {
+				st.state.SetNonce(msg.From(), nonce+1)
+			}
 		}
 	} else {
 		// Increment the nonce for the next transaction
@@ -494,7 +497,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	gasUsed := st.gasUsed()
-	if gasUsed < floorGas7623 && rules.IsPrague {
+	if gasUsed < floorGas7623 && rules.IsOsaka {
 		gasUsed = floorGas7623
 		st.gasRemaining = st.initialGas - gasUsed
 	}

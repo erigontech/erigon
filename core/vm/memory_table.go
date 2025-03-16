@@ -132,6 +132,7 @@ func memoryDataCopy(stack *stack.Stack) (uint64, bool) {
 }
 
 func memoryExtCall(stack *stack.Stack) (uint64, bool) {
+	// fmt.Println("len stack: ", stack.Len())
 	x, overflow := calcMemSize64(stack.Back(1), stack.Back(2))
 	if overflow {
 		return 0, true

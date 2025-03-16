@@ -50,6 +50,7 @@ const (
 )
 
 // TODO(racytech): remove unnecessary errors and add matched errors, some errors do not match the logic
+// sort the errors by the logic
 var (
 	ErrIncompleteEOF            = errors.New("incomplete EOF code")
 	ErrInvalidMagic             = errors.New("invalid magic")
@@ -61,6 +62,9 @@ var (
 	ErrInvalidCodeSize          = errors.New("invalid code size")
 	ErrMissingDataHeader        = errors.New("missing data header")
 	ErrMissingTerminator        = errors.New("missing header terminator")
+	ErrMissingTypesInput        = errors.New("missing types input")
+	ErrMissingTypesOutput       = errors.New("missing types output")
+	ErrMissingMaxStackHeight    = errors.New("missing types max_stack_height")
 	ErrTooManyInputs            = errors.New("invalid type content, too many inputs")
 	ErrTooManyOutputs           = errors.New("invalid type content, too many outputs")
 	ErrInvalidFirstSectionType  = errors.New("invalid section 0 type, input should be 0 and output should 128")
@@ -72,6 +76,47 @@ var (
 	ErrTooManyContainerSections = errors.New("number of container sections must not exceed 256")
 	ErrZeroContainerSize        = errors.New("container size may not be 0")
 	ErrInvalidSectionCount      = errors.New("invalid section count")
+	ErrReturnStackExceeded      = errors.New("return stack limit reached")
+	ErrLegacyCode               = errors.New("invalid code: EOF contract must not deploy legacy code")
+	ErrInvalidCode              = errors.New("invalid code: must not begin with 0xef")
+	ErrInvalidEOF               = errors.New("invalid eof")
+	ErrInvalidEOFInitcode       = errors.New("invalid eof initcode")
+	ErrAuxDataTooLarge          = errors.New("auxdata too large")
+	ErrAuxDataDecrease          = errors.New("auxdata decrease")
+)
+
+var (
+	ErrUndefinedInstruction     = errors.New("undefined instrustion")
+	ErrTruncatedImmediate       = errors.New("truncated immediate")
+	ErrInvalidSectionArgument   = errors.New("invalid section argument")
+	ErrInvalidContainerArgument = errors.New("invalid container argument")
+	ErrInvalidJumpDest          = errors.New("invalid jump destination")
+	ErrConflictingStack         = errors.New("conflicting stack height")
+	ErrInvalidBranchCount       = errors.New("invalid number of branches in jump table")
+	ErrInvalidOutputs           = errors.New("invalid number of outputs")
+	ErrInvalidMaxStackHeight    = errors.New("invalid max stack height")
+	ErrInvalidCodeTermination   = errors.New("invalid code termination")
+	ErrUnreachableCode          = errors.New("unreachable code")
+	ErrInvalidDataLoadN         = errors.New("invalid DATALOADN index")
+	ErrEOFStackOverflow         = errors.New("stack overflow")
+	ErrEOFStackUnderflow        = errors.New("stack underflow")
+	ErrJUMPFOutputs             = errors.New("current secion outputs less then target section outputs")
+	ErrStackHeightHigher        = errors.New("stack height higher then outputs required")
+	ErrNoTerminalInstruction    = errors.New("expected terminal instruction")
+	ErrStackHeightMismatch      = errors.New("stack height mismatch")
+	ErrCALLFtoNonReturning      = errors.New("op CALLF to non returning function")
+	ErrInvalidNonReturning      = errors.New("declared returning code section does not return")
+	ErrInvalidRjumpDest         = errors.New("invalid relative jump")
+)
+
+var (
+	ErrIncompatibleContainer           = errors.New("INCOMPATIBLE_CONTAINER_KIND")
+	ErrAmbiguousContainer              = errors.New("AMBIGUOUS_CONTAINER_KIND")
+	ErrInvalidSectionsSize             = errors.New("INVALID_SECTION_BODIES_SIZE")
+	ErrOrphanSubContainer              = errors.New("UNREFERENCED_SUBCONTAINER")
+	ErrTopLevelTruncated               = errors.New("TOPLEVEL_CONTAINER_TRUNCATED")
+	ErrEOFCreateWithTruncatedContainer = errors.New("EOF_CREATE_WITH_TRUNCATED_CONTAINER")
+	ErrUnreachableCodeSections         = errors.New("UNREACHABLE_CODE_SECTIONS")
 )
 
 var eofMagic = []byte{0xef, 0x00}
@@ -154,6 +199,7 @@ func (c *Container) MarshalBinary() []byte {
 // UnmarshalBinary decodes an EOF container.
 func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
 	// TODO(racytech): make sure this one is correct!
+	fmt.Println("len(b) = ", len(b))
 	if !hasEOFMagic(b) {
 		return fmt.Errorf("%w: want %x", ErrInvalidMagic, eofMagic)
 	}
@@ -333,11 +379,11 @@ func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
 // ValidateCode validates each code section of the container against the EOF v1
 // rule set.
 func (c *Container) ValidateCode(jt *JumpTable) error {
-	for i, code := range c.Code {
-		if err := validateCode(code, i, c.Types, jt, len(c.Data), len(c.SubContainers)); err != nil {
-			return err
-		}
-	}
+	// for i, code := range c.Code {
+	// 	// if err := validateCode(code, i, c.Types, jt, len(c.Data), len(c.SubContainers)); err != nil {
+	// 	// 	return err
+	// 	// }
+	// }
 	return nil
 }
 

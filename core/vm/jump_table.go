@@ -111,6 +111,7 @@ func newPragueInstructionSet() JumpTable {
 }
 
 func NewEOFInstructionSet() JumpTable {
+	fmt.Println("NewEOFInstructionSet: called")
 	instructionSet := newPragueInstructionSet()
 	enableEOF(&instructionSet)
 	validateAndFillMaxStack(&instructionSet)

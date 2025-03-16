@@ -82,6 +82,7 @@ func (st *Stack) Dup(n int) {
 }
 
 func (st *Stack) DupN(n int) { // TODO(racytech): See if it's correct
+	fmt.Println(len(st.Data), n, len(st.Data)-n-1)
 	st.Data = append(st.Data, st.Data[len(st.Data)-n-1])
 }
 
