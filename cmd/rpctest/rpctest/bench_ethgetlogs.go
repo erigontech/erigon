@@ -166,7 +166,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 	if blockNumber.Error != nil {
 		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	fmt.Printf("EthGetLogsInvariants: starting %d-%d, latestBlock=%d\n", blockFrom, blockTo, blockNumber.Number)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
