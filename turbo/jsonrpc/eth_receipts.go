@@ -244,7 +244,6 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	}
 	toTxNum++
 
-	return stream.Range[uint64](fromTxNum, toTxNum), nil
 	topicsBitmap, err := getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum)
 	if err != nil {
 		return out, err
@@ -260,14 +259,14 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if out == nil {
 			out = addrBitmap
 		} else {
-			println("there")
-			out = stream.Intersect[uint64](out, addrBitmap, -1)
+			//out = stream.Intersect[uint64](out, addrBitmap, -1)
 		}
 	}
 	if out == nil {
 		println("here")
 		out = stream.Range[uint64](fromTxNum, toTxNum)
 	}
+	println("hehe there")
 	return out, nil
 }
 
