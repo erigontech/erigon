@@ -515,7 +515,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		return err
 	}
 
-	diagTxns := make([]diagnostics.DiagTxn, len(newTxns.Txns))
+	diagTxns := make([]diagnostics.DiagTxn, 0, len(newTxns.Txns))
 
 	announcements, reasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
 		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
@@ -535,7 +535,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 			subpool = found.currentSubPool.String()
 		}
 
-		fmt.Println("reason", reason, "txhash", newTxns.Txns[i].IDHash)
+		//fmt.Println("reason", reason, "txhash", newTxns.Txns[i].IDHash)
 		diagTxn := diagnostics.DiagTxn{
 			IDHash:              txn.IDHash,
 			SenderID:            txn.SenderID,
