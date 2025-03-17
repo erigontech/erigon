@@ -56,7 +56,7 @@ jobs:
         run: |
           echo "Starting RpcDaemon..."
           
-          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
+          ./rpcdaemon --chain $CHAIN --datadir $ERIGON_REFERENCE_DATA_DIR --http.api bor,admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
           RPC_DAEMON_EXIT_STATUS=$?
