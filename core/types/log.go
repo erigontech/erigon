@@ -93,6 +93,7 @@ func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.H
 
 	//populate topic map
 	for idx, v := range topics {
+		topicMap[idx] = make(map[common.Hash]struct{})
 		for _, vv := range v {
 			topicMap[idx][vv] = struct{}{}
 		}
