@@ -160,7 +160,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 
 	_prevBn := blockFrom
 	for bn := blockFrom; bn < blockTo; {
-		batchEnd := min(bn+100, blockTo)
+		batchEnd := min(bn+1000, blockTo)
 		eg := &errgroup.Group{}
 		eg.SetLimit(runtime.NumCPU())
 		for ; bn < batchEnd; bn++ {
