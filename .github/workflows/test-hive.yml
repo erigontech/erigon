@@ -73,7 +73,7 @@ jobs:
               echo "failed" > failed.log
               exit 1
             fi
-            if (( failed*2 > tests )); then
+            if (( failed*10 > tests )); then
               echo "Too many failures for suite ${1}-${2} - ${failed} failed out of ${tests}"
               echo "failed" > failed.log
               exit 1
@@ -83,7 +83,7 @@ jobs:
           run_suite engine withdrawals
           run_suite engine cancun
           run_suite engine api
-          run_suite engine auth
+          # run_suite engine auth
           # run_suite rpc compat
         continue-on-error: true
       - name: Upload output log

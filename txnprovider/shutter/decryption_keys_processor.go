@@ -220,6 +220,7 @@ func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 }
 
 func (dkp DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub EncryptedTxnSubmission) (types.Transaction, error) {
+	dkp.logger.Debug("decrypting txn", "txnIndex", sub.TxnIndex)
 	key, ok := keys[sub.TxnIndex]
 	if !ok {
 		return nil, fmt.Errorf("key not found for txn index %d", sub.TxnIndex)

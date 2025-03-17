@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/spf13/cobra"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -40,7 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/ethdb/privateapi"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/txnprovider/txpool"
