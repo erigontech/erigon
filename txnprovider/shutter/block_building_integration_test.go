@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/devnet/requests"
@@ -280,8 +279,8 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 
 	ethConfig := ethconfig.Config{
 		Dirs: dirs,
-		Downloader: &downloadercfg.Cfg{
-			Dirs: dirs,
+		Snapshot: ethconfig.BlocksFreezing{
+			NoDownloader: true,
 		},
 		TxPool: txPoolConfig,
 		Miner: params.MiningConfig{
