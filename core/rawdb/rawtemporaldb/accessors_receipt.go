@@ -37,6 +37,24 @@ func ReceiptAsOfWithApply(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, tx
 	return r, nil
 }
 
+func FillLogsWithCalculatedFields(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int, blockHash common.Hash, blockNum uint64, txn types.Transaction) (types.Logs, error) {
+	_, _, firstLogIndexWithinBlock, err := ReceiptAsOf(tx, txNum+1)
+	if err != nil {
+		return nil, err
+	}
+
+	logIndex := firstLogIndexWithinBlock
+	for j := 0; j < len(rawLogs); j++ {
+		rawLogs[j].BlockNumber = blockNum
+		rawLogs[j].BlockHash = blockHash
+		rawLogs[j].TxHash = txn.Hash()
+		rawLogs[j].TxIndex = uint(txnIdx)
+		rawLogs[j].Index = uint(logIndex)
+		logIndex++
+	}
+	return rawLogs, nil
+}
+
 func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasused uint64, firstLogIndexWithinBlock uint32, err error) {
 	var v []byte
 	var ok bool

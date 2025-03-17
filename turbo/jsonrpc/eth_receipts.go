@@ -362,16 +362,13 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		rawLogs := exec.GetRawLogs(txIndex)
 
 		// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
-		r, err := rawtemporaldb.ReceiptAsOfWithApply(tx, txNum, rawLogs, txIndex, blockHash, blockNum, txn)
+		filledLogs, err := rawtemporaldb.FillLogsWithCalculatedFields(tx, txNum, rawLogs, txIndex, blockHash, blockNum, txn)
 		if err != nil {
 			return nil, err
 		}
 		var filtered types.Logs
-		if r == nil {
-			return nil, errors.New("nil receipt w/o error")
-		}
 
-		filtered = r.Logs.Filter(addrMap, crit.Topics, 0)
+		filtered = filledLogs.Filter(addrMap, crit.Topics, 0)
 
 		for _, filteredLog := range filtered {
 			logs = append(logs, &types.ErigonLog{
