@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 
@@ -64,7 +65,7 @@ var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
 func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg) (libcommon.Hash, error) {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
-	rh, err := cfg.agg.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader)
+	rh, err := state.RebuildCommitmentFiles(ctx, cfg.agg, cfg.db, &txNumsReader, log.New())
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
