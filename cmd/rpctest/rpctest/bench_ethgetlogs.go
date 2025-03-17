@@ -163,6 +163,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		eg := &errgroup.Group{}
 		eg.SetLimit(32)
 		for ; bn < batchEnd; bn++ {
+			bn := bn
 			prevBn := _prevBn
 			eg.Go(func() error {
 				var resp EthGetLogs
