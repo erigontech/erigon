@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	rand2 "math/rand/v2"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -34,7 +35,6 @@ import (
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/tidwall/btree"
-	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
