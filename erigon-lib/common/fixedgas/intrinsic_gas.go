@@ -70,8 +70,8 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessListLen,
 			}
 		}
 
-		// EIP-7623
-		if isPrague { // || isOsaka // TODO(racytech): add this
+		// EIP-7623	  // TODO(EOF): handle this part properly
+		if isPrague { // here isPrague is isOsaka, see IntrinsicGas call in state_transition
 			tokenLen := dataLen + 3*nz
 			dataGas, overflow := math.SafeMul(tokenLen, TxTotalCostFloorPerToken)
 			if overflow {

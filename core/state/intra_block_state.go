@@ -1028,7 +1028,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 			al.AddAddress(coinbase)
 		}
 	}
-	if rules.IsPrague {
+	if rules.IsOsaka { // TODO(EOF): IsOsaka safe change?
 		for _, addr := range authorities {
 			sdb.AddAddressToAccessList(addr)
 		}

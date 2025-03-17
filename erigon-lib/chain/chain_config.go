@@ -329,7 +329,8 @@ func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
 	if c != nil {
 		b = c.BlobSchedule
 	}
-	return b.MaxBlobsPerBlock(c.IsPrague(time))
+	// return b.MaxBlobsPerBlock(c.IsPrague(time))
+	return b.MaxBlobsPerBlock(c.IsOsaka(time))
 }
 
 func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
@@ -337,7 +338,8 @@ func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
 	if c != nil {
 		b = c.BlobSchedule
 	}
-	return b.TargetBlobsPerBlock(c.IsPrague(t)) * fixedgas.BlobGasPerBlob
+	// return b.TargetBlobsPerBlock(c.IsPrague(t)) * fixedgas.BlobGasPerBlob
+	return b.TargetBlobsPerBlock(c.IsOsaka(t)) * fixedgas.BlobGasPerBlob
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
@@ -345,7 +347,8 @@ func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
 	if c != nil {
 		b = c.BlobSchedule
 	}
-	return b.BaseFeeUpdateFraction(c.IsPrague(t))
+	// return b.BaseFeeUpdateFraction(c.IsPrague(t))
+	return b.BaseFeeUpdateFraction(c.IsOsaka(t))
 }
 
 func (c *Config) SecondsPerSlot() uint64 {

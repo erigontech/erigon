@@ -96,6 +96,25 @@ func (so *stateObject) empty() bool {
 	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == emptyCodeHashH)
 }
 
+func (so *stateObject) checkColdStorage(key *libcommon.Hash) bool {
+	b, err := so.db.stateReader.ReadAccountStorage(so.address, so.data.GetIncarnation(), key)
+	if err != nil {
+		return false // If we can't read the storage, we assume it's not cold storage
+	}
+	if len(b) == 0 {
+		return false
+	}
+	if len(so.originStorage) > 0 || len(so.blockOriginStorage) > 0 {
+		return true
+	}
+	v := new(uint256.Int)
+	so.GetCommittedState(key, v)
+	if v.IsZero() {
+		return false
+	}
+	return true
+}
+
 // newObject creates a state object.
 func newObject(db *IntraBlockState, address libcommon.Address, data, original *accounts.Account) *stateObject {
 	var so = stateObject{

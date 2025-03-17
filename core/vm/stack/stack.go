@@ -73,7 +73,7 @@ func (st *Stack) Swap(n int) {
 	st.Data[len(st.Data)-n], st.Data[len(st.Data)-1] = st.Data[len(st.Data)-1], st.Data[len(st.Data)-n]
 }
 
-func (st *Stack) SwapWith(n, m int) { // TODO(racytech): See if it's correct and find a better name
+func (st *Stack) SwapWith(n, m int) {
 	st.Data[n], st.Data[m] = st.Data[m], st.Data[n]
 }
 
@@ -81,7 +81,7 @@ func (st *Stack) Dup(n int) {
 	st.Data = append(st.Data, st.Data[len(st.Data)-n])
 }
 
-func (st *Stack) DupN(n int) { // TODO(racytech): See if it's correct
+func (st *Stack) DupN(n int) {
 	fmt.Println(len(st.Data), n, len(st.Data)-n-1)
 	st.Data = append(st.Data, st.Data[len(st.Data)-n-1])
 }

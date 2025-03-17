@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 )
 
-// TODO(racytech): make sure those tests are fixed
 // func bitvecToUint64Slice(b bitvec) []uint64 {
 // 	n := (len(b) + 7) / 8
 // 	padded := make([]uint64, n*8)

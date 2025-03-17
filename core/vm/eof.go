@@ -20,8 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
-	"io"
 )
 
 const (
@@ -138,294 +136,294 @@ func isEOFVersion1(code []byte) bool {
 }
 
 // Container is an EOF container object.
-type Container struct {
-	Types         []*FunctionMetadata
-	Code          [][]byte
-	SubContainers [][]byte
-	Data          []byte
-	DataSize      int // might be more than len(Data)
-}
+// type Container struct {
+// 	Types         []*FunctionMetadata
+// 	Code          [][]byte
+// 	SubContainers [][]byte
+// 	Data          []byte
+// 	DataSize      int // might be more than len(Data)
+// }
 
-// FunctionMetadata is an EOF function signature.
-type FunctionMetadata struct {
-	Inputs         uint8
-	Outputs        uint8
-	MaxStackHeight uint16
-}
+// // FunctionMetadata is an EOF function signature.
+// type FunctionMetadata struct {
+// 	Inputs         uint8
+// 	Outputs        uint8
+// 	MaxStackHeight uint16
+// }
 
 // MarshalBinary encodes an EOF container into binary format.
-func (c *Container) MarshalBinary() []byte {
-	// Build EOF prefix.
-	b := make([]byte, 2)
-	copy(b, eofMagic)
-	b = append(b, eof1Version)
+// func (c *Container) MarshalBinary() []byte {
+// 	// Build EOF prefix.
+// 	b := make([]byte, 2)
+// 	copy(b, eofMagic)
+// 	b = append(b, eof1Version)
 
-	// Write section headers.
-	b = append(b, kindTypes)
-	b = binary.BigEndian.AppendUint16(b, uint16(len(c.Types)*4))
-	b = append(b, kindCode)
-	b = binary.BigEndian.AppendUint16(b, uint16(len(c.Code)))
-	for _, code := range c.Code {
-		b = binary.BigEndian.AppendUint16(b, uint16(len(code)))
-	}
-	var encodedContainer [][]byte
-	if len(c.SubContainers) != 0 {
-		b = append(b, kindContainer)
-		b = binary.BigEndian.AppendUint16(b, uint16(len(c.SubContainers)))
-		for _, section := range c.SubContainers {
-			b = binary.BigEndian.AppendUint16(b, uint16(len(section)))
-			encodedContainer = append(encodedContainer, section)
-		}
-	}
-	b = append(b, kindData)
-	b = binary.BigEndian.AppendUint16(b, uint16(len(c.Data)))
-	b = append(b, 0) // terminator
+// 	// Write section headers.
+// 	b = append(b, kindTypes)
+// 	b = binary.BigEndian.AppendUint16(b, uint16(len(c.Types)*4))
+// 	b = append(b, kindCode)
+// 	b = binary.BigEndian.AppendUint16(b, uint16(len(c.Code)))
+// 	for _, code := range c.Code {
+// 		b = binary.BigEndian.AppendUint16(b, uint16(len(code)))
+// 	}
+// 	var encodedContainer [][]byte
+// 	if len(c.SubContainers) != 0 {
+// 		b = append(b, kindContainer)
+// 		b = binary.BigEndian.AppendUint16(b, uint16(len(c.SubContainers)))
+// 		for _, section := range c.SubContainers {
+// 			b = binary.BigEndian.AppendUint16(b, uint16(len(section)))
+// 			encodedContainer = append(encodedContainer, section)
+// 		}
+// 	}
+// 	b = append(b, kindData)
+// 	b = binary.BigEndian.AppendUint16(b, uint16(len(c.Data)))
+// 	b = append(b, 0) // terminator
 
-	// Write section contents.
-	for _, ty := range c.Types {
-		b = append(b, []byte{ty.Inputs, ty.Outputs, byte(ty.MaxStackHeight >> 8), byte(ty.MaxStackHeight & 0x00ff)}...)
-	}
-	for _, code := range c.Code {
-		b = append(b, code...)
-	}
-	for _, section := range encodedContainer {
-		b = append(b, section...)
-	}
-	b = append(b, c.Data...)
+// 	// Write section contents.
+// 	for _, ty := range c.Types {
+// 		b = append(b, []byte{ty.Inputs, ty.Outputs, byte(ty.MaxStackHeight >> 8), byte(ty.MaxStackHeight & 0x00ff)}...)
+// 	}
+// 	for _, code := range c.Code {
+// 		b = append(b, code...)
+// 	}
+// 	for _, section := range encodedContainer {
+// 		b = append(b, section...)
+// 	}
+// 	b = append(b, c.Data...)
 
-	return b
-}
+// 	return b
+// }
 
 // UnmarshalBinary decodes an EOF container.
-func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
-	// TODO(racytech): make sure this one is correct!
-	fmt.Println("len(b) = ", len(b))
-	if !hasEOFMagic(b) {
-		return fmt.Errorf("%w: want %x", ErrInvalidMagic, eofMagic)
-	}
-	if len(b) < 14 {
-		return ErrIncompleteEOF
-	}
-	if len(b) > maxInitCodeSize {
-		return fmt.Errorf("%w: %v > %v", ErrTooLargeByteCode, len(b), maxInitCodeSize)
-	}
-	if !isEOFVersion1(b) {
-		return fmt.Errorf("%w: have %d, want %d", ErrInvalidVersion, b[2], eof1Version)
-	}
+// func (c *Container) UnmarshalBinary(b []byte, isInitCode bool) error {
+// 	// TODO(racytech): make sure this one is correct!
+// 	fmt.Println("len(b) = ", len(b))
+// 	if !hasEOFMagic(b) {
+// 		return fmt.Errorf("%w: want %x", ErrInvalidMagic, eofMagic)
+// 	}
+// 	if len(b) < 14 {
+// 		return ErrIncompleteEOF
+// 	}
+// 	if len(b) > maxInitCodeSize {
+// 		return fmt.Errorf("%w: %v > %v", ErrTooLargeByteCode, len(b), maxInitCodeSize)
+// 	}
+// 	if !isEOFVersion1(b) {
+// 		return fmt.Errorf("%w: have %d, want %d", ErrInvalidVersion, b[2], eof1Version)
+// 	}
 
-	var (
-		kind, typesSize, dataSize int
-		codeSizes                 []int
-		containerSizes            []int
-		err                       error
-	)
+// 	var (
+// 		kind, typesSize, dataSize int
+// 		codeSizes                 []int
+// 		containerSizes            []int
+// 		err                       error
+// 	)
 
-	// Parse type section header.
-	kind, typesSize, err = parseSection(b, offsetTypesKind)
-	if err != nil {
-		return err
-	}
-	if kind != kindTypes {
-		return fmt.Errorf("%w: found section kind %x instead", ErrMissingTypeHeader, kind)
-	}
-	if typesSize < 4 || typesSize%4 != 0 {
-		return fmt.Errorf("%w: type section size must be divisible by 4, have %d", ErrInvalidTypeSize, typesSize)
-	}
-	if typesSize/4 > 1024 {
-		return fmt.Errorf("%w: type section must not exceed 4*1024, have %d", ErrInvalidTypeSize, typesSize)
-	}
+// 	// Parse type section header.
+// 	kind, typesSize, err = parseSection(b, offsetTypesKind)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	if kind != kindTypes {
+// 		return fmt.Errorf("%w: found section kind %x instead", ErrMissingTypeHeader, kind)
+// 	}
+// 	if typesSize < 4 || typesSize%4 != 0 {
+// 		return fmt.Errorf("%w: type section size must be divisible by 4, have %d", ErrInvalidTypeSize, typesSize)
+// 	}
+// 	if typesSize/4 > 1024 {
+// 		return fmt.Errorf("%w: type section must not exceed 4*1024, have %d", ErrInvalidTypeSize, typesSize)
+// 	}
 
-	// Parse code section header.
-	kind, codeSizes, err = parseSectionList(b, offsetCodeKind)
-	if err != nil {
-		return err
-	}
-	if kind != kindCode {
-		return fmt.Errorf("%w: found section kind %x instead", ErrMissingCodeHeader, kind)
-	}
-	if len(codeSizes) != typesSize/4 { // invalid code section count or type section count
-		return fmt.Errorf("%w: mismatch of code sections count and type signatures, types %d, code %d", ErrInvalidSectionCount, typesSize/4, len(codeSizes))
-	}
+// 	// Parse code section header.
+// 	kind, codeSizes, err = parseSectionList(b, offsetCodeKind)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	if kind != kindCode {
+// 		return fmt.Errorf("%w: found section kind %x instead", ErrMissingCodeHeader, kind)
+// 	}
+// 	if len(codeSizes) != typesSize/4 { // invalid code section count or type section count
+// 		return fmt.Errorf("%w: mismatch of code sections count and type signatures, types %d, code %d", ErrInvalidSectionCount, typesSize/4, len(codeSizes))
+// 	}
 
-	// Parse optional container section header
-	offsetContainerKind := offsetCodeKind + 2 + 2*len(codeSizes) + 1
-	offsetDataKind := offsetContainerKind
-	if offsetContainerKind < len(b) && b[offsetContainerKind] == kindContainer {
-		kind, containerSizes, err = parseSectionList(b, offsetContainerKind)
-		if err != nil {
-			return err
-		}
-		if kind != kindContainer {
-			panic("expected kind container, got something else")
-		}
-		if len(containerSizes) == 0 {
-			return ErrZeroSizeContainerSection
-		}
-		if len(containerSizes) > 256 {
-			return ErrTooManyContainerSections
-		}
-		offsetDataKind = offsetContainerKind + 1 + 2*len(containerSizes) + 2 // we have containers, add kind_byte + 2*len(container_sizes) + container_size (2-bytes)
-	}
+// 	// Parse optional container section header
+// 	offsetContainerKind := offsetCodeKind + 2 + 2*len(codeSizes) + 1
+// 	offsetDataKind := offsetContainerKind
+// 	if offsetContainerKind < len(b) && b[offsetContainerKind] == kindContainer {
+// 		kind, containerSizes, err = parseSectionList(b, offsetContainerKind)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		if kind != kindContainer {
+// 			panic("expected kind container, got something else")
+// 		}
+// 		if len(containerSizes) == 0 {
+// 			return ErrZeroSizeContainerSection
+// 		}
+// 		if len(containerSizes) > 256 {
+// 			return ErrTooManyContainerSections
+// 		}
+// 		offsetDataKind = offsetContainerKind + 1 + 2*len(containerSizes) + 2 // we have containers, add kind_byte + 2*len(container_sizes) + container_size (2-bytes)
+// 	}
 
-	// Parse data section header.
-	kind, dataSize, err = parseSection(b, offsetDataKind)
-	if err != nil {
-		return err
-	}
-	if kind != kindData {
-		return fmt.Errorf("%w: found section %x instead", ErrMissingDataHeader, kind)
-	}
-	c.DataSize = dataSize
+// 	// Parse data section header.
+// 	kind, dataSize, err = parseSection(b, offsetDataKind)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	if kind != kindData {
+// 		return fmt.Errorf("%w: found section %x instead", ErrMissingDataHeader, kind)
+// 	}
+// 	c.DataSize = dataSize
 
-	// Check for terminator.
-	offsetTerminator := offsetDataKind + 3
-	if len(b) < offsetTerminator {
-		return ErrMissingTerminator
-	}
-	if b[offsetTerminator] != 0 {
-		return fmt.Errorf("%w: have %x", ErrMissingTerminator, b[offsetTerminator])
-	}
+// 	// Check for terminator.
+// 	offsetTerminator := offsetDataKind + 3
+// 	if len(b) < offsetTerminator {
+// 		return ErrMissingTerminator
+// 	}
+// 	if b[offsetTerminator] != 0 {
+// 		return fmt.Errorf("%w: have %x", ErrMissingTerminator, b[offsetTerminator])
+// 	}
 
-	// Verify overall container size.
-	expectedSize := offsetTerminator + typesSize + sum(codeSizes) + sum(containerSizes) + dataSize + 1
-	if len(b) < expectedSize-dataSize {
-		return fmt.Errorf("%w: have %d, want %d", ErrInvalidContainerSize, len(b), expectedSize)
-	}
-	// Only check that the expected size is not exceed on non-initcode
-	if !isInitCode && len(b) > expectedSize {
-		return fmt.Errorf("%w: have %d, want %d", ErrInvalidContainerSize, len(b), expectedSize)
-	}
+// 	// Verify overall container size.
+// 	expectedSize := offsetTerminator + typesSize + sum(codeSizes) + sum(containerSizes) + dataSize + 1
+// 	if len(b) < expectedSize-dataSize {
+// 		return fmt.Errorf("%w: have %d, want %d", ErrInvalidContainerSize, len(b), expectedSize)
+// 	}
+// 	// Only check that the expected size is not exceed on non-initcode
+// 	if !isInitCode && len(b) > expectedSize {
+// 		return fmt.Errorf("%w: have %d, want %d", ErrInvalidContainerSize, len(b), expectedSize)
+// 	}
 
-	// Parse types section.
-	idx := offsetTerminator + 1
-	var types []*FunctionMetadata
+// 	// Parse types section.
+// 	idx := offsetTerminator + 1
+// 	var types []*FunctionMetadata
 
-	// first, parse the first section and check if it meets the boundries
-	i := 0
-	typ := &FunctionMetadata{
-		Inputs:         b[idx+i*4],
-		Outputs:        b[idx+i*4+1],
-		MaxStackHeight: binary.BigEndian.Uint16(b[idx+i*4+2:]),
-	}
-	if typ.Inputs != 0 || typ.Outputs != nonReturningFunction {
-		return fmt.Errorf("%w: have %d, %d", ErrInvalidFirstSectionType, typ.Inputs, typ.Outputs)
-	}
-	if typ.MaxStackHeight > maxStackHeight {
-		return fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, i, typ.MaxStackHeight)
-	}
-	types = append(types, typ)
+// 	// first, parse the first section and check if it meets the boundries
+// 	i := 0
+// 	typ := &FunctionMetadata{
+// 		Inputs:         b[idx+i*4],
+// 		Outputs:        b[idx+i*4+1],
+// 		MaxStackHeight: binary.BigEndian.Uint16(b[idx+i*4+2:]),
+// 	}
+// 	if typ.Inputs != 0 || typ.Outputs != nonReturningFunction {
+// 		return fmt.Errorf("%w: have %d, %d", ErrInvalidFirstSectionType, typ.Inputs, typ.Outputs)
+// 	}
+// 	if typ.MaxStackHeight > maxStackHeight {
+// 		return fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, i, typ.MaxStackHeight)
+// 	}
+// 	types = append(types, typ)
 
-	i = 1 // go to the next section
-	for ; i < typesSize/4; i++ {
-		typ := &FunctionMetadata{
-			Inputs:         b[idx+i*4],
-			Outputs:        b[idx+i*4+1],
-			MaxStackHeight: binary.BigEndian.Uint16(b[idx+i*4+2:]),
-		}
+// 	i = 1 // go to the next section
+// 	for ; i < typesSize/4; i++ {
+// 		typ := &FunctionMetadata{
+// 			Inputs:         b[idx+i*4],
+// 			Outputs:        b[idx+i*4+1],
+// 			MaxStackHeight: binary.BigEndian.Uint16(b[idx+i*4+2:]),
+// 		}
 
-		if typ.Inputs > maxInputItems {
-			return fmt.Errorf("%w for section %d: have %d", ErrTooManyInputs, i, typ.Inputs)
-		}
-		if typ.Outputs > maxOutputItems && typ.Outputs != nonReturningFunction {
-			return fmt.Errorf("%w for section %d: have %d", ErrTooManyOutputs, i, typ.Outputs)
-		}
-		if typ.MaxStackHeight > maxStackHeight {
-			return fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, i, typ.MaxStackHeight)
-		}
+// 		if typ.Inputs > maxInputItems {
+// 			return fmt.Errorf("%w for section %d: have %d", ErrTooManyInputs, i, typ.Inputs)
+// 		}
+// 		if typ.Outputs > maxOutputItems && typ.Outputs != nonReturningFunction {
+// 			return fmt.Errorf("%w for section %d: have %d", ErrTooManyOutputs, i, typ.Outputs)
+// 		}
+// 		if typ.MaxStackHeight > maxStackHeight {
+// 			return fmt.Errorf("%w for section %d: have %d", ErrTooLargeMaxStackHeight, i, typ.MaxStackHeight)
+// 		}
 
-		types = append(types, typ)
-	}
-	c.Types = types
+// 		types = append(types, typ)
+// 	}
+// 	c.Types = types
 
-	// Parse code sections.
-	idx += typesSize
-	code := make([][]byte, len(codeSizes))
-	for i, size := range codeSizes {
-		if size == 0 {
-			return fmt.Errorf("%w for section %d: size must not be 0", ErrInvalidCodeSize, i)
-		}
-		code[i] = b[idx : idx+size]
-		idx += size
-	}
-	c.Code = code
+// 	// Parse code sections.
+// 	idx += typesSize
+// 	code := make([][]byte, len(codeSizes))
+// 	for i, size := range codeSizes {
+// 		if size == 0 {
+// 			return fmt.Errorf("%w for section %d: size must not be 0", ErrInvalidCodeSize, i)
+// 		}
+// 		code[i] = b[idx : idx+size]
+// 		idx += size
+// 	}
+// 	c.Code = code
 
-	// Parse containers if any
-	if len(containerSizes) != 0 {
-		if len(containerSizes) > maxContainerSections {
-			return fmt.Errorf("containers exceed allowed limit: %v: have %v", maxContainerSections, len(containerSizes))
-		}
-		containers := make([][]byte, len(containerSizes))
-		for i, size := range containerSizes {
-			if size == 0 || idx+size > len(b) {
-				return fmt.Errorf("%w, container#: %d", ErrZeroContainerSize, i)
-			}
-			end := min(idx+size, len(b))
-			containers[i] = b[idx:end]
-			idx += size
-		}
-		c.SubContainers = containers
-	}
+// 	// Parse containers if any
+// 	if len(containerSizes) != 0 {
+// 		if len(containerSizes) > maxContainerSections {
+// 			return fmt.Errorf("containers exceed allowed limit: %v: have %v", maxContainerSections, len(containerSizes))
+// 		}
+// 		containers := make([][]byte, len(containerSizes))
+// 		for i, size := range containerSizes {
+// 			if size == 0 || idx+size > len(b) {
+// 				return fmt.Errorf("%w, container#: %d", ErrZeroContainerSize, i)
+// 			}
+// 			end := min(idx+size, len(b))
+// 			containers[i] = b[idx:end]
+// 			idx += size
+// 		}
+// 		c.SubContainers = containers
+// 	}
 
-	// Parse data section.
-	end := len(b)
-	if !isInitCode {
-		end = min(idx+dataSize, len(b))
-	}
-	c.Data = b[idx:end]
+// 	// Parse data section.
+// 	end := len(b)
+// 	if !isInitCode {
+// 		end = min(idx+dataSize, len(b))
+// 	}
+// 	c.Data = b[idx:end]
 
-	return nil
-}
+// 	return nil
+// }
 
-// ValidateCode validates each code section of the container against the EOF v1
-// rule set.
-func (c *Container) ValidateCode(jt *JumpTable) error {
-	// for i, code := range c.Code {
-	// 	// if err := validateCode(code, i, c.Types, jt, len(c.Data), len(c.SubContainers)); err != nil {
-	// 	// 	return err
-	// 	// }
-	// }
-	return nil
-}
+// // ValidateCode validates each code section of the container against the EOF v1
+// // rule set.
+// func (c *Container) ValidateCode(jt *JumpTable) error {
+// 	// for i, code := range c.Code {
+// 	// 	// if err := validateCode(code, i, c.Types, jt, len(c.Data), len(c.SubContainers)); err != nil {
+// 	// 	// 	return err
+// 	// 	// }
+// 	// }
+// 	return nil
+// }
 
-// parseSection decodes a (kind, size) pair from an EOF header.
-func parseSection(b []byte, idx int) (kind, size int, err error) {
-	if idx+3 >= len(b) {
-		return 0, 0, io.ErrUnexpectedEOF
-	}
-	kind = int(b[idx])
-	size = int(binary.BigEndian.Uint16(b[idx+1:]))
-	return kind, size, nil
-}
+// // parseSection decodes a (kind, size) pair from an EOF header.
+// func parseSection(b []byte, idx int) (kind, size int, err error) {
+// 	if idx+3 >= len(b) {
+// 		return 0, 0, io.ErrUnexpectedEOF
+// 	}
+// 	kind = int(b[idx])
+// 	size = int(binary.BigEndian.Uint16(b[idx+1:]))
+// 	return kind, size, nil
+// }
 
-// parseSectionList decodes a (kind, len, []codeSize) section list from an EOF
-// header.
-func parseSectionList(b []byte, idx int) (kind int, list []int, err error) {
-	if idx >= len(b) {
-		return 0, nil, io.ErrUnexpectedEOF
-	}
-	kind = int(b[idx])
-	list, err = parseList(b, idx+1)
-	if err != nil {
-		return 0, nil, err
-	}
-	return kind, list, nil
-}
+// // parseSectionList decodes a (kind, len, []codeSize) section list from an EOF
+// // header.
+// func parseSectionList(b []byte, idx int) (kind int, list []int, err error) {
+// 	if idx >= len(b) {
+// 		return 0, nil, io.ErrUnexpectedEOF
+// 	}
+// 	kind = int(b[idx])
+// 	list, err = parseList(b, idx+1)
+// 	if err != nil {
+// 		return 0, nil, err
+// 	}
+// 	return kind, list, nil
+// }
 
-// parseList decodes a list of uint16..
-func parseList(b []byte, idx int) ([]int, error) {
-	if len(b) < idx+2 {
-		return nil, io.ErrUnexpectedEOF
-	}
-	count := binary.BigEndian.Uint16(b[idx:])
-	if len(b) <= idx+2+int(count)*2 {
-		return nil, io.ErrUnexpectedEOF
-	}
-	list := make([]int, count) // list of sizes
-	for i := 0; i < int(count); i++ {
-		list[i] = int(binary.BigEndian.Uint16(b[idx+2+2*i:]))
-	}
-	return list, nil
-}
+// // parseList decodes a list of uint16..
+// func parseList(b []byte, idx int) ([]int, error) {
+// 	if len(b) < idx+2 {
+// 		return nil, io.ErrUnexpectedEOF
+// 	}
+// 	count := binary.BigEndian.Uint16(b[idx:])
+// 	if len(b) <= idx+2+int(count)*2 {
+// 		return nil, io.ErrUnexpectedEOF
+// 	}
+// 	list := make([]int, count) // list of sizes
+// 	for i := 0; i < int(count); i++ {
+// 		list[i] = int(binary.BigEndian.Uint16(b[idx+2+2*i:]))
+// 	}
+// 	return list, nil
+// }
 
 // parseUint16 parses a 16 bit BigEndian unsigned integer.
 func parseUint16(b []byte) (int, error) {

@@ -820,7 +820,6 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	if err := ms.insertPoSBlocks(chain); err != nil {
 		return err
 	}
-
 	roTx, err := ms.DB.BeginRo(ms.Ctx)
 	if err != nil {
 		return err

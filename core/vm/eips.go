@@ -411,7 +411,7 @@ func enableEOF(jt *JumpTable) {
 		constantGas:   GasFastestStep,
 		immediateSize: 1,
 	}
-	jt[EXCHANGE] = &operation{ // TODO(racytech)
+	jt[EXCHANGE] = &operation{
 		execute:       opExchange,
 		constantGas:   GasFastestStep,
 		immediateSize: 1,
@@ -788,7 +788,7 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 		return nil, ErrOutOfGas
 	}
 	if size.Uint64() > 0 {
-		input = scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64())) // TODO(racytech): figure out why it's needed?
+		input = scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64()))
 	}
 	stackValue := size
 	res, addr, returnGas, suberr := interpreter.evm.EOFCreate(scope.Contract, input, initContainer.rawData, gas, &endowment, &salt, false)
@@ -825,8 +825,6 @@ func opTxnCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	)
 	*pc += 1
 
-	// TODO(racytech): !!!
-
 	initContainer := interpreter.evm.TxContext.Initcodes[initcodeHash.Bytes32()]
 
 	// initcontainer = state.get_tx_initcode_by_hash(initcode_hash);
@@ -835,7 +833,7 @@ func opTxnCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	// if (initcontainer.empty())
 	// 	return {EVMC_SUCCESS, gas_left};  // "Light" failure
 
-	// TODO(racytech): do the gas calculations!
+	// TODO(racytech): do the gas calculations
 	// // Charge for initcode validation.
 	// constexpr auto initcode_word_cost_validation = 2;
 	// const auto initcode_cost_validation =

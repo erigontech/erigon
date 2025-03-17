@@ -22,42 +22,10 @@ const (
 	REL_OFFSET_SIZE = 2 // size of uint16
 )
 
-// func ValidateEOFContainer(c *EOFContainer, jt *JumpTable) error {
-
-// 	for i, code := range c._code {
-// 		if err := _validateCode(code, c._types, jt, i, len(c._data), len(c._subContainers)); err != nil {
-// 			return err
-// 		}
-// 	}
-// 	for _, subContainer := range c._subContainers {
-// 		if err := ValidateEOFContainer(subContainer, jt); err != nil {
-// 			return err
-// 		}
-// 	}
-// 	return nil
-// }
-
-// TODO(racytech): split validate code into validate_instructions and validate_rjump_destinations
-
 func makeEOFerr(errOrigin, pos int, op OpCode, err error) error {
 	errs := []string{"validateInstructions", "validateRjumpDestinations"}
 
 	return fmt.Errorf("%s: %s - %w, pos %d", errs[errOrigin], op, err, pos)
-}
-
-// validateCode validates the code parameter against the EOF v1 validity requirements.
-func _validateCode(code []byte, metadata []*eofMetaData, jt *JumpTable, section, dataSize, containerCount int) error {
-	// fmt.Println("-------------------------")
-	// if _, err := validateInstructions(code, metadata, jt, section, dataSize, containerCount); err != nil {
-	// 	return err
-	// }
-	// if err := validateRjumpDestinations(code, jt); err != nil {
-	// 	return err
-	// }
-	// if _, err := validateMaxStackHeight(code, metadata, jt, section); err != nil {
-	// 	return err
-	// }
-	return nil
 }
 
 func validateInstructions(code []byte, metadata []*eofMetaData, jt *JumpTable, section, dataSize, containerCount int, containerKind byte) ([][2]uint16, map[uint16]bool, error) {

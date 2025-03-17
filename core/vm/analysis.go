@@ -28,8 +28,6 @@ const (
 	set7BitsMask = uint64(0b111_1111)
 )
 
-// TODO(racytech): fix this part. Make sure merge did not brake anything. If it did investigate.
-
 // bitvec is a bit vector which maps bytes in a program.
 // An unset bit means the byte is an opcode, a set bit means
 // it's data (i.e. argument of PUSHxx).

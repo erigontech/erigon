@@ -109,7 +109,6 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 		if overridePragueTime != nil {
 			config.PragueTime = overridePragueTime
 		}
-		// TODO(racytech): override PragueEOF?
 	}
 
 	if (storedHash == libcommon.Hash{}) {

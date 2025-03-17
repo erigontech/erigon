@@ -29,23 +29,6 @@ func TestEOFValidation(t *testing.T) {
 	})
 }
 
-func TestEOFBlockchain(t *testing.T) {
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-
-	bt := new(testMatcher)
-
-	dir := filepath.Join(".", "osaka-eof/blockchain_tests/osaka/eip7692_eof_v1")
-
-	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
-		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t, true)); err != nil {
-			t.Error(err)
-		}
-		fmt.Println("---------------------------------")
-	})
-}
-
 func TestEOFStateTest(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
@@ -77,5 +60,22 @@ func TestEOFStateTest(t *testing.T) {
 				})
 			})
 		}
+	})
+}
+
+func TestEOFBlockchain(t *testing.T) {
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+
+	bt := new(testMatcher)
+
+	dir := filepath.Join(".", "osaka-eof/blockchain_tests/osaka/eip7692_eof_v1/eip7620_eof_create/gas")
+
+	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
+		// import pre accounts & construct test genesis block & state root
+		if err := bt.checkFailure(t, test.Run(t, true)); err != nil {
+			t.Error(err)
+		}
+		fmt.Println("---------------------------------")
 	})
 }

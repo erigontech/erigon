@@ -230,7 +230,10 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	if config.IsPrague(header.Time) {
+	// if config.IsPrague(header.Time) {
+	// 	header.RequestsHash = outRequests.Hash()
+	// }
+	if config.IsOsaka(header.Time) {
 		header.RequestsHash = outRequests.Hash()
 	}
 	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, outRequests, nil
@@ -314,7 +317,15 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	}
 
 	// Verify existence / non-existence of requestsHash
-	prague := chain.Config().IsPrague(header.Time)
+	// prague := chain.Config().IsPrague(header.Time)
+	// if prague && header.RequestsHash == nil {
+	// 	return errors.New("missing requestsHash")
+	// }
+	// if !prague && header.RequestsHash != nil {
+	// 	return consensus.ErrUnexpectedRequests
+	// }
+
+	prague := chain.Config().IsOsaka(header.Time)
 	if prague && header.RequestsHash == nil {
 		return errors.New("missing requestsHash")
 	}
@@ -360,7 +371,10 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer)
 	}
-	if chain.Config().IsPrague(header.Time) {
+	// if chain.Config().IsPrague(header.Time) {
+	// 	misc.StoreBlockHashesEip2935(header, state, config, chain)
+	// }
+	if chain.Config().IsOsaka(header.Time) {
 		misc.StoreBlockHashesEip2935(header, state, config, chain)
 	}
 }

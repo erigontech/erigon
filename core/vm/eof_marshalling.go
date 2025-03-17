@@ -221,7 +221,6 @@ func readHeader(buf *bytes.Reader) (*header, int64, error) {
 		// if len(containerSizes) > maxContainerSections {
 		// 	return fmt.Errorf("containers exceed allowed limit: %v: have %v", maxContainerSections, len(containerSizes))
 		// }
-		fmt.Println("numSubContainers: ", header.numSubContainers)
 		if header.numSubContainers > 256 {
 			return nil, 0, fmt.Errorf("%w: too many container sections: %d", ErrTooManyContainerSections, header.numSubContainers)
 		}
@@ -370,7 +369,7 @@ func readCodeSection(buf *bytes.Reader, jt *JumpTable, header *header, _types []
 		code := make([]byte, header.codeSectionSizes[codeIdx])
 		end += int64(header.codeSectionSizes[codeIdx])
 		offset := start
-		for i := uint16(0); i < codeIdx; i++ {
+		for i := uint16(0); i < codeIdx; i++ { // TODO(racytech): extra loop! do we need this?
 			offset += int64(header.codeSectionSizes[i])
 		}
 		if _, err := buf.ReadAt(code, offset); err != nil {
@@ -500,43 +499,9 @@ func UnmarshalEOF(data []byte, depth int, containerKind byte, jt *JumpTable, val
 
 func (c *EOFContainer) updateData(auxData []byte) error {
 
-	// assert(container.size() <= header.data_offset + header.data_size);
-	// std::cout << "aux_data.size: " << aux_data.size() << std::endl;
-	// const auto new_data_size = container.size() - header.data_offset + aux_data.size();
-	// if (new_data_size > std::numeric_limits<uint16_t>::max())
-	//     return false;
-	// std::cout << "header.data_size: " << header.data_size << std::endl;
-	// std::cout << "new_data_size: " << new_data_size << std::endl;
-	// // Check that appended data size is greater or equal of what header declaration expects.
-	// if (new_data_size < header.data_size)
-	//     return false;
-
-	// container.size() = 26
-	// header.data_offset = 26
-	// header.data_size = 0
-	// aux_data.size() = 0
-	// new_data_size = 0
-
-	// // Appending aux_data to the end, assuming data section is always the last one.
-	// container.append(aux_data);
-
-	// Update data size
-	// const auto data_size_pos = header.data_size_position();
-	// container[data_size_pos] = static_cast<uint8_t>(new_data_size >> 8);
-	// container[data_size_pos + 1] = static_cast<uint8_t>(new_data_size);
-	// std::cout << "header.data_size: " << header.data_size << std::endl;
-
-	// rewrite c++ code into go code
-
-	fmt.Println(c.rawData)
 	// dataOffset := len(c.rawData) - len(c._data)
 	newDataSize := len(c.rawData) - int(c._header.dataOffset) + len(auxData)
-	fmt.Println("container.size(): ", len(c.rawData))
-	fmt.Println("header.data_offset: ", c._header.dataOffset)
-	fmt.Println("header.data_size: ", c._header.dataLength)
-	fmt.Println("aux_data.size: ", len(auxData))
-	fmt.Println("new_data_size: ", newDataSize)
-	fmt.Println("new_data_sizeasdas: ", newDataSize)
+
 	if newDataSize > 65535 {
 		return ErrAuxDataTooLarge
 	}
@@ -546,61 +511,8 @@ func (c *EOFContainer) updateData(auxData []byte) error {
 
 	// const auto data_size_pos = header.data_size_position();
 	// dataSizePo
-
-	fmt.Println(c.rawData)
 	c.rawData = append(c.rawData, auxData...)
-	fmt.Println(c.rawData)
 	c.rawData[c._header.dataSizePos] = byte(newDataSize >> 8)
 	c.rawData[c._header.dataSizePos+1] = byte(newDataSize)
-	fmt.Println(c.rawData)
-
-	// c._data = append(c._data, auxData...)
-	// fmt.Println(c._data)
-	// c._header.dataLength += uint16(len(auxData))
-
 	return nil
 }
-
-// container: 239 0 1 1 0 4 2 0 1 0 7 4 0 0 0 0 128 0 2 97 32 21 96 1 85 0
-// aux_data:
-// container.size() = 26
-// header.data_offset = 26
-// header.data_size = 0
-// aux_data.size() = 0
-// new_data_size = 0
-// SETTING CODEe: 0xef00010100040200010007040000000080000261201560015500
-
-// container.size():  26
-// header.data_offset:  0
-// header.data_size:  0
-// aux_data.size:  0
-// new_data_size:  26
-// new_data_sizeasdas:  26
-// [239 0 1 1 0 4 2 0 1 0 7 4 0 0 0 0 128 0 2 97 32 21 96 1 85 0]
-// [239 0 1 1 0 4 2 0 1 0 7 4 0 0 0 0 128 0 2 97 32 21 96 1 85 0]
-// [239 0 1 1 0 4 2 0 1 0 7 4 0 26 0 0 128 0 2 97 32 21 96 1 85 0]
-// deployContainer: 0x, len: 0
-// ret:  [239 0 1 1 0 4 2 0 1 0 7 4 0 26 0 0 128 0 2 97 32 21 96 1 85 0]
-// DONE RUN
-// CHECK 4 FAIL
-// EVM ERROR <nil>
-// IN HERE
-// ========== setting code: 0xef0001010004020001000704001a000080000261201560015500
-
-// func (h *header) dataSizePos() uint16 {
-// 	// const auto num_code_sections = code_sizes.size();
-// 	// const auto num_container_sections = container_sizes.size();
-// 	// return std::size(EOF_MAGIC) + 1 +   // magic + version
-// 	// 	   3 +                          // type section kind + size
-// 	// 	   3 + 2 * num_code_sections +  // code sections kind + count + sizes
-// 	// 	   // container sections kind + count + sizes
-// 	// 	   (num_container_sections != 0 ? 3 + 2 * num_container_sections : 0) +
-// 	// 	   1;  // data section kind
-
-// 	pos := 2 + 1 + 3 + 3 + 2*h.numCodeSections
-// 	if h.numSubContainers != 0 {
-// 		pos += 3 + 2*h.numSubContainers
-// 	}
-// 	pos += 1
-// 	return pos
-// }

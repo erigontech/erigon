@@ -206,6 +206,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		if rw.vmConfig.TraceJumpDest {
 			txContext.TxHash = txTask.Tx.Hash()
 		}
+
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
 
 		// MA applytx

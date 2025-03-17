@@ -125,7 +125,6 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 	interpreter := NewEVMInterpreter(evm, vmConfig)
 	evm.interpreter = interpreter
 	evm.config.JumpTableEOF = interpreter.cfg.JumpTableEOF
-	fmt.Println("NewEVM: evm.config.JumpTableEOF == nil: ", evm.config.JumpTableEOF == nil)
 	return evm
 }
 
@@ -151,8 +150,12 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.config = vmConfig
 	evm.chainRules = chainRules
 
+	// TODO(racytech): jumptableEOF is nil here, so in the next if statement it will be set manually
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
-
+	// fmt.Println("ResetBetweenBlocks: evm.config.JumpTableEOF == nil: ", evm.config.JumpTableEOF == nil)
+	if chainRules.IsOsaka {
+		evm.config.JumpTableEOF = &eofInstructionSet
+	}
 	// ensure the evm is reset to be used again
 	atomic.StoreInt32(&evm.abort, 0)
 }
@@ -304,7 +307,6 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			}
 			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis, evm.JumpDestCache)
 		}
-		fmt.Println("VALUE: ", contract.value.Bytes32())
 		contract.SetCallCode(&addrCopy, codeHash, code, evm.parseContainer(code))
 		readOnly := false
 		if typ == STATICCALL {
@@ -312,10 +314,9 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		}
 
 		ret, err = run(evm, contract, input, readOnly)
+
 		gas = contract.Gas
 	}
-
-	fmt.Println("CALL ERR: ", err)
 
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
@@ -329,6 +330,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		//} else {
 		//	evm.StateDB.DiscardSnapshot(snapshot)
 	}
+	fmt.Println("--------- CALL DONE")
 	return ret, gas, err
 }
 
@@ -447,16 +449,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// placing this after  nonce != 0 || (contractHash != (libcommon.Hash{}) && contractHash != trie.EmptyCodeHash) check
 	// fixes JUMPF tests but brakes EOFCREATE tests
 	if isInitcodeEOF {
-		if allowEOF { // TODO(racytech): Handle Legacy calling EOF better
-			// var c Container
-			// if err := c.UnmarshalBinary(codeAndHash.code, isInitcodeEOF); err != nil {
-			// 	return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
-			// }
-			// if err := c.ValidateCode(evm.config.JumpTableEOF); err != nil {
-			// 	return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
-			// }
-			// contract.Container = &c
-			fmt.Printf("0x%x\n", codeAndHash.code)
+		if allowEOF { // TODO(racytech): remake this entire allowEOF business?
 			var containerKind byte = 1
 			if depth == 0 || typ == EOFCREATE {
 				containerKind = 0
@@ -491,6 +484,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if evm.chainRules.IsBerlin {
 		evm.intraBlockState.AddAddressToAccessList(address)
 	}
+
 	// Ensure there's no existing contract already at the designated address
 	contractHash, err := evm.intraBlockState.ResolveCodeHash(address)
 	if err != nil {
@@ -505,6 +499,19 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		err = ErrContractAddressCollision
 		return nil, libcommon.Address{}, 0, err
 	}
+
+	// if (accaunt.nonce != 0) -> collision
+	// if (accaunt.code_hash != EMPTY_CODE_HASH) -> collision
+	// if (accaunt.has_initial_storage) -> collision
+
+	// TODO(EOF): we dont check for has_inital_storage
+	// uncommiting this will fix the blockchain_tests/eofwrap/stSStoreTest/eof_wrapped_InitCollisionParis.json, but brakes the blockchain_tests/eip7692_eof_v1/eip7620_eof_create/gas
+	// if empty, err := evm.intraBlockState.Empty(address); err != nil {
+	// 	return nil, libcommon.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	// } else if empty {
+	// 	err = ErrContractAddressCollision
+	// 	return nil, libcommon.Address{}, 0, err
+	// }
 
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
@@ -534,21 +541,27 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		err = ErrMaxCodeSizeExceeded
 	}
 
+	// TODO(racytech): see EIP-7620 "test cases" for more info
+	if typ == CREATE || typ == CREATE2 {
+		if len(ret) == 1 && ret[0] == eofMagic[0] {
+			err = ErrInvalidCode
+		}
+	}
+
 	// Reject legacy contract deployment from EOF.
 	if err == nil && isInitcodeEOF && len(ret) > 0 && !hasEOFMagic(ret) {
 		fmt.Println("CHECK 1 FAIL")
 		err = ErrLegacyCode
 	}
-	// // Reject legacy contract deployment from EOF.
-	// if isInitcodeEOF && !hasEOFMagic(ret) {
-	// 	fmt.Println("CHECK 2 FAIL")
-	// 	err = fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, ErrLegacyCode)
-	// }
+
 	// Reject EOF deployment from legacy.
 	if !isInitcodeEOF && hasEOFMagic(ret) {
 		fmt.Println("CHECK 3 FAIL")
 		err = ErrLegacyCode
 	}
+
+	fmt.Println("hasEOFMagic(ret): ", hasEOFMagic(ret))
+	fmt.Println("isInitcodeEOF: ", isInitcodeEOF)
 
 	// Reject code starting with 0xEF if EIP-3541 is enabled.
 	if err == nil && len(ret) >= 1 && HasEOFByte(ret) {
@@ -560,20 +573,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		}
 	}
 
-	// if err == nil && len(ret) > 0 && HasEOFByte(ret) {
-	// 	if evm.chainRules.IsPrague {
-	// 		var c Container
-	// 		if err = c.UnmarshalBinary(ret, false); err == nil {
-	// 			err = c.ValidateCode(evm.config.JumpTableEOF)
-	// 		}
-	// 		if err != nil {
-	// 			err = fmt.Errorf("%w: %v", ErrInvalidEOF, err)
-	// 		}
-	// 	} else if evm.chainRules.IsLondon {
-	// 		// Reject code starting with 0xEF if EIP-3541 is enabled.
-	// 		err = ErrInvalidCode
-	// 	}
-	// }
 	fmt.Println("EVM ERROR", err)
 	// if the contract creation ran successfully and no errors were returned
 	// calculate the gas required to store the code. If the code could not
@@ -621,10 +620,7 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, end
 	if err != nil {
 		return nil, libcommon.Address{}, 0, err
 	}
-	fmt.Printf("\nsender: 0x%x\n", caller.Address())
-	// TODO(racytech): don't allow CREATE and CREATE2 to create EOF
 	contractAddr = crypto.CreateAddress(caller.Address(), nonce)
-	fmt.Printf("recepient: 0x%x\n", contractAddr)
 	return evm.create(caller, &codeAndHash{code: code}, gasRemaining, endowment, contractAddr, CREATE, nil, true /* incrementNonce */, bailout, allowEOF)
 }
 
@@ -693,17 +689,6 @@ func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 // parseContainer tries to parse an EOF container if the Cancun fork is active. It expects the code to already be validated.
 func (evm *EVM) parseContainer(b []byte) *EOFContainer {
 	if evm.chainRules.IsOsaka && hasEOFMagic(b) {
-		// var c Container
-		// if err := c.UnmarshalBinary(b, false); err != nil {
-		// 	// Code was already validated, so no other errors should be possible.
-		// 	panic(fmt.Sprintf("unexpected error: %v\ncode: %s\n", err, libcommon.Bytes2Hex(b)))
-		// }
-		// if err := c.ValidateCode(evm.interpreter.Config().JumpTableEOF); err != nil {
-		// 	panic(fmt.Sprintf("error validating container: %v", err))
-		// }
-		// return &c
-
-		// TODO(racytech): set the `initcode` or `runtime` properly!
 		if c, err := UnmarshalEOF(b, 0, 1, evm.interpreter.Config().JumpTableEOF, true); err != nil {
 			panic(fmt.Sprintf("error validating container: %v", err))
 		} else {

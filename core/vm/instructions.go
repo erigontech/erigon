@@ -402,23 +402,19 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		// return nil, ErrReturnDataOutOfBounds // TODO(racytech): uncomenting this results in failing eof state_tests/eip7069_extcall/returndatacopy_memory_expansion
 	}
 
-	if scope.Contract.Container != nil { // TODO(racytech): this may not be right
+	if scope.Contract.Container != nil {
 		if returnDataSize < offset64 {
 			offset64 = returnDataSize
 		}
 		copySize := min(length64, returnDataSize-offset64)
 
 		if copySize > 0 {
-			// fmt.Printf("-------------> HITTIN copySize > 0 0x%x, copySize: %v\n", interpreter.returnData[offset64:offset64+copySize], copySize)
 			scope.Memory.Set(memOffset.Uint64(), copySize, interpreter.returnData[offset64:offset64+copySize])
 		}
 		if length64-copySize > 0 {
-			// fmt.Printf("-------------> HITTIN length64-copySize > 0 0x%x, length64-copySize: %v", interpreter.returnData[0:length64-copySize], length64-copySize)
-			// scope.Memory.Set(memOffset.Uint64()+copySize, length64-copySize, interpreter.returnData[0:length64-copySize])
 			scope.Memory.SetZero(memOffset.Uint64()+copySize, length64-copySize)
 		}
 	} else {
-		// we can reuse dataOffset now (aliasing it for clarity)
 		end := dataOffset
 		_, overflow = end.AddOverflow(&dataOffset, &length)
 		if overflow {
@@ -761,7 +757,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	stackvalue := size
 
 	scope.Contract.UseGas(gas, tracing.GasChangeCallContractCreation)
-
+	fmt.Println("CALLING FROM HERE")
 	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value, false, false)
 
 	// Push item on the stack based on the returned error. If the ruleset is
