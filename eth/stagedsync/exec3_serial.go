@@ -76,6 +76,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 				}
 
 				se.outputBlockNum.SetUint64(txTask.BlockNum)
+
+				rh, err := se.rs.Domains().ComputeCommitment(ctx, true, se.rs.Domains().BlockNum(), "")
+				if err != nil {
+					return err
+				}
+				fmt.Printf("commitment hash %x header %x\n", rh, txTask.Header.Root)
+				fmt.Printf("txTask.Header.Root %x\n", txTask.Header.Root)
 			}
 			if se.cfg.syncCfg.ChaosMonkey {
 				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, se.cfg.badBlockHalt, txTask.Error)
@@ -128,9 +135,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			return false, err
 		}
 
+		fmt.Printf("%d: root hdr %x\n", txTask.BlockNum, txTask.Header.Root)
 		se.outputTxNum.Add(1)
 	}
-
 	return true, nil
 }
 

@@ -215,11 +215,14 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		ibsa := state.NewArbitrum(rw.ibs)
 
 		rw.evm.ProcessingHook = arbos.NewTxProcessorIBS(rw.evm, ibsa, &txTask.TxAsMessage)
+		// rw.evm.ProcessingHook.SetMessage(&txTask.TxAsMessage)
 	}
 
 	rw.ibs.Reset()
 	ibs := rw.ibs
-	//ibs.SetTrace(true)
+	rw.ibs.SetTrace(true)
+
+	fmt.Printf("---- txnIdx %d block %d\n", txTask.TxIndex, txTask.BlockNum)
 
 	rules := txTask.Rules
 	var err error
@@ -325,17 +328,18 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
+			fmt.Printf("logs len %d\n", len(txTask.Logs))
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
 		}
-
 	}
+	fmt.Printf("---- txnIdx %d block %d DONE------\n", txTask.TxIndex, txTask.BlockNum)
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		//for addr, bal := range txTask.BalanceIncreaseSet {
-		//	fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
-		//}
+		for addr, bal := range txTask.BalanceIncreaseSet {
+			fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
+		}
 		if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
 			panic(err)
 		}

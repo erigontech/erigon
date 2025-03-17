@@ -1869,9 +1869,9 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 	cell.stateHashLen = 0
 
 	cell.setFromUpdate(u)
-	if hph.trace {
-		fmt.Printf("updateCell %x => %s\n", plainKey, u.String())
-	}
+	// if hph.trace {
+	fmt.Printf("%x => %s\n", plainKey, u.String())
+	// }
 	return cell
 }
 
