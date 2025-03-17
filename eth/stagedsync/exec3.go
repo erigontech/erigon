@@ -970,18 +970,20 @@ func ExecV3(ctx context.Context,
 									fmt.Println(line)
 								}
 
-								for txIndex, stat := range applyResult.Stats {
+								maxTxIndex := len(applyResult.TxIO.Inputs()) - 1
+
+								for txIndex := -1; txIndex < maxTxIndex; txIndex++ {
 									fmt.Println(
-										fmt.Sprintf("%d (%d.%d) RD", applyResult.BlockNum, txIndex, stat.Incarnation), applyResult.TxIO.ReadSet(txIndex).Len(),
+										fmt.Sprintf("%d (%d) RD", applyResult.BlockNum, txIndex), applyResult.TxIO.ReadSet(txIndex).Len(),
 										"WRT", len(applyResult.TxIO.WriteSet(txIndex)))
 
 									applyResult.TxIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
-										fmt.Println(fmt.Sprintf("%d (%%d.%d)", applyResult.BlockNum, txIndex, stat.Incarnation), "RD", vr.String())
+										fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "RD", vr.String())
 										return true
 									})
 
 									for _, vw := range applyResult.TxIO.WriteSet(txIndex) {
-										fmt.Println(fmt.Sprintf("%d (%%d.%d)", applyResult.BlockNum, txIndex, stat.Incarnation), "WRT", vw.String())
+										fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "WRT", vw.String())
 									}
 								}
 
