@@ -970,18 +970,18 @@ func ExecV3(ctx context.Context,
 									fmt.Println(line)
 								}
 
-								for txIndex := -1; txIndex <= applyResult.lastTxNum; txIndex++ {
+								for txIndex, stat := range applyResult.Stats {
 									fmt.Println(
-										fmt.Sprintf("%d (%d) RD", applyResult.BlockNum, txIndex), be.blockIO.ReadSet(txIndex).Len(),
-										"WRT", len(applyResult.blockIO.WriteSet(txIndex)))
+										fmt.Sprintf("%d (%d.%d) RD", applyResult.BlockNum, txIndex, stat.Incarnation), applyResult.TxIO.ReadSet(txIndex).Len(),
+										"WRT", len(applyResult.TxIO.WriteSet(txIndex)))
 
-									be.blockIO.ReadSet(txVersion.TxIndex).Scan(func(vr *state.VersionedRead) bool {
-										fmt.Println(fmt.Sprintf("%d (%d)", be.blockNum, txIndex), "RD", vr.String())
+									applyResult.TxIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
+										fmt.Println(fmt.Sprintf("%d (%%d.%d)", applyResult.BlockNum, txIndex, stat.Incarnation), "RD", vr.String())
 										return true
 									})
 
-									for _, vw := range be.blockIO.WriteSet(txIndex) {
-										fmt.Println(fmt.Sprintf("%d (%d)", be.blockNum, txIndex), "WRT", vw.String())
+									for _, vw := range applyResult.TxIO.WriteSet(txIndex) {
+										fmt.Println(fmt.Sprintf("%d (%%d.%d)", applyResult.BlockNum, txIndex, stat.Incarnation), "WRT", vw.String())
 									}
 								}
 
