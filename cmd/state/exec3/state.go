@@ -212,10 +212,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
 	if rw.chainConfig.IsArbitrum() && txTask.BlockNum > 0 {
-		ibsa := state.NewArbitrum(rw.ibs)
-
-		rw.evm.ProcessingHook = arbos.NewTxProcessorIBS(rw.evm, ibsa, &txTask.TxAsMessage)
-		// rw.evm.ProcessingHook.SetMessage(&txTask.TxAsMessage)
+		if rw.evm.ProcessingHook == nil {
+			rw.evm.ProcessingHook = arbos.NewTxProcessorIBS(rw.evm, state.NewArbitrum(rw.ibs), &txTask.TxAsMessage)
+		} else {
+			rw.evm.ProcessingHook.SetMessage(&txTask.TxAsMessage)
+		}
 	}
 
 	rw.ibs.Reset()

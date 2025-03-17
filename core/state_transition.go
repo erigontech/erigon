@@ -349,7 +349,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(st.evm.Context.BaseFee) > 0 {
 		mmsg := st.msg.(types.Message)
 		(&mmsg).SetGasPrice(st.evm.Context.BaseFee)
-		(&mmsg).SetFeeCap(common.Num0)
+		(&mmsg).SetFeeCap(common.Num0) // todo
 		(&mmsg).SetTip(common.Num0)
 		st.msg = mmsg
 	}

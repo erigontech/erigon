@@ -28,6 +28,8 @@ type TxProcessingHook interface {
 	PushContract(contract *Contract)
 	PopContract()
 	ForceRefundGas() uint64
+
+	SetMessage(msg *types.Message)
 	NonrefundableGas() uint64
 	DropTip() bool
 	EndTxHook(totalGasUsed uint64, evmSuccess bool)
@@ -43,6 +45,8 @@ type TxProcessingHook interface {
 type DefaultTxProcessor struct {
 	evm *EVM
 }
+
+func (p DefaultTxProcessor) SetMessage(*types.Message) {}
 
 func (p DefaultTxProcessor) StartTxHook() (bool, uint64, error, []byte) {
 	return false, 0, nil, nil
