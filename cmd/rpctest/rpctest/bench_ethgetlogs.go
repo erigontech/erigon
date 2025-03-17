@@ -157,12 +157,13 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	prevBn := blockFrom
+	_prevBn := blockFrom
 	for bn := blockFrom; bn < blockTo; {
 		batchEnd := min(bn+100, blockTo)
 		eg := &errgroup.Group{}
 		eg.SetLimit(32)
 		for ; bn < batchEnd; bn++ {
+			prevBn := _prevBn
 			eg.Go(func() error {
 				var resp EthGetLogs
 				res := reqGen.Erigon("eth_getLogs", reqGen.getLogsNoFilters(prevBn, bn), &resp)
@@ -210,13 +211,12 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 
 				return nil
 			})
+			_prevBn = bn
 		}
 
 		if err := eg.Wait(); err != nil {
 			return err
 		}
-
-		prevBn = bn
 	}
 	return nil
 }
