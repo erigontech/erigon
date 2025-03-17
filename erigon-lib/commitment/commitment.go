@@ -977,8 +977,6 @@ type Updates struct {
 	tmpdir string
 }
 
-type Reads = Updates
-
 type keyHasher func(key []byte) []byte
 
 func keyHasherNoop(key []byte) []byte { return key }
@@ -998,9 +996,6 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	}
 	return t
 }
-
-var NewReads = NewUpdates
-
 func (t *Updates) SetMode(m Mode) {
 	t.mode = m
 	if t.mode == ModeDirect && t.keys == nil {

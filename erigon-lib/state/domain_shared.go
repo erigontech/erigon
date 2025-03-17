@@ -960,7 +960,7 @@ type SharedDomainsCommitmentContext struct {
 	branches      map[string]cachedBranch
 	keccak        cryptozerocopy.KeccakState
 	updates       *commitment.Updates
-	reads         *commitment.Reads
+	reads         *commitment.Updates
 	// for building and updating commitment
 	RWTrie commitment.Trie
 	// read only patricia trie for building proofs (eth_getProof)
@@ -987,7 +987,7 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, 
 
 	// we always initialize RO trie
 	ctx.ROTrie = commitment.NewHexPatriciaHashedReader(length.Addr, nil, sd.aggTx.a.tmpdir)
-	ctx.reads = commitment.NewReads(mode, sd.aggTx.a.tmpdir, commitment.KeyToHexNibbleHash)
+	ctx.reads = commitment.NewUpdates(mode, sd.aggTx.a.tmpdir, commitment.KeyToHexNibbleHash)
 	ctx.ROTrie.ResetContext(ctx)
 
 	return ctx
