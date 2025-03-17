@@ -24,10 +24,11 @@ import (
 )
 
 func MockRequestGenerator(reqId int) *RequestGenerator {
-	return &RequestGenerator{
-		reqID:  reqId,
+	r := &RequestGenerator{
 		client: nil,
 	}
+	r.reqID.Store(int64(reqId))
+	return r
 }
 
 func TestRequestGenerator_blockNumber(t *testing.T) {
