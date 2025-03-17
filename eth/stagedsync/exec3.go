@@ -969,6 +969,22 @@ func ExecV3(ctx context.Context,
 								for _, line := range captured {
 									fmt.Println(line)
 								}
+
+								for txIndex := -1; txIndex <= applyResult.lastTxNum; txIndex++ {
+									fmt.Println(
+										fmt.Sprintf("%d (%d) RD", applyResult.BlockNum, txIndex), be.blockIO.ReadSet(txIndex).Len(),
+										"WRT", len(applyResult.blockIO.WriteSet(txIndex)))
+
+									be.blockIO.ReadSet(txVersion.TxIndex).Scan(func(vr *state.VersionedRead) bool {
+										fmt.Println(fmt.Sprintf("%d (%d)", be.blockNum, txIndex), "RD", vr.String())
+										return true
+									})
+
+									for _, vw := range be.blockIO.WriteSet(txIndex) {
+										fmt.Println(fmt.Sprintf("%d (%d)", be.blockNum, txIndex), "WRT", vw.String())
+									}
+								}
+
 								return errors.New("wrong trie root")
 							}
 						}
