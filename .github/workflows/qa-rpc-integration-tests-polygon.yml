@@ -98,8 +98,8 @@ jobs:
           rm -rf ./polygon-pos/results/
                     
           # Run RPC integration test runner via http
-          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh
-          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh
+          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_polygon.sh
+          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_polygon.sh
           
           # Capture test runner script exit status
           test_exit_status=$?
