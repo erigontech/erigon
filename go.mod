@@ -175,7 +175,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elastic/gosigar v0.14.3 // indirect
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250317131446-4cc736aa84ea // indirect
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20250317154231-2ce6d6e9e6fc // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
