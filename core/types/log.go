@@ -89,11 +89,10 @@ func (logs Logs) Copy() Logs {
 }
 
 func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash, maxLogs uint64) Logs {
-	topicMap := make([]map[common.Hash]struct{}, 0, 7)
+	topicMap := make([]map[common.Hash]struct{}, len(topics))
 
 	//populate topic map
 	for idx, v := range topics {
-		topicMap = append(topicMap, map[common.Hash]struct{}{})
 		for _, vv := range v {
 			topicMap[idx][vv] = struct{}{}
 		}
