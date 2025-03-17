@@ -29,10 +29,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/types/accounts"
-
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/pkg/errors"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/crypto/sha3"
