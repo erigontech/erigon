@@ -98,6 +98,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
 		BaseFeeInBlock:   baseFee.Clone(),
+		ArbOSVersion:     arbOsVersion,
 	}
 }
 
