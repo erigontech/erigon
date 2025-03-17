@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
 )
 
 func BaseCaseDB(t *testing.T) kv.RwDB {
@@ -1041,4 +1042,88 @@ func BenchmarkDB_Delete(b *testing.B) {
 	}); err != nil {
 		b.Fatal(err)
 	}
+}
+
+func TestSequenceOps(t *testing.T) {
+	table1 := []byte("Table132323")
+	table2 := []byte("Table232232")
+	t.Run("empty read", func(t *testing.T) {
+		_, tx, _ := BaseCase(t)
+		_, err := tx.ReadSequence(string(table1))
+		require.Equal(t, nil, err)
+	})
+
+	t.Run("putting things and reading back", func(t *testing.T) {
+		_, tx, _ := BaseCase(t)
+		t1, err := tx.IncrementSequence(string(table1), 5)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), t1)
+
+		t2, err := tx.IncrementSequence(string(table2), 10)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), t2)
+
+		t1, err = tx.ReadSequence(string(table1))
+		require.NoError(t, err)
+		require.Equal(t, uint64(5), t1)
+
+		t2, err = tx.ReadSequence(string(table2))
+		require.NoError(t, err)
+		require.Equal(t, uint64(10), t2)
+	})
+
+	t.Run("reset sequence", func(t *testing.T) {
+		_, tx, _ := BaseCase(t)
+		t1, err := tx.ReadSequence(string(table1))
+		require.NoError(t, err)
+		require.Equal(t, t1, uint64(0))
+
+		// increment sequence and then reset and test value
+		// start
+		t1, err = tx.IncrementSequence(string(table1), 5)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), t1)
+
+		err = tx.ResetSequence(string(table1), 3)
+		require.NoError(t, err)
+
+		t1, err = tx.ReadSequence(string(table1))
+		require.NoError(t, err)
+		require.Equal(t, uint64(3), t1)
+	})
+}
+
+func BenchmarkDB_ResetSequence(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	//db := _db.(*MdbxKV)
+	ctx := context.Background()
+
+	tx, err := _db.BeginRw(ctx)
+	require.NoError(b, err)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err = tx.ResetSequence(table, uint64(i))
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	tx.Rollback()
+}
+
+func TestMdbxWithSyncBytes(t *testing.T) {
+	db, err := New(kv.TemporaryDB, log.Root()).
+		Path(t.TempDir()).
+		MapSize(8 * datasize.GB).
+		GrowthStep(16 * datasize.MB).
+		Flags(func(f uint) uint { return f&^mdbxgo.Durable | mdbxgo.SafeNoSync }).
+		SyncPeriod(2 * time.Second).
+		SyncBytes(20_000).
+		DirtySpace(uint64(64 * datasize.MB)).
+		// WithMetrics().
+		Open(context.Background())
+	if err != nil {
+		t.Fatalf("failed to open mdbx")
+	}
+	t.Cleanup(db.Close)
 }

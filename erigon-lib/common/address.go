@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 )
@@ -45,15 +45,15 @@ func BigToAddress(b *big.Int) Address { return BytesToAddress(b.Bytes()) }
 
 // HexToAddress returns Address with byte values of s.
 // If s is larger than len(h), s will be cropped from the left.
-func HexToAddress(s string) Address { return BytesToAddress(hexutility.FromHex(s)) }
+func HexToAddress(s string) Address { return BytesToAddress(hexutil.FromHex(s)) }
 
 // IsHexAddress verifies whether a string can represent a valid hex-encoded
 // Ethereum address or not.
 func IsHexAddress(s string) bool {
-	if hexutility.Has0xPrefix(s) {
+	if hexutil.Has0xPrefix(s) {
 		s = s[2:]
 	}
-	return len(s) == 2*length.Addr && hexutility.IsHex(s)
+	return len(s) == 2*length.Addr && hexutil.IsHex(s)
 }
 
 // Bytes gets the string representation of the underlying address.
@@ -151,12 +151,12 @@ func (a Address) MarshalText() ([]byte, error) {
 
 // UnmarshalText parses a hash in hex syntax.
 func (a *Address) UnmarshalText(input []byte) error {
-	return hexutility.UnmarshalFixedText("Address", input, a[:])
+	return hexutil.UnmarshalFixedText("Address", input, a[:])
 }
 
 // UnmarshalJSON parses a hash in hex syntax.
 func (a *Address) UnmarshalJSON(input []byte) error {
-	return hexutility.UnmarshalFixedJSON(addressT, input, a[:])
+	return hexutil.UnmarshalFixedJSON(addressT, input, a[:])
 }
 
 // Scan implements Scanner for database/sql.
@@ -175,4 +175,9 @@ func (a *Address) Scan(src interface{}) error {
 // Value implements valuer for database/sql.
 func (a Address) Value() (driver.Value, error) {
 	return a[:], nil
+}
+
+// Cmp compares two addresses.
+func (a Address) Cmp(other Address) int {
+	return bytes.Compare(a[:], other[:])
 }

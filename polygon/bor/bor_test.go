@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borabi"
@@ -76,6 +76,10 @@ func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, 
 }
 
 func (h *test_heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
+	return nil, nil
+}
+
+func (h *test_heimdall) FetchStatus(ctx context.Context) (*heimdall.Status, error) {
 	return nil, nil
 }
 

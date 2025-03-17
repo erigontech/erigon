@@ -62,12 +62,33 @@ type filesItem struct {
 	canDelete atomic.Bool
 }
 
+type FilesItem interface {
+	Segment() *seg.Decompressor
+	AccessorIndex() *recsplit.Index
+	BtIndex() *BtIndex
+	ExistenceFilter() *ExistenceFilter
+}
+
+var _ FilesItem = (*filesItem)(nil)
+
 func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
+	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize, config3.StepsInFrozenFile)
+}
+
+func newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *filesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
-	frozen := endStep-startStep == config3.StepsInFrozenFile
+	frozen := endStep-startStep >= stepsInFrozenFile
 	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
+
+func (i *filesItem) Segment() *seg.Decompressor { return i.decompressor }
+
+func (i *filesItem) AccessorIndex() *recsplit.Index { return i.index }
+
+func (i *filesItem) BtIndex() *BtIndex { return i.bindex }
+
+func (i *filesItem) ExistenceFilter() *ExistenceFilter { return i.existence }
 
 // isSubsetOf - when `j` covers `i` but not equal `i`
 func (i *filesItem) isSubsetOf(j *filesItem) bool {

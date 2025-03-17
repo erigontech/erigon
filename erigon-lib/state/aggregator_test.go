@@ -22,11 +22,9 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/rand"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -49,6 +47,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -1069,7 +1068,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	rnd := newRnd(0)
 	values := make([]byte, valueSize)
 
-	dataPath := path.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
+	dataPath := filepath.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
 	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
@@ -1118,7 +1117,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	compPath := decomp.FilePath()
 	ps := background.NewProgressSet()
 
-	IndexFile := path.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
+	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
 	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true)
 	require.NoError(tb, err)
 
@@ -1391,7 +1390,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	finalRoot, err := agg.RebuildCommitmentFiles(ctx, nil, &rawdbv3.TxNums)
+	finalRoot, err := RebuildCommitmentFiles(ctx, agg, nil, &rawdbv3.TxNums, agg.logger)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)
 	require.NotEqualValues(t, commitment.EmptyRootHash, finalRoot)

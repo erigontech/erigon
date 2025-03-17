@@ -133,7 +133,7 @@ var DomainCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
-func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
@@ -148,7 +148,7 @@ func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 	}
 
 	var err error
-	if d.History, err = NewHistory(cfg.hist, logger); err != nil {
+	if d.History, err = NewHistory(cfg.hist, aggStep, logger); err != nil {
 		return nil, err
 	}
 
@@ -301,9 +301,6 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) {
 	if d.filenameBase == "" {
 		panic("assert: empty `filenameBase`")
-	}
-	if d.aggregationStep == 0 {
-		panic("assert: empty `aggregationStep`")
 	}
 
 	l := scanDirtyFiles(fileNames, d.aggregationStep, d.filenameBase, "kv", d.logger)
@@ -2017,13 +2014,8 @@ func (sr *SegStreamReader) Next() (k, v []byte, err error) {
 	return k, v, nil
 }
 
-func (d *Domain) stepsRangeInDBAsStr(tx kv.Tx) string {
-	a1, a2 := d.History.InvertedIndex.stepsRangeInDB(tx)
-	//ad1, ad2 := d.stepsRangeInDB(tx)
-	//if ad2-ad1 < 0 {
-	//	fmt.Printf("aaa: %f, %f\n", ad1, ad2)
-	//}
-	return fmt.Sprintf("%s:%.1f", d.filenameBase, a2-a1)
+func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	return dt.ht.iit.stepsRangeInDB(tx)
 }
 
 func (dt *DomainRoTx) Files() (res []string) {

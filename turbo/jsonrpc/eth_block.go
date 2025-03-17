@@ -24,7 +24,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/kv"
@@ -35,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
@@ -182,7 +180,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 		// Execute the transaction message
-		result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			return nil, err
 		}
@@ -208,7 +206,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	ret := map[string]interface{}{}
 	ret["results"] = results
-	ret["bundleHash"] = hexutility.Encode(bundleHash.Sum(nil))
+	ret["bundleHash"] = hexutil.Encode(bundleHash.Sum(nil))
 	return ret, nil
 }
 
@@ -259,11 +257,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
 		}
-	}
-
-	if chainConfig.Bor != nil {
-		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-		response["miner"], _ = ecrecover(b.Header(), borConfig)
 	}
 
 	return response, err
@@ -330,11 +323,6 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
 		}
-	}
-
-	if chainConfig.Bor != nil {
-		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-		response["miner"], _ = ecrecover(block.Header(), borConfig)
 	}
 
 	return response, err

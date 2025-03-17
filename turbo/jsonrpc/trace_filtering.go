@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/ethdb"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
@@ -87,7 +86,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 				if err != nil {
 					return nil, err
 				}
-				txNum = txNumNextBlock - 1
+				txNum = txNumNextBlock
 			}
 		} else {
 			blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
@@ -266,8 +265,8 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 	for _, addr := range req.FromAddress {
 		if addr != nil {
 			it, err := tx.IndexRange(kv.TracesFromIdx, addr.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
-			if errors.Is(err, ethdb.ErrKeyNotFound) {
-				continue
+			if err != nil {
+				return nil, nil, nil, err
 			}
 			allBlocks = stream.Union[uint64](allBlocks, it, order.Asc, -1)
 			fromAddresses[*addr] = struct{}{}
@@ -277,8 +276,8 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 	for _, addr := range req.ToAddress {
 		if addr != nil {
 			it, err := tx.IndexRange(kv.TracesToIdx, addr.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
-			if errors.Is(err, ethdb.ErrKeyNotFound) {
-				continue
+			if err != nil {
+				return nil, nil, nil, err
 			}
 			blocksTo = stream.Union[uint64](blocksTo, it, order.Asc, -1)
 			toAddresses[*addr] = struct{}{}
@@ -614,7 +613,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(txIndex)
 		var execResult *evmtypes.ExecutionResult
-		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut)
+		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
 		if err != nil {
 			if first {
 				first = false
@@ -789,11 +788,11 @@ func (api *TraceAPIImpl) callBlock(
 		return nil, nil, err
 	}
 
-	msgs := make([]types.Message, len(txs))
+	msgs := make([]*types.Message, len(txs))
 	for i, txn := range txs {
 		isBorStateSyncTxn := txn == borStateSyncTxn
 		var txnHash common.Hash
-		var msg types.Message
+		var msg *types.Message
 		var err error
 		if isBorStateSyncTxn {
 			txnHash = borStateSyncTxnHash
@@ -803,14 +802,6 @@ func (api *TraceAPIImpl) callBlock(
 			msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
 			if err != nil {
 				return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
-			}
-
-			// gnosis might have a fee free account here
-			if msg.FeeCap().IsZero() && engine != nil {
-				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					return core.SysCallContract(contract, data, cfg, ibs, header, engine, true /* constCall */)
-				}
-				msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 			}
 		}
 
@@ -916,7 +907,7 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	var txnHash common.Hash
-	var msg types.Message
+	var msg *types.Message
 	if cfg.Bor != nil {
 		txnHash = borStateSyncTxnHash
 		// we use an empty message for bor state sync txn since it gets handled differently
@@ -925,14 +916,6 @@ func (api *TraceAPIImpl) callTransaction(
 		msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
 			return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
-		}
-
-		// gnosis might have a fee free account here
-		if msg.FeeCap().IsZero() && engine != nil {
-			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, cfg, ibs, header, engine, true /* constCall */)
-			}
-			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
 	}
 

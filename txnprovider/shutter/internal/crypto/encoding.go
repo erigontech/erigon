@@ -25,7 +25,6 @@ import (
 	blst "github.com/supranational/blst/bindings/go"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 var (
@@ -141,12 +140,12 @@ func (eonPublicKey *EonPublicKey) Unmarshal(m []byte) error {
 
 // MarshalText serializes the eon public key to hex.
 func (eonPublicKey EonPublicKey) MarshalText() ([]byte, error) {
-	return hexutility.Bytes(eonPublicKey.Marshal()).MarshalText()
+	return hexutil.Bytes(eonPublicKey.Marshal()).MarshalText()
 }
 
 // UnmarshalText deserializes the eon public key from hex.
 func (eonPublicKey *EonPublicKey) UnmarshalText(input []byte) error {
-	var b hexutility.Bytes
+	var b hexutil.Bytes
 	if err := b.UnmarshalText(input); err != nil {
 		return err
 	}
@@ -210,12 +209,12 @@ func (epochSecretKey *EpochSecretKey) Unmarshal(m []byte) error {
 
 // MarshalText serializes the epoch secret key to hex.
 func (epochSecretKey EpochSecretKey) MarshalText() ([]byte, error) { //nolint: unparam
-	return []byte(hexutility.Encode(epochSecretKey.Marshal())), nil
+	return []byte(hexutil.Encode(epochSecretKey.Marshal())), nil
 }
 
 // UnmarshalText deserializes the epoch secret key from hex.
 func (epochSecretKey *EpochSecretKey) UnmarshalText(input []byte) error {
-	var b hexutility.Bytes
+	var b hexutil.Bytes
 	if err := b.UnmarshalText(input); err != nil {
 		return err
 	}
@@ -224,7 +223,7 @@ func (epochSecretKey *EpochSecretKey) UnmarshalText(input []byte) error {
 
 // MarshalText serializes the block to hex.
 func (block Block) MarshalText() ([]byte, error) { //nolint:unparam
-	return []byte(hexutility.Encode(block[:])), nil
+	return []byte(hexutil.Encode(block[:])), nil
 }
 
 // UnmarshalText deserializes the block from hex.
@@ -236,7 +235,7 @@ func (block *Block) UnmarshalText(b []byte) error {
 
 // MarshalText serializes the encrypted message to hex.
 func (m EncryptedMessage) MarshalText() ([]byte, error) { //nolint:unparam
-	return []byte(hexutility.Encode(m.Marshal())), nil
+	return []byte(hexutil.Encode(m.Marshal())), nil
 }
 
 // UnmarshalText deserializes the encrypted message from hex.
@@ -286,7 +285,7 @@ func (g *Gammas) Unmarshal(m []byte) error {
 
 // MarshalText serializes the gammas as hex.
 func (g *Gammas) MarshalText() ([]byte, error) {
-	return []byte(hexutility.Encode(g.Marshal())), nil
+	return []byte(hexutil.Encode(g.Marshal())), nil
 }
 
 // UnmarshalText deserializes the gammas from hex.

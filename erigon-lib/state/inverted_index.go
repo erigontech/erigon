@@ -57,6 +57,8 @@ type InvertedIndex struct {
 	iiCfg
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
+	aggregationStep uint64 // amount of transactions inside single aggregation step
+
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
@@ -78,11 +80,10 @@ type iiCfg struct {
 	salt *uint32
 	dirs datadir.Dirs
 
-	filenameBase    string // filename base for all files of this inverted index
-	aggregationStep uint64 // amount of transactions inside single aggregation step
-	keysTable       string // bucket name for index keys;    txnNum_u64 -> key (k+auto_increment)
-	valuesTable     string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
-	name            kv.InvertedIdx
+	filenameBase string // filename base for all files of this inverted index
+	keysTable    string // bucket name for index keys;    txnNum_u64 -> key (k+auto_increment)
+	valuesTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
+	name         kv.InvertedIdx
 
 	withExistence bool                // defines if existence index should be built
 	compression   seg.FileCompression // compression type for inverted index keys and values
@@ -99,15 +100,12 @@ type iiVisible struct {
 	caches *sync.Pool
 }
 
-func NewInvertedIndex(cfg iiCfg, logger log.Logger) (*InvertedIndex, error) {
+func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIndex, error) {
 	if cfg.dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
 	if cfg.filenameBase == "" {
 		panic("assert: empty `filenameBase`")
-	}
-	if cfg.aggregationStep == 0 {
-		panic("assert: empty `aggregationStep`")
 	}
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
@@ -120,6 +118,11 @@ func NewInvertedIndex(cfg iiCfg, logger log.Logger) (*InvertedIndex, error) {
 		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visible:   newIIVisible(cfg.filenameBase, []visibleFile{}),
 		logger:     logger,
+
+		aggregationStep: aggStep,
+	}
+	if ii.aggregationStep == 0 {
+		panic("assert: empty `aggregationStep`")
 	}
 
 	return &ii, nil
@@ -504,6 +507,10 @@ type MergeRange struct {
 	needMerge bool
 	from      uint64
 	to        uint64
+}
+
+func NewMergeRange(name string, needMerge bool, from uint64, to uint64) *MergeRange {
+	return &MergeRange{name: name, needMerge: needMerge, from: from, to: to}
 }
 
 func (mr *MergeRange) FromTo() (uint64, uint64) {
@@ -1218,18 +1225,14 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	ii.dirtyFiles.Set(fi)
 }
 
-func (ii *InvertedIndex) stepsRangeInDBAsStr(tx kv.Tx) string {
-	a1, a2 := ii.stepsRangeInDB(tx)
-	return fmt.Sprintf("%s: %.1f", ii.filenameBase, a2-a1)
-}
-func (ii *InvertedIndex) stepsRangeInDB(tx kv.Tx) (from, to float64) {
-	fst, _ := kv.FirstKey(tx, ii.keysTable)
+func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	fst, _ := kv.FirstKey(tx, iit.ii.keysTable)
 	if len(fst) > 0 {
-		from = float64(binary.BigEndian.Uint64(fst)) / float64(ii.aggregationStep)
+		from = float64(binary.BigEndian.Uint64(fst)) / float64(iit.ii.aggregationStep)
 	}
-	lst, _ := kv.LastKey(tx, ii.keysTable)
+	lst, _ := kv.LastKey(tx, iit.ii.keysTable)
 	if len(lst) > 0 {
-		to = float64(binary.BigEndian.Uint64(lst)) / float64(ii.aggregationStep)
+		to = float64(binary.BigEndian.Uint64(lst)) / float64(iit.ii.aggregationStep)
 	}
 	if to == 0 {
 		to = from
