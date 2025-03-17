@@ -382,6 +382,13 @@ func (et *KsmEonTracker) readEonAtKeyperSetAddedEvent(event *contracts.KeyperSet
 		return Eon{}, false, fmt.Errorf("get eon key: %w", err)
 	}
 	if len(key) == 0 {
+		//
+		// TODO: this needs to actually go into a "future cache"
+		//       & add listening for eon key broadcasts
+		//       then match and add to recent eons
+		//       would also need to handle this cache in cleanup flow
+		//       then remove the `eon, ok` return values and stick to just `error` here
+		//
 		et.logger.Warn(
 			"empty eon key for keyper set added event",
 			"blockNum", event.Raw.BlockNumber,

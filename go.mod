@@ -85,7 +85,8 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/thomaso-mirodin/intmath v0.0.0-20160323211736-5dc6d854e46e
 	github.com/tidwall/btree v1.6.0
-	github.com/ugorji/go/codec v1.2.12
+	github.com/tyler-smith/go-bip32 v1.0.0
+	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/urfave/cli/v2 v2.27.5
 	github.com/valyala/fastjson v1.6.4
 	github.com/vektah/gqlparser/v2 v2.5.22
@@ -130,8 +131,7 @@ require (
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4 // indirect
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect
-	github.com/tyler-smith/go-bip32 v1.0.0 // indirect
-	github.com/tyler-smith/go-bip39 v1.1.0 // indirect
+	github.com/ugorji/go/codec v1.2.12 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.opentelemetry.io/otel/metric v1.31.0 // indirect
@@ -179,7 +179,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elastic/gosigar v0.14.3 // indirect
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250121111444-6cc4c0c1fb89 // indirect
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20250307141809-1a6da4c08b8b // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect

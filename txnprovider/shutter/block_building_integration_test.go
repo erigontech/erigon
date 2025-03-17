@@ -141,6 +141,12 @@ func TestShutterBlockBuilding(t *testing.T) {
 		require.NoError(t, err)
 
 		// build block and verify both txns are included (shutter at beginning of block)
+		//
+		// TODO: is there a possibility of a race condition and flakiness?
+		//       think about it/draw it out
+		//       can add a BuildBlockWithTime func (or add opts to BuildBlock)
+		//       then this will eliminate the race condition with slot times and decryption marks
+		//
 		err = libcommon.Sleep(ctx, time.Until(nextSlotStart))
 		require.NoError(t, err)
 		block, err = uni.cl.BuildBlock(ctx)
@@ -155,19 +161,19 @@ func TestShutterBlockBuilding(t *testing.T) {
 
 	t.Run("build shutter block after eon change", func(t *testing.T) {
 		//
-		// TODO
+		//  TODO
 		//
 	})
 
 	t.Run("build shutter block without breaching encrypted gas limit", func(t *testing.T) {
 		//
-		// TODO
+		//  TODO
 		//
 	})
 
 	t.Run("build shutter block without blob txns", func(t *testing.T) {
 		//
-		// TODO
+		//  TODO
 		//
 	})
 }
@@ -209,7 +215,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	t.Cleanup(cleanDecryptionKeySenderPort)
 
 	//
-	// TODO - double check all erigon ports are set to avoid clashes
+	//   TODO - double check all erigon ports are set to avoid clashes
 	//
 
 	const localhost = "127.0.0.1"

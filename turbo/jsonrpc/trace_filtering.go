@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/ethdb"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
@@ -266,8 +265,8 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 	for _, addr := range req.FromAddress {
 		if addr != nil {
 			it, err := tx.IndexRange(kv.TracesFromIdx, addr.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
-			if errors.Is(err, ethdb.ErrKeyNotFound) {
-				continue
+			if err != nil {
+				return nil, nil, nil, err
 			}
 			allBlocks = stream.Union[uint64](allBlocks, it, order.Asc, -1)
 			fromAddresses[*addr] = struct{}{}
@@ -277,8 +276,8 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 	for _, addr := range req.ToAddress {
 		if addr != nil {
 			it, err := tx.IndexRange(kv.TracesToIdx, addr.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
-			if errors.Is(err, ethdb.ErrKeyNotFound) {
-				continue
+			if err != nil {
+				return nil, nil, nil, err
 			}
 			blocksTo = stream.Union[uint64](blocksTo, it, order.Asc, -1)
 			toAddresses[*addr] = struct{}{}
