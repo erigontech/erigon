@@ -37,7 +37,7 @@ func ReceiptAsOfWithApply(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, tx
 	return r, nil
 }
 
-func FillLogsWithCalculatedFields(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int, blockHash common.Hash, blockNum uint64, txn types.Transaction) (types.Logs, error) {
+func PopulateLogsIndices(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txnIdx int, blockHash common.Hash, blockNum uint64, txn types.Transaction) (types.Logs, error) {
 	_, _, firstLogIndexWithinBlock, err := ReceiptAsOf(tx, txNum+1)
 	if err != nil {
 		return nil, err
