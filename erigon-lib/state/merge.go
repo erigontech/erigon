@@ -701,6 +701,26 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	if !r.any() {
 		return nil, nil, nil
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			var names []string
+			for _, f := range indexFiles {
+				if f == nil || f.decompressor == nil {
+					continue
+				}
+				names = append(names, f.decompressor.FileName())
+			}
+			for _, f := range historyFiles {
+				if f == nil || f.decompressor == nil {
+					continue
+				}
+				names = append(names, f.decompressor.FileName())
+			}
+			log.Info("[dbg] panic while merging files", "files", names)
+			panic(r)
+		}
+	}()
+
 	var closeIndex = true
 	defer func() {
 		if closeIndex {
