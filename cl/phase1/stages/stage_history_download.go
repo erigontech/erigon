@@ -97,6 +97,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
 
+	var initialBeaconBlock *cltypes.SignedBeaconBlock
+
 	var currEth1Progress atomic.Int64
 
 	destinationSlotForEL := uint64(math.MaxUint64)
@@ -113,6 +115,10 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		// handle the case where the block is a CL block including an execution payload
 		if blk.Version() >= clparams.BellatrixVersion {
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
+		}
+
+		if initialBeaconBlock == nil {
+			initialBeaconBlock = blk
 		}
 
 		slot := blk.Block.Slot
@@ -202,26 +208,50 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				speed := blockProgress / ratio
 				prevProgress = currProgress
 
-				if speed == 0 {
+				if speed == 0 || initialBeaconBlock == nil {
 					continue
 				}
+
 				if cfg.sn != nil && cfg.sn.SegmentsMax() == 0 {
 					cfg.sn.OpenFolder()
 				}
+
+				highestBlockSeen := initialBeaconBlock.Block.Slot
+				lowestBlockToReach := cfg.sn.SegmentsMax()
+
 				logArgs = append(logArgs,
 					"slot", currProgress,
 					"blockNumber", currEth1Progress.Load(),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"snapshots", cfg.sn.SegmentsMax(),
 				)
+
 				if cfg.engine != nil && cfg.engine.SupportInsertion() {
 					logArgs = append(logArgs, "frozenBlocks", cfg.engine.FrozenBlocks(ctx))
+					if !isBackfilling.Load() {
+						// If we are not backfilling, we are in the EL phase
+						highestBlockSeen = initialBeaconBlock.Block.Body.ExecutionPayload.BlockNumber
+						lowestBlockToReach = cfg.engine.FrozenBlocks(ctx)
+					}
 				}
+
 				logMsg := "Node is still syncing... downloading past blocks"
 				if isBackfilling.Load() {
 					logMsg = "Node has finished syncing... full history is being downloaded for archiving purposes"
 				}
-				logger.Info(logMsg, logArgs...)
+				// Log the progress for debugging
+				logger.Debug(logMsg, logArgs...)
+
+				if !isBackfilling.Load() {
+					logger.Info("Downloading History", "progress",
+						fmt.Sprintf("%d/%d", highestBlockSeen-uint64(currEth1Progress.Load()), highestBlockSeen-lowestBlockToReach),
+						"blk/sec", fmt.Sprintf("%.1f", speed))
+				} else {
+					logger.Info("Downloading History", "progress",
+						fmt.Sprintf("%d/%d", highestBlockSeen-currProgress, highestBlockSeen-lowestBlockToReach),
+						"blk/sec", fmt.Sprintf("%.1f", speed))
+				}
+				// More UX-friendly logging
 			case <-finishCh:
 				return
 			case <-ctx.Done():

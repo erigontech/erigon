@@ -244,6 +244,9 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			if timeProgress > 0 {
 				estimatedTimeRemaining = time.Duration(float64(progressMade)/(float64(currentSlot.Load()-prevProgress)/float64(secsPerLog))) * time.Second
 			}
+			if distFromChainTip < 0 || estimatedTimeRemaining < 0 {
+				continue
+			}
 			prevProgress = currentSlot.Load()
 			logger.Info("[Caplin] Forward Sync", "progress", currentSlot.Load(), "distance-from-chain-tip", distFromChainTip, "estimated-time-remaining", estimatedTimeRemaining)
 		default:
