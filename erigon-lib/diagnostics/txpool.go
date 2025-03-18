@@ -65,10 +65,24 @@ func (ti ProcessedRemoteTxnsUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
+type ChangePoolUpdate struct {
+	Txns []TxnPool `json:"txns"`
+}
+
+type TxnPool struct {
+	IDHash [32]byte `json:"hash"`
+	Pool   string   `json:"pool"`
+}
+
+func (ti ChangePoolUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
 func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnIncommingTxnListener(rootCtx)
 	d.runOnProcessedRemoteTxnsListener(rootCtx)
 	d.SetupNotifier()
+	d.runOnChangePoolListener(rootCtx)
 }
 
 func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
@@ -107,6 +121,27 @@ func (d *DiagnosticClient) runOnProcessedRemoteTxnsListener(rootCtx context.Cont
 					MessageType: "txpool",
 					Message:     info,
 				})*/
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnChangePoolListener(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[ChangePoolUpdate](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(ChangePoolUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				fmt.Println(info)
+				d.Notify(DiagMessages{
+					MessageType: "txpool_update",
+					Message:     info,
+				})
 			}
 		}
 	}()
