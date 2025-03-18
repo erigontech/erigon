@@ -414,6 +414,12 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		}
 		return nil, libcommon.Address{}, 0, err
 	}
+	nonEmptyStorage, err := evm.intraBlockState.HasAtLeastOneStorage(address)
+	if err != nil || nonEmptyStorage {
+		fmt.Printf("check nonEmptyStorage: %v, err: %v\n", nonEmptyStorage, err)
+		err = ErrContractAddressCollision
+		return nil, libcommon.Address{}, 0, err
+	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
 	evm.intraBlockState.CreateAccount(address, true)
