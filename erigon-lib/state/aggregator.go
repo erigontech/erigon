@@ -192,36 +192,34 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	return salt, nil
 }
 
-func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, logger log.Logger) (err error) {
+func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
 	cfg := Schema[name]
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
 	cfg.hist.iiCfg.salt = salt
 	cfg.hist.iiCfg.dirs = dirs
-	cfg.hist.iiCfg.aggregationStep = aggregationStep
-	a.d[name], err = NewDomain(cfg, logger)
+	a.d[name], err = NewDomain(cfg, a.aggregationStep, logger)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
+func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
 	idxCfg := iiCfg{
 		salt: salt, dirs: dirs,
-		aggregationStep: aggregationStep,
-		filenameBase:    filenameBase,
-		keysTable:       indexKeysTable,
-		valuesTable:     indexTable,
-		compression:     seg.CompressNone,
-		name:            idx,
+		filenameBase: filenameBase,
+		keysTable:    indexKeysTable,
+		valuesTable:  indexTable,
+		compression:  seg.CompressNone,
+		name:         idx,
 	}
 
 	if ii := a.searchII(idx); ii != nil {
 		return fmt.Errorf("inverted index %s already registered", idx)
 	}
 
-	ii, err := NewInvertedIndex(idxCfg, logger)
+	ii, err := NewInvertedIndex(idxCfg, a.aggregationStep, logger)
 	if err != nil {
 		return err
 	}
@@ -780,7 +778,7 @@ func (at *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) uint64 {
 	if txNumInFiles > 0 {
 		txNumInFiles--
 	}
-	return txNumInFiles / at.a.StepSize()
+	return txNumInFiles / at.StepSize()
 }
 
 func (at *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64) {
@@ -1054,7 +1052,7 @@ func (at *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 	txTo := at.a.visibleFilesMinimaxTxNum.Load()
 	if txTo > 0 {
 		// txTo is first txNum in next step, has to go 1 tx behind to get correct step number
-		step = (txTo - 1) / at.a.StepSize()
+		step = (txTo - 1) / at.StepSize()
 	}
 
 	if txFrom == txTo || !at.CanPrune(tx, txTo) {
@@ -1110,7 +1108,7 @@ func (at *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 			at.a.logger.Warn("[snapshots:history] Stat", "err", err)
 			return
 		}
-		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/at.a.StepSize(), bn/1_000))
+		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/at.StepSize(), bn/1_000))
 	}
 	//str2 := make([]string, 0, len(at.storage.files))
 	//for _, item := range at.storage.files {
@@ -1129,7 +1127,7 @@ func (at *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 			return
 		}
 	}
-	firstHistoryIndexBlockInDB, err := tx2block(at.d[kv.AccountsDomain].d.minStepInDB(tx) * at.a.StepSize())
+	firstHistoryIndexBlockInDB, err := tx2block(at.d[kv.AccountsDomain].d.minStepInDB(tx) * at.StepSize())
 	if err != nil {
 		at.a.logger.Warn("[snapshots:history] Stat", "err", err)
 		return
@@ -1284,8 +1282,8 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *RangesV3 
 		if !lmrCom.Equal(&lmrAcc) || !lmrCom.Equal(&lmrSto) {
 			// ensure that we do not make further merge progress until ranges are not equal
 			maxEndTxNum = min(maxEndTxNum, max(lmrAcc.to, lmrSto.to, lmrCom.to))
-			at.a.logger.Warn("findMergeRange: hold further merge", "to", maxEndTxNum/at.a.StepSize(),
-				"acc", lmrAcc.String("", at.a.StepSize()), "sto", lmrSto.String("", at.a.StepSize()), "com", lmrCom.String("", at.a.StepSize()))
+			at.a.logger.Warn("findMergeRange: hold further merge", "to", maxEndTxNum/at.StepSize(),
+				"acc", lmrAcc.String("", at.StepSize()), "sto", lmrSto.String("", at.StepSize()), "com", lmrCom.String("", at.StepSize()))
 		}
 	}
 	for id, d := range at.d {
@@ -1307,8 +1305,8 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *RangesV3 
 					// file for required range exists, hold this domain from merge but allow to merge comitemnt
 					r.domain[k].values = MergeRange{}
 					at.a.logger.Debug("findMergeRange: commitment range is different but file exists in domain, hold further merge",
-						at.d[k].d.filenameBase, dr.values.String("vals", at.a.StepSize()),
-						"commitment", cr.values.String("vals", at.a.StepSize()))
+						at.d[k].d.filenameBase, dr.values.String("vals", at.StepSize()),
+						"commitment", cr.values.String("vals", at.StepSize()))
 					continue
 				}
 				restorePrevRange = true
@@ -1318,7 +1316,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *RangesV3 
 			for k, dr := range &r.domain {
 				r.domain[k].values = MergeRange{}
 				at.a.logger.Debug("findMergeRange: commitment range is different than accounts or storage, cancel kv merge",
-					at.d[k].d.filenameBase, dr.values.String("", at.a.StepSize()))
+					at.d[k].d.filenameBase, dr.values.String("", at.StepSize()))
 			}
 		}
 	}
@@ -1653,6 +1651,21 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 }
 
 // --- Domain part END ---
+
+func (at *AggregatorRoTx) madvNormal() {
+	for _, d := range at.d {
+		for _, f := range d.files {
+			f.src.decompressor.EnableMadvNormal()
+		}
+	}
+}
+func (at *AggregatorRoTx) disableReadAhead() {
+	for _, d := range at.d {
+		for _, f := range d.files {
+			f.src.decompressor.DisableReadAhead()
+		}
+	}
+}
 
 func (at *AggregatorRoTx) Close() {
 	if at == nil || at.a == nil { // invariant: it's safe to call Close multiple times
