@@ -34,4 +34,5 @@ func TestGetConfigsByNetwork(t *testing.T) {
 	testConfig(t, SepoliaNetwork)
 	testConfig(t, GnosisNetwork)
 	testConfig(t, ChiadoNetwork)
+	testConfig(t, HoodiNetwork)
 }
