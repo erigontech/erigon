@@ -1331,12 +1331,6 @@ func EmbeddedSupported(id uint64) bool {
 		id == 10200
 }
 
-// Subset of supported networks where embedded CL is stable enough
-// (sufficient number of light-client peers) as to be enabled by default
-func EmbeddedEnabledByDefault(id uint64) bool {
-	return id == 1 || id == 5 || id == 11155111
-}
-
 func SupportBackfilling(networkId uint64) bool {
 	return networkId == uint64(MainnetNetwork) ||
 		networkId == uint64(SepoliaNetwork) ||
