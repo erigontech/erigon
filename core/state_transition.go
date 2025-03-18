@@ -559,14 +559,17 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-	fmt.Printf("tip amount %v to %x\n", amount.String(), coinbase)
-	if st.evm.Config().NoBaseFee && msg.FeeCap().Sign() == 0 && msg.Tip().Sign() == 0 {
-	} else {
 
-		if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
-		}
+	// if st.evm.Config().NoBaseFee && msg.FeeCap().Sign() == 0 && msg.Tip().Sign() == 0 {
+	// } else {
+	// if st.evm.ChainRules().IsArbitrum { // somewhy its false
+	// fmt.Printf("tip amount %v to %x; nitro tip recipient %x;from %x\n", amount.String(), coinbase, tipReceipient, st.msg.From())
+	coinbase = st.msg.From()
+	// }
+	if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
+	// }
 
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
