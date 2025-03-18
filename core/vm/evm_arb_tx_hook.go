@@ -23,6 +23,7 @@ func (evm *EVM) DecrementDepth() {
 }
 
 type TxProcessingHook interface {
+	IsArbitrum() bool                           // returns true if that is arbos.TxProcessor
 	StartTxHook() (bool, uint64, error, []byte) // return 4-tuple rather than *struct to avoid an import cycle
 	GasChargingHook(gasRemaining *uint64) (common.Address, error)
 	PushContract(contract *Contract)
@@ -45,6 +46,8 @@ type TxProcessingHook interface {
 type DefaultTxProcessor struct {
 	evm *EVM
 }
+
+func (p DefaultTxProcessor) IsArbitrum() bool { return false }
 
 func (p DefaultTxProcessor) SetMessage(*types.Message) {}
 

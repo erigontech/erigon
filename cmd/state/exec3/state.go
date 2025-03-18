@@ -212,7 +212,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
 	if rw.chainConfig.IsArbitrum() && txTask.BlockNum > 0 {
-		if rw.evm.ProcessingHook == nil {
+		if rw.evm.ProcessingHook == nil || !rw.evm.ProcessingHook.IsArbitrum() {
 			rw.evm.ProcessingHook = arbos.NewTxProcessorIBS(rw.evm, state.NewArbitrum(rw.ibs), &txTask.TxAsMessage)
 		} else {
 			rw.evm.ProcessingHook.SetMessage(&txTask.TxAsMessage)
@@ -242,7 +242,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{}
 
-			if rw.chainConfig.IsArbitrum() {
+			if rw.chainConfig.IsArbitrum() { // initialize arbos once
 				ibsa := state.NewArbitrum(rw.ibs)
 				accountsPerSync := uint(100000) // const for sep-rollup
 				initMessage, err := arbostypes.GetSepoliaRollupInitMessage()

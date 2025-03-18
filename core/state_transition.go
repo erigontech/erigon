@@ -365,6 +365,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	msg := st.msg
+	coinbase = st.msg.From()
+	// st.evm.Context.Coinbase = msg.From()
 	sender := vm.AccountRef(msg.From())
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
