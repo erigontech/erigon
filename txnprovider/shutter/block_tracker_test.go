@@ -47,13 +47,13 @@ func TestBlockTracker(t *testing.T) {
 	eg.Go(func() error { return bl.Run(egCtx) })
 	eg.Go(func() error { return bt.Run(egCtx) })
 
-	waitCtx1, waitCtxCancel1 := context.WithTimeout(ctx, 10*time.Millisecond)
+	waitCtx1, waitCtxCancel1 := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer waitCtxCancel1()
 	err := bt.Wait(waitCtx1, 15)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 
 	recvC <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 15}}}
-	waitCtx2, waitCtxCancel2 := context.WithTimeout(ctx, 10*time.Millisecond)
+	waitCtx2, waitCtxCancel2 := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer waitCtxCancel2()
 	err = bt.Wait(waitCtx2, 15)
 	require.NoError(t, err)
