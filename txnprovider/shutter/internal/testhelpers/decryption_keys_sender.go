@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"testing"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -109,7 +108,6 @@ func (dks DecryptionKeysSender) Connect(ctx context.Context, port int, peerId pe
 
 func (dks DecryptionKeysSender) PublishDecryptionKeys(
 	ctx context.Context,
-	t *testing.T,
 	ekg EonKeyGeneration,
 	slot uint64,
 	ips shutter.IdentityPreimages,
@@ -121,9 +119,18 @@ func (dks DecryptionKeysSender) PublishDecryptionKeys(
 		signerIndices[i] = uint64(signer.Index)
 	}
 
-	ipsWithSlot := shutter.IdentityPreimages{MakeSlotIdentityPreimage(t, slot)}
+	slotIp, err := MakeSlotIdentityPreimage(slot)
+	if err != nil {
+		return err
+	}
+
+	ipsWithSlot := shutter.IdentityPreimages{slotIp}
 	ipsWithSlot = append(ipsWithSlot, ips...)
-	keys := ekg.DecryptionKeys(t, signers, ipsWithSlot)
+	keys, err := ekg.DecryptionKeys(signers, ipsWithSlot)
+	if err != nil {
+		return err
+	}
+
 	signatureData := shutter.DecryptionKeysSignatureData{
 		InstanceId:        instanceId,
 		Eon:               ekg.EonIndex,
@@ -132,8 +139,12 @@ func (dks DecryptionKeysSender) PublishDecryptionKeys(
 		IdentityPreimages: ipsWithSlot.ToListSSZ(),
 	}
 
-	sigs := Signatures(t, signers, signatureData)
-	keysEnvelope := MockDecryptionKeysEnvelopeData(t, MockDecryptionKeysEnvelopeDataOptions{
+	sigs, err := Signatures(signers, signatureData)
+	if err != nil {
+		return err
+	}
+
+	keysEnvelope, err := MockDecryptionKeysEnvelopeData(MockDecryptionKeysEnvelopeDataOptions{
 		EonIndex:      ekg.EonIndex,
 		Keys:          keys,
 		Slot:          slot,
@@ -143,6 +154,9 @@ func (dks DecryptionKeysSender) PublishDecryptionKeys(
 		Signatures:    sigs,
 		Version:       shutterproto.EnvelopeVersion,
 	})
+	if err != nil {
+		return err
+	}
 
 	dks.logger.Debug("publishing decryption keys", "slot", slot, "keys", len(keys))
 	return dks.topic.Publish(ctx, keysEnvelope)

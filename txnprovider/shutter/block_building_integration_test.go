@@ -80,7 +80,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 	t.Run("deploy first keyper set", func(t *testing.T) {
 		currentBlock, err := uni.rpcApiClient.BlockNumber()
 		require.NoError(t, err)
-		ekg := testhelpers.MockEonKeyGeneration(t, shutter.EonIndex(0), 1, 2, currentBlock+1)
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, currentBlock+1)
+		require.NoError(t, err)
 		_, _, err = uni.contractsDeployer.DeployKeyperSet(ctx, uni.contractsDeployment, ekg)
 		require.NoError(t, err)
 		uni.ekgs[ekg.EonIndex] = ekg
@@ -97,7 +98,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 		require.True(t, ok)
 		encryptedSubmission, err := uni.transactor.SubmitEncryptedTransfer(ctx, sender1, receiver, amount, ekg.Eon())
 		require.NoError(t, err)
-		block, err := uni.shutterCoordinator.BuildBlock(ctx, t, ekg)
+		block, err := uni.shutterCoordinator.BuildBlock(ctx, ekg)
 		require.NoError(t, err)
 		err = testhelpers.VerifyTxnsInclusion(block, encryptedSubmission.SubmissionTxn.Hash())
 		require.NoError(t, err)
@@ -107,7 +108,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 		require.NoError(t, err)
 
 		// send decryption keys to block builder, build block and verify both txns are included (shutter at beginning of block)
-		block, err = uni.shutterCoordinator.BuildBlock(ctx, t, ekg, encryptedSubmission.IdentityPreimage)
+		block, err = uni.shutterCoordinator.BuildBlock(ctx, ekg, encryptedSubmission.IdentityPreimage)
 		require.NoError(t, err)
 		err = testhelpers.VerifyTxnsOrderedInclusion(
 			block,
@@ -156,15 +157,20 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	logger := testlog.Logger(t, log.LvlDebug)
 	dataDir := t.TempDir()
 	dirs := datadir.New(dataDir)
-	sentryPort, cleanSentryPort := testhelpers.ConsumeFreeTcpPort(t)
+	sentryPort, cleanSentryPort, err := testhelpers.ConsumeFreeTcpPort()
+	require.NoError(t, err)
 	t.Cleanup(cleanSentryPort)
-	engineApiPort, cleanEngineApiPort := testhelpers.ConsumeFreeTcpPort(t)
+	engineApiPort, cleanEngineApiPort, err := testhelpers.ConsumeFreeTcpPort()
+	require.NoError(t, err)
 	t.Cleanup(cleanEngineApiPort)
-	jsonRpcPort, cleanJsonRpcPort := testhelpers.ConsumeFreeTcpPort(t)
+	jsonRpcPort, cleanJsonRpcPort, err := testhelpers.ConsumeFreeTcpPort()
+	require.NoError(t, err)
 	t.Cleanup(cleanJsonRpcPort)
-	shutterPort, cleanShutterPort := testhelpers.ConsumeFreeTcpPort(t)
+	shutterPort, cleanShutterPort, err := testhelpers.ConsumeFreeTcpPort()
+	require.NoError(t, err)
 	t.Cleanup(cleanShutterPort)
-	decryptionKeySenderPort, cleanDecryptionKeySenderPort := testhelpers.ConsumeFreeTcpPort(t)
+	decryptionKeySenderPort, cleanDecryptionKeySenderPort, err := testhelpers.ConsumeFreeTcpPort()
+	require.NoError(t, err)
 	t.Cleanup(cleanDecryptionKeySenderPort)
 
 	const localhost = "127.0.0.1"

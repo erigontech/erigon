@@ -18,7 +18,6 @@ package testhelpers
 
 import (
 	"context"
-	"testing"
 
 	enginetypes "github.com/erigontech/erigon/turbo/engineapi/engine_types"
 	"github.com/erigontech/erigon/txnprovider/shutter"
@@ -47,12 +46,11 @@ func NewShutterBlockBuildingCoordinator(
 
 func (c ShutterBlockBuildingCoordinator) BuildBlock(
 	ctx context.Context,
-	t *testing.T,
 	ekg EonKeyGeneration,
 	ips ...*shutter.IdentityPreimage,
 ) (*enginetypes.ExecutionPayload, error) {
 	slot := c.slotCalculator.CalcCurrentSlot()
-	err := c.dks.PublishDecryptionKeys(ctx, t, ekg, slot, ips, c.instanceId)
+	err := c.dks.PublishDecryptionKeys(ctx, ekg, slot, ips, c.instanceId)
 	if err != nil {
 		return nil, err
 	}
