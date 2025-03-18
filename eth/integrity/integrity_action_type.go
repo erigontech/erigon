@@ -35,5 +35,5 @@ var AllChecks = []Check{
 }
 
 var NonDefaultChecks = []Check{
-	BorMilestones,
+	BorMilestones, ReceiptsNoDups,
 }
