@@ -77,9 +77,10 @@ func (bl BlockListener) Run(ctx context.Context) error {
 		bl.events.NotifySync(blockEvent)
 	}
 
-	if ctx.Err() != nil {
+	select {
+	case <-ctx.Done():
 		return ctx.Err()
+	default:
+		return fmt.Errorf("block listener sub.Recv: %w", err)
 	}
-
-	return fmt.Errorf("block listener sub.Recv: %w", err)
 }

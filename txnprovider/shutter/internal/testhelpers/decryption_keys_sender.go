@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"testing"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/txnprovider/shutter"
+	shutterproto "github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 )
 
 type DecryptionKeysSender struct {
@@ -41,6 +43,8 @@ type DecryptionKeysSender struct {
 }
 
 func DialDecryptionKeysSender(ctx context.Context, logger log.Logger, port int, key libp2pcrypto.PrivKey) (DecryptionKeysSender, error) {
+	logger = logger.New("component", "decryption-key-sender")
+
 	addr, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/" + strconv.FormatInt(int64(port), 10))
 	if err != nil {
 		return DecryptionKeysSender{}, err
@@ -56,7 +60,7 @@ func DialDecryptionKeysSender(ctx context.Context, logger log.Logger, port int, 
 		return DecryptionKeysSender{}, err
 	}
 
-	logger.Debug("decryption key sender p2p host initialised", "addr", addr, "id", p2pHost.ID())
+	logger.Debug("p2p host initialised", "addr", addr, "id", p2pHost.ID())
 	gossipSub, err := pubsub.NewGossipSub(ctx, p2pHost)
 	if err != nil {
 		return DecryptionKeysSender{}, err
@@ -103,8 +107,45 @@ func (dks DecryptionKeysSender) Connect(ctx context.Context, port int, peerId pe
 	return nil
 }
 
-func (dks DecryptionKeysSender) PublishDecryptionKeys(ctx context.Context, msg []byte) error {
-	return dks.topic.Publish(ctx, msg)
+func (dks DecryptionKeysSender) PublishDecryptionKeys(
+	ctx context.Context,
+	t *testing.T,
+	ekg EonKeyGeneration,
+	slot uint64,
+	ips shutter.IdentityPreimages,
+	instanceId uint64,
+) error {
+	signers := ekg.Keypers[:ekg.Threshold]
+	signerIndices := make([]uint64, len(signers))
+	for i, signer := range signers {
+		signerIndices[i] = uint64(signer.Index)
+	}
+
+	ipsWithSlot := shutter.IdentityPreimages{MakeSlotIdentityPreimage(t, slot)}
+	ipsWithSlot = append(ipsWithSlot, ips...)
+	keys := ekg.DecryptionKeys(t, signers, ipsWithSlot)
+	signatureData := shutter.DecryptionKeysSignatureData{
+		InstanceId:        instanceId,
+		Eon:               ekg.EonIndex,
+		Slot:              slot,
+		TxnPointer:        0,
+		IdentityPreimages: ipsWithSlot.ToListSSZ(),
+	}
+
+	sigs := Signatures(t, signers, signatureData)
+	keysEnvelope := MockDecryptionKeysEnvelopeData(t, MockDecryptionKeysEnvelopeDataOptions{
+		EonIndex:      ekg.EonIndex,
+		Keys:          keys,
+		Slot:          slot,
+		TxnPointer:    0,
+		InstanceId:    instanceId,
+		SignerIndices: signerIndices,
+		Signatures:    sigs,
+		Version:       shutterproto.EnvelopeVersion,
+	})
+
+	dks.logger.Debug("publishing decryption keys", "slot", slot, "keys", len(keys))
+	return dks.topic.Publish(ctx, keysEnvelope)
 }
 
 func (dks DecryptionKeysSender) Close() error {

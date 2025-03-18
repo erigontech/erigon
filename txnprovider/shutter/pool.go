@@ -178,47 +178,62 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 		return nil, err
 	}
 
+	// Note: specs say to produce empty block in case decryption keys do not arrive on time.
+	// However, upon discussion with Shutter and Nethermind it was agreed that this is not
+	// practical at this point in time as it can hurt validator rewards across the network,
+	// and also it doesn't in any way prevent any cheating from happening.
+	// To properly address cheating, we need a mechanism for slashing which is a future
+	// work stream item for the Shutter team. For now, we follow what Nethermind does
+	// and fallback to the public devp2p mempool - any changes to this should be
+	// co-ordinated with them.
+	blockNum := parentBlockNum + 1
 	decryptionMark := DecryptionMark{Slot: slot, Eon: eon.Index}
 	slotAge := p.slotCalculator.CalcSlotAge(slot)
-	keysWaitTime := p.config.MaxDecryptionKeysDelay - slotAge
-	decryptionWaitCtx, decryptionWaitCtxCancel := context.WithTimeout(ctx, keysWaitTime)
-	defer decryptionWaitCtxCancel()
-	err = p.decryptedTxnsPool.Wait(decryptionWaitCtx, decryptionMark)
-	if err != nil {
+	if slotAge < p.config.MaxDecryptionKeysDelay {
+		keysWaitTime := p.config.MaxDecryptionKeysDelay - slotAge
+		p.logger.Debug(
+			"waiting for decryption keys",
+			"slot", slot,
+			"eon", eon.Index,
+			"age", slotAge,
+			"blockNum", blockNum,
+			"timeout", keysWaitTime,
+		)
+
+		decryptionWaitCtx, decryptionWaitCtxCancel := context.WithTimeout(ctx, keysWaitTime)
+		defer decryptionWaitCtxCancel()
+		err = p.decryptedTxnsPool.Wait(decryptionWaitCtx, decryptionMark)
 		if errors.Is(err, context.DeadlineExceeded) {
 			p.logger.Warn(
 				"decryption keys wait timeout, falling back to base txn provider",
 				"slot", slot,
+				"eon", eon.Index,
 				"age", slotAge,
-				"blockNum", parentBlockNum+1,
+				"blockNum", blockNum,
 				"timeout", keysWaitTime,
 			)
 
-			// Note: specs say to produce empty block in case decryption keys do not arrive on time.
-			// However, upon discussion with Shutter and Nethermind it was agreed that this is not
-			// practical at this point in time as it can hurt validator rewards across the network,
-			// and also it doesn't in any way prevent any cheating from happening.
-			// To properly address cheating, we need a mechanism for slashing which is a future
-			// work stream item for the Shutter team. For now, we follow what Nethermind does
-			// and fallback to the public devp2p mempool - any changes to this should be
-			// co-ordinated with them.
 			return p.baseTxnProvider.ProvideTxns(ctx, opts...)
 		}
-
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return p.provide(ctx, decryptionMark, opts...)
-}
-
-func (p Pool) provide(ctx context.Context, mark DecryptionMark, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
-	decryptedTxns, ok := p.decryptedTxnsPool.DecryptedTxns(mark)
+	decryptedTxns, ok := p.decryptedTxnsPool.DecryptedTxns(decryptionMark)
 	if !ok {
-		return nil, fmt.Errorf("unexpected missing decrypted txns for mark: slot=%d, eon=%d", mark.Slot, mark.Eon)
+		p.logger.Warn(
+			"decryption keys missing, falling back to base txn provider",
+			"slot", slot,
+			"eon", eon.Index,
+			"age", slotAge,
+			"blockNum", blockNum,
+		)
+
+		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	}
 
 	decryptedTxnsGas := decryptedTxns.TotalGasLimit
-	provideOpts := txnprovider.ApplyProvideOptions(opts...)
 	totalGasTarget := provideOpts.GasTarget
 	if decryptedTxnsGas > totalGasTarget {
 		// note this should never happen because EncryptedGasLimit must always be <= gasLimit for a block
