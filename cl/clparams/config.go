@@ -1074,7 +1074,6 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.MaxBlobsPerBlockElectra = 9
 	cfg.BlobSidecarSubnetCountElectra = 9
 
-	// cfg.BaseRewardFactor = 64
 	cfg.SlotsPerEpoch = 32
 	cfg.EpochsPerSyncCommitteePeriod = 256
 	cfg.MinPerEpochChurnLimit = 4
