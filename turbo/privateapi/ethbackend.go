@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -81,7 +82,7 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
-	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore,
+	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
 ) *EthBackendServer {
 	s := &EthBackendServer{
 		ctx:                   ctx,
@@ -92,6 +93,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifi
 		logsFilter:            NewLogsFilterAggregator(notifications.Events),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
+		chainConfig:           chainConfig,
 	}
 
 	ch, clean := s.notifications.Events.AddLogsSubscription()
@@ -450,10 +452,11 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	_, txContext, err := transactions.ComputeTxContext(ibs, nil, nil, nil, currentBlock, s.chainConfig, 0)
 
 	ot := commands.NewOpcodeTracer(header.Number.Uint64(), true, false)
-	_ = vm.NewEVM(blockContext, txContext, ibs, s.chainConfig, vm.Config{Tracer: ot, ReadOnly: true})
-	_ = aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit
+	evm := vm.NewEVM(blockContext, txContext, ibs, s.chainConfig, vm.Config{Tracer: ot, ReadOnly: true})
+	validationGasLimit := aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit
+	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(core.GasPool).AddGas(validationGasLimit), header, evm, s.chainConfig)
 
-	// call validation and read tracer
+	// read tracer
 
 	return &remote.AAValidationReply{Valid: err == nil}, nil
 }

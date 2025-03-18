@@ -589,6 +589,7 @@ type Rules struct {
 	IsCancun, IsNapoli                                bool
 	IsPrague, IsOsaka                                 bool
 	IsAura                                            bool
+	IsAA                                              bool // TODO: set from config
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance

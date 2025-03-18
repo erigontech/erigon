@@ -118,6 +118,8 @@ const (
 	NoAuthorizations     DiscardReason = 32 // EIP-7702 transactions with an empty authorization list are invalid
 	GasLimitTooHigh      DiscardReason = 33 // Gas limit is too high
 	ErrAuthorityReserved DiscardReason = 34 // EIP-7702 transaction with authority already reserved
+	InvalidAA            DiscardReason = 35 // Invalid RIP-7560 transaction
+	ErrGetCode           DiscardReason = 36 // Error getting code during AA validation
 )
 
 func (r DiscardReason) String() string {
@@ -192,6 +194,10 @@ func (r DiscardReason) String() string {
 		return "blob_versioned_hashes, blobs, commitments and proofs must have equal number"
 	case ErrAuthorityReserved:
 		return "EIP-7702 transaction with authority already reserved"
+	case InvalidAA:
+		return "RIP-7560 transaction failed validation"
+	case ErrGetCode:
+		return "error getting account code during RIP-7560 validation"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
