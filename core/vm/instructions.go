@@ -1023,3 +1023,30 @@ func makeSwap(size int64) executionFunc {
 		return nil, nil
 	}
 }
+
+// Arbitrum: adaptation of opBlockHash that doesn't require an EVM interpreter
+// func BlockHashOp(evm *EVM, block *big.Int) common.Hash {
+// 	if !block.IsUint64() {
+// 		return common.Hash{}
+// 	}
+// 	num64 := block.Uint64()
+// 	upper, err := evm.ProcessingHook.L1BlockNumber(evm.Context)
+// 	if err != nil {
+// 		return common.Hash{}
+// 	}
+
+// 	var lower uint64
+// 	if upper <= params.BlockHashOldWindow {
+// 		lower = 0
+// 	} else {
+// 		lower = upper - params.BlockHashOldWindow
+// 	}
+// 	if num64 >= lower && num64 < upper {
+// 		hash, err := evm.ProcessingHook.L1BlockHash(evm.Context, num64)
+// 		if err != nil {
+// 			return common.Hash{}
+// 		}
+// 		return hash
+// 	}
+// 	return common.Hash{}
+// }

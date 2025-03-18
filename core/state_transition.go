@@ -296,6 +296,21 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 
+	// Check that the user is paying at least the current blob fee
+	// if st.evm.ChainConfig().IsCancun(st.evm.Context.BlockNumber, st.evm.Context.Time, st.evm.Context.ArbOSVersion) {
+	// 	if st.blobGasUsed() > 0 {
+	// 		// Skip the checks if gas fields are zero and blobBaseFee was explicitly disabled (eth_call)
+	// 		skipCheck := st.evm.Config.NoBaseFee && msg.BlobGasFeeCap.BitLen() == 0
+	// 		if !skipCheck {
+	// 			// This will panic if blobBaseFee is nil, but blobBaseFee presence
+	// 			// is verified as part of header validation.
+	// 			if msg.BlobGasFeeCap.Cmp(st.evm.Context.BlobBaseFee) < 0 {
+	// 				return fmt.Errorf("%w: address %v blobGasFeeCap: %v, blobBaseFee: %v", ErrBlobFeeCapTooLow,
+	// 					msg.From.Hex(), msg.BlobGasFeeCap, st.evm.Context.BlobBaseFee)
+	// 			}
+	// 		}
+	// 	}
+	// }
 	return st.buyGas(gasBailout)
 }
 
