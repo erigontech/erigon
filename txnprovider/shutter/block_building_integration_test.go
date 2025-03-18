@@ -200,22 +200,16 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	logger := testlog.Logger(t, log.LvlDebug)
 	dataDir := t.TempDir()
 	dirs := datadir.New(dataDir)
-	p2pPort, cleanP2pPort := testhelpers.ConsumeFreeTcpPort(t)
-	t.Cleanup(cleanP2pPort)
+	sentryPort, cleanSentryPort := testhelpers.ConsumeFreeTcpPort(t)
+	t.Cleanup(cleanSentryPort)
 	engineApiPort, cleanEngineApiPort := testhelpers.ConsumeFreeTcpPort(t)
 	t.Cleanup(cleanEngineApiPort)
 	jsonRpcPort, cleanJsonRpcPort := testhelpers.ConsumeFreeTcpPort(t)
 	t.Cleanup(cleanJsonRpcPort)
-	sentryPort, cleanSentryPort := testhelpers.ConsumeFreeTcpPort(t)
-	t.Cleanup(cleanSentryPort)
 	shutterPort, cleanShutterPort := testhelpers.ConsumeFreeTcpPort(t)
 	t.Cleanup(cleanShutterPort)
 	decryptionKeySenderPort, cleanDecryptionKeySenderPort := testhelpers.ConsumeFreeTcpPort(t)
 	t.Cleanup(cleanDecryptionKeySenderPort)
-
-	//
-	//   TODO - double check all erigon ports are set to avoid clashes
-	//
 
 	const localhost = "127.0.0.1"
 	httpConfig := httpcfg.HttpCfg{
@@ -237,7 +231,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		Dirs: dirs,
 		Http: httpConfig,
 		P2P: p2p.Config{
-			ListenAddr:      fmt.Sprintf("127.0.0.1:%d", p2pPort),
+			ListenAddr:      fmt.Sprintf("127.0.0.1:%d", sentryPort),
 			MaxPeers:        1,
 			MaxPendingPeers: 1,
 			NoDiscovery:     true,
