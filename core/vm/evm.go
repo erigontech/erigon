@@ -403,7 +403,7 @@ func (evm *EVM) OverlayCreate(caller ContractRef, codeAndHash *codeAndHash, gas 
 
 // create creates a new contract using code as deployment code.
 func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address libcommon.Address, typ OpCode, input []byte,
-	incrementNonce, bailout bool, allowEOF bool) ([]byte, libcommon.Address, uint64, error) {
+		incrementNonce, bailout bool, allowEOF bool) ([]byte, libcommon.Address, uint64, error) {
 	var ret []byte
 	var err error
 	var gasConsumption uint64
@@ -496,6 +496,13 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 	if nonce != 0 || (contractHash != (libcommon.Hash{}) && contractHash != trie.EmptyCodeHash) {
 		fmt.Println("Hitting this error")
+		err = ErrContractAddressCollision
+		return nil, libcommon.Address{}, 0, err
+	}
+
+	nonEmptyStorage, err := evm.intraBlockState.HasAtLeastOneStorage(address)
+	if err != nil || nonEmptyStorage {
+		fmt.Printf("check nonEmptyStorage: %v, err: %v\n", nonEmptyStorage, err)
 		err = ErrContractAddressCollision
 		return nil, libcommon.Address{}, 0, err
 	}

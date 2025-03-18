@@ -727,6 +727,9 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 	return
 }
 
+// This error must be returned by the iterator function to stop the iteration inside IterateStoragePrefix and exit without error
+var IterateStorageEarlyExit = errors.New("early exit")
+
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
 // Such iteration is not intended to be used in public API, therefore it uses read-write transaction
 // inside the domain. Another version of this for public API use needs to be created, that uses
@@ -868,6 +871,9 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		}
 		if len(lastVal) > 0 {
 			if err := it(lastKey, lastVal, lastStep); err != nil {
+				if errors.Is(err, IterateStorageEarlyExit) {
+					return nil
+				}
 				return err
 			}
 		}

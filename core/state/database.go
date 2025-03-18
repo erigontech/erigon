@@ -44,6 +44,12 @@ type StateReader interface {
 	ReadAccountIncarnation(address common.Address) (uint64, error)
 }
 
+type StateReaderEOF interface {
+	StateReader
+	// AddressHaveStorageKeys returns true if address have at least one storage key inside.
+	AddressHaveStorageKeys(address common.Address) (bool, error)
+}
+
 type HistoricalStateReader interface {
 	GetTxNum() uint64
 	SetTxNum(txNum uint64)
