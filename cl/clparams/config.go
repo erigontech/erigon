@@ -326,7 +326,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
-		RespTimeout:                     ConfigDurationSec(10),
+		RespTimeout:                     ConfigDurationSec(10 * time.Second),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
