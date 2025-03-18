@@ -81,7 +81,7 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 		if err != nil {
 			return nil, err
 		}
-		if err := returnState.DecodeSSZ(encodedState, int(clparams.BellatrixVersion)); err != nil {
+		if err := returnState.DecodeSSZ(encodedState, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
 	case clparams.HoodiNetwork:
@@ -90,7 +90,7 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 		if err != nil {
 			return nil, err
 		}
-		if err := returnState.DecodeSSZ(encodedState, int(clparams.BellatrixVersion)); err != nil {
+		if err := returnState.DecodeSSZ(encodedState, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
 	default:
