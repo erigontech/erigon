@@ -1053,7 +1053,7 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.AltairForkEpoch = 0
 	cfg.AltairForkVersion = 0x20000910
 	cfg.BellatrixForkEpoch = 0
-	cfg.BellatrixForkVersion = 0x03017000
+	cfg.BellatrixForkVersion = 0x30000910
 	cfg.CapellaForkEpoch = 0
 	cfg.CapellaForkVersion = 0x40000910
 	cfg.DenebForkEpoch = 0
