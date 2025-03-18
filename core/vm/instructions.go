@@ -484,7 +484,11 @@ func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 }
 
 func opGasprice(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.Push(interpreter.evm.GasPrice)
+	// Arbitrum: provide an opportunity to remove the tip from the gas price
+	gasPrice := interpreter.evm.ProcessingHook.GasPriceOp(interpreter.evm)
+	v, _ := uint256.FromBig(gasPrice)
+	scope.Stack.Push(v)
+	// scope.Stack.Push(interpreter.evm.GasPrice)
 	return nil, nil
 }
 
@@ -497,14 +501,24 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 		return nil, nil
 	}
 	var upper, lower uint64
-	upper = interpreter.evm.Context.BlockNumber
+	// Arbitrum
+	upper, err := interpreter.evm.ProcessingHook.L1BlockNumber(interpreter.evm.Context)
+	if err != nil {
+		return nil, err
+	}
+	// upper = interpreter.evm.Context.BlockNumber // must be returned by default hook
 	if upper <= params.BlockHashOldWindow {
 		lower = 0
 	} else {
 		lower = upper - params.BlockHashOldWindow
 	}
 	if arg64 >= lower && arg64 < upper {
-		arg.SetBytes(interpreter.evm.Context.GetHash(arg64).Bytes())
+		h, err := interpreter.evm.ProcessingHook.L1BlockHash(interpreter.evm.Context, arg64)
+		if err != nil {
+			return nil, err
+		}
+		arg.SetBytes(h.Bytes())
+		// arg.SetBytes(interpreter.evm.Context.GetHash(arg64).Bytes())
 	} else {
 		arg.Clear()
 	}
@@ -523,7 +537,13 @@ func opTimestamp(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 }
 
 func opNumber(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	v := new(uint256.Int).SetUint64(interpreter.evm.Context.BlockNumber)
+	bnum, err := interpreter.evm.ProcessingHook.L1BlockNumber(interpreter.evm.Context)
+	if err != nil {
+		return nil, err
+	}
+
+	v := uint256.NewInt(bnum)
+	// v := new(uint256.Int).SetUint64(interpreter.evm.Context.BlockNumber)
 	scope.Stack.Push(v)
 	return nil, nil
 }
