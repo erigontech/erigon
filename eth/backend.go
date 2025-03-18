@@ -36,8 +36,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv/prune"
-	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
@@ -75,6 +73,7 @@ import (
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -126,6 +125,7 @@ import (
 	"github.com/erigontech/erigon/turbo/execution/eth1"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
+	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -1474,7 +1474,6 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		return nil
 	}
 
-	fmt.Printf("[dbg] hi %s\n", s.config.Snapshot.DownloaderAddr)
 	if s.config.Snapshot.DownloaderAddr != "" {
 		// connect to external Downloader
 		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)

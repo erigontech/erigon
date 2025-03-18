@@ -24,16 +24,16 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 )
 
-type RoundTripper struct {
+type HttpRoundTripper struct {
 	base      http.RoundTripper
 	jwtSecret []byte
 }
 
-func NewHttpRoundTripper(base http.RoundTripper, jwtSecret []byte) *RoundTripper {
-	return &RoundTripper{base: base, jwtSecret: jwtSecret}
+func NewHttpRoundTripper(base http.RoundTripper, jwtSecret []byte) *HttpRoundTripper {
+	return &HttpRoundTripper{base: base, jwtSecret: jwtSecret}
 }
 
-func (t *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *HttpRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"iat": time.Now().Unix(),
 	})

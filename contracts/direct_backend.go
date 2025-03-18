@@ -34,31 +34,31 @@ import (
 	"github.com/erigontech/erigon/turbo/jsonrpc"
 )
 
-var _ bind.ContractBackend = Backend{}
+var _ bind.ContractBackend = DirectBackend{}
 
-type Backend struct {
+type DirectBackend struct {
 	api jsonrpc.EthAPI
 }
 
-func NewDirectBackend(api jsonrpc.EthAPI) Backend {
-	return Backend{
+func NewDirectBackend(api jsonrpc.EthAPI) DirectBackend {
+	return DirectBackend{
 		api: api,
 	}
 }
 
-func (b Backend) CodeAt(ctx context.Context, account libcommon.Address, blockNum *big.Int) ([]byte, error) {
+func (b DirectBackend) CodeAt(ctx context.Context, account libcommon.Address, blockNum *big.Int) ([]byte, error) {
 	return b.api.GetCode(ctx, account, BlockNumArg(blockNum))
 }
 
-func (b Backend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNum *big.Int) ([]byte, error) {
+func (b DirectBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNum *big.Int) ([]byte, error) {
 	return b.api.Call(ctx, CallArgsFromCallMsg(callMsg), BlockNumArg(blockNum), nil)
 }
 
-func (b Backend) PendingCodeAt(ctx context.Context, account libcommon.Address) ([]byte, error) {
+func (b DirectBackend) PendingCodeAt(ctx context.Context, account libcommon.Address) ([]byte, error) {
 	return b.api.GetCode(ctx, account, PendingBlockNumArg())
 }
 
-func (b Backend) PendingNonceAt(ctx context.Context, account libcommon.Address) (uint64, error) {
+func (b DirectBackend) PendingNonceAt(ctx context.Context, account libcommon.Address) (uint64, error) {
 	count, err := b.api.GetTransactionCount(ctx, account, PendingBlockNumArg())
 	if err != nil {
 		return 0, err
@@ -67,7 +67,7 @@ func (b Backend) PendingNonceAt(ctx context.Context, account libcommon.Address) 
 	return uint64(*count), nil
 }
 
-func (b Backend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
+func (b DirectBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
 	price, err := b.api.GasPrice(ctx)
 	if err != nil {
 		return nil, err
@@ -76,7 +76,7 @@ func (b Backend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
 	return price.ToInt(), nil
 }
 
-func (b Backend) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
+func (b DirectBackend) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
 	callArgs := CallArgsFromCallMsg(call)
 	gas, err := b.api.EstimateGas(ctx, &callArgs, nil, nil)
 	if err != nil {
@@ -86,7 +86,7 @@ func (b Backend) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64
 	return gas.Uint64(), nil
 }
 
-func (b Backend) SendTransaction(ctx context.Context, txn types.Transaction) error {
+func (b DirectBackend) SendTransaction(ctx context.Context, txn types.Transaction) error {
 	var buf bytes.Buffer
 	err := txn.MarshalBinary(&buf)
 	if err != nil {
@@ -97,7 +97,7 @@ func (b Backend) SendTransaction(ctx context.Context, txn types.Transaction) err
 	return err
 }
 
-func (b Backend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
+func (b DirectBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
 	logs, err := b.api.GetLogs(ctx, filters.FilterCriteria(query))
 	if err != nil {
 		return nil, err
@@ -111,7 +111,7 @@ func (b Backend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]
 	return res, nil
 }
 
-func (b Backend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
+func (b DirectBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
 	resc, closec := make(chan any), make(chan any)
 	ctx = rpc.ContextWithNotifier(ctx, rpc.NewLocalNotifier("eth", resc, closec))
 	_, err := b.api.Logs(ctx, filters.FilterCriteria(query))
