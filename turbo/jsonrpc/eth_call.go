@@ -342,7 +342,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon
 	sdCtx := domains.GetCommitmentContext()
 
 	// touch account
-	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil)
+	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil, commitment.ReadTouch)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
 	proofTrie, _, err := sdCtx.Witness(ctx, header.Root[:], "eth_getProof")
@@ -389,7 +389,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon
 	if proof.StorageHash.Cmp(libcommon.BytesToHash(commitment.EmptyRootHash)) != 0 && len(storageKeys) != 0 {
 		// touch storage keys
 		for _, storageKey := range storageKeys {
-			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.String()[2:])), nil)
+			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.String()[2:])), nil, commitment.ReadTouch)
 		}
 
 		// generate the trie for proofs, this works by loading the merkle paths to the touched keys
@@ -593,11 +593,10 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	if err != nil {
 		return nil, err
 	}
-	sdCtx := libstate.NewSharedDomainsCommitmentContext(domains, commitment.ModeUpdate, commitment.VariantHexPatriciaTrie)
-	patricieTrie := sdCtx.Trie()
-	hph, ok := patricieTrie.(*commitment.HexPatriciaHashed)
+
+	hph, ok := domains.GetCommitmentContext().GetROTrie().(*commitment.HexPatriciaHashedReader)
 	if !ok {
-		return nil, errors.New("casting to HexPatriciaTrieHashed failed")
+		return nil, errors.New("casting to HexPatriciaTrieHashedReader failed")
 	}
 
 	// execute block #blockNr ephemerally. This will use TrieStateWriter to record touches of accounts and storage keys.
@@ -612,14 +611,14 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 
 	// define these keys as "updates", but we are not really updating anything, we just want to load them into the grid,
 	// so this is just to satisfy the current hex patricia trie api.
-	updates := commitment.NewUpdates(commitment.ModeDirect, api.dirs.Tmp, commitment.KeyToHexNibbleHash)
+	reads := commitment.NewUpdates(commitment.ModeDirect, api.dirs.Tmp, commitment.KeyToHexNibbleHash)
 	for _, key := range touchedPlainKeys {
-		updates.TouchPlainKey(string(key), nil, updates.TouchAccount)
+		reads.TouchPlainKey(string(key), nil, reads.TouchAccount)
 	}
 
 	hph.SetTrace(false) // disable tracing to avoid mixing with trace from witness computation
 	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
-	witnessTrie, witnessRootHash, err := hph.GenerateWitness(ctx, updates, codeReads, prevHeader.Root[:], "computeWitness")
+	witnessTrie, witnessRootHash, err := hph.GenerateWitness(ctx, reads, codeReads, prevHeader.Root[:], "computeWitness")
 	if err != nil {
 		return nil, err
 	}
