@@ -1003,6 +1003,8 @@ func holeskyConfig() BeaconChainConfig {
 	cfg.MinGenesisTime = 1695902100
 	cfg.GenesisForkVersion = 0x01017000
 	cfg.GenesisDelay = 300
+	cfg.SecondsPerSlot = 12
+	cfg.Eth1FollowDistance = 2048
 	cfg.DepositChainID = uint64(HoleskyNetwork)
 	cfg.DepositNetworkID = uint64(HoleskyNetwork)
 
@@ -1027,6 +1029,7 @@ func holeskyConfig() BeaconChainConfig {
 	cfg.InactivityScoreRecoveryRate = 16
 	cfg.EjectionBalance = 28000000000
 	cfg.MinPerEpochChurnLimit = 4
+	cfg.ChurnLimitQuotient = 1 << 16
 	cfg.ProposerScoreBoost = 40
 
 	cfg.InitializeForkSchedule()
