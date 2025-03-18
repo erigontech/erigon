@@ -40,19 +40,20 @@ import (
 
 // CallArgs represents the arguments for a call.
 type CallArgs struct {
-	From                 *libcommon.Address `json:"from"`
-	To                   *libcommon.Address `json:"to"`
-	Gas                  *hexutil.Uint64    `json:"gas"`
-	GasPrice             *hexutil.Big       `json:"gasPrice"`
-	MaxPriorityFeePerGas *hexutil.Big       `json:"maxPriorityFeePerGas"`
-	MaxFeePerGas         *hexutil.Big       `json:"maxFeePerGas"`
-	MaxFeePerBlobGas     *hexutil.Big       `json:"maxFeePerBlobGas"`
-	Value                *hexutil.Big       `json:"value"`
-	Nonce                *hexutil.Uint64    `json:"nonce"`
-	Data                 *hexutility.Bytes  `json:"data"`
-	Input                *hexutility.Bytes  `json:"input"`
-	AccessList           *types.AccessList  `json:"accessList"`
-	ChainID              *hexutil.Big       `json:"chainId,omitempty"`
+	From                 *libcommon.Address        `json:"from"`
+	To                   *libcommon.Address        `json:"to"`
+	Gas                  *hexutil.Uint64           `json:"gas"`
+	GasPrice             *hexutil.Big              `json:"gasPrice"`
+	MaxPriorityFeePerGas *hexutil.Big              `json:"maxPriorityFeePerGas"`
+	MaxFeePerGas         *hexutil.Big              `json:"maxFeePerGas"`
+	MaxFeePerBlobGas     *hexutil.Big              `json:"maxFeePerBlobGas"`
+	Value                *hexutil.Big              `json:"value"`
+	Nonce                *hexutil.Uint64           `json:"nonce"`
+	Data                 *hexutility.Bytes         `json:"data"`
+	Input                *hexutility.Bytes         `json:"input"`
+	AccessList           *types.AccessList         `json:"accessList"`
+	ChainID              *hexutil.Big              `json:"chainId,omitempty"`
+	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 }
 
 // from retrieves the transaction sender address.
@@ -161,6 +162,19 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 	}
 
 	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerBlobGas)
+
+	if args.AuthorizationList != nil {
+		authorizations := make([]types.Authorization, len(args.AuthorizationList))
+		for i, auth := range args.AuthorizationList {
+			var err error
+			authorizations[i], err = auth.ToAuthorization()
+			if err != nil {
+				return nil, err
+			}
+		}
+		msg.SetAuthorizations(authorizations)
+	}
+
 	return msg, nil
 }
 
