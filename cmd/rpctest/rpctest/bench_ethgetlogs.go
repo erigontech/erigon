@@ -155,7 +155,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
 	fmt.Printf("EthGetLogsInvariants: starting %d-%d, latestBlock=%d\n", blockFrom, blockTo, blockNumber.Number)
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
 	_prevBn := blockFrom
