@@ -203,9 +203,9 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 		p.logger.Debug(
 			"waiting for decryption keys",
 			"slot", slot,
+			"blockNum", blockNum,
 			"eon", eon.Index,
 			"age", slotAge,
-			"blockNum", blockNum,
 			"timeout", decryptionMarkWaitTimeout,
 		)
 
