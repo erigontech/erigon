@@ -144,7 +144,6 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 
 		// Process the block
 		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, true); err != nil {
-			fmt.Println("EIP-4844 data not available", err, block.Block.Slot)
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) {
 				// Return an error if EIP-4844 data is not available
 				logger.Trace("[Caplin] forward sync EIP-4844 data not available", "blockSlot", block.Block.Slot)
