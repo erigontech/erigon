@@ -587,8 +587,14 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	poolChanges := make(map[string][][32]byte)
 
 	p.all.ascendAll(func(mt *metaTxn) bool {
-		subpool := mt.currentSubPool.String()
-		poolChanges[subpool] = append(poolChanges[subpool], mt.TxnSlot.IDHash)
+		for i := 0; i < len(announcements.hashes); i += 32 {
+			hash := announcements.hashes[i : i+32]
+			if !bytes.Equal(hash, mt.TxnSlot.IDHash[:]) {
+				continue
+			}
+			subpool := mt.currentSubPool.String()
+			poolChanges[subpool] = append(poolChanges[subpool], mt.TxnSlot.IDHash)
+		}
 		return true
 	})
 
