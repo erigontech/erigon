@@ -55,7 +55,6 @@ import (
 	"github.com/erigontech/erigon/turbo/engineapi"
 	"github.com/erigontech/erigon/turbo/testlog"
 	"github.com/erigontech/erigon/txnprovider/shutter"
-	shutterproto "github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -81,7 +80,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 	t.Run("deploy first keyper set", func(t *testing.T) {
 		currentBlock, err := uni.rpcApiClient.BlockNumber()
 		require.NoError(t, err)
-		ekg := testhelpers.MockEonKeyGeneration(t, shutter.EonIndex(0), 1, 2, currentBlock+1)
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, currentBlock+1)
+		require.NoError(t, err)
 		_, _, err = uni.contractsDeployer.DeployKeyperSet(ctx, uni.contractsDeployment, ekg)
 		require.NoError(t, err)
 		uni.ekgs[ekg.EonIndex] = ekg
@@ -98,7 +98,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 		require.True(t, ok)
 		encryptedSubmission, err := uni.transactor.SubmitEncryptedTransfer(ctx, sender1, receiver, amount, ekg.Eon())
 		require.NoError(t, err)
-		block, err := uni.cl.BuildBlock(ctx)
+		block, err := uni.shutterCoordinator.BuildBlock(ctx, ekg)
 		require.NoError(t, err)
 		err = testhelpers.VerifyTxnsInclusion(block, encryptedSubmission.SubmissionTxn.Hash())
 		require.NoError(t, err)
@@ -107,48 +107,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 		simpleTxn, err := uni.transactor.SubmitSimpleTransfer(sender2, receiver, amount)
 		require.NoError(t, err)
 
-		// send decryption keys to block builder
-		slot := uni.slotCalculator.CalcCurrentSlot()
-		nextSlot := slot + 1
-		nextSlotStart := time.Unix(int64(uni.slotCalculator.CalcSlotStartTimestamp(slot+1)), 0)
-		signers := ekg.Keypers[:1]
-		signerIndices := []uint64{0}
-		ips := shutter.IdentityPreimages{
-			testhelpers.MakeSlotIdentityPreimage(t, nextSlot),
-			encryptedSubmission.IdentityPreimage,
-		}
-		keys := ekg.DecryptionKeys(t, signers, ips)
-		signatureData := shutter.DecryptionKeysSignatureData{
-			InstanceId:        uni.shutterConfig.InstanceId,
-			Eon:               ekg.EonIndex,
-			Slot:              nextSlot,
-			TxnPointer:        0,
-			IdentityPreimages: ips.ToListSSZ(),
-		}
-		sigs := testhelpers.Signatures(t, signers, signatureData)
-		keysEnvelope := testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
-			EonIndex:      ekg.EonIndex,
-			Keys:          keys,
-			Slot:          nextSlot,
-			TxnPointer:    0,
-			InstanceId:    uni.shutterConfig.InstanceId,
-			SignerIndices: signerIndices,
-			Signatures:    sigs,
-			Version:       shutterproto.EnvelopeVersion,
-		})
-		err = uni.decryptionKeySender.PublishDecryptionKeys(ctx, keysEnvelope)
-		require.NoError(t, err)
-
-		// build block and verify both txns are included (shutter at beginning of block)
-		//
-		// TODO: is there a possibility of a race condition and flakiness?
-		//       think about it/draw it out
-		//       can add a BuildBlockWithTime func (or add opts to BuildBlock)
-		//       then this will eliminate the race condition with slot times and decryption marks
-		//
-		err = libcommon.Sleep(ctx, time.Until(nextSlotStart))
-		require.NoError(t, err)
-		block, err = uni.cl.BuildBlock(ctx)
+		// send decryption keys to block builder, build block and verify both txns are included (shutter at beginning of block)
+		block, err = uni.shutterCoordinator.BuildBlock(ctx, ekg, encryptedSubmission.IdentityPreimage)
 		require.NoError(t, err)
 		err = testhelpers.VerifyTxnsOrderedInclusion(
 			block,
@@ -181,8 +141,6 @@ type blockBuildingUniverse struct {
 	rpcApiClient        requests.RequestGenerator
 	contractsDeployer   testhelpers.ContractsDeployer
 	contractsDeployment testhelpers.ContractsDeployment
-	bank                testhelpers.Bank
-	cl                  *testhelpers.MockCl
 	ekgs                map[shutter.EonIndex]testhelpers.EonKeyGeneration
 	acc1PrivKey         *ecdsa.PrivateKey
 	acc1                libcommon.Address
@@ -191,24 +149,28 @@ type blockBuildingUniverse struct {
 	acc3PrivKey         *ecdsa.PrivateKey
 	acc3                libcommon.Address
 	transactor          testhelpers.EncryptedTransactor
-	decryptionKeySender testhelpers.DecryptionKeysSender
 	shutterConfig       shutter.Config
-	slotCalculator      shutter.SlotCalculator
+	shutterCoordinator  testhelpers.ShutterBlockBuildingCoordinator
 }
 
 func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingUniverse {
 	logger := testlog.Logger(t, log.LvlDebug)
 	dataDir := t.TempDir()
 	dirs := datadir.New(dataDir)
-	sentryPort, cleanSentryPort := testhelpers.ConsumeFreeTcpPort(t)
+	sentryPort, cleanSentryPort, err := testhelpers.ConsumeFreeTcpPort()
+	require.NoError(t, err)
 	t.Cleanup(cleanSentryPort)
-	engineApiPort, cleanEngineApiPort := testhelpers.ConsumeFreeTcpPort(t)
+	engineApiPort, cleanEngineApiPort, err := testhelpers.ConsumeFreeTcpPort()
+	require.NoError(t, err)
 	t.Cleanup(cleanEngineApiPort)
-	jsonRpcPort, cleanJsonRpcPort := testhelpers.ConsumeFreeTcpPort(t)
+	jsonRpcPort, cleanJsonRpcPort, err := testhelpers.ConsumeFreeTcpPort()
+	require.NoError(t, err)
 	t.Cleanup(cleanJsonRpcPort)
-	shutterPort, cleanShutterPort := testhelpers.ConsumeFreeTcpPort(t)
+	shutterPort, cleanShutterPort, err := testhelpers.ConsumeFreeTcpPort()
+	require.NoError(t, err)
 	t.Cleanup(cleanShutterPort)
-	decryptionKeySenderPort, cleanDecryptionKeySenderPort := testhelpers.ConsumeFreeTcpPort(t)
+	decryptionKeySenderPort, cleanDecryptionKeySenderPort, err := testhelpers.ConsumeFreeTcpPort()
+	require.NoError(t, err)
 	t.Cleanup(cleanDecryptionKeySenderPort)
 
 	const localhost = "127.0.0.1"
@@ -261,15 +223,15 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	contractDeployer := crypto.PubkeyToAddress(contractDeployerPrivKey.PublicKey)
 	shutterConfig := shutter.ConfigByChainName(params.ChiadoChainConfig.ChainName)
 	shutterConfig.Enabled = false // first we need to deploy the shutter smart contracts
-	shutterConfig.BootstrapNodes = nil
+	shutterConfig.BootstrapNodes = []string{decryptionKeySenderPeerAddr}
 	shutterConfig.PrivateKey = nodeKey
 	shutterConfig.ListenPort = uint64(shutterPort)
 	shutterConfig.InstanceId = 1234567890
 	shutterConfig.ChainId = chainIdU256
+	shutterConfig.SecondsPerSlot = 1
 	shutterConfig.SequencerContractAddress = crypto.CreateAddress(contractDeployer, 0).String()
 	shutterConfig.KeyperSetManagerContractAddress = crypto.CreateAddress(contractDeployer, 1).String()
 	shutterConfig.KeyBroadcastContractAddress = crypto.CreateAddress(contractDeployer, 2).String()
-	shutterConfig.BootstrapNodes = []string{decryptionKeySenderPeerAddr}
 
 	ethConfig := ethconfig.Config{
 		Dirs: dirs,
@@ -331,7 +293,8 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	engineApiUrl := fmt.Sprintf("http://%s:%d", httpConfig.AuthRpcHTTPListenAddress, httpConfig.AuthRpcPort)
 	engineApiClient, err := engineapi.DialJsonRpcClient(engineApiUrl, jwtSecret, logger)
 	require.NoError(t, err)
-	cl := testhelpers.NewMockCl(engineApiClient, bank.Address(), gensisBlock.Hash())
+	slotCalculator := shutter.NewBeaconChainSlotCalculator(shutterConfig.BeaconChainGenesisTimestamp, shutterConfig.SecondsPerSlot)
+	cl := testhelpers.NewMockCl(slotCalculator, engineApiClient, bank.Address(), gensisBlock)
 	_, err = cl.BuildBlock(ctx)
 	require.NoError(t, err)
 
@@ -394,7 +357,6 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	t.Cleanup(cleanNode(ethNode))
 
 	encryptedTransactor := testhelpers.NewEncryptedTransactor(transactor, encryptorAccPrivKey, shutterConfig.SequencerContractAddress, contractBackend)
-	slotCalculator := shutter.NewBeaconChainSlotCalculator(shutterConfig.BeaconChainGenesisTimestamp, shutterConfig.SecondsPerSlot)
 	decryptionKeySender, err := testhelpers.DialDecryptionKeysSender(ctx, logger, decryptionKeySenderPort, decryptionKeySenderP2pPrivKey)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -409,13 +371,11 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	err = decryptionKeySender.Connect(ctx, shutterPort, shutterValidatorPeerId)
 	require.NoError(t, err)
-
+	coordinator := testhelpers.NewShutterBlockBuildingCoordinator(cl, decryptionKeySender, slotCalculator, shutterConfig.InstanceId)
 	return blockBuildingUniverse{
 		rpcApiClient:        rpcApiClient,
 		contractsDeployer:   deployer,
 		contractsDeployment: contractsDeployment,
-		bank:                bank,
-		cl:                  cl,
 		ekgs:                map[shutter.EonIndex]testhelpers.EonKeyGeneration{},
 		acc1PrivKey:         acc1PrivKey,
 		acc1:                acc1,
@@ -424,8 +384,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		acc3PrivKey:         acc3PrivKey,
 		acc3:                acc3,
 		transactor:          encryptedTransactor,
-		decryptionKeySender: decryptionKeySender,
 		shutterConfig:       shutterConfig,
-		slotCalculator:      slotCalculator,
+		shutterCoordinator:  coordinator,
 	}
 }

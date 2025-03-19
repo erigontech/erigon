@@ -17,20 +17,18 @@
 package testhelpers
 
 import (
-	"testing"
-
-	"github.com/stretchr/testify/require"
-
 	"github.com/erigontech/erigon/txnprovider/shutter"
 )
 
-func Signatures(t *testing.T, signers []Keyper, data shutter.DecryptionKeysSignatureData) [][]byte {
+func Signatures(signers []Keyper, data shutter.DecryptionKeysSignatureData) ([][]byte, error) {
 	sigs := make([][]byte, len(signers))
 	for i, signer := range signers {
 		var err error
 		sigs[i], err = data.Sign(signer.PrivateKey)
-		require.NoError(t, err)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return sigs
+	return sigs, nil
 }
