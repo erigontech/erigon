@@ -592,6 +592,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 			if !bytes.Equal(hash, mt.TxnSlot.IDHash[:]) {
 				continue
 			}
+			fmt.Println("pool change", mt.currentSubPool.String(), mt.TxnSlot.IDHash[:])
 			subpool := mt.currentSubPool.String()
 			poolChanges[subpool] = append(poolChanges[subpool], mt.TxnSlot.IDHash)
 		}
