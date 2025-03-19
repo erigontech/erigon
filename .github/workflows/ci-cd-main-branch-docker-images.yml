@@ -137,7 +137,7 @@ jobs:
           --label org.opencontainers.image.vendor="${{ github.repository_owner }}" \
           --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
           --push \
-          --platform linux/amd64,linux/amd64/v2,linux/arm64 .
+          --platform linux/amd64,linux/arm64 .
 
       - name: export and print docker build tag, cleanup old docker images
         env:
