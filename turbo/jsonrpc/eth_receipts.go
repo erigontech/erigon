@@ -535,6 +535,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	var txnIndex = int(txNum - txNumMin - 2)
+	fmt.Printf("[dbg] txnIndex=%d\n", txnIndex)
 
 	txn, err := api._blockReader.TxnByIdxInBlock(ctx, tx, header.Number.Uint64(), txnIndex)
 	if err != nil {
