@@ -269,7 +269,6 @@ func New(
 	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, chainID, logger, opts...)
 	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
 
-	go res.MonitorPoolTransactions(ctx)
 	return res, nil
 }
 
@@ -584,11 +583,19 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	p.unprocessedRemoteTxns.Resize(0)
 	p.unprocessedRemoteByHash = map[string]int{}
 
+	poolChanges := make(map[string][]string)
+	for _, hash := range announcements.hashes {
+		txn, ok := p.byHash[string(hash)]
+		if !ok {
+			continue
+		}
+		subpool := txn.currentSubPool.String()
+		poolChanges[subpool] = append(poolChanges[subpool], string(hash))
+	}
+
 	diagnostics.Send(diagnostics.IncomingTxnUpdate{
-		Txns:      diagTxns,
-		Senders:   nil,
-		IsLocal:   nil,
-		KnownTxns: nil,
+		Txns:    diagTxns,
+		Updates: poolChanges,
 	})
 
 	return nil
@@ -2447,58 +2454,4 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 		}
 		return true
 	})
-}
-
-// MonitorPoolTransactions periodically logs the state of transactions in each pool
-func (p *TxPool) MonitorPoolTransactions(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			p.lock.Lock()
-
-			var poolUpdates []diagnostics.TxnPool
-
-			// Collect transactions from pending pool
-			for _, mt := range p.pending.best.ms {
-				poolUpdates = append(poolUpdates, diagnostics.TxnPool{
-					IDHash: mt.TxnSlot.IDHash,
-					Pool:   "pending",
-				})
-			}
-
-			// Collect transactions from base fee pool
-			for _, mt := range p.baseFee.best.ms {
-				poolUpdates = append(poolUpdates, diagnostics.TxnPool{
-					IDHash: mt.TxnSlot.IDHash,
-					Pool:   "basefee",
-				})
-			}
-
-			// Collect transactions from queued pool
-			for _, mt := range p.queued.best.ms {
-				poolUpdates = append(poolUpdates, diagnostics.TxnPool{
-					IDHash: mt.TxnSlot.IDHash,
-					Pool:   "queued",
-				})
-			}
-
-			p.lock.Unlock()
-
-			// Log the results
-			p.logger.Info("Pool Transaction Monitor",
-				"pending_count", len(p.pending.best.ms),
-				"basefee_count", len(p.baseFee.best.ms),
-				"queued_count", len(p.queued.best.ms))
-
-			// Send pool updates to diagnostics
-			diagnostics.Send(diagnostics.ChangePoolUpdate{
-				Txns: poolUpdates,
-			})
-		}
-	}
 }
