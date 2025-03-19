@@ -48,7 +48,7 @@ func MakeSlotIdentityPreimage(t *testing.T, slot uint64) *shutter.IdentityPreima
 	var buf bytes.Buffer
 	buf.Write(libcommon.BigToHash(libcommon.Big0).Bytes())
 	buf.Write(libcommon.BigToHash(new(big.Int).SetUint64(slot)).Bytes()[12:])
-	ip, err := shutter.IdentityPreimageFromSSZ(buf.Bytes())
+	ip, err := shutter.IdentityPreimageFromBytes(buf.Bytes())
 	require.NoError(t, err)
 	return ip
 }
@@ -56,7 +56,7 @@ func MakeSlotIdentityPreimage(t *testing.T, slot uint64) *shutter.IdentityPreima
 func Uint64ToIdentityPreimage(t *testing.T, i uint64) *shutter.IdentityPreimage {
 	buf := make([]byte, 52)
 	binary.BigEndian.PutUint64(buf[:8], i)
-	ip, err := shutter.IdentityPreimageFromSSZ(buf)
+	ip, err := shutter.IdentityPreimageFromBytes(buf)
 	require.NoError(t, err)
 	return ip
 }

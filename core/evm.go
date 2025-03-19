@@ -99,7 +99,6 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 		Origin:     msg.From(),
 		GasPrice:   msg.GasPrice(),
 		BlobHashes: msg.BlobHashes(),
-		Initcodes:  msg.Initcodes(),
 	}
 }
 

@@ -24,7 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -1748,7 +1748,7 @@ func selectDownloadPeer(ctx context.Context, peerUrls []*url.URL, t *torrent.Tor
 		}
 
 	default:
-		peerIndex := rand.Intn(len(peerUrls))
+		peerIndex := rand.IntN(len(peerUrls))
 		peerUrl := peerUrls[peerIndex]
 		downloadUrl := peerUrl.JoinPath(t.Name())
 		peerInfo, err := getWebpeerTorrentInfo(ctx, downloadUrl)
@@ -2443,6 +2443,9 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 				return nil
 			}
 		} else {
+			if ff.Type == nil {
+				panic(fmt.Sprintf("nil ptr after parsing file: %s", name))
+			}
 			if !d.cfg.SnapshotConfig.Seedable(ff) {
 				return nil
 			}

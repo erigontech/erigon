@@ -22,6 +22,7 @@ package vm
 import (
 	"fmt"
 	"hash"
+	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -61,12 +62,7 @@ var pool = sync.Pool{
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
-	for _, eip := range vmConfig.ExtraEips {
-		if eip == 3860 {
-			return true
-		}
-	}
-	return rules.IsShanghai
+	return slices.Contains(vmConfig.ExtraEips, 3860) || rules.IsShanghai
 }
 
 // Interpreter is used to run Ethereum based contracts and will utilise the

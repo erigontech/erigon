@@ -103,7 +103,7 @@ func (et *KsmEonTracker) RecentEon(index EonIndex) (Eon, bool) {
 	et.mu.RLock()
 	defer et.mu.RUnlock()
 
-	return et.recentEons.Get(Eon{Index: index})
+	return et.recentEon(index)
 }
 
 func (et *KsmEonTracker) EonByBlockNum(blockNum uint64) (Eon, bool) {
@@ -120,6 +120,10 @@ func (et *KsmEonTracker) EonByBlockNum(blockNum uint64) (Eon, bool) {
 		return true // continue
 	})
 	return eon, found
+}
+
+func (et *KsmEonTracker) recentEon(index EonIndex) (Eon, bool) {
+	return et.recentEons.Get(Eon{Index: index})
 }
 
 func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
@@ -149,15 +153,18 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 	et.mu.Lock()
 	defer et.mu.Unlock()
 
-	eon, err := et.readEonAtNewBlockEvent(blockEvent.BlockNum)
+	eon, err := et.readEonAtNewBlockEvent(blockEvent.LatestBlockNum)
 	if err != nil {
 		return err
 	}
 
-	et.logger.Debug("current eon at block", "blockNum", blockEvent.BlockNum, "eonIndex", eon.Index)
+	if et.currentEon == nil || et.currentEon.Index != eon.Index {
+		et.logger.Debug("current eon at block", "blockNum", blockEvent.LatestBlockNum, "eonIndex", eon.Index)
+	}
+
 	et.currentEon = &eon
 	et.recentEons.ReplaceOrInsert(eon)
-	et.maybeCleanup(blockEvent.BlockNum)
+	et.maybeCleanup(blockEvent.LatestBlockNum)
 	return nil
 }
 
@@ -170,7 +177,7 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, error) {
 			return
 		}
 
-		et.logger.Debug("readEonAtNewBlockEvent timing", "blockNum", blockNum, "cached", cached, "duration", time.Since(startTime))
+		et.logger.Trace("readEonAtNewBlockEvent timing", "blockNum", blockNum, "cached", cached, "duration", time.Since(startTime))
 	}()
 
 	callOpts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNum)}
@@ -178,7 +185,8 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, error) {
 	if err != nil {
 		return Eon{}, err
 	}
-	if eon, ok := et.RecentEon(EonIndex(eonIndex)); ok {
+
+	if eon, ok := et.recentEon(EonIndex(eonIndex)); ok {
 		cached = true
 		return eon, nil
 	}

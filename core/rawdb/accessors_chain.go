@@ -25,7 +25,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"math/big"
 	"time"
 
@@ -43,7 +42,6 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/rawdb/utils"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/ethdb/cbor"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -526,7 +524,7 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*t
 	if err != nil {
 		return nil, err
 	}
-	return body, err
+	return body, nil
 }
 
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
@@ -772,122 +770,6 @@ func TruncateTd(tx kv.RwTx, blockFrom uint64) error {
 		return fmt.Errorf("TruncateTd: %w", err)
 	}
 	return nil
-}
-
-// ReadRawReceipts retrieves all the transaction receipts belonging to a block.
-// The receipt metadata fields are not guaranteed to be populated, so they
-// should not be used. Use ReadReceipts instead if the metadata is needed.
-func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
-	// Retrieve the flattened receipt slice
-	data, err := db.GetOne(kv.Receipts, hexutil.EncodeTs(blockNum))
-	if err != nil {
-		log.Error("ReadRawReceipts failed", "err", err)
-	}
-	if len(data) == 0 {
-		return nil
-	}
-	var receipts types.Receipts
-	if err := cbor.Unmarshal(&receipts, bytes.NewReader(data)); err != nil {
-		log.Error("receipt unmarshal failed", "err", err)
-		return nil
-	}
-
-	prefix := make([]byte, 8)
-	binary.BigEndian.PutUint64(prefix, blockNum)
-
-	it, err := db.Prefix(kv.Log, prefix)
-	if err != nil {
-		log.Error("logs fetching failed", "err", err)
-		return nil
-	}
-	defer it.Close()
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			log.Error("logs fetching failed", "err", err)
-			return nil
-		}
-		var logs types.Logs
-		if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-			err = fmt.Errorf("receipt unmarshal failed:  %w", err)
-			log.Error("logs fetching failed", "err", err)
-			return nil
-		}
-
-		txIndex := int(binary.BigEndian.Uint32(k[8:]))
-
-		// only return logs from real txs (not from block's stateSyncReceipt)
-		if txIndex < len(receipts) {
-			receipts[txIndex].Logs = logs
-		}
-	}
-
-	return receipts
-}
-
-// WriteReceipts stores all the transaction receipts belonging to a block.
-func WriteReceipts(tx kv.Putter, number uint64, receipts types.Receipts) error {
-	buf := bytes.NewBuffer(make([]byte, 0, 1024))
-	for txId, r := range receipts {
-		if len(r.Logs) == 0 {
-			continue
-		}
-
-		buf.Reset()
-		err := cbor.Marshal(buf, r.Logs)
-		if err != nil {
-			return fmt.Errorf("encode block logs for block %d: %w", number, err)
-		}
-
-		if err = tx.Put(kv.Log, dbutils.LogKey(number, uint32(txId)), buf.Bytes()); err != nil {
-			return fmt.Errorf("writing logs for block %d: %w", number, err)
-		}
-	}
-
-	buf.Reset()
-	err := cbor.Marshal(buf, receipts)
-	if err != nil {
-		return fmt.Errorf("encode block receipts for block %d: %w", number, err)
-	}
-
-	if err = tx.Put(kv.Receipts, hexutil.EncodeTs(number), buf.Bytes()); err != nil {
-		return fmt.Errorf("writing receipts for block %d: %w", number, err)
-	}
-	return nil
-}
-
-// TruncateReceipts removes all receipt for given block number or newer - used for Unwind
-func TruncateReceipts(db kv.RwTx, number uint64) error {
-	if err := db.ForEach(kv.Receipts, hexutil.EncodeTs(number), func(k, _ []byte) error {
-		return db.Delete(kv.Receipts, k)
-	}); err != nil {
-		return err
-	}
-
-	from := make([]byte, 8)
-	binary.BigEndian.PutUint64(from, number)
-	if err := db.ForEach(kv.Log, from, func(k, _ []byte) error {
-		return db.Delete(kv.Log, k)
-	}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func ReceiptsAvailableFrom(tx kv.Tx) (uint64, error) {
-	c, err := tx.Cursor(kv.Receipts)
-	if err != nil {
-		return math.MaxUint64, err
-	}
-	defer c.Close()
-	k, _, err := c.First()
-	if err != nil {
-		return math.MaxUint64, err
-	}
-	if len(k) == 0 {
-		return math.MaxUint64, nil
-	}
-	return binary.BigEndian.Uint64(k), nil
 }
 
 // ReadBlock retrieves an entire block corresponding to the hash, assembling it

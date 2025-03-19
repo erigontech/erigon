@@ -73,6 +73,7 @@ type ExecutionResult struct {
 	SenderInitBalance   *uint256.Int
 	CoinbaseInitBalance *uint256.Int
 	FeeTipped           *uint256.Int
+	EvmRefund           uint64 // Gas refunded by EVM without considering refundQuotient
 }
 
 // Unwrap returns the internal evm error which allows us for further

@@ -18,8 +18,7 @@ on:
 
 jobs:
   integration-test-suite:
-    runs-on: [ self-hosted, Erigon3 ]
-    timeout-minutes: 15
+    runs-on: [ self-hosted, RpcSpecific ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
@@ -34,7 +33,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.41.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.49.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{ runner.workspace }}/rpc-tests
           pip3 install -r requirements.txt
 
@@ -54,13 +53,22 @@ jobs:
       - name: Run RpcDaemon
         working-directory: ${{ github.workspace }}/build/bin
         run: |
-          echo "RpcDaemon starting..."
+          echo "Starting RpcDaemon..."
           
-          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
+          RPC_DAEMON_EXIT_STATUS=$?
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
           
+          sleep 5
+          tail erigon.log
+          
+          if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then            
+            echo "RpcDaemon failed to start"
+            echo "::error::Error detected during tests: RpcDaemon failed to start"
+            exit 1
+          fi
           echo "RpcDaemon started"
 
       - name: Wait for port 8545 to be opened
@@ -75,6 +83,7 @@ jobs:
           done
           if ! nc -z localhost 8545; then
             echo "Port 8545 did not open in time"
+            echo "::error::Error detected during tests: Port 8545 did not open in time"
             exit 1
           fi
 
@@ -153,6 +162,6 @@ jobs:
       - name: Action for Failure
         if: steps.test_step.outputs.TEST_RESULT != 'success'
         run: |
-          echo "::error::Error detected during tests"
+          echo "::error::Error detected during tests: some tests failed, check the logs or the artifacts for more details"
           exit 1
 

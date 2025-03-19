@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	state2 "github.com/erigontech/erigon-lib/state"
 
 	"github.com/anacrolix/torrent"
@@ -65,7 +66,6 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
@@ -300,12 +300,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if cfg.silkworm != nil {
-		if err := cfg.blockReader.Snapshots().(silkworm.CanAddSnapshotsToSilkwarm).AddSnapshotsToSilkworm(cfg.silkworm); err != nil {
-			return err
-		}
-	}
-
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
 	if err := agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
@@ -319,6 +313,18 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
 	if cfg.notifier.Events != nil {
 		cfg.notifier.Events.OnNewSnapshot()
+	}
+
+	if cfg.silkworm != nil {
+		repository := silkworm.NewSnapshotsRepository(
+			cfg.silkworm,
+			cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots),
+			agg,
+			logger,
+		)
+		if err := repository.Update(); err != nil {
+			return err
+		}
 	}
 
 	frozenBlocks := cfg.blockReader.FrozenBlocks()

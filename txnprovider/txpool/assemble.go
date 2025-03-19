@@ -106,7 +106,7 @@ var defaultPoolDBInitializer = func(ctx context.Context, cfg txpoolcfg.Config, l
 		WriteMergeThreshold(3 * 8192).
 		PageSize(16 * datasize.KB).
 		GrowthStep(16 * datasize.MB).
-		DirtySpace(uint64(128 * datasize.MB)).
+		DirtySpace(uint64(64 * datasize.MB)).
 		MapSize(1 * datasize.TB).
 		WriteMap(cfg.MdbxWriteMap)
 	if cfg.MdbxPageSize > 0 {

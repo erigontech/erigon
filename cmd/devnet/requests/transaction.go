@@ -48,11 +48,11 @@ func (reqGen *requestGenerator) EstimateGas(args ethereum.CallMsg, blockRef Bloc
 		gasPrice = &big
 	}
 
-	var tip *hexutil.Big
+	var tipCap *hexutil.Big
 
-	if args.Tip != nil {
-		big := hexutil.Big(*args.Tip.ToBig())
-		tip = &big
+	if args.TipCap != nil {
+		big := hexutil.Big(*args.TipCap.ToBig())
+		tipCap = &big
 	}
 
 	var feeCap *hexutil.Big
@@ -81,7 +81,7 @@ func (reqGen *requestGenerator) EstimateGas(args ethereum.CallMsg, blockRef Bloc
 		To:                   args.To,
 		Gas:                  &gas,
 		GasPrice:             gasPrice,
-		MaxPriorityFeePerGas: tip,
+		MaxPriorityFeePerGas: tipCap,
 		MaxFeePerGas:         feeCap,
 		Value:                value,
 		Data:                 data,
@@ -103,7 +103,6 @@ func (reqGen *requestGenerator) EstimateGas(args ethereum.CallMsg, blockRef Bloc
 		return 0, fmt.Errorf("EstimateGas rpc failed: %w", b.Error)
 	}
 
-	fmt.Println("EST GAS", b.Number)
 	return uint64(b.Number), nil
 }
 

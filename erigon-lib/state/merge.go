@@ -81,6 +81,10 @@ type DomainRanges struct {
 	aggStep uint64
 }
 
+func NewDomainRanges(name kv.Domain, values MergeRange, history HistoryRanges, aggStep uint64) DomainRanges {
+	return DomainRanges{name: name, values: values, history: history, aggStep: aggStep}
+}
+
 func (r DomainRanges) String() string {
 	var b strings.Builder
 	if r.values.needMerge {
@@ -217,6 +221,10 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 type HistoryRanges struct {
 	history MergeRange
 	index   MergeRange
+}
+
+func NewHistoryRanges(history MergeRange, index MergeRange) HistoryRanges {
+	return HistoryRanges{history: history, index: index}
 }
 
 func (r HistoryRanges) String(aggStep uint64) string {
@@ -1081,10 +1089,10 @@ func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
 	return false
 }
 
-func (ac *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return ac.d[idx] }
-func (ac *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return ac.searchII(idx) }
-func (ac *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
-	for _, iit := range ac.iis {
+func (at *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return at.d[idx] }
+func (at *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return at.searchII(idx) }
+func (at *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
+	for _, iit := range at.iis {
 		if iit.name == idx {
 			return iit
 		}

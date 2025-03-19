@@ -297,6 +297,15 @@ const (
 	RandaoMixes      = "RandaoMixes"      // [validator_index+slot] => [randao_mix]
 	Proposers        = "BlockProposers"   // epoch => proposers indicies
 
+	// Electra
+	PendingDepositsDump           = "PendingDepositsDump"           // block_num => dump
+	PendingPartialWithdrawalsDump = "PendingPartialWithdrawalsDump" // block_num => dump
+	PendingConsolidationsDump     = "PendingConsolidationsDump"     // block_num => dump
+	PendingDeposits               = "PendingDeposits"               // slot => queue_diffs
+	PendingPartialWithdrawals     = "PendingPartialWithdrawals"     // slot => queue_diffs
+	PendingConsolidations         = "PendingConsolidations"         // slot => queue_diffs
+	// End Electra
+
 	StatesProcessingProgress = "StatesProcessingProgress"
 
 	//Diagnostics tables
@@ -450,6 +459,12 @@ var ChaindataTables = []string{
 	CurrentSyncCommittee,
 	Eth1DataVotes,
 	IntraRandaoMixes,
+	PendingConsolidations,
+	PendingDeposits,
+	PendingDepositsDump,
+	PendingPartialWithdrawalsDump,
+	PendingConsolidationsDump,
+	PendingPartialWithdrawals,
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
@@ -509,7 +524,7 @@ type CmpFunc func(k1, k2, v1, v2 []byte) int
 type TableCfg map[string]TableCfgItem
 type Bucket string
 
-type DBI uint
+type DBI uint32
 type TableFlags uint
 
 const (

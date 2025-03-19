@@ -163,7 +163,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
-	result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */)
+	result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, fmt.Errorf("tracing failed: %v", err)
 	}
@@ -337,7 +337,7 @@ func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, sender
 		txn := block.Transactions()[receipt.TransactionIndex]
 		var effectiveGasPrice uint64
 		if !chainConfig.IsLondon(block.NumberU64()) {
-			effectiveGasPrice = txn.GetPrice().Uint64()
+			effectiveGasPrice = txn.GetTipCap().Uint64()
 		} else {
 			baseFee, _ := uint256.FromBig(block.BaseFee())
 			gasPrice := new(big.Int).Add(block.BaseFee(), txn.GetEffectiveGasTip(baseFee).ToBig())
