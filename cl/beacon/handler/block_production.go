@@ -76,7 +76,7 @@ var (
 var defaultGraffitiString = "Caplin"
 
 func (a *ApiHandler) waitForHeadSlot(slot uint64) {
-	graceTime := 500 * time.Millisecond
+	graceTime := 1 * time.Second
 
 	timeout := graceTime
 	stopCh := time.After(timeout)
