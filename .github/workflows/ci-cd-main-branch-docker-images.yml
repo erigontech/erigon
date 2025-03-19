@@ -121,7 +121,7 @@ jobs:
           cd erigon
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
-          --build-arg BINARIES=${{ steps.def_docker_vars.outputs.binaries }} \
+          --build-arg BINARIES='${{ steps.def_docker_vars.outputs.binaries }}' \
           --attest type=provenance,mode=max \
           --sbom=true \
           ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ', env.DOCKER_URL, env.BUILD_VERSION) || '' }} \
