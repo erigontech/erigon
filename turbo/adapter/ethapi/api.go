@@ -169,7 +169,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 			var err error
 			authorizations[i], err = auth.ToAuthorization()
 			if err != nil {
-				return nil, err
+				return types.Message{}, err
 			}
 		}
 		msg.SetAuthorizations(authorizations)
