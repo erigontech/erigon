@@ -442,6 +442,15 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 			result.MaxFeePerGas = (*hexutil.Big)(txn.GetFeeCap().ToBig())
 		}
 
+		if txn.Type() == types.BlobTxType || txn.Type() == types.DynamicFeeTxType {
+			if baseFee != nil && blockHash != (libcommon.Hash{}) {
+				// price = min(gasTipCap + baseFee, gasFeeCap)
+				result.GasPrice = (*hexutil.Big)(effectiveGasPrice(txn, baseFee))
+			} else {
+				result.GasPrice = (*hexutil.Big)(txn.GetFeeCap().ToBig())
+			}
+		}
+
 		if txn.Type() == types.BlobTxType {
 			txn.GetBlobGas()
 			blobTx := txn.(*types.BlobTx)
@@ -469,6 +478,18 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 		result.TransactionIndex = (*hexutil.Uint64)(&index)
 	}
 	return result
+}
+
+// effectiveGasPrice computes the transaction gas fee, based on the given basefee value.
+//
+//	price = min(gasTipCap + baseFee, gasFeeCap)
+func effectiveGasPrice(txn types.Transaction, baseFee *big.Int) *big.Int {
+	fee := txn.GetTipCap().ToBig()
+	fee = fee.Add(fee, baseFee)
+	if txn.GetFeeCap().ToBig().Cmp(fee) < 0 {
+		return txn.GetFeeCap().ToBig()
+	}
+	return fee
 }
 
 func computeGasPrice(txn types.Transaction, blockHash libcommon.Hash, baseFee *big.Int) *hexutil.Big {

@@ -75,6 +75,10 @@ type Receipt struct {
 	TransactionIndex uint           `json:"transactionIndex"`
 
 	FirstLogIndexWithinBlock uint32 `json:"-"` // field which used to store in db and re-calc
+
+	EffectiveGasPrice *big.Int `json:"effectiveGasPrice"` // required, but tag omitted for backwards compatibility
+	BlobGasUsed       uint64   `json:"blobGasUsed,omitempty"`
+	BlobGasPrice      *big.Int `json:"blobGasPrice,omitempty"`
 }
 
 type receiptMarshaling struct {
@@ -85,6 +89,9 @@ type receiptMarshaling struct {
 	GasUsed           hexutil.Uint64
 	BlockNumber       *hexutil.Big
 	TransactionIndex  hexutil.Uint
+	EffectiveGasPrice *hexutil.Big
+	BlobGasUsed       hexutil.Uint64
+	BlobGasPrice      *hexutil.Big
 }
 
 // receiptRLP is the consensus encoding of a receipt.
@@ -470,6 +477,9 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 		r[i].BlockHash = hash
 		r[i].BlockNumber = blockNumber
 		r[i].TransactionIndex = uint(i)
+		tip := txs[i].GetEffectiveGasTip(txs[i].) // Вычисляем эффективный "Gas Tip"
+		r[i].EffectiveGasPrice = new(big.Int).Add(new(big.Int).SetUint64(tip.Uint64()), new(big.Int).SetUint64(baseFee.Uint64())) // Добавляем baseFee
+		r[i].EffectiveGasPrice = txs[i].GetEffectiveGasTip()
 
 		// The contract address can be derived from the transaction itself
 		if txs[i].GetTo() == nil {
