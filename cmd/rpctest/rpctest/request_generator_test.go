@@ -24,9 +24,7 @@ import (
 )
 
 func MockRequestGenerator(reqId int) *RequestGenerator {
-	r := &RequestGenerator{
-		client: nil,
-	}
+	r := &RequestGenerator{}
 	r.reqID.Store(int64(reqId))
 	return r
 }
