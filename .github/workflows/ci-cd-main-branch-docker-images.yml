@@ -117,6 +117,7 @@ jobs:
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           DOCKERFILE_PATH: Dockerfile
         run: |
+          mkdir ${GITHUB_WORKSPACE}/docker-build-cache ${GITHUB_WORKSPACE}/docker-build-cache-new
           echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
           cd erigon
           docker buildx build \
