@@ -63,7 +63,7 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 	)
 
 	// Retrieve blob identifiers from the given blocks
-	ids, err = network2.BlobsIdentifiersFromBlocks(blocks)
+	ids, err = network2.BlobsIdentifiersFromBlocks(blocks, cfg.beaconCfg)
 	if err != nil {
 		// Return an error if blob identifiers could not be retrieved
 		err = fmt.Errorf("failed to get blob identifiers: %w", err)

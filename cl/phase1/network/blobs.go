@@ -35,9 +35,12 @@ var requestBlobBatchExpiration = 15 * time.Second
 // This is just a bunch of functions to handle blobs
 
 // BlobsIdentifiersFromBlocks returns a list of blob identifiers from a list of blocks, which should then be forwarded to the network.
-func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
+func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock, cfg *clparams.BeaconChainConfig) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
 	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
 	for _, block := range blocks {
+		if ids.Len() >= cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
+			break
+		}
 		if block.Version() < clparams.DenebVersion {
 			continue
 		}
@@ -56,9 +59,12 @@ func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock) (*solid.Lis
 	return ids, nil
 }
 
-func BlobsIdentifiersFromBlindedBlocks(blocks []*cltypes.SignedBlindedBeaconBlock) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
+func BlobsIdentifiersFromBlindedBlocks(blocks []*cltypes.SignedBlindedBeaconBlock, cfg *clparams.BeaconChainConfig) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
 	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
 	for _, block := range blocks {
+		if ids.Len() >= cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
+			break
+		}
 		if block.Version() < clparams.DenebVersion {
 			continue
 		}

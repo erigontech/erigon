@@ -366,7 +366,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		default:
 		}
 		// Generate the request
-		req, err := network.BlobsIdentifiersFromBlindedBlocks(batch)
+		req, err := network.BlobsIdentifiersFromBlindedBlocks(batch, cfg.beaconCfg)
 		if err != nil {
 			cfg.logger.Debug("Error generating blob identifiers", "err", err)
 			continue
