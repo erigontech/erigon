@@ -55,20 +55,24 @@ func (ekg EonKeyGeneration) Eon() shutter.Eon {
 	}
 }
 
-func (ekg EonKeyGeneration) DecryptionKeys(t *testing.T, signers []Keyper, ips shutter.IdentityPreimages) []*proto.Key {
+func (ekg EonKeyGeneration) DecryptionKeys(signers []Keyper, ips shutter.IdentityPreimages) ([]*proto.Key, error) {
 	keys := make([]*proto.Key, len(ips))
 	for i, ip := range ips {
-		epochSecretKey := ekg.EpochSecretKey(t, signers, ip)
+		epochSecretKey, err := ekg.EpochSecretKey(signers, ip)
+		if err != nil {
+			return nil, err
+		}
+
 		keys[i] = &proto.Key{
 			IdentityPreimage: ip[:],
 			Key:              epochSecretKey.Marshal(),
 		}
 	}
 
-	return keys
+	return keys, nil
 }
 
-func (ekg EonKeyGeneration) EpochSecretKey(t *testing.T, signers []Keyper, ip *shutter.IdentityPreimage) *shuttercrypto.EpochSecretKey {
+func (ekg EonKeyGeneration) EpochSecretKey(signers []Keyper, ip *shutter.IdentityPreimage) (*shuttercrypto.EpochSecretKey, error) {
 	epochSecretKeyShares := make([]*shuttercrypto.EpochSecretKeyShare, len(signers))
 	keyperIndices := make([]int, len(signers))
 	for i, keyper := range signers {
@@ -76,9 +80,7 @@ func (ekg EonKeyGeneration) EpochSecretKey(t *testing.T, signers []Keyper, ip *s
 		epochSecretKeyShares[i] = keyper.EpochSecretKeyShare(ip)
 	}
 
-	epochSecretKey, err := shuttercrypto.ComputeEpochSecretKey(keyperIndices, epochSecretKeyShares, ekg.Threshold)
-	require.NoError(t, err)
-	return epochSecretKey
+	return shuttercrypto.ComputeEpochSecretKey(keyperIndices, epochSecretKeyShares, ekg.Threshold)
 }
 
 func (ekg EonKeyGeneration) Members() []libcommon.Address {
@@ -109,13 +111,15 @@ func (k Keyper) EpochSecretKeyShare(ip *shutter.IdentityPreimage) *shuttercrypto
 	return shuttercrypto.ComputeEpochSecretKeyShare(k.EonSecretKeyShare, id)
 }
 
-func MockEonKeyGeneration(t *testing.T, idx shutter.EonIndex, threshold, numKeypers, activationBlock uint64) EonKeyGeneration {
+func MockEonKeyGeneration(idx shutter.EonIndex, threshold, numKeypers, activationBlock uint64) (EonKeyGeneration, error) {
 	keypers := make([]Keyper, numKeypers)
 	polynomials := make([]*shuttercrypto.Polynomial, numKeypers)
 	gammas := make([]*shuttercrypto.Gammas, numKeypers)
 	for i := 0; i < int(numKeypers); i++ {
 		polynomial, err := shuttercrypto.RandomPolynomial(rand.Reader, threshold-1)
-		require.NoError(t, err)
+		if err != nil {
+			return EonKeyGeneration{}, err
+		}
 
 		polynomials[i] = polynomial
 		gammas[i] = polynomial.Gammas()
@@ -123,7 +127,9 @@ func MockEonKeyGeneration(t *testing.T, idx shutter.EonIndex, threshold, numKeyp
 
 	for i := 0; i < int(numKeypers); i++ {
 		privKey, err := crypto.GenerateKey()
-		require.NoError(t, err)
+		if err != nil {
+			return EonKeyGeneration{}, err
+		}
 
 		keyperX := shuttercrypto.KeyperX(i)
 		polynomialEvals := make([]*big.Int, numKeypers)
@@ -143,10 +149,16 @@ func MockEonKeyGeneration(t *testing.T, idx shutter.EonIndex, threshold, numKeyp
 
 	// generate 1 malicious keyper for last index
 	privKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
+	if err != nil {
+		return EonKeyGeneration{}, err
+	}
+
 	lastIdx := int(numKeypers - 1)
 	polynomials[lastIdx], err = shuttercrypto.RandomPolynomial(rand.Reader, threshold-1)
-	require.NoError(t, err)
+	if err != nil {
+		return EonKeyGeneration{}, err
+	}
+
 	gammas[lastIdx] = polynomials[lastIdx].Gammas()
 	keyperX := shuttercrypto.KeyperX(lastIdx)
 	polynomialEvals := make([]*big.Int, numKeypers)
@@ -160,7 +172,7 @@ func MockEonKeyGeneration(t *testing.T, idx shutter.EonIndex, threshold, numKeyp
 		EonPublicKeyShare: shuttercrypto.ComputeEonPublicKeyShare(lastIdx, gammas),
 	}
 
-	return EonKeyGeneration{
+	ekg := EonKeyGeneration{
 		EonIndex:        idx,
 		ActivationBlock: activationBlock,
 		Threshold:       threshold,
@@ -168,4 +180,12 @@ func MockEonKeyGeneration(t *testing.T, idx shutter.EonIndex, threshold, numKeyp
 		MaliciousKeyper: maliciousKeyper,
 		EonPublicKey:    eonPublicKey,
 	}
+
+	return ekg, nil
+}
+
+func TestMustGenerateDecryptionKeys(t *testing.T, ekg EonKeyGeneration, signers []Keyper, ips shutter.IdentityPreimages) []*proto.Key {
+	keys, err := ekg.DecryptionKeys(signers, ips)
+	require.NoError(t, err)
+	return keys
 }

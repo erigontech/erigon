@@ -4,6 +4,7 @@ const (
 	MainnetChainID    = 1
 	HoleskyChainID    = 17000
 	SepoliaChainID    = 11155111
+	HoodiChainID      = 560048
 	DevChainName      = 1337
 	AmoyChainID       = 80002
 	BorMainnetChainID = 137
@@ -17,6 +18,7 @@ var All = []uint64{
 	MainnetChainID,
 	HoleskyChainID,
 	SepoliaChainID,
+	HoodiChainID,
 	AmoyChainID,
 	BorMainnetChainID,
 	BorDevnetChainID,
@@ -29,6 +31,7 @@ var NetworkNameByID = map[uint64]string{
 	MainnetChainID:    "mainnet",
 	HoleskyChainID:    "holesky",
 	SepoliaChainID:    "sepolia",
+	HoodiChainID:      "hoodi",
 	AmoyChainID:       "amoy",
 	BorMainnetChainID: "bor-mainnet",
 	GnosisChainID:     "gnosis",

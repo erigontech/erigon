@@ -27,9 +27,11 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/engineapi"
 	enginetypes "github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/txnprovider/shutter"
 )
 
 type MockCl struct {
+	slotCalculator        shutter.SlotCalculator
 	engineApiClient       *engineapi.JsonRpcClient
 	suggestedFeeRecipient libcommon.Address
 	prevBlockHash         libcommon.Hash
@@ -37,17 +39,20 @@ type MockCl struct {
 	prevBeaconBlockRoot   *big.Int
 }
 
-func NewMockCl(elClient *engineapi.JsonRpcClient, feeRecipient libcommon.Address, elGenesis libcommon.Hash) *MockCl {
+func NewMockCl(sc shutter.SlotCalculator, elClient *engineapi.JsonRpcClient, feeRecipient libcommon.Address, elGenesis *types.Block) *MockCl {
 	return &MockCl{
+		slotCalculator:        sc,
 		engineApiClient:       elClient,
 		suggestedFeeRecipient: feeRecipient,
-		prevBlockHash:         elGenesis,
+		prevBlockHash:         elGenesis.Hash(),
 		prevRandao:            big.NewInt(0),
 		prevBeaconBlockRoot:   big.NewInt(10_000),
 	}
 }
 
-func (cl *MockCl) BuildBlock(ctx context.Context) (*enginetypes.ExecutionPayload, error) {
+func (cl *MockCl) BuildBlock(ctx context.Context, opts ...BlockBuildingOption) (*enginetypes.ExecutionPayload, error) {
+	options := cl.applyBlockBuildingOptions(opts...)
+	timestamp := cl.slotCalculator.CalcSlotStartTimestamp(options.slot)
 	forkChoiceState := enginetypes.ForkChoiceState{
 		FinalizedBlockHash: cl.prevBlockHash,
 		SafeBlockHash:      cl.prevBlockHash,
@@ -56,7 +61,7 @@ func (cl *MockCl) BuildBlock(ctx context.Context) (*enginetypes.ExecutionPayload
 
 	parentBeaconBlockRoot := libcommon.BigToHash(cl.prevBeaconBlockRoot)
 	payloadAttributes := enginetypes.PayloadAttributes{
-		Timestamp:             hexutil.Uint64(uint64(time.Now().Unix())),
+		Timestamp:             hexutil.Uint64(timestamp),
 		PrevRandao:            libcommon.BigToHash(cl.prevRandao),
 		SuggestedFeeRecipient: cl.suggestedFeeRecipient,
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -73,7 +78,7 @@ func (cl *MockCl) BuildBlock(ctx context.Context) (*enginetypes.ExecutionPayload
 	}
 
 	// give block builder time to build a block
-	err = libcommon.Sleep(ctx, time.Second)
+	err = libcommon.Sleep(ctx, time.Duration(cl.slotCalculator.SecondsPerSlot())*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -112,4 +117,26 @@ func (cl *MockCl) BuildBlock(ctx context.Context) (*enginetypes.ExecutionPayload
 	cl.prevRandao.Add(cl.prevRandao, big.NewInt(1))
 	cl.prevBeaconBlockRoot.Add(cl.prevBeaconBlockRoot, big.NewInt(1))
 	return payloadRes.ExecutionPayload, nil
+}
+
+func (cl *MockCl) applyBlockBuildingOptions(opts ...BlockBuildingOption) blockBuildingOptions {
+	defaultOptions := blockBuildingOptions{
+		slot: cl.slotCalculator.CalcCurrentSlot(),
+	}
+	for _, opt := range opts {
+		opt(&defaultOptions)
+	}
+	return defaultOptions
+}
+
+type BlockBuildingOption func(*blockBuildingOptions)
+
+func WithBlockBuildingSlot(slot uint64) BlockBuildingOption {
+	return func(opts *blockBuildingOptions) {
+		opts.slot = slot
+	}
+}
+
+type blockBuildingOptions struct {
+	slot uint64
 }

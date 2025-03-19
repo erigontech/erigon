@@ -17,11 +17,9 @@
 package testhelpers
 
 import (
+	"fmt"
 	"net"
 	"sync"
-	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
 var consumedPorts = sync.Map{}
@@ -30,27 +28,32 @@ var consumedPorts = sync.Map{}
 // It uses port 0 and the OS to find a random free port. Note it opens the port
 // so we have to close it. But closing a port makes it eligible for selection
 // by the OS again. So we need to remember which ones have been already touched.
-func ConsumeFreeTcpPort(t *testing.T) (int, func()) {
+func ConsumeFreeTcpPort() (int, func(), error) {
 	var port int
 	var done bool
 	var iterations int
 	for !done {
-		func() {
+		err := func() (err error) {
 			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			require.NoError(t, err)
+			if err != nil {
+				return err
+			}
 			defer func() {
-				err := listener.Close()
-				require.NoError(t, err)
+				err = listener.Close()
 			}()
 
 			port = listener.Addr().(*net.TCPAddr).Port
 			_, ok := consumedPorts.Swap(port, struct{}{})
 			done = !ok
+			return nil
 		}()
+		if err != nil {
+			return 0, nil, err
+		}
 		iterations++
 		if iterations > 1024 {
-			require.FailNow(t, "failed to find a free port", "after %d iterations", iterations)
+			return 0, nil, fmt.Errorf("failed to find a free port after %d iterations", iterations)
 		}
 	}
-	return port, func() { consumedPorts.Delete(port) }
+	return port, func() { consumedPorts.Delete(port) }, nil
 }
