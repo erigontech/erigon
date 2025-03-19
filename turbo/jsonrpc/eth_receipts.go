@@ -366,6 +366,11 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
+
+		if filledLogs == nil {
+			return nil, errors.New("filled logs is nil")
+		}
+
 		var filtered types.Logs
 
 		filtered = filledLogs.Filter(addrMap, crit.Topics, 0)
