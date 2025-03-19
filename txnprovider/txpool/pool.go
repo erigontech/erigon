@@ -524,10 +524,8 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		return err
 	}
 
-	fmt.Println("before", len(p.promoted.hashes))
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
-	fmt.Println("after", len(p.promoted.hashes))
 
 	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
 	for i, reason := range reasons {
@@ -586,24 +584,15 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	p.unprocessedRemoteTxns.Resize(0)
 	p.unprocessedRemoteByHash = map[string]int{}
 
-	poolChanges := make(map[string][]string)
-	/*for _, hash := range announcements.hashes {
-		txn, ok := p.byHash[string(hash)]
-		if !ok {
-			continue
-		}
-		subpool := txn.currentSubPool.String()
-		poolChanges[subpool] = append(poolChanges[subpool], string(hash))
-	}*/
+	poolChanges := make(map[string][][32]byte)
 
 	p.all.ascendAll(func(mt *metaTxn) bool {
 		subpool := mt.currentSubPool.String()
-		poolChanges[subpool] = append(poolChanges[subpool], string(mt.TxnSlot.IDHash[:]))
+		poolChanges[subpool] = append(poolChanges[subpool], mt.TxnSlot.IDHash)
 		return true
 	})
 
 	fmt.Println("poolChanges", len(poolChanges))
-	fmt.Println("announcements", len(announcements.hashes))
 
 	diagnostics.Send(diagnostics.IncomingTxnUpdate{
 		Txns:    diagTxns,

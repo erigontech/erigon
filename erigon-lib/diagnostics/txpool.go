@@ -47,8 +47,8 @@ type DiagTxn struct {
 }
 
 type IncomingTxnUpdate struct {
-	Txns    []DiagTxn           `json:"txns"`
-	Updates map[string][]string `json:"updates"`
+	Txns    []DiagTxn             `json:"txns"`
+	Updates map[string][][32]byte `json:"updates"`
 }
 
 func (ti IncomingTxnUpdate) Type() Type {
