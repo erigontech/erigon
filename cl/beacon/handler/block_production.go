@@ -87,6 +87,7 @@ func (a *ApiHandler) waitForHeadSlot(slot uint64) {
 	for {
 		if a.forkchoiceStore.IsProcessingBlock() && timeout == graceTime {
 			timeout = 3 * time.Second
+			fmt.Println("resort timeout", timeout)
 			stopCh = time.After(timeout)
 		}
 
