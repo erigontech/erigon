@@ -120,6 +120,8 @@ jobs:
           echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
           cd erigon
           docker buildx build \
+          --cache-from=type=local,src=${GITHUB_WORKSPACE}/docker-build-cache \
+          --cache-to=type=local,src=${GITHUB_WORKSPACE}/docker-build-cache-new \
           --file ${{ env.DOCKERFILE_PATH }} \
           --build-arg BINARIES='${{ steps.def_docker_vars.outputs.binaries }}' \
           --attest type=provenance,mode=max \
@@ -138,6 +140,9 @@ jobs:
           --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
           --push \
           --platform linux/amd64,linux/arm64 .
+          echo "Docker build done"
+          find ${GITHUB_WORKSPACE} -ls
+          du -sh ${GITHUB_WORKSPACE}/*
 
       - name: export and print docker build tag, cleanup old docker images
         env:
