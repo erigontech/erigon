@@ -1278,7 +1278,7 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockByVersion(v StateVersion) uint64 {
 
 func (b *BeaconChainConfig) MaxRequestBlobSidecarsByVersion(v StateVersion) int {
 	switch v {
-	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
+	case DenebVersion:
 		return int(b.MaxRequestBlobSidecars)
 	case ElectraVersion:
 		return int(b.MaxRequestBlobSidecarsElectra)
