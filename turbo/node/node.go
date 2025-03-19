@@ -24,6 +24,7 @@ import "C"
 
 import (
 	"context"
+
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"

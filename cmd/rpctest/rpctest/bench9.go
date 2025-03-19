@@ -18,8 +18,6 @@ package rpctest
 
 import (
 	"fmt"
-	"net/http"
-	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
@@ -29,16 +27,10 @@ import (
 // bench9 tests eth_getProof
 func Bench9(erigonURL, gethURL string, needCompare bool) error {
 	setRoutes(erigonURL, gethURL)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 
 	var res CallResult
-	reqGen := &RequestGenerator{
-		client: client,
-	}
+	reqGen := &RequestGenerator{}
 
-	reqGen.reqID++
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
@@ -56,7 +48,7 @@ func Bench9(erigonURL, gethURL string, needCompare bool) error {
 	for len(page) > 0 {
 		accRangeTG := make(map[libcommon.Address]state.DumpAccount)
 		var sr DebugAccountRange
-		reqGen.reqID++
+
 		res = reqGen.Erigon("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)
 
 		if res.Err != nil {
@@ -74,7 +66,7 @@ func Bench9(erigonURL, gethURL string, needCompare bool) error {
 		}
 		for address, dumpAcc := range accRangeTG {
 			var proof EthGetProof
-			reqGen.reqID++
+
 			var storageList []libcommon.Hash
 			// And now with the storage, if present
 			if len(dumpAcc.Storage) > 0 {
@@ -95,7 +87,7 @@ func Bench9(erigonURL, gethURL string, needCompare bool) error {
 			}
 			if needCompare {
 				var gethProof EthGetProof
-				reqGen.reqID++
+
 				res = reqGen.Geth("eth_getProof", reqGen.getProof(bn, address, storageList), &gethProof)
 				if res.Err != nil {
 					return fmt.Errorf("Could not get getProof (geth): %v\n", res.Err)
