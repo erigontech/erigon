@@ -26,12 +26,18 @@ on:
 jobs:
 
   Build:
-    runs-on: ubuntu-22.04 ## revert it to "ubuntu-latest" once https://github.com/actions/runner-images/issues/11471 fixed
+    # runs-on: ubuntu-22.04 ## revert it to "ubuntu-latest" once https://github.com/actions/runner-images/issues/11471 fixed
+    runs-on: 
+      group: devops-prod
+
     timeout-minutes: 45
     outputs:
       docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
 
     steps:
+      - name: Cleanup
+        run: rm -rf .
+
       - name: Fast checkout git repository, git ref ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }}
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
         with:
