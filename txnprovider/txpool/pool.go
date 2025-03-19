@@ -927,8 +927,11 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
-	// TODO: run AccountAbstractionTransaction validation phases here and ERC7562
 	if txn.Type == types.AccountAbstractionTxType {
+		if !p.cfg.AllowAA {
+			return txpoolcfg.TypeNotActivated
+		}
+
 		senderCode, err := stateCache.GetCode(txn.SenderAddress[:])
 		if err != nil {
 			return txpoolcfg.ErrGetCode

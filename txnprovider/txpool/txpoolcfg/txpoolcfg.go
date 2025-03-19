@@ -57,6 +57,9 @@ type Config struct {
 	MdbxWriteMap    bool
 
 	NoGossip bool // this mode doesn't broadcast any txns, and if receive remote-txn - skip it
+
+	// Account Abstraction
+	AllowAA bool
 }
 
 var DefaultConfig = Config{

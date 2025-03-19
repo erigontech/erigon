@@ -274,6 +274,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		ibs.SetTxContext(txTask.TxIndex)
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
+			if !rw.chainConfig.AllowAA {
+				txTask.Error = fmt.Errorf("account abstraction transactions are not allowed")
+				break
+			}
+
 			batchHeaderTxn, ok := txTask.Tx.(*types.AccountAbstractionBatchHeaderTransaction)
 			if !ok {
 				break // this is an AA transaction that should have already been executed at batch header
