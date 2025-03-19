@@ -593,6 +593,9 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		poolChanges[subpool] = append(poolChanges[subpool], string(hash))
 	}
 
+	fmt.Println("poolChanges", len(poolChanges))
+	fmt.Println("announcements", len(announcements.hashes))
+
 	diagnostics.Send(diagnostics.IncomingTxnUpdate{
 		Txns:    diagTxns,
 		Updates: poolChanges,
