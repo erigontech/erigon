@@ -38,9 +38,6 @@ var requestBlobBatchExpiration = 15 * time.Second
 func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock, cfg *clparams.BeaconChainConfig) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
 	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
 	for _, block := range blocks {
-		if ids.Len() >= cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
-			break
-		}
 		if block.Version() < clparams.DenebVersion {
 			continue
 		}
@@ -49,6 +46,9 @@ func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock, cfg *clpara
 			return nil, err
 		}
 		kzgCommitments := block.Block.Body.BlobKzgCommitments.Len()
+		if ids.Len()+kzgCommitments > cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
+			break
+		}
 		for i := 0; i < kzgCommitments; i++ {
 			ids.Append(&cltypes.BlobIdentifier{
 				BlockRoot: blockRoot,
@@ -62,9 +62,6 @@ func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock, cfg *clpara
 func BlobsIdentifiersFromBlindedBlocks(blocks []*cltypes.SignedBlindedBeaconBlock, cfg *clparams.BeaconChainConfig) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
 	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
 	for _, block := range blocks {
-		if ids.Len() >= cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
-			break
-		}
 		if block.Version() < clparams.DenebVersion {
 			continue
 		}
@@ -73,6 +70,9 @@ func BlobsIdentifiersFromBlindedBlocks(blocks []*cltypes.SignedBlindedBeaconBloc
 			return nil, err
 		}
 		kzgCommitments := block.Block.Body.BlobKzgCommitments.Len()
+		if ids.Len()+kzgCommitments > cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
+			break
+		}
 		for i := 0; i < kzgCommitments; i++ {
 			ids.Append(&cltypes.BlobIdentifier{
 				BlockRoot: blockRoot,
