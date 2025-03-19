@@ -28,20 +28,28 @@ import (
 )
 
 type ContractsDeployer struct {
-	key             *ecdsa.PrivateKey
-	address         libcommon.Address
-	contractBackend bind.ContractBackend
-	cl              *MockCl
-	chainId         *big.Int
+	key                  *ecdsa.PrivateKey
+	address              libcommon.Address
+	contractBackend      bind.ContractBackend
+	cl                   *MockCl
+	chainId              *big.Int
+	txnInclusionVerifier TxnInclusionVerifier
 }
 
-func NewContractsDeployer(key *ecdsa.PrivateKey, cb bind.ContractBackend, cl *MockCl, chainId *big.Int) ContractsDeployer {
+func NewContractsDeployer(
+	key *ecdsa.PrivateKey,
+	cb bind.ContractBackend,
+	cl *MockCl,
+	chainId *big.Int,
+	txnInclusionVerifier TxnInclusionVerifier,
+) ContractsDeployer {
 	return ContractsDeployer{
-		key:             key,
-		address:         crypto.PubkeyToAddress(key.PublicKey),
-		contractBackend: cb,
-		cl:              cl,
-		chainId:         chainId,
+		key:                  key,
+		address:              crypto.PubkeyToAddress(key.PublicKey),
+		contractBackend:      cb,
+		cl:                   cl,
+		chainId:              chainId,
+		txnInclusionVerifier: txnInclusionVerifier,
 	}
 }
 
@@ -82,7 +90,7 @@ func (d ContractsDeployer) DeployCore(ctx context.Context) (ContractsDeployment,
 		return ContractsDeployment{}, err
 	}
 
-	err = VerifyTxnsInclusion(block, sequencerDeployTxn.Hash(), ksmDeployTxn.Hash(), keyBroadcastDeployTxn.Hash())
+	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, sequencerDeployTxn.Hash(), ksmDeployTxn.Hash(), keyBroadcastDeployTxn.Hash())
 	if err != nil {
 		return ContractsDeployment{}, err
 	}
@@ -97,7 +105,7 @@ func (d ContractsDeployer) DeployCore(ctx context.Context) (ContractsDeployment,
 		return ContractsDeployment{}, err
 	}
 
-	err = VerifyTxnsInclusion(block, ksmInitTxn.Hash())
+	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, ksmInitTxn.Hash())
 	if err != nil {
 		return ContractsDeployment{}, err
 	}
@@ -134,7 +142,7 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return libcommon.Address{}, nil, err
 	}
 
-	err = VerifyTxnsInclusion(block, keyperSetDeployTxn.Hash())
+	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, keyperSetDeployTxn.Hash())
 	if err != nil {
 		return libcommon.Address{}, nil, err
 	}
@@ -164,7 +172,7 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return libcommon.Address{}, nil, err
 	}
 
-	err = VerifyTxnsInclusion(block, setPublisherTxn.Hash(), setThresholdTxn.Hash(), addMembersTxn.Hash(), setFinalizedTxn.Hash())
+	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, setPublisherTxn.Hash(), setThresholdTxn.Hash(), addMembersTxn.Hash(), setFinalizedTxn.Hash())
 	if err != nil {
 		return libcommon.Address{}, nil, err
 	}
@@ -179,7 +187,7 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return libcommon.Address{}, nil, err
 	}
 
-	err = VerifyTxnsInclusion(block, addKeyperSetTxn.Hash())
+	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, addKeyperSetTxn.Hash())
 	if err != nil {
 		return libcommon.Address{}, nil, err
 	}
@@ -194,7 +202,7 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return libcommon.Address{}, nil, err
 	}
 
-	err = VerifyTxnsInclusion(block, broadcastKeyTxn.Hash())
+	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, broadcastKeyTxn.Hash())
 	if err != nil {
 		return libcommon.Address{}, nil, err
 	}

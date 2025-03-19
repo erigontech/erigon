@@ -65,7 +65,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 
 	go func() {
 		// do a goroutine dump if we haven't finished in a long time
-		err := libcommon.Sleep(ctx, time.Minute)
+		err := libcommon.Sleep(ctx, 2*time.Minute)
 		if err != nil {
 			// means we've finished before sleep time - no need for a pprof dump
 			return
@@ -76,11 +76,17 @@ func TestShutterBlockBuilding(t *testing.T) {
 	}()
 
 	uni := initBlockBuildingUniverse(ctx, t)
+	sender1 := uni.acc1PrivKey
+	sender2 := uni.acc2PrivKey
+	receiver := uni.acc3
+	amount := big.NewInt(1)
+	// amount of blocks it takes to deploy a new keyper set based on contractsDeployer.DeployKeyperSet
+	keyperSetDeploymentBlocks := uint64(4)
 
 	t.Run("deploy first keyper set", func(t *testing.T) {
 		currentBlock, err := uni.rpcApiClient.BlockNumber()
 		require.NoError(t, err)
-		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, currentBlock+1)
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, currentBlock+keyperSetDeploymentBlocks)
 		require.NoError(t, err)
 		_, _, err = uni.contractsDeployer.DeployKeyperSet(ctx, uni.contractsDeployment, ekg)
 		require.NoError(t, err)
@@ -88,11 +94,6 @@ func TestShutterBlockBuilding(t *testing.T) {
 	})
 
 	t.Run("build shutter block", func(t *testing.T) {
-		sender1 := uni.acc1PrivKey
-		sender2 := uni.acc2PrivKey
-		receiver := uni.acc3
-		amount := big.NewInt(1)
-
 		// submit 1 shutter txn
 		ekg, ok := uni.ekgs[shutter.EonIndex(0)]
 		require.True(t, ok)
@@ -100,7 +101,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 		require.NoError(t, err)
 		block, err := uni.shutterCoordinator.BuildBlock(ctx, ekg)
 		require.NoError(t, err)
-		err = testhelpers.VerifyTxnsInclusion(block, encryptedSubmission.SubmissionTxn.Hash())
+		err = uni.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, encryptedSubmission.SubmissionTxn.Hash())
 		require.NoError(t, err)
 
 		// submit 1 non shutter txn
@@ -110,7 +111,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 		// send decryption keys to block builder, build block and verify both txns are included (shutter at beginning of block)
 		block, err = uni.shutterCoordinator.BuildBlock(ctx, ekg, encryptedSubmission.IdentityPreimage)
 		require.NoError(t, err)
-		err = testhelpers.VerifyTxnsOrderedInclusion(
+		err = uni.txnInclusionVerifier.VerifyTxnsOrderedInclusion(
+			ctx,
 			block,
 			testhelpers.OrderedInclusion{TxnIndex: 0, TxnHash: encryptedSubmission.OriginalTxn.Hash()},
 			testhelpers.OrderedInclusion{TxnIndex: 1, TxnHash: simpleTxn.Hash()},
@@ -118,16 +120,44 @@ func TestShutterBlockBuilding(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("build shutter block after eon change", func(t *testing.T) {
+	t.Run("build shutter block without breaching encrypted gas limit", func(t *testing.T) {
 		//
 		//  TODO
 		//
 	})
 
-	t.Run("build shutter block without breaching encrypted gas limit", func(t *testing.T) {
-		//
-		//  TODO
-		//
+	t.Run("build shutter block after eon change", func(t *testing.T) {
+		currentBlock, err := uni.rpcApiClient.BlockNumber()
+		require.NoError(t, err)
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(1), 1, 2, currentBlock+keyperSetDeploymentBlocks)
+		require.NoError(t, err)
+		_, _, err = uni.contractsDeployer.DeployKeyperSet(ctx, uni.contractsDeployment, ekg)
+		require.NoError(t, err)
+		uni.ekgs[ekg.EonIndex] = ekg
+		require.Len(t, uni.ekgs, 2)
+		_, ok := uni.ekgs[shutter.EonIndex(0)]
+		require.True(t, ok)
+		_, ok = uni.ekgs[shutter.EonIndex(1)]
+		require.True(t, ok)
+
+		// submit 1 shutter txn using the new eon
+		require.Equal(t, shutter.EonIndex(1), ekg.EonIndex)
+		encryptedSubmission, err := uni.transactor.SubmitEncryptedTransfer(ctx, sender2, receiver, amount, ekg.Eon())
+		require.NoError(t, err)
+		block, err := uni.shutterCoordinator.BuildBlock(ctx, ekg)
+		require.NoError(t, err)
+		err = uni.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, encryptedSubmission.SubmissionTxn.Hash())
+		require.NoError(t, err)
+
+		// build block and verify new txn with new eon is included
+		block, err = uni.shutterCoordinator.BuildBlock(ctx, ekg, encryptedSubmission.IdentityPreimage)
+		require.NoError(t, err)
+		err = uni.txnInclusionVerifier.VerifyTxnsOrderedInclusion(
+			ctx,
+			block,
+			testhelpers.OrderedInclusion{TxnIndex: 0, TxnHash: encryptedSubmission.OriginalTxn.Hash()},
+		)
+		require.NoError(t, err)
 	})
 
 	t.Run("build shutter block without blob txns", func(t *testing.T) {
@@ -138,19 +168,20 @@ func TestShutterBlockBuilding(t *testing.T) {
 }
 
 type blockBuildingUniverse struct {
-	rpcApiClient        requests.RequestGenerator
-	contractsDeployer   testhelpers.ContractsDeployer
-	contractsDeployment testhelpers.ContractsDeployment
-	ekgs                map[shutter.EonIndex]testhelpers.EonKeyGeneration
-	acc1PrivKey         *ecdsa.PrivateKey
-	acc1                libcommon.Address
-	acc2PrivKey         *ecdsa.PrivateKey
-	acc2                libcommon.Address
-	acc3PrivKey         *ecdsa.PrivateKey
-	acc3                libcommon.Address
-	transactor          testhelpers.EncryptedTransactor
-	shutterConfig       shutter.Config
-	shutterCoordinator  testhelpers.ShutterBlockBuildingCoordinator
+	rpcApiClient         requests.RequestGenerator
+	contractsDeployer    testhelpers.ContractsDeployer
+	contractsDeployment  testhelpers.ContractsDeployment
+	ekgs                 map[shutter.EonIndex]testhelpers.EonKeyGeneration
+	acc1PrivKey          *ecdsa.PrivateKey
+	acc1                 libcommon.Address
+	acc2PrivKey          *ecdsa.PrivateKey
+	acc2                 libcommon.Address
+	acc3PrivKey          *ecdsa.PrivateKey
+	acc3                 libcommon.Address
+	transactor           testhelpers.EncryptedTransactor
+	txnInclusionVerifier testhelpers.TxnInclusionVerifier
+	shutterConfig        shutter.Config
+	shutterCoordinator   testhelpers.ShutterBlockBuildingCoordinator
 }
 
 func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingUniverse {
@@ -298,6 +329,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	_, err = cl.BuildBlock(ctx)
 	require.NoError(t, err)
 
+	txnInclusionVerifier := testhelpers.NewTxnInclusionVerifier(rpcApiClient)
 	transactor := testhelpers.NewTransactor(rpcApiClient, chainConfig.ChainID)
 	acc1PrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -324,9 +356,9 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	block, err := cl.BuildBlock(ctx)
 	require.NoError(t, err)
-	err = testhelpers.VerifyTxnsInclusion(block, topUp1.Hash(), topUp2.Hash(), topUp3.Hash(), topUp4.Hash(), topUp5.Hash())
+	err = txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, topUp1.Hash(), topUp2.Hash(), topUp3.Hash(), topUp4.Hash(), topUp5.Hash())
 	require.NoError(t, err)
-	deployer := testhelpers.NewContractsDeployer(contractDeployerPrivKey, contractBackend, cl, chainConfig.ChainID)
+	deployer := testhelpers.NewContractsDeployer(contractDeployerPrivKey, contractBackend, cl, chainConfig.ChainID, txnInclusionVerifier)
 	contractsDeployment, err := deployer.DeployCore(ctx)
 	require.NoError(t, err)
 	// these addresses are determined by the order of deployment (deployerAddr+nonce)
@@ -373,18 +405,19 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	coordinator := testhelpers.NewShutterBlockBuildingCoordinator(cl, decryptionKeySender, slotCalculator, shutterConfig.InstanceId)
 	return blockBuildingUniverse{
-		rpcApiClient:        rpcApiClient,
-		contractsDeployer:   deployer,
-		contractsDeployment: contractsDeployment,
-		ekgs:                map[shutter.EonIndex]testhelpers.EonKeyGeneration{},
-		acc1PrivKey:         acc1PrivKey,
-		acc1:                acc1,
-		acc2PrivKey:         acc2PrivKey,
-		acc2:                acc2,
-		acc3PrivKey:         acc3PrivKey,
-		acc3:                acc3,
-		transactor:          encryptedTransactor,
-		shutterConfig:       shutterConfig,
-		shutterCoordinator:  coordinator,
+		rpcApiClient:         rpcApiClient,
+		contractsDeployer:    deployer,
+		contractsDeployment:  contractsDeployment,
+		ekgs:                 map[shutter.EonIndex]testhelpers.EonKeyGeneration{},
+		acc1PrivKey:          acc1PrivKey,
+		acc1:                 acc1,
+		acc2PrivKey:          acc2PrivKey,
+		acc2:                 acc2,
+		acc3PrivKey:          acc3PrivKey,
+		acc3:                 acc3,
+		transactor:           encryptedTransactor,
+		txnInclusionVerifier: txnInclusionVerifier,
+		shutterConfig:        shutterConfig,
+		shutterCoordinator:   coordinator,
 	}
 }

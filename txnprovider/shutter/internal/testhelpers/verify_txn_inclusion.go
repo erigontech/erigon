@@ -17,22 +17,47 @@
 package testhelpers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
 	mapset "github.com/deckarep/golang-set/v2"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core/types"
 	enginetypes "github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
-func VerifyTxnsInclusion(payload *enginetypes.ExecutionPayload, inclusions ...libcommon.Hash) error {
+type TxnInclusionVerifier struct {
+	rpcApiClient requests.RequestGenerator
+}
+
+func NewTxnInclusionVerifier(rpcApiClient requests.RequestGenerator) TxnInclusionVerifier {
+	return TxnInclusionVerifier{
+		rpcApiClient: rpcApiClient,
+	}
+}
+
+func (v TxnInclusionVerifier) VerifyTxnsInclusion(
+	ctx context.Context,
+	payload *enginetypes.ExecutionPayload,
+	inclusions ...libcommon.Hash,
+) error {
 	inclusionHashes := mapset.NewSet[libcommon.Hash](inclusions...)
-	for _, txnBytes := range payload.Transactions {
+	for i, txnBytes := range payload.Transactions {
 		txn, err := types.DecodeTransaction(txnBytes)
 		if err != nil {
 			return err
+		}
+
+		r, err := v.rpcApiClient.GetTransactionReceipt(ctx, txn.Hash())
+		if err != nil {
+			return err
+		}
+
+		if r.Status != types.ReceiptStatusSuccessful {
+			return fmt.Errorf("txn %d in block %d not successful", i, r.BlockNumber)
 		}
 
 		inclusionHashes.Remove(txn.Hash())
@@ -50,12 +75,11 @@ func VerifyTxnsInclusion(payload *enginetypes.ExecutionPayload, inclusions ...li
 	return err
 }
 
-type OrderedInclusion struct {
-	TxnHash  libcommon.Hash
-	TxnIndex uint64
-}
-
-func VerifyTxnsOrderedInclusion(payload *enginetypes.ExecutionPayload, inclusions ...OrderedInclusion) error {
+func (v TxnInclusionVerifier) VerifyTxnsOrderedInclusion(
+	ctx context.Context,
+	payload *enginetypes.ExecutionPayload,
+	inclusions ...OrderedInclusion,
+) error {
 	orderedInclusions := make(map[uint64]libcommon.Hash, len(inclusions))
 	for _, inclusion := range inclusions {
 		orderedInclusions[inclusion.TxnIndex] = inclusion.TxnHash
@@ -73,6 +97,15 @@ func VerifyTxnsOrderedInclusion(payload *enginetypes.ExecutionPayload, inclusion
 			continue
 		}
 
+		r, err := v.rpcApiClient.GetTransactionReceipt(ctx, txn.Hash())
+		if err != nil {
+			return err
+		}
+
+		if r.Status != types.ReceiptStatusSuccessful {
+			return fmt.Errorf("txn %d in block %d not successful", i, r.BlockNumber)
+		}
+
 		if txn.Hash() == inclusionHash {
 			continue
 		}
@@ -85,4 +118,9 @@ func VerifyTxnsOrderedInclusion(payload *enginetypes.ExecutionPayload, inclusion
 	}
 
 	return accErr
+}
+
+type OrderedInclusion struct {
+	TxnHash  libcommon.Hash
+	TxnIndex uint64
 }
