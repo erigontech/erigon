@@ -3,8 +3,6 @@ run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images bas
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "golang:1.24-alpine"
-  TARGET_BASE_IMAGE: "alpine:3.21"
   APP_REPO: "erigontech/erigon"
   CHECKOUT_REF: "main"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
@@ -70,6 +68,12 @@ jobs:
               export latest_suffix='';
               export binaries="erigon caplin diag devnet downloader evm hack integration rpcdaemon rpctest sentinel sentry state txpool"
               ;;
+            "feature/lystopad/2025-03-main-remove-dockerfile" )
+              export tag_name='2025-03-main-remove-dockerfile';
+              export keep_images=1;
+              export latest_suffix='';
+              export binaries="erigon downloader evm"
+              ;;
             * )
               # use last string after last slash '/' by default if branch contains slash:
               export tag_name=$(echo ${{ inputs.checkout_ref }} | sed -e  's/.*\///g' );
@@ -104,32 +108,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
 
-      - name: Build arm64
-        env:
-          BINARIES: ${{ steps.def_docker_vars.outputs.binaries }}
-        run: |
-          docker run --platform linux/arm64 \
-          --rm -v $(pwd)/erigon:/erigon:ro \
-          -v $(pwd)/build-arm64:/erigon-build \
-          -v ${HOME}/.cache/go-build:/root/.cache/go-build \
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod \
-          -w /erigon --entrypoint /bin/sh \
-          ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
-
-      - name: Build amd64
-        env:
-          BINARIES: ${{ steps.def_docker_vars.outputs.binaries }}
-        run: |
-          docker run --platform linux/amd64 \
-          --rm -v $(pwd)/erigon:/erigon:ro \
-          -v $(pwd)/build-amd64:/erigon-build \
-          -v ${HOME}/.cache/go-build:/root/.cache/go-build \
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod \
-          -w /erigon --entrypoint /bin/sh \
-          ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
-
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ${{ GITHUB.BASE_REF }} branch
         id: built_tag_export
         env:
@@ -137,19 +115,15 @@ jobs:
           BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}${{ steps.def_docker_vars.outputs.latest_suffix }}"
           DOCKER_PUBLISH_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ', env.DOCKER_URL, env.BUILD_VERSION) || '' }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
-          DOCKERFILE_PATH: Dockerfile.release
+          DOCKERFILE_PATH: Dockerfile
         run: |
           echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
-          cp -vr build-amd64 erigon/
-          cp -vr build-arm64 erigon/
           cd erigon
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
-          --target ci-cd-main-branch \
+          --build-arg BINARIES=${{ steps.def_docker_vars.outputs.binaries }} \
           --attest type=provenance,mode=max \
           --sbom=true \
-          --build-arg CI_CD_MAIN_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
-          --build-arg CI_CD_MAIN_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
           ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ', env.DOCKER_URL, env.BUILD_VERSION) || '' }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION_LATEST }} \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
@@ -162,9 +136,8 @@ jobs:
           --label org.opencontainers.image.vcs-ref-short=${{ steps.getCommitId.outputs.short_commit_id }} \
           --label org.opencontainers.image.vendor="${{ github.repository_owner }}" \
           --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
-          --label org.opencontainers.image.base.name="${{ env.TARGET_BASE_IMAGE }}" \
           --push \
-          --platform linux/amd64,linux/arm64 .
+          --platform linux/amd64,linux/amd64/v2,linux/arm64 .
 
       - name: export and print docker build tag, cleanup old docker images
         env:
