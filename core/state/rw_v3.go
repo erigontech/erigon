@@ -576,7 +576,8 @@ func (r *ReaderV3) ResetReadSet()                        {}
 func (r *ReaderV3) AddressHaveStorageKeys(address common.Address) (bool, error) {
 	sd, ok := r.tx.(*state.SharedDomains)
 	if !ok {
-		panic("AddressHasNoStorage: ReaderV3.tx is not SharedDomains")
+		// panic("AddressHasNoStorage: ReaderV3.tx is not SharedDomains")
+		return false, nil
 	}
 
 	var haveOneStorageKey bool
