@@ -172,7 +172,7 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []libcommon.Hash) ([]*txpoolproto.BlobAndProofV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
 	res, err := e.getBlobs(ctx, blobHashes)
-	e.logger.Debug("[GetBlobsV1] Received Response",)
+	e.logger.Debug("[GetBlobsV1] Received Response")
 	for i, r := range res {
 		if r != nil {
 			e.logger.Debug("- ", "hash", blobHashes[i], "len(blob)", len(r.Blob), "len(r.Proof)", len(r.Proof))

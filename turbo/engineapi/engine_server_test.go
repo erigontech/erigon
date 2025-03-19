@@ -119,7 +119,7 @@ func TestGetBlobsV1(t *testing.T) {
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
 
-	blobHashes := append([]common.Hash{common.Hash{}}, wrappedTxn.Tx.BlobVersionedHashes... )
+	blobHashes := append([]common.Hash{{}}, wrappedTxn.Tx.BlobVersionedHashes...)
 	blobsResp, err := engineServer.GetBlobsV1(ctx, blobHashes)
 	require.NoError(err)
 	require.True(blobsResp[0] == nil)
