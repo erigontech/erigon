@@ -77,6 +77,8 @@ type ForkChoiceStorageReader interface {
 	ValidateOnAttestation(attestation *solid.Attestation) error
 	IsRootOptimistic(root common.Hash) bool
 	IsHeadOptimistic() bool
+
+	IsProcessingBlock() bool
 }
 
 type ForkChoiceStorageWriter interface {

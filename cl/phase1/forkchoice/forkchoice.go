@@ -116,8 +116,9 @@ type ForkChoiceStore struct {
 	totalActiveBalances *lru.Cache[libcommon.Hash, uint64]
 	nextBlockProposers  *lru.Cache[libcommon.Hash, []uint64]
 	// Randao mixes
-	randaoMixesLists *lru.Cache[libcommon.Hash, solid.HashListSSZ] // limited randao mixes full list (only 16 elements)
-	randaoDeltas     *lru.Cache[libcommon.Hash, randaoDelta]       // small entry can be lots of elements.
+	randaoMixesLists  *lru.Cache[libcommon.Hash, solid.HashListSSZ] // limited randao mixes full list (only 16 elements)
+	randaoDeltas      *lru.Cache[libcommon.Hash, randaoDelta]       // small entry can be lots of elements.
+	isProcessingBlock atomic.Bool
 	// participation tracking
 	participation *lru.Cache[uint64, *solid.ParticipationBitList] // epoch -> [participation]
 

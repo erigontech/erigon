@@ -83,6 +83,10 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	f.isProcessingBlock.Store(true)
+	defer f.isProcessingBlock.Store(false)
+
 	f.headHash = libcommon.Hash{}
 	start := time.Now()
 	blockRoot, err := block.Block.HashSSZ()
@@ -314,4 +318,8 @@ func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, bloc
 		}
 	}
 	return nil
+}
+
+func (f *ForkChoiceStore) IsProcessingBlock() bool {
+	return f.isProcessingBlock.Load()
 }
