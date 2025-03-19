@@ -81,10 +81,9 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
-	cfg.hist.iiCfg.aggregationStep = aggStep
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt = &salt
-	d, err := NewDomain(cfg, logger)
+	d, err := NewDomain(cfg, aggStep, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
 	t.Cleanup(d.Close)
@@ -1031,10 +1030,9 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	salt := uint32(1)
 	cfg.hist.iiCfg.salt = &salt
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
-	cfg.hist.iiCfg.aggregationStep = aggStep
 	cfg.hist.iiCfg.name = kv.InvertedIdx("dummy")
 
-	d, err := NewDomain(cfg, log.New())
+	d, err := NewDomain(cfg, aggStep, log.New())
 	if err != nil {
 		panic(err)
 	}

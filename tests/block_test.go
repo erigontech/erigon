@@ -36,6 +36,8 @@ func TestBlockchain(t *testing.T) {
 	}
 
 	bt := new(testMatcher)
+	bt.skipLoad(`^.meta/`)
+
 	// General state tests are 'exported' as blockchain tests, but we can run them natively.
 	// For speedier CI-runs those are skipped.
 	bt.skipLoad(`^GeneralStateTests/`)

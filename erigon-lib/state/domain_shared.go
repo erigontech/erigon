@@ -294,7 +294,7 @@ func (sd *BufferedSharedDomains) rebuildCommitment(ctx context.Context, roTx kv.
 	return sd.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
 }
 
-// DiscardWrites disables updates collection for further flushing into db.
+// discardWrites disables updates collection for further flushing into db.
 // Instead, it keeps them temporarily available until .ClearRam/.Close will make them unavailable.
 func (sd *BufferedSharedDomains) DiscardWrites(d kv.Domain) {
 	if d >= kv.DomainLen {
@@ -304,13 +304,13 @@ func (sd *BufferedSharedDomains) DiscardWrites(d kv.Domain) {
 	sd.domainWriters[d].h.discard = true
 }
 
-func (sd *BufferedSharedDomains) RebuildCommitmentShard(ctx context.Context, next func() (bool, []byte), cfg *RebuiltCommitment) (*RebuiltCommitment, error) {
+func rebuildCommitmentShard(ctx context.Context, sd SharedDomains, next func() (bool, []byte), cfg *rebuiltCommitment, logger log.Logger) (*rebuiltCommitment, error) {
 	sd.DiscardWrites(kv.AccountsDomain)
 	sd.DiscardWrites(kv.StorageDomain)
 	sd.DiscardWrites(kv.CodeDomain)
 
 	visComFiles := sd.roTx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
-	sd.logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
+	logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
 		"totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum(),
 		"commitment files before dump step", cfg.StepTo,
 		"files", fmt.Sprintf("%d %v", len(visComFiles), visComFiles))
@@ -329,7 +329,7 @@ func (sd *BufferedSharedDomains) RebuildCommitmentShard(ctx context.Context, nex
 	if err != nil {
 		return nil, err
 	}
-	sd.logger.Info("sealing", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
+	logger.Info("sealing", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
 		"root", hex.EncodeToString(rh), "commitment", time.Since(sf).String(),
 		"collection", collectionSpent.String())
 
@@ -345,9 +345,9 @@ func (sd *BufferedSharedDomains) RebuildCommitmentShard(ctx context.Context, nex
 		return nil, err
 	}
 
-	sd.logger.Info("shard built", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String(), "file dump", time.Since(sb).String())
+	logger.Info("shard built", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String(), "file dump", time.Since(sb).String())
 
-	return &RebuiltCommitment{
+	return &rebuiltCommitment{
 		RootHash: rh,
 		StepFrom: cfg.StepFrom,
 		StepTo:   cfg.StepTo,
@@ -357,7 +357,7 @@ func (sd *BufferedSharedDomains) RebuildCommitmentShard(ctx context.Context, nex
 	}, nil
 }
 
-type RebuiltCommitment struct {
+type rebuiltCommitment struct {
 	RootHash []byte
 	StepFrom uint64
 	StepTo   uint64

@@ -40,7 +40,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			return false, nil
 		}
 
-		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.cfg.silkworm, se.applyTx)
+		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.skipPostEvaluation, se.cfg.silkworm, se.applyTx)
 		if err := func() error {
 			if errors.Is(txTask.Error, context.Canceled) {
 				return txTask.Error
@@ -61,7 +61,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			}
 
 			if txTask.Final {
-				if !se.isMining && !se.inMemExec && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
+				if !se.isMining && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
 					// note this assumes the bloach reciepts is a fixed array shared by
 					// all tasks - if that changes this will need to change - robably need to
 					// add this to the executor
