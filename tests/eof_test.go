@@ -69,7 +69,7 @@ func TestEOFBlockchain(t *testing.T) {
 
 	bt := new(testMatcher)
 
-	dir := filepath.Join(".", "osaka-eof/blockchain_tests/osaka/eofwrap")
+	dir := filepath.Join(".", "osaka-eof/blockchain_tests/osaka")
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root
