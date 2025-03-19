@@ -54,9 +54,7 @@ type blockFees struct {
 	blockNumber uint64
 	header      *types.Header
 	block       *types.Block // only set if reward percentiles are requested
-
-	cumulativeGasUsedFromReceipts cumulativeGasUsedFromReceipts
-
+	receipts    types.Receipts
 	// filled by processBlock
 	reward                       []*big.Int
 	baseFee, nextBaseFee         *big.Int
@@ -64,19 +62,6 @@ type blockFees struct {
 	gasUsedRatio                 float64
 	blobGasUsedRatio             float64
 	err                          error
-}
-
-type cumulativeGasUsedFromReceipts []uint64
-
-func extractCumulativeGasUsedFromReceipts(receipts types.Receipts) cumulativeGasUsedFromReceipts {
-	if receipts == nil { // preserve nil
-		return nil
-	}
-	res := make(cumulativeGasUsedFromReceipts, len(receipts))
-	for i := range receipts {
-		res[i] = receipts[i].CumulativeGasUsed
-	}
-	return res
 }
 
 // txGasAndReward is sorted in ascending order based on reward
@@ -141,7 +126,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 		return
 	}
 
-	if bf.block == nil || (bf.cumulativeGasUsedFromReceipts == nil && len(bf.block.Transactions()) != 0) {
+	if bf.block == nil || (bf.receipts == nil && len(bf.block.Transactions()) != 0) {
 		oracle.log.Error("Block or receipts are missing while reward percentiles are requested")
 		return
 	}
@@ -162,7 +147,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 	}
 	for i, txn := range bf.block.Transactions() {
 		reward := txn.GetEffectiveGasTip(baseFee)
-		sorter[i] = txGasAndReward{gasUsed: bf.cumulativeGasUsedFromReceipts[i], reward: reward.ToBig()}
+		sorter[i] = txGasAndReward{gasUsed: bf.receipts[i].GasUsed, reward: reward.ToBig()}
 	}
 	sort.Sort(sorter)
 
@@ -307,12 +292,12 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 
 		fees := &blockFees{blockNumber: blockNumber}
 		if pendingBlock != nil && blockNumber >= pendingBlock.NumberU64() {
-			fees.block, fees.cumulativeGasUsedFromReceipts = pendingBlock, extractCumulativeGasUsedFromReceipts(pendingReceipts)
+			fees.block, fees.receipts = pendingBlock, pendingReceipts
 		} else {
 			if len(rewardPercentiles) != 0 {
 				fees.block, fees.err = oracle.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNumber))
 				if fees.block != nil && fees.err == nil {
-					fees.cumulativeGasUsedFromReceipts, fees.err = oracle.backend.GetReceiptsGasUsed(ctx, fees.block)
+					fees.receipts, fees.err = oracle.backend.GetReceiptsGasUsed(ctx, fees.block)
 				}
 			} else {
 				fees.header, fees.err = oracle.backend.HeaderByNumber(ctx, rpc.BlockNumber(blockNumber))

@@ -78,8 +78,11 @@ type Record struct {
 	Lvl      Lvl
 	Msg      string
 	Ctx      []interface{}
-	Call     stack.Call
 	KeyNames RecordKeyNames
+}
+
+func (r *Record) Call(skip int) stack.Call {
+	return stack.Caller(skip)
 }
 
 // RecordKeyNames are the predefined names of the log props used by the Logger interface.
@@ -121,7 +124,6 @@ func (l *logger) write(msg string, lvl Lvl, ctx []interface{}) {
 		Lvl:  lvl,
 		Msg:  msg,
 		Ctx:  newContext(l.ctx, ctx),
-		Call: stack.Caller(2),
 		KeyNames: RecordKeyNames{
 			Time: timeKey,
 			Msg:  msgKey,

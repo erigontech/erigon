@@ -207,7 +207,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 
 				select {
 				case <-logEvery.C:
-					log.Info("[squeeze_migration]", "block_num", bn)
+					log.Info("[ethGetLogsInvariants]", "block_num", bn)
 				default:
 				}
 

@@ -11,10 +11,10 @@ replace (
 )
 
 require (
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250121111444-6cc4c0c1fb89
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20250317154231-2ce6d6e9e6fc
 	github.com/erigontech/interfaces v0.0.0-20250305132916-e79ba495d507
 	github.com/erigontech/mdbx-go v0.38.10
-	github.com/erigontech/secp256k1 v1.1.0
+	github.com/erigontech/secp256k1 v1.2.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 )
 
@@ -35,6 +35,7 @@ require (
 	github.com/erigontech/speedtest v0.0.2
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.12.1
+	github.com/golang-jwt/jwt/v4 v4.5.1
 	github.com/google/btree v1.1.3
 	github.com/gorilla/websocket v1.5.3
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
