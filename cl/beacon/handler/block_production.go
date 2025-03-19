@@ -76,13 +76,20 @@ var (
 var defaultGraffitiString = "Caplin"
 
 func (a *ApiHandler) waitForHeadSlot(slot uint64) {
-	timeout := time.Second
+	graceTime := 500 * time.Millisecond
+
+	timeout := graceTime
 	if a.forkchoiceStore.IsProcessingBlock() {
 		timeout = 3 * time.Second
 	}
 	fmt.Println("timeout", timeout)
 	stopCh := time.After(timeout)
 	for {
+		if a.forkchoiceStore.IsProcessingBlock() && timeout == graceTime {
+			timeout = 3 * time.Second
+			stopCh = time.After(timeout)
+		}
+
 		headSlot := a.syncedData.HeadSlot()
 		if headSlot >= slot || a.slotWaitedForAttestationProduction.Contains(slot) {
 			return
