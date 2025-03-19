@@ -119,10 +119,12 @@ func TestGetBlobsV1(t *testing.T) {
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
 
-	blobsResp, err := engineServer.GetBlobsV1(ctx, wrappedTxn.Tx.BlobVersionedHashes)
+	blobHashes := append([]common.Hash{common.Hash{}}, wrappedTxn.Tx.BlobVersionedHashes... )
+	blobsResp, err := engineServer.GetBlobsV1(ctx, blobHashes)
 	require.NoError(err)
-	require.Equal(blobsResp[0].Blob, wrappedTxn.Blobs[0][:])
-	require.Equal(blobsResp[1].Blob, wrappedTxn.Blobs[1][:])
-	require.Equal(blobsResp[0].Proof, wrappedTxn.Proofs[0][:])
-	require.Equal(blobsResp[1].Proof, wrappedTxn.Proofs[1][:])
+	require.True(blobsResp[0] == nil)
+	require.Equal(blobsResp[1].Blob, wrappedTxn.Blobs[0][:])
+	require.Equal(blobsResp[2].Blob, wrappedTxn.Blobs[1][:])
+	require.Equal(blobsResp[1].Proof, wrappedTxn.Proofs[0][:])
+	require.Equal(blobsResp[2].Proof, wrappedTxn.Proofs[1][:])
 }
