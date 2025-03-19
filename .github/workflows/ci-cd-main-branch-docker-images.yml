@@ -122,7 +122,7 @@ jobs:
           cd erigon
           docker buildx build \
           --cache-from=type=local,src=${GITHUB_WORKSPACE}/docker-build-cache \
-          --cache-to=type=local,src=${GITHUB_WORKSPACE}/docker-build-cache-new \
+          --cache-to=type=local,dest=${GITHUB_WORKSPACE}/docker-build-cache-new \
           --file ${{ env.DOCKERFILE_PATH }} \
           --build-arg BINARIES='${{ steps.def_docker_vars.outputs.binaries }}' \
           --attest type=provenance,mode=max \
