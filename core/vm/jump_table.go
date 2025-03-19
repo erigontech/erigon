@@ -110,8 +110,7 @@ func newPragueInstructionSet() JumpTable {
 	return instructionSet
 }
 
-func NewEOFInstructionSet() JumpTable {
-	fmt.Println("NewEOFInstructionSet: called")
+func NewEOFInstructionSet() JumpTable { // TODO(racytech): why is this exported?
 	instructionSet := newPragueInstructionSet()
 	enableEOF(&instructionSet)
 	validateAndFillMaxStack(&instructionSet)

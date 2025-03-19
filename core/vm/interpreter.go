@@ -147,7 +147,6 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
-	// fmt.Println("CALLING NewEVMInterpreter")
 	var jt, eofJt *JumpTable
 	switch {
 	case evm.ChainRules().IsOsaka:
@@ -212,7 +211,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	if len(contract.Code) == 0 {
 		return nil, nil
 	}
-	// fmt.Println("-- Run Interpreter")
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
 	in.returnData = nil
@@ -243,7 +241,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	)
 
 	mem.Reset()
-	fmt.Println("contract.IsEOF", contract.IsEOF())
 	contract.Input = input
 	var initcode []byte // TODO(racytech): temp solution, condsider a better way, this will not work with JUMPF, CALLF
 	if contract.IsEOF() {
@@ -253,8 +250,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		jt = in.cfg.JumpTable
 		initcode = contract.Code
 	}
-	// fmt.Printf("initcode: 0x%x\n", initcode)
-	// fmt.Println("contract.Gas: ", contract.Gas)
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
 	restoreReadonly := readOnly && !in.readOnly
@@ -279,13 +274,11 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			in.readOnly = false
 		}
 		in.depth--
-		// fmt.Printf("depth after: %v: ", in.depth)
 	}()
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
-	// fmt.Printf("\ngas: %v, depth before: %v: ", contract.Gas, in.depth)
 	steps := 0
 	for {
 		// required by CALLF to set the initcode to appropirate code section
@@ -308,8 +301,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		} else {
 			op = STOP
 		}
-
-		// fmt.Printf("OPCODE: %v, GAS: %v\n", op, contract.Gas)
 
 		operation := jt[op]
 		cost = operation.constantGas // For tracing
@@ -364,7 +355,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 			logged = true
 		}
-		// fmt.Printf("-> COST: %v, ", cost)
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
 		if err != nil {

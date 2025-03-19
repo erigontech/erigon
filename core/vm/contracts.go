@@ -23,7 +23,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"math/big"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -217,7 +216,6 @@ func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uin
 	}
 	suppliedGas -= gasCost
 	output, err := p.Run(input)
-	fmt.Println("Gas: ", gasCost)
 	return output, suppliedGas, err
 }
 

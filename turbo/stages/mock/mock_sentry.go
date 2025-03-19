@@ -813,7 +813,6 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 }
 
 func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
-	fmt.Println("------------> Insert Start")
 	if err := ms.insertPoWBlocks(chain); err != nil {
 		return err
 	}

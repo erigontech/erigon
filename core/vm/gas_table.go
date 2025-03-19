@@ -547,12 +547,11 @@ func gasExtCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, m
 		address        = libcommon.Address(stack.Back(0).Bytes20())
 	)
 
-	fmt.Printf("address: 0x%x\n", address)
 	addrMod := evm.IntraBlockState().AddAddressToAccessList(address)
 	if addrMod {
 		gas += params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
 	}
-	fmt.Println("GAS 1: ", gas)
+
 	if transfersValue {
 		if empty, err := evm.IntraBlockState().Empty(address); err != nil {
 			return 0, ErrIntraBlockStateFailed

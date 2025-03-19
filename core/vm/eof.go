@@ -135,6 +135,28 @@ func isEOFVersion1(code []byte) bool {
 	return 2 < len(code) && code[2] == byte(eof1Version)
 }
 
+// parseUint16 parses a 16 bit BigEndian unsigned integer.
+func parseUint16(b []byte) (int, error) {
+	if len(b) < 2 {
+		// return 0, io.ErrUnexpectedEOF
+		panic("parseUint16: len(b) < 2") // TODO(racytech): undo this when done with tests
+	}
+	return int(binary.BigEndian.Uint16(b)), nil
+}
+
+// parseInt16 parses a 16 bit signed integer.
+func parseInt16(b []byte) int {
+	return int(int16(b[1]) | int16(b[0])<<8)
+}
+
+// sum computes the sum of a slice.
+func sum(list []int) (s int) {
+	for _, n := range list {
+		s += n
+	}
+	return
+}
+
 // Container is an EOF container object.
 // type Container struct {
 // 	Types         []*FunctionMetadata
@@ -424,25 +446,3 @@ func isEOFVersion1(code []byte) bool {
 // 	}
 // 	return list, nil
 // }
-
-// parseUint16 parses a 16 bit BigEndian unsigned integer.
-func parseUint16(b []byte) (int, error) {
-	if len(b) < 2 {
-		// return 0, io.ErrUnexpectedEOF
-		panic("parseUint16: len(b) < 2") // TODO(racytech): undo this when done with tests
-	}
-	return int(binary.BigEndian.Uint16(b)), nil
-}
-
-// parseInt16 parses a 16 bit signed integer.
-func parseInt16(b []byte) int {
-	return int(int16(b[1]) | int16(b[0])<<8)
-}
-
-// sum computes the sum of a slice.
-func sum(list []int) (s int) {
-	for _, n := range list {
-		s += n
-	}
-	return
-}

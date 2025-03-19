@@ -510,7 +510,6 @@ func opRjump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 // opRjumpi implements the RJUMPI opcode
 func opRjumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	condition := scope.Stack.Pop()
-	fmt.Println("condition: ", condition)
 	if condition.BitLen() == 0 {
 		// Not branching, just skip over immediate argument.
 		*pc += 2
@@ -539,55 +538,15 @@ func opRjumpv(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	return nil, nil
 }
 
-// inline code_iterator callf(StackTop stack, ExecutionState& state, code_iterator pos) noexcept
-// {
-//     const auto index = read_uint16_be(&pos[1]);
-//     const auto& header = state.analysis.baseline->eof_header;
-//     const auto stack_size = &stack.top() - state.stack_space.bottom();
-
-//     const auto callee_required_stack_size =
-//         header.types[index].max_stack_height - header.types[index].inputs;
-//     if (stack_size + callee_required_stack_size > StackSpace::limit)
-//     {
-//         state.status = EVMC_STACK_OVERFLOW;
-//         return nullptr;
-//     }
-
-//     if (state.call_stack.size() >= StackSpace::limit)
-//     {
-//         // TODO: Add different error code.
-//         state.status = EVMC_STACK_OVERFLOW;
-//         return nullptr;
-//     }
-//     state.call_stack.push_back(pos + 3);
-
-//     const auto offset = header.code_offsets[index] - header.code_offsets[0];
-//     auto code = state.analysis.baseline->executable_code;
-//     return code.data() + offset;
-// }
-
 // opCallf implements the CALLF opcode
 func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	fmt.Println(scope.CodeSection)
-	code := scope.Contract.CodeAt(scope.CodeSection)
-	fmt.Printf("code: 0x%x\n", code)
-	fmt.Println("PC: ", *pc)
-	idx := binary.BigEndian.Uint16(code[*pc+1:])
-	fmt.Println("IDX: ", idx)
-	fmt.Println(code[*pc+1:])
-	var a uint64 = 0xFFFFFFFF_FFFFFFFF
-	fmt.Println(a + 1)
-	typ := scope.Contract.Container._types[idx]
-	// fmt.Println("CODE SECTION", scope.CodeSection)
-	// fmt.Println(scope.Contract.CodeAt(scope.CodeSection))
-	// fmt.Println(scope.Contract.CodeAt(scope.CodeSection)[*pc+1:])
-	// var (
-	// 	code = scope.Contract.CodeAt(scope.CodeSection)
-	// 	idx  = binary.BigEndian.Uint16(code[*pc+1:])
-	// 	typ  = scope.Contract.Container.Types[idx]
-	// )
 
-	// fmt.Printf("StackLen: %v, typ.MaxStackHeight: %v, typ.Inputs: %v\n", scope.Stack.Len(), typ.MaxStackHeight, typ.Inputs)
+	code := scope.Contract.CodeAt(scope.CodeSection)
+	idx := binary.BigEndian.Uint16(code[*pc+1:])
+	// var a uint64 = 0xFFFFFFFF_FFFFFFFF
+	// fmt.Println(a + 1)
+	typ := scope.Contract.Container._types[idx]
+
 	if scope.Stack.Len()+int(typ.maxStackHeight)-int(typ.inputs) > 1024 {
 		return nil, fmt.Errorf("CALLF stack overflow: StackLen: %v, typ.MaxStackHeight: %v, typ.Inputs: %v", scope.Stack.Len(), typ.maxStackHeight, typ.inputs)
 	}
@@ -629,7 +588,6 @@ func opJumpf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 		idx  = binary.BigEndian.Uint16(code[*pc+1:])
 		typ  = scope.Contract.Container._types[idx]
 	)
-	fmt.Println("JUMPF index: ", idx)
 	if scope.Stack.Len()+int(typ.maxStackHeight)-int(typ.inputs) > 1024 {
 		return nil, fmt.Errorf("JUMPF stack overflow: StackLen: %v, typ.MaxStackHeight: %v, typ.Inputs: %v", scope.Stack.Len(), typ.maxStackHeight, typ.inputs)
 	}
@@ -697,10 +655,7 @@ func opDataLoadN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 		data   = scope.Contract.Data()
 		offset = int(binary.BigEndian.Uint16(code[*pc+1:]))
 	)
-	// if len(data) < 32 || len(data)-32 < offset {
-	// 	return nil, ErrInvalidMemoryAccess
-	// }
-	fmt.Printf("DataSize: %v, OFFSET: %v\n", len(data), offset)
+
 	val := new(uint256.Int).SetBytes(data[offset : offset+32])
 	scope.Stack.Push(val)
 
@@ -735,18 +690,14 @@ func opDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	}
 	s := size256.Uint64()
 	copySize = min(s, uint64(len(data))-src)
-	fmt.Printf("src: %d, s: %d, copySize: %d\n", src, s, copySize)
 
 	if copySize > 0 {
-		fmt.Println("CopyFromData")
 		scope.Memory.CopyFromData(dst, data, src, copySize)
 	}
 
 	if s-copySize > 0 {
-		fmt.Println("Setting Zero")
 		scope.Memory.SetZero(dst+copySize, s-copySize)
 	}
-	fmt.Println("Exiting")
 	return nil, nil
 }
 
@@ -792,8 +743,7 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	}
 	stackValue := size
 	res, addr, returnGas, suberr := interpreter.evm.EOFCreate(scope.Contract, input, initContainer.rawData, gas, &endowment, &salt, false)
-	// fmt.Printf("EOFCREATE out_data: 0x%x, addr: 0x%x, returnGas: %v, suberr: %v\n", res, addr, returnGas, suberr)
-	// Push item on the stack based on the returned error.
+
 	if suberr != nil {
 		stackValue.Clear()
 	} else {
@@ -872,33 +822,22 @@ func opReturnCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 		offset256          = scope.Stack.Pop()
 		size256            = scope.Stack.Pop()
 	)
-	// deployContainerIdx = 255
-	fmt.Println("len(scope.Contract.Container._subContainers): ", len(scope.Contract.Container._subContainers))
 	if deployContainerIdx >= len(scope.Contract.Container._subContainers) {
 		return nil, fmt.Errorf("invalid subcontainer index: deployContainerIdx=%v, len(scope.Contract.Container.SubContainers)=%v", deployContainerIdx, len(scope.Contract.Container._subContainers))
 	}
-	fmt.Println("deploy container idx:", deployContainerIdx)
 	*pc += 1
 	offset := int64(offset256.Uint64())
 	size := int64(size256.Uint64())
 	container := scope.Contract.SubcontainerAt(deployContainerIdx)
-	fmt.Printf("deployContainer: 0x%x, len: %v\n", container._data, len(container._data))
 	auxData := scope.Memory.GetCopy(offset, size)
-	fmt.Printf("auxData: 0x%x, len: %v\n", auxData, len(auxData))
 	if err := container.updateData(auxData); err != nil {
 		return nil, err
 	}
-	fmt.Printf("deployContainer: 0x%x, len: %v\n", container._data, len(container._data))
 
 	if len(container.rawData) == 0 {
 		return nil, fmt.Errorf("len(container._data) == 0")
 	}
 
-	// d, err := MarshalEOF(container, 0)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// fmt.Println("len(d): ", len(d))
 	return container.rawData, errStopToken
 }
 
@@ -915,7 +854,6 @@ func opReturnDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 			b[i] = interpreter.returnData[start+i]
 		}
 		index256.SetBytes32(b[:])
-		fmt.Println("RETURNDATALOAD: ", b)
 	}
 	return nil, nil
 }
@@ -943,13 +881,11 @@ func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 		return nil, fmt.Errorf("argument out of range")
 	}
 	args := scope.Memory.GetPtr(offset, size)
-	fmt.Println("BEFORE: ")
 	var (
 		ret       []byte
 		returnGas uint64
 		err       error
 	)
-	fmt.Println("GAS: ", gas)
 	if gas == 0 {
 		// zero temp call gas indicates a min retained gas error
 		ret, returnGas, err = nil, 0, ErrExecutionReverted
@@ -957,7 +893,6 @@ func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 		ret, returnGas, err = interpreter.evm.ExtCall(scope.Contract, toAddr, args, gas, &value)
 	}
 
-	fmt.Println("opExtCall ERR: ", err)
 	if err == ErrExecutionReverted || err == ErrDepth || err == ErrInsufficientBalance {
 		dst256.SetOne()
 	} else if err != nil {
@@ -1005,15 +940,12 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 	if !hasEOFMagic(code) { // TODO(racytech): see if this part is correct and can be done better
-		fmt.Println("DOES NOT HAVE EOF MAGIC")
 		addr256.SetOne()
 		scope.Stack.Push(&addr256)
 		scope.Contract.RefundGas(gas, tracing.GasChangeCallLeftOverRefunded)
 		interpreter.returnData = nil
 		return nil, nil
 	}
-	fmt.Printf("ADDR BEFORE: 0x%x\n", addr256.Bytes32())
-	fmt.Printf("scope.Contract.Value(): 0x%x\n", scope.Contract.Value().Bytes32())
 	ret, returnGas, err := interpreter.evm.ExtDelegateCall(scope.Contract, toAddr, args, gas)
 	if err == ErrExecutionReverted || err == ErrDepth {
 		addr256.SetOne()
@@ -1022,7 +954,6 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 	} else {
 		addr256.Clear()
 	}
-	fmt.Printf("ADDR: 0x%x\n", addr256.Bytes32())
 	scope.Stack.Push(&addr256)
 
 	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)

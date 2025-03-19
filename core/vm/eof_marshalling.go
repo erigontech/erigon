@@ -169,7 +169,6 @@ func readHeader(buf *bytes.Reader) (*header, int64, error) {
 
 	var kind byte
 	if err := binary.Read(buf, binary.BigEndian, &kind); err != nil {
-		fmt.Println("HITTIN THIS ERR")
 		return nil, 0, fmt.Errorf("%w: %w", err, ErrMissingTypeHeader)
 	}
 	if kind != _kindTypes {
@@ -248,7 +247,6 @@ func readHeader(buf *bytes.Reader) (*header, int64, error) {
 	if kind != _kindData {
 		return nil, 0, fmt.Errorf("%w: %v", ErrMissingDataHeader, "expected data section")
 	}
-	// fmt.Println("DATA SIZE POS: ", buf.Size()-int64(buf.Len()))
 	header.dataSizePos = uint16(buf.Size() - int64(buf.Len()))
 	if err := binary.Read(buf, binary.BigEndian, &header.dataLength); err != nil {
 		return nil, 0, fmt.Errorf("%w: %w", err, ErrMissingDataHeader)
@@ -373,7 +371,6 @@ func readCodeSection(buf *bytes.Reader, jt *JumpTable, header *header, _types []
 			offset += int64(header.codeSectionSizes[i])
 		}
 		if _, err := buf.ReadAt(code, offset); err != nil {
-			fmt.Println("OFFSET: ", offset)
 			return nil, nil, nil, -1, fmt.Errorf("%w: %w", err, ErrInvalidCode)
 		}
 		if validateCode {
@@ -421,7 +418,6 @@ func readSubContainer(buf *bytes.Reader, header *header, jt *JumpTable, referenc
 
 		eofcreate := referencedByEofCreate[i]
 		returnContract := referencedByReturnContract[i]
-		// fmt.Println("eofcreate, returnContract: ", eofcreate, returnContract)
 		if eofcreate && returnContract {
 			return nil, 0, ErrAmbiguousContainer
 		}
@@ -449,10 +445,6 @@ func readSubContainer(buf *bytes.Reader, header *header, jt *JumpTable, referenc
 
 // UnmarshalEOF deserializes a byte array into an EOFContainer object.
 func UnmarshalEOF(data []byte, depth int, containerKind byte, jt *JumpTable, validateCode bool) (*EOFContainer, error) {
-	// if depth >= MaxContainerDepth {
-	// 	return nil, errors.New("depth >= MaxContainerDepth")
-	// }
-	// fmt.Println("initcodeSize: ", len(data))
 	buf := bytes.NewReader(data)
 	container := &EOFContainer{}
 	container.rawData = data
@@ -489,7 +481,6 @@ func UnmarshalEOF(data []byte, depth int, containerKind byte, jt *JumpTable, val
 	header.dataOffset = uint16(buf.Size() - int64(buf.Len()))
 	if header.dataLength > 0 {
 		container._data = make([]byte, header.dataLength)
-		fmt.Println("bufSIZE: ", buf.Size())
 		if _, err := buf.Read(container._data); err != nil && err != io.EOF {
 			return nil, fmt.Errorf("%w: %w", err, ErrInvalidEOF)
 		}

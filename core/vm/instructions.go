@@ -305,7 +305,6 @@ func opCaller(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 }
 
 func opCallValue(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	fmt.Println("CALLVALUE: ", scope.Contract.value.Bytes32())
 	scope.Stack.Push(scope.Contract.value)
 	return nil, nil
 }
@@ -368,14 +367,11 @@ func opCallDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	if src >= dataOffset64 {
 		src = dataOffset64
 	}
-	fmt.Println("SRC: ", src)
 	copySize := min(length64, uint64(len(scope.Contract.Input))-src)
 	if copySize > 0 {
-		fmt.Println("HIT 1")
 		scope.Memory.Set(memOffset64, copySize, scope.Contract.Input[src:src+copySize])
 	}
 	if length64-copySize > 0 {
-		fmt.Println("HIT 2")
 		scope.Memory.SetZero(memOffset64+copySize, length64-copySize)
 	}
 	// scope.Memory.Set(memOffset64, length64, getData(scope.Contract.Input, dataOffset64, length64))
@@ -757,7 +753,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	stackvalue := size
 
 	scope.Contract.UseGas(gas, tracing.GasChangeCallContractCreation)
-	fmt.Println("CALLING FROM HERE")
+
 	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value, false, false)
 
 	// Push item on the stack based on the returned error. If the ruleset is
@@ -954,7 +950,6 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 func opReturn(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	offset, size := scope.Stack.Pop(), scope.Stack.Pop()
 	ret := scope.Memory.GetPtr(int64(offset.Uint64()), int64(size.Uint64()))
-	fmt.Println("RETURN: ", ret)
 	return ret, errStopToken
 }
 
@@ -1071,7 +1066,6 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		code := scope.Contract.CodeAt(scope.CodeSection)
 		codeLen := len(code)
 
-		// fmt.Printf("scope.CodeSection: %v, len(code): %v, code: 0x%x\n", scope.CodeSection, codeLen, code)
 		startMin := int(*pc + 1)
 		if startMin >= codeLen {
 			startMin = codeLen

@@ -20,7 +20,7 @@ func IntrinsicGas(data []byte, accessListLen, storageKeysLen uint64, isContractC
 }
 
 // CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessListLen, storageKeysLen uint64, isContractCreation, isHomestead, isEIP2028, isShanghai, isPrague bool) (gas uint64, floorGas7623 uint64, overflow bool) {
+func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessListLen, storageKeysLen uint64, isContractCreation, isHomestead, isEIP2028, isShanghai, isOsaka bool) (gas uint64, floorGas7623 uint64, overflow bool) {
 	// Set the starting gas for the raw transaction
 	if isContractCreation && isHomestead {
 		gas = TxGasContractCreation
@@ -71,7 +71,7 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessListLen,
 		}
 
 		// EIP-7623	  // TODO(EOF): handle this part properly
-		if isPrague { // here isPrague is isOsaka, see IntrinsicGas call in state_transition
+		if isOsaka { // here isPrague is isOsaka, see IntrinsicGas call in state_transition
 			tokenLen := dataLen + 3*nz
 			dataGas, overflow := math.SafeMul(tokenLen, TxTotalCostFloorPerToken)
 			if overflow {
