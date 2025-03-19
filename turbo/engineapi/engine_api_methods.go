@@ -179,9 +179,9 @@ func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []libcommon.Ha
 	rs := []string{}
 	for i, r := range res {
 		if r != nil {
-			rs = append(rs, fmt.Sprintf("blobHash[%d]", i), fmt.Sprintf(" - hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(r.Blob), len(r.Proof)))
+			rs = append(rs, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(r.Blob), len(r.Proof)))
 		} else {
-			rs = append(rs, fmt.Sprintf("%d", i), "nil")
+			rs = append(rs, fmt.Sprintf(" %d:", i), " nil")
 		}
 	}
 	e.logger.Debug("[GetBlobsV1]", "Responses", rs)
