@@ -523,8 +523,11 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+
+	fmt.Println("before", len(p.promoted.hashes))
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
+	fmt.Println("after", len(p.promoted.hashes))
 
 	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
 	for i, reason := range reasons {
