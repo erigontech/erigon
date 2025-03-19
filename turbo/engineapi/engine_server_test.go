@@ -105,7 +105,8 @@ func TestGetBlobsV1(t *testing.T) {
 	dt.S.Set(s)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
-	txPool := txpool.NewTxpoolClient(conn)
+	txPool := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
+
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, logger)
 
