@@ -534,7 +534,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
-	var txnIndex = int(txNum - txNumMin - 1)
+	var txnIndex = int(txNum - txNumMin - 2)
 
 	txn, err := api._blockReader.TxnByIdxInBlock(ctx, tx, header.Number.Uint64(), txnIndex)
 	if err != nil {
