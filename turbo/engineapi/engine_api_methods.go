@@ -3,6 +3,7 @@ package engineapi
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -172,14 +173,18 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []libcommon.Hash) ([]*txpoolproto.BlobAndProofV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
 	res, err := e.getBlobs(ctx, blobHashes)
-	e.logger.Debug("[GetBlobsV1] Received Response")
+	if len(blobHashes) != len(res) { // Some fault in the underlying txpool, but still return sane resp
+		return make([]*txpoolproto.BlobAndProofV1, len(blobHashes)), nil
+	}
+	rs := []string{}
 	for i, r := range res {
 		if r != nil {
-			e.logger.Debug("- ", "hash", blobHashes[i], "len(blob)", len(r.Blob), "len(r.Proof)", len(r.Proof))
+			rs = append(rs, fmt.Sprintf("blobHash[%d]", i), fmt.Sprintf(" - hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(r.Blob), len(r.Proof)))
 		} else {
-			e.logger.Debug("- nil")
+			rs = append(rs, fmt.Sprintf("%d", i), "nil")
 		}
 	}
+	e.logger.Debug("[GetBlobsV1]", "Responses", rs)
 	return res, err
 
 }
