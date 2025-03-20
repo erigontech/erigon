@@ -530,11 +530,11 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	for i, reason := range reasons {
 		txn := newTxns.Txns[i]
 
-		subpool := "Unknown"
-		found := p.all.get(txn.SenderID, txn.Nonce)
-		if found != nil {
-			subpool = found.currentSubPool.String()
-		}
+		//subpool := "Unknown"
+		//found := p.all.get(txn.SenderID, txn.Nonce)
+		//if found != nil {
+		//	subpool = found.currentSubPool.String()
+		//}
 
 		//fmt.Println("reason", reason, "txhash", newTxns.Txns[i].IDHash)
 		diagTxn := diagnostics.DiagTxn{
@@ -555,7 +555,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 			Blobs:               txn.Blobs,
 			IsLocal:             false,
 			DiscardReason:       reason.String(),
-			Pool:                subpool,
+			Pool:                "Unknown",
 		}
 
 		diagTxns = append(diagTxns, diagTxn)
