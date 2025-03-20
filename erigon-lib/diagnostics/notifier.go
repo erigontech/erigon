@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -33,6 +34,7 @@ func (d *DiagnosticClient) SetupNotifier() {
 	go func() {
 		for {
 			d.saveNotificationMessagesToFile()
+			fmt.Println("adds", d.adds, "removes", d.removes)
 			time.Sleep(10 * time.Second)
 		}
 	}()

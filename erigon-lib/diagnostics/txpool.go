@@ -181,6 +181,7 @@ func (d *DiagnosticClient) runOnPendingAddEvent(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
+				d.adds++
 				d.Notify(DiagMessages{
 					MessageType: "txpool",
 					Message: PoolChangeEvent{
@@ -205,6 +206,7 @@ func (d *DiagnosticClient) runOnPendingRemoveEvent(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
+				d.removes++
 				d.Notify(DiagMessages{
 					MessageType: "txpool",
 					Message: PoolChangeEvent{
