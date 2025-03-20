@@ -58,7 +58,7 @@ type DiagnosticClient struct {
 	webseedsList        []string
 	conn                *websocket.Conn
 
-	notificationMessages []any
+	notificationMessages []DiagMessages
 }
 
 func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool, webseedsList []string) (*DiagnosticClient, error) {
