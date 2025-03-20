@@ -898,15 +898,15 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash
 		return nil, err
 	}
 	ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
-	if len(blobHashes) != len(res.BlobsAndProofs) { // Some fault in the underlying txpool, but still return sane resp
+	if len(blobHashes) != len(res.Blobs) { // Some fault in the underlying txpool, but still return sane resp
 		log.Warn("[GetBlobsV1] txpool returned unexpected number of BlobsAndProofs in response, returning nil blobs")
 		return ret, nil
 	}
 	logLine := []string{}
-	for i, r := range res.BlobsAndProofs {
-		if r != nil {
-			ret[i] = &engine_types.BlobAndProofV1{Blob: r.Blob, Proof: r.Proof}
-			logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(r.Blob), len(r.Proof)))
+	for i := range res.Blobs {
+		if res.Blobs[i] != nil {
+			ret[i] = &engine_types.BlobAndProofV1{Blob: res.Blobs[i], Proof: res.Proofs[i]}
+			logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(res.Blobs[i]), len(res.Proofs[i])))
 		} else {
 			logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
 		}

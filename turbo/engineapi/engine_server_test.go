@@ -21,6 +21,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -124,8 +125,8 @@ func TestGetBlobsV1(t *testing.T) {
 	blobsResp, err := engineServer.GetBlobsV1(ctx, blobHashes)
 	require.NoError(err)
 	require.True(blobsResp[0] == nil)
-	require.Equal(blobsResp[1].Blob, wrappedTxn.Blobs[0][:])
-	require.Equal(blobsResp[2].Blob, wrappedTxn.Blobs[1][:])
-	require.Equal(blobsResp[1].Proof, wrappedTxn.Proofs[0][:])
-	require.Equal(blobsResp[2].Proof, wrappedTxn.Proofs[1][:])
+	require.Equal(blobsResp[1].Blob, hexutil.Bytes(wrappedTxn.Blobs[0][:]))
+	require.Equal(blobsResp[2].Blob, hexutil.Bytes(wrappedTxn.Blobs[1][:]))
+	require.Equal(blobsResp[1].Proof, hexutil.Bytes(wrappedTxn.Proofs[0][:]))
+	require.Equal(blobsResp[2].Proof, hexutil.Bytes(wrappedTxn.Proofs[1][:]))
 }
