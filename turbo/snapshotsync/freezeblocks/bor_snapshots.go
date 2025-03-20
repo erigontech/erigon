@@ -80,11 +80,12 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 			rangeExtractor := snapshots.RangeExtractor(snap)
 			indexBuilder := snapshots.IndexBuilder(snap)
 
-			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig) {
+			for i := blockFrom; i < blockTo; {
 				end := chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig)
 				if _, err := snap.ExtractRange(ctx, snap.FileInfo(snapshots.Dir(), i, end), rangeExtractor, indexBuilder, firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger); err != nil {
-					return ok, fmt.Errorf("ExtractRange: %d-%d: %w", i, end, err)
+					return false, fmt.Errorf("ExtractRange: %d-%d: %w", i, end, err)
 				}
+				i = end
 			}
 		}
 	}
@@ -108,7 +109,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		return blocksRetired, nil
 	}
 	blocksRetired = true // have something to merge
-	onMerge := func(r snapshotsync.Range) error {
+	onMerge := func(_ snapshotsync.Range) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
@@ -135,7 +136,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 			return blocksRetired, err
 		}
 
-		// this is one off code to fix an issue in 2.49.x->2.52.x which missed
+		// this is one-off code to fix an issue in 2.49.x->2.52.x which missed
 		// removal of intermediate segments after a merge operation
 		removeBorOverlaps(br.borSnapshots().Dir(), files, br.borSnapshots().BlocksAvailable())
 	}
@@ -143,7 +144,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	return blocksRetired, nil
 }
 
-// this is one off code to fix an issue in 2.49.x->2.52.x which missed
+// this is one-off code to fix an issue in 2.49.x->2.52.x which missed
 // removal of intermediate segments after a merge operation
 func removeBorOverlaps(dir string, active []snaptype.FileInfo, _max uint64) {
 	list, err := snaptype.Segments(dir)
