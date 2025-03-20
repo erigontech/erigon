@@ -48,7 +48,7 @@ jobs:
           path: 'erigon'
 
       - name: Restore cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache@v4
         with:
           path: |
             ./docker-build-cache
@@ -206,11 +206,3 @@ jobs:
               fi
               echo "Done."
             done
-
-      - name: Save cache
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ./docker-build-cache
-          key: ci-cd-builds-docker-build-cache-branch-${{ github.ref }}
-
