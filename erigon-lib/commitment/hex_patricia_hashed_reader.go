@@ -420,16 +420,60 @@ func (hph *HexPatriciaHashedReader) GenerateWitness(ctx context.Context, reads *
 	return witnessTrie, rootHash, nil
 }
 
-func (hph *HexPatriciaHashedReader) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
+func (hph *HexPatriciaHashedReader) Process(_ context.Context, _ *HexPatriciaHashedReader, _ *Updates, _ string) (rootHash []byte, err error) {
 	panic("Process must not be called for HexPatriciaHashedReader")
+}
+
+func (hph *HexPatriciaHashedReader) TraverseKey(hashedKey, plainKey []byte, stateUpdate *Update) error {
+	var (
+		update *Update
+		err    error
+	)
+	if hph.trace {
+		fmt.Printf("plainKey [%x] hashedKey [%x] currentKey [%x]\n", plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+	}
+	// Keep folding until the currentKey is the prefix of the key we modify
+	for hph.needFolding(hashedKey) {
+		if err := hph.fold(); err != nil {
+			return fmt.Errorf("fold: %w", err)
+		}
+	}
+	// Now unfold until we step on an empty cell
+	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
+		if err := hph.unfold(hashedKey, unfolding); err != nil {
+			return fmt.Errorf("unfold: %w", err)
+		}
+	}
+
+	if stateUpdate == nil {
+		// Update the cell
+		if len(plainKey) == hph.accountKeyLen {
+			update, err = hph.ctx.Account(plainKey)
+			if err != nil {
+				return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
+			}
+		} else {
+			update, err = hph.ctx.Storage(plainKey)
+			if err != nil {
+				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
+			}
+		}
+	} else {
+		if update == nil {
+			update = stateUpdate
+		} else {
+			update.Reset()
+			update.Merge(stateUpdate)
+		}
+	}
+	hph.updateCell(plainKey, hashedKey, update) // todo this may update the cell with value obtained with hph.ctx.
+
+	mxTrieProcessedKeys.Inc()
+	return nil
 }
 
 func (hph *HexPatriciaHashedReader) Traverse(ctx context.Context, reads *Updates, logPrefix string) (rootHash []byte, err error) {
 	var (
-		m      runtime.MemStats
-		ki     uint64
-		update *Update
-
 		readCount = reads.Size()
 		logEvery  = time.NewTicker(20 * time.Second)
 	)
@@ -437,58 +481,7 @@ func (hph *HexPatriciaHashedReader) Traverse(ctx context.Context, reads *Updates
 	//hph.trace = true
 
 	err = reads.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-		select {
-		case <-logEvery.C:
-			dbg.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
-				"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(readCount)),
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-
-		default:
-		}
-
-		if hph.trace {
-			fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, readCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
-		}
-		// Keep folding until the currentKey is the prefix of the key we modify
-		for hph.needFolding(hashedKey) {
-			if err := hph.fold(); err != nil {
-				return fmt.Errorf("fold: %w", err)
-			}
-		}
-		// Now unfold until we step on an empty cell
-		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
-			if err := hph.unfold(hashedKey, unfolding); err != nil {
-				return fmt.Errorf("unfold: %w", err)
-			}
-		}
-
-		if stateUpdate == nil {
-			// Update the cell
-			if len(plainKey) == hph.accountKeyLen {
-				update, err = hph.ctx.Account(plainKey)
-				if err != nil {
-					return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
-				}
-			} else {
-				update, err = hph.ctx.Storage(plainKey)
-				if err != nil {
-					return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
-				}
-			}
-		} else {
-			if update == nil {
-				update = stateUpdate
-			} else {
-				update.Reset()
-				update.Merge(stateUpdate)
-			}
-		}
-		hph.updateCell(plainKey, hashedKey, update) // todo this may update the cell with value obtained with hph.ctx.
-
-		mxTrieProcessedKeys.Inc()
-		ki++
-		return nil
+		return hph.TraverseKey(hashedKey, plainKey, stateUpdate)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("hash sort failed: %w", err)

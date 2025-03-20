@@ -964,7 +964,7 @@ type SharedDomainsCommitmentContext struct {
 	// for building and updating commitment
 	RWTrie commitment.Trie
 	// read only patricia trie for building proofs (eth_getProof)
-	ROTrie       commitment.Trie
+	ROTrie       *commitment.HexPatriciaHashedReader
 	justRestored atomic.Bool
 
 	limitReadAsOfTxNum uint64
@@ -1226,7 +1226,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.RWTrie.SetTrace(sdc.sharedDomains.trace)
 	sdc.Reset()
 
-	rootHash, err = sdc.RWTrie.Process(ctx, sdc.updates, logPrefix)
+	rootHash, err = sdc.RWTrie.Process(ctx, sdc.ROTrie, sdc.updates, logPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -1361,13 +1361,12 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 	}
 
 	// restore state for HexPatriciaHashedReader
-	readTrie, _ := sdc.ROTrie.(*commitment.HexPatriciaHashedReader)
-	if err := readTrie.SetState(cs.trieState); err != nil {
+	if err := sdc.ROTrie.SetState(cs.trieState); err != nil {
 		return 0, 0, fmt.Errorf("failed restore state : %w", err)
 	}
 	sdc.justRestored.Store(true) // to prevent double reset
 	if sdc.sharedDomains.trace {
-		rootHash, err := readTrie.RootHash()
+		rootHash, err := sdc.ROTrie.RootHash()
 		if err != nil {
 			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
 		}

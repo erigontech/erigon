@@ -1716,7 +1716,9 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
-func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
+const PrefetchKeys = 1
+
+func (hph *HexPatriciaHashed) Process(ctx context.Context, RoTrie *HexPatriciaHashedReader, updates *Updates, logPrefix string) (rootHash []byte, err error) {
 	var (
 		m      runtime.MemStats
 		ki     uint64
@@ -1729,20 +1731,12 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	defer logEvery.Stop()
 	//hph.trace = true
 
-	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-		select {
-		case <-logEvery.C:
-			dbg.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
-				"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)),
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	type KeyUpdate struct {
+		hashedKey, plainKey []byte
+		stateUpdate         *Update
+	}
 
-		default:
-		}
-
-		if hph.trace {
-			fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
-		}
+	processKey := func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
 			if err := hph.fold(); err != nil {
@@ -1782,9 +1776,50 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		mxTrieProcessedKeys.Inc()
 		ki++
 		return nil
+	}
+
+	keyUpdates := make([]KeyUpdate, 0)
+	currentUpdate := PrefetchKeys
+	processedKeys := 0
+
+	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+		keyUpdates = append(keyUpdates, KeyUpdate{hashedKey: append([]byte{}, hashedKey...), plainKey: append([]byte{}, plainKey...), stateUpdate: stateUpdate})
+		// prefetch memory by traversing the key in RO tre
+		RoTrie.TraverseKey(keyUpdates[len(keyUpdates)].hashedKey, keyUpdates[len(keyUpdates)].plainKey, keyUpdates[len(keyUpdates)].stateUpdate)
+		if currentUpdate > 0 {
+			currentUpdate--
+			return nil
+		}
+
+		select {
+		case <-logEvery.C:
+			dbg.ReadMemStats(&m)
+			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
+				"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
+		default:
+		}
+
+		if hph.trace {
+			fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+		}
+
+		err := processKey(keyUpdates[processedKeys].hashedKey, keyUpdates[processedKeys].plainKey, keyUpdates[processedKeys].stateUpdate)
+		processedKeys++
+		return err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("hash sort failed: %w", err)
+	}
+
+	// process remaining keys
+	for processedKeys < len(keyUpdates) {
+		err := processKey(keyUpdates[processedKeys].hashedKey, keyUpdates[processedKeys].plainKey, keyUpdates[processedKeys].stateUpdate)
+		processedKeys++
+		if err != nil {
+			return nil, fmt.Errorf("hash sort failed: %w", err)
+		}
 	}
 
 	// Folding everything up to the root

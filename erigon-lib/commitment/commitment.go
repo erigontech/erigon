@@ -100,7 +100,7 @@ type Trie interface {
 	ResetContext(ctx PatriciaContext)
 
 	// Process updates
-	Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error)
+	Process(ctx context.Context, RoTrie *HexPatriciaHashedReader, updates *Updates, logPrefix string) (rootHash []byte, err error)
 }
 
 type PatriciaContext interface {
