@@ -184,7 +184,7 @@ func (d *DiagnosticClient) runOnPendingAddEvent(rootCtx context.Context) {
 				d.Notify(DiagMessages{
 					MessageType: "txpool",
 					Message: PoolChangeEvent{
-						Pool:    "pending",
+						Pool:    "Pending",
 						Event:   "add",
 						TxnHash: info.TxnHash,
 					},
@@ -208,7 +208,7 @@ func (d *DiagnosticClient) runOnPendingRemoveEvent(rootCtx context.Context) {
 				d.Notify(DiagMessages{
 					MessageType: "txpool",
 					Message: PoolChangeEvent{
-						Pool:    "pending",
+						Pool:    "Pending",
 						Event:   "remove",
 						TxnHash: info.TxnHash,
 					},
@@ -232,7 +232,7 @@ func (d *DiagnosticClient) runOnBaseFeeAddEvent(rootCtx context.Context) {
 				d.Notify(DiagMessages{
 					MessageType: "txpool",
 					Message: PoolChangeEvent{
-						Pool:    "baseFee",
+						Pool:    "BaseFee",
 						Event:   "add",
 						TxnHash: info.TxnHash,
 					},
@@ -256,7 +256,7 @@ func (d *DiagnosticClient) runOnBaseFeeRemoveEvent(rootCtx context.Context) {
 				d.Notify(DiagMessages{
 					MessageType: "txpool",
 					Message: PoolChangeEvent{
-						Pool:    "baseFee",
+						Pool:    "BaseFee",
 						Event:   "remove",
 						TxnHash: info.TxnHash,
 					},
@@ -280,7 +280,7 @@ func (d *DiagnosticClient) runOnQueuedAddEvent(rootCtx context.Context) {
 				d.Notify(DiagMessages{
 					MessageType: "txpool",
 					Message: PoolChangeEvent{
-						Pool:    "queued",
+						Pool:    "Queued",
 						Event:   "add",
 						TxnHash: info.TxnHash,
 					},
@@ -304,7 +304,7 @@ func (d *DiagnosticClient) runOnQueuedRemoveEvent(rootCtx context.Context) {
 				d.Notify(DiagMessages{
 					MessageType: "txpool",
 					Message: PoolChangeEvent{
-						Pool:    "queued",
+						Pool:    "Queued",
 						Event:   "remove",
 						TxnHash: info.TxnHash,
 					},
