@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -34,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/ethdb/privateapi"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/stages"

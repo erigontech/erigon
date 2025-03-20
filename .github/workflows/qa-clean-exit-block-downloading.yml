@@ -10,7 +10,7 @@ on:
 
 jobs:
   clean-exit-bd-test:
-    runs-on: [self-hosted, Erigon3]
+    runs-on: [self-hosted, qa, Erigon3]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir

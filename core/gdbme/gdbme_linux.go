@@ -1,3 +1,5 @@
+//go:build linux
+
 package gdbme
 
 import (
@@ -25,17 +27,45 @@ func RestartUnderGDB() {
 		}
 	}
 
+	gdbCommands := []string{
+		"set debuginfod enabled off",
+		"set pagination off",
+		"set confirm off",
+		"set width 200",
+		"set logging file /tmp/gdb_backtrace.log",
+		"set logging on",
+		"info sharedlibrary",
+		"info threads",
+		"thread apply all backtrace",
+		"thread apply all disassemble",
+		"thread apply all info all-registers",
+		"thread apply all backtrace full",
+		"shell uname -a",
+		"shell df -h",
+		"show environment",
+		"run",
+		"bt full",
+		"info all-registers",
+		"disassemble",
+		"thread",
+		"backtrace",
+		"frame 1",
+		"backtrace full",
+		"quit",
+	}
+
+	// Формируем аргументы для GDB
 	gdbArgs := []string{
 		"-q",
 		"-batch",
 		"-nx",
 		"-nh",
 		"-return-child-result",
-		"-ex", "run",
-		"-ex", "bt full",
-		"--args",
-		exePath,
 	}
+	for _, cmd := range gdbCommands {
+		gdbArgs = append(gdbArgs, "-ex", cmd)
+	}
+	gdbArgs = append(gdbArgs, "--args", exePath)
 	gdbArgs = append(gdbArgs, filteredArgs...)
 
 	fmt.Fprintln(os.Stderr, "Restarting under GDB for crash diagnostics...")
