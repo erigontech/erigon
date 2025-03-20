@@ -124,6 +124,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
 				// get last receipt and store the last log index + 1
 				lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+				if lastReceipt == nil || lastReceipt.Logs == nil {
+					return false, fmt.Errorf("last receipt log is nil")
+				}
 				if len(lastReceipt.Logs) > 0 {
 					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
 					receipt := types.Receipt{
