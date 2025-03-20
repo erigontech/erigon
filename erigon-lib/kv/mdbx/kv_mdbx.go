@@ -374,7 +374,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
 		db.periodicFlushTicker = time.NewTicker(opts.syncPeriod) // set ticker
-		db.quitFlushingChan = make(chan struct{})
+		db.quitFlushingChan = make(chan struct{}, 1)
 		go func(ctx context.Context) { // start goroutine periodically flushing to disk
 			for {
 				select {
