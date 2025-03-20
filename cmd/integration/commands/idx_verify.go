@@ -89,6 +89,7 @@ var idxVerify = &cobra.Command{
 			targetReader.Reset(0)
 
 			prevKeyOffset := uint64(0)
+			shouldSkipEfiCheck := false
 			for sourceReader.HasNext() {
 				if !targetReader.HasNext() {
 					log.Printf("target reader doesn't have next!")
@@ -120,23 +121,27 @@ var idxVerify = &cobra.Command{
 				targetV, nextKeyOffset := targetReader.Next(nil)
 				if !compareSequences(sourceK, sourceV, targetV, baseTxNum) {
 					log.Println("value mismatch!")
-					log.Println("skipping to next file...")
-					continue F
+					log.Println("skipping to next key...")
+					log.Println("skipping .efi offset checks for this file...")
+					shouldSkipEfiCheck = true
+					continue // next KEY, not FILE
 				}
 
 				// checks new efi lookup points to the same value
-				offset, found := targetEfiReader.TwoLayerLookup(targetK)
-				if !found {
-					log.Printf("key %v not found in efi", hexutil.Encode(targetK))
-					log.Println("skipping to next file...")
-					continue F
+				if !shouldSkipEfiCheck {
+					offset, found := targetEfiReader.TwoLayerLookup(targetK)
+					if !found {
+						log.Printf("key %v not found in efi", hexutil.Encode(targetK))
+						log.Println("skipping to next file...")
+						continue F
+					}
+					if offset != prevKeyOffset {
+						log.Printf("offset mismatch: %d != %d", offset, prevKeyOffset)
+						log.Println("skipping to next file...")
+						continue F
+					}
+					prevKeyOffset = nextKeyOffset
 				}
-				if offset != prevKeyOffset {
-					log.Printf("offset mismatch: %d != %d", offset, prevKeyOffset)
-					log.Println("skipping to next file...")
-					continue F
-				}
-				prevKeyOffset = nextKeyOffset
 
 				select {
 				case <-ctx.Done():
@@ -161,42 +166,104 @@ func compareSequences(sourceK, sourceV, targetV []byte, baseTxNum uint64) bool {
 		log.Printf("target encoding type can't be PlainEliasFano")
 		return false
 	}
-	if targetSeq.Count() > sourceEf.Count() {
-		log.Print("Optimized eliasfano is longer")
-		log.Printf("key=%s", hexutil.Encode(sourceK))
-		log.Printf("source min=%d max=%d count=%d", sourceEf.Min(), sourceEf.Max(), sourceEf.Count())
-		log.Printf("target min=%d max=%d count=%d", targetSeq.Min(), targetSeq.Max(), targetSeq.Count())
-		return false
-	}
-	if sourceEf.Count() > targetSeq.Count() {
-		log.Print("Optimized eliasfano is shorter")
-		log.Printf("key=%s", hexutil.Encode(sourceK))
-		log.Printf("source min=%d max=%d count=%d", sourceEf.Min(), sourceEf.Max(), sourceEf.Count())
-		log.Printf("target min=%d max=%d count=%d", targetSeq.Min(), targetSeq.Max(), targetSeq.Count())
-		return false
-	}
+	// if targetSeq.Count() > sourceEf.Count() {
+	// 	log.Print("Optimized eliasfano is longer")
+	// 	log.Printf("key=%s", hexutil.Encode(sourceK))
+	// 	log.Printf("source min=%d max=%d count=%d", sourceEf.Min(), sourceEf.Max(), sourceEf.Count())
+	// 	log.Printf("target min=%d max=%d count=%d", targetSeq.Min(), targetSeq.Max(), targetSeq.Count())
+	// 	// return false
+	// }
+	// if sourceEf.Count() > targetSeq.Count() {
+	// 	log.Print("Optimized eliasfano is shorter")
+	// 	log.Printf("key=%s", hexutil.Encode(sourceK))
+	// 	log.Printf("source min=%d max=%d count=%d", sourceEf.Min(), sourceEf.Max(), sourceEf.Count())
+	// 	log.Printf("target min=%d max=%d count=%d", targetSeq.Min(), targetSeq.Max(), targetSeq.Count())
+	// 	// return false
+	// }
 
 	sourceIt := sourceEf.Iterator()
 	targetIt := targetSeq.Iterator(0)
-	for sourceIt.HasNext() {
-		sourceN, err := sourceIt.Next()
+	var sourceN, targetN uint64
+	var err error
+	diff := false
+	for sourceIt.HasNext() && targetIt.HasNext() {
+		sourceN, err = sourceIt.Next()
 		if err != nil {
 			log.Fatalf("Failed to read next: %v", err)
 		}
-		targetN, err := targetIt.Next()
+		targetN, err = targetIt.Next()
 		if err != nil {
 			log.Fatalf("Failed to read next: %v", err)
 		}
-		if sourceN != targetN {
-			log.Printf("values mismatch: source=%d target=%d", sourceN, targetN)
+
+		if sourceN == targetN {
+			continue
+		}
+
+		if !diff {
 			log.Printf("key=%s", hexutil.Encode(sourceK))
 			log.Printf("source min=%d max=%d count=%d", sourceEf.Min(), sourceEf.Max(), sourceEf.Count())
 			log.Printf("target min=%d max=%d count=%d", targetSeq.Min(), targetSeq.Max(), targetSeq.Count())
-			return false
+		}
+		diff = true
+		for sourceN != targetN && sourceIt.HasNext() && targetIt.HasNext() {
+			if sourceN < targetN {
+				for sourceN < targetN {
+					log.Printf("> %d", sourceN)
+					if !sourceIt.HasNext() {
+						break
+					}
+
+					sourceN, err = sourceIt.Next()
+					if err != nil {
+						log.Fatalf("Failed to read next: %v", err)
+					}
+				}
+			} else {
+				for sourceN > targetN {
+					log.Printf("< %d", targetN)
+					if !targetIt.HasNext() {
+						break
+					}
+
+					targetN, err = targetIt.Next()
+					if err != nil {
+						log.Fatalf("Failed to read next: %v", err)
+					}
+				}
+			}
+		}
+
+		// if sourceN != targetN {
+		// 	log.Printf("values mismatch: source=%d target=%d", sourceN, targetN)
+		// 	log.Printf("key=%s", hexutil.Encode(sourceK))
+		// 	log.Printf("source min=%d max=%d count=%d", sourceEf.Min(), sourceEf.Max(), sourceEf.Count())
+		// 	log.Printf("target min=%d max=%d count=%d", targetSeq.Min(), targetSeq.Max(), targetSeq.Count())
+		// 	return false
+		// }
+	}
+
+	// Drain remaining elems
+	if sourceIt.HasNext() && !targetIt.HasNext() {
+		for sourceIt.HasNext() {
+			sourceN, err = sourceIt.Next()
+			if err != nil {
+				log.Fatalf("Failed to read next: %v", err)
+			}
+			log.Printf("> %d", sourceN)
+		}
+	}
+	if !sourceIt.HasNext() && targetIt.HasNext() {
+		for targetIt.HasNext() {
+			targetN, err = targetIt.Next()
+			if err != nil {
+				log.Fatalf("Failed to read next: %v", err)
+			}
+			log.Printf("< %d", targetN)
 		}
 	}
 
-	return true
+	return !diff
 }
 
 func init() {
