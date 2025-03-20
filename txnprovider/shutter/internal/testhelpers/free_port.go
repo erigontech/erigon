@@ -19,6 +19,7 @@ package testhelpers
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net"
 	"strconv"
 	"sync"
@@ -71,7 +72,14 @@ func NextFreePort() (int, error) {
 
 func nextPortNum(port int64) int64 {
 	if port == 0 { // init case
-		return minPort
+		// generate a random starting point to avoid clashes
+		// if more than 1 "go test ./erigon " processes are run on the same machine at the same time
+		// for simplicity, assume there are 60,000 ports and each go test process needs 2500 ports
+		// 60,000/2500=24 buckets - randomly pick 1 of these buckets
+		// note: this randomness is not needed for a single run of a "go test ./erigon" process
+		rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+		n := rnd.Intn(24)
+		return minPort + int64(n)*2500
 	} else if port == maxPort {
 		return minPort
 	} else {
