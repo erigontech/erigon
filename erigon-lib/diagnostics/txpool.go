@@ -25,6 +25,12 @@ import (
 	"github.com/holiman/uint256"
 )
 
+type PoolChangeEvent struct {
+	Pool    string   `json:"pool"`
+	Event   string   `json:"event"`
+	TxnHash [32]byte `json:"txnHash"`
+}
+
 type DiagTxn struct {
 	IDHash              [32]byte      `json:"hash"`
 	SenderID            uint64        `json:"senderID"`
@@ -63,9 +69,63 @@ func (ti ProcessedRemoteTxnsUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
+type PendingAddEvent struct {
+	TxnHash [32]byte `json:"txnHash"`
+}
+
+func (ti PendingAddEvent) Type() Type {
+	return TypeOf(ti)
+}
+
+type PendingRemoveEvent struct {
+	TxnHash [32]byte `json:"txnHash"`
+}
+
+func (ti PendingRemoveEvent) Type() Type {
+	return TypeOf(ti)
+}
+
+type BaseFeeAddEvent struct {
+	TxnHash [32]byte `json:"txnHash"`
+}
+
+func (ti BaseFeeAddEvent) Type() Type {
+	return TypeOf(ti)
+}
+
+type BaseFeeRemoveEvent struct {
+	TxnHash [32]byte `json:"txnHash"`
+}
+
+func (ti BaseFeeRemoveEvent) Type() Type {
+	return TypeOf(ti)
+}
+
+type QueuedAddEvent struct {
+	TxnHash [32]byte `json:"txnHash"`
+}
+
+func (ti QueuedAddEvent) Type() Type {
+	return TypeOf(ti)
+}
+
+type QueuedRemoveEvent struct {
+	TxnHash [32]byte `json:"txnHash"`
+}
+
+func (ti QueuedRemoveEvent) Type() Type {
+	return TypeOf(ti)
+}
+
 func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnIncommingTxnListener(rootCtx)
 	d.runOnProcessedRemoteTxnsListener(rootCtx)
+	d.runOnPendingAddEvent(rootCtx)
+	d.runOnPendingRemoveEvent(rootCtx)
+	d.runOnBaseFeeAddEvent(rootCtx)
+	d.runOnBaseFeeRemoveEvent(rootCtx)
+	d.runOnQueuedAddEvent(rootCtx)
+	d.runOnQueuedRemoveEvent(rootCtx)
 	d.SetupNotifier()
 }
 
@@ -105,6 +165,150 @@ func (d *DiagnosticClient) runOnProcessedRemoteTxnsListener(rootCtx context.Cont
 					MessageType: "txpool",
 					Message:     info,
 				})*/
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnPendingAddEvent(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[PendingAddEvent](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(PendingAddEvent{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.Notify(DiagMessages{
+					MessageType: "txpool",
+					Message: PoolChangeEvent{
+						Pool:    "pending",
+						Event:   "add",
+						TxnHash: info.TxnHash,
+					},
+				})
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnPendingRemoveEvent(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[PendingRemoveEvent](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(PendingRemoveEvent{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.Notify(DiagMessages{
+					MessageType: "txpool",
+					Message: PoolChangeEvent{
+						Pool:    "pending",
+						Event:   "remove",
+						TxnHash: info.TxnHash,
+					},
+				})
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnBaseFeeAddEvent(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[BaseFeeAddEvent](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(BaseFeeAddEvent{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.Notify(DiagMessages{
+					MessageType: "txpool",
+					Message: PoolChangeEvent{
+						Pool:    "baseFee",
+						Event:   "add",
+						TxnHash: info.TxnHash,
+					},
+				})
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnBaseFeeRemoveEvent(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[BaseFeeRemoveEvent](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(BaseFeeRemoveEvent{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.Notify(DiagMessages{
+					MessageType: "txpool",
+					Message: PoolChangeEvent{
+						Pool:    "baseFee",
+						Event:   "remove",
+						TxnHash: info.TxnHash,
+					},
+				})
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnQueuedAddEvent(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[QueuedAddEvent](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(QueuedAddEvent{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.Notify(DiagMessages{
+					MessageType: "txpool",
+					Message: PoolChangeEvent{
+						Pool:    "queued",
+						Event:   "add",
+						TxnHash: info.TxnHash,
+					},
+				})
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnQueuedRemoveEvent(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[QueuedRemoveEvent](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(QueuedRemoveEvent{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.Notify(DiagMessages{
+					MessageType: "txpool",
+					Message: PoolChangeEvent{
+						Pool:    "queued",
+						Event:   "remove",
+						TxnHash: info.TxnHash,
+					},
+				})
 			}
 		}
 	}()
