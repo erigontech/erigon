@@ -148,8 +148,12 @@ jobs:
           --push \
           --platform linux/amd64,linux/arm64 .
           echo "Docker build done"
-          find ${GITHUB_WORKSPACE} -ls
-          du -sh ${GITHUB_WORKSPACE}/*
+          echo Content of ${GITHUB_WORKSPACE}/docker-build-cache
+          find ${GITHUB_WORKSPACE}/docker-build-cache -ls
+          echo END
+          echo Content of ${GITHUB_WORKSPACE}/docker-build-cache-new
+          find ${GITHUB_WORKSPACE}/docker-build-cache-new -ls
+          du -sh ${GITHUB_WORKSPACE}/docker-build-cache*
 
       - name: export and print docker build tag, cleanup old docker images
         env:
