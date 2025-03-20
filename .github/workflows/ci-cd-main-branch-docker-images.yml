@@ -36,7 +36,12 @@ jobs:
 
     steps:
       - name: Cleanup
-        run: rm -rf $(pwd)/*
+        run: |
+          rm -rf $(pwd)/*
+          echo "DEBUG outputs:"
+          ls -l ${GITHUB_WORKSPACE}
+          echo "GITHUB_WORKSPACE= ${GITHUB_WORKSPACE}"
+          echo "pwd= $(pwd)"
 
       - name: Fast checkout git repository, git ref ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }}
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
