@@ -1,7 +1,10 @@
 package diagnostics
 
 import (
+	"encoding/json"
 	"net/http"
+	"os"
+	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/gorilla/websocket"
@@ -25,6 +28,31 @@ var upgrader = websocket.Upgrader{
 // these WebSocket connections.
 func (d *DiagnosticClient) SetupNotifier() {
 	d.metricsMux.HandleFunc("/ws", d.HandleConnections)
+
+	//run saveNotificationMessagesToFile every 10 seconds
+	go func() {
+		for {
+			d.saveNotificationMessagesToFile()
+			time.Sleep(10 * time.Second)
+		}
+	}()
+}
+
+func (d *DiagnosticClient) saveNotificationMessagesToFile() {
+	file, err := os.Create("people.json")
+	if err != nil {
+		log.Error("failed creating file: %s", err)
+	}
+	defer file.Close()
+
+	// Create a JSON encoder and optionally set indentation.
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+
+	// Encode the slice to the file.
+	if err := encoder.Encode(d.notificationMessages); err != nil {
+		log.Error("failed encoding data to file: %s", err)
+	}
 }
 
 // Notify sends a structured diagnostic message to the connected WebSocket client.
@@ -36,6 +64,7 @@ func (d *DiagnosticClient) Notify(msg DiagMessages) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	d.notificationMessages = append(d.notificationMessages, msg)
 	// If there is no connection, don't bother sending the message
 	if d.conn == nil {
 		return
