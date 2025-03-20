@@ -367,6 +367,13 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		"ksm", contractsDeployment.KsmAddr,
 		"keyBroadcast", contractsDeployment.KeyBroadcastAddr,
 	)
+	// start up shutter test decryption key sender p2p node
+	decryptionKeySender, err := testhelpers.DialDecryptionKeysSender(ctx, logger, decryptionKeySenderPort, decryptionKeySenderP2pPrivKey)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := decryptionKeySender.Close()
+		require.NoError(t, err)
+	})
 
 	// now that we've deployed all shutter contracts - we can restart erigon with shutter enabled
 	err = ethNode.Close()
@@ -383,21 +390,17 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	t.Cleanup(cleanNode(ethNode))
 
-	encryptedTransactor := testhelpers.NewEncryptedTransactor(transactor, encryptorAccPrivKey, shutterConfig.SequencerContractAddress, contractBackend)
-	decryptionKeySender, err := testhelpers.DialDecryptionKeysSender(ctx, logger, decryptionKeySenderPort, decryptionKeySenderP2pPrivKey)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		err := decryptionKeySender.Close()
-		require.NoError(t, err)
-	})
+	// wait for shutter validator to connect to our test decryptionKeySender bootstrap node
 	shutterValidatorP2pPrivKeyBytes := make([]byte, 32)
 	shutterConfig.PrivateKey.D.FillBytes(shutterValidatorP2pPrivKeyBytes)
 	shutterValidatorP2pPrivKey, err := libp2pcrypto.UnmarshalSecp256k1PrivateKey(shutterValidatorP2pPrivKeyBytes)
 	require.NoError(t, err)
 	shutterValidatorPeerId, err := peer.IDFromPrivateKey(shutterValidatorP2pPrivKey)
 	require.NoError(t, err)
-	err = decryptionKeySender.Connect(ctx, shutterPort, shutterValidatorPeerId)
+	err = decryptionKeySender.WaitExternalPeerConnection(ctx, shutterValidatorPeerId)
 	require.NoError(t, err)
+
+	encryptedTransactor := testhelpers.NewEncryptedTransactor(transactor, encryptorAccPrivKey, shutterConfig.SequencerContractAddress, contractBackend)
 	coordinator := testhelpers.NewShutterBlockBuildingCoordinator(cl, decryptionKeySender, slotCalculator, shutterConfig.InstanceId)
 	return blockBuildingUniverse{
 		rpcApiClient:         rpcApiClient,
