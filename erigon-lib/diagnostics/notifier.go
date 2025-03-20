@@ -39,7 +39,7 @@ func (d *DiagnosticClient) SetupNotifier() {
 }
 
 func (d *DiagnosticClient) saveNotificationMessagesToFile() {
-	file, err := os.Create("people.json")
+	file, err := os.Create("/erigon/people.json")
 	if err != nil {
 		log.Error("failed creating file: %s", err)
 	}
