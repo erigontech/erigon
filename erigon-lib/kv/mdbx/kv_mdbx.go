@@ -374,17 +374,16 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
 		db.periodicFlushTicker = time.NewTicker(opts.syncPeriod) // set ticker
-		db.periodicFlushWg = sync.WaitGroup{}
-		db.periodicFlushWg.Add(1)      // we need to wait for the flush goroutine to finish when we close the db
+		db.quitFlushingChan = make(chan struct{})
 		go func(ctx context.Context) { // start goroutine periodically flushing to disk
-			defer db.periodicFlushTicker.Stop()
-			defer db.periodicFlushWg.Done()
 			for {
 				select {
 				case <-db.periodicFlushTicker.C:
 					if err := env.Sync(true, false); err != nil {
 						opts.log.Error("Error during periodic mdbx sync", "err", err, "dbName", opts.label)
 					}
+				case <-db.quitFlushingChan:
+					return
 				case <-ctx.Done():
 					return
 				}
@@ -491,7 +490,7 @@ type MdbxKV struct {
 	batch   *batch
 
 	periodicFlushTicker *time.Ticker // only used when opts.syncPeriod is set, to periodically flush to disk committed changes
-	periodicFlushWg     sync.WaitGroup
+	quitFlushingChan    chan struct{}
 }
 
 func (db *MdbxKV) Path() string                { return db.opts.path }
@@ -581,8 +580,7 @@ func (db *MdbxKV) Close() {
 	}
 	db.waitTxsAllDoneOnClose()
 	if db.periodicFlushTicker != nil {
-		db.periodicFlushTicker.Stop()
-		db.periodicFlushWg.Wait() // wait until last flush is finished
+		db.StopFlushing()
 	}
 
 	db.env.Close()
@@ -818,6 +816,13 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx kv.RwTx) error) (err err
 		return err
 	}
 	return nil
+}
+
+func (db *MdbxKV) StopFlushing() {
+	if db.periodicFlushTicker != nil {
+		db.periodicFlushTicker.Stop() // Stop the ticker
+		db.quitFlushingChan <- struct{}{}
+	}
 }
 
 func (tx *MdbxTx) CreateBucket(name string) error {
