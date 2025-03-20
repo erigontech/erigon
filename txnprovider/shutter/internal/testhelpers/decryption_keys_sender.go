@@ -18,11 +18,9 @@ package testhelpers
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
@@ -73,37 +71,24 @@ func DialDecryptionKeysSender(ctx context.Context, logger log.Logger, port int, 
 	return DecryptionKeysSender{logger: logger, host: p2pHost, topic: topic}, nil
 }
 
-func (dks DecryptionKeysSender) Connect(ctx context.Context, port int, peerId peer.ID) error {
-	receiverAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", port, peerId))
-	if err != nil {
-		return err
-	}
-
-	receiverAddrInfo, err := peer.AddrInfoFromP2pAddr(receiverAddr)
-	if err != nil {
-		return err
-	}
-
-	connect := func() error {
-		err := dks.host.Connect(ctx, *receiverAddrInfo)
-		if err != nil {
-			dks.logger.Warn(
-				"decryption key sender failed to connect to receiver, trying again",
-				"receiver", receiverAddrInfo,
-				"err", err,
-			)
+func (dks DecryptionKeysSender) WaitExternalPeerConnection(ctx context.Context, peerId peer.ID) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			peers := dks.host.Network().Peers()
+			for _, p := range peers {
+				if p == peerId {
+					return nil
+				}
+			}
 		}
-		return err
 	}
-
-	dks.logger.Debug("decryption key sender connecting to receiver", "receiver", receiverAddrInfo)
-	err = backoff.Retry(connect, backoff.WithMaxRetries(backoff.NewConstantBackOff(time.Second), 10))
-	if err != nil {
-		return err
-	}
-
-	dks.logger.Debug("decryption key sender connected to receiver", "receiver", receiverAddrInfo)
-	return nil
 }
 
 func (dks DecryptionKeysSender) PublishDecryptionKeys(
