@@ -855,6 +855,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		for _, mt := range toRemove {
 			p.pending.Remove(mt, "best", p.logger)
 		}
+		fmt.Println("pending remove", len(toRemove))
 	}
 	return true, count, nil
 }
@@ -1268,6 +1269,8 @@ func (p *TxPool) punishSpammer(spammer uint64) {
 
 			p.discardLocked(mt, txpoolcfg.Spammer) // can't call it while iterating by all
 		}
+
+		fmt.Println("punishSpammer", len(txnsToDelete))
 	}
 }
 
@@ -1535,10 +1538,13 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		switch found.currentSubPool {
 		case PendingSubPool:
 			p.pending.Remove(found, "add", p.logger)
+			fmt.Println("pending remove")
 		case BaseFeeSubPool:
 			p.baseFee.Remove(found, "add", p.logger)
+			fmt.Println("baseFee remove")
 		case QueuedSubPool:
 			p.queued.Remove(found, "add", p.logger)
+			fmt.Println("queued remove")
 		default:
 			//already removed
 		}
@@ -1784,6 +1790,8 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	if discarded > 0 {
 		p.logger.Debug("Discarded transactions", "count", discarded, "pending", pendingRemoved, "baseFee", baseFeeRemoved, "queued", queuedRemoved)
 	}
+
+	fmt.Println("Discarded transactions", "count", discarded, "pending", pendingRemoved, "baseFee", baseFeeRemoved, "queued", queuedRemoved)
 
 	return nil
 }
