@@ -1907,10 +1907,12 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 			announcements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 			baseFeeAnnouncements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 			p.baseFee.Add(tx, "demote-pending", logger)
+			fmt.Println("baseFee add")
 		} else {
 			tx := p.pending.PopWorst()
 			queuedAnnauncements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 			p.queued.Add(tx, "demote-pending", logger)
+			fmt.Println("queued add")
 		}
 	}
 
@@ -1919,6 +1921,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 		tx := p.baseFee.PopBest()
 		announcements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 		p.pending.Add(tx, logger)
+		fmt.Println("pending add")
 	}
 
 	// Demote worst transactions that do not qualify for base fee pool anymore, to queued sub pool, or discard
@@ -1926,6 +1929,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 		tx := p.baseFee.PopWorst()
 		queuedAnnauncements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 		p.queued.Add(tx, "demote-base", logger)
+		fmt.Println("queued add")
 	}
 
 	// Promote best transactions from the queued pool to either pending or base fee pool, while they qualify
@@ -1934,10 +1938,12 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 			tx := p.queued.PopBest()
 			announcements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 			p.pending.Add(tx, logger)
+			fmt.Println("pending add")
 		} else {
 			tx := p.queued.PopBest()
 			baseFeeAnnouncements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 			p.baseFee.Add(tx, "promote-queued", logger)
+			fmt.Println("baseFee add")
 		}
 	}
 
@@ -1949,6 +1955,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 		tx := p.pending.PopWorst()
 		dropAnnouncements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 		p.discardLocked(p.pending.PopWorst(), txpoolcfg.PendingPoolOverflow)
+		fmt.Println("pending discard")
 	}
 
 	// Discard worst transactions from pending sub pool until it is within capacity limits
@@ -1956,6 +1963,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 		tx := p.baseFee.PopWorst()
 		dropAnnouncements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 		p.discardLocked(tx, txpoolcfg.BaseFeePoolOverflow)
+		fmt.Println("baseFee discard")
 	}
 
 	// Discard worst transactions from the queued sub pool until it is within its capacity limits
@@ -1963,6 +1971,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 		tx := p.queued.PopWorst()
 		dropAnnouncements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 		p.discardLocked(tx, txpoolcfg.QueuedPoolOverflow)
+		fmt.Println("queued discard")
 	}
 }
 
