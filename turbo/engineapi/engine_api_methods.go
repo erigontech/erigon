@@ -3,7 +3,6 @@ package engineapi
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -171,20 +170,5 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []libcommon.Hash) ([]*engine_types.BlobAndProofV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
-	res, err := e.getBlobs(ctx, blobHashes)
-	if len(blobHashes) != len(res) { // Some fault in the underlying txpool, but still return sane resp
-		return make([]*engine_types.BlobAndProofV1, len(blobHashes)), nil
-	}
-	rs := []string{}
-	for i, r := range res {
-		if r != nil {
-
-			rs = append(rs, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(r.Blob), len(r.Proof)))
-		} else {
-			rs = append(rs, fmt.Sprintf(" %d:", i), " nil")
-		}
-	}
-	e.logger.Debug("[GetBlobsV1]", "Responses", rs)
-	return res, err
-
+	return e.getBlobs(ctx, blobHashes)
 }

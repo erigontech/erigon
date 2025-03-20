@@ -911,6 +911,7 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash
 			logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
 		}
 	}
+	e.logger.Debug("[GetBlobsV1]", "Responses", logLine)
 	return ret, nil
 }
 
