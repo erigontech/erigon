@@ -664,7 +664,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
-		domains, err := libstate.NewSharedDomains(tx, logger)
+		domains, err := libstate.NewSharedDomains(tx, db, logger)
 		if err != nil {
 			return err
 		}
@@ -1116,7 +1116,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber, true, false)
-		err := stagedsync.UnwindExecutionStage(u, s, txc, ctx, cfg, logger)
+		err := stagedsync.UnwindExecutionStage(u, s, txc, db, ctx, cfg, logger)
 		if err != nil {
 			return err
 		}
@@ -1143,7 +1143,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				return err
 			}
 			if execProgress == 0 {
-				doms, err := libstate.NewSharedDomains(tx, log.New())
+				doms, err := libstate.NewSharedDomains(tx, db, log.New())
 				if err != nil {
 					panic(err)
 				}
@@ -1170,7 +1170,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			defer tx.Rollback()
 			for bn := execProgress; bn < block; bn++ {
 				txc.Tx = tx
-				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
+				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, db, bn, ctx, cfg, logger); err != nil {
 					return err
 				}
 			}
@@ -1178,7 +1178,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if err := db.Update(ctx, func(tx kv.RwTx) error {
 				for bn := execProgress; bn < block; bn++ {
 					txc.Tx = tx
-					if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
+					if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, db, bn, ctx, cfg, logger); err != nil {
 						return err
 					}
 				}
@@ -1190,7 +1190,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return nil
 	}
 
-	if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, logger); err != nil {
+	if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, db, block, ctx, cfg, logger); err != nil {
 		return err
 	}
 

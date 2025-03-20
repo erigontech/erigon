@@ -103,7 +103,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	domains.SetTxNum(0)
@@ -215,7 +215,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	require.NoError(t, err)
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -249,7 +249,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	defer tx.Rollback()
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	writer = state2.NewWriterV4(domains)
@@ -309,7 +309,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	domains.SetTxNum(0)
@@ -399,7 +399,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -419,7 +419,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	defer tx.Rollback()
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -486,7 +486,7 @@ func TestCommit(t *testing.T) {
 
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx, db, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -519,7 +519,7 @@ func TestCommit(t *testing.T) {
 	require.NoError(t, err)
 
 	core.GenerateTrace = true
-	oldHash, err := core.CalcHashRootForTests(tx, &types.Header{Number: big.NewInt(1)}, true, true)
+	oldHash, err := core.CalcHashRootForTests(tx, db, &types.Header{Number: big.NewInt(1)}, true, true)
 	require.NoError(t, err)
 
 	t.Logf("old hash %x\n", oldHash)
