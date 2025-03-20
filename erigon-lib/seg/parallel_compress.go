@@ -42,12 +42,6 @@ import (
 // MinPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
 const MinPatternScore = 1024
 
-const (
-	None         = 0b0
-	CompressKeys = 0b1
-	CompressVals = 0b10
-)
-
 var V1Enabled = false
 
 const (
@@ -321,7 +315,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		if err = intermediateW.WriteByte(V1); err != nil {
 			return err
 		}
-		if err = intermediateW.WriteByte(None); err != nil {
+		if err = intermediateW.WriteByte(CompressNone); err != nil {
 			return err
 		}
 		outputSize.Add(2)
