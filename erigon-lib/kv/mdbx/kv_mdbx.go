@@ -379,8 +379,8 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			for {
 				select {
 				case <-db.ticker.C:
-					if err := env.Sync(false, true); err != nil {
-						opts.log.Error("Error during periodic mdbx sync", "err", err)
+					if err := env.Sync(true, false); err != nil {
+						opts.log.Error("Error during periodic mdbx sync", "err", err, "dbName", opts.label)
 					}
 				case <-ctx.Done():
 					return
