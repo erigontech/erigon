@@ -111,6 +111,7 @@ jobs:
         uses: docker/setup-qemu-action@v3 ## v3.2.0
 
       - name: Set up Docker Buildx
+        id: docker-buildx
         uses: docker/setup-buildx-action@v3.10.0
 
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ${{ GITHUB.BASE_REF }} branch
@@ -126,6 +127,7 @@ jobs:
           echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
           cd erigon
           docker buildx build \
+          --builder ${{ steps.docker-buildx.outputs.name }} \
           --cache-from=type=local,src=${GITHUB_WORKSPACE}/docker-build-cache \
           --cache-to=type=local,dest=${GITHUB_WORKSPACE}/docker-build-cache-new \
           --file ${{ env.DOCKERFILE_PATH }} \
