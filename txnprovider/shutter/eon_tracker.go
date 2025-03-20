@@ -43,7 +43,7 @@ type EonTracker interface {
 
 type KsmEonTracker struct {
 	logger               log.Logger
-	blockListener        BlockListener
+	blockListener        *BlockListener
 	contractBackend      bind.ContractBackend
 	ksmContract          *contracts.KeyperSetManager
 	keyBroadcastContract *contracts.KeyBroadcastContract
@@ -54,7 +54,7 @@ type KsmEonTracker struct {
 	lastCleanupBlockNum  uint64
 }
 
-func NewKsmEonTracker(logger log.Logger, config Config, bl BlockListener, cb bind.ContractBackend) *KsmEonTracker {
+func NewKsmEonTracker(logger log.Logger, config Config, bl *BlockListener, cb bind.ContractBackend) *KsmEonTracker {
 	ksmContractAddr := libcommon.HexToAddress(config.KeyperSetManagerContractAddress)
 	ksmContract, err := contracts.NewKeyperSetManager(ksmContractAddr, cb)
 	if err != nil {
@@ -206,10 +206,19 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, err
 		if err != nil {
 			return Eon{}, false, fmt.Errorf("get num keyper sets: %w", err)
 		}
-		// wait until we have at least one keyper set added to avoid
-		// execution reverts for GetKeyperSetIndexByBlock
+		// wait until we have at least one keyper set added and past activation block
+		// to avoid execution reverts for GetKeyperSetIndexByBlock
 		if numKeyperSets == 0 {
 			et.logger.Warn("no keyper sets found", "blockNum", blockNum)
+			return Eon{}, false, nil
+		}
+
+		activationBlock, err := et.ksmContract.GetKeyperSetActivationBlock(callOpts, 0)
+		if err != nil {
+			return Eon{}, false, fmt.Errorf("initial get keyper set activation block: %w", err)
+		}
+		if blockNum < activationBlock {
+			et.logger.Warn("initial keyper set not yet activated", "blockNum", blockNum, "activationAt", activationBlock)
 			return Eon{}, false, nil
 		}
 	}
