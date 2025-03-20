@@ -207,6 +207,7 @@ func (d *DiagnosticClient) runOnPendingRemoveEvent(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.removes++
+				fmt.Println("PendingRemoveEvent")
 				d.Notify(DiagMessages{
 					MessageType: "txpool",
 					Message: PoolChangeEvent{
