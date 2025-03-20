@@ -341,13 +341,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		return nil, err
 	}
 
-	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
-		if err = env.SetSyncPeriod(opts.syncPeriod); err != nil {
-			env.Close()
-			return nil, err
-		}
-	}
-
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncBytes != nil {
 		if err = env.SetSyncBytes(*opts.syncBytes); err != nil {
 			env.Close()
@@ -377,6 +370,23 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 		MaxBatchSize:  DefaultMaxBatchSize,
 		MaxBatchDelay: DefaultMaxBatchDelay,
+	}
+
+	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
+		db.ticker = time.NewTicker(opts.syncPeriod) // set ticker
+		go func(ctx context.Context) {              // start goroutine periodically flushing to disk
+			defer db.ticker.Stop()
+			for {
+				select {
+				case <-db.ticker.C:
+					if err := env.Sync(false, true); err != nil {
+						opts.log.Error("Error during periodic mdbx sync", "err", err)
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(ctx)
 	}
 
 	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
@@ -476,6 +486,8 @@ type MdbxKV struct {
 
 	batchMu sync.Mutex
 	batch   *batch
+
+	ticker *time.Ticker // only used when opts.syncPeriod is set, to periodically flush to disk committed changes
 }
 
 func (db *MdbxKV) Path() string                { return db.opts.path }
