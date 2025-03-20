@@ -607,6 +607,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 
 	fmt.Println("poolChanges, Pending:", len(poolChanges["Pending"]), "BaseFee:", len(poolChanges["BaseFee"]), "Queued:", len(poolChanges["Queued"]), "Dropped:", len(poolChanges["Dropped"]))
+	fmt.Println("pool -Sizes, Pending:", p.pending.Len(), "BaseFee:", p.baseFee.Len(), "Queued:", p.queued.Len(), "Dropped:", p.drop.Len())
 
 	diagnostics.Send(diagnostics.IncomingTxnUpdate{
 		Txns:    diagTxns,
