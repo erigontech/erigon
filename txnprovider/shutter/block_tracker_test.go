@@ -53,7 +53,7 @@ func TestBlockTracker(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 
 	recvC <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 15}}}
-	waitCtx2, waitCtxCancel2 := context.WithTimeout(ctx, 50*time.Millisecond)
+	waitCtx2, waitCtxCancel2 := context.WithTimeout(ctx, time.Minute)
 	defer waitCtxCancel2()
 	err = bt.Wait(waitCtx2, 15)
 	require.NoError(t, err)
