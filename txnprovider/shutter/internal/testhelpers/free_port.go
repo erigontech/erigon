@@ -17,43 +17,64 @@
 package testhelpers
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"sync"
+	"time"
 )
 
-var consumedPorts = sync.Map{}
+const (
+	maxPort = 65535
+	minPort = 1024
+)
 
-// ConsumeFreeTcpPort can be used by many goroutines at the same time.
-// It uses port 0 and the OS to find a random free port. Note it opens the port
-// so we have to close it. But closing a port makes it eligible for selection
-// by the OS again. So we need to remember which ones have been already touched.
-func ConsumeFreeTcpPort() (int, func(), error) {
-	var port int
-	var done bool
-	var iterations int
-	for !done {
-		err := func() (err error) {
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				return err
-			}
-			defer func() {
-				err = listener.Close()
-			}()
+var (
+	portMu  sync.Mutex
+	portNum int64
+)
 
-			port = listener.Addr().(*net.TCPAddr).Port
-			_, ok := consumedPorts.Swap(port, struct{}{})
-			done = !ok
-			return nil
-		}()
+// NextFreePort uses a global circular port counter to find the next free port.
+// Note, it can be used by many goroutines at the same time.
+func NextFreePort() (int, error) {
+	portMu.Lock()
+	defer portMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	attempts := -1
+	for {
+		attempts++
+
+		select {
+		case <-ctx.Done():
+			return 0, fmt.Errorf("could not find next free port: attempts %d: %w", attempts, ctx.Err())
+		default: // continue
+		}
+
+		portNum = nextPortNum(portNum)
+		listener, err := net.Listen("tcp", "127.0.0.1:"+strconv.FormatInt(portNum, 10))
 		if err != nil {
-			return 0, nil, err
+			continue
 		}
-		iterations++
-		if iterations > 1024 {
-			return 0, nil, fmt.Errorf("failed to find a free port after %d iterations", iterations)
+
+		err = listener.Close()
+		if err != nil {
+			return 0, err
 		}
+
+		return int(portNum), nil
 	}
-	return port, func() { consumedPorts.Delete(port) }, nil
+}
+
+func nextPortNum(port int64) int64 {
+	if port == 0 { // init case
+		return minPort
+	} else if port == maxPort {
+		return minPort
+	} else {
+		return port + 1
+	}
 }
