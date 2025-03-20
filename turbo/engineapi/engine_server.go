@@ -63,13 +63,13 @@ func NewEngineServer(logger log.Logger, config *chain.Config, executionService e
 	blockDownloader *engine_block_downloader.EngineBlockDownloader, test bool, proposing bool) *EngineServer {
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	return &EngineServer{
-		logger:           logger,
-		config:           config,
-		executionService: executionService,
-		blockDownloader:  blockDownloader,
-		chainRW:          chainRW,
-		proposing:        proposing,
-		hd:               hd,
+		logger:            logger,
+		config:            config,
+		executionService:  executionService,
+		blockDownloader:   blockDownloader,
+		chainRW:           chainRW,
+		proposing:         proposing,
+		hd:                hd,
 		printPectraBanner: true,
 	}
 }
