@@ -28,14 +28,14 @@ type currentBlockNumReader func(ctx context.Context) (*uint64, error)
 
 type BlockTracker struct {
 	logger                log.Logger
-	blockListener         BlockListener
+	blockListener         *BlockListener
 	blockChangeCond       *sync.Cond
 	currentBlockNum       uint64
 	stopped               bool
 	currentBlockNumReader currentBlockNumReader
 }
 
-func NewBlockTracker(logger log.Logger, blockListener BlockListener, bnReader currentBlockNumReader) *BlockTracker {
+func NewBlockTracker(logger log.Logger, blockListener *BlockListener, bnReader currentBlockNumReader) *BlockTracker {
 	var blockChangeMu sync.Mutex
 	return &BlockTracker{
 		logger:                logger,

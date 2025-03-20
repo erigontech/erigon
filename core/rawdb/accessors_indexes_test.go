@@ -103,7 +103,7 @@ func TestLookupStorage(t *testing.T) {
 					if txn.Hash() != txn2.Hash() {
 						t.Fatalf("txn #%d [%x]: transaction mismatch: have %v, want %v", i, txn.Hash(), txn, txn2)
 					}
-					if txNum != txNumMin+uint64(i)+2 {
+					if txNum != txNumMin+uint64(i)+1 {
 						t.Fatalf("txn #%d [%x]: txnum mismatch: have %d, want %d", i, txn.Hash(), txNum, txNumMin+uint64(i)+1)
 					}
 				}
