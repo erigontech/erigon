@@ -576,7 +576,9 @@ func (db *MdbxKV) Close() {
 		return
 	}
 	db.waitTxsAllDoneOnClose()
-	db.periodicFlushTicker.Stop()
+	if db.periodicFlushTicker != nil {
+		db.periodicFlushTicker.Stop()
+	}
 
 	db.env.Close()
 	db.env = nil
