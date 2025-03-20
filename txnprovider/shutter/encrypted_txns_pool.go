@@ -37,13 +37,13 @@ type EncryptedTxnsPool struct {
 	logger            log.Logger
 	config            Config
 	sequencerContract *contracts.Sequencer
-	blockListener     BlockListener
+	blockListener     *BlockListener
 	mu                sync.RWMutex
 	submissions       *btree.BTreeG[EncryptedTxnSubmission]
 	initialLoadDone   chan struct{}
 }
 
-func NewEncryptedTxnsPool(logger log.Logger, config Config, cb bind.ContractBackend, bl BlockListener) *EncryptedTxnsPool {
+func NewEncryptedTxnsPool(logger log.Logger, config Config, cb bind.ContractBackend, bl *BlockListener) *EncryptedTxnsPool {
 	sequencerContractAddress := libcommon.HexToAddress(config.SequencerContractAddress)
 	sequencerContract, err := contracts.NewSequencer(sequencerContractAddress, cb)
 	if err != nil {
@@ -90,6 +90,11 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 		return nil, fmt.Errorf("invalid encrypted txns requests range: %d >= %d", from, to)
 	}
 
+	etp.logger.Debug("looking up encrypted txns for", "eon", eon, "from", from, "to", to, "gasLimit", gasLimit)
+	if from == to {
+		return nil, nil
+	}
+
 	fromKey := EncryptedTxnSubmission{EonIndex: eon, TxnIndex: from}
 	toKey := EncryptedTxnSubmission{EonIndex: eon, TxnIndex: to}
 	count := to - from
@@ -129,6 +134,7 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 				"encrypted txn gap when reading encrypted txns",
 				"gapFrom", nextTxnIndex,
 				"gapTo", item.TxnIndex,
+				"nextTxnIndex", nextTxnIndex,
 				"eonIndex", item.EonIndex,
 				"from", from,
 				"to", to,
@@ -137,6 +143,7 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 			return true // continue
 		}
 
+		idxOffset++
 		txns = append(txns, item)
 		return true // continue
 	})

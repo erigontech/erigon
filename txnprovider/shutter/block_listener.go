@@ -38,19 +38,19 @@ type BlockListener struct {
 	events             *event.Observers[BlockEvent]
 }
 
-func NewBlockListener(logger log.Logger, stateChangesClient stateChangesClient) BlockListener {
-	return BlockListener{
+func NewBlockListener(logger log.Logger, stateChangesClient stateChangesClient) *BlockListener {
+	return &BlockListener{
 		logger:             logger,
 		stateChangesClient: stateChangesClient,
 		events:             event.NewObservers[BlockEvent](),
 	}
 }
 
-func (bl BlockListener) RegisterObserver(o event.Observer[BlockEvent]) event.UnregisterFunc {
+func (bl *BlockListener) RegisterObserver(o event.Observer[BlockEvent]) event.UnregisterFunc {
 	return bl.events.Register(o)
 }
 
-func (bl BlockListener) Run(ctx context.Context) error {
+func (bl *BlockListener) Run(ctx context.Context) error {
 	defer bl.logger.Info("block listener stopped")
 	bl.logger.Info("running block listener")
 

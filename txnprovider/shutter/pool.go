@@ -39,11 +39,11 @@ type Pool struct {
 	logger                  log.Logger
 	config                  Config
 	baseTxnProvider         txnprovider.TxnProvider
-	blockListener           BlockListener
+	blockListener           *BlockListener
 	blockTracker            *BlockTracker
 	eonTracker              EonTracker
-	decryptionKeysListener  DecryptionKeysListener
-	decryptionKeysProcessor DecryptionKeysProcessor
+	decryptionKeysListener  *DecryptionKeysListener
+	decryptionKeysProcessor *DecryptionKeysProcessor
 	encryptedTxnsPool       *EncryptedTxnsPool
 	decryptedTxnsPool       *DecryptedTxnsPool
 	slotCalculator          SlotCalculator

@@ -95,6 +95,7 @@ func (dks DecryptionKeysSender) PublishDecryptionKeys(
 	ctx context.Context,
 	ekg EonKeyGeneration,
 	slot uint64,
+	txnPointer uint64,
 	ips shutter.IdentityPreimages,
 	instanceId uint64,
 ) error {
@@ -120,7 +121,7 @@ func (dks DecryptionKeysSender) PublishDecryptionKeys(
 		InstanceId:        instanceId,
 		Eon:               ekg.EonIndex,
 		Slot:              slot,
-		TxnPointer:        0,
+		TxnPointer:        txnPointer,
 		IdentityPreimages: ipsWithSlot.ToListSSZ(),
 	}
 
@@ -133,7 +134,7 @@ func (dks DecryptionKeysSender) PublishDecryptionKeys(
 		EonIndex:      ekg.EonIndex,
 		Keys:          keys,
 		Slot:          slot,
-		TxnPointer:    0,
+		TxnPointer:    txnPointer,
 		InstanceId:    instanceId,
 		SignerIndices: signerIndices,
 		Signatures:    sigs,
@@ -143,7 +144,7 @@ func (dks DecryptionKeysSender) PublishDecryptionKeys(
 		return err
 	}
 
-	dks.logger.Debug("publishing decryption keys", "slot", slot, "keys", len(keys))
+	dks.logger.Debug("publishing decryption keys", "slot", slot, "eon", ekg.EonIndex, "txnPointer", txnPointer, "keys", len(keys))
 	return dks.topic.Publish(ctx, keysEnvelope)
 }
 

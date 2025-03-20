@@ -47,13 +47,20 @@ func NewShutterBlockBuildingCoordinator(
 func (c ShutterBlockBuildingCoordinator) BuildBlock(
 	ctx context.Context,
 	ekg EonKeyGeneration,
+	txnPointer *uint64,
 	ips ...*shutter.IdentityPreimage,
 ) (*enginetypes.ExecutionPayload, error) {
 	slot := c.slotCalculator.CalcCurrentSlot()
-	err := c.dks.PublishDecryptionKeys(ctx, ekg, slot, ips, c.instanceId)
+	err := c.dks.PublishDecryptionKeys(ctx, ekg, slot, *txnPointer, ips, c.instanceId)
 	if err != nil {
 		return nil, err
 	}
 
-	return c.mockCl.BuildBlock(ctx, WithBlockBuildingSlot(slot))
+	block, err := c.mockCl.BuildBlock(ctx, WithBlockBuildingSlot(slot))
+	if err != nil {
+		return nil, err
+	}
+
+	*txnPointer = *txnPointer + uint64(len(ips))
+	return block, nil
 }

@@ -51,8 +51,8 @@ type DecryptionKeysListener struct {
 	observers *event.Observers[*proto.DecryptionKeys]
 }
 
-func NewDecryptionKeysListener(logger log.Logger, config Config, validator pubsub.ValidatorEx) DecryptionKeysListener {
-	return DecryptionKeysListener{
+func NewDecryptionKeysListener(logger log.Logger, config Config, validator pubsub.ValidatorEx) *DecryptionKeysListener {
+	return &DecryptionKeysListener{
 		logger:    logger,
 		config:    config,
 		validator: validator,

@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -42,8 +43,9 @@ type DecryptionKeysProcessor struct {
 	config            Config
 	encryptedTxnsPool *EncryptedTxnsPool
 	decryptedTxnsPool *DecryptedTxnsPool
-	blockListener     BlockListener
+	blockListener     *BlockListener
 	slotCalculator    SlotCalculator
+	txnParseCtxMu     sync.Mutex
 	txnParseCtx       *txpool.TxnParseContext
 	queue             chan *proto.DecryptionKeys
 	processed         mapset.Set[ProcessedMark]
@@ -54,10 +56,10 @@ func NewDecryptionKeysProcessor(
 	config Config,
 	encryptedTxnsPool *EncryptedTxnsPool,
 	decryptedTxnsPool *DecryptedTxnsPool,
-	blockListener BlockListener,
+	blockListener *BlockListener,
 	slotCalculator SlotCalculator,
-) DecryptionKeysProcessor {
-	return DecryptionKeysProcessor{
+) *DecryptionKeysProcessor {
+	return &DecryptionKeysProcessor{
 		logger:            logger,
 		config:            config,
 		encryptedTxnsPool: encryptedTxnsPool,
@@ -70,11 +72,11 @@ func NewDecryptionKeysProcessor(
 	}
 }
 
-func (dkp DecryptionKeysProcessor) Enqueue(msg *proto.DecryptionKeys) {
+func (dkp *DecryptionKeysProcessor) Enqueue(msg *proto.DecryptionKeys) {
 	dkp.queue <- msg
 }
 
-func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
+func (dkp *DecryptionKeysProcessor) Run(ctx context.Context) error {
 	defer dkp.logger.Info("decryption keys processor stopped")
 	dkp.logger.Info("running decryption keys processor")
 
@@ -99,7 +101,7 @@ func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
 	return eg.Wait()
 }
 
-func (dkp DecryptionKeysProcessor) processKeys(ctx context.Context) error {
+func (dkp *DecryptionKeysProcessor) processKeys(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -113,7 +115,7 @@ func (dkp DecryptionKeysProcessor) processKeys(ctx context.Context) error {
 	}
 }
 
-func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
+func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 	dkp.logger.Debug(
 		"processing decryption keys message",
 		"instanceId", msg.InstanceId,
@@ -197,7 +199,7 @@ func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 	return nil
 }
 
-func (dkp DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub EncryptedTxnSubmission) (types.Transaction, error) {
+func (dkp *DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub EncryptedTxnSubmission) (types.Transaction, error) {
 	dkp.logger.Debug("decrypting txn", "txnIndex", sub.TxnIndex)
 	key, ok := keys[sub.TxnIndex]
 	if !ok {
@@ -225,9 +227,7 @@ func (dkp DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub 
 		return nil, fmt.Errorf("failed to decrypt message: %w", err)
 	}
 
-	var txnSlot txpool.TxnSlot
-	var sender libcommon.Address
-	_, err = dkp.txnParseCtx.ParseTransaction(decryptedMessage, 0, &txnSlot, sender[:], true, true, nil)
+	txnSlot, sender, err := dkp.threadSafeParseTxn(decryptedMessage)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse decrypted transaction: %w", err)
 	}
@@ -249,7 +249,22 @@ func (dkp DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub 
 	return txn, nil
 }
 
-func (dkp DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
+// threadSafeParseTxn is needed because txnParseCtx.ParseTransaction is not thread safe
+func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnSlot, libcommon.Address, error) {
+	dkp.txnParseCtxMu.Lock()
+	defer dkp.txnParseCtxMu.Unlock()
+
+	var txnSlot txpool.TxnSlot
+	var sender libcommon.Address
+	_, err := dkp.txnParseCtx.ParseTransaction(rlp, 0, &txnSlot, sender[:], true, true, nil)
+	if err != nil {
+		return nil, libcommon.Address{}, err
+	}
+
+	return &txnSlot, sender, nil
+}
+
+func (dkp *DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
 	blockEventC := make(chan BlockEvent)
 	unregister := dkp.blockListener.RegisterObserver(func(event BlockEvent) {
 		select {
@@ -272,7 +287,7 @@ func (dkp DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
 	}
 }
 
-func (dkp DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEvent) error {
+func (dkp *DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEvent) error {
 	slot, err := dkp.slotCalculator.CalcSlot(blockEvent.LatestBlockTime)
 	if err != nil {
 		return err
