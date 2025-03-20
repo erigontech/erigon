@@ -1122,6 +1122,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
+	cfg.MaxRequestBlobSidecarsElectra = 256
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -1163,6 +1164,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
+	cfg.MaxRequestBlobSidecarsElectra = 256
 	cfg.InitializeForkSchedule()
 	return cfg
 }
