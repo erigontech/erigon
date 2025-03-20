@@ -898,8 +898,8 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash
 		return nil, err
 	}
 	ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
-	if len(blobHashes) != len(res.Blobs) { // Some fault in the underlying txpool, but still return sane resp
-		log.Warn("[GetBlobsV1] txpool returned unexpected number of BlobsAndProofs in response, returning nil blobs")
+	if len(blobHashes) != len(res.Blobs) || len(blobHashes) != len(res.Proofs) { // Some fault in the underlying txpool, but still return sane resp
+		log.Warn("[GetBlobsV1] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
 		return ret, nil
 	}
 	logLine := []string{}
