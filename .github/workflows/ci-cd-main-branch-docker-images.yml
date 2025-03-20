@@ -46,13 +46,12 @@ jobs:
           ref: ${{ inputs.checkout_ref == '' && github.ref || inputs.checkout_ref }}
           path: 'erigon'
 
-      - name: Setup go env and cache
-        uses: actions/setup-go@v5
+      - name: Restore cache
+        uses: actions/cache/restore@v4
         with:
-          go-version: '>=1.23'
-          cache: ${{ contains(fromJSON('["refs/heads/main","refs/heads/docker_pectra"]'), github.ref) }}
-          cache-dependency-path: |
-            erigon/go.sum
+          path: |
+            ./docker-build-cache
+          key: ci-cd-builds-docker-build-cache-branch-${{ github.ref }}
 
       - name: Define variables
         id: def_docker_vars
@@ -154,6 +153,8 @@ jobs:
           echo Content of ${GITHUB_WORKSPACE}/docker-build-cache-new
           find ${GITHUB_WORKSPACE}/docker-build-cache-new -ls
           du -sh ${GITHUB_WORKSPACE}/docker-build-cache*
+          mv ${GITHUB_WORKSPACE}/docker-build-cache ${GITHUB_WORKSPACE}/docker-build-cache.ORIG
+          mv ${GITHUB_WORKSPACE}/docker-build-cache-new ${GITHUB_WORKSPACE}/docker-build-cache
 
       - name: export and print docker build tag, cleanup old docker images
         env:
@@ -201,3 +202,11 @@ jobs:
               fi
               echo "Done."
             done
+
+      - name: Save cache
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ./docker-build-cache
+          key: ci-cd-builds-docker-build-cache-branch-${{ github.ref }}
+
