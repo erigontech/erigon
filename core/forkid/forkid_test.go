@@ -132,6 +132,17 @@ func TestCreation(t *testing.T) {
 			},
 		},
 
+		// Hoodi test cases
+		{
+			params.HoodiChainConfig,
+			params.HoodiGenesisHash,
+			[]testcase{
+				{0, 174221200, ID{Hash: checksumToBytes(0xbef71d30), Next: 1742999832}},      // First Cancun block
+				{50000, 1742999820, ID{Hash: checksumToBytes(0xbef71d30), Next: 1742999832}}, // Last Cancun block (approx)
+				{50001, 1742999832, ID{Hash: checksumToBytes(0x0929e24e), Next: 0}},          // First Prague block (approx)
+				{8000000, 1800000000, ID{Hash: checksumToBytes(0x0929e24e), Next: 0}},        // Future Prague block (mock)
+			},
+		},
 		// Gnosis test cases
 		{
 			params.GnosisChainConfig,
