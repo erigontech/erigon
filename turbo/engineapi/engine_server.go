@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -886,7 +885,7 @@ func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
 }
 
-func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash) ([]*txpoolproto.BlobAndProofV1, error) {
+func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash) ([]*engine_types.BlobAndProofV1, error) {
 	if len(blobHashes) > 128 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
@@ -898,8 +897,21 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash
 	if err != nil {
 		return nil, err
 	}
-
-	return res.BlobsAndProofs, nil
+	ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
+	if len(blobHashes) != len(res.BlobsAndProofs) { // Some fault in the underlying txpool, but still return sane resp
+		log.Warn("[GetBlobsV1] txpool returned unexpected number of BlobsAndProofs in response, returning nil blobs")
+		return ret, nil
+	}
+	logLine := []string{}
+	for i, r := range res.BlobsAndProofs {
+		if r != nil {
+			ret[i] = &engine_types.BlobAndProofV1{Blob: r.Blob, Proof: r.Proof}
+			logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(r.Blob), len(r.Proof)))
+		} else {
+			logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
+		}
+	}
+	return ret, nil
 }
 
 func waitForStuff(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {

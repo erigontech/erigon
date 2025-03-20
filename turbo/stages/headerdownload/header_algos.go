@@ -451,7 +451,7 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 		return
 	}
 
-	hd.logger.Debug("[downloader] Request header", "number", anchor.blockHeight-1, "length", 192)
+	hd.logger.Trace("[downloader] Request header", "number", anchor.blockHeight-1, "length", 192)
 
 	// Request ancestors
 	request = &HeaderRequest{
