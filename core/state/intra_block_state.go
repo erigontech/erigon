@@ -1557,10 +1557,7 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 				s.setState(addr, stateKey, state, true)
 			case BalancePath:
 				balance := val.(uint256.Int)
-				trace := s.trace
-				s.trace = true
 				s.SetBalance(addr, &balance, writes[i].Reason)
-				s.trace = trace
 			case NoncePath:
 				nonce := val.(uint64)
 				s.SetNonce(addr, nonce)
