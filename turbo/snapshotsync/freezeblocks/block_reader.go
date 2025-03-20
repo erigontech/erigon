@@ -1129,7 +1129,7 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
-			return txn, blockNum, idxTxnHash.BaseDataID() + txNumInFile + 1, true, nil
+			return txn, blockNum, idxTxnHash.BaseDataID() + txNumInFile, true, nil
 		}
 	}
 

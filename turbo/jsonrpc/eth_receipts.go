@@ -454,7 +454,9 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	// Private API returns 0 if transaction is not found.
-	if blockNum == 0 && chainConfig.Bor != nil {
+	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
+
+	if isBorStateSyncTx {
 		if api.useBridgeReader {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
 			if err != nil {
@@ -479,7 +481,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	if txNumMin+2 > txNum { //TODO: what a magic is this "2" and how to avoid it
+	if txNumMin+1 > txNum {
 		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 
@@ -488,14 +490,14 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	var txnIndex = int(txNum - txNumMin - 2)
+	var txnIndex = int(txNum - txNumMin - 1)
 
 	txn, err := api._blockReader.TxnByIdxInBlock(ctx, tx, header.Number.Uint64(), txnIndex)
 	if err != nil {
 		return nil, err
 	}
 
-	if txn == nil && chainConfig.Bor != nil {
+	if isBorStateSyncTx {
 		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
