@@ -349,6 +349,8 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
 	if err = json.Unmarshal([]byte(expectedJSON), &expected); err != nil {
 		t.Fatalf("parsing expected: %v", err)
 	}
+	t.Log(expected)
+	t.Log(result)
 	if !assert.Equal(t, expected, result) {
 		t.Fatalf("not equal")
 	}
