@@ -315,7 +315,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		if err = intermediateW.WriteByte(V1); err != nil {
 			return err
 		}
-		if err = intermediateW.WriteByte(CompressNone); err != nil {
+		if err = intermediateW.WriteByte([]byte(CompressNone)); err != nil {
 			return err
 		}
 		outputSize.Add(2)
