@@ -1548,33 +1548,34 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 		addr := writes[i].Address
 
 		if val != nil {
-			if path == StatePath {
+			switch path {
+			case AddressPath:
+				continue
+			case StatePath:
 				stateKey := writes[i].Key
 				state := val.(uint256.Int)
 				s.setState(addr, stateKey, state, true)
-			} else if path == AddressPath {
-				continue
-			} else {
-				switch path {
-				case BalancePath:
-					balance := val.(uint256.Int)
-					s.SetBalance(addr, &balance, writes[i].Reason)
-				case NoncePath:
-					nonce := val.(uint64)
-					s.SetNonce(addr, nonce)
-				case CodePath:
-					code := val.([]byte)
-					s.SetCode(addr, code)
-				case CodeHashPath, CodeSizePath:
-					// set by SetCode
-				case SelfDestructPath:
-					deleted := val.(bool)
-					if deleted {
-						s.Selfdestruct(addr)
-					}
-				default:
-					panic(fmt.Errorf("unknown key type: %d", path))
+			case BalancePath:
+				balance := val.(uint256.Int)
+				trace := s.trace
+				s.trace = true
+				s.SetBalance(addr, &balance, writes[i].Reason)
+				s.trace = trace
+			case NoncePath:
+				nonce := val.(uint64)
+				s.SetNonce(addr, nonce)
+			case CodePath:
+				code := val.([]byte)
+				s.SetCode(addr, code)
+			case CodeHashPath, CodeSizePath:
+				// set by SetCode
+			case SelfDestructPath:
+				deleted := val.(bool)
+				if deleted {
+					s.Selfdestruct(addr)
 				}
+			default:
+				panic(fmt.Errorf("unknown key type: %d", path))
 			}
 		}
 	}

@@ -144,11 +144,6 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		return nil, nil
 	}
 
-	if task.version.BlockNum == 66929801 && txIndex == 134 {
-		fmt.Printf("(%d.%d) Finalize\n", txIndex, task.version.Incarnation)
-		defer fmt.Printf("(%d.%d) Done Finalize\n", txIndex, task.version.Incarnation)
-	}
-
 	// we want to force a re-read of the conbiase & burnt contract address
 	// if thay where referenced by the tx
 	delete(result.TxIn, result.Coinbase)
