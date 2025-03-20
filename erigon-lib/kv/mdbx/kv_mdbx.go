@@ -374,8 +374,11 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
 		db.periodicFlushTicker = time.NewTicker(opts.syncPeriod) // set ticker
-		go func(ctx context.Context) {                           // start goroutine periodically flushing to disk
+		db.periodicFlushWg = sync.WaitGroup{}
+		db.periodicFlushWg.Add(1)      // we need to wait for the flush goroutine to finish when we close the db
+		go func(ctx context.Context) { // start goroutine periodically flushing to disk
 			defer db.periodicFlushTicker.Stop()
+			defer db.periodicFlushWg.Done()
 			for {
 				select {
 				case <-db.periodicFlushTicker.C:
@@ -488,6 +491,7 @@ type MdbxKV struct {
 	batch   *batch
 
 	periodicFlushTicker *time.Ticker // only used when opts.syncPeriod is set, to periodically flush to disk committed changes
+	periodicFlushWg     sync.WaitGroup
 }
 
 func (db *MdbxKV) Path() string                { return db.opts.path }
@@ -578,6 +582,7 @@ func (db *MdbxKV) Close() {
 	db.waitTxsAllDoneOnClose()
 	if db.periodicFlushTicker != nil {
 		db.periodicFlushTicker.Stop()
+		db.periodicFlushWg.Wait() // wait until last flush is finished
 	}
 
 	db.env.Close()
