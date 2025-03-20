@@ -1174,9 +1174,6 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) Update Account %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
-		}
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks); err != nil {
 			return err
 		}
