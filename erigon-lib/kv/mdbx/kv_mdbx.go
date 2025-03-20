@@ -373,12 +373,12 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
-		db.ticker = time.NewTicker(opts.syncPeriod) // set ticker
-		go func(ctx context.Context) {              // start goroutine periodically flushing to disk
-			defer db.ticker.Stop()
+		db.periodicFlushTicker = time.NewTicker(opts.syncPeriod) // set ticker
+		go func(ctx context.Context) {                           // start goroutine periodically flushing to disk
+			defer db.periodicFlushTicker.Stop()
 			for {
 				select {
-				case <-db.ticker.C:
+				case <-db.periodicFlushTicker.C:
 					if err := env.Sync(true, false); err != nil {
 						opts.log.Error("Error during periodic mdbx sync", "err", err, "dbName", opts.label)
 					}
@@ -487,7 +487,7 @@ type MdbxKV struct {
 	batchMu sync.Mutex
 	batch   *batch
 
-	ticker *time.Ticker // only used when opts.syncPeriod is set, to periodically flush to disk committed changes
+	periodicFlushTicker *time.Ticker // only used when opts.syncPeriod is set, to periodically flush to disk committed changes
 }
 
 func (db *MdbxKV) Path() string                { return db.opts.path }
@@ -576,6 +576,7 @@ func (db *MdbxKV) Close() {
 		return
 	}
 	db.waitTxsAllDoneOnClose()
+	db.periodicFlushTicker.Stop()
 
 	db.env.Close()
 	db.env = nil
