@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon-lib/kv/prune"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -262,6 +263,9 @@ type Config struct {
 	// PoS Single Slot finality
 	PolygonPosSingleSlotFinality        bool
 	PolygonPosSingleSlotFinalityBlockAt uint64
+
+	// Account Abstraction
+	AllowAA bool
 }
 
 type Sync struct {

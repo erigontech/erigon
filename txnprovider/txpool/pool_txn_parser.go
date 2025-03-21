@@ -44,6 +44,7 @@ const (
 	DynamicFeeTxnType byte = 2 // EIP-1559
 	BlobTxnType       byte = 3 // EIP-4844
 	SetCodeTxnType    byte = 4 // EIP-7702
+	AATxnType         byte = 5 // RIP-7560
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -154,7 +155,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// If it is non-legacy transaction, the transaction type follows, and then the list
 	if !legacy {
 		slot.Type = payload[p]
-		if slot.Type > SetCodeTxnType {
+		if slot.Type > AATxnType {
 			return 0, fmt.Errorf("%w: unknown transaction type: %d", ErrParseTxn, slot.Type)
 		}
 		p++
@@ -255,6 +256,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: extraneous elements in blobs wrapper", ErrParseTxn)
 		}
 	}
+
+	// TODO: add 7560 support here
 
 	slot.Size = uint32(len(slot.Rlp))
 
@@ -357,6 +360,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		if !ctx.ChainID.Eq(&ctx.cfg.ChainID) {
 			return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.ChainID.Uint64(), ctx.cfg.ChainID.Uint64())
 		}
+		slot.ChainID = ctx.ChainID
 	}
 	// Next follows the nonce, which we need to parse
 	p, slot.Nonce, err = rlp.ParseU64(payload, p)
@@ -400,12 +404,13 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	if err != nil {
 		return 0, fmt.Errorf("%w: value: %s", ErrParseTxn, err) //nolint
 	}
-	// Next goes data, but we are only interested in its length
+	// Next goes data
 	dataPos, dataLen, err = rlp.ParseString(payload, p)
 	if err != nil {
 		return 0, fmt.Errorf("%w: data len: %s", ErrParseTxn, err) //nolint
 	}
 	slot.DataLen = dataLen
+	slot.ExecutionData = payload[p : dataPos+dataLen]
 
 	// Zero and non-zero bytes are priced differently
 	slot.DataNonZeroLen = 0
