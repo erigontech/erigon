@@ -37,10 +37,6 @@ import (
 
 var emptyHash = libcommon.Hash{}
 
-func (evm *EVM) Precompile(addr libcommon.Address) (PrecompiledContract, bool) {
-	return evm.precompile(addr)
-}
-
 func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
