@@ -739,17 +739,18 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 		tx := toValidate[i]
 		txVersion := be.tasks[tx].Task.Version()
 		txIncarnation := be.txIncarnations[tx]
+		trace := false
+		tracePrefix := ""
 
-		if traceTx(be.blockNum, txVersion.TxIndex) {
-			if dbg.TraceTransactionIO {
-				fmt.Println(fmt.Sprintf("%d (%d.%d) RD", be.blockNum, txVersion.TxIndex, txIncarnation), be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", len(be.blockIO.WriteSet(txVersion.TxIndex)))
-				be.blockIO.ReadSet(txVersion.TxIndex).Scan(func(vr *state.VersionedRead) bool {
-					fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "RD", vr.String())
-					return true
-				})
-				for _, vw := range be.blockIO.WriteSet(txVersion.TxIndex) {
-					fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "WRT", vw.String())
-				}
+		if trace = dbg.TraceTransactionIO && traceTx(be.blockNum, txVersion.TxIndex); trace {
+			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation)
+			fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", len(be.blockIO.WriteSet(txVersion.TxIndex)))
+			be.blockIO.ReadSet(txVersion.TxIndex).Scan(func(vr *state.VersionedRead) bool {
+				fmt.Println(tracePrefix, "RD", vr.String())
+				return true
+			})
+			for _, vw := range be.blockIO.WriteSet(txVersion.TxIndex) {
+				fmt.Println(tracePrefix, "WRT", vw.String())
 			}
 		}
 
@@ -758,10 +759,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 				func(readsource state.ReadSource, readVersion, writtenVersion state.Version) bool {
 					return readsource == state.MapRead && readVersion == writtenVersion
 				}) {
+
+			fmt.Println("VALID", tx, be.txIncarnations[tx], be.execFailed[tx])
+
 			if cntInvalid == 0 {
-				be.versionMap.SetTrace(dbg.TraceTransactionIO && traceTx(be.blockNum, txVersion.TxIndex))
-				be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), true, fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation))
-				be.versionMap.SetTrace(false)
 				be.validateTasks.markComplete(tx)
 				// note this assumes that tasks are pushed in order as finalization needs to happen in block order
 				be.finalizeTasks.pushPending(tx)
@@ -772,24 +773,22 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			be.cntValidationFail++
 			be.execFailed[tx]++
 
-			if be.execFailed[tx] > 4 {
-				fmt.Println("FAIL", tx, be.txIncarnations[tx], be.execFailed[tx])
+			if be.execFailed[tx] > 0 {
+				fmt.Println("INVALID", tx, be.txIncarnations[tx], be.execFailed[tx])
 			}
-
-			be.versionMap.SetTrace(dbg.TraceTransactionIO && traceTx(be.blockNum, txVersion.TxIndex))
-			be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), false, fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation))
-			be.versionMap.SetTrace(false)
 
 			// 'create validation tasks for all transactions > tx ...'
 			be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
 			be.validateTasks.clearInProgress(tx) // clear in progress - pending will be added again once new incarnation executes
-
 			be.execTasks.clearComplete(tx)
 			be.execTasks.pushPending(tx)
-
 			be.preValidated[tx] = false
 			be.txIncarnations[tx]++
 		}
+
+		be.versionMap.SetTrace(trace)
+		be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), cntInvalid == 0, tracePrefix)
+		be.versionMap.SetTrace(false)
 	}
 
 	maxValidated := be.validateTasks.maxComplete()

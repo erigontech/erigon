@@ -48,12 +48,6 @@ func (se *serialExecutor) wait(ctx context.Context) error {
 	return nil
 }
 
-func (se *serialExecutor) processEvents(ctx context.Context, wait bool) *blockResult {
-	result := se.lastBlockResult
-	se.lastBlockResult = nil
-	return result
-}
-
 func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInitialCycle bool, profile bool) (cont bool, err error) {
 	blockReceipts := make([]*types.Receipt, 0, len(tasks))
 	var startTxIndex int

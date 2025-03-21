@@ -636,7 +636,7 @@ var discardLogging = true
 
 func TestLessConflicts(t *testing.T) {
 	//t.Parallel()
-	rand.Seed(0)
+	rand := rand.New(rand.NewSource(0))
 
 	logger := logger(discardLogging)
 
@@ -662,7 +662,7 @@ func TestLessConflicts(t *testing.T) {
 
 func TestLessConflictsWithMetadata(t *testing.T) {
 	//t.Parallel()
-	rand.Seed(0)
+	rand := rand.New(rand.NewSource(0))
 
 	logger := logger(discardLogging)
 
@@ -710,8 +710,6 @@ func TestLessConflictsWithMetadata(t *testing.T) {
 
 func TestZeroTx(t *testing.T) {
 	//t.Parallel()
-	rand.Seed(0)
-
 	logger := logger(discardLogging)
 
 	totalTxs := []int{0}
@@ -733,7 +731,6 @@ func TestZeroTx(t *testing.T) {
 
 func TestAlternatingTx(t *testing.T) {
 	//t.Parallel()
-	rand.Seed(0)
 
 	logger := logger(discardLogging)
 
@@ -756,8 +753,6 @@ func TestAlternatingTx(t *testing.T) {
 
 func TestAlternatingTxWithMetadata(t *testing.T) {
 	//t.Parallel()
-	rand.Seed(0)
-
 	logger := logger(discardLogging)
 
 	totalTxs := []int{200}
@@ -801,7 +796,7 @@ func TestAlternatingTxWithMetadata(t *testing.T) {
 
 func TestMoreConflicts(t *testing.T) {
 	//t.Parallel()
-	rand.Seed(0)
+	rand := rand.New(rand.NewSource(0))
 
 	logger := logger(discardLogging)
 
@@ -827,7 +822,7 @@ func TestMoreConflicts(t *testing.T) {
 
 func TestMoreConflictsWithMetadata(t *testing.T) {
 	//t.Parallel()
-	rand.Seed(0)
+	rand := rand.New(rand.NewSource(0))
 
 	logger := logger(discardLogging)
 
@@ -875,7 +870,7 @@ func TestMoreConflictsWithMetadata(t *testing.T) {
 
 func TestRandomTx(t *testing.T) {
 	//t.Parallel()
-	rand.Seed(0)
+	rand := rand.New(rand.NewSource(0))
 
 	logger := logger(discardLogging)
 
@@ -899,7 +894,7 @@ func TestRandomTx(t *testing.T) {
 
 func TestRandomTxWithMetadata(t *testing.T) {
 	//t.Parallel()
-	rand.Seed(0)
+	rand := rand.New(rand.NewSource(0))
 
 	logger := logger(discardLogging)
 
@@ -945,7 +940,7 @@ func TestRandomTxWithMetadata(t *testing.T) {
 
 func TestTxWithLongTailRead(t *testing.T) {
 	//t.Parallel()
-	rand.Seed(0)
+	rand := rand.New(rand.NewSource(0))
 
 	logger := logger(discardLogging)
 
@@ -974,7 +969,7 @@ func TestTxWithLongTailRead(t *testing.T) {
 
 func TestTxWithLongTailReadWithMetadata(t *testing.T) {
 	//t.Parallel()
-	rand.Seed(0)
+	rand := rand.New(rand.NewSource(0))
 
 	logger := logger(discardLogging)
 
@@ -1025,8 +1020,6 @@ func TestTxWithLongTailReadWithMetadata(t *testing.T) {
 
 func TestDexScenario(t *testing.T) {
 	//t.Parallel()
-	rand.Seed(0)
-
 	logger := logger(discardLogging)
 
 	totalTxs := []int{10, 50, 100, 200, 300}
@@ -1070,8 +1063,6 @@ func TestDexScenario(t *testing.T) {
 
 func TestDexScenarioWithMetadata(t *testing.T) {
 	//t.Parallel()
-	rand.Seed(0)
-
 	logger := logger(discardLogging)
 
 	totalTxs := []int{300}
