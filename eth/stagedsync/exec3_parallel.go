@@ -757,7 +757,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 					return readsource == state.MapRead && readVersion == writtenVersion
 				}) {
 
-			//fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "VALID", be.execFailed[tx])
+			fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "VALID", be.execFailed[tx])
 
 			if cntInvalid == 0 {
 				be.validateTasks.markComplete(tx)
