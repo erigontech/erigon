@@ -99,7 +99,7 @@ func validateAndFillMaxStack(jt *JumpTable) {
 	}
 }
 
-func NewEOFInstructionSet() JumpTable { // TODO(racytech): why is this exported?
+func NewEOFInstructionSet() JumpTable {
 	instructionSet := newPragueInstructionSet()
 	enableEOF(&instructionSet)
 	validateAndFillMaxStack(&instructionSet)

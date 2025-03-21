@@ -68,8 +68,6 @@ type header struct {
 	dataSizePos       uint16
 }
 
-// var jumpTables = []JumpTable{NewEOFInstructionSet()}
-
 // MarshalEOF serializes theEOFContainer into a byte array.
 func MarshalEOF(container *EOFContainer, depth int) ([]byte, error) {
 	// if depth >= MaxContainerDepth {

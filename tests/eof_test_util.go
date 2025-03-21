@@ -198,7 +198,6 @@ func (e *EOFTest) Run(t *testing.T) error {
 		_cotainerKind = 1
 	}
 	eofJt := vm.NewEOFInstructionSet()
-	// var c vm.Container
 	arr := strings.Split(exception, "|")
 
 	if _, err := vm.UnmarshalEOF(code, 0, byte(_cotainerKind), &eofJt, true); err != nil {
