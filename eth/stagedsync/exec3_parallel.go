@@ -209,10 +209,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	}
 
 	if txTask.Config.IsByzantium(blockNum) {
-		trace := ibs.Trace()
-		ibs.SetTrace(true)
 		ibs.FinalizeTx(txTask.Config.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter)
-		ibs.SetTrace(trace)
 	}
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx.
