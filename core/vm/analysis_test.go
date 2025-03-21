@@ -28,18 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 )
 
-// func bitvecToUint64Slice(b bitvec) []uint64 {
-// 	n := (len(b) + 7) / 8
-// 	padded := make([]uint64, n*8)
-// 	copy(padded, b)
-
-// 	res := make([]uint64, n)
-// 	for i := 0; i < n; i++ {
-// 		res[i] = binary.LittleEndian.Uint64(padded[i:])
-// 	}
-// 	return res
-// }
-
 func TestJumpDestAnalysis(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
