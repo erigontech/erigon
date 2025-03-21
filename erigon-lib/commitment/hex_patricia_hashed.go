@@ -1718,6 +1718,9 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 
 const PrefetchKeys = 1
 
+var TimeSpentInTraverse int64
+var TimeSpentInOtherProcessing int64
+
 func (hph *HexPatriciaHashed) Process(ctx context.Context, RoTrie *HexPatriciaHashedReader, updates *Updates, logPrefix string) (rootHash []byte, err error) {
 	var (
 		m      runtime.MemStats
@@ -1785,7 +1788,14 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, RoTrie *HexPatriciaHa
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		keyUpdates = append(keyUpdates, KeyUpdate{hashedKey: append([]byte{}, hashedKey...), plainKey: append([]byte{}, plainKey...), stateUpdate: stateUpdate})
 		// prefetch memory by traversing the key in RO tre
-		RoTrie.TraverseKey(keyUpdates[len(keyUpdates)].hashedKey, keyUpdates[len(keyUpdates)].plainKey, keyUpdates[len(keyUpdates)].stateUpdate)
+		if RoTrie != nil {
+			start := time.Now()
+			err := RoTrie.TraverseKey(keyUpdates[len(keyUpdates)-1].hashedKey, keyUpdates[len(keyUpdates)-1].plainKey, keyUpdates[len(keyUpdates)-1].stateUpdate)
+			if err != nil {
+
+			}
+			atomic.AddInt64(&TimeSpentInTraverse, int64(time.Since(start).Microseconds()))
+		}
 		if currentUpdate > 0 {
 			currentUpdate--
 			return nil
@@ -1805,7 +1815,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, RoTrie *HexPatriciaHa
 			fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 
+		start := time.Now()
 		err := processKey(keyUpdates[processedKeys].hashedKey, keyUpdates[processedKeys].plainKey, keyUpdates[processedKeys].stateUpdate)
+		atomic.AddInt64(&TimeSpentInOtherProcessing, int64(time.Since(start).Microseconds()))
 		processedKeys++
 		return err
 	})

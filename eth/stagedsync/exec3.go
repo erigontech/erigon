@@ -198,6 +198,8 @@ func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum 
 	return lastTxNum == inputTxNum, nil
 }
 
+var ToTalCommitment int64
+
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer,
 	parallel bool, //nolint
@@ -613,10 +615,12 @@ Loop:
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
+
 			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix())
 			if err != nil {
 				return err
 			}
+			fmt.Println("shota ComputeCommitment total", atomic.AddInt64(&ToTalCommitment, time.Since(start).Milliseconds()))
 
 			//if !bytes.Equal(rh, header.Root.Bytes()) {
 			//	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
@@ -834,6 +838,8 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg Exe
 	return false, nil
 }
 
+var flusht int64
+
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
 func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
 
@@ -859,10 +865,12 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
+	start := time.Now()
 	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), e.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
+	fmt.Println("shota flush compute", atomic.AddInt64(&flusht, time.Since(start).Microseconds())/1000)
 	if cfg.blockProduction {
 		header.Root = common.BytesToHash(computedRootHash)
 		return true, nil
