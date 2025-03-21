@@ -61,14 +61,6 @@ func (ti IncomingTxnUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
-type PendingAddEvent struct {
-	TxnHash [32]byte `json:"txnHash"`
-}
-
-func (ti PendingAddEvent) Type() Type {
-	return TypeOf(ti)
-}
-
 type PendingRemoveEvent struct {
 	TxnHash [32]byte `json:"txnHash"`
 }
@@ -125,7 +117,6 @@ func (ti PoolChangeBatchEvent) Type() Type {
 
 func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnIncommingTxnListener(rootCtx)
-	d.runOnPendingAddEvent(rootCtx)
 	d.runOnPendingRemoveEvent(rootCtx)
 	d.runOnBaseFeeAddEvent(rootCtx)
 	d.runOnBaseFeeRemoveEvent(rootCtx)
@@ -149,31 +140,6 @@ func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 				d.Notify(DiagMessages{
 					MessageType: "txpool",
 					Message:     info,
-				})
-			}
-		}
-	}()
-}
-
-func (d *DiagnosticClient) runOnPendingAddEvent(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[PendingAddEvent](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(PendingAddEvent{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.adds++
-				d.Notify(DiagMessages{
-					MessageType: "txpool",
-					Message: PoolChangeEvent{
-						Pool:    "Pending",
-						Event:   "add",
-						TxnHash: info.TxnHash,
-					},
 				})
 			}
 		}

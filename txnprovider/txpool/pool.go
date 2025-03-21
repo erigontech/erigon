@@ -154,8 +154,6 @@ type TxPool struct {
 		index   int
 		txnHash common.Hash
 	}
-
-	removes uint64
 }
 
 type FeeCalculator interface {
@@ -237,7 +235,6 @@ func New(
 			index   int
 			txnHash common.Hash
 		}{},
-		removes: 0,
 	}
 
 	if shanghaiTime != nil {
@@ -586,7 +583,6 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		default:
 		}
 
-		toAddBatch := make([]diagnostics.PoolChangeBatch, 0)
 		pendingHashes := make([][32]byte, 0)
 		for i := 0; i < len(copied.hashes); i += 32 {
 			var txnHash [32]byte
@@ -594,17 +590,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 			pendingHashes = append(pendingHashes, txnHash)
 		}
 
-		if len(pendingHashes) > 0 {
-			toAddBatch = append(toAddBatch, diagnostics.PoolChangeBatch{
-				Pool:    "Pending",
-				Event:   "add",
-				TxnHash: pendingHashes,
-			})
-
-			diagnostics.Send(diagnostics.PoolChangeBatchEvent{
-				Changes: toAddBatch,
-			})
-		}
+		sendChangeEventToDiagnostics("Pending", "add", pendingHashes)
 	}
 
 	p.unprocessedRemoteTxns.Resize(0)
@@ -847,13 +833,25 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	}
 
 	txns.Resize(uint(count))
+	toRemoveBatch := make([]diagnostics.PoolChangeBatch, 0)
+	toRemoveHashes := make([][32]byte, 0)
 	if len(toRemove) > 0 {
 		for _, mt := range toRemove {
 			p.pending.Remove(mt, "best", p.logger)
-			diagnostics.Send(diagnostics.PendingRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
-			fmt.Println("best: remove")
-			p.removes++
+			toRemoveHashes = append(toRemoveHashes, mt.TxnSlot.IDHash)
 		}
+	}
+
+	if len(toRemoveHashes) > 0 {
+		toRemoveBatch = append(toRemoveBatch, diagnostics.PoolChangeBatch{
+			Pool:    "Pending",
+			Event:   "remove",
+			TxnHash: toRemoveHashes,
+		})
+
+		diagnostics.Send(diagnostics.PoolChangeBatchEvent{
+			Changes: toRemoveBatch,
+		})
 	}
 	return true, count, nil
 }
@@ -1253,25 +1251,31 @@ func (p *TxPool) punishSpammer(spammer uint64) {
 			return count > 0
 		})
 
+		pendingHashes := make([][32]byte, 0)
+		baseFeeHashes := make([][32]byte, 0)
+		queuedHashes := make([][32]byte, 0)
+
 		for _, mt := range txnsToDelete {
 			switch mt.currentSubPool {
 			case PendingSubPool:
 				p.pending.Remove(mt, "punishSpammer", p.logger)
-				diagnostics.Send(diagnostics.PendingRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
-				fmt.Println("punishSpammer: remove")
-				p.removes++
+				pendingHashes = append(pendingHashes, mt.TxnSlot.IDHash)
 			case BaseFeeSubPool:
 				p.baseFee.Remove(mt, "punishSpammer", p.logger)
-				diagnostics.Send(diagnostics.BaseFeeRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
+				baseFeeHashes = append(baseFeeHashes, mt.TxnSlot.IDHash)
 			case QueuedSubPool:
 				p.queued.Remove(mt, "punishSpammer", p.logger)
-				diagnostics.Send(diagnostics.QueuedRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
+				queuedHashes = append(queuedHashes, mt.TxnSlot.IDHash)
 			default:
 				//already removed
 			}
 
 			p.discardLocked(mt, txpoolcfg.Spammer) // can't call it while iterating by all
 		}
+
+		sendChangeEventToDiagnostics("Pending", "remove", pendingHashes)
+		sendChangeEventToDiagnostics("BaseFee", "remove", baseFeeHashes)
+		sendChangeEventToDiagnostics("Queued", "remove", queuedHashes)
 	}
 }
 
@@ -1537,8 +1541,6 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		case PendingSubPool:
 			p.pending.Remove(found, "add", p.logger)
 			diagnostics.Send(diagnostics.PendingRemoveEvent{TxnHash: found.TxnSlot.IDHash})
-			fmt.Println("addLocked: remove")
-			p.removes++
 		case BaseFeeSubPool:
 			p.baseFee.Remove(found, "add", p.logger)
 			diagnostics.Send(diagnostics.BaseFeeRemoveEvent{TxnHash: found.TxnSlot.IDHash})
@@ -1752,7 +1754,6 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	baseFeeHashes := make([][32]byte, 0)
 	queuedHashes := make([][32]byte, 0)
 
-	toRemoveBatch := make([]diagnostics.PoolChangeBatch, 0, len(noncesToRemove))
 	for senderID, nonce := range noncesToRemove {
 		byNonce.ascend(senderID, func(mt *metaTxn) bool {
 			if mt.TxnSlot.Nonce > nonce {
@@ -1773,19 +1774,15 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 			case PendingSubPool:
 				pendingRemoved++
 				p.pending.Remove(mt, "remove-mined", p.logger)
-				//diagnostics.Send(diagnostics.PendingRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
-				p.removes++
 				pendingHashes = append(pendingHashes, mt.TxnSlot.IDHash)
 				fmt.Println("mined: remove")
 			case BaseFeeSubPool:
 				baseFeeRemoved++
 				p.baseFee.Remove(mt, "remove-mined", p.logger)
-				//diagnostics.Send(diagnostics.BaseFeeRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
 				baseFeeHashes = append(baseFeeHashes, mt.TxnSlot.IDHash)
 			case QueuedSubPool:
 				queuedRemoved++
 				p.queued.Remove(mt, "remove-mined", p.logger)
-				//diagnostics.Send(diagnostics.QueuedRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
 				queuedHashes = append(queuedHashes, mt.TxnSlot.IDHash)
 			default:
 				//already removed
@@ -1801,33 +1798,9 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 		toDel = toDel[:0]
 	}
 
-	if len(pendingHashes) > 0 {
-		toRemoveBatch = append(toRemoveBatch, diagnostics.PoolChangeBatch{
-			Pool:    "Pending",
-			Event:   "remove",
-			TxnHash: pendingHashes,
-		})
-	}
-
-	if len(baseFeeHashes) > 0 {
-		toRemoveBatch = append(toRemoveBatch, diagnostics.PoolChangeBatch{
-			Pool:    "BaseFee",
-			Event:   "remove",
-			TxnHash: baseFeeHashes,
-		})
-	}
-
-	if len(queuedHashes) > 0 {
-		toRemoveBatch = append(toRemoveBatch, diagnostics.PoolChangeBatch{
-			Pool:    "Queued",
-			Event:   "remove",
-			TxnHash: queuedHashes,
-		})
-	}
-
-	diagnostics.Send(diagnostics.PoolChangeBatchEvent{
-		Changes: toRemoveBatch,
-	})
+	sendChangeEventToDiagnostics("Pending", "remove", pendingHashes)
+	sendChangeEventToDiagnostics("BaseFee", "remove", baseFeeHashes)
+	sendChangeEventToDiagnostics("Queued", "remove", queuedHashes)
 
 	if discarded > 0 {
 		p.logger.Debug("Discarded transactions", "count", discarded, "pending", pendingRemoved, "baseFee", baseFeeRemoved, "queued", queuedRemoved)
@@ -1863,8 +1836,6 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			case PendingSubPool:
 				p.pending.Remove(mt, deleteAndContinueReasonLog, p.logger)
 				diagnostics.Send(diagnostics.PendingRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
-				fmt.Println("senderStateChange: remove")
-				p.removes++
 			case BaseFeeSubPool:
 				p.baseFee.Remove(mt, deleteAndContinueReasonLog, p.logger)
 				diagnostics.Send(diagnostics.BaseFeeRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
@@ -2000,8 +1971,6 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 		tx := p.pending.PopWorst()
 		p.discardLocked(p.pending.PopWorst(), txpoolcfg.PendingPoolOverflow)
 		diagnostics.Send(diagnostics.PendingRemoveEvent{TxnHash: tx.TxnSlot.IDHash})
-		fmt.Println("pop worst: remove")
-		p.removes++
 	}
 
 	// Discard worst transactions from pending sub pool until it is within capacity limits
@@ -2057,7 +2026,6 @@ func (p *TxPool) Run(ctx context.Context) error {
 			}
 			return err
 		case <-logEvery.C:
-			fmt.Println("Removes count: ", p.removes)
 			p.logStats()
 		case <-processRemoteTxnsEvery.C:
 			if !p.Started() {
@@ -2539,5 +2507,23 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 			f(slotRlp, sender, mt.currentSubPool)
 		}
 		return true
+	})
+}
+
+func sendChangeEventToDiagnostics(pool string, event string, txnHashes [][32]byte) {
+	//Not sending empty events
+	if len(txnHashes) == 0 {
+		return
+	}
+
+	toRemoveBatch := make([]diagnostics.PoolChangeBatch, 0)
+	toRemoveBatch = append(toRemoveBatch, diagnostics.PoolChangeBatch{
+		Pool:    pool,
+		Event:   event,
+		TxnHash: txnHashes,
+	})
+
+	diagnostics.Send(diagnostics.PoolChangeBatchEvent{
+		Changes: toRemoveBatch,
 	})
 }
