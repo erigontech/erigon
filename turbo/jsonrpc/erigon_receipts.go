@@ -271,7 +271,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			maxLogCount = logOptions.LogCount - logCount
 		}
 		if logOptions.IgnoreTopicsOrder {
-			filtered = blockLogs.CointainTopics(addrMap, topicsMap, maxLogCount)
+			filtered = blockLogs.ContainingTopics(addrMap, topicsMap, maxLogCount)
 		} else {
 			filtered = blockLogs.Filter(addrMap, crit.Topics, maxLogCount)
 		}
