@@ -317,3 +317,15 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		return gas, nil
 	}
 }
+
+func makeEOFCreateGasFunc() gasFunc {
+	gasFunc := func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+		// var (
+		// 	code             = contract.CodeAt(scope.CodeSection)
+		// 	initContainerIdx = code[*pc+1]
+		// 	initContainer = scope.Contract.SubContainerAt(int(initContainerIdx))
+		// )
+		return 0, nil
+	}
+	return gasFunc
+}

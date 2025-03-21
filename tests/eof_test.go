@@ -14,32 +14,29 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package tests
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-func TestExecutionSpec(t *testing.T) {
+func TestEOFValidation(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
-	bt := new(testMatcher)
+	et := new(testMatcher)
 
-	dir := filepath.Join(".", "execution-spec-tests")
-	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
-	checkStateRoot := true
+	dir := filepath.Join(".", "execution-spec-tests", "eof_tests")
 
-	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
-		t.Parallel()
+	et.walk(t, dir, func(t *testing.T, name string, test *EOFTest) {
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
+		if err := et.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
+		fmt.Println("---------------------------------")
 	})
 }
