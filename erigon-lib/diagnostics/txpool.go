@@ -33,7 +33,7 @@ type PoolChangeEvent struct {
 }
 
 type DiagTxn struct {
-	IDHash              [32]byte      `json:"hash"`
+	IDHash              string        `json:"hash"`
 	SenderID            uint64        `json:"senderID"`
 	Nonce               uint64        `json:"nonce"`
 	Value               uint256.Int   `json:"value"`
