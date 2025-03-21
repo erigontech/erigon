@@ -26,6 +26,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
@@ -38,7 +39,7 @@ import (
 	"github.com/erigontech/erigon/eth/tracers/logger"
 )
 
-func TestState(t *testing.T) {
+func TestLegacyState(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
@@ -61,6 +62,40 @@ func TestState(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db, _ := temporaltest.NewTestDB(t, dirs)
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
+		for _, subtest := range test.Subtests() {
+			subtest := subtest
+			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
+			t.Run(key, func(t *testing.T) {
+				withTrace(t, func(vmconfig vm.Config) error {
+					tx, err := db.BeginRw(context.Background())
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer tx.Rollback()
+					_, _, err = test.Run(tx, subtest, vmconfig, dirs)
+					tx.Rollback()
+					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
+						// Ignore expected errors
+						return nil
+					}
+					return st.checkFailure(t, err)
+				})
+			})
+		}
+	})
+}
+
+func TestExecutionSpecState(t *testing.T) {
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+
+	st := new(testMatcher)
+
+	dir := filepath.Join(".", "execution-spec-tests", "state_tests")
+
+	dirs := datadir.New(t.TempDir())
+	db, _ := temporaltest.NewTestDB(t, dirs)
+	st.walk(t, dir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
