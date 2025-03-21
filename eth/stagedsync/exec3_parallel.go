@@ -771,7 +771,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			be.execFailed[tx]++
 
 			if be.execFailed[tx] > 4 {
-				fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "INVALID", be.execFailed[tx])
+				fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "INVALID", "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
 			}
 
 			// 'create validation tasks for all transactions > tx ...'
