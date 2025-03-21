@@ -6,14 +6,14 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/params"
 )
 
 // MarshalTOML marshals as TOML.
@@ -33,7 +33,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Miner                          params.MiningConfig
 		Ethash                         ethashcfg.Config
 		Clique                         params.ConsensusSnapshotConfig
-		Aura                           erigonchain.AuRaConfig
+		Aura                           chain.AuRaConfig
 		TxPool                         DeprecatedTxPoolConfig
 		GPO                            gaspricecfg.Config
 		RPCGasCap                      uint64  `toml:",omitempty"`
@@ -82,7 +82,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Miner                          *params.MiningConfig
 		Ethash                         *ethashcfg.Config
 		Clique                         *params.ConsensusSnapshotConfig
-		Aura                           *erigonchain.AuRaConfig
+		Aura                           *chain.AuRaConfig
 		TxPool                         *DeprecatedTxPoolConfig
 		GPO                            *gaspricecfg.Config
 		RPCGasCap                      *uint64  `toml:",omitempty"`

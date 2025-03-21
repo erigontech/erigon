@@ -25,14 +25,14 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/smt/pkg/utils"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/smt/pkg/utils"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
 type revision struct {
@@ -42,6 +42,8 @@ type revision struct {
 
 // SystemAddress - sender address for internal state updates.
 var SystemAddress = libcommon.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
+
+var EmptyAddress = libcommon.Address{}
 
 // BalanceIncrease represents the increase of balance of an account that did not require
 // reading the account first
@@ -268,6 +270,33 @@ func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) libcommon.Hash {
 	return libcommon.BytesToHash(stateObject.CodeHash())
 }
 
+func (sdb *IntraBlockState) ResolveCodeHash(addr libcommon.Address) libcommon.Hash {
+	// eip-7702
+	if dd, ok := sdb.GetDelegatedDesignation(addr); ok {
+		return sdb.GetCodeHash(dd)
+	}
+
+	return sdb.GetCodeHash(addr)
+}
+
+func (sdb *IntraBlockState) ResolveCode(addr libcommon.Address) []byte {
+	// eip-7702
+	if dd, ok := sdb.GetDelegatedDesignation(addr); ok {
+		return sdb.GetCode(dd)
+	}
+
+	return sdb.GetCode(addr)
+}
+
+func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (libcommon.Address, bool) {
+	// eip-7702
+	code := sdb.GetCode(addr)
+	if delegation, ok := types.ParseDelegation(code); ok {
+		return delegation, true
+	}
+	return EmptyAddress, false
+}
+
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) {
@@ -475,9 +504,10 @@ func (sdb *IntraBlockState) Selfdestruct6780(addr libcommon.Address) {
 	if stateObject == nil {
 		return
 	}
-
 	if stateObject.newlyCreated {
-		sdb.Selfdestruct(addr)
+		if _, ok := types.ParseDelegation(sdb.GetCode(addr)); !ok {
+			sdb.Selfdestruct(addr)
+		}
 	}
 }
 
@@ -824,9 +854,12 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 //
 // Cancun fork:
 // - Reset transient storage (EIP-1153)
+//
+// Prague fork:
+// - Add authorities to access list (EIP-7702)
+// - Add delegated designation (if it exists for dst) to access list (EIP-7702)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
-	precompiles []libcommon.Address, list types2.AccessList,
-) {
+	precompiles []libcommon.Address, list types2.AccessList, authorities []libcommon.Address) {
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		al := newAccessList()
@@ -848,6 +881,17 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 		}
 		if rules.IsShanghai { // EIP-3651: warm coinbase
 			al.AddAddress(coinbase)
+		}
+	}
+	if rules.IsPrague {
+		for _, addr := range authorities {
+			sdb.AddAddressToAccessList(addr)
+		}
+
+		if dst != nil {
+			if dd, ok := sdb.GetDelegatedDesignation(*dst); ok {
+				sdb.AddAddressToAccessList(dd)
+			}
 		}
 	}
 	// Reset transient storage at the beginning of transaction execution

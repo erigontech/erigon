@@ -1,16 +1,16 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"errors"
+	"flag"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
-	"time"
-	"bytes"
-	"flag"
-	"bufio"
 	"strings"
-	"errors"
-	"os"
+	"time"
 )
 
 type Flags struct {

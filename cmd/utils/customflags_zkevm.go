@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/cmd/utils/flags"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/urfave/cli/v2"
 )
 

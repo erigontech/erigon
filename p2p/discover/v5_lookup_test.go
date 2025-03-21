@@ -9,9 +9,9 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/p2p/discover/v5wire"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // This test checks that lookup works.

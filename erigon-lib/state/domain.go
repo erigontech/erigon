@@ -32,16 +32,16 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 // Domain is a part of the state (examples are Accounts, Storage, Code)
@@ -900,8 +900,6 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 // [txFrom; txTo)
 func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
 	defer func(t time.Time) { d.stats.LastPruneTook = time.Since(t) }(time.Now())
-	mxPruningProgress.Inc()
-	defer mxPruningProgress.Dec()
 
 	var (
 		_state    = "scan steps"
@@ -948,7 +946,6 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 					if err := keysCursor.DeleteCurrent(); err != nil {
 						return fmt.Errorf("prune key %x: %w", k, err)
 					}
-					mxPruneSize.Inc()
 					keyMaxSteps[string(k)] = s
 				}
 			}
@@ -992,7 +989,6 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 			if err := valsCursor.DeleteCurrent(); err != nil {
 				return fmt.Errorf("prune val %x: %w", k, err)
 			}
-			mxPruneSize.Inc()
 		}
 		pos.Add(1)
 		//_prog = 100 * (float64(pos) / float64(totalKeys))

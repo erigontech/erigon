@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func Test_SenderLocks(t *testing.T) {

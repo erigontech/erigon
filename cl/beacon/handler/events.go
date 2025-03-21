@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/gfx-labs/sse"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var validTopics = map[string]struct{}{

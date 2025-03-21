@@ -13,8 +13,8 @@ import (
 	reflect "reflect"
 	time "time"
 
-	common "github.com/ledgerwatch/erigon-lib/common"
-	clparams "github.com/ledgerwatch/erigon/cl/clparams"
+	common "github.com/erigontech/erigon-lib/common"
+	clparams "github.com/erigontech/erigon/cl/clparams"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -22,6 +22,7 @@ import (
 type MockEthereumClock struct {
 	ctrl     *gomock.Controller
 	recorder *MockEthereumClockMockRecorder
+	isgomock struct{}
 }
 
 // MockEthereumClockMockRecorder is the mock recorder for MockEthereumClock.

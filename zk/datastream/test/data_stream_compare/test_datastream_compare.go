@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/ledgerwatch/erigon/zk/datastream/client"
-	"github.com/ledgerwatch/erigon/zk/datastream/types"
+	"github.com/erigontech/erigon/zk/datastream/client"
+	"github.com/erigontech/erigon/zk/datastream/types"
 	"github.com/nsf/jsondiff"
 )
 

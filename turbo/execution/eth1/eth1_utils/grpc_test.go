@@ -3,13 +3,15 @@ package eth1_utils
 import (
 	"testing"
 
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/go-test/deep"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/stretchr/testify/require"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
@@ -58,6 +60,13 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 			Amount:    uint64(10 * i),
 		}
 	}
+	for i := range withdrawals {
+		withdrawals[i] = &types.Withdrawal{
+			Index:     uint64(i),
+			Validator: uint64(i),
+			Amount:    uint64(10 * i),
+		}
+	}
 	return types.NewBlock(header, txs, uncles, receipts, withdrawals)
 }
 
@@ -72,7 +81,9 @@ func TestBlockRpcConversion(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	require.Equal(testBlock.Header(), roundTripHeader)
+
+	deep.CompareUnexportedFields = true
+	require.Nil(deep.Equal(testBlock.HeaderNoCopy(), roundTripHeader))
 
 	// body conversions
 	rpcBlock := ConvertBlockToRPC(testBlock)
@@ -84,7 +95,7 @@ func TestBlockRpcConversion(t *testing.T) {
 	require.Greater(len(testBlockRaw.Transactions), 0)
 	require.Greater(len(testBlockRaw.Uncles), 0)
 	require.Greater(len(testBlockRaw.Withdrawals), 0)
-	require.Equal(testBlockRaw, roundTripBody) // validates txns, uncles, and withdrawals
+	require.Nil(deep.Equal(testBlockRaw, roundTripBody))
 }
 
 func TestBigIntConversion(t *testing.T) {

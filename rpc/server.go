@@ -24,8 +24,8 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
+	"github.com/erigontech/erigon-lib/log/v3"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const MetadataApi = "rpc"

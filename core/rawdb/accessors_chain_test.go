@@ -24,20 +24,21 @@ import (
 	"math/big"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // Tests block header storage and retrieval operations.
@@ -815,6 +816,72 @@ func TestTruncateBlocks(t *testing.T) {
 
 		tx.Rollback()
 	}
+}
+
+func TestBadBlocks(t *testing.T) {
+	t.Parallel()
+	m := mock.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	require := require.New(t)
+	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+
+	mustSign := func(tx types.Transaction, s types.Signer) types.Transaction {
+		r, err := types.SignTx(tx, s, testKey)
+		require.NoError(err)
+		return r
+	}
+
+	putBlock := func(number uint64) common.Hash {
+		// prepare db so it works with our test
+		signer1 := types.MakeSigner(params.MainnetChainConfig, number, number-1)
+		body := &types.Body{
+			Transactions: []types.Transaction{
+				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number+1, testAddr, u256.Num1, 2, u256.Num1, nil), *signer1),
+			},
+			Uncles: []*types.Header{{Extra: []byte("test header")}},
+		}
+
+		header := &types.Header{Number: big.NewInt(int64(number))}
+		require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), number))
+		require.NoError(rawdb.WriteHeader(tx, header))
+		require.NoError(rawdb.WriteBody(tx, header.Hash(), number, body))
+
+		return header.Hash()
+	}
+	rawdb.ResetBadBlockCache(tx, 4)
+
+	// put some blocks
+	for i := 1; i <= 6; i++ {
+		putBlock(uint64(i))
+	}
+	hash1 := putBlock(7)
+	hash2 := putBlock(8)
+	hash3 := putBlock(9)
+	hash4 := putBlock(10)
+
+	// mark some blocks as bad
+	require.NoError(rawdb.TruncateCanonicalHash(tx, 7, true))
+	badBlks, err := rawdb.GetLatestBadBlocks(tx)
+	require.NoError(err)
+	require.Len(badBlks, 4)
+
+	require.Equal(badBlks[0].Hash(), hash4)
+	require.Equal(badBlks[1].Hash(), hash3)
+	require.Equal(badBlks[2].Hash(), hash2)
+	require.Equal(badBlks[3].Hash(), hash1)
+
+	// testing the "limit"
+	rawdb.ResetBadBlockCache(tx, 2)
+	badBlks, err = rawdb.GetLatestBadBlocks(tx)
+	require.NoError(err)
+	require.Len(badBlks, 2)
+	require.Equal(badBlks[0].Hash(), hash4)
+	require.Equal(badBlks[1].Hash(), hash3)
 }
 
 func checkReceiptsRLP(have, want types.Receipts) error {

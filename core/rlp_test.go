@@ -25,18 +25,19 @@ import (
 	"math/big"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
-	"github.com/ledgerwatch/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string, logger log.Logger) *types.Block {
@@ -95,8 +96,8 @@ func TestRlpIterator(t *testing.T) {
 
 func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 	desc := fmt.Sprintf("%d txs [%d datasize] and %d uncles", txs, datasize, uncles)
-	bodyRlp, _ := rlp.EncodeToBytes(getBlock(t, txs, uncles, datasize, "", log.Root()).Body())
-	it, err := rlp.NewListIterator(bodyRlp)
+	bodyRlp, _ := rlp2.EncodeToBytes(getBlock(t, txs, uncles, datasize, "", log.Root()).Body())
+	it, err := rlp2.NewListIterator(bodyRlp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 	if it.Next() {
 		t.Fatal("expected only three elems, got more")
 	}
-	txIt, err := rlp.NewListIterator(txdata)
+	txIt, err := rlp2.NewListIterator(txdata)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +125,7 @@ func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 	}
 
 	var expBody types.Body
-	err = rlp.DecodeBytes(bodyRlp, &expBody)
+	err = rlp2.DecodeBytes(bodyRlp, &expBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,8 +156,8 @@ func BenchmarkHashing(b *testing.B) {
 	)
 	{
 		block := getBlock(b, 200, 2, 50, "", log.Root())
-		bodyRlp, _ = rlp.EncodeToBytes(block.Body())
-		blockRlp, _ = rlp.EncodeToBytes(block)
+		bodyRlp, _ = rlp2.EncodeToBytes(block.Body())
+		blockRlp, _ = rlp2.EncodeToBytes(block)
 	}
 	var got libcommon.Hash
 	var hasher = sha3.NewLegacyKeccak256()
@@ -164,13 +165,13 @@ func BenchmarkHashing(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			var hash libcommon.Hash
-			it, err := rlp.NewListIterator(bodyRlp)
+			it, err := rlp2.NewListIterator(bodyRlp)
 			if err != nil {
 				b.Fatal(err)
 			}
 			it.Next()
 			txs := it.Value()
-			txIt, err := rlp.NewListIterator(txs)
+			txIt, err := rlp2.NewListIterator(txs)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -187,7 +188,7 @@ func BenchmarkHashing(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			var body types.Body
-			rlp.DecodeBytes(bodyRlp, &body)
+			rlp2.DecodeBytes(bodyRlp, &body)
 			for _, tx := range body.Transactions {
 				exp = tx.Hash()
 			}
@@ -197,7 +198,7 @@ func BenchmarkHashing(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			var block types.Block
-			rlp.DecodeBytes(blockRlp, &block)
+			rlp2.DecodeBytes(blockRlp, &block)
 			for _, tx := range block.Transactions() {
 				tx.Hash()
 			}

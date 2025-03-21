@@ -4,15 +4,16 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/execution"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // ExecutionPayload represents an execution payload (aka block)
@@ -66,7 +67,7 @@ type BlobsBundleV1 struct {
 	Blobs       []hexutility.Bytes `json:"blobs"       gencodec:"required"`
 }
 
-type ExecutionPayloadBodyV1 struct {
+type ExecutionPayloadBody struct {
 	Transactions []hexutility.Bytes  `json:"transactions" gencodec:"required"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
 }
@@ -84,10 +85,22 @@ type ForkChoiceUpdatedResponse struct {
 }
 
 type GetPayloadResponse struct {
-	ExecutionPayload      *ExecutionPayload `json:"executionPayload" gencodec:"required"`
-	BlockValue            *hexutil.Big      `json:"blockValue"`
-	BlobsBundle           *BlobsBundleV1    `json:"blobsBundle"`
-	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
+	ExecutionPayload      *ExecutionPayload  `json:"executionPayload" gencodec:"required"`
+	BlockValue            *hexutil.Big       `json:"blockValue"`
+	BlobsBundle           *BlobsBundleV1     `json:"blobsBundle"`
+	ExecutionRequests     []hexutility.Bytes `json:"executionRequests"`
+	ShouldOverrideBuilder bool               `json:"shouldOverrideBuilder"`
+}
+
+type ClientVersionV1 struct {
+	Code    string `json:"code" gencodec:"required"`
+	Name    string `json:"name" gencodec:"required"`
+	Version string `json:"version" gencodec:"required"`
+	Commit  string `json:"commit" gencodec:"required"`
+}
+
+func (c ClientVersionV1) String() string {
+	return fmt.Sprintf("ClientCode: %s, %s-%s-%s", c.Code, c.Name, c.Version, c.Commit)
 }
 
 type StringifiedError struct{ err error }

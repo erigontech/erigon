@@ -6,31 +6,32 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	cMocks "github.com/erigontech/erigon-lib/kv/kvcache/mocks"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/smt/pkg/db"
+	dsMocks "github.com/erigontech/erigon/zk/datastream/mocks"
+	"github.com/erigontech/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon/zk/l1infotree"
+	verifier "github.com/erigontech/erigon/zk/legacy_executor_verifier"
+	"github.com/erigontech/erigon/zk/syncer"
+	"github.com/erigontech/erigon/zk/syncer/mocks"
+	"github.com/erigontech/erigon/zk/txpool"
+	zkTypes "github.com/erigontech/erigon/zk/types"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	cMocks "github.com/ledgerwatch/erigon-lib/kv/kvcache/mocks"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/smt/pkg/db"
-	dsMocks "github.com/ledgerwatch/erigon/zk/datastream/mocks"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	"github.com/ledgerwatch/erigon/zk/l1infotree"
-	verifier "github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
-	"github.com/ledgerwatch/erigon/zk/syncer"
-	"github.com/ledgerwatch/erigon/zk/syncer/mocks"
-	"github.com/ledgerwatch/erigon/zk/txpool"
-	zkTypes "github.com/ledgerwatch/erigon/zk/types"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -128,7 +129,7 @@ func TestSpawnSequencingStage(t *testing.T) {
 	cacheMock := cMocks.NewMockCache(mockCtrl)
 	cacheMock.EXPECT().View(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 
-	txPool, err := txpool.New(nil, txPoolDb, txpoolcfg.Config{}, &ethconfig.Config{}, cacheMock, chainID, nil, nil, nil)
+	txPool, err := txpool.New(nil, txPoolDb, txpoolcfg.Config{}, cacheMock, chainID, nil, nil, nil, nil, nil, nil, &ethconfig.Config{}, nil)
 	require.NoError(t, err)
 
 	engineMock.EXPECT().
@@ -137,9 +138,18 @@ func TestSpawnSequencingStage(t *testing.T) {
 		AnyTimes()
 	engineMock.EXPECT().
 		FinalizeAndAssemble(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger) (*types.Block, types.Transactions, types.Receipts, error) {
+		DoAndReturn(func(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 			finalBlock := types.NewBlockWithHeader(header)
-			return finalBlock, txs, receipts, nil
+			return finalBlock, txs, receipts, types.FlatRequests{}, nil
+		}).
+		AnyTimes()
+	engineMock.EXPECT().
+		GetTransferFunc().
+		Return(func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) {}).
+		AnyTimes()
+	engineMock.EXPECT().
+		GetPostApplyMessageFunc().
+		Return(func(ibs evmtypes.IntraBlockState, sender common.Address, coinbase common.Address, result *evmtypes.ExecutionResult) {
 		}).
 		AnyTimes()
 

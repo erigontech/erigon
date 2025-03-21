@@ -10,14 +10,14 @@ import (
 	"strings"
 	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/pkg/errors"
 )
 
@@ -404,12 +404,19 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 		if err != nil {
 			return nil, err
 		}
+		if validatorSet == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validators not found"))
+		}
 		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
 		if err != nil {
 			return nil, err
 		}
+		if balances == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("balances not found"))
+		}
 		return responseValidator(validatorIndex, stateEpoch, balances, validatorSet, true)
 	}
+
 	balances, err := a.forkchoiceStore.GetBalances(blockRoot)
 	if err != nil {
 		return nil, err

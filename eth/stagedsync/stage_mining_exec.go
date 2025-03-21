@@ -4,35 +4,34 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"sync/atomic"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/metrics"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/zk/txpool"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/metrics"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/membatch"
+	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/zk/txpool"
 
-	zktypes "github.com/ledgerwatch/erigon/zk/types"
+	zktypes "github.com/erigontech/erigon/zk/types"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 type MiningExecCfg struct {
@@ -129,7 +128,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 			}
 
 			for {
-				txs, y, err := getNextTransactions(cfg, chainID, current.Header, 50, executionAt, simulationTx, yielded, logger)
+				txs, y, err := getNextTransactions(cfg, chainID, current.Header, 50, executionAt, stateReader, simulationTx, yielded, logger)
 				if err != nil {
 					return err
 				}
@@ -169,9 +168,9 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	}
 
 	var err error
-	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
+	_, current.Txs, current.Receipts, current.Requests, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
 
 	logger.Debug("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txs.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
@@ -189,6 +188,7 @@ func getNextTransactions(
 	header *types.Header,
 	amount uint16,
 	executionAt uint64,
+	stateReader state.StateReader,
 	simulationTx kv.StatelessRwTx,
 	alreadyYielded mapset.Set[[32]byte],
 	logger log.Logger,
@@ -201,7 +201,7 @@ func getNextTransactions(
 		remainingGas := header.GasLimit - header.GasUsed
 		remainingBlobGas := uint64(0)
 		if header.BlobGasUsed != nil {
-			remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed
+			remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed
 		}
 
 		if _, count, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, remainingBlobGas, alreadyYielded); err != nil {
@@ -235,7 +235,7 @@ func getNextTransactions(
 	}
 
 	blockNum := executionAt + 1
-	txs, err := filterBadTransactions(txs, cfg.chainConfig, blockNum, header.BaseFee, simulationTx, logger)
+	txs, err := filterBadTransactions(txs, cfg.chainConfig, blockNum, header, stateReader, simulationTx, logger)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -243,7 +243,7 @@ func getNextTransactions(
 	return types.NewTransactionsFixedOrder(txs), count, nil
 }
 
-func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, baseFee *big.Int, simulationTx kv.StatelessRwTx, logger log.Logger) ([]types.Transaction, error) {
+func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, header *types.Header, stateReader state.StateReader, simulationTx kv.StatelessRwTx, logger log.Logger) ([]types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	gasBailout := false
@@ -289,15 +289,28 @@ func filterBadTransactions(transactions []types.Transaction, config chain.Config
 
 		// Make sure the sender is an EOA (EIP-3607)
 		if !account.IsEmptyCodeHash() {
-			transactions = transactions[1:]
-			notEOACnt++
-			continue
+			isEoaCodeAllowed := false
+			if config.IsPrague(header.Time) {
+				code, err := stateReader.ReadAccountCode(sender, account.Incarnation, account.CodeHash)
+				if err != nil {
+					return nil, err
+				}
+
+				_, isDelegated := types.ParseDelegation(code)
+				isEoaCodeAllowed = isDelegated // non-empty code allowed for eoa if it points to delegation
+			}
+
+			if !isEoaCodeAllowed {
+				transactions = transactions[1:]
+				notEOACnt++
+				continue
+			}
 		}
 
 		if config.IsLondon(blockNumber) {
 			baseFee256 := uint256.NewInt(0)
-			if overflow := baseFee256.SetFromBig(baseFee); overflow {
-				return nil, fmt.Errorf("bad baseFee %s", baseFee)
+			if overflow := baseFee256.SetFromBig(header.BaseFee); overflow {
+				return nil, fmt.Errorf("bad baseFee %s", header.BaseFee)
 			}
 			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 			if !transaction.GetFeeCap().IsZero() || !transaction.GetTip().IsZero() {
@@ -368,7 +381,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
-		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed)
+		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
 	}
 	signer := types.MakeSigner(&chainConfig, header.Number.Uint64(), header.Time)
 

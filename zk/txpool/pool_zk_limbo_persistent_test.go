@@ -7,15 +7,15 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"gotest.tools/v3/assert"
 )
@@ -44,7 +44,7 @@ func store(t *testing.T, dbPath string) *TxPool {
 	ethCfg := &ethconfig.Defaults
 	ethCfg.Zk.Limbo = true
 
-	pSource, err := New(make(chan types.Announcements), db, txpoolcfg.DefaultConfig, ethCfg, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), aclDb)
+	pSource, err := New(make(chan types.Announcements), db, txpoolcfg.DefaultConfig, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, big.NewInt(0), ethCfg, aclDb)
 	assert.NilError(t, err)
 
 	parseCtx := types.NewTxParseContext(pSource.chainID)
@@ -147,7 +147,7 @@ func store(t *testing.T, dbPath string) *TxPool {
 	assert.NilError(t, err)
 
 	// restore
-	pTarget, err := New(make(chan types.Announcements), db, txpoolcfg.DefaultConfig, ethCfg, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), aclDb)
+	pTarget, err := New(make(chan types.Announcements), db, txpoolcfg.DefaultConfig, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, big.NewInt(0), ethCfg, aclDb)
 	assert.NilError(t, err)
 
 	cacheView, err := pTarget._stateCache.View(context.Background(), tx)
@@ -184,7 +184,7 @@ func restoreRo(t *testing.T, dbPath string, pSource *TxPool) {
 	newTxs := make(chan types.Announcements, 1024)
 	defer close(newTxs)
 
-	pTarget, err := New(newTxs, db, txpoolcfg.DefaultConfig, &ethconfig.Defaults, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), aclDb)
+	pTarget, err := New(newTxs, db, txpoolcfg.DefaultConfig, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, big.NewInt(0), &ethconfig.Defaults, aclDb)
 	assert.NilError(t, err)
 
 	err = db.View(context.Background(), func(tx kv.Tx) error {

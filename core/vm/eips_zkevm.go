@@ -1,6 +1,6 @@
 package vm
 
-import "github.com/ledgerwatch/erigon/params"
+import "github.com/erigontech/erigon/params"
 
 // Dynamically enable EIP-2929 and EIP-3529 for ZKEVM
 func init() {

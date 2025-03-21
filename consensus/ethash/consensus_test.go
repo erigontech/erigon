@@ -24,13 +24,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/goccy/go-json"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	math2 "github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/goccy/go-json"
+
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 type diffTest struct {
@@ -54,10 +56,10 @@ func (d *diffTest) UnmarshalJSON(b []byte) (err error) {
 	}
 
 	d.ParentTimestamp = math.MustParseUint64(ext.ParentTimestamp)
-	d.ParentDifficulty = math.MustParseBig256(ext.ParentDifficulty)
+	d.ParentDifficulty = math2.MustParseBig256(ext.ParentDifficulty)
 	d.CurrentTimestamp = math.MustParseUint64(ext.CurrentTimestamp)
-	d.CurrentBlocknumber = math.MustParseBig256(ext.CurrentBlocknumber)
-	d.CurrentDifficulty = math.MustParseBig256(ext.CurrentDifficulty)
+	d.CurrentBlocknumber = math2.MustParseBig256(ext.CurrentBlocknumber)
+	d.CurrentDifficulty = math2.MustParseBig256(ext.CurrentDifficulty)
 
 	return nil
 }

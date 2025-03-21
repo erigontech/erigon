@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/zk/l1_data"
-	verifier "github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/zk/l1_data"
+	verifier "github.com/erigontech/erigon/zk/legacy_executor_verifier"
 )
 
 func prepareBatchNumber(sdb *stageDb, forkId, lastBatch uint64, isL1Recovery bool) (uint64, error) {

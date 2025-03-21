@@ -28,22 +28,22 @@ import (
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/u256"
-	"github.com/ledgerwatch/erigon-lib/crypto/kzg"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/remote"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 func TestNonceFromAddress(t *testing.T) {
@@ -53,7 +53,7 @@ func TestNonceFromAddress(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, log.New())
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
@@ -173,7 +173,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, log.New())
 	assert.NoError(err)
 	require.NotEqual(nil, pool)
 	ctx := context.Background()
@@ -290,7 +290,7 @@ func TestReverseNonces(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, log.New())
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
@@ -417,7 +417,7 @@ func TestTxPoke(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, log.New())
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
@@ -583,52 +583,59 @@ func TestTxPoke(t *testing.T) {
 
 func TestShanghaiIntrinsicGas(t *testing.T) {
 	cases := map[string]struct {
-		expected       uint64
-		dataLen        uint64
-		dataNonZeroLen uint64
-		creation       bool
-		isShanghai     bool
+		expected          uint64
+		dataLen           uint64
+		dataNonZeroLen    uint64
+		authorizationsLen uint64
+		creation          bool
+		isShanghai        bool
 	}{
 		"simple no data": {
-			expected:       21000,
-			dataLen:        0,
-			dataNonZeroLen: 0,
-			creation:       false,
-			isShanghai:     false,
+			expected:          21000,
+			dataLen:           0,
+			dataNonZeroLen:    0,
+			authorizationsLen: 0,
+			creation:          false,
+			isShanghai:        false,
 		},
 		"simple with data": {
-			expected:       21512,
-			dataLen:        32,
-			dataNonZeroLen: 32,
-			creation:       false,
-			isShanghai:     false,
+			expected:          21512,
+			dataLen:           32,
+			dataNonZeroLen:    32,
+			authorizationsLen: 0,
+			creation:          false,
+			isShanghai:        false,
 		},
 		"creation with data no shanghai": {
-			expected:       53512,
-			dataLen:        32,
-			dataNonZeroLen: 32,
-			creation:       true,
-			isShanghai:     false,
+			expected:          53512,
+			dataLen:           32,
+			dataNonZeroLen:    32,
+			authorizationsLen: 0,
+			creation:          true,
+			isShanghai:        false,
 		},
 		"creation with single word and shanghai": {
-			expected:       53514, // additional gas for single word
-			dataLen:        32,
-			dataNonZeroLen: 32,
-			creation:       true,
-			isShanghai:     true,
+			expected:          53514, // additional gas for single word
+			dataLen:           32,
+			dataNonZeroLen:    32,
+			authorizationsLen: 0,
+			creation:          true,
+			isShanghai:        true,
 		},
 		"creation between word 1 and 2 and shanghai": {
-			expected:       53532, // additional gas for going into 2nd word although not filling it
-			dataLen:        33,
-			dataNonZeroLen: 33,
-			creation:       true,
-			isShanghai:     true,
+			expected:          53532, // additional gas for going into 2nd word although not filling it
+			dataLen:           33,
+			dataNonZeroLen:    33,
+			authorizationsLen: 0,
+			creation:          true,
+			isShanghai:        true,
 		},
 	}
 
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			gas, reason := txpoolcfg.CalcIntrinsicGas(c.dataLen, c.dataNonZeroLen, nil, c.creation, true, true, c.isShanghai)
+			// Todo (@somnathb1) - Factor in EIP-7623
+			gas, _, reason := txpoolcfg.CalcIntrinsicGas(c.dataLen, c.dataNonZeroLen, c.authorizationsLen, 0, 0, c.creation, true, true, c.isShanghai, false)
 			if reason != txpoolcfg.Success {
 				t.Errorf("expected success but got reason %v", reason)
 			}
@@ -699,7 +706,7 @@ func TestShanghaiValidateTx(t *testing.T) {
 			}
 
 			cache := &kvcache.DummyCache{}
-			pool, err := New(ch, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, logger)
+			pool, err := New(ch, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil, nil, nil, logger)
 			asrt.NoError(err)
 			ctx := context.Background()
 			tx, err := coreDB.BeginRw(ctx)
@@ -738,6 +745,54 @@ func TestShanghaiValidateTx(t *testing.T) {
 	}
 }
 
+func TestSetCodeTxValidationWithLargeAuthorizationValues(t *testing.T) {
+	maxUint256 := new(uint256.Int).SetAllOne()
+
+	ch := make(chan types.Announcements, 1)
+	_, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
+	cfg := txpoolcfg.DefaultConfig
+	chainID := *maxUint256
+	cache := &kvcache.DummyCache{}
+	logger := log.New()
+	pool, err := New(ch, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil, /* agraBlock */
+		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, logger)
+	assert.NoError(t, err)
+	ctx := context.Background()
+	tx, err := coreDB.BeginRw(ctx)
+	defer tx.Rollback()
+	assert.NoError(t, err)
+
+	sndr := sender{nonce: 0, balance: *uint256.NewInt(math.MaxUint64)}
+	sndrBytes := make([]byte, types.EncodeSenderLengthForStorage(sndr.nonce, sndr.balance))
+	types.EncodeSender(sndr.nonce, sndr.balance, sndrBytes)
+	err = tx.Put(kv.PlainState, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes)
+	assert.NoError(t, err)
+
+	txn := &types.TxSlot{
+		FeeCap:         *uint256.NewInt(21000),
+		Gas:            500000,
+		SenderID:       0,
+		Type:           types.SetCodeTxType,
+		Authorizations: make([]types.Signature, 1),
+	}
+	txn.Authorizations[0].ChainID = chainID
+	txn.Authorizations[0].V.Set(maxUint256)
+	txn.Authorizations[0].R.Set(maxUint256)
+	txn.Authorizations[0].S.Set(maxUint256)
+
+	txns := types.TxSlots{
+		Txs:     append([]*types.TxSlot{}, txn),
+		Senders: types.Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+	}
+	err = pool.senders.registerNewSenders(&txns, logger)
+	assert.NoError(t, err)
+	view, err := cache.View(ctx, tx)
+	assert.NoError(t, err)
+
+	result := pool.validateTx(txn, false /* isLocal */, view)
+	assert.Equal(t, txpoolcfg.Success, result)
+}
+
 // Blob gas price bump + other requirements to replace existing txns in the pool
 func TestBlobTxReplacement(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
@@ -745,7 +800,7 @@ func TestBlobTxReplacement(t *testing.T) {
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, log.New())
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
@@ -962,7 +1017,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	logger := log.New()
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
-	txPool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, big.NewInt(0), big.NewInt(0), nil, fixedgas.DefaultMaxBlobsPerBlock, nil, logger)
+	txPool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, logger)
 	assert.NoError(err)
 	require.True(txPool != nil)
 
@@ -1068,7 +1123,7 @@ func TestBlobSlots(t *testing.T) {
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, log.New())
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
@@ -1142,7 +1197,7 @@ func TestGasLimitChanged(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, log.New())
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()

@@ -7,10 +7,10 @@ import (
 	"math/big"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/accounts/abi"
 )
 
 // EventRecord represents state record
@@ -55,7 +55,7 @@ func (e *EventRecordWithTime) BuildEventRecord() *EventRecord {
 	}
 }
 
-func UnpackEventRecordWithTime(stateContract abi.ABI, encodedEvent rlp.RawValue) (*EventRecordWithTime, error) {
+func UnpackEventRecordWithTime(stateContract abi.ABI, encodedEvent rlp2.RawValue) (*EventRecordWithTime, error) {
 	commitStateInputs := stateContract.Methods["commitState"].Inputs
 	methodId := stateContract.Methods["commitState"].ID
 
@@ -65,7 +65,7 @@ func UnpackEventRecordWithTime(stateContract abi.ABI, encodedEvent rlp.RawValue)
 
 		if len(args) == 2 {
 			var eventRecord EventRecord
-			if err := rlp.DecodeBytes(args[1].([]byte), &eventRecord); err != nil {
+			if err := rlp2.DecodeBytes(args[1].([]byte), &eventRecord); err != nil {
 				return nil, err
 			}
 

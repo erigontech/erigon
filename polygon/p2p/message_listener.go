@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
+
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	sentrymulticlient "github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	sentrymulticlient "github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 )
 
 type DecodedInboundMessage[TPacket any] struct {

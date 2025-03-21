@@ -26,8 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/gorilla/websocket"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestWebsocketClientHeaders(t *testing.T) {

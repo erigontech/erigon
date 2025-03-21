@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/eth/protocols/eth"
 )
 
 var ErrPeerNotFound = errors.New("peer not found")

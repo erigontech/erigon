@@ -8,17 +8,17 @@ import (
 
 	"errors"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	zktx "github.com/ledgerwatch/erigon/zk/tx"
-	zktypes "github.com/ledgerwatch/erigon/zk/types"
-	"github.com/ledgerwatch/erigon/zk/utils"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	zktx "github.com/erigontech/erigon/zk/tx"
+	zktypes "github.com/erigontech/erigon/zk/types"
+	"github.com/erigontech/erigon/zk/utils"
 )
 
 const (
@@ -73,7 +73,7 @@ func processInjectedInitialBatch(
 		return rawdb.ReadHeader(batchContext.sdb.tx, hash, number)
 	}
 	getHashFn := core.GetHashFn(header, getHeader)
-	blockContext := core.NewEVMBlockContext(header, getHashFn, batchContext.cfg.engine, &batchContext.cfg.zk.AddressSequencer)
+	blockContext := core.NewEVMBlockContext(header, getHashFn, batchContext.cfg.engine, &batchContext.cfg.zk.AddressSequencer, batchContext.cfg.chainConfig)
 
 	fakeL1TreeUpdate := &zktypes.L1InfoTreeUpdate{
 		GER:        injectedBatch.LastGlobalExitRoot,
@@ -101,7 +101,7 @@ func processInjectedInitialBatch(
 	batchState.blockState.builtBlockElements = BuiltBlockElements{
 		transactions:     types.Transactions{*txn},
 		receipts:         types.Receipts{receipt},
-		executionResults: []*core.ExecutionResult{execResult},
+		executionResults: []*evmtypes.ExecutionResult{execResult},
 		effectiveGases:   []uint8{effectiveGas},
 	}
 	batchCounters := vm.NewBatchCounterCollector(batchContext.sdb.smt.GetDepth(), uint16(batchState.forkId), batchContext.cfg.zk.VirtualCountersSmtReduction,
@@ -122,7 +122,7 @@ func handleInjectedBatch(
 	header *types.Header,
 	parentBlock *types.Block,
 	forkId uint64,
-) (*types.Transaction, *types.Receipt, *core.ExecutionResult, uint8, error) {
+) (*types.Transaction, *types.Receipt, *evmtypes.ExecutionResult, uint8, error) {
 	decodedBlocks, err := zktx.DecodeBatchL2Blocks(injected.Transaction, forkId)
 	if err != nil {
 		return nil, nil, nil, 0, err

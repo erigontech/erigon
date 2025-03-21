@@ -22,22 +22,22 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/smt/pkg/blockinfo"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/smt/pkg/blockinfo"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	"github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon/zk/utils"
 )
 
 type EphemeralExecResultZk struct {
@@ -191,7 +191,7 @@ func ExecuteBlockEphemerallyZk(
 	}
 	if !vmConfig.ReadOnly {
 		txs := blockTransactions
-		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, log.New()); err != nil {
+		if _, _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, log.New()); err != nil {
 			return nil, fmt.Errorf("FinalizeBlockExecution: %w", err)
 		}
 	}
@@ -288,12 +288,12 @@ func PrepareBlockTxExecution(
 	// [zkevm] finish set preexecution state //
 	///////////////////////////////////////////
 
-	blockContextImpl := NewEVMBlockContext(block.Header(), blockHashFunc, engine, author)
+	blockContextImpl := NewEVMBlockContext(block.Header(), blockHashFunc, engine, author, chainConfig)
 
 	return &blockContextImpl, excessDataGas, &blockGer, &blockL1BlockHash, nil
 }
 
-func CreateReceiptForBlockInfoTree(receipt *types.Receipt, chainConfig *chain.Config, blockNum uint64, execResult *ExecutionResult) *types.Receipt {
+func CreateReceiptForBlockInfoTree(receipt *types.Receipt, chainConfig *chain.Config, blockNum uint64, execResult *evmtypes.ExecutionResult) *types.Receipt {
 	// [hack]TODO: remove this after bug is fixed
 	localReceipt := receipt.Clone()
 	if !chainConfig.IsForkID8Elderberry(blockNum) && errors.Is(execResult.Err, vm.ErrUnsupportedPrecompile) {

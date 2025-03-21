@@ -1,10 +1,10 @@
 package jsonrpc
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/zk/hermez_db"
 )
 
 func (api *APIImpl) addEffectiveGasPercentage(fields map[string]interface{}, tx kv.Tx, txn types.Transaction) (map[string]interface{}, error) {

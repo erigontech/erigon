@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 )
 
 const lifeSpan = 30 * time.Minute

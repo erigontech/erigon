@@ -22,8 +22,8 @@ import (
 	"math/big"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
 )
 
 // this needs to always be in descending order
@@ -84,14 +84,19 @@ type Config struct {
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
 
-	// Optional EIP-4844 parameters
-	MinBlobGasPrice            *uint64 `json:"minBlobGasPrice,omitempty"`
-	MaxBlobGasPerBlock         *uint64 `json:"maxBlobGasPerBlock,omitempty"`
-	TargetBlobGasPerBlock      *uint64 `json:"targetBlobGasPerBlock,omitempty"`
-	BlobGasPriceUpdateFraction *uint64 `json:"blobGasPriceUpdateFraction,omitempty"`
+	// Optional EIP-4844 parameters (see also EIP-7691 & EIP-7840)
+	MinBlobGasPrice *uint64       `json:"minBlobGasPrice,omitempty"`
+	BlobSchedule    *BlobSchedule `json:"blobSchedule,omitempty"`
 
-	// (Optional) governance contract where EIP-1559 fees will be sent to that otherwise would be burnt since the London fork
+	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
+	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
+	// Starting from Prague, EIP-4844 fees might be collected as well:
+	// see https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra.
 	BurntContract map[string]common.Address `json:"burntContract,omitempty"`
+
+	// (Optional) deposit contract of PoS chains
+	// See also EIP-6110: Supply validator deposits on chain
+	DepositContract common.Address `json:"depositContractAddress,omitempty"`
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -100,11 +105,6 @@ type Config struct {
 
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
-
-	// For not pruning the logs of these contracts
-	// For deposit contract logs are needed by CL to validate/produce blocks.
-	// All logs should be available to a validating node through eth_getLogs
-	NoPruneContracts map[common.Address]bool `json:"noPruneContracts,omitempty"`
 
 	//zkEVM updates
 	ForkID4Block            *big.Int `json:"forkID4Block,omitempty"`
@@ -123,18 +123,70 @@ type Config struct {
 	ZkDefaultGasPrice     uint64 `json:"zkDefaultGasFee,omitempty"`
 }
 
+type BlobConfig struct {
+	Target                *uint64 `json:"target,omitempty"`
+	Max                   *uint64 `json:"max,omitempty"`
+	BaseFeeUpdateFraction *uint64 `json:"baseFeeUpdateFraction,omitempty"`
+}
+
+// See EIP-7840: Add blob schedule to EL config files
+type BlobSchedule struct {
+	Cancun *BlobConfig `json:"cancun,omitempty"`
+	Prague *BlobConfig `json:"prague,omitempty"`
+}
+
+func (b *BlobSchedule) TargetBlobsPerBlock(isPrague bool) uint64 {
+	if isPrague {
+		if b != nil && b.Prague != nil && b.Prague.Target != nil {
+			return *b.Prague.Target
+		}
+		return 6 // EIP-7691
+	}
+	if b != nil && b.Cancun != nil && b.Cancun.Target != nil {
+		return *b.Cancun.Target
+	}
+	return 3 // EIP-4844
+}
+
+func (b *BlobSchedule) MaxBlobsPerBlock(isPrague bool) uint64 {
+	if isPrague {
+		if b != nil && b.Prague != nil && b.Prague.Max != nil {
+			return *b.Prague.Max
+		}
+		return 9 // EIP-7691
+	}
+	if b != nil && b.Cancun != nil && b.Cancun.Max != nil {
+		return *b.Cancun.Max
+	}
+	return 6 // EIP-4844
+}
+
+func (b *BlobSchedule) BaseFeeUpdateFraction(isPrague bool) uint64 {
+	if isPrague {
+		if b != nil && b.Prague != nil && b.Prague.BaseFeeUpdateFraction != nil {
+			return *b.Prague.BaseFeeUpdateFraction
+		}
+		return 5007716 // EIP-7691
+	}
+	if b != nil && b.Cancun != nil && b.Cancun.BaseFeeUpdateFraction != nil {
+		return *b.Cancun.BaseFeeUpdateFraction
+	}
+	return 3338477 // EIP-4844
+}
+
 type BorConfig interface {
 	fmt.Stringer
 	IsAgra(num uint64) bool
 	GetAgraBlock() *big.Int
 	IsNapoli(num uint64) bool
 	GetNapoliBlock() *big.Int
+	IsAhmedabad(number uint64) bool
 }
 
 func (c *Config) String() string {
 	engine := c.getEngine()
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Normalcy: %v, Engine: %v, NoPruneContracts: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Normalcy: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -157,7 +209,6 @@ func (c *Config) String() string {
 		c.OsakaTime,
 		c.NormalcyBlock,
 		engine,
-		c.NoPruneContracts,
 	)
 }
 
@@ -320,29 +371,32 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
-func (c *Config) GetMaxBlobGasPerBlock() uint64 {
-	if c != nil && c.MaxBlobGasPerBlock != nil {
-		return *c.MaxBlobGasPerBlock
-	}
-	return 786432 // MAX_BLOB_GAS_PER_BLOCK (EIP-4844)
+func (c *Config) GetMaxBlobGasPerBlock(t uint64) uint64 {
+	return c.GetMaxBlobsPerBlock(t) * fixedgas.BlobGasPerBlob
 }
 
-func (c *Config) GetTargetBlobGasPerBlock() uint64 {
-	if c != nil && c.TargetBlobGasPerBlock != nil {
-		return *c.TargetBlobGasPerBlock
+func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
+	var b *BlobSchedule
+	if c != nil {
+		b = c.BlobSchedule
 	}
-	return 393216 // TARGET_BLOB_GAS_PER_BLOCK (EIP-4844)
+	return b.MaxBlobsPerBlock(c.IsPrague(time))
 }
 
-func (c *Config) GetBlobGasPriceUpdateFraction() uint64 {
-	if c != nil && c.BlobGasPriceUpdateFraction != nil {
-		return *c.BlobGasPriceUpdateFraction
+func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
+	var b *BlobSchedule
+	if c != nil {
+		b = c.BlobSchedule
 	}
-	return 3338477 // BLOB_GASPRICE_UPDATE_FRACTION (EIP-4844)
+	return b.TargetBlobsPerBlock(c.IsPrague(t)) * fixedgas.BlobGasPerBlob
 }
 
-func (c *Config) GetMaxBlobsPerBlock() uint64 {
-	return c.GetMaxBlobGasPerBlock() / fixedgas.BlobGasPerBlob
+func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
+	var b *BlobSchedule
+	if c != nil {
+		b = c.BlobSchedule
+	}
+	return b.BaseFeeUpdateFraction(c.IsPrague(t))
 }
 
 func (c *Config) IsNormalcy(num uint64) bool {
@@ -385,6 +439,16 @@ func (c *Config) IsForkID12Banana(num uint64) bool {
 
 func (c *Config) IsForkID13Durian(num uint64) bool {
 	return isForked(c.ForkId13Durian, num)
+}
+
+func (c *Config) SecondsPerSlot() uint64 {
+	if c.Bor != nil {
+		return 2 // Polygon
+	}
+	if c.Aura != nil {
+		return 5 // Gnosis
+	}
+	return 12 // Ethereum
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported

@@ -11,7 +11,7 @@ import (
 
 	"context"
 
-	"github.com/ledgerwatch/erigon/smt/pkg/utils"
+	"github.com/erigontech/erigon/smt/pkg/utils"
 )
 
 type Address struct {

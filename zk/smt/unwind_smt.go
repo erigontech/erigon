@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	db2 "github.com/erigontech/erigon/smt/pkg/db"
 
-	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
+	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 
-	"github.com/ledgerwatch/erigon/smt/pkg/smt"
-	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/erigon/zk"
-	"github.com/ledgerwatch/erigon/zkevm/log"
+	"github.com/erigontech/erigon/smt/pkg/smt"
+	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon/zk"
+	"github.com/erigontech/erigon/zkevm/log"
 )
 
 func UnwindZkSMT(ctx context.Context, logPrefix string, from, to uint64, tx kv.RwTx, checkRoot bool, expectedRootHash *common.Hash, quiet bool) (common.Hash, error) {

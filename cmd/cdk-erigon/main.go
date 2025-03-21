@@ -8,18 +8,18 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/common"
-	zkutils "github.com/ledgerwatch/erigon/zk/utils"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	zkutils "github.com/erigontech/erigon/zk/utils"
 	"github.com/pelletier/go-toml"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v2"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/params"
-	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
-	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
-	"github.com/ledgerwatch/erigon/turbo/node"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/params"
+	erigonapp "github.com/erigontech/erigon/turbo/app"
+	erigoncli "github.com/erigontech/erigon/turbo/cli"
+	"github.com/erigontech/erigon/turbo/node"
 )
 
 func main() {

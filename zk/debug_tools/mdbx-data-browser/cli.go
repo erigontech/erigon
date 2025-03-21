@@ -9,12 +9,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
+	"github.com/erigontech/erigon/cmd/utils"
+	types "github.com/erigontech/erigon/zk/rpcdaemon"
 )
 
 var (

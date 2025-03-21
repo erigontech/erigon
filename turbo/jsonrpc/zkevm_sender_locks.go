@@ -3,7 +3,7 @@ package jsonrpc
 import (
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 // SenderLock is a map of sender addresses to the number of locks they have

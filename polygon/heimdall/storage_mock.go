@@ -13,9 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	common "github.com/ledgerwatch/erigon-lib/common"
-	kv "github.com/ledgerwatch/erigon-lib/kv"
-	rlp "github.com/ledgerwatch/erigon/rlp"
+	common "github.com/erigontech/erigon-lib/common"
+	kv "github.com/erigontech/erigon-lib/kv"
+	rlp "github.com/erigontech/erigon-lib/rlp"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -23,6 +23,7 @@ import (
 type MockSpanReader struct {
 	ctrl     *gomock.Controller
 	recorder *MockSpanReaderMockRecorder
+	isgomock struct{}
 }
 
 // MockSpanReaderMockRecorder is the mock recorder for MockSpanReader.
@@ -125,6 +126,7 @@ func (c *MockSpanReaderLastSpanIdCall) DoAndReturn(f func(context.Context) (Span
 type MockSpanWriter struct {
 	ctrl     *gomock.Controller
 	recorder *MockSpanWriterMockRecorder
+	isgomock struct{}
 }
 
 // MockSpanWriterMockRecorder is the mock recorder for MockSpanWriter.
@@ -186,6 +188,7 @@ func (c *MockSpanWriterPutSpanCall) DoAndReturn(f func(context.Context, *Span) e
 type MockSpanStore struct {
 	ctrl     *gomock.Controller
 	recorder *MockSpanStoreMockRecorder
+	isgomock struct{}
 }
 
 // MockSpanStoreMockRecorder is the mock recorder for MockSpanStore.
@@ -326,6 +329,7 @@ func (c *MockSpanStorePutSpanCall) DoAndReturn(f func(context.Context, *Span) er
 type MockMilestoneReader struct {
 	ctrl     *gomock.Controller
 	recorder *MockMilestoneReaderMockRecorder
+	isgomock struct{}
 }
 
 // MockMilestoneReaderMockRecorder is the mock recorder for MockMilestoneReader.
@@ -428,6 +432,7 @@ func (c *MockMilestoneReaderLastMilestoneIdCall) DoAndReturn(f func(context.Cont
 type MockMilestoneWriter struct {
 	ctrl     *gomock.Controller
 	recorder *MockMilestoneWriterMockRecorder
+	isgomock struct{}
 }
 
 // MockMilestoneWriterMockRecorder is the mock recorder for MockMilestoneWriter.
@@ -489,6 +494,7 @@ func (c *MockMilestoneWriterPutMilestoneCall) DoAndReturn(f func(context.Context
 type MockMilestoneStore struct {
 	ctrl     *gomock.Controller
 	recorder *MockMilestoneStoreMockRecorder
+	isgomock struct{}
 }
 
 // MockMilestoneStoreMockRecorder is the mock recorder for MockMilestoneStore.
@@ -629,6 +635,7 @@ func (c *MockMilestoneStorePutMilestoneCall) DoAndReturn(f func(context.Context,
 type MockCheckpointReader struct {
 	ctrl     *gomock.Controller
 	recorder *MockCheckpointReaderMockRecorder
+	isgomock struct{}
 }
 
 // MockCheckpointReaderMockRecorder is the mock recorder for MockCheckpointReader.
@@ -731,6 +738,7 @@ func (c *MockCheckpointReaderLastCheckpointIdCall) DoAndReturn(f func(context.Co
 type MockCheckpointWriter struct {
 	ctrl     *gomock.Controller
 	recorder *MockCheckpointWriterMockRecorder
+	isgomock struct{}
 }
 
 // MockCheckpointWriterMockRecorder is the mock recorder for MockCheckpointWriter.
@@ -792,6 +800,7 @@ func (c *MockCheckpointWriterPutCheckpointCall) DoAndReturn(f func(context.Conte
 type MockCheckpointStore struct {
 	ctrl     *gomock.Controller
 	recorder *MockCheckpointStoreMockRecorder
+	isgomock struct{}
 }
 
 // MockCheckpointStoreMockRecorder is the mock recorder for MockCheckpointStore.
@@ -932,6 +941,7 @@ func (c *MockCheckpointStorePutCheckpointCall) DoAndReturn(f func(context.Contex
 type MockStore struct {
 	ctrl     *gomock.Controller
 	recorder *MockStoreMockRecorder
+	isgomock struct{}
 }
 
 // MockStoreMockRecorder is the mock recorder for MockStore.
@@ -1306,6 +1316,7 @@ func (c *MockStorePutSpanCall) DoAndReturn(f func(context.Context, *Span) error)
 type Mockreader struct {
 	ctrl     *gomock.Controller
 	recorder *MockreaderMockRecorder
+	isgomock struct{}
 }
 
 // MockreaderMockRecorder is the mock recorder for Mockreader.

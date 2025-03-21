@@ -5,12 +5,12 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/ledgerwatch/secp256k1"
+	"github.com/erigontech/secp256k1"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/crypto"
 )
 
 // A message broadcast by authorities when it's their turn to seal a block but there are no

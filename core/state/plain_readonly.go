@@ -22,18 +22,18 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/core/state/historyv2read"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
+
+	"github.com/erigontech/erigon/core/state/historyv2read"
+	"github.com/erigontech/erigon/core/types/accounts"
 )
 
 type storageItem struct {
@@ -194,11 +194,23 @@ func (s *PlainState) ReadAccountData(address libcommon.Address) (*accounts.Accou
 	if fromHistory {
 		//restore codehash
 		if records, ok := s.systemContractLookup[address]; ok {
+			// Find the first system contract record after the block number
 			p := sort.Search(len(records), func(i int) bool {
 				return records[i].BlockNumber > s.blockNr
 			})
-			a.CodeHash = records[p-1].CodeHash
-		} else if a.Incarnation > 0 && a.IsEmptyCodeHash() {
+			if p > 0 {
+				a.CodeHash = records[p-1].CodeHash
+				if s.trace {
+					fmt.Printf("ReadAccountData [%x] => (systemContractLookup) [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
+				}
+				return &a, nil
+			}
+			// All system contract records are after the block number
+			if s.trace {
+				fmt.Printf("ReadAccountData [%x] systemContract was created after %d, at %d\n", address, s.blockNr, records[0].BlockNumber)
+			}
+		}
+		if a.Incarnation > 0 && a.IsEmptyCodeHash() {
 			if codeHash, err1 := s.tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
 				if len(codeHash) > 0 {
 					a.CodeHash = libcommon.BytesToHash(codeHash)

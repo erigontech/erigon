@@ -6,16 +6,16 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/matic"
-	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/mockverifier"
-	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/polygonzkevm"
-	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/polygonzkevmbridge"
-	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/polygonzkevmglobalexitroot"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/accounts/abi/bind/backends"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/zkevm/etherman/smartcontracts/matic"
+	"github.com/erigontech/erigon/zkevm/etherman/smartcontracts/mockverifier"
+	"github.com/erigontech/erigon/zkevm/etherman/smartcontracts/polygonzkevm"
+	"github.com/erigontech/erigon/zkevm/etherman/smartcontracts/polygonzkevmbridge"
+	"github.com/erigontech/erigon/zkevm/etherman/smartcontracts/polygonzkevmglobalexitroot"
 )
 
 // NewSimulatedEtherman creates an etherman that uses a simulated blockchain. It's important to notice that the ChainID of the auth

@@ -25,15 +25,15 @@ import (
 	"testing"
 	"time"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/goccy/go-json"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 
-	"github.com/ledgerwatch/erigon/turbo/testlog"
+	"github.com/erigontech/erigon/turbo/testlog"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // Tests whether remote HTTP servers are correctly notified of new work.
@@ -60,8 +60,9 @@ func TestRemoteNotify(t *testing.T) {
 	// Stream a work task and ensure the notification bubbles out.
 	header := &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(100)}
 	block := types.NewBlockWithHeader(header)
+	blockWithReceipts := &types.BlockWithReceipts{Block: block}
 
-	if err := ethash.Seal(nil, block, nil, nil); err != nil {
+	if err := ethash.Seal(nil, blockWithReceipts, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -110,8 +111,9 @@ func TestRemoteNotifyFull(t *testing.T) {
 	// Stream a work task and ensure the notification bubbles out.
 	header := &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(100)}
 	block := types.NewBlockWithHeader(header)
+	blockWithReceipts := &types.BlockWithReceipts{Block: block}
 
-	if err := ethash.Seal(nil, block, nil, nil); err != nil {
+	if err := ethash.Seal(nil, blockWithReceipts, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -155,13 +157,14 @@ func TestRemoteMultiNotify(t *testing.T) {
 	// Provide a results reader.
 	// Otherwise the unread results will be logged asynchronously
 	// and this can happen after the test is finished, causing a panic.
-	results := make(chan *types.Block, cap(sink))
+	results := make(chan *types.BlockWithReceipts, cap(sink))
 
 	// Stream a lot of work task and ensure all the notifications bubble out.
 	for i := 0; i < cap(sink); i++ {
 		header := &types.Header{Number: big.NewInt(int64(i)), Difficulty: big.NewInt(100)}
 		block := types.NewBlockWithHeader(header)
-		err := ethash.Seal(nil, block, results, nil)
+		blockWithReceipts := &types.BlockWithReceipts{Block: block}
+		err := ethash.Seal(nil, blockWithReceipts, results, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -208,13 +211,14 @@ func TestRemoteMultiNotifyFull(t *testing.T) {
 	// Provide a results reader.
 	// Otherwise the unread results will be logged asynchronously
 	// and this can happen after the test is finished, causing a panic.
-	results := make(chan *types.Block, cap(sink))
+	results := make(chan *types.BlockWithReceipts, cap(sink))
 
 	// Stream a lot of work task and ensure all the notifications bubble out.
 	for i := 0; i < cap(sink); i++ {
 		header := &types.Header{Number: big.NewInt(int64(i)), Difficulty: big.NewInt(100)}
 		block := types.NewBlockWithHeader(header)
-		err := ethash.Seal(nil, block, results, nil)
+		blockWithReceipts := &types.BlockWithReceipts{Block: block}
+		err := ethash.Seal(nil, blockWithReceipts, results, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -279,11 +283,12 @@ func TestStaleSubmission(t *testing.T) {
 			false,
 		},
 	}
-	results := make(chan *types.Block, 16)
+	results := make(chan *types.BlockWithReceipts, 16)
 
 	for id, c := range testcases {
 		for _, h := range c.headers {
-			err := ethash.Seal(nil, types.NewBlockWithHeader(h), results, nil)
+			blockWithReceipts := &types.BlockWithReceipts{Block: types.NewBlockWithHeader(h)}
+			err := ethash.Seal(nil, blockWithReceipts, results, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -295,7 +300,8 @@ func TestStaleSubmission(t *testing.T) {
 			continue
 		}
 		select {
-		case res := <-results:
+		case resWithReceipts := <-results:
+			res := resWithReceipts.Block
 			if res.Nonce() != fakeNonce {
 				t.Errorf("case %d block nonce mismatch, want %x, get %x", id+1, fakeNonce, res.Nonce())
 			}

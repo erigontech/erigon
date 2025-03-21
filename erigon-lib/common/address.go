@@ -24,9 +24,9 @@ import (
 	"math/big"
 	"reflect"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/crypto/cryptopool"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 )
 
 var (
@@ -81,11 +81,11 @@ func (a *Address) checksumHex() []byte {
 	buf := a.hex()
 
 	// compute checksum
-	sha := cryptopool.GetLegacyKeccak256()
+	sha := cryptopool.NewLegacyKeccak256()
 	//nolint:errcheck
 	sha.Write(buf[2:])
 	hash := sha.Sum(nil)
-	cryptopool.ReturnLegacyKeccak256(sha)
+	cryptopool.ReturnToPoolKeccak256(sha)
 
 	for i := 2; i < len(buf); i++ {
 		hashByte := hash[(i-2)/2]

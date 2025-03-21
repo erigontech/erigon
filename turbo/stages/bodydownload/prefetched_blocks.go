@@ -1,10 +1,10 @@
 package bodydownload
 
 import (
-	"github.com/hashicorp/golang-lru/v2"
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 type PrefetchedBlocks struct {

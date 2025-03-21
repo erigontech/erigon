@@ -4,8 +4,8 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon/ethclient"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/ethclient"
 )
 
 type RpcL1GasPriceTracker interface {

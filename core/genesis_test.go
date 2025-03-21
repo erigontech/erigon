@@ -5,25 +5,27 @@ package core_test
 
 import (
 	"context"
+	"encoding/json"
 	"math/big"
+	"os"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
@@ -53,12 +55,12 @@ func TestGenesisBlockRoots(t *testing.T) {
 	require := require.New(t)
 	var err error
 
-	block, _, _ := core.GenesisToBlock(core.MainnetGenesisBlock(), "", log.Root())
+	block, _, _, _ := core.GenesisToBlock(core.MainnetGenesisBlock(), "", log.Root())
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.GnosisGenesisBlock(), "", log.Root())
+	block, _, _, err = core.GenesisToBlock(core.GnosisGenesisBlock(), "", log.Root())
 	require.NoError(err)
 	if block.Root() != params.GnosisGenesisStateRoot {
 		t.Errorf("wrong Gnosis Chain genesis state root, got %v, want %v", block.Root(), params.GnosisGenesisStateRoot)
@@ -67,7 +69,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 		t.Errorf("wrong Gnosis Chain genesis hash, got %v, want %v", block.Hash(), params.GnosisGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.ChiadoGenesisBlock(), "", log.Root())
+	block, _, _, err = core.GenesisToBlock(core.ChiadoGenesisBlock(), "", log.Root())
 	require.NoError(err)
 	if block.Root() != params.ChiadoGenesisStateRoot {
 		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.ChiadoGenesisStateRoot)
@@ -143,4 +145,15 @@ func TestAllocConstructor(t *testing.T) {
 	storage1 := &uint256.Int{}
 	state.GetState(address, &key1, storage1)
 	assert.Equal(uint256.NewInt(0x01c9), storage1)
+}
+
+// See https://github.com/erigontech/erigon/pull/11264
+func TestDecodeBalance0(t *testing.T) {
+	genesisData, err := os.ReadFile("./genesis_test.json")
+	require.NoError(t, err)
+
+	genesis := &types.Genesis{}
+	err = json.Unmarshal(genesisData, genesis)
+	require.NoError(t, err)
+	_ = genesisData
 }

@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 //go:generate mockgen -typed=true -destination=./storage_mock.go -package=sync . Storage

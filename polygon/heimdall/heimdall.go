@@ -6,9 +6,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 // Heimdall is a wrapper of Heimdall HTTP API

@@ -3,7 +3,7 @@ package stages
 import (
 	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon/zk/datastream/types"
+	"github.com/erigontech/erigon/zk/datastream/types"
 )
 
 type TestDatastreamClient struct {

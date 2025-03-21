@@ -7,17 +7,17 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/execution"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/types"
 
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/builder"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/builder"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 )
 
 func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
@@ -199,11 +199,22 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		}
 	}
 
+	var requestsBundle *types2.RequestsBundle
+	if blockWithReceipts.Requests != nil {
+		requestsBundle = &types2.RequestsBundle{}
+		requests := make([][]byte, 0)
+		for _, r := range blockWithReceipts.Requests {
+			requests = append(requests, r.Encode())
+		}
+		requestsBundle.Requests = requests
+	}
+
 	return &execution.GetAssembledBlockResponse{
 		Data: &execution.AssembledBlockData{
 			ExecutionPayload: payload,
 			BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
 			BlobsBundle:      blobsBundle,
+			Requests:         requestsBundle,
 		},
 		Busy: false,
 	}, nil

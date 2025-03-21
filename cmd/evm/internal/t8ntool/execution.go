@@ -21,16 +21,18 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	math2 "github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/kv"
+
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 type Prestate struct {
@@ -61,18 +63,19 @@ type stEnv struct {
 	UncleHash        libcommon.Hash                         `json:"uncleHash,omitempty"`
 	Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
 	WithdrawalsHash  *libcommon.Hash                        `json:"withdrawalsRoot,omitempty"`
+	RequestsHash     *libcommon.Hash                        `json:"requestsHash,omitempty"`
 }
 
 type stEnvMarshaling struct {
 	Coinbase         common.UnprefixedAddress
-	Difficulty       *math.HexOrDecimal256
-	Random           *math.HexOrDecimal256
-	ParentDifficulty *math.HexOrDecimal256
+	Difficulty       *math2.HexOrDecimal256
+	Random           *math2.HexOrDecimal256
+	ParentDifficulty *math2.HexOrDecimal256
 	GasLimit         math.HexOrDecimal64
 	Number           math.HexOrDecimal64
 	Timestamp        math.HexOrDecimal64
 	ParentTimestamp  math.HexOrDecimal64
-	BaseFee          *math.HexOrDecimal256
+	BaseFee          *math2.HexOrDecimal256
 }
 
 func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc) (state.StateReader, *state.PlainStateWriter) {

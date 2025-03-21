@@ -16,39 +16,40 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/tidwall/btree"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/cmp"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
+	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	coresnaptype "github.com/erigontech/erigon/core/snaptype"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/silkworm"
 )
 
 type Range struct {
@@ -115,7 +116,9 @@ func (s Segment) FileInfo(dir string) snaptype.FileInfo {
 }
 
 func (s *Segment) reopenSeg(dir string) (err error) {
-	s.closeSeg()
+	if s.Decompressor != nil {
+		return nil
+	}
 	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
@@ -160,12 +163,7 @@ func (s *Segment) openFiles() []string {
 }
 
 func (s *Segment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if len(s.Type().IdxFileNames(s.version, s.from, s.to)) == 0 {
-		return nil
-	}
-
 	err = s.reopenIdx(dir)
-
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			if optimistic {
@@ -180,19 +178,25 @@ func (s *Segment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
 }
 
 func (s *Segment) reopenIdx(dir string) (err error) {
-	s.closeIdx()
 	if s.Decompressor == nil {
 		return nil
 	}
+	for len(s.indexes) < len(s.Type().Indexes()) {
+		s.indexes = append(s.indexes, nil)
+	}
 
-	for _, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
+	for i, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
+		if s.indexes[i] != nil {
+			continue
+		}
+
 		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
 
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
 
-		s.indexes = append(s.indexes, index)
+		s.indexes[i] = index
 	}
 
 	return nil
@@ -808,8 +812,8 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 }
 
 func (s *RoSnapshots) PrintDebug() {
-	s.lockSegments()
-	defer s.unlockSegments()
+	view := s.View()
+	defer view.Close()
 
 	s.segments.Scan(func(key snaptype.Enum, value *segments) bool {
 		fmt.Println("    == [dbg] Snapshots,", key.String())
@@ -894,11 +898,18 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 }
 
 func notifySegmentIndexingFinished(name string) {
-	diagnostics.Send(
-		diagnostics.SnapshotSegmentIndexingFinishedUpdate{
+	dts := []diagnostics.SnapshotSegmentIndexingStatistics{
+		{
 			SegmentName: name,
+			Percent:     100,
+			Alloc:       0,
+			Sys:         0,
 		},
-	)
+	}
+	diagnostics.Send(diagnostics.SnapshotIndexingStatistics{
+		Segments:    dts,
+		TimeElapsed: -1,
+	})
 }
 
 func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, alloc uint64, sys uint64) {
@@ -1099,7 +1110,7 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, chainConfig *chai
 	if chainConfig != nil {
 		chainName = chainConfig.ChainName
 	}
-	blocksPerFile := snapcfg.MergeLimit(chainName, snapType, from)
+	blocksPerFile := snapcfg.MergeLimitFromCfg(snapcfg.KnownCfg(chainName), snapType, from)
 
 	next := (from/blocksPerFile + 1) * blocksPerFile
 	to = cmp.Min(next, to)
@@ -1174,7 +1185,7 @@ func canRetire(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Confi
 		chainName = chainConfig.ChainName
 	}
 
-	mergeLimit := snapcfg.MergeLimit(chainName, snapType, blockFrom)
+	mergeLimit := snapcfg.MergeLimitFromCfg(snapcfg.KnownCfg(chainName), snapType, blockFrom)
 
 	if blockFrom%mergeLimit == 0 {
 		maxJump = mergeLimit
@@ -1563,7 +1574,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, fmt.Errorf("body not found: %d, %x", blockNum, h)
 		}
 		var body types.BodyForStorage
-		if e := rlp.DecodeBytes(dataRLP, &body); e != nil {
+		if e := rlp2.DecodeBytes(dataRLP, &body); e != nil {
 			return false, e
 		}
 		if body.TxAmount == 0 {
@@ -1711,7 +1722,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 			return false, fmt.Errorf("header missed in db: block_num=%d,  hash=%x", blockNum, v)
 		}
 		h := types.Header{}
-		if err := rlp.DecodeBytes(dataRLP, &h); err != nil {
+		if err := rlp2.DecodeBytes(dataRLP, &h); err != nil {
 			return false, err
 		}
 
@@ -1779,7 +1790,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		body.BaseTxId = lastTxNum
 		lastTxNum += uint64(body.TxAmount)
 
-		dataRLP, err := rlp.EncodeToBytes(body)
+		dataRLP, err := rlp2.EncodeToBytes(body)
 		if err != nil {
 			return false, err
 		}
@@ -1823,7 +1834,7 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 				word, _ = g.Next(word[:0])
 				var header types.Header
 				r.Reset(word[1:])
-				if err := rlp.Decode(r, &header); err != nil {
+				if err := rlp2.Decode(r, &header); err != nil {
 					return err
 				}
 				if err := walker(&header); err != nil {
@@ -1855,13 +1866,14 @@ func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB,
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
+	cfg := snapcfg.KnownCfg(m.chainConfig.ChainName)
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		mergeLimit := snapcfg.MergeLimit(m.chainConfig.ChainName, snaptype.Unknown, r.from)
+		mergeLimit := snapcfg.MergeLimitFromCfg(cfg, snaptype.Unknown, r.from)
 		if r.to-r.from >= mergeLimit {
 			continue
 		}
-		for _, span := range snapcfg.MergeSteps(m.chainConfig.ChainName, snaptype.Unknown, r.from) {
+		for _, span := range snapcfg.MergeStepsFromCfg(cfg, snaptype.Unknown, r.from) {
 			if r.to%span != 0 {
 				continue
 			}
@@ -2040,9 +2052,13 @@ type View struct {
 	closed      bool
 }
 
+// ViewSingleFile - RLock files of all types
 func (s *RoSnapshots) View() *View {
 	v := &View{s: s, baseSegType: coresnaptype.Headers}
-	s.lockSegments()
+	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		value.lock.RLock()
+		return true
+	})
 	return v
 }
 
@@ -2051,7 +2067,55 @@ func (v *View) Close() {
 		return
 	}
 	v.closed = true
-	v.s.unlockSegments()
+	v.s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		value.lock.RUnlock()
+		return true
+	})
+}
+
+var noop = func() {}
+
+// ViewSingleFile - RLock all files of given type
+func (s *RoSnapshots) ViewType(t snaptype.Type) (segments []*Segment, release func()) {
+	segs, ok := s.segments.Get(t.Enum())
+	if !ok {
+		return nil, noop
+	}
+
+	segs.lock.RLock()
+	var released = false
+	return segs.segments, func() {
+		if released {
+			return
+		}
+		segs.lock.RUnlock()
+		released = true
+	}
+}
+
+// ViewSingleFile - RLock all files of given type if has file with `blockNum`
+func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *Segment, ok bool, release func()) {
+	segs, ok := s.segments.Get(t.Enum())
+	if !ok {
+		return nil, false, noop
+	}
+
+	segs.lock.RLock()
+	var released = false
+	for _, seg := range segs.segments {
+		if !(blockNum >= seg.from && blockNum < seg.to) {
+			continue
+		}
+		return seg, true, func() {
+			if released {
+				return
+			}
+			segs.lock.RUnlock()
+			released = true
+		}
+	}
+	segs.lock.RUnlock()
+	return nil, false, noop
 }
 
 func (v *View) Segments(t snaptype.Type) []*Segment {
@@ -2092,6 +2156,7 @@ func (v *View) HeadersSegment(blockNum uint64) (*Segment, bool) {
 func (v *View) BodiesSegment(blockNum uint64) (*Segment, bool) {
 	return v.Segment(coresnaptype.Bodies, blockNum)
 }
+
 func (v *View) TxsSegment(blockNum uint64) (*Segment, bool) {
 	return v.Segment(coresnaptype.Transactions, blockNum)
 }

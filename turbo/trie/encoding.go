@@ -19,7 +19,7 @@ package trie
 import (
 	"io"
 
-	"github.com/ledgerwatch/erigon/rlp"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 )
 
 // Trie keys are dealt with in three distinct encodings:
@@ -142,11 +142,11 @@ func CompactToKeybytes(c []byte) Keybytes {
 
 // EncodeRLP implements rlp.Encoder and encodes Keybytes in the COMPACT encoding.
 func (x *Keybytes) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, x.ToCompact())
+	return rlp2.Encode(w, x.ToCompact())
 }
 
 // DecodeRLP implements rlp.Decoder and decodes Keybytes from the COMPACT encoding.
-func (x *Keybytes) DecodeRLP(s *rlp.Stream) error {
+func (x *Keybytes) DecodeRLP(s *rlp2.Stream) error {
 	var compact []byte
 	if err := s.Decode(&compact); err != nil {
 		return err

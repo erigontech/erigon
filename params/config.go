@@ -20,16 +20,17 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_chain"
 	"math/big"
 	"path"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/zk/zk_config/cfg_chain"
 
-	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+
+	"github.com/erigontech/erigon/common/paths"
 )
 
 //go:embed chainspecs

@@ -3,7 +3,7 @@ package types
 import (
 	"reflect"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 // Sequence represents an operation sent to the PoE smart contract to be

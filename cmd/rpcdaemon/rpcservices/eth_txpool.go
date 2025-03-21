@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	txpooproto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	txpool2 "github.com/ledgerwatch/erigon/zk/txpool"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	txpooproto "github.com/erigontech/erigon-lib/gointerfaces/txpool"
+	"github.com/erigontech/erigon-lib/log/v3"
+	txpool2 "github.com/erigontech/erigon-lib/txpool"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )

@@ -15,23 +15,24 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/metrics"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/metrics"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/dataflow"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon/dataflow"
+	"github.com/erigontech/erigon/turbo/services"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/params"
 )
 
 const POSPandaBanner = `
@@ -104,7 +105,8 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 	headerHash := types.RawRlpHash(headerRaw)
 	if _, bad := hd.badHeaders[headerHash]; bad {
 		hd.stats.RejectedBadHeaders++
-		hd.logger.Warn("[downloader] Rejected header marked as bad", "hash", headerHash, "height", header.Number.Uint64())
+		dbg.SaveHeapProfileNearOOM(dbg.SaveHeapWithLogger(&hd.logger))
+		hd.logger.Warn("[downloader] SingleHeaderAsSegment: Rejected header marked as bad", "hash", headerHash, "height", header.Number.Uint64())
 		return nil, BadBlockPenalty, nil
 	}
 	if penalizePoSBlocks && header.Difficulty.Sign() == 0 {
@@ -157,6 +159,11 @@ func (hd *HeaderDownload) IsBadHeaderPoS(tipHash libcommon.Hash) (bad bool, last
 func (hd *HeaderDownload) removeUpwards(link *Link) {
 	if link == nil {
 		return
+	}
+	if link.header != nil {
+		if parentLink, ok := hd.links[link.header.ParentHash]; ok {
+			parentLink.RemoveChild(link)
+		}
 	}
 	var toRemove = []*Link{link}
 	for len(toRemove) > 0 {
@@ -320,7 +327,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 				return err
 			}
 			var header types.Header
-			if err = rlp.DecodeBytes(v, &header); err != nil {
+			if err = rlp2.DecodeBytes(v, &header); err != nil {
 				return err
 			}
 			if header.Number.Uint64() <= hd.highestInDb {
@@ -512,12 +519,11 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		}
 		if bad {
 			// If the link or its parent is marked bad, throw it out
-			hd.moveLinkToQueue(link, NoQueue)
-			delete(hd.links, link.hash)
 			hd.removeUpwards(link)
 			dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderBad)
 			hd.stats.RejectedBadHeaders++
-			hd.logger.Warn("[downloader] Rejected header marked as bad", "hash", link.hash, "height", link.blockHeight)
+			dbg.SaveHeapProfileNearOOM(dbg.SaveHeapWithLogger(&hd.logger))
+			hd.logger.Warn("[downloader] InsertHeader: Rejected header marked as bad", "hash", link.hash, "height", link.blockHeight)
 			return true, false, 0, lastTime, nil
 		}
 		if !link.verified {
@@ -529,12 +535,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 					return false, false, 0, lastTime, nil // prevent removal of the link from the hd.linkQueue
 				} else {
 					hd.logger.Debug("[downloader] Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
-					hd.moveLinkToQueue(link, NoQueue)
-					delete(hd.links, link.hash)
 					hd.removeUpwards(link)
-					if parentLink, ok := hd.links[link.header.ParentHash]; ok {
-						parentLink.RemoveChild(link)
-					}
 					dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderEvicted)
 					hd.stats.InvalidHeaders++
 					return true, false, 0, lastTime, nil
@@ -1247,7 +1248,7 @@ func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, r services.FullBlockR
 		if header == nil {
 			continue
 		}
-		v, err := rlp.EncodeToBytes(header)
+		v, err := rlp2.EncodeToBytes(header)
 		if err != nil {
 			return err
 		}
@@ -1381,7 +1382,7 @@ func DecodeTips(encodings []string) (map[libcommon.Hash]HeaderRecord, error) {
 		}
 
 		var h types.Header
-		if err := rlp.DecodeBytes(res, &h); err != nil {
+		if err := rlp2.DecodeBytes(res, &h); err != nil {
 			return nil, fmt.Errorf("parsing hard coded header on %d: %w", i, err)
 		}
 

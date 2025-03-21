@@ -17,9 +17,10 @@
 package runtime
 
 import (
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 func NewEnv(cfg *Config) *vm.EVM {
@@ -30,7 +31,7 @@ func NewEnv(cfg *Config) *vm.EVM {
 
 	blockContext := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
+		Transfer:    consensus.Transfer,
 		GetHash:     cfg.GetHashFn,
 		Coinbase:    cfg.Coinbase,
 		BlockNumber: cfg.BlockNumber.Uint64(),

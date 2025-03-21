@@ -26,19 +26,19 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	"github.com/erigontech/erigon-lib/kv"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 var (
@@ -91,7 +91,7 @@ func TestGetBlockReceipts(t *testing.T) {
 	// Collect the hashes to request, and the response to expect
 	var (
 		hashes   []libcommon.Hash
-		receipts []rlp.RawValue
+		receipts []rlp2.RawValue
 	)
 	err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
@@ -101,14 +101,14 @@ func TestGetBlockReceipts(t *testing.T) {
 			hashes = append(hashes, block.Hash())
 			// If known, encode and queue for response packet
 			r := rawdb.ReadReceipts(tx, block, nil)
-			encoded, err := rlp.EncodeToBytes(r)
+			encoded, err := rlp2.EncodeToBytes(r)
 			require.NoError(t, err)
 			receipts = append(receipts, encoded)
 		}
 		return nil
 	})
 	require.NoError(t, err)
-	b, err := rlp.EncodeToBytes(eth.GetReceiptsPacket66{RequestId: 1, GetReceiptsPacket: hashes})
+	b, err := rlp2.EncodeToBytes(eth.GetReceiptsPacket66{RequestId: 1, GetReceiptsPacket: hashes})
 	require.NoError(t, err)
 
 	m.StreamWg.Wait()
@@ -119,7 +119,7 @@ func TestGetBlockReceipts(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	expect, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket66{RequestId: 1, ReceiptsRLPPacket: receipts})
+	expect, err := rlp2.EncodeToBytes(eth.ReceiptsRLPPacket66{RequestId: 1, ReceiptsRLPPacket: receipts})
 	require.NoError(t, err)
 	if m.HistoryV3 {
 		// GetReceiptsMsg disabled for historyV3

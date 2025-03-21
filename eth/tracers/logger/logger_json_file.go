@@ -20,11 +20,11 @@ import (
 	"encoding/json"
 	"os"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/zkevm/log"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/zkevm/log"
 )
 
 type JSONFileLogger struct {

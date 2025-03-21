@@ -9,19 +9,20 @@ import (
 	"sync"
 	"sync/atomic"
 
-	lru "github.com/hashicorp/golang-lru/v2"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura/auraabi"
-	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	lru "github.com/hashicorp/golang-lru/v2"
+
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/aura/auraabi"
+	"github.com/erigontech/erigon/consensus/aura/aurainterfaces"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // nolint
@@ -447,7 +448,7 @@ func NewValidatorSafeContract(contractAddress libcommon.Address, posdaoTransitio
 func (s *ValidatorSafeContract) epochSet(firstInEpoch bool, num uint64, setProof []byte, call consensus.SystemCall) (SimpleList, libcommon.Hash, error) {
 	if firstInEpoch {
 		var proof FirstValidatorSetProof
-		if err := rlp.DecodeBytes(setProof, &proof); err != nil {
+		if err := rlp2.DecodeBytes(setProof, &proof); err != nil {
 			return SimpleList{}, libcommon.Hash{}, fmt.Errorf("[ValidatorSafeContract.epochSet] %w", err)
 		}
 
@@ -470,7 +471,7 @@ func (s *ValidatorSafeContract) epochSet(firstInEpoch bool, num uint64, setProof
 		return *l, proof.Header.ParentHash, nil
 	}
 	var proof ValidatorSetProof
-	if err := rlp.DecodeBytes(setProof, &proof); err != nil {
+	if err := rlp2.DecodeBytes(setProof, &proof); err != nil {
 		return SimpleList{}, libcommon.Hash{}, fmt.Errorf("[ValidatorSafeContract.epochSet] %w", err)
 	}
 
@@ -683,7 +684,7 @@ func (s *ValidatorSafeContract) signalEpochEnd(firstInEpoch bool, header *types.
 		   });
 		   return ::engines::EpochChange::Yes(::engines::Proof::WithState(state_proof as Arc<_>));
 		*/
-		return rlp.EncodeToBytes(FirstValidatorSetProof{Header: header, ContractAddress: s.contractAddress})
+		return rlp2.EncodeToBytes(FirstValidatorSetProof{Header: header, ContractAddress: s.contractAddress})
 	}
 
 	// otherwise, we're checking for logs.
@@ -700,7 +701,7 @@ func (s *ValidatorSafeContract) signalEpochEnd(firstInEpoch bool, header *types.
 		}
 		return nil, nil
 	}
-	proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})
+	proof, err := rlp2.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})
 	if err != nil {
 		return nil, err
 	}
@@ -894,7 +895,7 @@ func (s *ValidatorContract) signalEpochEnd(firstInEpoch bool, header *types.Head
 }
 
 func proveInitial(s *ValidatorSafeContract, contractAddr libcommon.Address, header *types.Header, caller consensus.SystemCall) ([]byte, error) {
-	return rlp.EncodeToBytes(FirstValidatorSetProof{Header: header, ContractAddress: s.contractAddress})
+	return rlp2.EncodeToBytes(FirstValidatorSetProof{Header: header, ContractAddress: s.contractAddress})
 	//list, err := s.getList(caller)
 	//fmt.Printf("aaa: %x,%t\n", list, err)
 

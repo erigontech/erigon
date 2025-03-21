@@ -12,11 +12,11 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/erigontech/erigon-lib/common/cmp"
 )
 
 func makeSegFilePath(path string, suffix string) string {

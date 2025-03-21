@@ -3,10 +3,12 @@ package httpcfg
 import (
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 type HttpCfg struct {
@@ -54,6 +56,7 @@ type HttpCfg struct {
 	RpcAllowListFilePath              string
 	RpcBatchConcurrency               uint
 	RpcStreamingDisable               bool
+	RpcFiltersConfig                  rpchelper.FiltersConfig
 	DBReadConcurrency                 int
 	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	TxPoolApiAddr                     string

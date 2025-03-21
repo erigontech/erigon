@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/core/types/accounts"
 )
 
 // Prove constructs a merkle proof for key. The result contains all encoded nodes
@@ -104,12 +104,12 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 }
 
 func decodeRef(buf []byte) (node, []byte, error) {
-	kind, val, rest, err := rlp.Split(buf)
+	kind, val, rest, err := rlp2.Split(buf)
 	if err != nil {
 		return nil, nil, err
 	}
 	switch {
-	case kind == rlp.List:
+	case kind == rlp2.List:
 		if len(buf)-len(rest) >= length.Hash {
 			return nil, nil, fmt.Errorf("embedded nodes must be less than hash size")
 		}
@@ -118,9 +118,9 @@ func decodeRef(buf []byte) (node, []byte, error) {
 			return nil, nil, err
 		}
 		return n, rest, nil
-	case kind == rlp.String && len(val) == 0:
+	case kind == rlp2.String && len(val) == 0:
 		return nil, rest, nil
-	case kind == rlp.String && len(val) == 32:
+	case kind == rlp2.String && len(val) == 32:
 		return hashNode{hash: val}, rest, nil
 	default:
 		return nil, nil, fmt.Errorf("invalid RLP string size %d (want 0 through 32)", len(val))
@@ -137,7 +137,7 @@ func decodeFull(elems []byte) (*fullNode, error) {
 		}
 
 	}
-	val, _, err := rlp.SplitString(elems)
+	val, _, err := rlp2.SplitString(elems)
 	if err != nil {
 		return nil, err
 	}
@@ -148,13 +148,13 @@ func decodeFull(elems []byte) (*fullNode, error) {
 }
 
 func decodeShort(elems []byte) (*shortNode, error) {
-	kbuf, rest, err := rlp.SplitString(elems)
+	kbuf, rest, err := rlp2.SplitString(elems)
 	if err != nil {
 		return nil, err
 	}
 	kb := CompactToKeybytes(kbuf)
 	if kb.Terminating {
-		val, _, err := rlp.SplitString(rest)
+		val, _, err := rlp2.SplitString(rest)
 		if err != nil {
 			return nil, err
 		}
@@ -178,11 +178,11 @@ func decodeNode(encoded []byte) (node, error) {
 	if len(encoded) == 0 {
 		return nil, fmt.Errorf("nodes must not be zero length")
 	}
-	elems, _, err := rlp.SplitList(encoded)
+	elems, _, err := rlp2.SplitList(encoded)
 	if err != nil {
 		return nil, err
 	}
-	switch c, _ := rlp.CountValues(elems); c {
+	switch c, _ := rlp2.CountValues(elems); c {
 	case 2:
 		return decodeShort(elems)
 	case 17:
@@ -303,7 +303,7 @@ func VerifyAccountProofByHash(stateRoot libcommon.Hash, accountKey libcommon.Has
 		}
 	}
 
-	expected, err := rlp.EncodeToBytes([]any{
+	expected, err := rlp2.EncodeToBytes([]any{
 		uint64(proof.Nonce),
 		proof.Balance.ToInt().Bytes(),
 		proof.StorageHash,
@@ -357,7 +357,7 @@ func VerifyStorageProofByHash(storageRoot libcommon.Hash, keyHash libcommon.Hash
 	var expected []byte
 	if value != nil {
 		// A non-nil value proves the storage does exist.
-		expected, err = rlp.EncodeToBytes(proof.Value.ToInt().Bytes())
+		expected, err = rlp2.EncodeToBytes(proof.Value.ToInt().Bytes())
 		if err != nil {
 			return err
 		}

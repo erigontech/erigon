@@ -3,8 +3,8 @@ package stages
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 var SyncStages = map[string]SyncStage{

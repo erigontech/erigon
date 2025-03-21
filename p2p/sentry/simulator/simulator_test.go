@@ -7,14 +7,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	sentry_if "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p/sentry/simulator"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	sentry_if "github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/simulator"
 )
 
 func TestSimulatorStart(t *testing.T) {
@@ -64,7 +64,7 @@ func TestSimulatorStart(t *testing.T) {
 
 	var data bytes.Buffer
 
-	err = rlp.Encode(&data, getHeaders66)
+	err = rlp2.Encode(&data, getHeaders66)
 
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestSimulatorStart(t *testing.T) {
 
 	packet := &eth.BlockHeadersPacket66{}
 
-	if err := rlp.DecodeBytes(message.Data, packet); err != nil {
+	if err := rlp2.DecodeBytes(message.Data, packet); err != nil {
 		t.Fatal("failed to decode packet:", err)
 	}
 
@@ -135,7 +135,7 @@ func TestSimulatorStart(t *testing.T) {
 
 	data.Reset()
 
-	err = rlp.Encode(&data, getHeaders65)
+	err = rlp2.Encode(&data, getHeaders65)
 
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestSimulatorStart(t *testing.T) {
 
 	packet65 := eth.BlockHeadersPacket{}
 
-	if err := rlp.DecodeBytes(message.Data, &packet65); err != nil {
+	if err := rlp2.DecodeBytes(message.Data, &packet65); err != nil {
 		t.Fatal("failed to decode packet:", err)
 	}
 

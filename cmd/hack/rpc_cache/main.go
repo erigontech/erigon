@@ -9,9 +9,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/boltdb/bolt"
-	url2 "net/url"
 	"flag"
+	url2 "net/url"
+
+	"github.com/boltdb/bolt"
 )
 
 var db *bolt.DB

@@ -8,17 +8,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/execution_client/rpc_helper"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 const DefaultRPCHTTPTimeout = time.Second * 30
@@ -204,7 +204,7 @@ func (cc *ExecutionClientRpc) Ready(ctx context.Context) (bool, error) {
 
 // GetBodiesByRange gets block bodies in given block range
 func (cc *ExecutionClientRpc) GetBodiesByRange(ctx context.Context, start, count uint64) ([]*types.RawBody, error) {
-	result := []*engine_types.ExecutionPayloadBodyV1{}
+	result := []*engine_types.ExecutionPayloadBody{}
 
 	if err := cc.client.CallContext(ctx, &result, rpc_helper.GetPayloadBodiesByRangeV1, hexutil.Uint64(start), hexutil.Uint64(count)); err != nil {
 		return nil, err
@@ -223,7 +223,7 @@ func (cc *ExecutionClientRpc) GetBodiesByRange(ctx context.Context, start, count
 
 // GetBodiesByHashes gets block bodies with given hashes
 func (cc *ExecutionClientRpc) GetBodiesByHashes(ctx context.Context, hashes []libcommon.Hash) ([]*types.RawBody, error) {
-	result := []*engine_types.ExecutionPayloadBodyV1{}
+	result := []*engine_types.ExecutionPayloadBody{}
 
 	if err := cc.client.CallContext(ctx, &result, rpc_helper.GetPayloadBodiesByHashV1, hashes); err != nil {
 		return nil, err

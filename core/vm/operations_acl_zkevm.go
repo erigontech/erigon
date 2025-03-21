@@ -1,9 +1,9 @@
 package vm
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/params"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/vm/stack"
+	"github.com/erigontech/erigon/params"
 )
 
 var (

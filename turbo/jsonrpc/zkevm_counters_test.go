@@ -1,9 +1,10 @@
 package jsonrpc
 
 import (
-	"testing"
 	"errors"
-	"github.com/ledgerwatch/erigon/eth/tracers"
+	"testing"
+
+	"github.com/erigontech/erigon/eth/tracers"
 )
 
 type MockDepthGetter struct {

@@ -2,7 +2,8 @@ package aura
 
 import (
 	"container/list"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 // nolint

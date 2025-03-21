@@ -20,15 +20,18 @@ package consensus
 import (
 	"math/big"
 
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // ChainHeaderReader defines a small collection of methods needed to access the local
@@ -127,6 +130,10 @@ type EngineReader interface {
 	CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall SystemCall,
 	) ([]Reward, error)
 
+	GetTransferFunc() evmtypes.TransferFunc
+
+	GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc
+
 	// Close terminates any background threads, DB's etc maintained by the consensus engine.
 	Close() error
 }
@@ -152,13 +159,9 @@ type EngineWriter interface {
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
-	//
-	// Note: The block header and state database might be updated to reflect any
-	// consensus rules that happen at finalization (e.g. block rewards).
 	Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-		chain ChainReader, syscall SystemCall, logger log.Logger,
-	) (types.Transactions, types.Receipts, error)
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainReader, syscall SystemCall, logger log.Logger,
+	) (types.Transactions, types.Receipts, types.FlatRequests, error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
 	// rewards) and assembles the final block.
@@ -166,16 +169,15 @@ type EngineWriter interface {
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
 	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-		chain ChainReader, syscall SystemCall, call Call, logger log.Logger,
-	) (*types.Block, types.Transactions, types.Receipts, error)
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainReader, syscall SystemCall, call1 Call, logger log.Logger,
+	) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
 	// the result into the given channel.
 	//
 	// Note, the method returns immediately and will send the result async. More
 	// than one result may also be returned depending on the consensus algorithm.
-	Seal(chain ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error
+	Seal(chain ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error
 
 	// SealHash returns the hash of a block prior to it being sealed.
 	SealHash(header *types.Header) libcommon.Hash
@@ -185,7 +187,7 @@ type EngineWriter interface {
 	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64,
 		parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
 
-	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
+	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call1 Call) []byte
 
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
@@ -197,4 +199,12 @@ type PoW interface {
 
 	// Hashrate returns the current mining hashrate of a PoW consensus engine.
 	Hashrate() float64
+}
+
+// Transfer subtracts amount from sender and adds amount to recipient using the given Db
+func Transfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
+	if !bailout {
+		db.SubBalance(sender, amount)
+	}
+	db.AddBalance(recipient, amount)
 }

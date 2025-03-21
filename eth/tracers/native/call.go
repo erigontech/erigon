@@ -24,12 +24,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/tracers"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/tracers"
 )
 
 //go:generate gencodec -type callFrame -field-override callFrameMarshaling -out gen_callframe_json.go
@@ -180,6 +180,10 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 	}
 	// Avoid processing nested calls when only caring about top call
 	if t.config.OnlyTopCall && depth > 0 {
+		return
+	}
+	// on-error `stackData[stackSize-2]` will contain error data instead of logs.
+	if err != nil {
 		return
 	}
 	// Skip if tracing was interrupted

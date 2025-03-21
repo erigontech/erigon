@@ -1,7 +1,7 @@
 package logging
 
 import (
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/urfave/cli/v2"
 )
 

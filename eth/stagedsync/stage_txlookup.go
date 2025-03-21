@@ -6,24 +6,26 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/ethconfig"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/cmp"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 type TxLookupCfg struct {
 	db          kv.RwDB
 	prune       prune.Mode
+	syncConfig  ethconfig.Sync
 	tmpdir      string
 	borConfig   *borcfg.BorConfig
 	blockReader services.FullBlockReader
@@ -32,6 +34,7 @@ type TxLookupCfg struct {
 func StageTxLookupCfg(
 	db kv.RwDB,
 	prune prune.Mode,
+	syncConfig ethconfig.Sync,
 	tmpdir string,
 	borConfigInterface chain.BorConfig,
 	blockReader services.FullBlockReader,
@@ -44,6 +47,7 @@ func StageTxLookupCfg(
 	return TxLookupCfg{
 		db:          db,
 		prune:       prune,
+		syncConfig:  syncConfig,
 		tmpdir:      tmpdir,
 		borConfig:   borConfig,
 		blockReader: blockReader,
@@ -237,8 +241,10 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	} else if cfg.blockReader.FreezingCfg().Enabled {
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
-	// can't prune much here: because tx_lookup index has crypto-hashed-keys, and 1 block producing hundreds of deletes
-	blockTo = cmp.Min(blockTo, blockFrom+10)
+	// chain-tip has limited time to prune: but tx_lookup index has crypto-hashed-keys, and 1 block producing hundreds of random deletes
+	if !initialCycle { //on non-chain-tip prune as much as we can
+		blockTo = cmp.Min(blockTo, blockFrom+uint64(cfg.syncConfig.PruneLimit))
+	}
 
 	if blockFrom < blockTo {
 		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger); err != nil {

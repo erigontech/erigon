@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/rpc"
 )
 
-var errTimestampTooOld = errors.New("timestamp too old")
+var (
+	errTimestampTooOld = errors.New("timestamp too old")
+)
 
 func checkTime(
 	r *http.Request,

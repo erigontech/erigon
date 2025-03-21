@@ -33,18 +33,18 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/mmap"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/iter"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/mmap"
 )
 
 const NonExistingDBI kv.DBI = 999_999_999
@@ -719,6 +719,9 @@ func (db *MdbxKV) trackTxEnd() {
 
 func (db *MdbxKV) waitTxsAllDoneOnClose() {
 	for !db.hasTxsAllDoneAndClosed() {
+		db.txsAllDoneOnCloseCond.L.Lock()
+		defer db.txsAllDoneOnCloseCond.L.Unlock()
+
 		db.txsAllDoneOnCloseCond.Wait()
 	}
 }

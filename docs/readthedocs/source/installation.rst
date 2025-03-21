@@ -16,7 +16,7 @@ In order to download the code and compile you need the following commands:
 
 .. code-block:: sh
 
-    $ git clone https://github.com/ledgerwatch/erigon
+    $ git clone https://github.com/erigontech/erigon
 
     $ cd erigon
 

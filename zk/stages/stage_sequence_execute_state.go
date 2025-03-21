@@ -7,15 +7,15 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	dsTypes "github.com/ledgerwatch/erigon/zk/datastream/types"
-	"github.com/ledgerwatch/erigon/zk/l1_data"
-	zktx "github.com/ledgerwatch/erigon/zk/tx"
-	"github.com/ledgerwatch/erigon/zk/txpool"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	dsTypes "github.com/erigontech/erigon/zk/datastream/types"
+	"github.com/erigontech/erigon/zk/l1_data"
+	zktx "github.com/erigontech/erigon/zk/tx"
+	"github.com/erigontech/erigon/zk/txpool"
 )
 
 const maximumOverflowTransactionAttempts = 5
@@ -164,7 +164,7 @@ func (bs *BatchState) getCoinbase(cfg *SequenceBlockCfg) common.Address {
 	return cfg.zk.AddressSequencer
 }
 
-func (bs *BatchState) onAddedTransaction(transaction types.Transaction, receipt *types.Receipt, execResult *core.ExecutionResult, effectiveGas uint8) {
+func (bs *BatchState) onAddedTransaction(transaction types.Transaction, receipt *types.Receipt, execResult *evmtypes.ExecutionResult, effectiveGas uint8) {
 	slotId, ok := bs.blockState.transactionHashesToSlots[transaction.Hash()]
 	if !ok {
 		log.Warn("[batchState] transaction hash not found in transaction hashes to slots map", "hash", transaction.Hash())
@@ -301,7 +301,7 @@ type BuiltBlockElements struct {
 	transactions     []types.Transaction
 	receipts         types.Receipts
 	effectiveGases   []uint8
-	executionResults []*core.ExecutionResult
+	executionResults []*evmtypes.ExecutionResult
 	txSlots          []common.Hash
 }
 
@@ -309,10 +309,10 @@ func (bbe *BuiltBlockElements) resetBlockBuildingArrays() {
 	bbe.transactions = []types.Transaction{}
 	bbe.receipts = types.Receipts{}
 	bbe.effectiveGases = []uint8{}
-	bbe.executionResults = []*core.ExecutionResult{}
+	bbe.executionResults = []*evmtypes.ExecutionResult{}
 }
 
-func (bbe *BuiltBlockElements) onFinishAddingTransaction(transaction types.Transaction, receipt *types.Receipt, execResult *core.ExecutionResult, effectiveGas uint8, slotId common.Hash) {
+func (bbe *BuiltBlockElements) onFinishAddingTransaction(transaction types.Transaction, receipt *types.Receipt, execResult *evmtypes.ExecutionResult, effectiveGas uint8, slotId common.Hash) {
 	bbe.transactions = append(bbe.transactions, transaction)
 	bbe.receipts = append(bbe.receipts, receipt)
 	bbe.executionResults = append(bbe.executionResults, execResult)

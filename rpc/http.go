@@ -31,12 +31,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/golang-jwt/jwt/v4"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 )
 
 const (

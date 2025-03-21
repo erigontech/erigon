@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // This test checks whether calls exceeding the request size limit are rejected.

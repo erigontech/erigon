@@ -13,9 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	types "github.com/ledgerwatch/erigon/core/types"
-	eth "github.com/ledgerwatch/erigon/eth/protocols/eth"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	types "github.com/erigontech/erigon/core/types"
+	eth "github.com/erigontech/erigon/eth/protocols/eth"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -23,6 +23,7 @@ import (
 type MockService struct {
 	ctrl     *gomock.Controller
 	recorder *MockServiceMockRecorder
+	isgomock struct{}
 }
 
 // MockServiceMockRecorder is the mock recorder for MockService.

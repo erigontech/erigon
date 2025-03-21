@@ -3,10 +3,11 @@ package cfg_dynamic_genesis
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon/zk/zk_config"
 	"io"
 	"os"
 	"path"
+
+	"github.com/erigontech/erigon/zk/zk_config"
 )
 
 type DynamicGenesisConfig struct {

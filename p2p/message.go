@@ -25,10 +25,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/event"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/rlp"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/event"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // Msg defines the structure of a p2p message.
@@ -54,7 +54,7 @@ type Msg struct {
 //
 // For the decoding rules, please see package rlp.
 func (msg Msg) Decode(val interface{}) error {
-	s := rlp.NewStream(msg.Payload, uint64(msg.Size))
+	s := rlp2.NewStream(msg.Payload, uint64(msg.Size))
 	if err := s.Decode(val); err != nil {
 		return NewPeerError(PeerErrorInvalidMessage, DiscProtocolError, err, fmt.Sprintf("(code %x) (size %d)", msg.Code, msg.Size))
 	}
@@ -101,7 +101,7 @@ type MsgReadWriter interface {
 // Send writes an RLP-encoded message with the given code.
 // data should encode as an RLP list.
 func Send(w MsgWriter, msgcode uint64, data interface{}) error {
-	size, r, err := rlp.EncodeToReader(data)
+	size, r, err := rlp2.EncodeToReader(data)
 	if err != nil {
 		return err
 	}
@@ -242,7 +242,7 @@ func ExpectMsg(r MsgReader, code uint64, content interface{}) error {
 		msg.Discard()
 		return nil
 	}
-	contentEnc, err := rlp.EncodeToBytes(content)
+	contentEnc, err := rlp2.EncodeToBytes(content)
 	if err != nil {
 		panic("content encode error: " + err.Error())
 	}

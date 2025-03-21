@@ -11,17 +11,17 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	eriCommon "github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/ethdb"
+	"github.com/erigontech/erigon/smt/pkg/utils"
+	"github.com/erigontech/erigon/turbo/trie"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	eriCommon "github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/smt/pkg/utils"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 // Buffer is a structure holding updates, deletes, and reads registered within one change period

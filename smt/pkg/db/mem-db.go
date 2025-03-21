@@ -6,7 +6,7 @@ import (
 	"math/big"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/smt/pkg/utils"
+	"github.com/erigontech/erigon/smt/pkg/utils"
 )
 
 var (

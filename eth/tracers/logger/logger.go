@@ -12,13 +12,14 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	math2 "github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
 )
 
 var ErrTraceLimitReached = errors.New("the number of logs reached the specified limit")
@@ -68,7 +69,7 @@ type StructLog struct {
 
 // overrides for gencodec
 type structLogMarshaling struct {
-	Stack       []*math.HexOrDecimal256
+	Stack       []*math2.HexOrDecimal256
 	Gas         math.HexOrDecimal64
 	GasCost     math.HexOrDecimal64
 	Memory      hexutility.Bytes
@@ -267,7 +268,7 @@ func FormatLogs(logs []StructLog) []StructLogRes {
 		if trace.Stack != nil {
 			stack := make([]string, len(trace.Stack))
 			for i, stackValue := range trace.Stack {
-				stack[i] = fmt.Sprintf("%x", math.PaddedBigBytes(stackValue, 32))
+				stack[i] = fmt.Sprintf("%x", math2.PaddedBigBytes(stackValue, 32))
 			}
 			formatted[index].Stack = &stack
 		}
@@ -301,7 +302,7 @@ func WriteTrace(writer io.Writer, logs []StructLog) {
 		if len(log.Stack) > 0 {
 			fmt.Fprintln(writer, "Stack:")
 			for i := len(log.Stack) - 1; i >= 0; i-- {
-				fmt.Fprintf(writer, "%08d  %x\n", len(log.Stack)-i-1, math.PaddedBigBytes(log.Stack[i], 32))
+				fmt.Fprintf(writer, "%08d  %x\n", len(log.Stack)-i-1, math2.PaddedBigBytes(log.Stack[i], 32))
 			}
 		}
 		if len(log.Memory) > 0 {

@@ -21,11 +21,12 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
-	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/erigon/rlp"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/erigontech/erigon-lib/crypto"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/p2p/discover/v4wire"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 // List of known secure identity schemes.
@@ -49,7 +50,7 @@ func SignV4(r *enr.Record, privkey *ecdsa.PrivateKey) error {
 	cpy.Set(Secp256k1(privkey.PublicKey))
 
 	h := sha3.NewLegacyKeccak256()
-	rlp.Encode(h, cpy.AppendElements(nil))
+	rlp2.Encode(h, cpy.AppendElements(nil))
 	sig, err := crypto.Sign(h.Sum(nil), privkey)
 	if err != nil {
 		return err
@@ -70,7 +71,7 @@ func (V4ID) Verify(r *enr.Record, sig []byte) error {
 	}
 
 	h := sha3.NewLegacyKeccak256()
-	rlp.Encode(h, r.AppendElements(nil))
+	rlp2.Encode(h, r.AppendElements(nil))
 	if !crypto.VerifySignature(entry, h.Sum(nil), sig) {
 		return enr.ErrInvalidSig
 	}
@@ -106,11 +107,11 @@ func (v Secp256k1) ENRKey() string { return "secp256k1" }
 
 // EncodeRLP implements rlp.Encoder.
 func (v Secp256k1) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, crypto.CompressPubkey((*ecdsa.PublicKey)(&v)))
+	return rlp2.Encode(w, crypto.CompressPubkey((*ecdsa.PublicKey)(&v)))
 }
 
 // DecodeRLP implements rlp.Decoder.
-func (v *Secp256k1) DecodeRLP(s *rlp.Stream) error {
+func (v *Secp256k1) DecodeRLP(s *rlp2.Stream) error {
 	buf, err := s.Bytes()
 	if err != nil {
 		return err

@@ -5,14 +5,14 @@ import (
 	"encoding/hex"
 	"math/big"
 
-	ethTypes "github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	ethTypes "github.com/erigontech/erigon/core/types"
 
-	"github.com/ledgerwatch/erigon/smt/pkg/smt"
-	"github.com/ledgerwatch/erigon/smt/pkg/utils"
-	zktx "github.com/ledgerwatch/erigon/zk/tx"
+	"github.com/erigontech/erigon/smt/pkg/smt"
+	"github.com/erigontech/erigon/smt/pkg/utils"
+	zktx "github.com/erigontech/erigon/zk/tx"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 type ExecutedTxInfo struct {

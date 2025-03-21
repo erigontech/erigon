@@ -3,8 +3,8 @@ package stages
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/eth/stagedsync"
 )
 
 // This stages does NOTHING while going forward, because its done during execution

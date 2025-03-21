@@ -35,10 +35,11 @@ import (
 	"time"
 
 	"github.com/golang/snappy"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/ecies"
-	"github.com/ledgerwatch/erigon/rlp"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto/ecies"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 )
 
 // Conn is an RLPx network connection. It wraps a low-level network connection. The
@@ -137,7 +138,7 @@ func (c *Conn) Read() (code uint64, data []byte, wireSize int, err error) {
 	if err != nil {
 		return 0, nil, 0, err
 	}
-	code, data, err = rlp.SplitUint64(frame)
+	code, data, err = rlp2.SplitUint64(frame)
 	if err != nil {
 		return 0, nil, 0, fmt.Errorf("invalid message code: %w", err)
 	}
@@ -232,7 +233,7 @@ func (h *sessionState) writeFrame(conn io.Writer, code uint64, data []byte) erro
 	h.wbuf.reset()
 
 	// Write header.
-	fsize := rlp.IntSize(code) + len(data)
+	fsize := rlp2.IntSize(code) + len(data)
 	if fsize > maxUint24 {
 		return errPlainMessageTooLarge
 	}
@@ -246,7 +247,7 @@ func (h *sessionState) writeFrame(conn io.Writer, code uint64, data []byte) erro
 
 	// Encode and encrypt the frame data.
 	offset := len(h.wbuf.data)
-	h.wbuf.data = rlp.AppendUint64(h.wbuf.data, code)
+	h.wbuf.data = rlp2.AppendUint64(h.wbuf.data, code)
 	h.wbuf.Write(data)
 	if padding := fsize % 16; padding > 0 {
 		h.wbuf.appendZero(16 - padding)
@@ -394,7 +395,7 @@ type authMsgV4 struct {
 	Version         uint
 
 	// Ignore additional fields (forward-compatibility)
-	Rest []rlp.RawValue `rlp:"tail"`
+	Rest []rlp2.RawValue `rlp:"tail"`
 }
 
 // RLPx v4 handshake response (defined in EIP-8).
@@ -404,7 +405,7 @@ type authRespV4 struct {
 	Version      uint
 
 	// Ignore additional fields (forward-compatibility)
-	Rest []rlp.RawValue `rlp:"tail"`
+	Rest []rlp2.RawValue `rlp:"tail"`
 }
 
 // runRecipient negotiates a session token on conn.
@@ -616,7 +617,7 @@ func (h *handshakeState) readMsg(msg interface{}, prv *ecdsa.PrivateKey, r io.Re
 	}
 	// Can't use rlp.DecodeBytes here because it rejects
 	// trailing data (forward-compatibility).
-	s := rlp.NewStream(bytes.NewReader(dec), 0)
+	s := rlp2.NewStream(bytes.NewReader(dec), 0)
 	err = s.Decode(msg)
 	return h.rbuf.data[:len(prefix)+len(packet)], err
 }
@@ -626,7 +627,7 @@ func (h *handshakeState) sealEIP8(msg interface{}) ([]byte, error) {
 	h.wbuf.reset()
 
 	// Write the message plaintext.
-	if err := rlp.Encode(&h.wbuf, msg); err != nil {
+	if err := rlp2.Encode(&h.wbuf, msg); err != nil {
 		return nil, err
 	}
 	// Pad with random amount of data. the amount needs to be at least 100 bytes to make

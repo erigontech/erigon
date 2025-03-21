@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/smt/pkg/smt"
-	"github.com/ledgerwatch/erigon/smt/pkg/utils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/smt/pkg/smt"
+	"github.com/erigontech/erigon/smt/pkg/utils"
 	"gotest.tools/v3/assert"
 )
 

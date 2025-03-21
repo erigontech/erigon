@@ -3,8 +3,8 @@ package l1infotree
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // L1InfoTree provides methods to compute L1InfoTree

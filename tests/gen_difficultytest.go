@@ -6,7 +6,8 @@ import (
 	"encoding/json"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common/math"
+	math2 "github.com/erigontech/erigon-lib/common/math"
 )
 
 var _ = (*difficultyTestMarshaling)(nil)
@@ -14,32 +15,32 @@ var _ = (*difficultyTestMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (d DifficultyTest) MarshalJSON() ([]byte, error) {
 	type DifficultyTest struct {
-		ParentTimestamp    math.HexOrDecimal64   `json:"parentTimestamp"`
-		ParentDifficulty   *math.HexOrDecimal256 `json:"parentDifficulty"`
-		ParentUncles       math.HexOrDecimal64   `json:"parentUncles"`
-		CurrentTimestamp   math.HexOrDecimal64   `json:"currentTimestamp"`
-		CurrentBlockNumber math.HexOrDecimal64   `json:"currentBlockNumber"`
-		CurrentDifficulty  *math.HexOrDecimal256 `json:"currentDifficulty"`
+		ParentTimestamp    math.HexOrDecimal64    `json:"parentTimestamp"`
+		ParentDifficulty   *math2.HexOrDecimal256 `json:"parentDifficulty"`
+		ParentUncles       math.HexOrDecimal64    `json:"parentUncles"`
+		CurrentTimestamp   math.HexOrDecimal64    `json:"currentTimestamp"`
+		CurrentBlockNumber math.HexOrDecimal64    `json:"currentBlockNumber"`
+		CurrentDifficulty  *math2.HexOrDecimal256 `json:"currentDifficulty"`
 	}
 	var enc DifficultyTest
 	enc.ParentTimestamp = math.HexOrDecimal64(d.ParentTimestamp)
-	enc.ParentDifficulty = (*math.HexOrDecimal256)(d.ParentDifficulty)
+	enc.ParentDifficulty = (*math2.HexOrDecimal256)(d.ParentDifficulty)
 	enc.ParentUncles = math.HexOrDecimal64(d.ParentUncles)
 	enc.CurrentTimestamp = math.HexOrDecimal64(d.CurrentTimestamp)
 	enc.CurrentBlockNumber = math.HexOrDecimal64(d.CurrentBlockNumber)
-	enc.CurrentDifficulty = (*math.HexOrDecimal256)(d.CurrentDifficulty)
+	enc.CurrentDifficulty = (*math2.HexOrDecimal256)(d.CurrentDifficulty)
 	return json.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
 func (d *DifficultyTest) UnmarshalJSON(input []byte) error {
 	type DifficultyTest struct {
-		ParentTimestamp    *math.HexOrDecimal64  `json:"parentTimestamp"`
-		ParentDifficulty   *math.HexOrDecimal256 `json:"parentDifficulty"`
-		ParentUncles       *math.HexOrDecimal64  `json:"parentUncles"`
-		CurrentTimestamp   *math.HexOrDecimal64  `json:"currentTimestamp"`
-		CurrentBlockNumber *math.HexOrDecimal64  `json:"currentBlockNumber"`
-		CurrentDifficulty  *math.HexOrDecimal256 `json:"currentDifficulty"`
+		ParentTimestamp    *math.HexOrDecimal64   `json:"parentTimestamp"`
+		ParentDifficulty   *math2.HexOrDecimal256 `json:"parentDifficulty"`
+		ParentUncles       *math.HexOrDecimal64   `json:"parentUncles"`
+		CurrentTimestamp   *math.HexOrDecimal64   `json:"currentTimestamp"`
+		CurrentBlockNumber *math.HexOrDecimal64   `json:"currentBlockNumber"`
+		CurrentDifficulty  *math2.HexOrDecimal256 `json:"currentDifficulty"`
 	}
 	var dec DifficultyTest
 	if err := json.Unmarshal(input, &dec); err != nil {

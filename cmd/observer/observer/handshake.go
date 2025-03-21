@@ -9,17 +9,17 @@ import (
 	"net"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/direct"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/rlpx"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core/forkid"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/rlpx"
+	"github.com/erigontech/erigon/params"
 )
 
 // https://github.com/ethereum/devp2p/blob/master/rlpx.md#p2p-capability
@@ -41,7 +41,7 @@ type HelloMessage struct {
 	Pubkey     []byte // secp256k1 public key
 
 	// Ignore additional fields (for forward compatibility).
-	Rest []rlp.RawValue `rlp:"tail"`
+	Rest []rlp2.RawValue `rlp:"tail"`
 }
 
 // StatusMessage is the Ethereum Status message v63+.
@@ -53,8 +53,8 @@ type StatusMessage struct {
 	TD              *big.Int
 	Head            libcommon.Hash
 	Genesis         libcommon.Hash
-	ForkID          *forkid.ID     `rlp:"-"` // parsed from Rest if exists in v64+
-	Rest            []rlp.RawValue `rlp:"tail"`
+	ForkID          *forkid.ID      `rlp:"-"` // parsed from Rest if exists in v64+
+	Rest            []rlp2.RawValue `rlp:"tail"`
 }
 
 type HandshakeErrorID string
@@ -167,7 +167,7 @@ func Handshake(
 	}
 
 	ourHelloMessage := makeOurHelloMessage(myPrivateKey)
-	ourHelloData, err := rlp.EncodeToBytes(&ourHelloMessage)
+	ourHelloData, err := rlp2.EncodeToBytes(&ourHelloMessage)
 	if err != nil {
 		return nil, nil, NewHandshakeError(HandshakeErrorIDHelloEncode, err, 0)
 	}
@@ -191,7 +191,7 @@ func Handshake(
 	// parse fork ID
 	if (statusMessage.ProtocolVersion >= 64) && (len(statusMessage.Rest) > 0) {
 		var forkID forkid.ID
-		if err := rlp.DecodeBytes(statusMessage.Rest[0], &forkID); err != nil {
+		if err := rlp2.DecodeBytes(statusMessage.Rest[0], &forkID); err != nil {
 			return &helloMessage, nil, NewHandshakeError(HandshakeErrorIDStatusDecode, err, 0)
 		}
 		statusMessage.ForkID = &forkID
@@ -207,7 +207,7 @@ func readMessage(conn *rlpx.Conn, expectedMessageID uint64, decodeError Handshak
 	}
 
 	if messageID == RLPxMessageIDPing {
-		pongData, _ := rlp.EncodeToBytes(make([]string, 0, 1))
+		pongData, _ := rlp2.EncodeToBytes(make([]string, 0, 1))
 		go func() { _, _ = conn.Write(RLPxMessageIDPong, pongData) }()
 		return readMessage(conn, expectedMessageID, decodeError, message)
 	}
@@ -225,7 +225,7 @@ func readMessage(conn *rlpx.Conn, expectedMessageID uint64, decodeError Handshak
 		return NewHandshakeError(HandshakeErrorIDUnexpectedMessage, nil, messageID)
 	}
 
-	if err = rlp.DecodeBytes(data, message); err != nil {
+	if err = rlp2.DecodeBytes(data, message); err != nil {
 		return NewHandshakeError(decodeError, err, 0)
 	}
 	return nil

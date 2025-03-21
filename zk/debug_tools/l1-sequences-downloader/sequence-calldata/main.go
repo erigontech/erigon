@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/erigon/ethclient"
-	"github.com/ledgerwatch/erigon/zk/debug_tools"
-	"github.com/ledgerwatch/erigon/zk/types"
+	"github.com/erigontech/erigon/ethclient"
+	"github.com/erigontech/erigon/zk/debug_tools"
+	"github.com/erigontech/erigon/zk/types"
 )
 
 func main() {

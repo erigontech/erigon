@@ -20,12 +20,13 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	math2 "github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/core/types"
 )
 
 //go:generate gencodec -type DifficultyTest -field-override difficultyTestMarshaling -out gen_difficultytest.go
@@ -41,9 +42,9 @@ type DifficultyTest struct {
 
 type difficultyTestMarshaling struct {
 	ParentTimestamp    math.HexOrDecimal64
-	ParentDifficulty   *math.HexOrDecimal256
+	ParentDifficulty   *math2.HexOrDecimal256
 	CurrentTimestamp   math.HexOrDecimal64
-	CurrentDifficulty  *math.HexOrDecimal256
+	CurrentDifficulty  *math2.HexOrDecimal256
 	ParentUncles       uint64
 	CurrentBlockNumber math.HexOrDecimal64
 }

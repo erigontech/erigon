@@ -1,155 +1,722 @@
-/*
-   Copyright 2021 The Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2014 The go-ethereum Authors
+// This file is part of the go-ethereum library.
+//
+// The go-ethereum library is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// The go-ethereum library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 package rlp
 
 import (
 	"encoding/binary"
+	"fmt"
+	"io"
+	"math/big"
 	"math/bits"
+	"reflect"
+	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/holiman/uint256"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
-// General design:
-//      - rlp package doesn't manage memory - and Caller must ensure buffers are big enough.
-//      - no io.Writer, because it's incompatible with binary.BigEndian functions and Writer can't be used as temporary buffer
-//
-// Composition:
-//     - each Encode method does write to given buffer and return written len
-//     - each Parse accept position in payload and return new position
-//
-// General rules:
-//      - functions to calculate prefix len are fast (and pure). it's ok to call them multiple times during encoding of large object for readability.
-//      - rlp has 2 data types: List and String (bytes array), and low-level funcs are operate with this types.
-//      - but for convenience and performance - provided higher-level functions (for example for EncodeHash - for []byte of len 32)
-//      - functions to Parse (Decode) data - using data type as name (without any prefix): rlp.String(), rlp.List, rlp.U64(), rlp.U256()
-//
+// https://github.com/ethereum/wiki/wiki/RLP
+const (
+	// EmptyStringCode is the RLP code for empty strings.
+	EmptyStringCode = 0x80
+	// EmptyListCode is the RLP code for empty lists.
+	EmptyListCode = 0xC0
+)
 
-func ListPrefixLen(dataLen int) int {
-	if dataLen >= 56 {
-		return 1 + common.BitLenToByteLen(bits.Len64(uint64(dataLen)))
-	}
-	return 1
-}
-func EncodeListPrefix(dataLen int, to []byte) int {
-	if dataLen >= 56 {
-		_ = to[9]
-		beLen := common.BitLenToByteLen(bits.Len64(uint64(dataLen)))
-		binary.BigEndian.PutUint64(to[1:], uint64(dataLen))
-		to[8-beLen] = 247 + byte(beLen)
-		copy(to, to[8-beLen:9])
-		return 1 + beLen
-	}
-	to[0] = 192 + byte(dataLen)
-	return 1
+var (
+	// Common encoded values.
+	// These are useful when implementing EncodeRLP.
+	EmptyString = []byte{EmptyStringCode}
+	EmptyList   = []byte{EmptyListCode}
+)
+
+// Encoder is implemented by types that require custom
+// encoding rules or want to encode private fields.
+type Encoder interface {
+	// EncodeRLP should write the RLP encoding of its receiver to w.
+	// If the implementation is a pointer method, it may also be
+	// called for nil pointers.
+	//
+	// Implementations should generate valid RLP. The data written is
+	// not verified at the moment, but a future version might. It is
+	// recommended to write only a single value but writing multiple
+	// values or no value at all is also permitted.
+	EncodeRLP(io.Writer) error
 }
 
-func U32Len(i uint32) int {
-	if i < 128 {
+// Encode writes the RLP encoding of val to w. Note that Encode may
+// perform many small writes in some cases. Consider making w
+// buffered.
+//
+// Please see package-level documentation of encoding rules.
+func Encode(w io.Writer, val interface{}) error {
+	if outer, ok := w.(*encbuf); ok {
+		// Encode was called by some type's EncodeRLP.
+		// Avoid copying by writing to the outer encbuf directly.
+		return outer.encode(val)
+	}
+	eb := encbufPool.Get().(*encbuf)
+	defer encbufPool.Put(eb)
+	eb.reset()
+	if err := eb.encode(val); err != nil {
+		return err
+	}
+	return eb.toWriter(w)
+}
+
+func Write(w io.Writer, val []byte) error {
+	if outer, ok := w.(*encbuf); ok {
+		// Encode was called by some type's EncodeRLP.
+		// Avoid copying by writing to the outer encbuf directly.
+		_, err := outer.Write(val)
+		return err
+	}
+
+	_, err := w.Write(val)
+	return err
+}
+
+// EncodeToBytes returns the RLP encoding of val.
+// Please see package-level documentation for the encoding rules.
+func EncodeToBytes(val interface{}) ([]byte, error) {
+	eb := encbufPool.Get().(*encbuf)
+	defer encbufPool.Put(eb)
+	eb.reset()
+	if err := eb.encode(val); err != nil {
+		return nil, err
+	}
+	return eb.toBytes(), nil
+}
+
+// EncodeToReader returns a reader from which the RLP encoding of val
+// can be read. The returned size is the total size of the encoded
+// data.
+//
+// Please see the documentation of Encode for the encoding rules.
+func EncodeToReader(val interface{}) (size int, r io.Reader, err error) {
+	eb := encbufPool.Get().(*encbuf)
+	eb.reset()
+	if err := eb.encode(val); err != nil {
+		return 0, nil, err
+	}
+	return eb.size(), &encReader{buf: eb}, nil
+}
+
+type listhead struct {
+	offset int // index of this header in string data
+	size   int // total size of encoded data (including list headers)
+}
+
+// encode writes head to the given buffer, which must be at least
+// 9 bytes long. It returns the encoded bytes.
+func (head *listhead) encode(buf []byte) []byte {
+	return buf[:puthead(buf, 0xC0, 0xF7, uint64(head.size))]
+}
+
+// headsize returns the size of a list or string header
+// for a value of the given size.
+func headsize(size uint64) int {
+	if size < 56 {
 		return 1
 	}
-	return 1 + common.BitLenToByteLen(bits.Len32(i))
+	return 1 + intsize(size)
 }
 
-func U64Len(i uint64) int {
-	if i < 128 {
+// puthead writes a list or string header to buf.
+// buf must be at least 9 bytes long.
+func puthead(buf []byte, smalltag, largetag byte, size uint64) int {
+	if size < 56 {
+		buf[0] = smalltag + byte(size)
 		return 1
 	}
-	return 1 + common.BitLenToByteLen(bits.Len64(i))
+	sizesize := putint(buf[1:], size)
+	buf[0] = largetag + byte(sizesize)
+	return sizesize + 1
 }
 
-func EncodeU32(i uint32, to []byte) int {
+type encbuf struct {
+	str      []byte        // string data, contains everything except list headers
+	lheads   []listhead    // all list headers
+	lhsize   int           // sum of sizes of all encoded list headers
+	sizebuf  [9]byte       // auxiliary buffer for uint encoding
+	bufvalue reflect.Value // used in writeByteArrayCopy
+}
+
+// encbufs are pooled.
+var encbufPool = sync.Pool{
+	New: func() interface{} {
+		var bytes []byte
+		return &encbuf{bufvalue: reflect.ValueOf(&bytes).Elem()}
+	},
+}
+
+func (w *encbuf) reset() {
+	w.lhsize = 0
+	w.str = w.str[:0]
+	w.lheads = w.lheads[:0]
+}
+
+// encbuf implements io.Writer so it can be passed it into EncodeRLP.
+func (w *encbuf) Write(b []byte) (int, error) {
+	w.str = append(w.str, b...)
+	return len(b), nil
+}
+
+func (w *encbuf) encode(val interface{}) error {
+	rval := reflect.ValueOf(val)
+	writer, err := cachedWriter(rval.Type())
+	if err != nil {
+		return err
+	}
+	return writer(rval, w)
+}
+
+func (w *encbuf) encodeStringHeader(size int) {
+	if size < 56 {
+		w.str = append(w.str, EmptyStringCode+byte(size))
+	} else {
+		sizesize := putint(w.sizebuf[1:], uint64(size))
+		w.sizebuf[0] = 0xB7 + byte(sizesize)
+		w.str = append(w.str, w.sizebuf[:sizesize+1]...)
+	}
+}
+
+func (w *encbuf) encodeString(b []byte) {
+	if len(b) == 1 && b[0] <= 0x7F {
+		// fits single byte, no string header
+		w.str = append(w.str, b[0])
+	} else {
+		w.encodeStringHeader(len(b))
+		w.str = append(w.str, b...)
+	}
+}
+
+func (w *encbuf) encodeUint(i uint64) {
 	if i == 0 {
-		to[0] = 128
-		return 1
+		w.str = append(w.str, 0x80)
+	} else if i < 128 {
+		// fits single byte
+		w.str = append(w.str, byte(i))
+	} else {
+		s := putint(w.sizebuf[1:], i)
+		w.sizebuf[0] = 0x80 + byte(s)
+		w.str = append(w.str, w.sizebuf[:s+1]...)
 	}
-	if i < 128 {
-		to[0] = byte(i) // fits single byte
-		return 1
+}
+
+// list adds a new list header to the header stack. It returns the index
+// of the header. The caller must call listEnd with this index after encoding
+// the content of the list.
+func (w *encbuf) list() int {
+	w.lheads = append(w.lheads, listhead{offset: len(w.str), size: w.lhsize})
+	return len(w.lheads) - 1
+}
+
+func (w *encbuf) listEnd(index int) {
+	lh := &w.lheads[index]
+	lh.size = w.size() - lh.offset - lh.size
+	if lh.size < 56 {
+		w.lhsize++ // length encoded into kind tag
+	} else {
+		w.lhsize += 1 + intsize(uint64(lh.size))
 	}
+}
 
-	b := to[1:]
-	var l int
+func (w *encbuf) size() int {
+	return len(w.str) + w.lhsize
+}
 
-	// writes i to b in big endian byte order, using the least number of bytes needed to represent i.
+func (w *encbuf) toBytes() []byte {
+	out := make([]byte, w.size())
+	strpos := 0
+	pos := 0
+	for _, head := range w.lheads {
+		// write string data before header
+		n := copy(out[pos:], w.str[strpos:head.offset])
+		pos += n
+		strpos += n
+		// write the header
+		enc := head.encode(out[pos:])
+		pos += len(enc)
+	}
+	// copy string data after the last list header
+	copy(out[pos:], w.str[strpos:])
+	return out
+}
+
+func (w *encbuf) toWriter(out io.Writer) (err error) {
+	strpos := 0
+	for _, head := range w.lheads {
+		// write string data before header
+		if head.offset-strpos > 0 {
+			n, nErr := out.Write(w.str[strpos:head.offset])
+			strpos += n
+			if nErr != nil {
+				return nErr
+			}
+		}
+		// write the header
+		enc := head.encode(w.sizebuf[:])
+		if _, wErr := out.Write(enc); wErr != nil {
+			return wErr
+		}
+	}
+	if strpos < len(w.str) {
+		// write string data after the last list header
+		_, err = out.Write(w.str[strpos:])
+	}
+	return err
+}
+
+// encReader is the io.Reader returned by EncodeToReader.
+// It releases its encbuf at EOF.
+type encReader struct {
+	buf    *encbuf // the buffer we're reading from. this is nil when we're at EOF.
+	lhpos  int     // index of list header that we're reading
+	strpos int     // current position in string buffer
+	piece  []byte  // next piece to be read
+}
+
+func (r *encReader) Read(b []byte) (n int, err error) {
+	for {
+		if r.piece = r.next(); r.piece == nil {
+			// Put the encode buffer back into the pool at EOF when it
+			// is first encountered. Subsequent calls still return EOF
+			// as the error but the buffer is no longer valid.
+			if r.buf != nil {
+				encbufPool.Put(r.buf)
+				r.buf = nil
+			}
+			return n, io.EOF
+		}
+		nn := copy(b[n:], r.piece)
+		n += nn
+		if nn < len(r.piece) {
+			// piece didn't fit, see you next time.
+			r.piece = r.piece[nn:]
+			return n, nil
+		}
+		r.piece = nil
+	}
+}
+
+// next returns the next piece of data to be read.
+// it returns nil at EOF.
+func (r *encReader) next() []byte {
 	switch {
-	case i < (1 << 8):
-		b[0] = byte(i)
-		l = 1
-	case i < (1 << 16):
-		b[0] = byte(i >> 8)
-		b[1] = byte(i)
-		l = 2
-	case i < (1 << 24):
-		b[0] = byte(i >> 16)
-		b[1] = byte(i >> 8)
-		b[2] = byte(i)
-		l = 3
+	case r.buf == nil:
+		return nil
+
+	case r.piece != nil:
+		// There is still data available for reading.
+		return r.piece
+
+	case r.lhpos < len(r.buf.lheads):
+		// We're before the last list header.
+		head := r.buf.lheads[r.lhpos]
+		sizebefore := head.offset - r.strpos
+		if sizebefore > 0 {
+			// String data before header.
+			p := r.buf.str[r.strpos:head.offset]
+			r.strpos += sizebefore
+			return p
+		}
+		r.lhpos++
+		return head.encode(r.buf.sizebuf[:])
+
+	case r.strpos < len(r.buf.str):
+		// String data at the end, after all list headers.
+		p := r.buf.str[r.strpos:]
+		r.strpos = len(r.buf.str)
+		return p
+
 	default:
-		b[0] = byte(i >> 24)
-		b[1] = byte(i >> 16)
-		b[2] = byte(i >> 8)
-		b[3] = byte(i)
-		l = 4
+		return nil
 	}
-
-	to[0] = 128 + byte(l)
-	return 1 + l
 }
 
-func EncodeU64(i uint64, to []byte) int {
-	if i == 0 {
-		to[0] = 128
-		return 1
+var encoderInterface = reflect.TypeOf(new(Encoder)).Elem()
+
+// makeWriter creates a writer function for the given type.
+func makeWriter(typ reflect.Type, ts tags) (writer, error) {
+	kind := typ.Kind()
+	switch {
+	case typ == rawValueType:
+		return writeRawValue, nil
+	case typ.AssignableTo(reflect.PtrTo(bigInt)):
+		return writeBigIntPtr, nil
+	case typ.AssignableTo(bigInt):
+		return writeBigIntNoPtr, nil
+	case typ.AssignableTo(reflect.PtrTo(uint256Int)):
+		return writeUint256Ptr, nil
+	case typ.AssignableTo(uint256Int):
+		return writeUint256NoPtr, nil
+	case kind == reflect.Ptr:
+		return makePtrWriter(typ, ts)
+	case reflect.PtrTo(typ).Implements(encoderInterface):
+		return makeEncoderWriter(typ), nil
+	case isUint(kind):
+		return writeUint, nil
+	case kind == reflect.Bool:
+		return writeBool, nil
+	case kind == reflect.String:
+		return writeString, nil
+	case kind == reflect.Slice && isByte(typ.Elem()):
+		return writeBytes, nil
+	case kind == reflect.Array && isByte(typ.Elem()):
+		return makeByteArrayWriter(typ), nil
+	case kind == reflect.Slice || kind == reflect.Array:
+		return makeSliceWriter(typ, ts)
+	case kind == reflect.Struct:
+		return makeStructWriter(typ)
+	case kind == reflect.Interface:
+		return writeInterface, nil
+	default:
+		return nil, fmt.Errorf("rlp: type %v is not RLP-serializable", typ)
 	}
-	if i < 128 {
-		to[0] = byte(i) // fits single byte
-		return 1
+}
+
+func writeRawValue(val reflect.Value, w *encbuf) error {
+	w.str = append(w.str, val.Bytes()...)
+	return nil
+}
+
+func writeUint(val reflect.Value, w *encbuf) error {
+	w.encodeUint(val.Uint())
+	return nil
+}
+
+func writeBool(val reflect.Value, w *encbuf) error {
+	if val.Bool() {
+		w.str = append(w.str, 0x01)
+	} else {
+		w.str = append(w.str, EmptyStringCode)
+	}
+	return nil
+}
+
+func writeBigIntPtr(val reflect.Value, w *encbuf) error {
+	ptr := val.Interface().(*big.Int)
+	if ptr == nil {
+		w.str = append(w.str, EmptyStringCode)
+		return nil
+	}
+	return writeBigInt(ptr, w)
+}
+
+func writeBigIntNoPtr(val reflect.Value, w *encbuf) error {
+	i := val.Interface().(big.Int)
+	return writeBigInt(&i, w)
+}
+
+// wordBytes is the number of bytes in a big.Word
+const wordBytes = (32 << (uint64(^big.Word(0)) >> 63)) / 8
+
+func writeBigInt(i *big.Int, w *encbuf) error {
+	if i.Sign() == -1 {
+		return fmt.Errorf("rlp: cannot encode negative *big.Int")
+	}
+	bitlen := i.BitLen()
+	if bitlen <= 64 {
+		w.encodeUint(i.Uint64())
+		return nil
+	}
+	// Integer is larger than 64 bits, encode from i.Bits().
+	// The minimal byte length is bitlen rounded up to the next
+	// multiple of 8, divided by 8.
+	length := ((bitlen + 7) & -8) >> 3
+	w.encodeStringHeader(length)
+	w.str = append(w.str, make([]byte, length)...)
+	index := length
+	buf := w.str[len(w.str)-length:]
+	for _, d := range i.Bits() {
+		for j := 0; j < wordBytes && index > 0; j++ {
+			index--
+			buf[index] = byte(d)
+			d >>= 8
+		}
+	}
+	return nil
+}
+
+func writeUint256Ptr(val reflect.Value, w *encbuf) error {
+	ptr := val.Interface().(*uint256.Int)
+	if ptr == nil {
+		w.str = append(w.str, EmptyStringCode)
+		return nil
+	}
+	return writeUint256(ptr, w)
+}
+
+func writeUint256NoPtr(val reflect.Value, w *encbuf) error {
+	i := val.Interface().(uint256.Int)
+	return writeUint256(&i, w)
+}
+
+func writeUint256(i *uint256.Int, w *encbuf) error {
+	if i.IsZero() {
+		w.str = append(w.str, EmptyStringCode)
+	} else if i.LtUint64(0x80) {
+		w.str = append(w.str, byte(i.Uint64()))
+	} else {
+		n := i.ByteLen()
+		w.str = append(w.str, EmptyStringCode+byte(n))
+		pos := len(w.str)
+		w.str = append(w.str, make([]byte, n)...)
+		i.WriteToSlice(w.str[pos:])
+	}
+	return nil
+}
+
+func writeBytes(val reflect.Value, w *encbuf) error {
+	w.encodeString(val.Bytes())
+	return nil
+}
+
+var byteType = reflect.TypeOf(byte(0))
+
+func makeByteArrayWriter(typ reflect.Type) writer {
+	length := typ.Len()
+	if length == 0 {
+		return writeLengthZeroByteArray
+	} else if length == 1 {
+		return writeLengthOneByteArray
+	}
+	if typ.Elem() != byteType {
+		return writeNamedByteArray
+	}
+	return func(val reflect.Value, w *encbuf) error {
+		writeByteArrayCopy(length, val, w)
+		return nil
+	}
+}
+
+func writeLengthZeroByteArray(val reflect.Value, w *encbuf) error {
+	w.str = append(w.str, 0x80)
+	return nil
+}
+
+func writeLengthOneByteArray(val reflect.Value, w *encbuf) error {
+	b := byte(val.Index(0).Uint())
+	if b <= 0x7f {
+		w.str = append(w.str, b)
+	} else {
+		w.str = append(w.str, 0x81, b)
+	}
+	return nil
+}
+
+// writeByteArrayCopy encodes byte arrays using reflect.Copy. This is
+// the fast path for [N]byte where N > 1.
+func writeByteArrayCopy(length int, val reflect.Value, w *encbuf) {
+	w.encodeStringHeader(length)
+	offset := len(w.str)
+	w.str = append(w.str, make([]byte, length)...)
+	w.bufvalue.SetBytes(w.str[offset:])
+	reflect.Copy(w.bufvalue, val)
+}
+
+// writeNamedByteArray encodes byte arrays with named element type.
+// This exists because reflect.Copy can't be used with such types.
+func writeNamedByteArray(val reflect.Value, w *encbuf) error {
+	if !val.CanAddr() {
+		// Slice requires the value to be addressable.
+		// Make it addressable by copying.
+		valCopy := reflect.New(val.Type()).Elem()
+		valCopy.Set(val)
+		val = valCopy
+	}
+	size := val.Len()
+	slice := val.Slice(0, size).Bytes()
+	w.encodeString(slice)
+	return nil
+}
+
+func writeString(val reflect.Value, w *encbuf) error {
+	s := val.String()
+	if len(s) == 1 && s[0] <= 0x7f {
+		// fits single byte, no string header
+		w.str = append(w.str, s[0])
+	} else {
+		w.encodeStringHeader(len(s))
+		w.str = append(w.str, s...)
+	}
+	return nil
+}
+
+func writeInterface(val reflect.Value, w *encbuf) error {
+	if val.IsNil() {
+		// Write empty list. This is consistent with the previous RLP
+		// encoder that we had and should therefore avoid any
+		// problems.
+		w.str = append(w.str, EmptyListCode)
+		return nil
+	}
+	eval := val.Elem()
+	wtr, wErr := cachedWriter(eval.Type())
+	if wErr != nil {
+		return wErr
+	}
+	return wtr(eval, w)
+}
+
+func makeSliceWriter(typ reflect.Type, ts tags) (writer, error) {
+	etypeinfo := cachedTypeInfo1(typ.Elem(), tags{})
+	if etypeinfo.writerErr != nil {
+		return nil, etypeinfo.writerErr
+	}
+	writer := func(val reflect.Value, w *encbuf) error {
+		if !ts.tail {
+			defer w.listEnd(w.list())
+		}
+		vlen := val.Len()
+		for i := 0; i < vlen; i++ {
+			if err := etypeinfo.writer(val.Index(i), w); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return writer, nil
+}
+
+func makeStructWriter(typ reflect.Type) (writer, error) {
+	fields, err := structFields(typ)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range fields {
+		if f.info.writerErr != nil {
+			return nil, structFieldError{typ, f.index, f.info.writerErr}
+		}
 	}
 
-	b := to[1:]
-	var l int
+	var writer writer
+	firstOptionalField := firstOptionalField(fields)
+	if firstOptionalField == len(fields) {
+		// This is the writer function for structs without any optional fields.
+		writer = func(val reflect.Value, w *encbuf) error {
+			lh := w.list()
+			for _, f := range fields {
+				if err := f.info.writer(val.Field(f.index), w); err != nil {
+					return err
+				}
+			}
+			w.listEnd(lh)
+			return nil
+		}
+	} else {
+		// If there are any "optional" fields, the writer needs to perform additional
+		// checks to determine the output list length.
+		writer = func(val reflect.Value, w *encbuf) error {
+			lastField := len(fields) - 1
+			for ; lastField >= firstOptionalField; lastField-- {
+				if !val.Field(fields[lastField].index).IsZero() {
+					break
+				}
+			}
+			lh := w.list()
+			for i := 0; i <= lastField; i++ {
+				if err := fields[i].info.writer(val.Field(fields[i].index), w); err != nil {
+					return err
+				}
+			}
+			w.listEnd(lh)
+			return nil
+		}
+	}
+	return writer, nil
+}
 
-	// writes i to b in big endian byte order, using the least number of bytes needed to represent i.
+func makePtrWriter(typ reflect.Type, ts tags) (writer, error) {
+	etypeinfo := cachedTypeInfo1(typ.Elem(), tags{})
+	if etypeinfo.writerErr != nil {
+		return nil, etypeinfo.writerErr
+	}
+	// Determine how to encode nil pointers.
+	var nilKind Kind
+	if ts.nilOK {
+		nilKind = ts.nilKind // use struct tag if provided
+	} else {
+		nilKind = defaultNilKind(typ.Elem())
+	}
+
+	writer := func(val reflect.Value, w *encbuf) error {
+		if val.IsNil() {
+			if nilKind == String {
+				w.str = append(w.str, EmptyStringCode)
+			} else {
+				w.listEnd(w.list())
+			}
+			return nil
+		}
+		return etypeinfo.writer(val.Elem(), w)
+	}
+	return writer, nil
+}
+
+func makeEncoderWriter(typ reflect.Type) writer {
+	if typ.Implements(encoderInterface) {
+		return func(val reflect.Value, w *encbuf) error {
+			return val.Interface().(Encoder).EncodeRLP(w)
+		}
+	}
+	w := func(val reflect.Value, w *encbuf) error {
+		if !val.CanAddr() {
+			// package json simply doesn't call MarshalJSON for this case, but encodes the
+			// value as if it didn't implement the interface. We don't want to handle it that
+			// way.
+			return fmt.Errorf("rlp: unadressable value of type %v, EncodeRLP is pointer method", val.Type())
+		}
+		return val.Addr().Interface().(Encoder).EncodeRLP(w)
+	}
+	return w
+}
+
+// putint writes i to the beginning of b in big endian byte
+// order, using the least number of bytes needed to represent i.
+func putint(b []byte, i uint64) (size int) {
 	switch {
 	case i < (1 << 8):
 		b[0] = byte(i)
-		l = 1
+		return 1
 	case i < (1 << 16):
 		b[0] = byte(i >> 8)
 		b[1] = byte(i)
-		l = 2
+		return 2
 	case i < (1 << 24):
 		b[0] = byte(i >> 16)
 		b[1] = byte(i >> 8)
 		b[2] = byte(i)
-		l = 3
+		return 3
 	case i < (1 << 32):
 		b[0] = byte(i >> 24)
 		b[1] = byte(i >> 16)
 		b[2] = byte(i >> 8)
 		b[3] = byte(i)
-		l = 4
+		return 4
 	case i < (1 << 40):
 		b[0] = byte(i >> 32)
 		b[1] = byte(i >> 24)
 		b[2] = byte(i >> 16)
 		b[3] = byte(i >> 8)
 		b[4] = byte(i)
-		l = 5
+		return 5
 	case i < (1 << 48):
 		b[0] = byte(i >> 40)
 		b[1] = byte(i >> 32)
@@ -157,7 +724,7 @@ func EncodeU64(i uint64, to []byte) int {
 		b[3] = byte(i >> 16)
 		b[4] = byte(i >> 8)
 		b[5] = byte(i)
-		l = 6
+		return 6
 	case i < (1 << 56):
 		b[0] = byte(i >> 48)
 		b[1] = byte(i >> 40)
@@ -166,7 +733,7 @@ func EncodeU64(i uint64, to []byte) int {
 		b[4] = byte(i >> 16)
 		b[5] = byte(i >> 8)
 		b[6] = byte(i)
-		l = 7
+		return 7
 	default:
 		b[0] = byte(i >> 56)
 		b[1] = byte(i >> 48)
@@ -176,123 +743,135 @@ func EncodeU64(i uint64, to []byte) int {
 		b[5] = byte(i >> 16)
 		b[6] = byte(i >> 8)
 		b[7] = byte(i)
-		l = 8
+		return 8
 	}
-
-	to[0] = 128 + byte(l)
-	return 1 + l
 }
 
-func StringLen(s []byte) int {
-	sLen := len(s)
-	switch {
-	case sLen >= 56:
-		beLen := common.BitLenToByteLen(bits.Len(uint(sLen)))
-		return 1 + beLen + sLen
-	case sLen == 0:
-		return 1
-	case sLen == 1:
-		if s[0] < 128 {
-			return 1
+// intsize computes the minimum number of bytes required to store i.
+func intsize(i uint64) (size int) {
+	return libcommon.BitLenToByteLen(bits.Len64(i))
+}
+
+func IntLenExcludingHead(i uint64) int {
+	if i < 0x80 {
+		return 0
+	}
+	return intsize(i)
+}
+
+func BigIntLenExcludingHead(i *big.Int) int {
+	bitLen := i.BitLen()
+	if bitLen < 8 {
+		return 0
+	}
+	return libcommon.BitLenToByteLen(bitLen)
+}
+
+func Uint256LenExcludingHead(i *uint256.Int) int {
+	bitLen := i.BitLen()
+	if bitLen < 8 {
+		return 0
+	}
+	return libcommon.BitLenToByteLen(bitLen)
+}
+
+// precondition: len(buffer) >= 9
+func EncodeInt(i uint64, w io.Writer, buffer []byte) error {
+	if 0 < i && i < 0x80 {
+		buffer[0] = byte(i)
+		_, err := w.Write(buffer[:1])
+		return err
+	}
+
+	binary.BigEndian.PutUint64(buffer[1:], i)
+	size := intsize(i)
+	buffer[8-size] = 0x80 + byte(size)
+	_, err := w.Write(buffer[8-size : 9])
+	return err
+}
+
+func EncodeBigInt(i *big.Int, w io.Writer, buffer []byte) error {
+	bitLen := 0 // treat nil as 0
+	if i != nil {
+		bitLen = i.BitLen()
+	}
+	if bitLen < 8 {
+		if bitLen > 0 {
+			buffer[0] = byte(i.Uint64())
+		} else {
+			buffer[0] = 0x80
 		}
-		return 1 + sLen
-	default: // 1<s<56
-		return 1 + sLen
+		_, err := w.Write(buffer[:1])
+		return err
 	}
-}
-func EncodeString(s []byte, to []byte) int {
-	switch {
-	case len(s) >= 56:
-		beLen := common.BitLenToByteLen(bits.Len(uint(len(s))))
-		binary.BigEndian.PutUint64(to[1:], uint64(len(s)))
-		_ = to[beLen+len(s)]
 
-		to[8-beLen] = byte(beLen) + 183
-		copy(to, to[8-beLen:9])
-		copy(to[1+beLen:], s)
-		return 1 + beLen + len(s)
-	case len(s) == 0:
-		to[0] = 128
-		return 1
-	case len(s) == 1:
-		if s[0] < 128 {
-			to[0] = s[0]
-			return 1
+	size := libcommon.BitLenToByteLen(bitLen)
+	buffer[0] = 0x80 + byte(size)
+	i.FillBytes(buffer[1 : 1+size])
+	_, err := w.Write(buffer[:1+size])
+	return err
+}
+
+func EncodeString(s []byte, w io.Writer, buffer []byte) error {
+	switch len(s) {
+	case 0:
+		buffer[0] = 128
+		if _, err := w.Write(buffer[:1]); err != nil {
+			return err
 		}
-		to[0] = 129
-		to[1] = s[0]
-		return 2
-	default: // 1<s<56
-		_ = to[len(s)]
-		to[0] = byte(len(s)) + 128
-		copy(to[1:], s)
-		return 1 + len(s)
+	case 1:
+		if s[0] >= 128 {
+			buffer[0] = 129
+			if _, err := w.Write(buffer[:1]); err != nil {
+				return err
+			}
+		}
+		if _, err := w.Write(s); err != nil {
+			return err
+		}
+	default:
+		if err := EncodeStringSizePrefix(len(s), w, buffer); err != nil {
+			return err
+		}
+		if _, err := w.Write(s); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-// EncodeHash assumes that `to` buffer is already 32bytes long
-func EncodeHash(h, to []byte) int {
-	_ = to[32] // early bounds check to guarantee safety of writes below
-	to[0] = 128 + 32
-	copy(to[1:33], h[:32])
-	return 33
+func EncodeStringSizePrefix(size int, w io.Writer, buffer []byte) error {
+	if size >= 56 {
+		beSize := libcommon.BitLenToByteLen(bits.Len(uint(size)))
+		binary.BigEndian.PutUint64(buffer[1:], uint64(size))
+		buffer[8-beSize] = byte(beSize) + 183
+		if _, err := w.Write(buffer[8-beSize : 9]); err != nil {
+			return err
+		}
+	} else {
+		buffer[0] = byte(size) + 128
+		if _, err := w.Write(buffer[:1]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func HashesLen(hashes []byte) int {
-	hashesLen := len(hashes) / 32 * 33
-	return ListPrefixLen(hashesLen) + hashesLen
-}
+func EncodeOptionalAddress(addr *libcommon.Address, w io.Writer, buffer []byte) error {
+	if addr == nil {
+		buffer[0] = 128
+	} else {
+		buffer[0] = 128 + 20
+	}
 
-func EncodeHashes(hashes []byte, encodeBuf []byte) int {
-	pos := 0
-	hashesLen := len(hashes) / 32 * 33
-	pos += EncodeListPrefix(hashesLen, encodeBuf)
-	for i := 0; i < len(hashes); i += 32 {
-		pos += EncodeHash(hashes[i:], encodeBuf[pos:])
+	if _, err := w.Write(buffer[:1]); err != nil {
+		return err
 	}
-	return pos
-}
+	if addr != nil {
+		if _, err := w.Write(addr.Bytes()); err != nil {
+			return err
+		}
+	}
 
-func AnnouncementsLen(types []byte, sizes []uint32, hashes []byte) int {
-	if len(types) == 0 {
-		return 4
-	}
-	typesLen := StringLen(types)
-	var sizesLen int
-	for _, size := range sizes {
-		sizesLen += U32Len(size)
-	}
-	hashesLen := len(hashes) / 32 * 33
-	totalLen := typesLen + sizesLen + ListPrefixLen(sizesLen) + hashesLen + ListPrefixLen(hashesLen)
-	return ListPrefixLen(totalLen) + totalLen
-}
-
-// EIP-5793: eth/68 - Add tx type to tx announcement
-func EncodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf []byte) int {
-	if len(types) == 0 {
-		encodeBuf[0] = 0xc3
-		encodeBuf[1] = 0x80
-		encodeBuf[2] = 0xc0
-		encodeBuf[3] = 0xc0
-		return 4
-	}
-	pos := 0
-	typesLen := StringLen(types)
-	var sizesLen int
-	for _, size := range sizes {
-		sizesLen += U32Len(size)
-	}
-	hashesLen := len(hashes) / 32 * 33
-	totalLen := typesLen + sizesLen + ListPrefixLen(sizesLen) + hashesLen + ListPrefixLen(hashesLen)
-	pos += EncodeListPrefix(totalLen, encodeBuf)
-	pos += EncodeString(types, encodeBuf[pos:])
-	pos += EncodeListPrefix(sizesLen, encodeBuf[pos:])
-	for _, size := range sizes {
-		pos += EncodeU32(size, encodeBuf[pos:])
-	}
-	pos += EncodeListPrefix(hashesLen, encodeBuf[pos:])
-	for i := 0; i < len(hashes); i += 32 {
-		pos += EncodeHash(hashes[i:], encodeBuf[pos:])
-	}
-	return pos
+	return nil
 }

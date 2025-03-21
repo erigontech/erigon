@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
-	"io"
 )
 
 type RequestBody struct {

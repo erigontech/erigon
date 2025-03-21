@@ -9,8 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/zkevm/jsonrpc/types"
 	"github.com/stretchr/testify/require"
 )
 

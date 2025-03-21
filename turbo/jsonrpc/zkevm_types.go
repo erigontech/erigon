@@ -1,8 +1,8 @@
 package jsonrpc
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
-	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
+	"github.com/erigontech/erigon-lib/common"
+	types "github.com/erigontech/erigon/zk/rpcdaemon"
 )
 
 type ZkExitRoots struct {

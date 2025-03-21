@@ -3,7 +3,7 @@ package types
 import (
 	"encoding/hex"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 func (_this *Log) Clone() *Log {

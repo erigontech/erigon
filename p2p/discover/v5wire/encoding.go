@@ -28,10 +28,10 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/ledgerwatch/erigon/common/mclock"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/erigon/rlp"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 // TODO concurrent WHOAREYOU tie-breaker
@@ -374,7 +374,7 @@ func (c *Codec) makeHandshakeAuth(toID enode.ID, addr string, challenge *Whoarey
 	// Add our record to response if it's newer than what remote side has.
 	ln := c.localnode.Node()
 	if challenge.RecordSeq < ln.Seq() {
-		auth.record, _ = rlp.EncodeToBytes(ln.Record())
+		auth.record, _ = rlp2.EncodeToBytes(ln.Record())
 	}
 
 	// Create session keys.
@@ -406,7 +406,7 @@ func (c *Codec) encryptMessage(s *session, p Packet, head *Header, headerData []
 	// Encode message plaintext.
 	c.msgbuf.Reset()
 	c.msgbuf.WriteByte(p.Kind())
-	if err := rlp.Encode(&c.msgbuf, p); err != nil {
+	if err := rlp2.Encode(&c.msgbuf, p); err != nil {
 		return nil, err
 	}
 	messagePT := c.msgbuf.Bytes()
@@ -569,7 +569,7 @@ func (c *Codec) decodeHandshakeRecord(local *enode.Node, wantID enode.ID, remote
 	node := local
 	if len(remote) > 0 {
 		var record enr.Record
-		if err := rlp.DecodeBytes(remote, &record); err != nil {
+		if err := rlp2.DecodeBytes(remote, &record); err != nil {
 			return nil, err
 		}
 		if local == nil || local.Seq() < record.Seq() {

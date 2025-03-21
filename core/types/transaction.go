@@ -24,18 +24,19 @@ import (
 	"math/big"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/protolambda/ztyp/codec"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	libcrypto "github.com/erigontech/erigon-lib/crypto"
+	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/common/math"
 )
 
 var (
@@ -51,6 +52,7 @@ const (
 	AccessListTxType
 	DynamicFeeTxType
 	BlobTxType
+	SetCodeTxType
 )
 
 // Transaction is an Ethereum transaction.
@@ -69,7 +71,6 @@ type Transaction interface {
 	GetTo() *libcommon.Address
 	AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
-	FakeSign(address libcommon.Address) (Transaction, error)
 	Hash() libcommon.Hash
 	SigningHash(chainID *big.Int) libcommon.Hash
 	GetData() []byte
@@ -78,6 +79,7 @@ type Transaction interface {
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
 	EncodingSize() int
 	EncodeRLP(w io.Writer) error
+	DecodeRLP(s *rlp2.Stream) error
 	MarshalBinary(w io.Writer) error
 	// Sender returns the address derived from the signature (V, R, S) using secp256k1
 	// elliptic curve and an error if it failed deriving or upon an incorrect
@@ -97,8 +99,8 @@ type Transaction interface {
 // implementations of different transaction types
 type TransactionMisc struct {
 	// caches
-	hash atomic.Value //nolint:structcheck
-	from atomic.Value
+	hash atomic.Pointer[libcommon.Hash]
+	from atomic.Pointer[libcommon.Address]
 }
 
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
@@ -112,20 +114,20 @@ func (t BinaryTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 	w.Write(t[i])
 }
 
-func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
-	kind, size, err := s.Kind()
+func DecodeRLPTransaction(s *rlp2.Stream, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
+	kind, _, err := s.Kind()
 	if err != nil {
 		return nil, err
 	}
-	if rlp.List == kind {
+	if rlp2.List == kind {
 		tx := &LegacyTx{}
-		if err = tx.DecodeRLP(s, size); err != nil {
+		if err = tx.DecodeRLP(s); err != nil {
 			return nil, err
 		}
 		return tx, nil
 	}
-	if rlp.String != kind {
-		return nil, fmt.Errorf("Not an RLP encoded transaction. If this is a canonical encoded transaction, use UnmarshalTransactionFromBinary instead. Got %v for kind, expected String", kind)
+	if rlp2.String != kind {
+		return nil, fmt.Errorf("not an RLP encoded transaction. If this is a canonical encoded transaction, use UnmarshalTransactionFromBinary instead. Got %v for kind, expected String", kind)
 	}
 	// Decode the EIP-2718 typed TX envelope.
 	var b []byte
@@ -133,7 +135,7 @@ func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Tran
 		return nil, err
 	}
 	if len(b) == 0 {
-		return nil, rlp.EOL
+		return nil, rlp2.EOL
 	}
 	return UnmarshalTransactionFromBinary(b, blobTxnsAreWrappedWithBlobs)
 }
@@ -149,7 +151,7 @@ func DecodeWrappedTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
+	s := rlp2.NewStream(bytes.NewReader(data), uint64(len(data)))
 	return DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 }
 
@@ -162,8 +164,15 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
-	return DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
+	s := rlp2.NewStream(bytes.NewReader(data), uint64(len(data)))
+	tx, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
+	if err != nil {
+		return nil, err
+	}
+	if s.Remaining() != 0 {
+		return nil, fmt.Errorf("trailing bytes after rlp encoded transaction")
+	}
+	return tx, nil
 }
 
 // Parse transaction without envelope.
@@ -171,34 +180,21 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	if len(data) <= 1 {
 		return nil, fmt.Errorf("short input: %v", len(data))
 	}
-	s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
+	s := rlp2.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
+	var t Transaction
 	switch data[0] {
 	case AccessListTxType:
-		t := &AccessListTx{}
-		if err := t.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		return t, nil
+		t = &AccessListTx{}
 	case DynamicFeeTxType:
-		t := &DynamicFeeTransaction{}
-		if err := t.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		return t, nil
+		t = &DynamicFeeTransaction{}
 	case BlobTxType:
 		if blobTxnsAreWrappedWithBlobs {
-			t := &BlobTxWrapper{}
-			if err := t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			return t, nil
+			t = &BlobTxWrapper{}
 		} else {
-			t := &BlobTx{}
-			if err := t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			return t, nil
+			t = &BlobTx{}
 		}
+	case SetCodeTxType:
+		t = &SetCodeTransaction{}
 	default:
 		if data[0] >= 0x80 {
 			// Tx is type legacy which is RLP encoded
@@ -206,6 +202,13 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		}
 		return nil, ErrTxTypeNotSupported
 	}
+	if err := t.DecodeRLP(s); err != nil {
+		return nil, err
+	}
+	if s.Remaining() != 0 {
+		return nil, fmt.Errorf("trailing bytes after rlp encoded transaction")
+	}
+	return t, nil
 }
 
 // Remove everything but the payload body from the wrapper - this is not used, for reference only
@@ -213,7 +216,7 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) (retRlp []byte, err error) {
 	if blobTxRlp[0] != BlobTxType {
 		return blobTxRlp, nil
 	}
-	it, err := rlp.NewListIterator(blobTxRlp[1:])
+	it, err := rlp2.NewListIterator(blobTxRlp[1:])
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +280,7 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 		// must already be equal to the recovery id.
 		plainV = byte(v.Uint64())
 	}
-	if !crypto.ValidateSignatureValues(plainV, r, s, false) {
+	if !libcrypto.TransactionSignatureIsValid(plainV, r, s, true /* allowPreEip2s */) {
 		return ErrInvalidSig
 	}
 
@@ -407,6 +410,7 @@ type Message struct {
 	isFree                      bool
 	blobHashes                  []libcommon.Hash
 	effectiveGasPricePercentage uint8
+	authorizations              []Authorization
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -439,17 +443,21 @@ func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amo
 	return m
 }
 
-func (m Message) From() libcommon.Address       { return m.from }
-func (m Message) To() *libcommon.Address        { return m.to }
-func (m Message) GasPrice() *uint256.Int        { return &m.gasPrice }
-func (m Message) FeeCap() *uint256.Int          { return &m.feeCap }
-func (m Message) Tip() *uint256.Int             { return &m.tip }
-func (m Message) Value() *uint256.Int           { return &m.amount }
-func (m Message) Gas() uint64                   { return m.gasLimit }
-func (m Message) Nonce() uint64                 { return m.nonce }
-func (m Message) Data() []byte                  { return m.data }
-func (m Message) AccessList() types2.AccessList { return m.accessList }
-func (m Message) CheckNonce() bool              { return m.checkNonce }
+func (m Message) From() libcommon.Address         { return m.from }
+func (m Message) To() *libcommon.Address          { return m.to }
+func (m Message) GasPrice() *uint256.Int          { return &m.gasPrice }
+func (m Message) FeeCap() *uint256.Int            { return &m.feeCap }
+func (m Message) Tip() *uint256.Int               { return &m.tip }
+func (m Message) Value() *uint256.Int             { return &m.amount }
+func (m Message) Gas() uint64                     { return m.gasLimit }
+func (m Message) Nonce() uint64                   { return m.nonce }
+func (m Message) Data() []byte                    { return m.data }
+func (m Message) AccessList() types2.AccessList   { return m.accessList }
+func (m Message) Authorizations() []Authorization { return m.authorizations }
+func (m *Message) SetAuthorizations(authorizations []Authorization) {
+	m.authorizations = authorizations
+}
+func (m Message) CheckNonce() bool { return m.checkNonce }
 func (m *Message) SetCheckNonce(checkNonce bool) {
 	m.checkNonce = checkNonce
 }
@@ -503,13 +511,4 @@ func DecodeSSZ(data []byte, dest codec.Deserializable) error {
 
 func EncodeSSZ(w io.Writer, obj codec.Serializable) error {
 	return obj.Serialize(codec.NewEncodingWriter(w))
-}
-
-// copyAddressPtr copies an address.
-func copyAddressPtr(a *libcommon.Address) *libcommon.Address {
-	if a == nil {
-		return nil
-	}
-	cpy := *a
-	return &cpy
 }

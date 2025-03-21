@@ -3,22 +3,22 @@ package stages
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/smt/pkg/blockinfo"
-	"github.com/ledgerwatch/erigon/zk/erigon_db"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	zktypes "github.com/ledgerwatch/erigon/zk/types"
-	"github.com/ledgerwatch/secp256k1"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/smt/pkg/blockinfo"
+	"github.com/erigontech/erigon/zk/erigon_db"
+	"github.com/erigontech/erigon/zk/hermez_db"
+	zktypes "github.com/erigontech/erigon/zk/types"
+	"github.com/erigontech/secp256k1"
 )
 
 func handleStateForNewBlockStarting(
@@ -165,7 +165,7 @@ func finaliseBlock(
 		withdrawals = []*types.Withdrawal{}
 	}
 
-	finalBlock, finalTransactions, finalReceipts, err := core.FinalizeBlockExecution(
+	finalBlock, finalTransactions, finalReceipts, _, err := core.FinalizeBlockExecution(
 		batchContext.cfg.engine,
 		batchContext.sdb.stateReader,
 		newHeader,

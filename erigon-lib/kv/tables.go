@@ -21,7 +21,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/erigontech/erigon-lib/gointerfaces/types"
 )
 
 // DBSchemaVersion versions list
@@ -243,8 +243,8 @@ const (
 	DatabaseInfo = "DbInfo"
 
 	// Naming:
-	//   NeaderNumber - Ethereum-specific block number. All nodes have same BlockNum.
-	//   NeaderID - auto-increment ID. Depends on order in which node see headers.
+	//   HeaderNumber - Ethereum-specific block number. All nodes have same BlockNum.
+	//   HeaderID - auto-increment ID. Depends on order in which node see headers.
 	//      Invariant: for all headers in snapshots Number == ID. It means no reason to store Num/ID for this headers in DB.
 	//   Same about: TxNum/TxID, BlockNum/BlockID
 	HeaderNumber    = "HeaderNumber"           // header_hash -> header_num_u64
@@ -912,6 +912,11 @@ var ChaindataTablesCfg = TableCfg{
 	RStorageIdx:              {Flags: DupSort},
 	RCodeKeys:                {Flags: DupSort},
 	RCodeIdx:                 {Flags: DupSort},
+}
+
+var AuRaTablesCfg = TableCfg{
+	Epoch:        {},
+	PendingEpoch: {},
 }
 
 var BorTablesCfg = TableCfg{

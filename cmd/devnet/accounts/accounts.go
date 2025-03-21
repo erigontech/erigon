@@ -3,9 +3,9 @@ package accounts
 import (
 	"crypto/ecdsa"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/crypto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/core"
 )
 
 const DevAddress = "0x67b1d87101671b127f5f8714789C7192f7ad340e"

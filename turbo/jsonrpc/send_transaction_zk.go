@@ -6,11 +6,11 @@ import (
 
 	"math/big"
 
-	zkchainconfig "github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/zk/sequencer"
-	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
+	zkchainconfig "github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/zk/sequencer"
+	"github.com/erigontech/erigon/zkevm/jsonrpc/client"
 )
 
 func (api *APIImpl) isPoolManagerAddressSet() bool {

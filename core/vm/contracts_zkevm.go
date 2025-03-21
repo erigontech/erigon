@@ -25,15 +25,15 @@ import (
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon-lib/crypto/blake2b"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/secp256r1"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto/blake2b"
+	"github.com/erigontech/erigon-lib/crypto/secp256r1"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/params"
 	"golang.org/x/crypto/ripemd160"
 	//lint:ignore SA1019 Needed for precompile
 )
@@ -143,7 +143,7 @@ func (c *ecrecover_zkevm) Run(input []byte) ([]byte, error) {
 	}
 
 	// tighter sig s values input homestead only apply to tx sigs
-	if !allZero(input[32:63]) || !crypto.ValidateSignatureValues(v, r, s, false) {
+	if !allZero(input[32:63]) || !crypto.TransactionSignatureIsValid(v, r, s, true /* allowPreEip2s */) {
 		return nil, nil
 	}
 	// We must make sure not to modify the 'input', so placing the 'v' along with
@@ -855,10 +855,10 @@ func (c *bls12381G1MultiExp_zkevm) RequiredGas(input []byte) uint64 {
 	}
 	// Lookup discount value for G1 point, scalar value pair length
 	var discount uint64
-	if dLen := len(params.Bls12381MultiExpDiscountTable); k < dLen {
-		discount = params.Bls12381MultiExpDiscountTable[k-1]
+	if dLen := len(params.Bls12381MSMDiscountTableG1); k < dLen {
+		discount = params.Bls12381MSMDiscountTableG1[k-1]
 	} else {
-		discount = params.Bls12381MultiExpDiscountTable[dLen-1]
+		discount = params.Bls12381MSMDiscountTableG1[dLen-1]
 	}
 	// Calculate gas and return the result
 	return (uint64(k) * params.Bls12381G1MulGas * discount) / 1000
@@ -884,6 +884,10 @@ func (c *bls12381G1MultiExp_zkevm) Run(input []byte) ([]byte, error) {
 		p, err := decodePointG1(input[t0:t1])
 		if err != nil {
 			return nil, err
+		}
+		// Fast subgroup check
+		if !p.IsInSubGroup() {
+			return nil, errBLS12381G1PointSubgroup
 		}
 		points[i] = *p
 		// Decode scalar value
@@ -1008,10 +1012,10 @@ func (c *bls12381G2MultiExp_zkevm) RequiredGas(input []byte) uint64 {
 	}
 	// Lookup discount value for G2 point, scalar value pair length
 	var discount uint64
-	if dLen := len(params.Bls12381MultiExpDiscountTable); k < dLen {
-		discount = params.Bls12381MultiExpDiscountTable[k-1]
+	if dLen := len(params.Bls12381MSMDiscountTableG2); k < dLen {
+		discount = params.Bls12381MSMDiscountTableG2[k-1]
 	} else {
-		discount = params.Bls12381MultiExpDiscountTable[dLen-1]
+		discount = params.Bls12381MSMDiscountTableG2[dLen-1]
 	}
 	// Calculate gas and return the result
 	return (uint64(k) * params.Bls12381G2MulGas * discount) / 1000
@@ -1037,6 +1041,10 @@ func (c *bls12381G2MultiExp_zkevm) Run(input []byte) ([]byte, error) {
 		p, err := decodePointG2(input[t0:t1])
 		if err != nil {
 			return nil, err
+		}
+		// Fast subgroup check
+		if !p.IsInSubGroup() {
+			return nil, errBLS12381G2PointSubgroup
 		}
 		points[i] = *p
 		// Decode scalar value

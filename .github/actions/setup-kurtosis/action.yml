@@ -35,7 +35,21 @@ runs:
         sudo curl -L https://github.com/mikefarah/yq/releases/download/v4.44.2/yq_linux_amd64 -o /usr/local/bin/yq
         sudo chmod +x /usr/local/bin/yq
         /usr/local/bin/yq --version
-        
+
+    # Cleanup before running Kurtosis to have more space. Those dirs are claimed to be universal and safe to remove
+    - name: Cleanup Disk Space
+      shell: bash
+      run: |
+        echo "Disk usage before cleanup:"
+        df -h
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /usr/local/share/boost
+        docker system prune -af
+        echo "Disk usage after cleanup:"
+        df -h
+
     - name: Build docker image
       working-directory: ./cdk-erigon
       shell: bash

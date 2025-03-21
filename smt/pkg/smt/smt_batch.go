@@ -6,8 +6,8 @@ import (
 	"sync"
 
 	"github.com/dgravesa/go-parallel/parallel"
-	"github.com/ledgerwatch/erigon/smt/pkg/utils"
-	"github.com/ledgerwatch/erigon/zk"
+	"github.com/erigontech/erigon/smt/pkg/utils"
+	"github.com/erigontech/erigon/zk"
 )
 
 type InsertBatchConfig struct {

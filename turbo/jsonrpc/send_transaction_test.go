@@ -8,30 +8,33 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon-lib/wrap"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon-lib/wrap"
+
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpool"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common/u256"
+
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/stages"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func newBaseApiForTest(m *mock.MockSentry) *jsonrpc.BaseAPI {
@@ -88,7 +91,7 @@ func TestSendRawTransaction(t *testing.T) {
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := txpool.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, 1e18, 100_000, &ethconfig.Defaults, false, 100_000, 128, logger, nil, 1000, false)
 	api.BadTxAllowance = 1
 
@@ -114,7 +117,7 @@ func TestSendRawTransaction(t *testing.T) {
 		t.Log("Timeout waiting for txn from channel")
 		jsonTx, err := api.GetTransactionByHash(ctx, txHash, nil)
 		require.NoError(err)
-		jsonTxRPCTransaction, ok := jsonTx.(jsonrpc.RPCTransaction)
+		jsonTxRPCTransaction, ok := jsonTx.(ethapi.RPCTransaction)
 		require.True(ok)
 		require.Equal(expectedValue, jsonTxRPCTransaction.Value.Uint64())
 	}
@@ -148,7 +151,7 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := txpool.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, 1e18, 100_000, &ethconfig.Defaults, false, 100_000, 128, logger, nil, 1000, false)
 	api.BadTxAllowance = 1
 
@@ -175,7 +178,7 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 		t.Log("Timeout waiting for txn from channel")
 		jsonTx, err := api.GetTransactionByHash(ctx, txHash, nil)
 		require.NoError(err)
-		jsonTxRPCTransaction, ok := jsonTx.(jsonrpc.RPCTransaction)
+		jsonTxRPCTransaction, ok := jsonTx.(ethapi.RPCTransaction)
 		require.True(ok)
 		require.Equal(expectedTxValue, jsonTxRPCTransaction.Value.Uint64())
 	}

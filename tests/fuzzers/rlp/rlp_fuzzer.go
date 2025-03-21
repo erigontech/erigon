@@ -20,13 +20,13 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/core/types"
 )
 
 func decodeEncode(input []byte, val interface{}, i int) {
-	if err := rlp.DecodeBytes(input, val); err == nil {
-		output, err := rlp.EncodeToBytes(val)
+	if err := rlp2.DecodeBytes(input, val); err == nil {
+		output, err := rlp2.EncodeToBytes(val)
 		if err != nil {
 			panic(err)
 		}
@@ -43,21 +43,21 @@ func Fuzz(input []byte) int {
 
 	var i int
 	{
-		if _, _, _, err := rlp.Split(input); err != nil {
+		if _, _, _, err := rlp2.Split(input); err != nil {
 			panic(err)
 		}
 	}
 
 	{
-		if elems, _, err := rlp.SplitList(input); err == nil {
-			if _, err = rlp.CountValues(elems); err != nil {
+		if elems, _, err := rlp2.SplitList(input); err == nil {
+			if _, err = rlp2.CountValues(elems); err != nil {
 				panic(err)
 			}
 		}
 	}
 
 	{
-		if err := rlp.NewStream(bytes.NewReader(input), 0).Decode(new(interface{})); err != nil {
+		if err := rlp2.NewStream(bytes.NewReader(input), 0).Decode(new(interface{})); err != nil {
 			panic(err)
 		}
 	}
@@ -79,7 +79,7 @@ func Fuzz(input []byte) int {
 	{
 		type Types struct {
 			Bool  bool
-			Raw   rlp.RawValue
+			Raw   rlp2.RawValue
 			Slice []*Types
 			Iface []interface{}
 		}
@@ -93,7 +93,7 @@ func Fuzz(input []byte) int {
 			String string
 			Bytes  []byte
 			Bool   bool
-			Raw    rlp.RawValue
+			Raw    rlp2.RawValue
 			Slice  []*AllTypes
 			Array  [3]*AllTypes
 			Iface  []interface{}

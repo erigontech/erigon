@@ -5,7 +5,7 @@ import (
 
 	"encoding/hex"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestApplyHexPadBug(t *testing.T) {

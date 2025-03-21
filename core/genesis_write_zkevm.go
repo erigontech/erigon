@@ -1,15 +1,16 @@
 package core
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/smt/pkg/smt"
-	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_allocs"
-	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_chain"
-	"github.com/ledgerwatch/erigon/zk/zk_config/cfg_dynamic_genesis"
-	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"math/big"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/smt/pkg/smt"
+	"github.com/erigontech/erigon/zk/zk_config/cfg_allocs"
+	"github.com/erigontech/erigon/zk/zk_config/cfg_chain"
+	"github.com/erigontech/erigon/zk/zk_config/cfg_dynamic_genesis"
+	"github.com/erigontech/erigon/zkevm/hex"
 )
 
 func HermezMainnetGenesisBlock() *types.Genesis {

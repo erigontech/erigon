@@ -9,7 +9,7 @@ import (
 
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	log2 "github.com/0xPolygonHermez/zkevm-data-streamer/log"
-	"github.com/ledgerwatch/erigon/zk/datastream/server"
+	"github.com/erigontech/erigon/zk/datastream/server"
 )
 
 var (

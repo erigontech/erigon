@@ -1,0 +1,140 @@
+name: QA - Sync with external CL
+
+on:
+  push:
+    branches:
+      - 'release/2.*'
+  workflow_dispatch:     # Run manually
+
+jobs:
+  sync-with-externalcl:
+    strategy:
+      matrix:
+        include:
+          - chain: mainnet
+            client: lighthouse
+            runner: Erigon2
+            reference_data_dir: /opt/erigon-versions/reference-version/datadir
+          - chain: mainnet
+            client: prysm
+            runner: Erigon2
+            reference_data_dir: /opt/erigon-versions/reference-version/datadir
+          - chain: gnosis
+            client: lighthouse
+            runner: Gnosis
+            reference_data_dir: /opt/erigon-versions/reference-version-2/datadir
+    runs-on: [ self-hosted, "${{ matrix.runner }}" ]
+    timeout-minutes: 600
+    env:
+      ERIGON_REFERENCE_DATA_DIR: ${{ matrix.reference_data_dir }}
+      CL_DATA_DIR: ${{ github.workspace }}/consensus
+      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      TRACKING_TIME_SECONDS: 3600 # 1 hour
+      TOTAL_TIME_SECONDS: 25200 # 7 hours
+
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v4
+
+    - name: Clean Erigon Build Directory
+      run: |
+        make clean
+
+    - name: Build Erigon
+      run: |
+        make erigon
+      working-directory: ${{ github.workspace }}
+
+    - name: Install ${{ matrix.client }} and generate JWT secret
+      run: |
+        mkdir -p $CL_DATA_DIR
+        if [ "${{ matrix.client }}" == "lighthouse" ]; then
+          curl -LO https://github.com/sigp/lighthouse/releases/download/v7.0.0-beta.0/lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz
+          tar -xvf lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz -C $CL_DATA_DIR
+          rm lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz
+        elif [ "${{ matrix.client }}" == "prysm" ]; then
+          curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o $CL_DATA_DIR/prysm.sh
+          chmod +x $CL_DATA_DIR/prysm.sh
+        fi
+        openssl rand -hex 32 > $CL_DATA_DIR/jwt.hex
+
+    - name: Pause the Erigon instance dedicated to db maintenance
+      run: |
+        python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
+
+    #- name: Restore Erigon Testbed Data Directory
+    #  run: |
+    #    rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+
+    - name: Run Erigon, wait sync and check ability to maintain sync
+      id: test_step
+      run: |
+        set +e # Disable exit on error
+        
+        # 1. Launch the testbed Erigon instance
+        # 2. Allow time for the Erigon to achieve synchronization
+        # 3. Begin timing the duration that Erigon maintains synchronization
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+          ${{ github.workspace }}/build/bin $ERIGON_REFERENCE_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon2 ${{ matrix.chain }} standard_node no_statistics ${{ matrix.client }} $CL_DATA_DIR
+  
+        # Capture monitoring script exit status
+        test_exit_status=$?
+        
+        # Save the subsection reached status
+        echo "::set-output name=test_executed::true"
+
+        # Check test runner script exit status
+        if [ $test_exit_status -eq 0 ]; then
+          echo "Tests completed successfully"
+          echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+        else
+          echo "Error detected during tests"
+          echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+        fi
+
+    #- name: Delete Erigon Testbed Data Directory
+    #  if: always()
+    #  run: |
+    #    rm -rf $ERIGON_TESTBED_DATA_DIR
+
+    - name: Resume the Erigon instance dedicated to db maintenance
+      run: |
+        python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
+
+    - name: Save test results
+      if: steps.test_step.outputs.test_executed == 'true'
+      env:
+        TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+      run: |
+        db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit)
+        if [ -z "$db_version" ]; then
+          db_version="no-version"
+        fi
+      
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name tip-tracking --chain ${{ matrix.chain }} --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT --result_file ${{ github.workspace }}/result-${{ matrix.chain }}.json
+
+    - name: Upload test results
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.client }}-${{ matrix.chain }}
+        path: |
+          ${{ github.workspace }}/result-${{ matrix.chain }}.json
+          ${{ matrix.client == 'lighthouse' && '$CL_DATA_DIR/data/beacon/logs/beacon.log' || '' }}
+          ${{ matrix.client == 'prysm' && '$CL_DATA_DIR/data/beacon.log' || '' }}
+
+    - name: Cleanup consensus runner directory
+      if: always()
+      run: |
+        rm -rf $CL_DATA_DIR
+
+    - name: Action for Success
+      if: steps.test_step.outputs.TEST_RESULT == 'success'
+      run: echo "::notice::Tests completed successfully"
+
+    - name: Action for Not Success
+      if: steps.test_step.outputs.TEST_RESULT != 'success'
+      run: |
+        echo "::error::Error detected during tests"
+        exit 1
