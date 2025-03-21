@@ -770,7 +770,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			be.cntValidationFail++
 			be.execFailed[tx]++
 
-			if be.execFailed[tx] > 1 {
+			if be.execFailed[tx] > 4 {
 				fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "INVALID", be.execFailed[tx])
 			}
 
