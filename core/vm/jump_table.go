@@ -99,20 +99,19 @@ func validateAndFillMaxStack(jt *JumpTable) {
 	}
 }
 
+func NewEOFInstructionSet() JumpTable { // TODO(racytech): why is this exported?
+	instructionSet := newPragueInstructionSet()
+	enableEOF(&instructionSet)
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
 // newPragueInstructionSet returns the frontier, homestead, byzantium,
 // constantinople, istanbul, petersburg, berlin, london, paris, shanghai,
 // cancun, and prague instructions.
 func newPragueInstructionSet() JumpTable {
 	instructionSet := newCancunInstructionSet()
-	// enable7702(&instructionSet) // EIP-7702: set code tx
-	// enableEOF(&instructionSet)
-	validateAndFillMaxStack(&instructionSet)
-	return instructionSet
-}
-
-func NewEOFInstructionSet() JumpTable { // TODO(racytech): why is this exported?
-	instructionSet := newPragueInstructionSet()
-	enableEOF(&instructionSet)
+	enable7702(&instructionSet) // EIP-7702: set code tx
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
@@ -1241,7 +1240,7 @@ func newFrontierInstructionSet() JumpTable {
 	// Fill all unassigned slots with opUndefined.
 	for i, entry := range tbl {
 		if entry == nil {
-			tbl[i] = &operation{execute: opUndefined, numPop: 0, numPush: 0, undefined: true}
+			tbl[i] = &operation{execute: opUndefined, undefined: true}
 		}
 	}
 

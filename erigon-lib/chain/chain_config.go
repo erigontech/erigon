@@ -68,7 +68,6 @@ type Config struct {
 	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"`
 	CancunTime   *big.Int `json:"cancunTime,omitempty"`
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
-	PragueEOF    *big.Int `json:"pragueEOFTime,omitempty"` // prague EOF time for devnet
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691 & EIP-7840)
@@ -329,8 +328,7 @@ func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
 	if c != nil {
 		b = c.BlobSchedule
 	}
-	// return b.MaxBlobsPerBlock(c.IsPrague(time))
-	return b.MaxBlobsPerBlock(c.IsOsaka(time))
+	return b.MaxBlobsPerBlock(c.IsPrague(time))
 }
 
 func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
@@ -338,8 +336,7 @@ func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
 	if c != nil {
 		b = c.BlobSchedule
 	}
-	// return b.TargetBlobsPerBlock(c.IsPrague(t)) * fixedgas.BlobGasPerBlob
-	return b.TargetBlobsPerBlock(c.IsOsaka(t)) * fixedgas.BlobGasPerBlob
+	return b.TargetBlobsPerBlock(c.IsPrague(t)) * fixedgas.BlobGasPerBlob
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
@@ -347,8 +344,7 @@ func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
 	if c != nil {
 		b = c.BlobSchedule
 	}
-	// return b.BaseFeeUpdateFraction(c.IsPrague(t))
-	return b.BaseFeeUpdateFraction(c.IsOsaka(t))
+	return b.BaseFeeUpdateFraction(c.IsPrague(t))
 }
 
 func (c *Config) SecondsPerSlot() uint64 {

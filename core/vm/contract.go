@@ -62,8 +62,7 @@ type Contract struct {
 	analysis      bitvec         // Locally cached result of JUMPDEST analysis
 	skipAnalysis  bool
 
-	Code []byte
-	// Container *Container
+	Code      []byte
 	Container *EOFContainer
 	CodeHash  libcommon.Hash
 	CodeAddr  *libcommon.Address

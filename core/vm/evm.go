@@ -212,6 +212,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	}
 
 	snapshot := evm.intraBlockState.Snapshot()
+
 	if typ == CALL {
 		exist, err := evm.intraBlockState.Exist(addr)
 		if err != nil {
@@ -569,6 +570,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 
 	// calculate gasConsumption for deferred captures
 	gasConsumption = gasRemaining - contract.Gas
+
 	return ret, address, contract.Gas, err
 }
 
