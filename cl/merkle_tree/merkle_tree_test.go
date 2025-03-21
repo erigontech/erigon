@@ -56,7 +56,7 @@ func TestMerkleTreeAppendLeaf(t *testing.T) {
 	}, nil)
 	// Test AppendLeaf
 	mt.AppendLeaf()
-	testBuffer = append(testBuffer, make([]byte, 4*length.Hash)...)
+	testBuffer = append(testBuffer, make([]byte, 4*length.Hash)...) // nozero
 	testBuffer[128] = 5
 	expectedRoot1 := getExpectedRoot(testBuffer)
 	require.Equal(t, mt.ComputeRoot(), expectedRoot1)
@@ -97,7 +97,7 @@ func TestMerkleTreeAppendLeafWithLowMaxDepth(t *testing.T) {
 	}, nil)
 	// Test AppendLeaf
 	mt.AppendLeaf()
-	testBuffer = append(testBuffer, make([]byte, 4*length.Hash)...)
+	testBuffer = append(testBuffer, make([]byte, 4*length.Hash)...) // nozero
 	testBuffer[128] = 5
 	expectedRoot := getExpectedRoot(testBuffer)
 	require.Equal(t, mt.ComputeRoot(), expectedRoot)
@@ -137,7 +137,7 @@ func TestMerkleTreeAppendLeafWithLowMaxDepthAndLimitAndTestWR(t *testing.T) {
 	}, &lm)
 	// Test AppendLeaf
 	mt.AppendLeaf()
-	testBuffer = append(testBuffer, make([]byte, 4*length.Hash)...)
+	testBuffer = append(testBuffer, make([]byte, 4*length.Hash)...) // nozero
 	testBuffer[128] = 5
 	expectedRoot := getExpectedRootWithLimit(testBuffer, int(lm))
 	require.Equal(t, mt.ComputeRoot(), expectedRoot)
