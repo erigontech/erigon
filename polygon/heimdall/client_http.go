@@ -47,11 +47,13 @@ var (
 	ErrBadGateway            = errors.New("bad gateway")
 	ErrServiceUnavailable    = errors.New("service unavailable")
 	ErrCloudflareAccessNoApp = errors.New("cloudflare access - no application")
+	ErrOperationTimeout      = errors.New("operation timed out")
 
 	TransientErrors = []error{
 		ErrBadGateway,
 		ErrServiceUnavailable,
 		ErrCloudflareAccessNoApp,
+		ErrOperationTimeout,
 		context.DeadlineExceeded,
 	}
 )

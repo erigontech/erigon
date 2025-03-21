@@ -742,8 +742,24 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logger,
 		)
 		contractBackend := contracts.NewDirectBackend(ethApi)
-		secondaryTxnProvider := backend.txPool
-		backend.shutterPool = shutter.NewPool(logger, config.Shutter, secondaryTxnProvider, contractBackend, backend.stateDiffClient)
+		baseTxnProvider := backend.txPool
+		currentBlockNumReader := func(ctx context.Context) (*uint64, error) {
+			tx, err := backend.chainDB.BeginRo(ctx)
+			if err != nil {
+				return nil, err
+			}
+
+			defer tx.Rollback()
+			return chain.CurrentBlockNumber(tx)
+		}
+		backend.shutterPool = shutter.NewPool(
+			logger,
+			config.Shutter,
+			baseTxnProvider,
+			contractBackend,
+			backend.stateDiffClient,
+			currentBlockNumReader,
+		)
 		txnProvider = backend.shutterPool
 	}
 
