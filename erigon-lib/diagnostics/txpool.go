@@ -117,6 +117,20 @@ func (ti QueuedRemoveEvent) Type() Type {
 	return TypeOf(ti)
 }
 
+type PoolChangeBatch struct {
+	Pool    string     `json:"pool"`
+	Event   string     `json:"event"`
+	TxnHash [][32]byte `json:"txnHash"`
+}
+
+type PoolChangeBatchEvent struct {
+	Changes []PoolChangeBatch `json:"changes"`
+}
+
+func (ti PoolChangeBatchEvent) Type() Type {
+	return TypeOf(ti)
+}
+
 func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnIncommingTxnListener(rootCtx)
 	d.runOnProcessedRemoteTxnsListener(rootCtx)
@@ -126,6 +140,7 @@ func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnBaseFeeRemoveEvent(rootCtx)
 	d.runOnQueuedAddEvent(rootCtx)
 	d.runOnQueuedRemoveEvent(rootCtx)
+	d.runOnPoolChangeBatchEvent(rootCtx)
 	d.SetupNotifier()
 }
 
@@ -312,6 +327,34 @@ func (d *DiagnosticClient) runOnQueuedRemoveEvent(rootCtx context.Context) {
 						TxnHash: info.TxnHash,
 					},
 				})
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnPoolChangeBatchEvent(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[PoolChangeBatchEvent](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(PoolChangeBatchEvent{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				for _, change := range info.Changes {
+					for _, txnHash := range change.TxnHash {
+						d.Notify(DiagMessages{
+							MessageType: "txpool",
+							Message: PoolChangeEvent{
+								Pool:    change.Pool,
+								Event:   change.Event,
+								TxnHash: txnHash,
+							},
+						})
+					}
+				}
 			}
 		}
 	}()

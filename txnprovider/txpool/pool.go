@@ -1734,6 +1734,11 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	baseFeeRemoved := 0
 	queuedRemoved := 0
 
+	pendingHashes := make([][32]byte, 0)
+	baseFeeHashes := make([][32]byte, 0)
+	queuedHashes := make([][32]byte, 0)
+
+	toRemoveBatch := make([]diagnostics.PoolChangeBatch, 0, len(noncesToRemove))
 	for senderID, nonce := range noncesToRemove {
 		byNonce.ascend(senderID, func(mt *metaTxn) bool {
 			if mt.TxnSlot.Nonce > nonce {
@@ -1754,17 +1759,20 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 			case PendingSubPool:
 				pendingRemoved++
 				p.pending.Remove(mt, "remove-mined", p.logger)
-				diagnostics.Send(diagnostics.PendingRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
+				//diagnostics.Send(diagnostics.PendingRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
 				p.removes++
+				pendingHashes = append(pendingHashes, mt.TxnSlot.IDHash)
 				fmt.Println("mined: remove")
 			case BaseFeeSubPool:
 				baseFeeRemoved++
 				p.baseFee.Remove(mt, "remove-mined", p.logger)
-				diagnostics.Send(diagnostics.BaseFeeRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
+				//diagnostics.Send(diagnostics.BaseFeeRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
+				baseFeeHashes = append(baseFeeHashes, mt.TxnSlot.IDHash)
 			case QueuedSubPool:
 				queuedRemoved++
 				p.queued.Remove(mt, "remove-mined", p.logger)
-				diagnostics.Send(diagnostics.QueuedRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
+				//diagnostics.Send(diagnostics.QueuedRemoveEvent{TxnHash: mt.TxnSlot.IDHash})
+				queuedHashes = append(queuedHashes, mt.TxnSlot.IDHash)
 			default:
 				//already removed
 			}
@@ -1778,6 +1786,34 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 		}
 		toDel = toDel[:0]
 	}
+
+	if len(pendingHashes) > 0 {
+		toRemoveBatch = append(toRemoveBatch, diagnostics.PoolChangeBatch{
+			Pool:    "Pending",
+			Event:   "remove",
+			TxnHash: pendingHashes,
+		})
+	}
+
+	if len(baseFeeHashes) > 0 {
+		toRemoveBatch = append(toRemoveBatch, diagnostics.PoolChangeBatch{
+			Pool:    "BaseFee",
+			Event:   "remove",
+			TxnHash: baseFeeHashes,
+		})
+	}
+
+	if len(queuedHashes) > 0 {
+		toRemoveBatch = append(toRemoveBatch, diagnostics.PoolChangeBatch{
+			Pool:    "Queued",
+			Event:   "remove",
+			TxnHash: queuedHashes,
+		})
+	}
+
+	diagnostics.Send(diagnostics.PoolChangeBatchEvent{
+		Changes: toRemoveBatch,
+	})
 
 	if discarded > 0 {
 		p.logger.Debug("Discarded transactions", "count", discarded, "pending", pendingRemoved, "baseFee", baseFeeRemoved, "queued", queuedRemoved)
