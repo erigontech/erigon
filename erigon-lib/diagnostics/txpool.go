@@ -125,7 +125,6 @@ func (ti PoolChangeBatchEvent) Type() Type {
 
 func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnIncommingTxnListener(rootCtx)
-	d.runOnProcessedRemoteTxnsListener(rootCtx)
 	d.runOnPendingAddEvent(rootCtx)
 	d.runOnPendingRemoveEvent(rootCtx)
 	d.runOnBaseFeeAddEvent(rootCtx)
