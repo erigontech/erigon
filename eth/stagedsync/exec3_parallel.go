@@ -760,7 +760,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 					return readsource == state.MapRead && readVersion == writtenVersion
 				}) {
 
-			fmt.Println("VALID", tx, be.txIncarnations[tx], be.execFailed[tx])
+			fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "VALID", be.execFailed[tx])
 
 			if cntInvalid == 0 {
 				be.validateTasks.markComplete(tx)
@@ -774,7 +774,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			be.execFailed[tx]++
 
 			if be.execFailed[tx] > 0 {
-				fmt.Println("INVALID", tx, be.txIncarnations[tx], be.execFailed[tx])
+				fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "INVALID", be.execFailed[tx])
 			}
 
 			// 'create validation tasks for all transactions > tx ...'
