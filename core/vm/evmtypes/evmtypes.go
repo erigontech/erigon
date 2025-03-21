@@ -73,7 +73,6 @@ type ExecutionResult struct {
 	CoinbaseInitBalance *uint256.Int
 	FeeTipped           *uint256.Int
 	EvmRefund           uint64 // Gas refunded by EVM without considering refundQuotient
-	EvmGasUsed          uint64 // Gas used by the execution of all instructions only
 }
 
 // Unwrap returns the internal evm error which allows us for further

@@ -71,7 +71,7 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 	}
 
 	// Generate blob identifiers from the retrieved blocks
-	ids, err := network2.BlobsIdentifiersFromBlocks(blocks)
+	ids, err := network2.BlobsIdentifiersFromBlocks(blocks, cfg.beaconCfg)
 	if err != nil {
 		return nil, err
 	}

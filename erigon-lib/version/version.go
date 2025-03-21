@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,32 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package networkname
+package version
 
+// see https://calver.org
 const (
-	Mainnet             = "mainnet"
-	Holesky             = "holesky"
-	Sepolia             = "sepolia"
-	Hoodi               = "hoodi"
-	Dev                 = "dev"
-	Amoy                = "amoy"
-	BorMainnet          = "bor-mainnet"
-	BorDevnet           = "bor-devnet"
-	Gnosis              = "gnosis"
-	BorE2ETestChain2Val = "bor-e2e-test-2Val"
-	Chiado              = "chiado"
-	Test                = "test"
+	Major                    = 3      // Major version component of the current release
+	Minor                    = 1      // Minor version component of the current release
+	Micro                    = 0      // Patch version component of the current release
+	Modifier                 = "dev"  // Modifier component of the current release
+	DefaultSnapshotGitBranch = "main" // Branch of erigontech/erigon-snapshot to use in OtterSync
 )
-
-var All = []string{
-	Mainnet,
-	Holesky,
-	Sepolia,
-	Hoodi,
-	Amoy,
-	BorMainnet,
-	BorDevnet,
-	Gnosis,
-	Chiado,
-	Test,
-}

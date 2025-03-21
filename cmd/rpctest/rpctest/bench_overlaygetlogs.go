@@ -20,9 +20,7 @@ import (
 	"bufio"
 	"fmt"
 	"math/rand"
-	"net/http"
 	"os"
-	"time"
 )
 
 // BenchOverlayGetLogs compares response of Erigon with Geth
@@ -35,9 +33,6 @@ import (
 //	errorFile stores information when erigon and geth doesn't return same data
 func BenchOverlayGetLogs(erigonURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
 	setRoutes(erigonURL, erigonURL)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 
 	var rec *bufio.Writer
 	if recordFile != "" {
@@ -68,11 +63,8 @@ func BenchOverlayGetLogs(erigonURL string, needCompare bool, blockFrom uint64, b
 	}
 
 	var res CallResult
-	reqGen := &RequestGenerator{
-		client: client,
-	}
+	reqGen := &RequestGenerator{}
 
-	reqGen.reqID++
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
@@ -88,7 +80,7 @@ func BenchOverlayGetLogs(erigonURL string, needCompare bool, blockFrom uint64, b
 	for bn := blockFrom + 100; bn < blockTo; bn += 100 {
 
 		// Checking modified accounts
-		reqGen.reqID++
+
 		var mag DebugModifiedAccounts
 		res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 		if res.Err != nil {
@@ -100,7 +92,7 @@ func BenchOverlayGetLogs(erigonURL string, needCompare bool, blockFrom uint64, b
 		if res.Err == nil && mag.Error == nil {
 			accountSet := extractAccountMap(&mag)
 			for account := range accountSet {
-				reqGen.reqID++
+
 				requestEth := reqGen.getLogs(prevBn, bn, account)
 				requestOverlay := reqGen.getOverlayLogs(prevBn, bn, account)
 				errCtx := fmt.Sprintf("account %x blocks %d-%d", account, prevBn, bn)
@@ -112,7 +104,7 @@ func BenchOverlayGetLogs(erigonURL string, needCompare bool, blockFrom uint64, b
 				topics := getTopics(res.Result)
 				// All combination of account and one topic
 				for _, topic := range topics {
-					reqGen.reqID++
+
 					requestEth = reqGen.getLogs1(prevBn, bn+10000, account, topic)
 					requestOverlay := reqGen.getOverlayLogs1(prevBn, bn+10000, account, topic)
 					errCtx := fmt.Sprintf("account %x topic %x blocks %d-%d", account, topic, prevBn, bn)
@@ -129,7 +121,7 @@ func BenchOverlayGetLogs(erigonURL string, needCompare bool, blockFrom uint64, b
 					if idx2 >= idx1 {
 						idx2++
 					}
-					reqGen.reqID++
+
 					requestEth = reqGen.getLogs2(prevBn, bn+100000, account, topics[idx1], topics[idx2])
 					requestOverlay := reqGen.getOverlayLogs2(prevBn, bn+100000, account, topics[idx1], topics[idx2])
 					errCtx := fmt.Sprintf("account %x topic1 %x topic2 %x blocks %d-%d", account, topics[idx1], topics[idx2], prevBn, bn)
