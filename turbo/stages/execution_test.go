@@ -38,6 +38,7 @@ import (
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus/clique"
 	"github.com/erigontech/erigon/consensus/ethash"
@@ -45,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -479,3 +479,21 @@ func BenchmarkBlockExecution(b *testing.B) {
 		})
 	}
 }
+
+// func TestManual(t *testing.T) {
+// 	logger := log.New()
+
+// 	ctx := context.Background()
+
+// 	execState := stagedsync.StageState{
+// 		ID: stages.Execution,
+// 		BlockNumber: ,
+// 	}
+
+// 	dirs := datadir.New("/home/jacek/data/sepolia")
+// 	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
+// 	tx, err := db.BeginRw(ctx)
+
+// 	assert.NoError(t, err)
+
+// }

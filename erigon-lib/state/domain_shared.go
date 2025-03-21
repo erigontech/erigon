@@ -86,7 +86,7 @@ type SharedDomains interface {
 	AggTx() *AggregatorRoTx
 	Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff) error
 	DiscardWrites(d kv.Domain)
-	RebuildCommitmentShard(ctx context.Context, next func() (bool, []byte), cfg *RebuiltCommitment) (*RebuiltCommitment, error)
+	// RebuildCommitmentShard(ctx context.Context, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error)
 	SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error)
 	ClearRam(resetCommitment bool)
 	SizeEstimate() uint64
@@ -113,6 +113,7 @@ type SharedDomains interface {
 	TouchKey(d kv.Domain, key string, val []byte)
 	ObjectInfo() string
 	GetAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error)
+	GetDomainWriter(domain kv.Domain) *domainBufferedWriter
 }
 
 type BufferedSharedDomains struct {
@@ -309,7 +310,7 @@ func rebuildCommitmentShard(ctx context.Context, sd SharedDomains, next func() (
 	sd.DiscardWrites(kv.StorageDomain)
 	sd.DiscardWrites(kv.CodeDomain)
 
-	visComFiles := sd.roTx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
+	visComFiles := sd.Tx().(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
 	logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
 		"totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum(),
 		"commitment files before dump step", cfg.StepTo,
@@ -318,14 +319,14 @@ func rebuildCommitmentShard(ctx context.Context, sd SharedDomains, next func() (
 	sf := time.Now()
 	var processed uint64
 	for ok, key := next(); ; ok, key = next() {
-		sd.sdCtx.TouchKey(kv.AccountsDomain, string(key), nil)
+		sd.TouchKey(kv.AccountsDomain, string(key), nil)
 		processed++
 		if !ok {
 			break
 		}
 	}
 	collectionSpent := time.Since(sf)
-	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, sd.BlockNum(), fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
+	rh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +341,7 @@ func rebuildCommitmentShard(ctx context.Context, sd SharedDomains, next func() (
 	// if err != nil {
 	// 	return nil, err
 	// }
-	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, cfg.TxnFrom, cfg.TxnTo, sd.domainWriters[kv.CommitmentDomain], nil)
+	err = sd.AggTx().d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, cfg.TxnFrom, cfg.TxnTo, sd.GetDomainWriter(kv.CommitmentDomain), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -906,6 +907,10 @@ func (sd *BufferedSharedDomains) GetAsOfFile(domain kv.Domain, k, k2 []byte, ofM
 		return nil, 0, nil
 	}
 	return v, step, nil
+}
+
+func (sd *BufferedSharedDomains) GetDomainWriter(domain kv.Domain) *domainBufferedWriter {
+	return sd.domainWriters[domain]
 }
 
 // DomainPut
