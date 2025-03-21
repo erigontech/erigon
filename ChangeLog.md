@@ -1,7 +1,11 @@
 ChangeLog
 ---------
 
-## v3.0.0 (in development)
+## v3.0.1 (in development)
+
+https://github.com/erigontech/erigon/milestone/40
+
+## v3.0.0 
 
 ### Milestone
 
