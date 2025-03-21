@@ -326,31 +326,6 @@ func opCallDataSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 }
 
 func opCallDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-
-	// const auto& mem_index = stack.pop();
-	// const auto& input_index = stack.pop();
-	// const auto& size = stack.pop();
-
-	// if (!check_memory(gas_left, state.memory, mem_index, size))
-	//     return {EVMC_OUT_OF_GAS, gas_left};
-
-	// auto dst = static_cast<size_t>(mem_index);
-	// auto src = state.msg->input_size < input_index ? state.msg->input_size :
-	//                                                  static_cast<size_t>(input_index);
-	// auto s = static_cast<size_t>(size);
-	// auto copy_size = std::min(s, state.msg->input_size - src);
-
-	// if (const auto cost = copy_cost(s); (gas_left -= cost) < 0)
-	//     return {EVMC_OUT_OF_GAS, gas_left};
-
-	// if (copy_size > 0)
-	//     std::memcpy(&state.memory[dst], &state.msg->input_data[src], copy_size);
-
-	// if (s - copy_size > 0)
-	//     std::memset(&state.memory[dst + copy_size], 0, s - copy_size);
-
-	// return {EVMC_SUCCESS, gas_left};
-
 	var (
 		memOffset  = scope.Stack.Pop()
 		dataOffset = scope.Stack.Pop()

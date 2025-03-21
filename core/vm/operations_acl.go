@@ -45,6 +45,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			current uint256.Int
 			cost    = uint64(0)
 		)
+
 		evm.IntraBlockState().GetState(contract.Address(), &slot, &current)
 		// If the caller cannot afford the cost, this change will be rolled back
 		if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(contract.Address(), slot); slotMod {

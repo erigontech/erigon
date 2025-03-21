@@ -293,7 +293,6 @@ func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, ch
 		msg.Value(),
 		false,
 	)
-
 	if isBor && err != nil {
 		return nil, nil
 	}

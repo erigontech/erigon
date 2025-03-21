@@ -815,12 +815,14 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 }
 
 func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
+
 	if err := ms.insertPoWBlocks(chain); err != nil {
 		return err
 	}
 	if err := ms.insertPoSBlocks(chain); err != nil {
 		return err
 	}
+
 	roTx, err := ms.DB.BeginRo(ms.Ctx)
 	if err != nil {
 		return err

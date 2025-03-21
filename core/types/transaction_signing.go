@@ -49,14 +49,6 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 	}
 	signer.unprotected = true
 	switch {
-	case config.IsOsaka(blockTime):
-		signer.protected = true
-		signer.accessList = true
-		signer.dynamicFee = true
-		signer.blob = true
-		signer.setCode = true
-		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
 	case config.IsPrague(blockTime):
 		signer.protected = true
 		signer.accessList = true

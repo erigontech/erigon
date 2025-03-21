@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// //go:build integration
+//go:build integration
 
 package tests
 
@@ -53,8 +53,6 @@ func TestBlockchain(t *testing.T) {
 	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongGasUsed\.json`)
 
 	checkStateRoot := true
-
-	// dir := filepath.Join(".", "/testdata/BlockchainTests/InvalidBlocks")
 
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		t.Parallel()

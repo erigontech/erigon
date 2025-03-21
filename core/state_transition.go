@@ -565,6 +565,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		FeeTipped:           amount,
 		EvmRefund:           st.state.GetRefund(),
 	}
+
 	if st.evm.Context.PostApplyMessage != nil {
 		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
 	}
@@ -582,25 +583,7 @@ func (st *StateTransition) refundGas() {
 	st.gp.AddGas(st.gasRemaining)
 }
 
-func (st *StateTransition) refundGasEVMONE() {
-	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
-	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
-	// Also return remaining gas to the block gas counter so it is
-	// available for the next transaction.
-	st.gp.AddGas(st.gasRemaining)
-}
-
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
-}
-
-// ------ interface functions to get necessary info for evmone ---
-func (st *StateTransition) GetEnvEVM() *vm.EVM {
-	return st.evm
-}
-
-func (st *StateTransition) GetEnvIntraBlockState() evmtypes.IntraBlockState {
-	return st.state
 }

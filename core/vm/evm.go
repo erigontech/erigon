@@ -182,6 +182,7 @@ func (evm *EVM) Interpreter() Interpreter {
 
 func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
 	depth := evm.interpreter.Depth()
+
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, gas, nil
 	}
@@ -268,6 +269,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			}(gas)
 		}
 	}
+
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
 		ret, gas, err = RunPrecompiledContract(p, input, gas)
@@ -304,9 +306,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		if typ == STATICCALL {
 			readOnly = true
 		}
-
 		ret, err = run(evm, contract, input, readOnly)
-
 		gas = contract.Gas
 	}
 

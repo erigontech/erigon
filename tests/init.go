@@ -409,7 +409,7 @@ var Forks = map[string]*chain.Config{
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  big.NewInt(0),
 		CancunTime:                    big.NewInt(0),
-		PragueTime:                    big.NewInt(15_000),
+		PragueTime:                    big.NewInt(0),
 		OsakaTime:                     big.NewInt(0),
 		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 	},

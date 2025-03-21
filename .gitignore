@@ -100,8 +100,3 @@ node_modules
 /config.yml
 
 vendor
-
-/core/evmone-go/lib
-cmp.py
-/tests/osaka-eof
-/tests/__backup
