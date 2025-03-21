@@ -572,29 +572,43 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		}
 	}
 
+	diagnostics.Send(diagnostics.IncomingTxnUpdate{
+		Txns:    diagTxns,
+		Updates: map[string][][32]byte{},
+	})
+
 	if p.promoted.Len() > 0 {
+		copied := p.promoted.Copy()
 		select {
 		case <-ctx.Done():
 			return nil
-		case p.newPendingTxns <- p.promoted.Copy():
+		case p.newPendingTxns <- copied:
 		default:
+		}
+
+		toAddBatch := make([]diagnostics.PoolChangeBatch, 0)
+		pendingHashes := make([][32]byte, 0)
+		for i := 0; i < len(copied.hashes); i += 32 {
+			var txnHash [32]byte
+			copy(txnHash[:], copied.hashes[i:i+32])
+			pendingHashes = append(pendingHashes, txnHash)
+		}
+
+		if len(pendingHashes) > 0 {
+			toAddBatch = append(toAddBatch, diagnostics.PoolChangeBatch{
+				Pool:    "Pending",
+				Event:   "add",
+				TxnHash: pendingHashes,
+			})
+
+			diagnostics.Send(diagnostics.PoolChangeBatchEvent{
+				Changes: toAddBatch,
+			})
 		}
 	}
 
-	//diagnostics.ProcessedRemoteTxnsUpdate(len(p.unprocessedRemoteTxns.Txns), len(newTxns.Txns), len(p.promoted.Txns))
-
 	p.unprocessedRemoteTxns.Resize(0)
-	p.unprocessedRemoteByHash = map[string]int{}
-
-	poolChanges := make(map[string][][32]byte)
-
-	//fmt.Println("poolChanges, Pending:", len(poolChanges["Pending"]), "BaseFee:", len(poolChanges["BaseFee"]), "Queued:", len(poolChanges["Queued"]), "Dropped:", len(poolChanges["Dropped"]))
-	//fmt.Println("pool -Sizes, Pending:", p.pending.Len(), "BaseFee:", p.baseFee.Len(), "Queued:", p.queued.Len())
-
-	diagnostics.Send(diagnostics.IncomingTxnUpdate{
-		Txns:    diagTxns,
-		Updates: poolChanges,
-	})
+	p.unprocessedRemoteByHash = map[string]int{})
 
 	return nil
 }
@@ -1957,7 +1971,6 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 		tx := p.baseFee.PopBest()
 		announcements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 		p.pending.Add(tx, logger)
-		diagnostics.Send(diagnostics.PendingAddEvent{TxnHash: tx.TxnSlot.IDHash})
 	}
 
 	// Demote worst transactions that do not qualify for base fee pool anymore, to queued sub pool, or discard
@@ -1973,7 +1986,6 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 		if best.minFeeCap.Cmp(uint256.NewInt(pendingBaseFee)) >= 0 {
 			announcements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 			p.pending.Add(tx, logger)
-			diagnostics.Send(diagnostics.PendingAddEvent{TxnHash: tx.TxnSlot.IDHash})
 		} else {
 			p.baseFee.Add(tx, "promote-queued", logger)
 			diagnostics.Send(diagnostics.BaseFeeAddEvent{TxnHash: tx.TxnSlot.IDHash})

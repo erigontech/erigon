@@ -61,14 +61,6 @@ func (ti IncomingTxnUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
-type ProcessedRemoteTxnsUpdate struct {
-	Txns [][32]byte `json:"txns"`
-}
-
-func (ti ProcessedRemoteTxnsUpdate) Type() Type {
-	return TypeOf(ti)
-}
-
 type PendingAddEvent struct {
 	TxnHash [32]byte `json:"txnHash"`
 }
@@ -159,27 +151,6 @@ func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 					MessageType: "txpool",
 					Message:     info,
 				})
-			}
-		}
-	}()
-}
-
-func (d *DiagnosticClient) runOnProcessedRemoteTxnsListener(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[ProcessedRemoteTxnsUpdate](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(ProcessedRemoteTxnsUpdate{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				fmt.Println(info)
-				/*d.Notify(DiagMessages{
-					MessageType: "txpool",
-					Message:     info,
-				})*/
 			}
 		}
 	}()
