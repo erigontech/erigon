@@ -318,7 +318,13 @@ func NewRequestGenerator(target string, logger log.Logger) RequestGenerator {
 func (req *requestGenerator) rpcClient(ctx context.Context) (*rpc.Client, error) {
 	if req.requestClient == nil {
 		var err error
-		req.requestClient, err = rpc.DialContext(ctx, "http://"+req.target, req.logger)
+		var url string
+		if strings.HasPrefix(req.target, "http") {
+			url = req.target
+		} else {
+			url = "http://" + req.target
+		}
+		req.requestClient, err = rpc.DialContext(ctx, url, req.logger)
 		if err != nil {
 			return nil, err
 		}
