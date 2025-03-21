@@ -115,13 +115,14 @@ func (d *DiagnosticClient) runOnPoolChangeBatchEvent(rootCtx context.Context) {
 			case info := <-ch:
 				for _, change := range info.Changes {
 					for _, txnHash := range change.TxnHash {
-						fmt.Println("PendingRemoveEvent")
+						hsss := hex.EncodeToString(txnHash[:])
+						fmt.Println("PendingRemoveEvent", hsss)
 						d.Notify(DiagMessages{
 							MessageType: "txpool",
 							Message: PoolChangeEvent{
 								Pool:    change.Pool,
 								Event:   change.Event,
-								TxnHash: hex.EncodeToString(txnHash[:]),
+								TxnHash: hsss, //hex.EncodeToString(txnHash[:]),
 							},
 						})
 					}
