@@ -526,6 +526,8 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
 
+	isDiagEnabled := diagnostics.TypeOf(diagnostics.IncomingTxnUpdate{}).Enabled()
+
 	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
 	for i, reason := range reasons {
 		txn := newTxns.Txns[i]
@@ -536,29 +538,30 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 			subpool = found.currentSubPool.String()
 		}
 
-		//fmt.Println("reason", reason, "txhash", newTxns.Txns[i].IDHash)
-		diagTxn := diagnostics.DiagTxn{
-			IDHash:              txn.IDHash,
-			SenderID:            txn.SenderID,
-			Nonce:               txn.Nonce,
-			Value:               txn.Value,
-			Gas:                 txn.Gas,
-			FeeCap:              txn.FeeCap,
-			Tip:                 txn.Tip,
-			Size:                txn.Size,
-			Type:                txn.Type,
-			Creation:            txn.Creation,
-			DataLen:             txn.DataLen,
-			AccessListAddrCount: txn.AccessListAddrCount,
-			AccessListStorCount: txn.AccessListStorCount,
-			BlobHashes:          txn.BlobHashes,
-			Blobs:               txn.Blobs,
-			IsLocal:             false,
-			DiscardReason:       reason.String(),
-			Pool:                subpool,
-		}
+		if isDiagEnabled {
+			diagTxn := diagnostics.DiagTxn{
+				IDHash:              txn.IDHash,
+				SenderID:            txn.SenderID,
+				Nonce:               txn.Nonce,
+				Value:               txn.Value,
+				Gas:                 txn.Gas,
+				FeeCap:              txn.FeeCap,
+				Tip:                 txn.Tip,
+				Size:                txn.Size,
+				Type:                txn.Type,
+				Creation:            txn.Creation,
+				DataLen:             txn.DataLen,
+				AccessListAddrCount: txn.AccessListAddrCount,
+				AccessListStorCount: txn.AccessListStorCount,
+				BlobHashes:          txn.BlobHashes,
+				Blobs:               txn.Blobs,
+				IsLocal:             false,
+				DiscardReason:       reason.String(),
+				Pool:                subpool,
+			}
 
-		diagTxns = append(diagTxns, diagTxn)
+			diagTxns = append(diagTxns, diagTxn)
+		}
 
 		if reason == txpoolcfg.Success {
 
@@ -569,10 +572,12 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		}
 	}
 
-	diagnostics.Send(diagnostics.IncomingTxnUpdate{
-		Txns:    diagTxns,
-		Updates: map[string][][32]byte{},
-	})
+	if isDiagEnabled {
+		diagnostics.Send(diagnostics.IncomingTxnUpdate{
+			Txns:    diagTxns,
+			Updates: map[string][][32]byte{},
+		})
+	}
 
 	if p.promoted.Len() > 0 {
 		copied := p.promoted.Copy()
