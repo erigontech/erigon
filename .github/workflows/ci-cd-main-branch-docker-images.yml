@@ -47,13 +47,6 @@ jobs:
           ref: ${{ inputs.checkout_ref == '' && github.ref || inputs.checkout_ref }}
           path: 'erigon'
 
-      - name: Restore cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ./docker-build-cache
-          key: ci-cd-builds-docker-build-cache-branch-${{ github.ref }}
-
       - name: Define variables
         id: def_docker_vars
         ## Idea is:
@@ -92,6 +85,7 @@ jobs:
           echo "keep_images=${keep_images}" >> $GITHUB_OUTPUT
           echo "latest_suffix=${latest_suffix}" >> $GITHUB_OUTPUT
           echo "binaries=${binaries}" >> $GITHUB_OUTPUT
+          echo "week_of_the_year=$(/bin/date -u "+%Y-%W")" >> $GITHUB_OUTPUT
           echo "Debug ${tag_name} ${keep_images} ${latest_suffix} ${binaries}"
 
       - name: Get commit id
@@ -102,6 +96,13 @@ jobs:
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
           cd ..
 
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ./docker-build-cache
+          key: ci-cd-builds-docker-build-cache-year-week-${{ steps.def_docker_vars.outputs.week_of_the_year }}-go.mod-hash:${{ hashFiles('erigon/go.mod') }}
+
       - name: Login to Docker Hub
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
         with:
@@ -109,7 +110,9 @@ jobs:
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3 ## v3.2.0
+        uses: docker/setup-qemu-action@v3
+        with:
+          image: tonistiigi/binfmt:qemu-v8.1.5
 
       - name: Set up Docker Buildx
         id: docker-buildx
