@@ -17,18 +17,39 @@
 package testhelpers
 
 import (
-	"github.com/erigontech/erigon/txnprovider/shutter"
+	"crypto/ecdsa"
+	"math/big"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/core/types"
 )
 
-func Signatures(signers []Keyper, data shutter.DecryptionKeysSignatureData) ([][]byte, error) {
-	sigs := make([][]byte, len(signers))
-	for i, signer := range signers {
-		var err error
-		sigs[i], err = data.Sign(signer.PrivateKey)
-		if err != nil {
-			return nil, err
-		}
+type Bank struct {
+	privKey        *ecdsa.PrivateKey
+	initialBalance *big.Int
+}
+
+func NewBank(initialBalance *big.Int) Bank {
+	privKey, err := crypto.GenerateKey()
+	if err != nil {
+		panic(err)
 	}
 
-	return sigs, nil
+	return Bank{
+		privKey:        privKey,
+		initialBalance: initialBalance,
+	}
+}
+
+func (b Bank) Address() libcommon.Address {
+	return crypto.PubkeyToAddress(b.privKey.PublicKey)
+}
+
+func (b Bank) PrivKey() *ecdsa.PrivateKey {
+	return b.privKey
+}
+
+func (b Bank) RegisterGenesisAlloc(genesis *types.Genesis) {
+	genesis.Alloc[b.Address()] = types.GenesisAccount{Balance: b.initialBalance}
 }
