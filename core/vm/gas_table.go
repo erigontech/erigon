@@ -83,9 +83,11 @@ func memoryCopierGas(stackpos int) gasFunc {
 		if overflow {
 			return 0, ErrGasUintOverflow
 		}
+
 		if words, overflow = math.SafeMul(ToWordSize(words), params.CopyGas); overflow {
 			return 0, ErrGasUintOverflow
 		}
+
 		if gas, overflow = math.SafeAdd(gas, words); overflow {
 			return 0, ErrGasUintOverflow
 		}

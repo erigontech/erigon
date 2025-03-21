@@ -52,7 +52,6 @@ const (
 	AccessListTxType
 	DynamicFeeTxType
 	BlobTxType
-	InitcodeTxType
 	SetCodeTxType
 	AccountAbstractionTxType
 )

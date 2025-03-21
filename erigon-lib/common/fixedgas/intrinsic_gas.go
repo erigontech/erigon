@@ -70,6 +70,7 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessListLen,
 			}
 		}
 
+		// EIP-7623
 		if isPrague {
 			tokenLen := dataLen + 3*nz
 			dataGas, overflow := math.SafeMul(tokenLen, TxTotalCostFloorPerToken)

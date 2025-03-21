@@ -338,18 +338,7 @@ func opCallDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	// These values are checked for overflow during gas cost calculation
 	memOffset64 := memOffset.Uint64()
 	length64 := length.Uint64()
-	src := uint64(len(scope.Contract.Input))
-	if src >= dataOffset64 {
-		src = dataOffset64
-	}
-	copySize := min(length64, uint64(len(scope.Contract.Input))-src)
-	if copySize > 0 {
-		scope.Memory.Set(memOffset64, copySize, scope.Contract.Input[src:src+copySize])
-	}
-	if length64-copySize > 0 {
-		scope.Memory.SetZero(memOffset64+copySize, length64-copySize)
-	}
-	// scope.Memory.Set(memOffset64, length64, getData(scope.Contract.Input, dataOffset64, length64))
+	scope.Memory.Set(memOffset64, length64, getData(scope.Contract.Input, dataOffset64, length64))
 	return nil, nil
 }
 
