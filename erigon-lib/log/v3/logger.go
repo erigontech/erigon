@@ -13,6 +13,9 @@ const lvlKey = "lvl"
 const msgKey = "msg"
 const errorKey = "LOG15_ERROR"
 
+const maxPrefixSuffixSize = 4096
+const maxCtxSize = 256
+
 // Lvl is a type for predefined log levels.
 type Lvl int
 
@@ -138,7 +141,15 @@ func (l *logger) New(ctx ...interface{}) Logger {
 
 func newContext(prefix []interface{}, suffix []interface{}) []interface{} {
 	normalizedSuffix := normalize(suffix)
-	newCtx := make([]interface{}, len(prefix)+len(normalizedSuffix))
+
+	length := len(prefix) + len(normalizedSuffix)
+	if length > maxPrefixSuffixSize {
+		excess := length - maxPrefixSuffixSize
+		normalizedSuffix = normalizedSuffix[:len(normalizedSuffix)-excess]
+		length = maxPrefixSuffixSize
+	}
+
+	newCtx := make([]interface{}, length)
 	n := copy(newCtx, prefix)
 	copy(newCtx[n:], normalizedSuffix)
 	return newCtx
@@ -220,10 +231,16 @@ type Lazy struct {
 type Ctx map[string]interface{}
 
 func (c Ctx) toArray() []interface{} {
-	arr := make([]interface{}, len(c)*2)
+	ctxSize := min(len(c), maxCtxSize)
+	arrSize := ctxSize * 2
+	arr := make([]interface{}, arrSize)
 
 	i := 0
 	for k, v := range c {
+		if i >= arrSize {
+			break
+		}
+
 		arr[i] = k
 		arr[i+1] = v
 		i += 2
