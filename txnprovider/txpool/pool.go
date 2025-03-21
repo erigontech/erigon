@@ -2500,8 +2500,10 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 }
 
 func sendChangeBatchEventToDiagnostics(pool string, event string, txnHashes [][32]byte) {
-	//Not sending empty events
-	if len(txnHashes) == 0 {
+	//Not sending empty events or diagnostics disabled
+	isDiagEnabled := diagnostics.TypeOf(diagnostics.PoolChangeBatchEvent{}).Enabled()
+	if len(txnHashes) == 0 || !isDiagEnabled {
+		fmt.Println("Not sending empty events or diagnostics disabled")
 		return
 	}
 
