@@ -79,6 +79,9 @@ but can be controlled via the following flags:
 To transplant the cache between datadirs, the `l1cache` dir can be copied. To use an upstream cdk-erigon node's L1 cache, the zkevm.l1-cache-enabled can be set to false, and the node provided the endpoint of the cache,
 instead of a regular L1 URL. e.g. `zkevm.l1-rpc-url=http://myerigonnode:6969?endpoint=http%3A%2F%2Fsepolia-rpc.com&chainid=2440`. NB: this node must be syncing the same network for any benefit!
 
+### Witness Cache
+The node can cache witnesses for batches to speed up the RPC endpoint `zkevm_getBatchWitness`. To read more on how to enable this feature, see the [Witness Cache Flags](docs/witness-cache.md) section.
+
 ## Sequencer
 
 Enable Sequencer: `CDK_ERIGON_SEQUENCER=1 ./build/bin/cdk-erigon <flags>`
