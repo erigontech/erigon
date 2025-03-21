@@ -18,6 +18,7 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -26,9 +27,9 @@ import (
 )
 
 type PoolChangeEvent struct {
-	Pool    string   `json:"pool"`
-	Event   string   `json:"event"`
-	TxnHash [32]byte `json:"txnHash"`
+	Pool    string `json:"pool"`
+	Event   string `json:"event"`
+	TxnHash string `json:"txnHash"`
 }
 
 type DiagTxn struct {
@@ -120,7 +121,7 @@ func (d *DiagnosticClient) runOnPoolChangeBatchEvent(rootCtx context.Context) {
 							Message: PoolChangeEvent{
 								Pool:    change.Pool,
 								Event:   change.Event,
-								TxnHash: txnHash,
+								TxnHash: hex.EncodeToString(txnHash[:]),
 							},
 						})
 					}
