@@ -12,6 +12,7 @@ import (
 type RootNum = ae.RootNum
 type Num = ae.Num
 type Id = ae.Id
+type EncToBytesI = ae.EncToBytesI
 type AppendableId = ae.AppendableId
 type Bytes = ae.Bytes
 

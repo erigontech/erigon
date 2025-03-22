@@ -22,13 +22,13 @@ func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to RootNum,
 		return err
 	}
 	defer tx.Rollback()
-	_entityIdFrom, err := sf.rel.RootNum2Num(from, tx)
+	_entityIdFrom, err := sf.rel.RootNum2Id(from, tx)
 	if err != nil {
 		return err
 	}
 	entityIdFrom := hexutil.EncodeTs(uint64(_entityIdFrom))
 
-	_entityIdTo, err := sf.rel.RootNum2Num(to, tx)
+	_entityIdTo, err := sf.rel.RootNum2Id(to, tx)
 	if err != nil {
 		return err
 	}
