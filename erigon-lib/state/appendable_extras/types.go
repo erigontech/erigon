@@ -13,6 +13,10 @@ type RootNum uint64
 
 type Bytes = []byte
 
+type EncToBytesI interface {
+	EncToBytes(enc8Bytes bool) []byte
+}
+
 func (n Num) Step(a AppendableId) uint64 {
 	return step(n, a)
 }

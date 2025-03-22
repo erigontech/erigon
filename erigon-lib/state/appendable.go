@@ -14,7 +14,7 @@ import (
 const MaxUint64 = ^uint64(0)
 
 type RootRelationI interface {
-	RootNum2Num(from RootNum, tx kv.Tx) (Num, error)
+	RootNum2Id(from RootNum, tx kv.Tx) (Id, error)
 }
 
 type BufferFactory interface {
@@ -34,8 +34,8 @@ type Appendable[T EntityTxI] struct {
 	ms      *markedStructure
 	valsTbl string
 
-	ts4Bytes        bool
-	pruneFrom       Num // should this be rootnum? Num is fine for now.
+	ts4Bytes        bool // caplin entities are encoded as 4 bytes
+	pruneFrom       Num  // should this be rootnum? Num is fine for now.
 	beginFilesRoGen func() T
 
 	rel RootRelationI
@@ -169,7 +169,7 @@ func (a *Appendable[T]) PruneFrom() Num {
 	return a.pruneFrom
 }
 
-func (a *Appendable[T]) encTs(ts Num) []byte {
+func (a *Appendable[T]) encTs(ts ae.EncToBytesI) []byte {
 	return ts.EncToBytes(!a.ts4Bytes)
 }
 
@@ -233,7 +233,7 @@ func (m *MarkedTx) Put(num Num, hash []byte, val Bytes, tx kv.RwTx) error {
 
 func (m *MarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 	a := m.ap
-	efrom, err := a.rel.RootNum2Num(from, tx)
+	efrom, err := a.rel.RootNum2Id(from, tx) // for marked, id==num
 	if err != nil {
 		return err
 	}
@@ -245,7 +245,7 @@ func (m *MarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	a := m.ap
 	fromKeyPrefix := a.encTs(a.pruneFrom)
-	eto, err := a.rel.RootNum2Num(to, tx)
+	eto, err := a.rel.RootNum2Id(to, tx)
 	if err != nil {
 		return 0, err
 	}
@@ -293,7 +293,7 @@ func (m *UnmarkedTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
 
 func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 	ap := m.ap
-	fromId, err := ap.rel.RootNum2Num(from, tx)
+	fromId, err := ap.rel.RootNum2Id(from, tx)
 	if err != nil {
 		return err
 	}
@@ -303,7 +303,7 @@ func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
 
 func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
-	toId, err := ap.rel.RootNum2Num(to, tx)
+	toId, err := ap.rel.RootNum2Id(to, tx)
 	if err != nil {
 		return 0, err
 	}
@@ -355,7 +355,7 @@ func (m *AppendingTx) ResetSequence(value uint64, tx kv.RwTx) error {
 
 func (m *AppendingTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 	ap := m.ap
-	fromId, err := ap.rel.RootNum2Num(from, tx)
+	fromId, err := ap.rel.RootNum2Id(from, tx)
 	if err != nil {
 		return err
 	}
@@ -365,7 +365,7 @@ func (m *AppendingTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) erro
 
 func (m *AppendingTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
-	toId, err := ap.rel.RootNum2Num(to, tx)
+	toId, err := ap.rel.RootNum2Id(to, tx)
 	if err != nil {
 		return 0, err
 	}
@@ -410,7 +410,7 @@ func (m *BufferedTx) Flush(ctx context.Context, tx kv.RwTx) error {
 
 func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
-	toId, err := ap.rel.RootNum2Num(to, tx)
+	toId, err := ap.rel.RootNum2Id(to, tx)
 	if err != nil {
 		return 0, err
 	}
