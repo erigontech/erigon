@@ -216,11 +216,8 @@ func validateMaxStackHeight(eofCode []byte, codeIdx uint16, header *eofHeader, o
 		stackHeights[i] = stackHeightRange{min: -1, max: -1}
 	}
 	stackHeights[0] = stackHeightRange{min: int(thisInputs), max: int(thisInputs)}
-	fmt.Println("validateMaxStackHeight code: ", code)
 	for pos := 0; pos < len(code); {
-		fmt.Println("pos: ", pos)
 		op := OpCode(code[pos])
-		fmt.Println("op: ", op)
 		stackHeightRequired := jt[op].numPop // how many stack items required by the instruction
 		stackHeightChange := 0
 		if stackHeightRequired != jt[op].numPush {
@@ -283,10 +280,6 @@ func validateMaxStackHeight(eofCode []byte, codeIdx uint16, header *eofHeader, o
 			stackHeightRequired = n + m + 1
 		}
 
-		fmt.Println("stackHeightChange", stackHeightChange)
-		fmt.Println("stackHeight.min", stackHeight.min)
-		fmt.Println("stackHeight.max", stackHeight.max)
-		fmt.Println("stackHeightRequired", stackHeightRequired)
 		if stackHeight.min < stackHeightRequired {
 			return 0, fmt.Errorf("EOFException.STACK_UNDERFLOW")
 		}
@@ -296,7 +289,7 @@ func validateMaxStackHeight(eofCode []byte, codeIdx uint16, header *eofHeader, o
 		if op == RJUMPV {
 			immSize = 1 + (int(code[pos+1])+1)*REL_OFFSET_SIZE // (size of int16)
 		}
-		fmt.Println("immSize", immSize)
+
 		next := pos + immSize + 1 // offset to the next instruction (may be invalid)
 		// check validity of next instuction, skip RJUMP and termination instructions
 		if !isTerminal(op) && op != RJUMP {

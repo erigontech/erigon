@@ -88,6 +88,9 @@ type ScopeContext struct {
 	Memory   *Memory
 	Stack    *stack.Stack
 	Contract *Contract
+
+	_eofHeader   *eofHeader
+	_returnStack []uint64
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports

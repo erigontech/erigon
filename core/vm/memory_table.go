@@ -124,3 +124,26 @@ func memoryRevert(stack *stack.Stack) (uint64, bool) {
 func memoryLog(stack *stack.Stack) (uint64, bool) {
 	return calcMemSize64(stack.Back(0), stack.Back(1))
 }
+
+func memoryDataCopy(stack *stack.Stack) (uint64, bool) {
+	return calcMemSize64(stack.Back(0), stack.Back(2))
+}
+
+func memoryExtCall(stack *stack.Stack) (uint64, bool) {
+	x, overflow := calcMemSize64(stack.Back(1), stack.Back(2))
+	if overflow {
+		return 0, true
+	}
+	return x, false
+}
+
+func memoryEOFCreate(stack *stack.Stack) (uint64, bool) {
+	return calcMemSize64(stack.Back(2), stack.Back(3))
+}
+func memoryReturnContract(stack *stack.Stack) (uint64, bool) {
+	return calcMemSize64(stack.Back(0), stack.Back(1))
+}
+
+func memoryZeroCost(stack *stack.Stack) (uint64, bool) {
+	return 0, false
+}

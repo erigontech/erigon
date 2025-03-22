@@ -338,6 +338,8 @@ func enableEOFv1(jt *JumpTable) {
 	// add them to `opCodeToString` as well
 	undefined := &operation{
 		execute:     opUndefined,
+		dynamicGas:  gasZeroCost,
+		memorySize:  memoryZeroCost,
 		constantGas: 0,
 		numPop:      0,
 		numPush:     0,
@@ -364,130 +366,142 @@ func enableEOFv1(jt *JumpTable) {
 	jt[SELFDESTRUCT] = undefined // 0xff
 
 	jt[RJUMP] = &operation{
-		execute:       nil,
+		execute:       opRjump,
 		constantGas:   GasQuickStep,
 		immediateSize: 2,
 	}
 	jt[RJUMPI] = &operation{
-		execute:       nil,
+		execute:       opRjumpi,
 		constantGas:   GasSwiftStep,
 		numPop:        1,
 		immediateSize: 2,
 	}
 	jt[RJUMPV] = &operation{
-		execute:       nil,
+		execute:       opRjumpv,
 		constantGas:   GasSwiftStep,
 		numPop:        1,
 		immediateSize: 1,
 	}
 	jt[CALLF] = &operation{
-		execute:       nil,
+		execute:       opCallf,
 		constantGas:   GasFastStep,
 		immediateSize: 2,
 	}
 	jt[RETF] = &operation{
-		execute:     nil,
+		execute:     opRetf,
 		constantGas: GasFastestStep,
 		terminal:    true,
 	}
 	jt[JUMPF] = &operation{
-		execute:       nil,
+		execute:       opJumpf,
 		constantGas:   GasFastStep,
 		terminal:      true,
 		immediateSize: 2,
 	}
 	jt[DUPN] = &operation{
-		execute:       nil,
+		execute:       opDupN,
 		constantGas:   GasFastestStep,
 		numPop:        0,
 		numPush:       1,
 		immediateSize: 1,
 	}
 	jt[SWAPN] = &operation{
-		execute:       nil,
+		execute:       opSwapN,
 		constantGas:   GasFastestStep,
 		immediateSize: 1,
 	}
 	jt[EXCHANGE] = &operation{
-		execute:       nil,
+		execute:       opExchange,
 		constantGas:   GasFastestStep,
 		immediateSize: 1,
 	}
 	jt[DATALOAD] = &operation{
-		execute:     nil,
+		execute:     opDataLoad,
 		constantGas: GasSwiftStep,
 		numPop:      1,
 		numPush:     1,
 	}
 	jt[DATALOADN] = &operation{
-		execute:       nil,
+		execute:       opDataLoadN,
 		constantGas:   GasFastestStep,
 		numPush:       1,
 		immediateSize: 2,
 	}
 	jt[DATASIZE] = &operation{
-		execute:     nil,
+		execute:     opDataSize,
 		constantGas: GasQuickStep,
 		numPush:     1,
 	}
 	jt[DATACOPY] = &operation{
-		execute:     nil,
+		execute:     opDataCopy,
 		constantGas: GasFastestStep,
-		dynamicGas:  nil,
+		dynamicGas:  gasDataCopy,
 		numPop:      3,
-		memorySize:  nil,
+		memorySize:  memoryDataCopy,
 	}
 	jt[EOFCREATE] = &operation{
-		execute:       nil,
+		execute:       opEOFCreate,
 		constantGas:   params.CreateGas,
-		dynamicGas:    nil,
+		dynamicGas:    gasEOFCreate,
 		numPop:        4,
 		numPush:       1,
 		immediateSize: 1,
-		memorySize:    nil,
+		memorySize:    memoryEOFCreate,
 	}
 	jt[RETURNCODE] = &operation{
-		execute:       nil,
+		execute:       opReturnCode,
 		dynamicGas:    pureMemoryGascost,
 		numPop:        2,
 		immediateSize: 1,
-		memorySize:    nil,
+		memorySize:    memoryReturnContract,
 		terminal:      true,
 	}
 	jt[RETURNDATALOAD] = &operation{
-		execute:     nil,
+		execute:     opReturnDataLoad,
 		constantGas: GasFastestStep,
 		numPop:      1,
 		numPush:     1,
 	}
 	jt[EXTCALL] = &operation{
-		execute:     nil,
+		execute:     opExtCall,
 		constantGas: 100,
-		dynamicGas:  nil,
+		dynamicGas:  gasExtCall,
 		numPop:      4,
 		numPush:     1,
-		memorySize:  nil,
+		memorySize:  memoryExtCall,
 	}
 	jt[EXTDELEGATECALL] = &operation{
-		execute:     nil,
+		execute:     opExtDelegateCall,
 		constantGas: 100,
-		dynamicGas:  nil,
+		dynamicGas:  gasExtDelegateCall,
 		numPop:      3,
 		numPush:     1,
-		memorySize:  nil,
+		memorySize:  memoryExtCall,
 	}
 	jt[EXTSTATICCALL] = &operation{
-		execute:     nil,
+		execute:     opExtStaticCall,
 		constantGas: 100,
-		dynamicGas:  nil,
+		dynamicGas:  gasExtStaticCall,
 		numPop:      3,
 		numPush:     1,
-		memorySize:  nil,
+		memorySize:  memoryExtCall,
 	}
 
 	immSize := uint8(1)
 	for op := 0x60; op < 0x60+32; op++ {
 		jt[op].immediateSize = immSize
 		immSize++
+	}
+
+	for op := 0; op < 256; op++ {
+		if jt[op] == nil {
+			jt[op] = undefined
+		}
+		if jt[op].dynamicGas == nil {
+			jt[op].dynamicGas = gasZeroCost
+		}
+		if jt[op].memorySize == nil {
+			jt[op].memorySize = memoryZeroCost
+		}
 	}
 }

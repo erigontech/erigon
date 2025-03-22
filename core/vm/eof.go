@@ -1,7 +1,12 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
+)
+
+var (
+	ErrInvalidEOFInitcode = errors.New("invalid eof initcode")
 )
 
 const (
@@ -52,7 +57,7 @@ const ( // EOFv1 Opcodes
 )
 
 func isEOFcode(code []byte) bool {
-	return code[0] == 0xEF && code[1] == 0x00
+	return len(code) >= 2 && code[0] == 0xEF && code[1] == 0x00
 }
 
 func isSupportedVersion(version byte) bool {
@@ -67,13 +72,12 @@ type eofHeader struct {
 	containerSizes   []uint16
 	containerOffsets []uint16
 	dataSize         uint16
+	dataSizePos      uint16
 	dataOffset       uint16
 }
 
 func ParseEOFHeader(eofCode []byte, jt *JumpTable, containerKind byte, validate bool, depth int) (*eofHeader, error) {
 
-	// TODO: type section and code section, code section and data section or container section and data section overlap?
-	fmt.Println("-------------------- ParseEOFHeader: ")
 	header := &eofHeader{}
 	if len(eofCode) < 14 {
 		return nil, fmt.Errorf("EOFException.CODE_TOO_SHORT")
@@ -173,12 +177,16 @@ func ParseEOFHeader(eofCode []byte, jt *JumpTable, containerKind byte, validate 
 	if eofCode[offset] != kindData {
 		return nil, fmt.Errorf("EOFException.MISSING_DATA_SECTION|EOFException.UNEXPECTED_HEADER_KIND")
 	}
+
 	offset++
 	if offset+1 >= uint16(len(eofCode)) {
 		return nil, fmt.Errorf("EOFException.INCOMPLETE_SECTION_SIZE")
 	}
+
+	header.dataSizePos = offset
 	header.dataSize = uint16(eofCode[offset])<<8 | uint16(eofCode[offset+1])
 	offset += 2
+
 	if offset >= uint16(len(eofCode)) {
 		return nil, fmt.Errorf("EOFException.INCOMPLETE_SECTION_SIZE")
 	}
@@ -189,11 +197,6 @@ func ParseEOFHeader(eofCode []byte, jt *JumpTable, containerKind byte, validate 
 
 	header.typesOffset = offset
 
-	// check if remaining bytes are enough for the body
-	if err := validateBody(eofCode, header, containerKind, depth); err != nil {
-		return nil, err
-	}
-
 	offset += typesSizes
 
 	for i := uint16(0); i < numCodeSections; i++ {
@@ -201,7 +204,7 @@ func ParseEOFHeader(eofCode []byte, jt *JumpTable, containerKind byte, validate 
 		offset += header.codeSizes[i]
 	}
 
-	if len(header.containerSizes) > 0 { // do we need this if check?
+	if len(header.containerSizes) > 0 { // do we need this check?
 		for i := range header.containerSizes {
 			header.containerOffsets = append(header.containerOffsets, offset)
 			offset += header.containerSizes[i]
@@ -214,6 +217,10 @@ func ParseEOFHeader(eofCode []byte, jt *JumpTable, containerKind byte, validate 
 		referencedByReturnCode := make([]bool, len(header.containerSizes))
 
 		// validate body
+		// check if remaining bytes are enough for the body
+		if err := validateBody(eofCode, header, containerKind, depth); err != nil {
+			return nil, err
+		}
 
 		// validate types
 		if offset, err = validateTypes(eofCode, header); err != nil {
@@ -230,17 +237,9 @@ func ParseEOFHeader(eofCode []byte, jt *JumpTable, containerKind byte, validate 
 
 		// validate containers
 		for i := range header.containerSizes {
-			if err = validateContainer(eofCode, header, offset, i, referencedByEofCreate[i], referencedByReturnCode[i], jt, depth); err != nil {
+			if _, err = validateContainer(eofCode, header, offset, i, referencedByEofCreate[i], referencedByReturnCode[i], jt, depth); err != nil {
 				return nil, err
 			}
-			offset += header.containerSizes[i]
-		}
-	} else {
-		offset += typesSizes
-		for i := range header.codeSizes {
-			offset += header.codeSizes[i]
-		}
-		for i := range header.containerSizes {
 			offset += header.containerSizes[i]
 		}
 	}
@@ -262,28 +261,13 @@ func validateBody(code []byte, header *eofHeader, containerKind byte, depth int)
 	if offset > len(code) {
 		return fmt.Errorf("EOFException.INVALID_SECTION_BODIES_SIZE")
 	}
-	remaining := len(code) - offset
-	fmt.Println("code size:", len(code))
-	fmt.Println("offset:", offset)
-	fmt.Println("remaining:", remaining)
-
-	// if offset < remaining-int(header.dataSize) {
-	// 	fmt.Println("h2")
-	// 	return fmt.Errorf("EOFException.INVALID_SECTION_BODIES_SIZE")
-	// }
-
-	dataOffset := offset
-	fmt.Println("DATA SIZE: ", header.dataSize)
-	// total := bytesRead + bytesRemaining
-	// dataOffset := bytesRead + expectedRemaining
-	if dataOffset == len(code) &&
+	// offset here is data offset
+	if offset == len(code) &&
 		header.dataSize > 0 && depth == 0 /* top level container */ {
-		fmt.Println("THIS 1")
 		return fmt.Errorf("EOFException.TOPLEVEL_CONTAINER_TRUNCATED")
 	}
-	if dataOffset+int(header.dataSize) > len(code) {
+	if offset+int(header.dataSize) > len(code) {
 		if depth == 0 {
-			fmt.Println("THIS 2")
 			return fmt.Errorf("EOFException.TOPLEVEL_CONTAINER_TRUNCATED")
 		}
 		if containerKind == initcode {
@@ -291,13 +275,9 @@ func validateBody(code []byte, header *eofHeader, containerKind byte, depth int)
 		}
 	}
 
-	if dataOffset+int(header.dataSize) < len(code) {
+	if offset+int(header.dataSize) < len(code) {
 		return fmt.Errorf("EOFException.INVALID_SECTION_BODIES_SIZE")
 	}
-
-	// if dataOffset+int64(header.dataLength) < total {
-	// 	return fmt.Errorf("%w: %d + %d > %d", ErrInvalidSectionsSize, dataOffset, header.dataLength, total)
-	// }
 
 	return nil
 }
@@ -397,8 +377,6 @@ func validateCode(eofCode []byte, header *eofHeader, offset uint16, containerKin
 		} else {
 			typesOffset := getTypeSectionOffset(codeIdx, header)
 			sectionMaxStack := int(eofCode[typesOffset+2])<<8 | int(eofCode[typesOffset+3])
-			fmt.Println("maxStackHeight:", maxStackHeight)
-			fmt.Println("sectionMaxStack:", sectionMaxStack)
 			if maxStackHeight != sectionMaxStack {
 				return fmt.Errorf("EOFException.INVALID_MAX_STACK_HEIGHT")
 			}
@@ -413,26 +391,27 @@ func validateCode(eofCode []byte, header *eofHeader, offset uint16, containerKin
 	return nil
 }
 
-func validateContainer(eofCode []byte, header *eofHeader, offset uint16, containerIdx int, eofcreate, returnCode bool, jt *JumpTable, depth int) error {
+func validateContainer(eofCode []byte, header *eofHeader, offset uint16, containerIdx int, eofcreate, returnCode bool, jt *JumpTable, depth int) (*eofHeader, error) {
 
 	container := eofCode[offset : offset+header.containerSizes[containerIdx]]
 
 	if eofcreate && returnCode {
-		return fmt.Errorf("EOF container referenced by both eofcreate and returncode")
+		return nil, fmt.Errorf("EOF container referenced by both eofcreate and returncode")
 	}
 	if !eofcreate && !returnCode {
-		return fmt.Errorf("EOFException.ORPHAN_SUBCONTAINER")
+		return nil, fmt.Errorf("EOFException.ORPHAN_SUBCONTAINER")
 	}
 	var err error
+	var h *eofHeader
 	if eofcreate {
 		_, err = ParseEOFHeader(container, jt, initcode, true, depth+1)
 	} else {
 		_, err = ParseEOFHeader(container, jt, runtime, true, depth+1)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return h, nil
 }
 
 // given code 0xef00010100100200040008000a00040006040000000080000200000001008000000000000260006000e3000100600035e10001e4e50002e30003006001600055e4

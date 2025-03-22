@@ -133,6 +133,10 @@ func CreateAddress2(b common.Address, salt [32]byte, inithash []byte) common.Add
 	return common.BytesToAddress(Keccak256([]byte{0xff}, b.Bytes(), salt[:], inithash)[12:])
 }
 
+func CreateEOFAddress(b common.Address, salt [32]byte, initcode []byte) common.Address {
+	return common.BytesToAddress(Keccak256([]byte{0xff}, b.Bytes(), salt[:], Keccak256(initcode))[12:])
+}
+
 // ToECDSA creates a private key with the given D value.
 func ToECDSA(d []byte) (*ecdsa.PrivateKey, error) {
 	return toECDSA(d, true)

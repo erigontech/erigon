@@ -101,6 +101,7 @@ var (
 	gasMcopy          = memoryCopierGas(2)
 	gasExtCodeCopy    = memoryCopierGas(3)
 	gasReturnDataCopy = memoryCopierGas(2)
+	gasDataCopy       = memoryCopierGas(2)
 )
 
 func gasSStore(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
@@ -539,4 +540,122 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 		evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
 	}
 	return gas, nil
+}
+
+func gasExtCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	var (
+		gas            uint64
+		transfersValue = !stack.Back(3).IsZero()
+		address        = libcommon.Address(stack.Back(0).Bytes20())
+	)
+
+	addrMod := evm.IntraBlockState().AddAddressToAccessList(address)
+	if addrMod {
+		gas += params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
+	}
+
+	if transfersValue {
+		if empty, err := evm.IntraBlockState().Empty(address); err != nil {
+			return 0, ErrIntraBlockStateFailed
+		} else if empty {
+			gas += params.CallNewAccountGas
+		}
+		gas += params.CallValueTransferGas
+	}
+	memoryGas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+	var overflow bool
+	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
+		return 0, ErrGasUintOverflow
+	}
+
+	evm.callGasTemp, err = extCallGas(contract.Gas, gas)
+	if err != nil {
+		return 0, err
+	}
+	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
+		return 0, ErrGasUintOverflow
+	}
+
+	return gas, nil
+}
+
+func gasExtDelegateCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	var (
+		gas     uint64
+		address = libcommon.Address(stack.Back(0).Bytes20())
+	)
+
+	addrMod := evm.IntraBlockState().AddAddressToAccessList(address)
+	if addrMod {
+		gas += params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
+	}
+
+	memoryGas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+	var overflow bool
+	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
+		return 0, ErrGasUintOverflow
+	}
+
+	evm.callGasTemp, err = extCallGas(contract.Gas, gas)
+	if err != nil {
+		return 0, err
+	}
+	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
+		return 0, ErrGasUintOverflow
+	}
+
+	return gas, nil
+}
+
+func gasExtStaticCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	var (
+		gas     uint64
+		address = libcommon.Address(stack.Back(0).Bytes20())
+	)
+	addrMod := evm.IntraBlockState().AddAddressToAccessList(address)
+	if addrMod {
+		gas += params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
+	}
+
+	memoryGas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+	var overflow bool
+	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
+		return 0, ErrGasUintOverflow
+	}
+
+	evm.callGasTemp, err = extCallGas(contract.Gas, gas)
+	if err != nil {
+		return 0, err
+	}
+	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
+		return 0, ErrGasUintOverflow
+	}
+
+	return gas, nil
+}
+
+func gasEOFCreate(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	// var gas uint64
+	gas, err := memoryGasCost(mem, memorySize)
+	if err != nil {
+		return 0, err
+	}
+	// var overflow bool
+	// if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
+	// 	return 0, ErrGasUintOverflow
+	// }
+	return gas, nil
+}
+
+func gasZeroCost(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	return 0, nil
 }
