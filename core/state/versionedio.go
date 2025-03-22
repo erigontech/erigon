@@ -229,8 +229,7 @@ func (vr *versionedStateReader) ReadAccountData(address libcommon.Address) (*acc
 
 func versionedUpdate[T any](versionMap *VersionMap, addr libcommon.Address, path AccountPath, key libcommon.Hash, txIndex int) (T, bool) {
 	if res := versionMap.Read(addr, path, key, txIndex); res.Status() == MVReadResultDone {
-		v, ok := res.Value().(T)
-		return v, ok
+		return res.Value().(T), true
 	}
 	var v T
 	return v, false
