@@ -317,8 +317,7 @@ type rebuiltCommitment struct {
 
 // SeekCommitment lookups latest available commitment and sets it as current
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
-	aggTx := tx.(HasAggTx).AggTx().(*AggregatorRoTx)
-	bn, txn, ok, err := sd.sdCtx.SeekCommitment(tx, aggTx.d[kv.CommitmentDomain], 0, math.MaxUint64)
+	bn, txn, ok, err := sd.sdCtx.SeekCommitment(tx, sd.aggTx.d[kv.CommitmentDomain], 0, math.MaxUint64)
 	if err != nil {
 		return 0, err
 	}
