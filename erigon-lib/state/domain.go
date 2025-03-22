@@ -1752,14 +1752,14 @@ func (dt *DomainRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, fromKey, toKey []
 	if err != nil {
 		return nil, err
 	}
-	lastestStateIt, err := dt.RangeLatest(tx, fromKey, toKey, kv.Unlim)
+	lastestStateIt, err := dt.DebugRangeLatest(tx, fromKey, toKey, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
 	return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
 }
 
-func (dt *DomainRoTx) RangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
+func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
 	s := &DomainLatestIterFile{
 		from: fromKey, to: toKey, limit: limit,
 		orderAscend: order.Asc,
