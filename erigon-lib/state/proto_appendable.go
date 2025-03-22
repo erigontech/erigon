@@ -151,9 +151,10 @@ func (a *ProtoAppendable) Close() {
 // proto_appendable_rotx
 
 type ProtoAppendableTx struct {
-	id    AppendableId
-	files visibleFiles
-	a     *ProtoAppendable
+	id      AppendableId
+	files   visibleFiles
+	a       *ProtoAppendable
+	noFiles bool
 
 	readers []*recsplit.IndexReader
 }
@@ -174,9 +175,10 @@ func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableTx {
 
 func (a *ProtoAppendable) BeginNoFilesRo() *ProtoAppendableTx {
 	return &ProtoAppendableTx{
-		id:    a.a,
-		files: nil,
-		a:     a,
+		id:      a.a,
+		files:   nil,
+		a:       a,
+		noFiles: true,
 	}
 }
 
@@ -204,6 +206,7 @@ func (a *ProtoAppendableTx) Close() {
 }
 
 func (a *ProtoAppendableTx) StatelessIdxReader(i int) *recsplit.IndexReader {
+	a.NoFilesCheck()
 	if a.readers == nil {
 		a.readers = make([]*recsplit.IndexReader, len(a.files))
 	}
@@ -244,6 +247,7 @@ func (a *ProtoAppendableTx) Garbage(merged *filesItem) (outs []*filesItem) {
 }
 
 func (a *ProtoAppendableTx) VisibleFilesMaxRootNum() RootNum {
+	a.NoFilesCheck()
 	lasti := len(a.files) - 1
 	if lasti < 0 {
 		return 0
@@ -253,6 +257,7 @@ func (a *ProtoAppendableTx) VisibleFilesMaxRootNum() RootNum {
 }
 
 func (a *ProtoAppendableTx) VisibleFilesMaxNum() Num {
+	a.NoFilesCheck()
 	lasti := len(a.files) - 1
 	if lasti < 0 {
 		return 0
@@ -262,6 +267,7 @@ func (a *ProtoAppendableTx) VisibleFilesMaxNum() Num {
 }
 
 func (a *ProtoAppendableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, err error) {
+	a.NoFilesCheck()
 	ap := a.a
 	lastNum := a.VisibleFilesMaxNum()
 	if entityNum < lastNum && ap.builders[0].AllowsOrdinalLookupByNum() {
@@ -280,6 +286,7 @@ func (a *ProtoAppendableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, er
 }
 
 func (a *ProtoAppendableTx) Files() []FilesItem {
+	a.NoFilesCheck()
 	v := a.a._visible
 	fi := make([]FilesItem, len(v))
 	for i, f := range v {
@@ -289,6 +296,7 @@ func (a *ProtoAppendableTx) Files() []FilesItem {
 }
 
 func (a *ProtoAppendableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error) {
+	a.NoFilesCheck()
 	if idx >= len(a.files) {
 		return nil, false, fmt.Errorf("index out of range: %d >= %d", idx, len(a.files))
 	}
@@ -309,5 +317,10 @@ func (a *ProtoAppendableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found 
 	}
 	ap := a.a
 	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, ap._visible[idx].src.decompressor.FileName1)
+}
 
+func (a *ProtoAppendableTx) NoFilesCheck() {
+	if a.noFiles {
+		panic("snapshot read attempt on noFiles mode")
+	}
 }

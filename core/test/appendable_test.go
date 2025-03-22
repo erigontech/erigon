@@ -61,7 +61,7 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	return dirs, db, logger
 }
 
-func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (EntityId, *state.Appendable[state.AppendableDbLessTxI, state.MarkedTxI]) {
+func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (EntityId, *state.Appendable[state.MarkedTxI]) {
 	headerId := registerEntity(dir, "headers")
 	require.Equal(t, ae.AppendableId(0), headerId)
 
@@ -104,7 +104,7 @@ func TestMarked_PutToDb(t *testing.T) {
 	dir, db, log := setup(t)
 	_, ma := setupHeader(t, log, dir, db)
 
-	ma_tx := ma.BeginFilesTx().(state.MarkedTxI)
+	ma_tx := ma.BeginFilesTx()
 	defer ma_tx.Close()
 	rwtx, err := db.BeginRw(context.Background())
 	defer rwtx.Rollback()
@@ -143,7 +143,7 @@ func TestPrune(t *testing.T) {
 			cfg := headerId.SnapshotConfig()
 			entries_count = cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 
-			ma_tx := ma.BeginFilesTx().(state.MarkedTxI)
+			ma_tx := ma.BeginFilesTx()
 			defer ma_tx.Close()
 			rwtx, err := db.BeginRw(ctx)
 			defer rwtx.Rollback()
@@ -182,7 +182,7 @@ func TestPrune(t *testing.T) {
 			require.Equal(t, int64(del), max(0, min(int64(pruneTo), int64(entries_count))-cfgPruneFrom))
 
 			require.NoError(t, rwtx.Commit())
-			ma_tx = ma.BeginFilesTx().(state.MarkedTxI)
+			ma_tx = ma.BeginFilesTx()
 			defer ma_tx.Close()
 			rwtx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
@@ -211,7 +211,7 @@ func TestBuildFiles(t *testing.T) {
 	headerId, ma := setupHeader(t, log, dir, db)
 	ctx := context.Background()
 
-	ma_tx := ma.BeginFilesTx().(state.MarkedTxI)
+	ma_tx := ma.BeginFilesTx()
 	defer ma_tx.Close()
 	rwtx, err := db.BeginRw(ctx)
 	defer rwtx.Rollback()
@@ -249,7 +249,7 @@ func TestBuildFiles(t *testing.T) {
 	ma.IntegrateDirtyFiles(files)
 	ma.RecalcVisibleFiles(RootNum(entries_count))
 
-	ma_tx = ma.BeginFilesTx().(state.MarkedTxI)
+	ma_tx = ma.BeginFilesTx()
 	defer ma_tx.Close()
 
 	rwtx, err = db.BeginRw(ctx)
@@ -262,7 +262,7 @@ func TestBuildFiles(t *testing.T) {
 	require.Equal(t, del, uint64(firstRootNumNotInSnap)-uint64(ma.PruneFrom()))
 
 	require.NoError(t, rwtx.Commit())
-	ma_tx = ma.BeginFilesTx().(state.MarkedTxI)
+	ma_tx = ma.BeginFilesTx()
 	defer ma_tx.Close()
 	rwtx, err = db.BeginRw(ctx)
 	require.NoError(t, err)

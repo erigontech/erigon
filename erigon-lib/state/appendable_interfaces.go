@@ -41,9 +41,9 @@ type AccessorIndexBuilder interface {
 // D: db interface
 // we don't need a separate interface for files...since tx is provided separately
 // anyway.
-type StartRoTx[T AppendableDbLessTxI, D AppendableDbCommonTxI] interface {
+type StartRoTx[T AppendableDbLessTxI] interface {
 	BeginFilesTx() T
-	BeginDbTx() D
+	BeginDbTx() T
 }
 
 // why we need temporal + db + snapshot txs
