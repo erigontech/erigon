@@ -44,6 +44,7 @@ func TestBlockTracker(t *testing.T) {
 	}
 	bt := shutter.NewBlockTracker(logger, bl, bnReader)
 	eg, egCtx := errgroup.WithContext(ctx)
+	defer eg.Wait()
 	eg.Go(func() error { return bl.Run(egCtx) })
 	eg.Go(func() error { return bt.Run(egCtx) })
 
