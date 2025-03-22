@@ -14,7 +14,7 @@ import (
 const MaxUint64 = ^uint64(0)
 
 type RootRelationI interface {
-	RootNum2Num(from RootNum, tx kv.Tx) (Num, error)
+	RootNum2Id(from RootNum, tx kv.Tx) (Id, error)
 }
 
 type BufferFactory interface {
@@ -224,7 +224,7 @@ func (m *MarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	a := m.ap
 	fromKeyPrefix := a.encTs(a.pruneFrom)
-	eto, err := a.rel.RootNum2Num(to, tx)
+	eto, err := a.rel.RootNum2Id(to, tx)
 	if err != nil {
 		return 0, err
 	}
@@ -272,7 +272,7 @@ func (m *UnmarkedTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
 
 func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 	ap := m.ap
-	fromId, err := ap.rel.RootNum2Num(from, tx)
+	fromId, err := ap.rel.RootNum2Id(from, tx)
 	if err != nil {
 		return err
 	}
@@ -282,7 +282,7 @@ func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
 
 func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
-	toId, err := ap.rel.RootNum2Num(to, tx)
+	toId, err := ap.rel.RootNum2Id(to, tx)
 	if err != nil {
 		return 0, err
 	}
@@ -327,7 +327,7 @@ func (m *BufferedTx) Flush(ctx context.Context, tx kv.RwTx) error {
 
 func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
-	toId, err := ap.rel.RootNum2Num(to, tx)
+	toId, err := ap.rel.RootNum2Id(to, tx)
 	if err != nil {
 		return 0, err
 	}
