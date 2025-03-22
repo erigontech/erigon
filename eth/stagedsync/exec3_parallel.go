@@ -209,7 +209,10 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	}
 
 	if txTask.Config.IsByzantium(blockNum) {
+		trace := ibs.Trace()
+		ibs.SetTrace(true)
 		ibs.FinalizeTx(txTask.Config.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter)
+		ibs.SetTrace(trace)
 	}
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx.
@@ -756,8 +759,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 				func(readsource state.ReadSource, readVersion, writtenVersion state.Version) bool {
 					return readsource == state.MapRead && readVersion == writtenVersion
 				}) {
-
-			fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "VALID", be.execFailed[tx])
 
 			if cntInvalid == 0 {
 				be.validateTasks.markComplete(tx)

@@ -131,7 +131,7 @@ type VersionedRead struct {
 }
 
 func (vr VersionedRead) String() string {
-	return fmt.Sprintf("%x %s: %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val))
+	return fmt.Sprintf("%x %s (%s:%d.%d): %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, vr.Source, vr.Version.TxIndex, vr.Version.Incarnation, valueString(vr.Path, vr.Val))
 }
 
 type VersionedWrite struct {
