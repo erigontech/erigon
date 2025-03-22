@@ -278,8 +278,8 @@ func (so *stateObject) setState(key libcommon.Hash, value uint256.Int) {
 	so.dirtyStorage[key] = value
 }
 
-// updateTrie writes cached storage modifications into the object's storage trie.
-func (so *stateObject) updateTrie(stateWriter StateWriter) error {
+// updateStotage writes cached storage modifications into the object's storage trie.
+func (so *stateObject) updateStotage(stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {
 		original := so.blockOriginStorage[key]
 		so.originStorage[key] = value

@@ -32,6 +32,21 @@ func (s ReadSource) String() string {
 	}
 }
 
+func (s ReadSource) versionedString(version Version) string {
+	switch s {
+	case MapRead:
+		return fmt.Sprintf("version-map:%d.%d", version.TxIndex, version.Incarnation)
+	case StorageRead:
+		return "storage"
+	case WriteSetRead:
+		return "tx-writes"
+	case ReadSetRead:
+		return "tx-reads"
+	default:
+		return "unknown"
+	}
+}
+
 const (
 	UnknownSource ReadSource = iota
 	MapRead
@@ -131,7 +146,7 @@ type VersionedRead struct {
 }
 
 func (vr VersionedRead) String() string {
-	return fmt.Sprintf("%x %s (%s:%d.%d): %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, vr.Source, vr.Version.TxIndex, vr.Version.Incarnation, valueString(vr.Path, vr.Val))
+	return fmt.Sprintf("%x %s (%s): %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, vr.Source.versionedString(vr.Version), valueString(vr.Path, vr.Val))
 }
 
 type VersionedWrite struct {
@@ -227,8 +242,8 @@ func versionedUpdate[T any](versionMap *VersionMap, addr libcommon.Address, path
 // be recored as reads and hence the varification process will miss them.  We don't want to creat a fail but
 // we do  want to capture the updates
 func (vr versionedStateReader) applyVersionedUpdates(address libcommon.Address, account accounts.Account) accounts.Account {
-	if update, ok := versionedUpdate[*uint256.Int](vr.versionMap, address, BalancePath, libcommon.Hash{}, vr.txIndex); ok {
-		account.Balance = *update
+	if update, ok := versionedUpdate[uint256.Int](vr.versionMap, address, BalancePath, libcommon.Hash{}, vr.txIndex); ok {
+		account.Balance = update
 	}
 	if update, ok := versionedUpdate[uint64](vr.versionMap, address, NoncePath, libcommon.Hash{}, vr.txIndex); ok {
 		account.Nonce = update
