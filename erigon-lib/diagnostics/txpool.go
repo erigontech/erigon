@@ -19,7 +19,6 @@ package diagnostics
 import (
 	"context"
 	"encoding/hex"
-	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -115,14 +114,12 @@ func (d *DiagnosticClient) runOnPoolChangeBatchEvent(rootCtx context.Context) {
 			case info := <-ch:
 				for _, change := range info.Changes {
 					for _, txnHash := range change.TxnHash {
-						hsss := hex.EncodeToString(txnHash[:])
-						fmt.Println("PendingRemoveEvent", hsss)
 						d.Notify(DiagMessages{
 							MessageType: "txpool",
 							Message: PoolChangeEvent{
 								Pool:    change.Pool,
 								Event:   change.Event,
-								TxnHash: hsss, //hex.EncodeToString(txnHash[:]),
+								TxnHash: hex.EncodeToString(txnHash[:]),
 							},
 						})
 					}
