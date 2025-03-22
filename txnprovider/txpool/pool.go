@@ -1769,7 +1769,6 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 				pendingRemoved++
 				p.pending.Remove(mt, "remove-mined", p.logger)
 				pendingHashes = append(pendingHashes, mt.TxnSlot.IDHash)
-				fmt.Println("mined: remove")
 			case BaseFeeSubPool:
 				baseFeeRemoved++
 				p.baseFee.Remove(mt, "remove-mined", p.logger)
@@ -1922,7 +1921,6 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || worst.minFeeCap.LtUint64(pendingBaseFee) || (worst.TxnSlot.Type == BlobTxnType && worst.TxnSlot.BlobFeeCap.LtUint64(pendingBlobFee))); worst = p.pending.Worst() {
 		tx := p.pending.PopWorst()
 		if worst.subPool >= BaseFeePoolBits {
-			//announcements.Append(tx.TxnSlot.Type, tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 			p.baseFee.Add(tx, "demote-pending", logger)
 			sendChangeBatchEventToDiagnostics("BaseFee", "add", [][32]byte{tx.TxnSlot.IDHash})
 		} else {
@@ -2508,7 +2506,6 @@ func sendChangeBatchEventToDiagnostics(pool string, event string, txnHashes [][3
 	//Not sending empty events or diagnostics disabled
 	isDiagEnabled := diagnostics.TypeOf(diagnostics.PoolChangeBatchEvent{}).Enabled()
 	if len(txnHashes) == 0 || !isDiagEnabled {
-		fmt.Println("Not sending empty events or diagnostics disabled")
 		return
 	}
 
