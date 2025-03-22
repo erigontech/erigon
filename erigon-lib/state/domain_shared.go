@@ -691,7 +691,7 @@ func (sd *SharedDomains) SetTx(tx kv.Tx) {
 		panic(errors.New("aggtx is nil"))
 	}
 
-	if casted, ok := tx.(kv.TemporalTx); !ok {
+	if casted, ok := tx.(kv.TemporalTx); ok {
 		sd.roTtx = casted
 	} else {
 		panic(fmt.Sprintf("expecting TemporalTx, got %T", tx))
