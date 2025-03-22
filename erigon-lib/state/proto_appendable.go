@@ -172,6 +172,14 @@ func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableTx {
 	}
 }
 
+func (a *ProtoAppendable) BeginNoFilesRo() *ProtoAppendableTx {
+	return &ProtoAppendableTx{
+		id:    a.a,
+		files: nil,
+		a:     a,
+	}
+}
+
 func (a *ProtoAppendableTx) Close() {
 	if a.files == nil {
 		return
@@ -253,11 +261,10 @@ func (a *ProtoAppendableTx) VisibleFilesMaxNum() Num {
 	return Num(idx.BaseDataID() + idx.KeyCount())
 }
 
-func (a *ProtoAppendableTx) LookupFile(entityNum Num, tx kv.Tx) (b Bytes, found bool, err error) {
+func (a *ProtoAppendableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, err error) {
 	ap := a.a
 	lastNum := a.VisibleFilesMaxNum()
 	if entityNum < lastNum && ap.builders[0].AllowsOrdinalLookupByNum() {
-		var word []byte
 		index := sort.Search(len(ap._visible), func(i int) bool {
 			idx := ap._visible[i].src.index
 			return idx.BaseDataID()+idx.KeyCount() > uint64(entityNum)
@@ -265,21 +272,42 @@ func (a *ProtoAppendableTx) LookupFile(entityNum Num, tx kv.Tx) (b Bytes, found 
 		if index == -1 {
 			return nil, false, fmt.Errorf("entity get error: snapshot expected but now found: (%s, %d)", ap.a.Name(), entityNum)
 		}
-		indexR := a.StatelessIdxReader(index)
-		id := int64(entityNum) - int64(indexR.BaseDataID())
-		if id < 0 {
-			a.a.logger.Error("ordinal lookup by negative num", "entityNum", entityNum, "index", index, "indexR.BaseDataID()", indexR.BaseDataID())
-			panic("ordinal lookup by negative num")
-		}
-		offset := indexR.OrdinalLookup(uint64(id))
-		g := a.files[index].src.decompressor.MakeGetter()
-		g.Reset(offset)
-		if g.HasNext() {
-			word, _ = g.Next(word[:0])
-			return word, true, nil
-		}
-		return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, ap._visible[index].src.decompressor.FileName1)
+
+		return a.GetFromFile(entityNum, index)
 	}
 
 	return nil, false, nil
+}
+
+func (a *ProtoAppendableTx) Files() []FilesItem {
+	v := a.a._visible
+	fi := make([]FilesItem, len(v))
+	for i, f := range v {
+		fi[i] = f.src
+	}
+	return fi
+}
+
+func (a *ProtoAppendableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error) {
+	if idx >= len(a.files) {
+		return nil, false, fmt.Errorf("index out of range: %d >= %d", idx, len(a.files))
+	}
+
+	indexR := a.StatelessIdxReader(idx)
+	id := int64(entityNum) - int64(indexR.BaseDataID())
+	if id < 0 {
+		a.a.logger.Error("ordinal lookup by negative num", "entityNum", entityNum, "index", idx, "indexR.BaseDataID()", indexR.BaseDataID())
+		panic("ordinal lookup by negative num")
+	}
+	offset := indexR.OrdinalLookup(uint64(id))
+	g := a.files[idx].src.decompressor.MakeGetter()
+	g.Reset(offset)
+	var word []byte
+	if g.HasNext() {
+		word, _ = g.Next(word[:0])
+		return word, true, nil
+	}
+	ap := a.a
+	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, ap._visible[idx].src.decompressor.FileName1)
+
 }

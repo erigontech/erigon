@@ -21,56 +21,66 @@ type BufferFactory interface {
 	New() etl.Buffer
 }
 
-var _ StartRoTx[EntityTxI] = (*Appendable[EntityTxI])(nil)
+var _ StartRoTx[AppendableDbLessTxI, AppendableDbCommonTxI] = (*Appendable[AppendableDbLessTxI, AppendableDbCommonTxI])(nil)
 var ErrNotFoundInSnapshot = errors.New("entity not found in snapshot")
 
-type Appendable[T EntityTxI] struct {
+type Appendable[T AppendableDbLessTxI, D AppendableDbCommonTxI] struct {
 	*ProtoAppendable
 
 	canonicalTbl string // for marked structures
 	valsTbl      string
 
-	ts4Bytes        bool // caplin entities are encoded as 4 bytes
-	pruneFrom       Num  // should this be rootnum? Num is fine for now.
-	beginFilesRoGen func() T
+	ts4Bytes        bool     // caplin entities are encoded as 4 bytes
+	pruneFrom       Num      // should this be rootnum? Num is fine for now.
+	beginFilesTxGen func() T // returns the temporal interface (not just files)
+	beginDbTxGen    func() D
 
 	rel RootRelationI
 }
 
-type AppOpts[T EntityTxI] func(a *Appendable[T])
+type AppOpts func(AppendableConfig)
 
-func App_WithFreezer[T EntityTxI](freezer Freezer) AppOpts[T] {
-	return func(a *Appendable[T]) {
-		a.freezer = freezer
+func App_WithFreezer(freezer Freezer) AppOpts {
+	return func(a AppendableConfig) {
+		a.SetFreezer(freezer)
 	}
 }
 
-func App_WithIndexBuilders[T EntityTxI](builders ...AccessorIndexBuilder) AppOpts[T] {
-	return func(a *Appendable[T]) {
-		a.builders = builders
+func App_WithIndexBuilders(builders ...AccessorIndexBuilder) AppOpts {
+	return func(a AppendableConfig) {
+		a.SetIndexBuilders(builders...)
 	}
 }
 
-func App_WithTs4Bytes[T EntityTxI](ts4Bytes bool) AppOpts[T] {
-	return func(a *Appendable[T]) {
-		a.ts4Bytes = ts4Bytes
+func App_WithTs4Bytes(ts4Bytes bool) AppOpts {
+	return func(a AppendableConfig) {
+		a.SetTs4Bytes(ts4Bytes)
 	}
 }
 
-func App_WithPruneFrom[T EntityTxI](pruneFrom Num) AppOpts[T] {
-	return func(a *Appendable[T]) {
-		a.pruneFrom = pruneFrom
+func App_WithPruneFrom(pruneFrom Num) AppOpts {
+	return func(a AppendableConfig) {
+		a.SetPruneFrom(pruneFrom)
 	}
 }
 
 // func App
-func NewMarkedAppendable(id AppendableId, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[MarkedTxI]) (*Appendable[MarkedTxI], error) {
-	a, err := create(id, Marked, valsTbl, canonicalTbl, relation, logger, options...)
+func NewMarkedAppendable(id AppendableId, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Appendable[AppendableDbLessTxI, MarkedTxI], error) {
+	a, err := create[AppendableDbLessTxI, MarkedTxI](id, Marked, valsTbl, canonicalTbl, relation, logger, options...)
 	if err != nil {
 		return nil, err
 	}
 
-	a.beginFilesRoGen = func() MarkedTxI {
+	// db interface generator
+	a.beginDbTxGen = func() MarkedTxI {
+		return &MarkedTx{
+			ProtoAppendableTx: a.ProtoAppendable.BeginNoFilesRo(),
+			ap:                a,
+		}
+	}
+
+	// temporal interface generator
+	a.beginFilesTxGen = func() AppendableDbLessTxI {
 		return &MarkedTx{
 			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
 			ap:                a,
@@ -80,8 +90,8 @@ func NewMarkedAppendable(id AppendableId, valsTbl string, canonicalTbl string, r
 	return a, nil
 }
 
-func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[UnmarkedTxI]) (*Appendable[UnmarkedTxI], error) {
-	a, err := create(id, Unmarked, valsTbl, "", relation, logger, options...)
+func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Appendable[AppendableDbLessTxI, UnmarkedTxI], error) {
+	a, err := create[AppendableDbLessTxI, UnmarkedTxI](id, Unmarked, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +108,16 @@ func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 		a.builders = []AccessorIndexBuilder{builder}
 	}
 
-	a.beginFilesRoGen = func() UnmarkedTxI {
+	// db interface generator
+	a.beginDbTxGen = func() UnmarkedTxI {
+		return &UnmarkedTx{
+			ProtoAppendableTx: a.ProtoAppendable.BeginNoFilesRo(),
+			ap:                a,
+		}
+	}
+
+	// temporal interface generator
+	a.beginFilesTxGen = func() AppendableDbLessTxI {
 		return &UnmarkedTx{
 			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
 			ap:                a,
@@ -108,7 +127,7 @@ func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 	return a, nil
 }
 
-func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelationI, factory BufferFactory, logger log.Logger, options ...AppOpts[BufferedTxI]) (*Appendable[BufferedTxI], error) {
+func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelationI, factory BufferFactory, logger log.Logger, options ...AppOpts) (*Appendable[BufferedTxI], error) {
 	a, err := create(id, Buffered, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
@@ -118,11 +137,19 @@ func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 		panic("no factory")
 	}
 
-	a.beginFilesRoGen = func() BufferedTxI {
+	// db interface generator
+	a.beginDbTxGen = func() BufferedTxI {
+		return &BufferedTx{
+			ProtoAppendableTx: a.ProtoAppendable.BeginNoFilesRo(),
+			ap:                a,
+		}
+	}
+
+	// temporal interface generator
+	a.beginFilesTxGen = func() AppendableDbLessTxI {
 		return &BufferedTx{
 			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
 			ap:                a,
-			factory:           factory,
 		}
 	}
 
@@ -130,8 +157,8 @@ func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 	return a, nil
 }
 
-func create[T EntityTxI](id AppendableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[T]) (*Appendable[T], error) {
-	a := &Appendable[T]{
+func create[T AppendableDbLessTxI, D AppendableDbCommonTxI](id AppendableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Appendable[T, D], error) {
+	a := &Appendable[T, D]{
 		ProtoAppendable: NewProto(id, nil, nil, logger),
 	}
 	a.rel = relation
@@ -144,59 +171,55 @@ func create[T EntityTxI](id AppendableId, strategy CanonicityStrategy, valsTbl s
 	return a, nil
 }
 
-func (a *Appendable[T]) PruneFrom() Num {
+func (a *Appendable[T, D]) PruneFrom() Num {
 	return a.pruneFrom
 }
 
-func (a *Appendable[T]) encTs(ts ae.EncToBytesI) []byte {
+func (a *Appendable[T, D]) encTs(ts ae.EncToBytesI) []byte {
 	return ts.EncToBytes(!a.ts4Bytes)
 }
 
-func (a *Appendable[T]) BeginFilesRo() T {
-	return a.beginFilesRoGen()
+func (a *Appendable[T, D]) BeginFilesTx() T {
+	return a.beginFilesTxGen()
+}
+
+func (a *Appendable[T, D]) BeginDbTx() D {
+	return a.beginDbTxGen()
+}
+
+func (a *Appendable[T, D]) SetFreezer(freezer Freezer) {
+	a.freezer = freezer
+}
+
+func (a *Appendable[T, D]) SetIndexBuilders(builders ...AccessorIndexBuilder) {
+	a.builders = builders
+}
+
+func (a *Appendable[T, D]) SetPruneFrom(pruneFrom Num) {
+	a.pruneFrom = pruneFrom
+}
+
+func (a *Appendable[T, D]) SetTs4Bytes(ts4Bytes bool) {
+	a.ts4Bytes = ts4Bytes
 }
 
 // marked tx
 type MarkedTx struct {
 	*ProtoAppendableTx
-	ap *Appendable[MarkedTxI]
+	ap *Appendable[AppendableDbLessTxI, MarkedTxI]
 }
 
-func (m *MarkedTx) Get(entityNum Num, tx kv.Tx) (value Bytes, foundInSnapshot bool, err error) {
-	data, found, err := m.LookupFile(entityNum, tx)
-	if err != nil {
-		return nil, false, err
-	}
-	if !found {
-		data, err := m.getDb(entityNum, nil, tx)
-		return data, false, err
-	}
-
-	switch m.ap.a.Name() {
-	case "headers":
-		// remove the first byte; it's first byte of header hash
-		// we should ultimately remove this first byte...as it's an old implementation of
-		// LessFalsePositives=True
-		data = data[1:]
-	}
-	return data, true, nil
-}
-
-func (m *MarkedTx) getDb(entityNum Num, hash []byte, tx kv.Tx) (Bytes, error) {
+func (m *MarkedTx) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
 	a := m.ap
 	if hash == nil {
 		// find canonical hash
-		canHash, err := tx.GetOne(a.canonicalTbl, a.encTs(entityNum))
+		canHash, err := tx.GetOne(a.canonicalTbl, a.encTs(num))
 		if err != nil {
 			return nil, err
 		}
 		hash = canHash
 	}
-	return tx.GetOne(a.valsTbl, m.combK(entityNum, hash))
-}
-
-func (m *MarkedTx) GetNc(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
-	return m.getDb(num, hash, tx)
+	return tx.GetOne(a.valsTbl, m.combK(num, hash))
 }
 
 func (m *MarkedTx) Put(num Num, hash []byte, val Bytes, tx kv.RwTx) error {
@@ -249,21 +272,7 @@ func (m *MarkedTx) combK(ts Num, hash []byte) []byte {
 // unmarked tx
 type UnmarkedTx struct {
 	*ProtoAppendableTx
-	ap *Appendable[UnmarkedTxI]
-}
-
-func (m *UnmarkedTx) Get(entityNum Num, tx kv.Tx) (value Bytes, pruneCount bool, err error) {
-	ap := m.ap
-	data, found, err := m.LookupFile(entityNum, tx)
-	if err != nil {
-		return nil, false, err
-	}
-	if !found {
-		data, err := tx.GetOne(ap.valsTbl, ap.encTs(entityNum))
-		return data, false, err
-	}
-
-	return data, true, nil
+	ap *Appendable[AppendableDbLessTxI, UnmarkedTxI]
 }
 
 func (m *UnmarkedTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
@@ -295,15 +304,14 @@ func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 
 type BufferedTx struct {
 	*ProtoAppendableTx
-	ap      *Appendable[BufferedTxI]
+	ap      *Appendable[AppendableDbLessTxI, BufferedTxI]
 	values  *etl.Collector
 	factory BufferFactory
 }
 
 // Get doesn't reflect the values currently in Buffer
-func (m *BufferedTx) Get(entityNum Num, tx kv.Tx) (data Bytes, foundInSnapshot bool, err error) {
-	data, err = tx.GetOne(m.ap.valsTbl, m.ap.encTs(entityNum))
-	return data, false, err
+func (m *BufferedTx) GetDb(entityNum Num, tx kv.Tx) (data Bytes, err error) {
+	return tx.GetOne(m.ap.valsTbl, m.ap.encTs(entityNum))
 }
 
 func (m *BufferedTx) Put(entityNum Num, value Bytes) error {
