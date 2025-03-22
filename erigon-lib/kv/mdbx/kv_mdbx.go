@@ -67,6 +67,7 @@ type PeriodicFlusher struct {
 	syncPeriod       time.Duration // how often to flush
 	quitFlushingChan chan struct{} // to signal end of flushing
 	closed           atomic.Bool
+	lock             sync.Mutex
 }
 
 func newPeriodicFlusher(env *mdbx.Env, opts MdbxOpts, syncPeriod time.Duration) *PeriodicFlusher {
@@ -80,6 +81,8 @@ func newPeriodicFlusher(env *mdbx.Env, opts MdbxOpts, syncPeriod time.Duration) 
 }
 
 func (flusher *PeriodicFlusher) Close() {
+	flusher.lock.Lock()
+	defer flusher.lock.Unlock()
 	swapped := flusher.closed.CompareAndSwap(false, true)
 	if !swapped {
 		return
@@ -87,7 +90,7 @@ func (flusher *PeriodicFlusher) Close() {
 	if flusher.ticker != nil {
 		flusher.ticker.Stop() // Stop the ticker
 	}
-	close(flusher.quitFlushingChan) //  close channel to signal quit
+	flusher.quitFlushingChan <- struct{}{} // send quit signal
 }
 
 func (flusher *PeriodicFlusher) FlushInBackground(ctx context.Context) {
@@ -97,13 +100,14 @@ func (flusher *PeriodicFlusher) FlushInBackground(ctx context.Context) {
 			if err := flusher.env.Sync(true, false); err != nil {
 				flusher.opts.log.Error("Error during periodic mdbx sync", "err", err, "dbName", flusher.opts.label)
 			}
-		case _, ok := <-flusher.quitFlushingChan:
-			if !ok {
-				return
-			}
+		case <-flusher.quitFlushingChan:
+			return
 		case <-ctx.Done():
 			// here the flusher is not closed explicitly from outside,
 			// so we must close it from within
+			flusher.lock.Lock()
+			defer flusher.lock.Unlock()
+			flusher.closed.CompareAndSwap(false, true)
 			flusher.ticker.Stop()
 			return
 		}
