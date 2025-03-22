@@ -83,6 +83,7 @@ type SharedDomains struct {
 	aggTx  *AggregatorRoTx
 	sdCtx  *SharedDomainsCommitmentContext
 	roTx   kv.Tx
+	roTtx  kv.TemporalTx
 	logger log.Logger
 
 	txNum    uint64
@@ -212,7 +213,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 }
 
 func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, blockNum uint64) ([]byte, error) {
-	it, err := sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
+	it, err := sd.roTtx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +226,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 	}
 
-	it, err = sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
+	it, err = sd.roTtx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -689,6 +690,12 @@ func (sd *SharedDomains) SetTx(tx kv.Tx) {
 	if sd.aggTx == nil {
 		panic(errors.New("aggtx is nil"))
 	}
+
+	if casted, ok := tx.(kv.TemporalTx); !ok {
+		sd.roTtx = casted
+	} else {
+		panic(fmt.Sprintf("expecting TemporalTx, got %T", tx))
+	}
 }
 
 func (sd *SharedDomains) StepSize() uint64 { return sd.aggTx.StepSize() }
@@ -823,7 +830,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step u
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil
 	}
-	v, step, _, err = sd.aggTx.GetLatest(domain, k, sd.roTx)
+	v, step, err = sd.roTtx.GetLatest(domain, k)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
