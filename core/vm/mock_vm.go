@@ -44,6 +44,12 @@ type testVM struct {
 	currentIdx        *int
 }
 
+func (evm *testVM) EOFTable() *JumpTable { // added just to satisfy the interface
+	return nil
+}
+func (evm *testVM) RunEOF(_ *Contract, _ []byte, readOnly bool, header *eofHeader) (ret []byte, err error) { // added just to satisfy the interface
+	return nil, nil
+}
 func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err error) {
 	currentReadOnly := new(readOnlyState)
 

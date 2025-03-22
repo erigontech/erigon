@@ -74,9 +74,12 @@ type Interpreter interface {
 	// Run loops and evaluates the contract's code with the given input data and returns
 	// the return byte-slice and an error if one occurred.
 	Run(contract *Contract, input []byte, static bool) ([]byte, error)
+	RunEOF(contract *Contract, input []byte, static bool, header *eofHeader) ([]byte, error)
 
 	// `Depth` returns the current call stack's depth.
 	Depth() int
+
+	EOFTable() *JumpTable
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,
@@ -99,6 +102,7 @@ type keccakState interface {
 type EVMInterpreter struct {
 	*VM
 	jt    *JumpTable // EVM instruction table
+	jtEOF *JumpTable // EOF instruction table
 	depth int
 }
 
@@ -129,8 +133,11 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
-	var jt *JumpTable
+	var jt, eofJt *JumpTable
 	switch {
+	case evm.ChainRules().IsOsaka:
+		jt = &pragueInstructionSet
+		eofJt = &eofInstructionSet
 	case evm.ChainRules().IsPrague:
 		jt = &pragueInstructionSet
 	case evm.ChainRules().IsCancun:
@@ -174,8 +181,13 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 			evm: evm,
 			cfg: cfg,
 		},
-		jt: jt,
+		jt:    jt,
+		jtEOF: eofJt,
 	}
+}
+
+func (in *EVMInterpreter) EOFTable() *JumpTable {
+	return in.jtEOF
 }
 
 // Run loops and evaluates the contract's code with the given input data and returns
@@ -217,7 +229,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	)
 
 	mem.Reset()
-
 	contract.Input = input
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.

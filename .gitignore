@@ -100,3 +100,6 @@ node_modules
 /config.yml
 
 vendor
+
+tests/osaka-eof
+tests/__backup

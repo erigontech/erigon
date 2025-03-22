@@ -390,6 +390,27 @@ var opCodeToString = map[OpCode]string{
 	REVERT:       "REVERT",
 	INVALID:      "INVALID",
 	SELFDESTRUCT: "SELFDESTRUCT",
+
+	// EOFv1 Opcodes
+	RJUMP:           "RJUMP",
+	RJUMPI:          "RJUMPI",
+	RJUMPV:          "RJUMPV",
+	CALLF:           "CALLF",
+	RETF:            "RETF",
+	JUMPF:           "JUMPF",
+	DUPN:            "DUPN",
+	SWAPN:           "SWAPN",
+	EXCHANGE:        "EXCHANGE",
+	EOFCREATE:       "EOFCREATE",
+	RETURNCODE:      "RETURNCODE",
+	DATALOAD:        "DATALOAD",
+	DATALOADN:       "DATALOADN",
+	DATASIZE:        "DATASIZE",
+	DATACOPY:        "DATACOPY",
+	RETURNDATALOAD:  "RETURNDATALOAD",
+	EXTCALL:         "EXTCALL",
+	EXTDELEGATECALL: "EXTDELEGATECALL",
+	EXTSTATICCALL:   "EXTSTATICCALL",
 }
 
 func (op OpCode) String() string {
@@ -551,6 +572,27 @@ var stringToOp = map[string]OpCode{
 	"REVERT":         REVERT,
 	"INVALID":        INVALID,
 	"SELFDESTRUCT":   SELFDESTRUCT,
+
+	// EOFv1 Opcodes
+	"RJUMP":           RJUMP,
+	"RJUMPI":          RJUMPI,
+	"RJUMPV":          RJUMPV,
+	"CALLF":           CALLF,
+	"RETF":            RETF,
+	"JUMPF":           JUMPF,
+	"DUPN":            DUPN,
+	"SWAPN":           SWAPN,
+	"EXCHANGE":        EXCHANGE,
+	"EOFCREATE":       EOFCREATE,
+	"RETURNCODE":      RETURNCODE,
+	"DATALOAD":        DATALOAD,
+	"DATALOADN":       DATALOADN,
+	"DATASIZE":        DATASIZE,
+	"DATACOPY":        DATACOPY,
+	"RETURNDATALOAD":  RETURNDATALOAD,
+	"EXTCALL":         EXTCALL,
+	"EXTDELEGATECALL": EXTDELEGATECALL,
+	"EXTSTATICCALL":   EXTSTATICCALL,
 }
 
 // StringToOp finds the opcode whose name is stored in `str`.

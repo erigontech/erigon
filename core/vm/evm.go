@@ -64,6 +64,10 @@ func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, err
 	return evm.interpreter.Run(contract, input, readOnly)
 }
 
+func runEOF(evm *EVM, contract *Contract, input []byte, readOnly bool, header *eofHeader) ([]byte, error) {
+	return evm.interpreter.RunEOF(contract, input, readOnly, header)
+}
+
 // EVM is the Ethereum Virtual Machine base object and provides
 // the necessary tools to run a contract on the given state with
 // the provided context. It should be noted that any error
@@ -411,6 +415,30 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 			return nil, libcommon.Address{}, gasRemaining, err
 		}
 	}
+
+	// var header *eofHeader
+	// check if Osaka and if is EOF code
+	if evm.chainRules.IsOsaka {
+		if len(codeAndHash.code) > 0 && isEOFcode(codeAndHash.code) {
+			if depth == 0 {
+				// first execution frame - validate all type sections, code sections and subcontainers
+				if _, err = ParseEOFHeader(codeAndHash.code, evm.interpreter.EOFTable(), initcode, true, 0); err != nil {
+					return nil, libcommon.Address{}, gasRemaining, err
+				}
+			} else {
+				// do not allow EOF call Legacy.
+				// if typ == CREATE || typ == CREATE2 {
+				// 	err = ErrEOFCodeNotAllowed
+				// 	return nil, libcommon.Address{}, gasRemaining, err
+				// }
+				// subsequent execution frames - do not validate anything
+				if _, err = ParseEOFHeader(codeAndHash.code, evm.interpreter.EOFTable(), runtime, false, 0); err != nil {
+					return nil, libcommon.Address{}, gasRemaining, err
+				}
+			}
+		}
+	}
+
 	if incrementNonce {
 		nonce, err := evm.intraBlockState.GetNonce(caller.Address())
 		if err != nil {
@@ -456,7 +484,12 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gasRemaining, nil
 	}
-
+	// fmt.Println("input: ", input)
+	// if header != nil { // at this point we know that code is EOF
+	// 	ret, err = runEOF(evm, contract, nil, false, header)
+	// } else { // legacy code
+	// 	ret, err = run(evm, contract, nil, false)
+	// }
 	ret, err = run(evm, contract, nil, false)
 
 	// EIP-170: Contract code size limit
