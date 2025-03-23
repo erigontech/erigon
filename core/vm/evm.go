@@ -473,6 +473,12 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		err = ErrContractAddressCollision
 		return nil, libcommon.Address{}, 0, err
 	}
+	nonEmptyStorage, err := evm.intraBlockState.HasAtLeastOneStorage(address)
+	if err != nil || nonEmptyStorage {
+		err = ErrContractAddressCollision
+		return nil, libcommon.Address{}, 0, err
+	}
+
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
 	evm.intraBlockState.CreateAccount(address, true)
@@ -623,24 +629,25 @@ func (evm *EVM) GetEOFHeader(code []byte, typ OpCode) (*eofHeader, error) {
 	var headerEOF *eofHeader
 	var err error
 	if evm.chainRules.IsOsaka { // check if Osaka and if is EOF code
-		if len(code) > 0 && isEOFcode(code) {
-			if evm.interpreter.Depth() == 0 || typ == EOFCREATE {
+		if len(code) > 1 && code[0] == 0xEF && code[1] == 0x00 {
+			if evm.interpreter.Depth() == 0 {
 				// first execution frame - validate all type sections, code sections and subcontainers
 				if headerEOF, err = ParseEOFHeader(code, evm.interpreter.EOFTable(), initcode, true, 0); err != nil {
 					return nil, err
 				}
 			} else {
-				// do not allow EOF call Legacy.
-				if typ == CREATE || typ == CREATE2 { // TODO: charge for this as well?
+				// do not allow to create EOF from legacy calls
+				if typ == CREATE || typ == CREATE2 {
 					return nil, fmt.Errorf("attmept to create EOF from legacy call (CREATE, CREATE2)")
 					// return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err) //
 				}
 				// subsequent execution frames do not validate anything
-				if headerEOF, err = ParseEOFHeader(code, evm.interpreter.EOFTable(), runtime, false, 0); err != nil {
+				if headerEOF, err = ParseEOFHeader(code, evm.interpreter.EOFTable(), initcode, false, 0); err != nil {
 					return nil, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
 				}
 			}
 		}
+		// else not an EOF code
 	}
 	return headerEOF, nil
 }

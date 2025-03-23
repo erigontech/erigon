@@ -136,35 +136,3 @@ func (e *EOFTest) Run(t *testing.T) error {
 
 	return nil
 }
-
-// given code 0xef00010100100200040008000a00040006040000000080000200000001008000000000000260006000e3000100600035e10001e4e50002e30003006001600055e4
-// 0x
-// ef00 - magic
-// 01 - version
-// 01 - kind type
-// 0010 - type sizes (16/4=4 type sections)
-// 02 - kind code
-// 0004 - num code sections (4)
-// 0008 - 1st code section size
-// 000a - 2nd
-// 0004 - 3d
-// 0006 - 4th
-// 04 - kind data
-// 0000 - data size
-// 00 - terminator
-// 00 - inputs 1st type section
-// 80 - outputs 1st type section (non returning function)
-// 0002 - max stack height 1st section
-// 00 - inputs 2nd
-// 00 - outputs 2nd
-// 0001 - max stack height 2nd
-// 00 - inputs 3d
-// 80 - outputs 3d (non returning function)
-// 0000 - max stack height 3d
-// 00 - inputs 4th
-// 00 - outputs 4th
-// 0002 - max stack heitgh 4th
-// 60006000e3000100 - 1st code
-// 600035e10001e4e50002 - 2nd code
-// e3000300 - 3d code
-// 6001600055e4 - 4th code

@@ -93,10 +93,8 @@ func validateInstructions(eofCode []byte, codeIdx uint16, header *eofHeader, off
 				if int(containerIDX) >= len(header.containerSizes) {
 					return nil, nil, fmt.Errorf("EOFException.INVALID_CONTAINER_SECTION_INDEX: %d", containerIDX)
 				}
-				if op == RETURNCODE {
-					if containerKind == runtime {
-						return nil, nil, fmt.Errorf("EOFException.INCOMPATIBLE_CONTAINER_KIND")
-					}
+				if op == RETURNCODE && containerKind == runtime {
+					return nil, nil, fmt.Errorf("EOFException.INCOMPATIBLE_CONTAINER_KIND")
 				}
 				subcontainerRefs = append(subcontainerRefs, [2]uint16{containerIDX, uint16(op)})
 			} else if op == RETURN || op == STOP {
@@ -330,99 +328,3 @@ func validateMaxStackHeight(eofCode []byte, codeIdx uint16, header *eofHeader, o
 
 	return max, nil
 }
-
-// validateMaxStackHeight code:  [95 227 0 1 80 0]
-// pos:  0
-// op:  PUSH0
-// stackHeightChange 1
-// stackHeight.min 0
-// stackHeight.max 0
-// stackHeightRequired 0
-// immSize 0
-// pos:  1
-// op:  CALLF
-// stackHeightChange 0
-// stackHeight.min 1
-// stackHeight.max 1
-// stackHeightRequired 1
-// immSize 2
-// pos:  4
-// op:  POP
-// stackHeightChange -1
-// stackHeight.min 1
-// stackHeight.max 1
-// stackHeightRequired 1
-// immSize 0
-// pos:  5
-// op:  STOP
-// stackHeightChange 0
-// stackHeight.min 0
-// stackHeight.max 0
-// stackHeightRequired 0
-// immSize 0
-// maxStackHeight: 1
-// sectionMaxStack: 1
-// code:  [96 0 225 0 1 80 227 0 2 95 228]
-// len(code):  11
-// op:  PUSH1
-// pos:  0
-// op:  RJUMPI
-// pos:  2
-// op:  POP
-// pos:  5
-// op:  CALLF
-// pos:  6
-// op:  PUSH0
-// pos:  9
-// op:  RETF
-// pos:  10
-// op:  RETF
-// pos:  11
-// !!code:  [96 0 225 0 1 80 227 0 2 95 228]
-// !!header.codeSizes[codeIdx]:  11
-// OP:  PUSH1
-// IMMEDIATE SIZE:  1
-// j := pos + 1:  1
-// OP:  RJUMPI
-// IMMEDIATE SIZE:  2
-// j := pos + 1:  3
-// OP:  POP
-// IMMEDIATE SIZE:  0
-// j := pos + 1:  6
-// OP:  CALLF
-// IMMEDIATE SIZE:  2
-// j := pos + 1:  7
-// OP:  PUSH0
-// IMMEDIATE SIZE:  0
-// j := pos + 1:  10
-// OP:  RETF
-// IMMEDIATE SIZE:  0
-// j := pos + 1:  11
-// validateMaxStackHeight code:  [96 0 225 0 1 80 227 0 2 95 228]
-// pos:  0
-// op:  PUSH1
-// stackHeightChange 1
-// stackHeight.min 1
-// stackHeight.max 1
-// stackHeightRequired 0
-// immSize 1
-// pos:  2
-// op:  RJUMPI
-// stackHeightChange -1
-// stackHeight.min 2
-// stackHeight.max 2
-// stackHeightRequired 1
-// immSize 2
-// pos:  5
-// op:  POP
-// stackHeightChange -1
-// stackHeight.min 1
-// stackHeight.max 1
-// stackHeightRequired 1
-// immSize 0
-// pos:  6
-// op:  CALLF
-// stackHeightChange -1
-// stackHeight.min 0
-// stackHeight.max 1
-// stackHeightRequired 1

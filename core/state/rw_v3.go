@@ -573,6 +573,24 @@ func (r *ReaderV3) ReadSet() map[string]*libstate.KvList { return nil }
 func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderV3) ResetReadSet()                        {}
 
+func (r *ReaderV3) AddressHaveStorageKeys(address common.Address) (bool, error) {
+	sd, ok := r.tx.(*state.SharedDomains)
+	if !ok {
+		// panic("AddressHasNoStorage: ReaderV3.tx is not SharedDomains")
+		return false, nil
+	}
+
+	var haveOneStorageKey bool
+	err := sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) error {
+		haveOneStorageKey = true
+		return fmt.Errorf("ReaderV3: AddressHaveStorageKeys: early exit")
+	})
+	if err != nil {
+		return false, err
+	}
+	return haveOneStorageKey, nil
+}
+
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.tx.GetLatest(kv.AccountsDomain, address[:])
 	if err != nil {
@@ -667,6 +685,22 @@ func (r *ReaderParallelV3) SetTx(tx kv.TemporalTx)               {}
 func (r *ReaderParallelV3) ReadSet() map[string]*libstate.KvList { return r.readLists }
 func (r *ReaderParallelV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderParallelV3) ResetReadSet()                        { r.readLists = newReadList() }
+
+func (r *ReaderParallelV3) AddressHaveStorageKeys(address common.Address) (bool, error) {
+	var haveOneStorageKey bool
+	err := r.sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) error {
+		haveOneStorageKey = true
+		if !r.discardReadList {
+			// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
+			r.readLists[kv.StorageDomain.String()].Push(string(ask), common.Copy(val))
+		}
+		return fmt.Errorf("ReaderParallelV3: AddressHaveStorageKeys: early exit")
+	})
+	if err != nil {
+		return false, err
+	}
+	return haveOneStorageKey, nil
+}
 
 func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, address[:])

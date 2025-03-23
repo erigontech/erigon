@@ -376,7 +376,7 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if !isEOFcode(code) { // TODO(racytech): see if this part is correct and can be done better
+	if !isEOFcode(code) {
 		addr256.SetOne()
 		scope.Stack.Push(&addr256)
 		scope.Contract.RefundGas(gas, tracing.GasChangeCallLeftOverRefunded)

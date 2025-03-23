@@ -144,6 +144,7 @@ type IntraBlockState interface {
 	SubRefund(uint64)
 	GetRefund() uint64
 
+	HasAtLeastOneStorage(addr common.Address) (bool, error)
 	GetCommittedState(common.Address, *common.Hash, *uint256.Int) error
 	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int) error
 	SetState(common.Address, *common.Hash, uint256.Int) error

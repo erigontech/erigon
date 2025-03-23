@@ -536,18 +536,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			}
 		}
 	}
-	// fmt.Println("st.gasRemaining", st.gasRemaining)
-	// fmt.Println("---------------------")
-	// fmt.Println("UsedGas:", st.gasUsed())
-	// fmt.Println("Err", vmerr)
-	// fmt.Println("Reverted", vmerr == vm.ErrExecutionReverted)
-	// fmt.Println("ReturnData", ret)
-	// fmt.Println("SenderInitBalance", senderInitBalance)
-	// fmt.Println("CoinbaseInitBalance", coinbaseInitBalance)
-	// fmt.Println("FeeTipped", amount)
-	// fmt.Println("EvmRefund", st.state.GetRefund())
-	// fmt.Println("EvmGasUsed", st.gasUsed())
-	// fmt.Println("---------------------")
 
 	result := &evmtypes.ExecutionResult{
 		UsedGas:             st.gasUsed(),
