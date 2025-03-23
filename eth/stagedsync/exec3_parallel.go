@@ -209,19 +209,15 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	}
 
 	if txTask.Config.IsByzantium(blockNum) {
-		trace := ibs.Trace()
-		ibs.SetTrace(true)
 		ibs.FinalizeTx(txTask.Config.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter)
-		ibs.SetTrace(trace)
 	}
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx.
 	result.Receipt = &types.Receipt{
-		Type:              txTask.TxType(),
-		PostState:         nil,
-		CumulativeGasUsed: result.ExecutionResult.UsedGas,
-		GasUsed:           result.ExecutionResult.UsedGas,
-		TxHash:            txHash,
+		Type:      txTask.TxType(),
+		PostState: nil,
+		GasUsed:   result.ExecutionResult.UsedGas,
+		TxHash:    txHash,
 		// Set the receipt logs and create the bloom filter.
 		Logs:             ibs.GetLogs(txTask.TxIndex, txHash, blockNum, blockHash),
 		BlockHash:        blockHash,
@@ -229,14 +225,16 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		TransactionIndex: uint(txTask.TxIndex),
 	}
 
+	if prevReceipt != nil {
+		result.Receipt.CumulativeGasUsed = prevReceipt.CumulativeGasUsed + result.ExecutionResult.UsedGas
+	} else {
+		result.Receipt.CumulativeGasUsed = result.ExecutionResult.UsedGas
+	}
+
 	if result.ExecutionResult.Failed() {
 		result.Receipt.Status = types.ReceiptStatusFailed
 	} else {
 		result.Receipt.Status = types.ReceiptStatusSuccessful
-	}
-
-	if prevReceipt != nil {
-		result.Receipt.CumulativeGasUsed += prevReceipt.CumulativeGasUsed
 	}
 
 	// If the transaction created a contract, store the creation address in the receipt.
