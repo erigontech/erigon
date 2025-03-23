@@ -43,6 +43,10 @@ func PopulateLogsIndices(tx kv.TemporalTx, txNum uint64, rawLogs types.Logs, txn
 		return nil, err
 	}
 
+	if rawLogs == nil {
+		return types.Logs{}, nil
+	}
+
 	logIndex := firstLogIndexWithinBlock
 	for j := 0; j < len(rawLogs); j++ {
 		rawLogs[j].BlockNumber = blockNum
