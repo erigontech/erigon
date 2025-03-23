@@ -2002,7 +2002,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 	defer processRemoteTxnsEvery.Stop()
 	commitEvery := time.NewTicker(p.cfg.CommitEvery)
 	defer commitEvery.Stop()
-	logEvery := time.NewTicker(10 * time.Second)
+	logEvery := time.NewTicker(p.cfg.LogEvery)
 	defer logEvery.Stop()
 
 	if err := p.start(ctx); err != nil {
