@@ -532,13 +532,13 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	for i, reason := range reasons {
 		txn := newTxns.Txns[i]
 
-		subpool := "Unknown"
-		found := p.all.get(txn.SenderID, txn.Nonce)
-		if found != nil {
-			subpool = found.currentSubPool.String()
-		}
-
 		if isDiagEnabled {
+			subpool := "Unknown"
+			found := p.all.get(txn.SenderID, txn.Nonce)
+			if found != nil {
+				subpool = found.currentSubPool.String()
+			}
+
 			diagTxn := diagnostics.DiagTxn{
 				IDHash:              hex.EncodeToString(txn.IDHash[:]),
 				SenderID:            txn.SenderID,
@@ -588,14 +588,16 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		default:
 		}
 
-		pendingHashes := make([][32]byte, 0)
-		for i := 0; i < len(copied.hashes); i += 32 {
-			var txnHash [32]byte
-			copy(txnHash[:], copied.hashes[i:i+32])
-			pendingHashes = append(pendingHashes, txnHash)
-		}
+		if isDiagEnabled {
+			pendingHashes := make([][32]byte, 0)
+			for i := 0; i < len(copied.hashes); i += 32 {
+				var txnHash [32]byte
+				copy(txnHash[:], copied.hashes[i:i+32])
+				pendingHashes = append(pendingHashes, txnHash)
+			}
 
-		sendChangeBatchEventToDiagnostics("Pending", "add", pendingHashes)
+			sendChangeBatchEventToDiagnostics("Pending", "add", pendingHashes)
+		}
 	}
 
 	p.unprocessedRemoteTxns.Resize(0)
