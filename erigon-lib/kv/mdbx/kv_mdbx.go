@@ -66,7 +66,6 @@ type PeriodicFlusher struct {
 	ticker     *time.Ticker  // set ticker
 	syncPeriod time.Duration // how often to flush
 	closed     atomic.Bool
-	lock       sync.Mutex
 	doneWg     sync.WaitGroup
 }
 
