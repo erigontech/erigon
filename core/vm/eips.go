@@ -334,8 +334,7 @@ func enable7702(jt *JumpTable) {
 
 // enableEOFv1 applies the EOFv1 changes.
 func enableEOFv1(jt *JumpTable) {
-	// TODO(racytech): Make sure everything is correct, add all EOF opcodes and remove deprecated ones
-	// add them to `opCodeToString` as well
+
 	undefined := &operation{
 		execute:     opUndefined,
 		dynamicGas:  gasZeroCost,
