@@ -291,7 +291,7 @@ func NewDecryptionKeysExtendedValidator(logger log.Logger, config Config, sc Slo
 		return pubsub.ValidationAccept
 	}
 
-	// decorate the validator with rejections metric
+	// decorate the validator with metrics
 	return func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		result := validator(ctx, id, msg)
 		if result == pubsub.ValidationReject {
