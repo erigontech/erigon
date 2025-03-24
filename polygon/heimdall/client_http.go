@@ -511,6 +511,10 @@ func FetchWithRetryEx[T any](
 			return result, nil
 		}
 
+		if strings.Contains(err.Error(), "operation timed out") {
+			return result, ErrOperationTimeout
+		}
+
 		// 503 (Service Unavailable) is thrown when an endpoint isn't activated
 		// yet in heimdall. E.g. when the hard fork hasn't hit yet but heimdall
 		// is upgraded.
