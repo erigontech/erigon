@@ -274,7 +274,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// the true amount of gas it wants to consume to execute fully.
 	// We want to ensure that the gas used doesn't fall below this
 	trueGas := result.UsedGas // Must not fall below this
-	lo = min(trueGas+result.EvmRefund-1, params.TxGas-1)
+	lo = max(trueGas+result.EvmRefund-1, params.TxGas-1)
 
 	i := 0
 	// Execute the binary search and hone in on an executable gas limit
@@ -288,10 +288,10 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
 		// assigened. Return the error directly, don't struggle any more.
-		if err != nil {
+		if err != nil && !errors.Is(err, core.ErrIntrinsicGas) {
 			return 0, err
 		}
-		if result.Failed() || result.UsedGas < trueGas {
+		if errors.Is(err, core.ErrIntrinsicGas) || result.Failed() || result.UsedGas < trueGas {
 			lo = mid
 		} else {
 			hi = mid
