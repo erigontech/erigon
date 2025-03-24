@@ -116,6 +116,7 @@ require (
 	github.com/elastic/go-freelru v0.13.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
+	github.com/felixge/fgprof v0.9.5 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
