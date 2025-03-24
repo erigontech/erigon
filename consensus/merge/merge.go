@@ -189,7 +189,10 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	if config.IsPrague(header.Time) && !skipReceiptsEval {
 		rs = make(types.FlatRequests, 0)
 		allLogs := make(types.Logs, 0)
-		for _, rec := range receipts {
+		for i, rec := range receipts {
+			if rec == nil {
+				return nil, nil, nil, fmt.Errorf("nil receipt: block %d, txId %d, receipts %s", header.Number, i, receipts)
+			}
 			allLogs = append(allLogs, rec.Logs...)
 		}
 		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)

@@ -13,7 +13,7 @@ replace (
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250317154231-2ce6d6e9e6fc
 	github.com/erigontech/interfaces v0.0.0-20250320093525-f1bb05e72b33
-	github.com/erigontech/mdbx-go v0.38.10
+	github.com/erigontech/mdbx-go v0.39.5
 	github.com/erigontech/secp256k1 v1.2.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 )
@@ -35,7 +35,7 @@ require (
 	github.com/erigontech/speedtest v0.0.2
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.12.1
-	github.com/golang-jwt/jwt/v4 v4.5.1
+	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/google/btree v1.1.3
 	github.com/gorilla/websocket v1.5.3
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -45,7 +45,7 @@ require (
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml/v2 v2.2.3
-	github.com/prometheus/client_golang v1.21.0
+	github.com/prometheus/client_golang v1.21.1
 	github.com/prometheus/client_model v0.6.1
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/shirou/gopsutil/v4 v4.25.1
@@ -59,7 +59,7 @@ require (
 	golang.org/x/sync v0.12.0
 	golang.org/x/sys v0.31.0
 	golang.org/x/time v0.11.0
-	google.golang.org/grpc v1.69.4
+	google.golang.org/grpc v1.71.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
 	google.golang.org/protobuf v1.36.5
 )
@@ -74,10 +74,11 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/pion/udp v0.1.4 // indirect
-	go.opentelemetry.io/otel/metric v1.31.0 // indirect
+	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
+	go.opentelemetry.io/otel/metric v1.34.0 // indirect
 	golang.org/x/mod v0.24.0 // indirect
 	golang.org/x/tools v0.31.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20241015192408-796eee8c2d53 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250115164207-1a7da9e5054f // indirect
 	modernc.org/libc v1.55.3 // indirect
 	modernc.org/memory v1.8.0 // indirect
 	modernc.org/sqlite v1.33.1 // indirect
@@ -155,8 +156,8 @@ require (
 	github.com/tklauser/numcpus v0.8.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
-	go.opentelemetry.io/otel v1.31.0 // indirect
-	go.opentelemetry.io/otel/trace v1.31.0 // indirect
+	go.opentelemetry.io/otel v1.34.0 // indirect
+	go.opentelemetry.io/otel/trace v1.34.0 // indirect
 	go.uber.org/goleak v1.3.0 // indirect
 	golang.org/x/net v0.37.0
 	golang.org/x/text v0.23.0 // indirect
