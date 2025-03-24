@@ -24,19 +24,16 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/contracts"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/txnprovider/shutter"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
 func main() {
-	//ctx, cancel := context.WithCancel(context.Background())
-	//defer cancel()
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
 	elUrl := "http://135.125.119.2:8545"
-	_ = requests.NewRequestGenerator(elUrl, logger)
 	cb := contracts.NewJsonRpcBackend(elUrl, logger)
 	valRegAddr := libcommon.HexToAddress("0xa9289A3Dd14FEBe10611119bE81E5d35eAaC3084")
 	valReg, err := shuttercontracts.NewValidatorRegistry(valRegAddr, cb)
@@ -49,23 +46,22 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	logger.Info("Num updates", "num", n.Uint64())
-
 	chainId := params.ChiadoChainConfig.ChainID
-
 	for i := uint64(0); i < n.Uint64(); i++ {
 		u, err := valReg.GetUpdate(&callOpts, big.NewInt(int64(i)))
 		if err != nil {
 			panic(err)
 		}
 
-		msg := new(AggregateRegistrationMessage)
+		msg := new(shutter.AggregateRegistrationMessage)
 		err = msg.Unmarshal(u.Message)
 		if err != nil {
 			panic(err)
 		}
 
-		if !checkStaticRegistrationMessageFields(msg, chainId.Uint64(), valRegAddr) {
+		if !checkStaticRegistrationMessageFields(logger, msg, chainId.Uint64(), valRegAddr) {
 			continue
 		}
 
@@ -78,26 +74,31 @@ func main() {
 }
 
 func checkStaticRegistrationMessageFields(
-	msg *AggregateRegistrationMessage,
+	logger log.Logger,
+	msg *shutter.AggregateRegistrationMessage,
 	chainID uint64,
 	validatorRegistryAddress libcommon.Address,
 ) bool {
-	if msg.Version != AggregateValidatorRegistrationMessageVersion &&
-		msg.Version != LegacyValidatorRegistrationMessageVersion {
-		fmt.Printf("ignoring registration message with invalid version: %d\n", msg.Version)
+	if msg.Version != shutter.AggregateValidatorRegistrationMessageVersion &&
+		msg.Version != shutter.LegacyValidatorRegistrationMessageVersion {
+		logger.Info("ignoring registration message with invalid version", "version", msg.Version)
 		return false
 	}
-	if msg.ChainID != chainID {
-		fmt.Printf("ignoring registration message with invalid chain ID")
+
+	if msg.ChainId != chainID {
+		logger.Info("ignoring registration message with invalid chain id", "chainId", msg.ChainId)
 		return false
 	}
+
 	if msg.ValidatorRegistryAddress != validatorRegistryAddress {
-		fmt.Printf("ignoring registration message with invalid validator registry address")
+		logger.Info("ignoring registration message with invalid validator registry address", "addr", msg.ValidatorRegistryAddress)
 		return false
 	}
+
 	if msg.ValidatorIndex > math.MaxInt64 {
-		fmt.Printf("ignoring registration message with invalid validator index")
+		logger.Info("ignoring registration message with invalid validator index")
 		return false
 	}
+
 	return true
 }

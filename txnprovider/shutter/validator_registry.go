@@ -1,4 +1,20 @@
-package main
+// Copyright 2025 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package shutter
 
 import (
 	"encoding/binary"
@@ -12,14 +28,9 @@ const (
 	AggregateValidatorRegistrationMessageVersion = 1
 )
 
-type RegistrationMessage interface {
-	Marshal() []byte
-	Unmarshal(b []byte) error
-}
-
 type AggregateRegistrationMessage struct {
 	Version                  uint8
-	ChainID                  uint64
+	ChainId                  uint64
 	ValidatorRegistryAddress common.Address
 	ValidatorIndex           uint64
 	Nonce                    uint32
@@ -30,7 +41,7 @@ type AggregateRegistrationMessage struct {
 func (m *AggregateRegistrationMessage) Marshal() []byte {
 	b := make([]byte, 0)
 	b = append(b, m.Version)
-	b = binary.BigEndian.AppendUint64(b, m.ChainID)
+	b = binary.BigEndian.AppendUint64(b, m.ChainId)
 	b = append(b, m.ValidatorRegistryAddress.Bytes()...)
 	b = binary.BigEndian.AppendUint64(b, m.ValidatorIndex)
 	b = binary.BigEndian.AppendUint32(b, m.Count)
@@ -50,7 +61,7 @@ func (m *AggregateRegistrationMessage) Unmarshal(b []byte) error {
 	}
 
 	m.Version = b[0]
-	m.ChainID = binary.BigEndian.Uint64(b[1:9])
+	m.ChainId = binary.BigEndian.Uint64(b[1:9])
 	m.ValidatorRegistryAddress = common.BytesToAddress(b[9:29])
 	m.ValidatorIndex = binary.BigEndian.Uint64(b[29:37])
 	m.Count = binary.BigEndian.Uint32(b[37:41])
@@ -79,7 +90,7 @@ func (m *AggregateRegistrationMessage) ValidatorIndices() []int64 {
 
 type LegacyRegistrationMessage struct {
 	Version                  uint8
-	ChainID                  uint64
+	ChainId                  uint64
 	ValidatorRegistryAddress common.Address
 	ValidatorIndex           uint64
 	Nonce                    uint64
@@ -89,7 +100,7 @@ type LegacyRegistrationMessage struct {
 func (m *LegacyRegistrationMessage) Marshal() []byte {
 	b := make([]byte, 0)
 	b = append(b, m.Version)
-	b = binary.BigEndian.AppendUint64(b, m.ChainID)
+	b = binary.BigEndian.AppendUint64(b, m.ChainId)
 	b = append(b, m.ValidatorRegistryAddress.Bytes()...)
 	b = binary.BigEndian.AppendUint64(b, m.ValidatorIndex)
 	b = binary.BigEndian.AppendUint64(b, m.Nonce)
@@ -108,7 +119,7 @@ func (m *LegacyRegistrationMessage) Unmarshal(b []byte) error {
 	}
 
 	m.Version = b[0]
-	m.ChainID = binary.BigEndian.Uint64(b[1:9])
+	m.ChainId = binary.BigEndian.Uint64(b[1:9])
 	m.ValidatorRegistryAddress = common.BytesToAddress(b[9:29])
 	m.ValidatorIndex = binary.BigEndian.Uint64(b[29:37])
 	m.Nonce = binary.BigEndian.Uint64(b[37:45])
