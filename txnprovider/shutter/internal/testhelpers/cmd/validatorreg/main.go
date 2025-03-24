@@ -17,6 +17,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"math"
 	"math/big"
@@ -31,11 +32,22 @@ import (
 )
 
 func main() {
+	elUrlFlag := flag.String("el-url", "", "execution layer url")
+	valRegAddrFlag := flag.String("validator-registry-address", "", "validator registry smart contract address")
+	fromIndexFlag := flag.Int64("from-index", 0, "validator from index filter")
+	toIndexFlag := flag.Int64("to-index", math.MaxInt64, "validator to index filter (exclusive)")
+	flag.Parse()
+	if elUrlFlag == nil || *elUrlFlag == "" {
+		panic("el-url flag is required")
+	}
+	if valRegAddrFlag == nil || *valRegAddrFlag == "" {
+		panic("validator-registry-address flag is required")
+	}
+
 	logger := log.New()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
-	elUrl := "http://135.125.119.2:8545"
-	cb := contracts.NewJsonRpcBackend(elUrl, logger)
-	valRegAddr := libcommon.HexToAddress("0xa9289A3Dd14FEBe10611119bE81E5d35eAaC3084")
+	logger.SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	cb := contracts.NewJsonRpcBackend(*elUrlFlag, logger)
+	valRegAddr := libcommon.HexToAddress(*valRegAddrFlag)
 	valReg, err := shuttercontracts.NewValidatorRegistry(valRegAddr, cb)
 	if err != nil {
 		panic(err)
@@ -47,7 +59,7 @@ func main() {
 		panic(err)
 	}
 
-	logger.Info("Num updates", "num", n.Uint64())
+	logger.Info("num updates", "num", n.Uint64())
 	chainId := params.ChiadoChainConfig.ChainID
 	for i := uint64(0); i < n.Uint64(); i++ {
 		u, err := valReg.GetUpdate(&callOpts, big.NewInt(int64(i)))
@@ -66,9 +78,14 @@ func main() {
 		}
 
 		for _, i := range msg.ValidatorIndices() {
-			if i >= 7615 && i <= 7714 {
-				fmt.Printf("Validator index: %d, %+v\n", i, msg)
+			if fromIndexFlag != nil && i < *fromIndexFlag {
+				continue
 			}
+			if toIndexFlag != nil && i >= *toIndexFlag {
+				break
+			}
+
+			logger.Info(fmt.Sprintf("validator index found: %d, %+v", i, msg))
 		}
 	}
 }
