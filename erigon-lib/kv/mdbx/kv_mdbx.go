@@ -59,6 +59,57 @@ func WithChaindataTables(defaultBuckets kv.TableCfg) kv.TableCfg {
 	return defaultBuckets
 }
 
+// handles background process of periodically flushing commits to disk
+type PeriodicFlusher struct {
+	env              *mdbx.Env // mdbx environment to flush to
+	opts             MdbxOpts
+	ticker           *time.Ticker  // set ticker
+	syncPeriod       time.Duration // how often to flush
+	quitFlushingChan chan struct{} // to signal end of flushing
+	closed           atomic.Bool
+}
+
+func newPeriodicFlusher(env *mdbx.Env, opts MdbxOpts, syncPeriod time.Duration) *PeriodicFlusher {
+	return &PeriodicFlusher{
+		env:              env,
+		opts:             opts,
+		ticker:           time.NewTicker(syncPeriod),
+		syncPeriod:       syncPeriod,
+		quitFlushingChan: make(chan struct{}),
+	}
+}
+
+func (flusher *PeriodicFlusher) Close() {
+	swapped := flusher.closed.CompareAndSwap(false, true)
+	if !swapped {
+		return
+	}
+	if flusher.ticker != nil {
+		flusher.ticker.Stop() // Stop the ticker
+	}
+	close(flusher.quitFlushingChan) //  close channel to signal quit
+}
+
+func (flusher *PeriodicFlusher) FlushInBackground(ctx context.Context) {
+	for {
+		select {
+		case <-flusher.ticker.C:
+			if err := flusher.env.Sync(true, false); err != nil {
+				flusher.opts.log.Error("Error during periodic mdbx sync", "err", err, "dbName", flusher.opts.label)
+			}
+		case _, ok := <-flusher.quitFlushingChan:
+			if !ok {
+				return
+			}
+		case <-ctx.Done():
+			// here the flusher is not closed explicitly from outside,
+			// so we must close it from within
+			flusher.ticker.Stop()
+			return
+		}
+	}
+}
+
 type MdbxOpts struct {
 	// must be in the range from 12.5% (almost empty) to 50% (half empty)
 	// which corresponds to the range from 8192 and to 32768 in units respectively
@@ -218,7 +269,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	}
 
-	env, err := mdbx.NewEnv()
+	env, err := mdbx.NewEnv(mdbx.Default)
 	if err != nil {
 		return nil, err
 	}
@@ -373,19 +424,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
-		db.ticker = time.NewTicker(opts.syncPeriod) // set ticker
-		go func(ctx context.Context) {              // start goroutine periodically flushing to disk
-			defer db.ticker.Stop()
-			for {
-				select {
-				case <-db.ticker.C:
-					if err := env.Sync(false, true); err != nil {
-						opts.log.Error("Error during periodic mdbx sync", "err", err)
-					}
-				case <-ctx.Done():
-					return
-				}
-			}
+		db.periodicFlusher = newPeriodicFlusher(env, opts, opts.syncPeriod)
+		go func(ctx context.Context) { // start goroutine periodically flushing to disk
+			db.periodicFlusher.FlushInBackground(ctx) // start flushing in background
 		}(ctx)
 	}
 
@@ -487,7 +528,8 @@ type MdbxKV struct {
 	batchMu sync.Mutex
 	batch   *batch
 
-	ticker *time.Ticker // only used when opts.syncPeriod is set, to periodically flush to disk committed changes
+	periodicFlusher *PeriodicFlusher // only used when opts.syncPeriod is set, to periodically flush to disk committed changes
+
 }
 
 func (db *MdbxKV) Path() string                { return db.opts.path }
@@ -576,7 +618,9 @@ func (db *MdbxKV) Close() {
 		return
 	}
 	db.waitTxsAllDoneOnClose()
-
+	if db.periodicFlusher != nil {
+		db.periodicFlusher.Close()
+	}
 	db.env.Close()
 	db.env = nil
 

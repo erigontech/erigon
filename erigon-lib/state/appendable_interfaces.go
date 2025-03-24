@@ -12,6 +12,7 @@ import (
 type RootNum = ae.RootNum
 type Num = ae.Num
 type Id = ae.Id
+type EncToBytesI = ae.EncToBytesI
 type AppendableId = ae.AppendableId
 type Bytes = ae.Bytes
 
@@ -96,11 +97,5 @@ const (
 		and so unwind doesn't need to be very performant.
 	*/
 	Unmarked
-	/*
-		valsTbl;
-		unwinds are frequent and values arrive at high cadence
-		so need to have very performant unwinds.
-	*/
-	Appending
 	Buffered
 )

@@ -159,13 +159,22 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 	}
 
 	parentBlockNum := provideOpts.ParentBlockNum
-	parentBlockWaitTime := time.Second * time.Duration(p.slotCalculator.SecondsPerSlot())
-	parentBlockWaitCtx, parentBlockWaitCtxCancel := context.WithTimeout(ctx, parentBlockWaitTime)
+	parentBlockWaitTimeout := time.Second * time.Duration(p.slotCalculator.SecondsPerSlot())
+	parentBlockWaitCtx, parentBlockWaitCtxCancel := context.WithTimeout(ctx, parentBlockWaitTimeout)
 	defer parentBlockWaitCtxCancel()
+	parentBlockWaitStart := time.Now()
 	err := p.blockTracker.Wait(parentBlockWaitCtx, parentBlockNum)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			parentBlockWaitSecs.ObserveDuration(parentBlockWaitStart)
+			parentBlockMissed.Inc()
+		}
+
 		return nil, fmt.Errorf("issue while waiting for parent block %d: %w", parentBlockNum, err)
 	}
+
+	parentBlockWaitSecs.ObserveDuration(parentBlockWaitStart)
+	parentBlockOnTime.Inc()
 
 	eon, ok := p.eonTracker.EonByBlockNum(parentBlockNum)
 	if !ok {
@@ -190,34 +199,42 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 	decryptionMark := DecryptionMark{Slot: slot, Eon: eon.Index}
 	slotAge := p.slotCalculator.CalcSlotAge(slot)
 	if slotAge < p.config.MaxDecryptionKeysDelay {
-		keysWaitTime := p.config.MaxDecryptionKeysDelay - slotAge
+		decryptionMarkWaitTimeout := p.config.MaxDecryptionKeysDelay - slotAge
 		p.logger.Debug(
 			"waiting for decryption keys",
 			"slot", slot,
+			"blockNum", blockNum,
 			"eon", eon.Index,
 			"age", slotAge,
-			"blockNum", blockNum,
-			"timeout", keysWaitTime,
+			"timeout", decryptionMarkWaitTimeout,
 		)
 
-		decryptionWaitCtx, decryptionWaitCtxCancel := context.WithTimeout(ctx, keysWaitTime)
-		defer decryptionWaitCtxCancel()
-		err = p.decryptedTxnsPool.Wait(decryptionWaitCtx, decryptionMark)
-		if errors.Is(err, context.DeadlineExceeded) {
-			p.logger.Warn(
-				"decryption keys wait timeout, falling back to base txn provider",
-				"slot", slot,
-				"eon", eon.Index,
-				"age", slotAge,
-				"blockNum", blockNum,
-				"timeout", keysWaitTime,
-			)
-
-			return p.baseTxnProvider.ProvideTxns(ctx, opts...)
-		}
+		decryptionMarkWaitCtx, decryptionMarkWaitCtxCancel := context.WithTimeout(ctx, decryptionMarkWaitTimeout)
+		defer decryptionMarkWaitCtxCancel()
+		decryptionMarkWaitStart := time.Now()
+		err = p.decryptedTxnsPool.Wait(decryptionMarkWaitCtx, decryptionMark)
 		if err != nil {
+			decryptionMarkWaitSecs.ObserveDuration(decryptionMarkWaitStart)
+			decryptionMarkMissed.Inc()
+
+			if errors.Is(err, context.DeadlineExceeded) {
+				p.logger.Warn(
+					"decryption mark wait timeout, falling back to secondary txn provider",
+					"slot", slot,
+					"blockNum", blockNum,
+					"eon", eon.Index,
+					"age", slotAge,
+					"timeout", decryptionMarkWaitTimeout,
+				)
+
+				return p.baseTxnProvider.ProvideTxns(ctx, opts...)
+			}
+
 			return nil, err
 		}
+
+		decryptionMarkWaitSecs.ObserveDuration(decryptionMarkWaitStart)
+		decryptionMarkOnTime.Inc()
 	}
 
 	decryptedTxns, ok := p.decryptedTxnsPool.DecryptedTxns(decryptionMark)
@@ -230,6 +247,7 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 			"blockNum", blockNum,
 		)
 
+		decryptionMarkMissed.Inc()
 		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	}
 
