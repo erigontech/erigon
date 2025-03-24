@@ -85,8 +85,6 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/thomaso-mirodin/intmath v0.0.0-20160323211736-5dc6d854e46e
 	github.com/tidwall/btree v1.6.0
-	github.com/tyler-smith/go-bip32 v1.0.0
-	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/urfave/cli/v2 v2.27.5
 	github.com/valyala/fastjson v1.6.4
 	github.com/vektah/gqlparser/v2 v2.5.22
@@ -112,8 +110,6 @@ require (
 )
 
 require (
-	github.com/FactomProject/basen v0.0.0-20150613233007-fe3947df716e // indirect
-	github.com/FactomProject/btcutilecc v0.0.0-20130527213604-d3a63a5752ec // indirect
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b // indirect

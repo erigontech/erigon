@@ -22,10 +22,8 @@ import (
 	"math/big"
 	"os"
 	"strconv"
+	"strings"
 	"time"
-
-	"github.com/tyler-smith/go-bip32"
-	"github.com/tyler-smith/go-bip39"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -38,10 +36,10 @@ import (
 
 func main() {
 	if len(os.Args) < 8 {
-		fmt.Printf("Usage: %s <seedFile> <fromAddress> <toAddress> <amountEth> <rpcURL> <numTxn> <chain>\n", os.Args[0])
+		fmt.Printf("Usage: %s <fromPkFile> <fromAddress> <toAddress> <amountEth> <rpcURL> <numTxn> <chain>\n", os.Args[0])
 		os.Exit(1)
 	}
-	seedFile := os.Args[1]
+	fromPkFile := os.Args[1]
 	from := os.Args[2]
 	to := os.Args[3]
 	amount := os.Args[4]
@@ -52,14 +50,14 @@ func main() {
 	defer cancel()
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
-	err := sendTxns(ctx, logger, seedFile, from, to, amount, rpcUrl, numTxnStr, chainStr)
+	err := sendTxns(ctx, logger, fromPkFile, from, to, amount, rpcUrl, numTxnStr, chainStr)
 	if err != nil {
 		logger.Error("failed to send transactions", "err", err)
 		os.Exit(1)
 	}
 }
 
-func sendTxns(ctx context.Context, logger log.Logger, seedFile, fromStr, toStr, amountStr, url, countStr, chain string) error {
+func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr, amountStr, url, countStr, chain string) error {
 	chainId := params.ChainConfigByChainName(chain).ChainID
 	rpcClient := requests.NewRequestGenerator(url, logger)
 	transactor := testhelpers.NewTransactor(rpcClient, chainId)
@@ -69,63 +67,12 @@ func sendTxns(ctx context.Context, logger log.Logger, seedFile, fromStr, toStr, 
 	if err != nil {
 		return err
 	}
-	mnemonicBytes, err := os.ReadFile(seedFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			entropy, err := bip39.NewEntropy(128)
-			if err != nil {
-				return err
-			}
-			mnemonic, err := bip39.NewMnemonic(entropy)
-			if err != nil {
-				return err
-			}
-			mnemonicBytes = []byte(mnemonic)
-			err = os.WriteFile(seedFile, []byte(mnemonic), 0644)
-			if err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-	}
-	mnemonic := string(mnemonicBytes)
-	seed := bip39.NewSeed(mnemonic, "")
-	masterKey, err := bip32.NewMasterKey(seed)
+	fromPkBytes, err := os.ReadFile(fromPkFile)
 	if err != nil {
 		return err
 	}
-	purpose := 44 + bip32.FirstHardenedChild
-	coinType := 60 + bip32.FirstHardenedChild
-	account := 0 + bip32.FirstHardenedChild
-	change := uint32(0)
-	addressIndex := uint32(0)
-	// Derive the purpose key (m/44H)
-	purposeKey, err := masterKey.NewChildKey(purpose)
-	if err != nil {
-		return err
-	}
-	// Derive the coin type key (m/44'/60H)
-	coinTypeKey, err := purposeKey.NewChildKey(coinType)
-	if err != nil {
-		return err
-	}
-	// Derive the account key (m/44'/60'/0H)
-	accountKey, err := coinTypeKey.NewChildKey(account)
-	if err != nil {
-		return err
-	}
-	// Derive the change key (m/44'/60'/0'/0)
-	changeKey, err := accountKey.NewChildKey(change)
-	if err != nil {
-		return err
-	}
-	// Finally, derive the address index key (m/44'/60'/0'/0/0)
-	addressKey, err := changeKey.NewChildKey(addressIndex)
-	if err != nil {
-		return err
-	}
-	from, err := crypto.ToECDSA(addressKey.Key)
+	fromPkStr := strings.TrimSpace(string(fromPkBytes))
+	from, err := crypto.HexToECDSA(fromPkStr)
 	if err != nil {
 		return err
 	}
@@ -148,10 +95,12 @@ func sendTxns(ctx context.Context, logger log.Logger, seedFile, fromStr, toStr, 
 }
 
 func waitInclusion(ctx context.Context, txn types.Transaction, rpcClient requests.RequestGenerator) (*types.Receipt, error) {
+	logger := log.New("hash", txn.Hash())
+	timeout := 1 * time.Minute
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	queryTicker := time.NewTicker(time.Second)
 	defer queryTicker.Stop()
-
-	logger := log.New("hash", txn.Hash())
 	for {
 		receipt, err := rpcClient.GetTransactionReceipt(ctx, txn.Hash())
 		if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
@@ -166,7 +115,8 @@ func waitInclusion(ctx context.Context, txn types.Transaction, rpcClient request
 		// Wait for the next round.
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			logger.Warn("transaction inclusion taking a while, proceeding to next submission", "timeout", timeout)
+			return nil, nil
 		case <-queryTicker.C:
 		}
 	}
