@@ -398,7 +398,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer dom2.Close()
 
-	_, err = dom2.SeekCommitment(ctx, rwTx)
+	_, err = dom2.SeekCommitment(ctx, WrapTxWithCtx(rwTx, ac2))
 	sstartTx := dom2.TxNum()
 
 	require.NoError(t, err)
@@ -486,15 +486,15 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	)
 	maxInt := math.MaxInt
 	{
-		it, err := ac.RangeLatest(tx, kv.AccountsDomain, nil, nil, maxInt)
+		it, err := ac.DebugRangeLatest(tx, kv.AccountsDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		accountsRange = extractKVErrIterator(t, it)
 
-		it, err = ac.RangeLatest(tx, kv.StorageDomain, nil, nil, maxInt)
+		it, err = ac.DebugRangeLatest(tx, kv.StorageDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		storageRange = extractKVErrIterator(t, it)
 
-		it, err = ac.RangeLatest(tx, kv.CodeDomain, nil, nil, maxInt)
+		it, err = ac.DebugRangeLatest(tx, kv.CodeDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		codeRange = extractKVErrIterator(t, it)
 
@@ -549,15 +549,15 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	)
 
 	{
-		it, err := ac.RangeLatest(afterTx, kv.AccountsDomain, nil, nil, maxInt)
+		it, err := ac.DebugRangeLatest(afterTx, kv.AccountsDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		accountsRangeAfter = extractKVErrIterator(t, it)
 
-		it, err = ac.RangeLatest(afterTx, kv.StorageDomain, nil, nil, maxInt)
+		it, err = ac.DebugRangeLatest(afterTx, kv.StorageDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		storageRangeAfter = extractKVErrIterator(t, it)
 
-		it, err = ac.RangeLatest(afterTx, kv.CodeDomain, nil, nil, maxInt)
+		it, err = ac.DebugRangeLatest(afterTx, kv.CodeDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		codeRangeAfter = extractKVErrIterator(t, it)
 
@@ -864,11 +864,12 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	ac = newAgg.BeginFilesRo()
 	defer ac.Close()
-	newDoms, err := NewSharedDomains(WrapTxWithCtx(newTx, ac), log.New())
+	tx2 := WrapTxWithCtx(newTx, ac)
+	newDoms, err := NewSharedDomains(tx2, log.New())
 	require.NoError(t, err)
 	defer newDoms.Close()
 
-	_, err = newDoms.SeekCommitment(ctx, newTx)
+	_, err = newDoms.SeekCommitment(ctx, tx2)
 	require.NoError(t, err)
 	latestTx := newDoms.TxNum()
 	t.Logf("seek to latest_tx=%d", latestTx)
@@ -878,7 +879,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		if uint64(i+1) >= txs-aggStep {
 			continue // finishtx always stores last agg step in db which we deleted, so missing  values which were not aggregated is expected
 		}
-		stored, _, _, err := ac.GetLatest(kv.AccountsDomain, key[:length.Addr], newTx)
+		stored, _, _, err := ac.GetLatest(kv.AccountsDomain, key[:length.Addr], tx2)
 		require.NoError(t, err)
 		if len(stored) == 0 {
 			miss++
@@ -891,7 +892,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 		require.EqualValues(t, i+1, int(acc.Nonce))
 
-		storedV, _, found, err := ac.GetLatest(kv.StorageDomain, key, newTx)
+		storedV, _, found, err := ac.GetLatest(kv.StorageDomain, key, tx2)
 		require.NoError(t, err)
 		require.True(t, found)
 		require.NotEmpty(t, storedV)
