@@ -1619,7 +1619,7 @@ func TestDomainRange(t *testing.T) {
 	}
 
 	{
-		it, err := dc.RangeLatest(tx, nil, nil, -1)
+		it, err := dc.DebugRangeLatest(tx, nil, nil, -1)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
@@ -2113,7 +2113,7 @@ func TestDomain_Unwind(t *testing.T) {
 		writeKeys(t, expected, tmpDb, unwindTo)
 
 		suf := fmt.Sprintf(";unwindTo=%d", unwindTo)
-		t.Run("RangeLatest"+suf, func(t *testing.T) {
+		t.Run("DebugRangeLatest"+suf, func(t *testing.T) {
 			t.Helper()
 
 			etx, err := tmpDb.BeginRo(ctx)
@@ -2128,10 +2128,10 @@ func TestDomain_Unwind(t *testing.T) {
 			defer ectx.Close()
 			uc := d.BeginFilesRo()
 			defer uc.Close()
-			et, err := ectx.RangeLatest(etx, nil, nil, -1)
+			et, err := ectx.DebugRangeLatest(etx, nil, nil, -1)
 			require.NoError(t, err)
 
-			ut, err := uc.RangeLatest(utx, nil, nil, -1)
+			ut, err := uc.DebugRangeLatest(utx, nil, nil, -1)
 			require.NoError(t, err)
 			compareIterators(t, et, ut)
 		})

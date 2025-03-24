@@ -87,7 +87,7 @@ func (flusher *PeriodicFlusher) Close() {
 	if flusher.ticker != nil {
 		flusher.ticker.Stop() // Stop the ticker
 	}
-	flusher.quitFlushingChan <- struct{}{} // signal quit
+	close(flusher.quitFlushingChan) //  close channel to signal quit
 }
 
 func (flusher *PeriodicFlusher) FlushInBackground(ctx context.Context) {
@@ -97,13 +97,14 @@ func (flusher *PeriodicFlusher) FlushInBackground(ctx context.Context) {
 			if err := flusher.env.Sync(true, false); err != nil {
 				flusher.opts.log.Error("Error during periodic mdbx sync", "err", err, "dbName", flusher.opts.label)
 			}
-		case <-flusher.quitFlushingChan:
-			return
+		case _, ok := <-flusher.quitFlushingChan:
+			if !ok {
+				return
+			}
 		case <-ctx.Done():
 			// here the flusher is not closed explicitly from outside,
 			// so we must close it from within
 			flusher.ticker.Stop()
-			flusher.closed.CompareAndSwap(false, true)
 			return
 		}
 	}
@@ -268,7 +269,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	}
 
-	env, err := mdbx.NewEnv()
+	env, err := mdbx.NewEnv(mdbx.Default)
 	if err != nil {
 		return nil, err
 	}
