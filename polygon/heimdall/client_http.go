@@ -365,7 +365,7 @@ func (c *HttpClient) FetchStatus(ctx context.Context) (*Status, error) {
 
 	response, err := FetchWithRetry[StatusResponse](ctx, c, url, c.logger)
 	if err != nil {
-		return nil, fmt.Errorf("could not get heimdall status, check if your heimdall URL and if instance is running. err: %w", err)
+		return nil, err
 	}
 
 	return &response.Result, nil

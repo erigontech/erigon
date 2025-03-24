@@ -690,7 +690,7 @@ func (s *Sync) Run(ctx context.Context) error {
 
 		catchingUp, err := s.heimdallSync.IsCatchingUp(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("could not get heimdall status, check if your heimdall URL and if instance is running. err: %w", err)
 		}
 
 		if !catchingUp {
