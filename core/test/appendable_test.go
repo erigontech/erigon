@@ -60,7 +60,7 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	return dirs, db, logger
 }
 
-func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (EntityId, *state.Appendable[state.MarkedTxI]) {
+func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (EntityId, *state.Appendable[state.MarkedTxI, Num]) {
 	headerId := registerEntity(dir, "headers")
 	require.Equal(t, ae.AppendableId(0), headerId)
 
@@ -71,9 +71,9 @@ func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (En
 		state.WithIndexKeyFactory(&snaptype.HeaderAccessorIndexKeyFactory{}))
 
 	ma, err := state.NewMarkedAppendable(headerId, kv.Headers, kv.HeaderCanonical, ae.IdentityRootRelationInstance, log,
-		state.App_WithFreezer[state.MarkedTxI](freezer),
-		state.App_WithPruneFrom[state.MarkedTxI](Num(1)),
-		state.App_WithIndexBuilders[state.MarkedTxI](builder),
+		state.App_WithFreezer[state.MarkedTxI, Num](freezer),
+		state.App_WithPruneFrom[state.MarkedTxI, Num](Num(1)),
+		state.App_WithIndexBuilders[state.MarkedTxI, Num](builder),
 	)
 	require.NoError(t, err)
 

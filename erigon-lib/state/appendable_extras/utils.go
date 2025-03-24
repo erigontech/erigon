@@ -58,8 +58,8 @@ func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, r
 
 type IdentityRootRelation struct{}
 
-func (i *IdentityRootRelation) RootNum2Id(rootNum RootNum, tx kv.Tx) (id Id, err error) {
-	return Id(rootNum), nil
+func (i *IdentityRootRelation) RootNum2Num(rootNum RootNum, tx kv.Tx) (num Num, err error) {
+	return Num(rootNum), nil
 }
 
 var IdentityRootRelationInstance = &IdentityRootRelation{}
