@@ -20,8 +20,7 @@ func (r *PointRelation) RootNum2Num(inp RootNum, tx kv.Tx) (Num, error) {
 
 //////////////////////////////////////////////
 
-// many:1; EntityEnds tbl: start RootNum -> num
-// also id == num here (only canonical data)
+// many:1; EntityEnds tbl: start RootNum -> id
 type ManyToOneRelation struct {
 	entityEndsTbl string
 }
