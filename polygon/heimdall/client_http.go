@@ -47,13 +47,15 @@ var (
 	ErrBadGateway            = errors.New("bad gateway")
 	ErrServiceUnavailable    = errors.New("service unavailable")
 	ErrCloudflareAccessNoApp = errors.New("cloudflare access - no application")
-	ErrOperationTimeout      = errors.New("operation timed out")
+	ErrOperationTimeout      = errors.New("operation timed out, check internet connection")
+	ErrNoHost                = errors.New("no such host, check internet connection")
 
 	TransientErrors = []error{
 		ErrBadGateway,
 		ErrServiceUnavailable,
 		ErrCloudflareAccessNoApp,
 		ErrOperationTimeout,
+		ErrNoHost,
 		context.DeadlineExceeded,
 	}
 )
@@ -363,7 +365,7 @@ func (c *HttpClient) FetchStatus(ctx context.Context) (*Status, error) {
 
 	response, err := FetchWithRetry[StatusResponse](ctx, c, url, c.logger)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not get heimdall status, check if your heimdall URL and if instance is running. err: %w", err)
 	}
 
 	return &response.Result, nil
@@ -513,6 +515,10 @@ func FetchWithRetryEx[T any](
 
 		if strings.Contains(err.Error(), "operation timed out") {
 			return result, ErrOperationTimeout
+		}
+
+		if strings.Contains(err.Error(), "no such host") {
+			return result, ErrNoHost
 		}
 
 		// 503 (Service Unavailable) is thrown when an endpoint isn't activated
