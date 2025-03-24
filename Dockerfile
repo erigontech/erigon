@@ -34,7 +34,7 @@ ARG BUILDER_IMAGE="golang:1.24-bookworm" \
        6060"
 
 ### Erigon Builder section:
-FROM ${BUILDER_IMAGE} AS builder 
+FROM --platform=$BUILDPLATFORM ${BUILDER_IMAGE} AS builder 
 ARG TARGETARCH \
     TARGETVARIANT \
     BUILD_DBTOOLS \
@@ -56,6 +56,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     elif [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "xv2" ]; then \
         echo "DEBUG: detected architecture AMD64v2"; \
         export AMD_FLAGS="GOAMD64_VERSION=v2 GOARCH=amd64"; \
+    elif [ "x${TARGETARCH}" == "xarm64" ]; then \
+        echo "DEBUG: detected architecture ARM64"; \
+        export AMD_FLAGS="GOARCH=arm64"; \
     fi && \
     if [ "x${BUILD_SILKWORM}" != "xtrue" ] || [ "x${TARGETARCH}" == "xarm64" ] ; then \
         echo "DEBUG: add nosilkworm build tag - BUILD_SILKWORM is not true OR ARM64 architecture "; \
