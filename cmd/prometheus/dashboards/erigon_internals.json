@@ -319,7 +319,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 781
+            "y": 953
           },
           "id": 240,
           "options": {
@@ -425,7 +425,7 @@
             "h": 4,
             "w": 12,
             "x": 0,
-            "y": 782
+            "y": 954
           },
           "id": 219,
           "options": {
@@ -524,7 +524,7 @@
             "h": 12,
             "w": 12,
             "x": 12,
-            "y": 782
+            "y": 954
           },
           "id": 220,
           "options": {
@@ -641,7 +641,7 @@
             "h": 4,
             "w": 12,
             "x": 0,
-            "y": 1340
+            "y": 1512
           },
           "id": 222,
           "options": {
@@ -708,7 +708,7 @@
             "h": 4,
             "w": 12,
             "x": 0,
-            "y": 1344
+            "y": 1516
           },
           "id": 223,
           "options": {
@@ -785,7 +785,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 783
+            "y": 955
           },
           "id": 232,
           "options": {
@@ -947,7 +947,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 783
+            "y": 955
           },
           "id": 230,
           "options": {
@@ -1046,7 +1046,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 833
+            "y": 1005
           },
           "id": 229,
           "options": {
@@ -1112,7 +1112,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 833
+            "y": 1005
           },
           "id": 215,
           "options": {
@@ -1205,7 +1205,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 841
+            "y": 1013
           },
           "id": 236,
           "options": {
@@ -1282,7 +1282,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 841
+            "y": 1013
           },
           "id": 214,
           "options": {
@@ -1354,7 +1354,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 849
+            "y": 1021
           },
           "id": 235,
           "options": {
@@ -1459,7 +1459,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 849
+            "y": 1021
           },
           "id": 210,
           "options": {
@@ -1527,7 +1527,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 857
+            "y": 1029
           },
           "id": 234,
           "options": {
@@ -1657,7 +1657,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 857
+            "y": 1029
           },
           "id": 211,
           "options": {
@@ -1754,7 +1754,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 865
+            "y": 1037
           },
           "id": 231,
           "options": {
@@ -1841,7 +1841,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 865
+            "y": 1037
           },
           "id": 221,
           "options": {
@@ -2027,7 +2027,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 873
+            "y": 1045
           },
           "id": 216,
           "options": {
@@ -2155,7 +2155,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 873
+            "y": 1045
           },
           "id": 217,
           "options": {
@@ -2252,7 +2252,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 881
+            "y": 1053
           },
           "id": 228,
           "options": {
@@ -2316,7 +2316,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 881
+            "y": 1053
           },
           "id": 213,
           "options": {
@@ -2388,7 +2388,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 889
+            "y": 1061
           },
           "id": 226,
           "options": {
@@ -2493,7 +2493,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 889
+            "y": 1061
           },
           "id": 227,
           "options": {
@@ -2618,7 +2618,7 @@
             "h": 9,
             "w": 24,
             "x": 0,
-            "y": 897
+            "y": 1069
           },
           "id": 224,
           "options": {
@@ -2753,7 +2753,7 @@
             "h": 12,
             "w": 24,
             "x": 0,
-            "y": 906
+            "y": 1078
           },
           "id": 209,
           "options": {
@@ -2882,7 +2882,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 401
+            "y": 573
           },
           "id": 204,
           "options": {
@@ -2981,7 +2981,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 401
+            "y": 573
           },
           "id": 203,
           "options": {
@@ -3079,7 +3079,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 493
+            "y": 665
           },
           "id": 238,
           "options": {
@@ -3170,7 +3170,7 @@
             "h": 3,
             "w": 12,
             "x": 0,
-            "y": 501
+            "y": 673
           },
           "id": 239,
           "options": {
@@ -3314,7 +3314,7 @@
             "h": 6,
             "w": 8,
             "x": 0,
-            "y": 250
+            "y": 422
           },
           "id": 196,
           "options": {
@@ -3414,7 +3414,7 @@
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 250
+            "y": 422
           },
           "id": 206,
           "options": {
@@ -3542,7 +3542,7 @@
             "h": 6,
             "w": 8,
             "x": 16,
-            "y": 250
+            "y": 422
           },
           "id": 200,
           "options": {
@@ -3644,7 +3644,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 256
+            "y": 428
           },
           "id": 197,
           "options": {
@@ -3802,7 +3802,7 @@
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 256
+            "y": 428
           },
           "id": 207,
           "options": {
@@ -3897,7 +3897,7 @@
             "h": 6,
             "w": 8,
             "x": 16,
-            "y": 256
+            "y": 428
           },
           "id": 202,
           "options": {
@@ -4019,7 +4019,7 @@
             "h": 5,
             "w": 8,
             "x": 8,
-            "y": 262
+            "y": 434
           },
           "id": 158,
           "options": {
@@ -4122,7 +4122,7 @@
             "h": 5,
             "w": 8,
             "x": 16,
-            "y": 262
+            "y": 434
           },
           "id": 199,
           "options": {
@@ -4250,7 +4250,7 @@
             "h": 12,
             "w": 8,
             "x": 0,
-            "y": 264
+            "y": 436
           },
           "id": 112,
           "options": {
@@ -4400,7 +4400,7 @@
             "h": 9,
             "w": 8,
             "x": 8,
-            "y": 267
+            "y": 439
           },
           "id": 198,
           "options": {
@@ -4559,7 +4559,7 @@
             "h": 9,
             "w": 8,
             "x": 16,
-            "y": 267
+            "y": 439
           },
           "id": 201,
           "options": {
@@ -4692,7 +4692,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 276
+            "y": 448
           },
           "id": 245,
           "options": {
@@ -4793,7 +4793,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 276
+            "y": 448
           },
           "id": 246,
           "options": {
@@ -4894,7 +4894,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 284
+            "y": 456
           },
           "id": 208,
           "options": {
@@ -5012,7 +5012,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 2325
+            "y": 2497
           },
           "id": 243,
           "options": {
@@ -5130,7 +5130,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 2325
+            "y": 2497
           },
           "id": 244,
           "options": {
@@ -5246,7 +5246,7 @@
             "h": 5,
             "w": 8,
             "x": 0,
-            "y": 1913
+            "y": 2085
           },
           "id": 141,
           "options": {
@@ -5347,7 +5347,7 @@
             "h": 9,
             "w": 16,
             "x": 8,
-            "y": 1913
+            "y": 2085
           },
           "id": 166,
           "options": {
@@ -5504,7 +5504,7 @@
             "h": 5,
             "w": 8,
             "x": 0,
-            "y": 1918
+            "y": 2090
           },
           "id": 159,
           "options": {
@@ -5613,7 +5613,7 @@
             "h": 7,
             "w": 16,
             "x": 8,
-            "y": 1922
+            "y": 2094
           },
           "id": 168,
           "options": {
@@ -5911,7 +5911,7 @@
             "h": 6,
             "w": 8,
             "x": 0,
-            "y": 1923
+            "y": 2095
           },
           "id": 167,
           "options": {
@@ -6024,7 +6024,7 @@
             "h": 6,
             "w": 8,
             "x": 0,
-            "y": 1929
+            "y": 2101
           },
           "id": 169,
           "options": {
@@ -6154,7 +6154,7 @@
             "h": 6,
             "w": 16,
             "x": 8,
-            "y": 1929
+            "y": 2101
           },
           "id": 150,
           "options": {
@@ -6270,7 +6270,7 @@
             "h": 5,
             "w": 8,
             "x": 0,
-            "y": 1935
+            "y": 2107
           },
           "id": 194,
           "options": {
@@ -6404,7 +6404,7 @@
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 2327
+            "y": 2499
           },
           "id": 155,
           "options": {
@@ -6525,7 +6525,7 @@
             "h": 5,
             "w": 8,
             "x": 16,
-            "y": 2327
+            "y": 2499
           },
           "id": 148,
           "options": {
@@ -6694,7 +6694,7 @@
             "h": 5,
             "w": 8,
             "x": 16,
-            "y": 2403
+            "y": 2575
           },
           "id": 106,
           "options": {
@@ -6822,7 +6822,7 @@
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 2404
+            "y": 2576
           },
           "id": 85,
           "options": {
@@ -6941,7 +6941,7 @@
             "h": 6,
             "w": 8,
             "x": 16,
-            "y": 2408
+            "y": 2580
           },
           "id": 153,
           "options": {
@@ -7043,7 +7043,7 @@
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 2410
+            "y": 2582
           },
           "id": 154,
           "options": {
@@ -7226,7 +7226,7 @@
             "h": 6,
             "w": 8,
             "x": 16,
-            "y": 2414
+            "y": 2586
           },
           "id": 128,
           "options": {
@@ -7337,7 +7337,7 @@
             "h": 5,
             "w": 8,
             "x": 8,
-            "y": 2416
+            "y": 2588
           },
           "id": 86,
           "options": {
@@ -7456,7 +7456,7 @@
             "h": 5,
             "w": 8,
             "x": 16,
-            "y": 2420
+            "y": 2592
           },
           "id": 124,
           "options": {
@@ -7569,7 +7569,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1199
+            "y": 1371
           },
           "id": 185,
           "options": {
@@ -7681,7 +7681,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1199
+            "y": 1371
           },
           "id": 186,
           "options": {
@@ -7781,7 +7781,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1207
+            "y": 1379
           },
           "id": 187,
           "options": {
@@ -7881,7 +7881,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1207
+            "y": 1379
           },
           "id": 188,
           "options": {
@@ -7989,7 +7989,7 @@
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 1215
+            "y": 1387
           },
           "id": 189,
           "options": {
@@ -8125,7 +8125,7 @@
             "h": 6,
             "w": 8,
             "x": 16,
-            "y": 1215
+            "y": 1387
           },
           "id": 184,
           "options": {
@@ -8280,7 +8280,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 2329
+            "y": 2501
           },
           "id": 96,
           "options": {
@@ -8402,7 +8402,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 2329
+            "y": 2501
           },
           "id": 77,
           "options": {
@@ -8547,7 +8547,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 1828
+            "y": 12
           },
           "id": 175,
           "options": {
@@ -8566,7 +8566,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.6.0-83314",
+          "pluginVersion": "11.6.0-84846",
           "targets": [
             {
               "datasource": {
@@ -8707,7 +8707,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 1828
+            "y": 12
           },
           "id": 177,
           "options": {
@@ -8726,7 +8726,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.6.0-83314",
+          "pluginVersion": "11.6.0-84846",
           "targets": [
             {
               "datasource": {
@@ -8865,7 +8865,7 @@
             "h": 6,
             "w": 8,
             "x": 0,
-            "y": 1836
+            "y": 100
           },
           "id": 176,
           "options": {
@@ -8884,7 +8884,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.6.0-83314",
+          "pluginVersion": "11.6.0-84846",
           "targets": [
             {
               "datasource": {
@@ -8965,7 +8965,7 @@
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 1836
+            "y": 100
           },
           "id": 180,
           "options": {
@@ -8984,7 +8984,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.6.0-83314",
+          "pluginVersion": "11.6.0-84846",
           "targets": [
             {
               "datasource": {
@@ -9078,7 +9078,7 @@
             "h": 6,
             "w": 8,
             "x": 16,
-            "y": 1836
+            "y": 100
           },
           "id": 181,
           "options": {
@@ -9097,7 +9097,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.6.0-83314",
+          "pluginVersion": "11.6.0-84846",
           "targets": [
             {
               "datasource": {
@@ -9191,7 +9191,7 @@
             "h": 6,
             "w": 8,
             "x": 0,
-            "y": 1842
+            "y": 106
           },
           "id": 178,
           "options": {
@@ -9210,7 +9210,7 @@
               "sort": "none"
             }
           },
-          "pluginVersion": "11.6.0-83314",
+          "pluginVersion": "11.6.0-84846",
           "targets": [
             {
               "datasource": {
@@ -9278,7 +9278,7 @@
                   "type": "linear"
                 },
                 "showPoints": "auto",
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -9327,8 +9327,8 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_encrypted_txns_pool_total_count{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_encrypted_txns_pool_total_count{instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
               "legendFormat": "total_count {{instance}}",
@@ -9378,7 +9378,7 @@
                   "type": "linear"
                 },
                 "showPoints": "auto",
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -9427,8 +9427,8 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_encrypted_txns_pool_added{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_encrypted_txns_pool_added{instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": false,
               "legendFormat": "added {{instance}}",
@@ -9446,11 +9446,11 @@
                 "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
               },
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_encrypted_txns_pool_deleted{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_encrypted_txns_pool_deleted{instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "hide": false,
-              "includeNullMetadata": true,
+              "includeNullMetadata": false,
               "instant": false,
               "legendFormat": "deleted {{instance}}",
               "range": true,
@@ -9495,7 +9495,7 @@
                   "type": "linear"
                 },
                 "showPoints": "auto",
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -9516,7 +9516,8 @@
                     "value": 80
                   }
                 ]
-              }
+              },
+              "unit": "bytes"
             },
             "overrides": []
           },
@@ -9544,11 +9545,11 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_encrypted_txns_pool_total_bytes{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_encrypted_txns_pool_total_bytes{instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
-              "legendFormat": "total_bytes {{instance}}",
+              "legendFormat": "total_mem {{instance}}",
               "range": true,
               "refId": "A",
               "useBackend": false,
@@ -9645,11 +9646,11 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_encrypted_txn_size_bytes{quantile=\"$quantile\", instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_encrypted_txn_size_bytes{quantile=\"$quantile\", instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
-              "legendFormat": "txn_size_bytes {{instance}}",
+              "legendFormat": "encrypted_txn_size {{instance}}",
               "range": true,
               "refId": "A",
               "useBackend": false,
@@ -9696,7 +9697,7 @@
                   "type": "linear"
                 },
                 "showPoints": "auto",
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -9745,8 +9746,8 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decrypted_txns_pool_total_count{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_decrypted_txns_pool_total_count{instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
               "legendFormat": "total_count {{instance}}",
@@ -9796,7 +9797,7 @@
                   "type": "linear"
                 },
                 "showPoints": "auto",
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -9819,32 +9820,7 @@
                 ]
               }
             },
-            "overrides": [
-              {
-                "__systemRef": "hideSeriesFrom",
-                "matcher": {
-                  "id": "byNames",
-                  "options": {
-                    "mode": "exclude",
-                    "names": [
-                      "added dev-bm-e3-multichain-n1"
-                    ],
-                    "prefix": "All except:",
-                    "readOnly": true
-                  }
-                },
-                "properties": [
-                  {
-                    "id": "custom.hideFrom",
-                    "value": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": true
-                    }
-                  }
-                ]
-              }
-            ]
+            "overrides": []
           },
           "gridPos": {
             "h": 8,
@@ -9870,10 +9846,10 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decrypted_txns_pool_added{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_decrypted_txns_pool_added{instance=~\"$instance\"}",
               "fullMetaSearch": false,
-              "includeNullMetadata": true,
+              "includeNullMetadata": false,
               "legendFormat": "added {{instance}}",
               "range": true,
               "refId": "A",
@@ -9889,11 +9865,11 @@
                 "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
               },
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decrypted_txns_pool_deleted{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_decrypted_txns_pool_deleted{instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "hide": false,
-              "includeNullMetadata": true,
+              "includeNullMetadata": false,
               "instant": false,
               "legendFormat": "deleted {{instance}}",
               "range": true,
@@ -9938,7 +9914,7 @@
                   "type": "linear"
                 },
                 "showPoints": "auto",
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -9959,7 +9935,8 @@
                     "value": 80
                   }
                 ]
-              }
+              },
+              "unit": "bytes"
             },
             "overrides": []
           },
@@ -9987,11 +9964,11 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decrypted_txns_pool_total_bytes{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_decrypted_txns_pool_total_bytes{instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
-              "legendFormat": "total_bytes {{instance}}",
+              "legendFormat": "total_mem {{instance}}",
               "range": true,
               "refId": "A",
               "useBackend": false,
@@ -10088,11 +10065,11 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decrypted_txn_size_bytes{quantile=\"$quantile\", instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_decrypted_txn_size_bytes{quantile=\"$quantile\", instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
-              "legendFormat": "txn_size_bytes {{instance}}",
+              "legendFormat": "decrypted_txn_size {{instance}}",
               "range": true,
               "refId": "A",
               "useBackend": false,
@@ -10160,8 +10137,7 @@
                     "value": 80
                   }
                 ]
-              },
-              "unit": "s"
+              }
             },
             "overrides": []
           },
@@ -10169,106 +10145,6 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 45
-          },
-          "id": 260,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "11.6.0-84846",
-          "targets": [
-            {
-              "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decryption_keys_slot_delay_secs{quantile=\"$quantile\", instance=\"$instance\"}",
-              "fullMetaSearch": false,
-              "includeNullMetadata": true,
-              "legendFormat": "delay_secs {{instance}}",
-              "range": true,
-              "refId": "A",
-              "useBackend": false,
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              }
-            }
-          ],
-          "title": "Decryption Keys Slot Delays",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green"
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
             "y": 45
           },
           "id": 259,
@@ -10289,8 +10165,8 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decryption_keys_count{quantile=\"$quantile\", instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_decryption_keys_count{quantile=\"$quantile\", instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
               "legendFormat": "count {{instance}}",
@@ -10340,7 +10216,7 @@
                   "type": "linear"
                 },
                 "showPoints": "auto",
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -10363,40 +10239,15 @@
                 ]
               }
             },
-            "overrides": [
-              {
-                "__systemRef": "hideSeriesFrom",
-                "matcher": {
-                  "id": "byNames",
-                  "options": {
-                    "mode": "exclude",
-                    "names": [
-                      "{__name__=\"shutter_decryption_keys_processing_time_secs\", instance=\"dev-bm-e3-multichain-n1\", job=\"erigon\", quantile=\"0.97\"}"
-                    ],
-                    "prefix": "All except:",
-                    "readOnly": true
-                  }
-                },
-                "properties": [
-                  {
-                    "id": "custom.hideFrom",
-                    "value": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": true
-                    }
-                  }
-                ]
-              }
-            ]
+            "overrides": []
           },
           "gridPos": {
             "h": 8,
             "w": 12,
-            "x": 0,
-            "y": 53
+            "x": 12,
+            "y": 45
           },
-          "id": 258,
+          "id": 269,
           "options": {
             "legend": {
               "calcs": [],
@@ -10413,12 +10264,29 @@
           "pluginVersion": "11.6.0-84846",
           "targets": [
             {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              },
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decryption_keys_processing_time_secs{quantile=\"$quantile\", instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_decryption_keys_ignores{instance=~\"$instance\"}",
+              "fullMetaSearch": false,
+              "hide": false,
+              "includeNullMetadata": true,
+              "instant": false,
+              "legendFormat": "ignores {{instance}}",
+              "range": true,
+              "refId": "B",
+              "useBackend": false
+            },
+            {
+              "disableTextWrap": false,
+              "editorMode": "code",
+              "expr": "shutter_decryption_keys_rejections{instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
-              "legendFormat": "processing_time_secs {{instance}}",
+              "legendFormat": "rejections {{instance}}",
               "range": true,
               "refId": "A",
               "useBackend": false,
@@ -10428,7 +10296,7 @@
               }
             }
           ],
-          "title": "Decryption Keys Processing Times",
+          "title": "Decryption Keys Validation Failures",
           "type": "timeseries"
         },
         {
@@ -10465,7 +10333,124 @@
                   "type": "linear"
                 },
                 "showPoints": "auto",
-                "spanNulls": false,
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 53
+          },
+          "id": 255,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "11.6.0-84846",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              },
+              "disableTextWrap": false,
+              "editorMode": "code",
+              "expr": "shutter_decryption_successes{instance=~\"$instance\"}",
+              "fullMetaSearch": false,
+              "hide": false,
+              "includeNullMetadata": true,
+              "instant": false,
+              "legendFormat": "successes {{instance}}",
+              "range": true,
+              "refId": "B",
+              "useBackend": false
+            },
+            {
+              "disableTextWrap": false,
+              "editorMode": "code",
+              "expr": "shutter_decryption_failures{instance=~\"$instance\"}",
+              "fullMetaSearch": false,
+              "includeNullMetadata": true,
+              "legendFormat": "failures {{instance}}",
+              "range": true,
+              "refId": "A",
+              "useBackend": false,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "Decryption Outcomes",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -10514,8 +10499,8 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decryption_keys_gas{quantile=\"$quantile\", instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_decryption_keys_gas{quantile=\"$quantile\", instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
               "legendFormat": "gas {{instance}}",
@@ -10565,7 +10550,7 @@
                   "type": "linear"
                 },
                 "showPoints": "auto",
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -10586,7 +10571,8 @@
                     "value": 80
                   }
                 ]
-              }
+              },
+              "unit": "s"
             },
             "overrides": []
           },
@@ -10596,7 +10582,7 @@
             "x": 0,
             "y": 61
           },
-          "id": 256,
+          "id": 260,
           "options": {
             "legend": {
               "calcs": [],
@@ -10614,11 +10600,11 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decryption_keys_topic_peer_count{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_decryption_keys_slot_delay_secs{quantile=\"$quantile\", instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
-              "legendFormat": "peer_count {{instance}}",
+              "legendFormat": "delay {{instance}}",
               "range": true,
               "refId": "A",
               "useBackend": false,
@@ -10628,7 +10614,7 @@
               }
             }
           ],
-          "title": "Decryption Keys Topic Peers",
+          "title": "Decryption Keys Slot Delays",
           "type": "timeseries"
         },
         {
@@ -10665,7 +10651,7 @@
                   "type": "linear"
                 },
                 "showPoints": "auto",
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -10686,7 +10672,8 @@
                     "value": 80
                   }
                 ]
-              }
+              },
+              "unit": "s"
             },
             "overrides": []
           },
@@ -10696,7 +10683,7 @@
             "x": 12,
             "y": 61
           },
-          "id": 255,
+          "id": 258,
           "options": {
             "legend": {
               "calcs": [],
@@ -10714,11 +10701,11 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decryption_failures{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_decryption_keys_processing_time_secs{quantile=\"$quantile\", instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
-              "legendFormat": "failures {{instance}}",
+              "legendFormat": "processing_time {{instance}}",
               "range": true,
               "refId": "A",
               "useBackend": false,
@@ -10726,26 +10713,9 @@
                 "type": "prometheus",
                 "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
               }
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-              },
-              "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decryption_successes{instance=\"$instance\"}",
-              "fullMetaSearch": false,
-              "hide": false,
-              "includeNullMetadata": true,
-              "instant": false,
-              "legendFormat": "successes {{instance}}",
-              "range": true,
-              "refId": "B",
-              "useBackend": false
             }
           ],
-          "title": "Decryption Outcomes",
+          "title": "Decryption Keys Processing Times",
           "type": "timeseries"
         },
         {
@@ -10832,11 +10802,11 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decryption_mark_wait_secs{instance=\"$instance\", quantile=\"$quantile\"}",
+              "editorMode": "code",
+              "expr": "shutter_decryption_mark_wait_secs{instance=~\"$instance\", quantile=\"$quantile\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
-              "legendFormat": "wait_secs {{instance}}",
+              "legendFormat": "wait_time {{instance}}",
               "range": true,
               "refId": "A",
               "useBackend": false,
@@ -10883,7 +10853,7 @@
                   "type": "linear"
                 },
                 "showPoints": "auto",
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -10932,8 +10902,8 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decryption_mark_on_time{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_decryption_mark_on_time{instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
               "legendFormat": "on_time {{instance}}",
@@ -10951,8 +10921,8 @@
                 "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
               },
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_decryption_mark_missed{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_decryption_mark_missed{instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "hide": false,
               "includeNullMetadata": true,
@@ -10963,7 +10933,7 @@
               "useBackend": false
             }
           ],
-          "title": "Decryption Mark Wait Timeouts",
+          "title": "Decryption Mark Wait Outcomes",
           "type": "timeseries"
         },
         {
@@ -11050,11 +11020,11 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_parent_block_wait_secs{quantile=\"$quantile\", instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_parent_block_wait_secs{quantile=\"$quantile\", instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
-              "legendFormat": "wait_secs {{instance}}",
+              "legendFormat": "wait_time {{instance}}",
               "range": true,
               "refId": "A",
               "useBackend": false,
@@ -11101,7 +11071,7 @@
                   "type": "linear"
                 },
                 "showPoints": "auto",
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -11150,8 +11120,8 @@
           "targets": [
             {
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_parent_block_on_time{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_parent_block_on_time{instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "includeNullMetadata": true,
               "legendFormat": "on_time {{instance}}",
@@ -11169,8 +11139,8 @@
                 "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
               },
               "disableTextWrap": false,
-              "editorMode": "builder",
-              "expr": "shutter_parent_block_missed{instance=\"$instance\"}",
+              "editorMode": "code",
+              "expr": "shutter_parent_block_missed{instance=~\"$instance\"}",
               "fullMetaSearch": false,
               "hide": false,
               "includeNullMetadata": true,
@@ -11183,21 +11153,121 @@
           ],
           "title": "Parent Block Wait Outcomes",
           "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 85
+          },
+          "id": 256,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "11.6.0-84846",
+          "targets": [
+            {
+              "disableTextWrap": false,
+              "editorMode": "code",
+              "expr": "shutter_decryption_keys_topic_peer_count{instance=~\"$instance\"}",
+              "fullMetaSearch": false,
+              "includeNullMetadata": true,
+              "legendFormat": "peer_count {{instance}}",
+              "range": true,
+              "refId": "A",
+              "useBackend": false,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "Decryption Keys Topic Peers",
+          "type": "timeseries"
         }
       ],
       "title": "Shutter",
       "type": "row"
     }
   ],
-  "refresh": "30s",
+  "refresh": "10s",
   "schemaVersion": 41,
   "tags": [],
   "templating": {
     "list": [
       {
         "current": {
-          "text": "0.97",
-          "value": "0.97"
+          "text": "0.99",
+          "value": "0.99"
         },
         "includeAll": false,
         "name": "quantile",
@@ -11223,12 +11293,12 @@
             "value": "0.9"
           },
           {
-            "selected": true,
+            "selected": false,
             "text": "0.97",
             "value": "0.97"
           },
           {
-            "selected": false,
+            "selected": true,
             "text": "0.99",
             "value": "0.99"
           },
@@ -11284,6 +11354,6 @@
   "timezone": "",
   "title": "1. Erigon CUSTOM METRICS",
   "uid": "b42a61d7-02b1-416c-8ab4-b9c864356174",
-  "version": 326,
+  "version": 390,
   "weekStart": ""
 }
