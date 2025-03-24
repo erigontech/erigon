@@ -1826,10 +1826,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, RoTrie *HexPatriciaHa
 	}
 
 	// process remaining keys
-	for processedKeys < len(keyUpdates) {
-		err := processKey(keyUpdates[processedKeys].hashedKey, keyUpdates[processedKeys].plainKey, keyUpdates[processedKeys].stateUpdate)
-		processedKeys++
-		if err != nil {
+	for k := processedKeys; k < len(keyUpdates); k++ {
+		if err := processKey(keyUpdates[k].hashedKey, keyUpdates[k].plainKey, keyUpdates[k].stateUpdate); err != nil {
 			return nil, fmt.Errorf("hash sort failed: %w", err)
 		}
 	}
