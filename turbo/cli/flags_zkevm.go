@@ -177,6 +177,16 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 	}
 
+	hardfork := ethconfig.Hardfork(ctx.String(utils.Hardfork.Name))
+	if !hardfork.IsValid() {
+		panic(fmt.Sprintf("Invalid hardfork: %s. Must be one of: %s", ctx.String(utils.Hardfork.Name), hardfork.ValidHardforks()))
+	}
+
+	commitment := ethconfig.Commitment(ctx.String(utils.Commitment.Name))
+	if !commitment.IsValid() {
+		panic(fmt.Sprintf("Invalid commitment: %s. Must be one of: %s", ctx.String(utils.Commitment.Name), commitment.ValidCommitments()))
+	}
+
 	cfg.Zk = &ethconfig.Zk{
 		L2ChainId:                              ctx.Uint64(utils.L2ChainIdFlag.Name),
 		L2RpcUrl:                               ctx.String(utils.L2RpcUrlFlag.Name),
@@ -284,6 +294,9 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		BadTxPurge:                             ctx.Bool(utils.BadTxPurge.Name),
 		L2InfoTreeUpdatesBatchSize:             ctx.Uint64(utils.L2InfoTreeUpdatesBatchSize.Name),
 		L2InfoTreeUpdatesEnabled:               ctx.Bool(utils.L2InfoTreeUpdatesEnabled.Name),
+		Hardfork:                               hardfork,
+		Commitment:                             commitment,
+		InjectGers:                             ctx.Bool(utils.InjectGers.Name),
 	}
 
 	utils2.EnableTimer(cfg.DebugTimers)

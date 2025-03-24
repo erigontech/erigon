@@ -1,6 +1,7 @@
 package ethconfig
 
 import (
+	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -123,6 +124,48 @@ type Zk struct {
 	BadTxPurge                     bool
 	L2InfoTreeUpdatesBatchSize     uint64
 	L2InfoTreeUpdatesEnabled       bool
+
+	Hardfork   Hardfork
+	Commitment Commitment
+	InjectGers bool
+}
+
+type Hardfork string
+
+const (
+	HardforkTypeHermez   Hardfork = "hermez"
+	HardforkTypeEthereum Hardfork = "ethereum"
+)
+
+func (h Hardfork) IsValid() bool {
+	switch Hardfork(strings.ToLower(string(h))) {
+	case HardforkTypeHermez, HardforkTypeEthereum:
+		return true
+	}
+	return false
+}
+
+func (h Hardfork) ValidHardforks() []Hardfork {
+	return []Hardfork{HardforkTypeHermez, HardforkTypeEthereum}
+}
+
+type Commitment string
+
+const (
+	CommitmentPMT Commitment = "pmt"
+	CommitmentSMT Commitment = "smt"
+)
+
+func (c Commitment) IsValid() bool {
+	switch Commitment(strings.ToLower(string(c))) {
+	case CommitmentPMT, CommitmentSMT:
+		return true
+	}
+	return false
+}
+
+func (c Commitment) ValidCommitments() []Commitment {
+	return []Commitment{CommitmentPMT, CommitmentSMT}
 }
 
 var DefaultZkConfig = &Zk{}
@@ -146,4 +189,20 @@ func (c *Zk) ShouldImportInitialBatch() bool {
 
 func (c *Zk) IsL1Recovery() bool {
 	return c.L1SyncStartBlock > 0
+}
+
+func (c *Zk) UsingSMT() bool {
+	return c.Commitment == CommitmentSMT
+}
+
+func (c *Zk) UsingPMT() bool {
+	return c.Commitment == CommitmentPMT
+}
+
+func (c *Zk) UsingHermezHardfork() bool {
+	return c.Hardfork == HardforkTypeHermez
+}
+
+func (c *Zk) UsingEthereumHardfork() bool {
+	return c.Hardfork == HardforkTypeEthereum
 }
