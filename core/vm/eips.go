@@ -331,3 +331,177 @@ func enable7702(jt *JumpTable) {
 	jt[STATICCALL].dynamicGas = gasStaticCallEIP7702
 	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP7702
 }
+
+// enableEOFv1 applies the EOFv1 changes.
+func enableEOFv1(jt *JumpTable) {
+	// TODO(racytech): Make sure everything is correct, add all EOF opcodes and remove deprecated ones
+	// add them to `opCodeToString` as well
+	undefined := &operation{
+		execute:     opUndefined,
+		dynamicGas:  gasZeroCost,
+		memorySize:  memoryZeroCost,
+		constantGas: 0,
+		numPop:      0,
+		numPush:     0,
+		undefined:   true,
+	}
+
+	jt[JUMP] = undefined
+	jt[JUMPI] = undefined
+	jt[PC] = undefined
+
+	// 0x38, 0x39, 0x3b, 0x3c, 0x3f, 0x5a, 0xf0, 0xf1, 0xf2, 0xf4, 0xf5, 0xfa, 0xff - rejected opcodes
+	jt[CODESIZE] = undefined     // 0x38
+	jt[CODECOPY] = undefined     // 0x39
+	jt[EXTCODESIZE] = undefined  // 0x3b
+	jt[EXTCODECOPY] = undefined  // 0x3c
+	jt[EXTCODEHASH] = undefined  // 0x3f
+	jt[GAS] = undefined          // 0x5a
+	jt[CREATE] = undefined       // 0xf0
+	jt[CALL] = undefined         // 0xf1
+	jt[CALLCODE] = undefined     // 0xf2
+	jt[DELEGATECALL] = undefined // 0xf4
+	jt[CREATE2] = undefined      // 0xf5
+	jt[STATICCALL] = undefined   // 0xfa
+	jt[SELFDESTRUCT] = undefined // 0xff
+
+	jt[RJUMP] = &operation{
+		execute:       opRjump,
+		constantGas:   GasQuickStep,
+		immediateSize: 2,
+	}
+	jt[RJUMPI] = &operation{
+		execute:       opRjumpi,
+		constantGas:   GasSwiftStep,
+		numPop:        1,
+		immediateSize: 2,
+	}
+	jt[RJUMPV] = &operation{
+		execute:       opRjumpv,
+		constantGas:   GasSwiftStep,
+		numPop:        1,
+		immediateSize: 1,
+	}
+	jt[CALLF] = &operation{
+		execute:       opCallf,
+		constantGas:   GasFastStep,
+		immediateSize: 2,
+	}
+	jt[RETF] = &operation{
+		execute:     opRetf,
+		constantGas: GasFastestStep,
+		terminal:    true,
+	}
+	jt[JUMPF] = &operation{
+		execute:       opJumpf,
+		constantGas:   GasFastStep,
+		terminal:      true,
+		immediateSize: 2,
+	}
+	jt[DUPN] = &operation{
+		execute:       opDupN,
+		constantGas:   GasFastestStep,
+		numPop:        0,
+		numPush:       1,
+		immediateSize: 1,
+	}
+	jt[SWAPN] = &operation{
+		execute:       opSwapN,
+		constantGas:   GasFastestStep,
+		immediateSize: 1,
+	}
+	jt[EXCHANGE] = &operation{
+		execute:       opExchange,
+		constantGas:   GasFastestStep,
+		immediateSize: 1,
+	}
+	jt[DATALOAD] = &operation{
+		execute:     opDataLoad,
+		constantGas: GasSwiftStep,
+		numPop:      1,
+		numPush:     1,
+	}
+	jt[DATALOADN] = &operation{
+		execute:       opDataLoadN,
+		constantGas:   GasFastestStep,
+		numPush:       1,
+		immediateSize: 2,
+	}
+	jt[DATASIZE] = &operation{
+		execute:     opDataSize,
+		constantGas: GasQuickStep,
+		numPush:     1,
+	}
+	jt[DATACOPY] = &operation{
+		execute:     opDataCopy,
+		constantGas: GasFastestStep,
+		dynamicGas:  gasDataCopy,
+		numPop:      3,
+		memorySize:  memoryDataCopy,
+	}
+	jt[EOFCREATE] = &operation{
+		execute:       opEOFCreate,
+		constantGas:   params.CreateGas,
+		dynamicGas:    gasEOFCreate,
+		numPop:        4,
+		numPush:       1,
+		immediateSize: 1,
+		memorySize:    memoryEOFCreate,
+	}
+	jt[RETURNCODE] = &operation{
+		execute:       opReturnCode,
+		dynamicGas:    pureMemoryGascost,
+		numPop:        2,
+		immediateSize: 1,
+		memorySize:    memoryReturnContract,
+		terminal:      true,
+	}
+	jt[RETURNDATALOAD] = &operation{
+		execute:     opReturnDataLoad,
+		constantGas: GasFastestStep,
+		numPop:      1,
+		numPush:     1,
+	}
+	jt[EXTCALL] = &operation{
+		execute:     opExtCall,
+		constantGas: 100,
+		dynamicGas:  gasExtCall,
+		numPop:      4,
+		numPush:     1,
+		memorySize:  memoryExtCall,
+	}
+	jt[EXTDELEGATECALL] = &operation{
+		execute:     opExtDelegateCall,
+		constantGas: 100,
+		dynamicGas:  gasExtDelegateCall,
+		numPop:      3,
+		numPush:     1,
+		memorySize:  memoryExtCall,
+	}
+	jt[EXTSTATICCALL] = &operation{
+		execute:     opExtStaticCall,
+		constantGas: 100,
+		dynamicGas:  gasExtStaticCall,
+		numPop:      3,
+		numPush:     1,
+		memorySize:  memoryExtCall,
+	}
+
+	immSize := uint8(1)
+	for op := 0x60; op < 0x60+32; op++ {
+		jt[op].immediateSize = immSize
+		immSize++
+	}
+
+	for op := 0; op < 256; op++ {
+		if jt[op] == nil {
+			jt[op] = undefined
+		}
+		if jt[op].dynamicGas == nil {
+			jt[op].dynamicGas = gasZeroCost
+		}
+		if jt[op].memorySize == nil {
+			jt[op].memorySize = memoryZeroCost
+		}
+	}
+}
