@@ -18,16 +18,12 @@ package rpctest
 
 import (
 	"fmt"
-	"net/http"
-	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 func Bench6(erigon_url string) error {
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
+
 	req_id := 0
 
 	req_id++

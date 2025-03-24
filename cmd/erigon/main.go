@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/params"
@@ -72,7 +72,7 @@ func runErigon(cliCtx *cli.Context) error {
 	// initializing the node and providing the current git commit there
 
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
-	if params.VersionMajor == 3 {
+	if version.Major == 3 {
 		logger.Info(`
 	########b          oo                               d####b. 
 	##                                                      '## 

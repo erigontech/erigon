@@ -68,7 +68,6 @@ func NewBorStateSyncTxnTracer(
 // state sync events bor transaction.
 type borStateSyncTxnTracer struct { /// LOOKS WRONG
 	Tracer                       *tracers.Tracer
-	captureStartCalledOnce       bool
 	stateSyncEventsCount         int
 	stateReceiverContractAddress libcommon.Address
 }
@@ -95,22 +94,21 @@ func (bsstt *borStateSyncTxnTracer) OnExit(depth int, output []byte, gasUsed uin
 	bsstt.stateSyncEventsCount--
 
 	if bsstt.Tracer.OnExit != nil {
-		// trick tracer to think it is a CaptureExit
 		bsstt.Tracer.OnExit(depth, output, gasUsed, err, reverted)
 	}
 
 	if bsstt.stateSyncEventsCount == 0 && bsstt.Tracer.OnTxEnd != nil {
-		bsstt.Tracer.OnTxEnd()
+		// trick tracer to think it is a OnTxEnd
+		status := uint64(1)
+		if reverted {
+			status = 0
+		}
+
+		bsstt.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed, Status: status}, err)
 	}
 }
 
 func (bsstt *borStateSyncTxnTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	if !bsstt.captureStartCalledOnce {
-		if bsstt.Tracer.OnTxStart != nil {
-			bsstt.Tracer.OnTxStart()
-		}
-		bsstt.captureStartCalledOnce = true
-	}
 	if bsstt.Tracer.OnEnter != nil {
 		bsstt.Tracer.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
 	}

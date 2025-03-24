@@ -208,6 +208,10 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if err != nil {
 		return nil, err
 	}
+
+	activePeers, _, _ := s.sentinel.GetPeersCount()
+
+	shouldBanOnFail := activePeers >= int(s.sentinel.Config().MaxPeerCount)
 	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
@@ -226,9 +230,11 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 			// don't ban the peer.
 			return nil, errorMessage
 		}
-		s.sentinel.Peers().RemovePeer(pid)
-		s.sentinel.Host().Peerstore().RemovePeer(pid)
-		s.sentinel.Host().Network().ClosePeer(pid)
+		if shouldBanOnFail {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+		}
 		return nil, errorMessage
 	}
 	// we should never get an invalid response to this. our responder should always set it on non-error response
@@ -239,9 +245,11 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	}
 	// known error codes, just remove the peer
 	if isError != 0 {
-		s.sentinel.Peers().RemovePeer(pid)
-		s.sentinel.Host().Peerstore().RemovePeer(pid)
-		s.sentinel.Host().Network().ClosePeer(pid)
+		if shouldBanOnFail {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+		}
 		return nil, fmt.Errorf("peer error code: %d", isError)
 	}
 

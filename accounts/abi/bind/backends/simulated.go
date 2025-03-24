@@ -32,7 +32,7 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
@@ -73,7 +73,7 @@ var (
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
 	m         *mock.MockSentry
-	getHeader func(hash libcommon.Hash, number uint64) *types.Header
+	getHeader func(hash common.Hash, number uint64) *types.Header
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -101,7 +101,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
-		getHeader: func(hash libcommon.Hash, number uint64) (h *types.Header) {
+		getHeader: func(hash common.Hash, number uint64) (h *types.Header) {
 			var err error
 			if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 				h, err = m.BlockReader.Header(context.Background(), tx, hash, number)
@@ -198,7 +198,7 @@ func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *big
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
-func (b *SimulatedBackend) CodeAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) ([]byte, error) {
+func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	tx, err := b.m.DB.BeginTemporalRo(context.Background())
@@ -211,7 +211,7 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract libcommon.Addres
 }
 
 // BalanceAt returns the wei balance of a certain account in the blockchain.
-func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) (*uint256.Int, error) {
+func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Address, blockNumber *big.Int) (*uint256.Int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	tx, err := b.m.DB.BeginTemporalRo(context.Background())
@@ -224,7 +224,7 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract libcommon.Add
 }
 
 // NonceAt returns the nonce of a certain account in the blockchain.
-func (b *SimulatedBackend) NonceAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) (uint64, error) {
+func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address, blockNumber *big.Int) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	tx, err := b.m.DB.BeginTemporalRo(context.Background())
@@ -238,7 +238,7 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract libcommon.Addre
 }
 
 // StorageAt returns the value of key in the storage of an account in the blockchain.
-func (b *SimulatedBackend) StorageAt(ctx context.Context, contract libcommon.Address, key libcommon.Hash, blockNumber *big.Int) ([]byte, error) {
+func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Address, key common.Hash, blockNumber *big.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	tx, err := b.m.DB.BeginTemporalRo(context.Background())
@@ -254,7 +254,7 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract libcommon.Add
 }
 
 // TransactionReceipt returns the receipt of a transaction.
-func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash libcommon.Hash) (*types.Receipt, error) {
+func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -294,7 +294,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash libcom
 // blockchain. The isPending return value indicates whether the transaction has been
 // mined yet. Note that the transaction may not be part of the canonical chain even if
 // it's not pending.
-func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash libcommon.Hash) (types.Transaction, bool, error) {
+func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.Hash) (types.Transaction, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -338,7 +338,7 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash libcomm
 }
 
 // BlockByHash retrieves a block based on the block hash.
-func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash libcommon.Hash) (*types.Block, error) {
+func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash common.Hash) (*types.Block, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -396,7 +396,7 @@ func (b *SimulatedBackend) blockByNumberNoLock(ctx context.Context, number *big.
 }
 
 // HeaderByHash returns a block header from the current canonical chain.
-func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash libcommon.Hash) (*types.Header, error) {
+func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -446,7 +446,7 @@ func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, number *big.Int) 
 }
 
 // TransactionCount returns the number of transactions in a given block.
-func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash libcommon.Hash) (uint, error) {
+func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash common.Hash) (uint, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -475,7 +475,7 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash libco
 }
 
 // TransactionInBlock returns the transaction for a specific block at a specific index.
-func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash libcommon.Hash, index uint) (types.Transaction, error) {
+func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash common.Hash, index uint) (types.Transaction, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -514,7 +514,7 @@ func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash lib
 }
 
 // PendingCodeAt returns the code associated with an account in the pending state.
-func (b *SimulatedBackend) PendingCodeAt(ctx context.Context, contract libcommon.Address) ([]byte, error) {
+func (b *SimulatedBackend) PendingCodeAt(ctx context.Context, contract common.Address) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -596,7 +596,7 @@ func (b *SimulatedBackend) PendingCallContract(ctx context.Context, call ethereu
 
 // PendingNonceAt implements PendingStateReader.PendingNonceAt, retrieving
 // the nonce currently pending for the account.
-func (b *SimulatedBackend) PendingNonceAt(ctx context.Context, account libcommon.Address) (uint64, error) {
+func (b *SimulatedBackend) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -843,10 +843,10 @@ type callMsg struct {
 	ethereum.CallMsg
 }
 
-func (m callMsg) From() libcommon.Address               { return m.CallMsg.From }
+func (m callMsg) From() common.Address                  { return m.CallMsg.From }
 func (m callMsg) Nonce() uint64                         { return 0 }
 func (m callMsg) CheckNonce() bool                      { return false }
-func (m callMsg) To() *libcommon.Address                { return m.CallMsg.To }
+func (m callMsg) To() *common.Address                   { return m.CallMsg.To }
 func (m callMsg) GasPrice() *uint256.Int                { return m.CallMsg.GasPrice }
 func (m callMsg) FeeCap() *uint256.Int                  { return m.CallMsg.FeeCap }
 func (m callMsg) TipCap() *uint256.Int                  { return m.CallMsg.TipCap }
@@ -860,4 +860,4 @@ func (m callMsg) SetIsFree(_ bool)                      {}
 
 func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
 func (m callMsg) MaxFeePerBlobGas() *uint256.Int { return m.CallMsg.MaxFeePerBlobGas }
-func (m callMsg) BlobHashes() []libcommon.Hash   { return m.CallMsg.BlobHashes }
+func (m callMsg) BlobHashes() []common.Hash      { return m.CallMsg.BlobHashes }

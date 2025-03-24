@@ -24,13 +24,12 @@ import "C"
 
 import (
 	"context"
+
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/gdbme"
-	"github.com/urfave/cli/v2"
-
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core/gdbme"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -38,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
+	"github.com/urfave/cli/v2"
 )
 
 // ErigonNode represents a single node, that runs sync and p2p network.
@@ -94,6 +94,8 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, e
 		logger.Info("Starting Erigon on Holesky testnet...")
 	case networkname.Sepolia:
 		logger.Info("Starting Erigon on Sepolia testnet...")
+	case networkname.Hoodi:
+		logger.Info("Starting Erigon on Hoodi testnet...")
 	case networkname.Dev:
 		logger.Info("Starting Erigon in ephemeral dev mode...")
 	case networkname.Amoy:

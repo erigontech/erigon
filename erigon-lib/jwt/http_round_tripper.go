@@ -1,7 +1,4 @@
-// Copyright 2018 The go-ethereum Authors
-// (original work)
 // Copyright 2024 The Erigon Authors
-// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -17,19 +14,35 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package ethdb
+package jwt
 
 import (
-	"errors"
+	"fmt"
+	"net/http"
+	"time"
 
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/golang-jwt/jwt/v4"
 )
 
-// DESCRIBED: For info on database buckets see docs/programmers_guide/db_walkthrough.MD
+type HttpRoundTripper struct {
+	base      http.RoundTripper
+	jwtSecret []byte
+}
 
-// ErrKeyNotFound is returned when key isn't found in the database.
-var ErrKeyNotFound = errors.New("db: key not found")
+func NewHttpRoundTripper(base http.RoundTripper, jwtSecret []byte) *HttpRoundTripper {
+	return &HttpRoundTripper{base: base, jwtSecret: jwtSecret}
+}
 
-type HasTx interface {
-	Tx() kv.Tx
+func (t *HttpRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"iat": time.Now().Unix(),
+	})
+
+	tokenString, err := token.SignedString(t.jwtSecret)
+	if err != nil {
+		return nil, fmt.Errorf("JwtRoundTripper failed to produce a JWT token, err: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	return t.base.RoundTrip(req)
 }
