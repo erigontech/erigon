@@ -1792,7 +1792,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, RoTrie *HexPatriciaHa
 			start := time.Now()
 			err := RoTrie.TraverseKey(keyUpdates[len(keyUpdates)-1].hashedKey, keyUpdates[len(keyUpdates)-1].plainKey, keyUpdates[len(keyUpdates)-1].stateUpdate)
 			if err != nil {
-
+				return err
 			}
 			atomic.AddInt64(&TimeSpentInTraverse, int64(time.Since(start).Microseconds()))
 		}
