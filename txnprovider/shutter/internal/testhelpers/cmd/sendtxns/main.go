@@ -96,9 +96,6 @@ func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr
 
 func waitInclusion(ctx context.Context, txn types.Transaction, rpcClient requests.RequestGenerator) (*types.Receipt, error) {
 	logger := log.New("hash", txn.Hash())
-	timeout := 1 * time.Minute
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 	queryTicker := time.NewTicker(time.Second)
 	defer queryTicker.Stop()
 	for {
@@ -115,8 +112,7 @@ func waitInclusion(ctx context.Context, txn types.Transaction, rpcClient request
 		// Wait for the next round.
 		select {
 		case <-ctx.Done():
-			logger.Warn("transaction inclusion taking a while, proceeding to next submission", "timeout", timeout)
-			return nil, nil
+			return nil, ctx.Err()
 		case <-queryTicker.C:
 		}
 	}
