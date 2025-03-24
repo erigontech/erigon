@@ -611,12 +611,14 @@ Loop:
 		}
 
 		if parallel {
-			if _, err := executor.execute(ctx, txTasks); err != nil {
-				if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
-					hooks.OnBlockEnd(err) // can we replace these with the defer pattern on other tracers?
-				}
+			_, err := executor.execute(ctx, txTasks)
+			if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+				hooks.OnBlockEnd(err)
+			}
+			if err != nil {
 				return err
 			}
+
 			agg.BuildFilesInBackground(outputTxNum.Load())
 		} else {
 			se := executor.(*serialExecutor)
@@ -627,7 +629,6 @@ Loop:
 			if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
 				hooks.OnBlockEnd(err)
 			}
-
 			if err != nil {
 				return err
 			}
