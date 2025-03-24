@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"math/big"
 	"os"
@@ -35,22 +36,41 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 8 {
-		fmt.Printf("Usage: %s <fromPkFile> <fromAddress> <toAddress> <amountEth> <rpcURL> <numTxn> <chain>\n", os.Args[0])
-		os.Exit(1)
+	fromPkFile := flag.String("fromPkFile", "", "path to the private key file")
+	from := flag.String("from", "", "sender address")
+	to := flag.String("to", "", "receiver address")
+	amount := flag.String("amount", "", "amount to transfer")
+	rpcUrl := flag.String("rpcUrl", "", "el rpc url")
+	numTxn := flag.String("numTxn", "", "Number of transactions")
+	chain := flag.String("chain", "", "chain name")
+	flag.Parse()
+	if fromPkFile == nil || *fromPkFile == "" {
+		panic("fromPkFile flag is required")
 	}
-	fromPkFile := os.Args[1]
-	from := os.Args[2]
-	to := os.Args[3]
-	amount := os.Args[4]
-	rpcUrl := os.Args[5]
-	numTxnStr := os.Args[6]
-	chainStr := os.Args[7]
+	if from == nil || *from == "" {
+		panic("from flag is required")
+	}
+	if to == nil || *to == "" {
+		panic("to flag is required")
+	}
+	if amount == nil || *amount == "" {
+		panic("amount flag is required")
+	}
+	if rpcUrl == nil || *rpcUrl == "" {
+		panic("rpcUrl flag is required")
+	}
+	if numTxn == nil || *numTxn == "" {
+		panic("numTxn flag is required")
+	}
+	if chain == nil || *chain == "" {
+		panic("chain flag is required")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
-	err := sendTxns(ctx, logger, fromPkFile, from, to, amount, rpcUrl, numTxnStr, chainStr)
+	err := sendTxns(ctx, logger, *fromPkFile, *from, *to, *amount, *rpcUrl, *numTxn, *chain)
 	if err != nil {
 		logger.Error("failed to send transactions", "err", err)
 		os.Exit(1)
