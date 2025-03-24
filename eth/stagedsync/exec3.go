@@ -1013,7 +1013,7 @@ func ExecV3(ctx context.Context,
 						logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
 					}
 				case <-pruneEvery:
-					if prunePending {
+					if false /*prunePending*/ {
 						prunePending = false
 
 						if !pe.inMemExec {
