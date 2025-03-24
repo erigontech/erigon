@@ -317,6 +317,7 @@ func (dkl DecryptionKeysListener) peerInfoLoop(ctx context.Context, pubSub *pubs
 		case <-ticker.C:
 			peers := pubSub.ListPeers(DecryptionKeysTopic)
 			dkl.logger.Info("decryption keys peer count", "peers", len(peers))
+			decryptionKeysTopicPeerCount.Set(float64(len(peers)))
 		}
 	}
 }
