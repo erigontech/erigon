@@ -21,18 +21,14 @@ type BufferFactory interface {
 	New() etl.Buffer
 }
 
-type markedStructure struct {
-	canonicalTbl string
-}
-
 var _ StartRoTx[EntityTxI] = (*Appendable[EntityTxI])(nil)
 var ErrNotFoundInSnapshot = errors.New("entity not found in snapshot")
 
 type Appendable[T EntityTxI] struct {
 	*ProtoAppendable
 
-	ms      *markedStructure
-	valsTbl string
+	canonicalTbl string // for marked structures
+	valsTbl      string
 
 	ts4Bytes        bool // caplin entities are encoded as 4 bytes
 	pruneFrom       Num  // should this be rootnum? Num is fine for now.
@@ -140,10 +136,7 @@ func create[T EntityTxI](id AppendableId, strategy CanonicityStrategy, valsTbl s
 	}
 	a.rel = relation
 	a.valsTbl = valsTbl
-	if canonicalTbl != "" {
-		a.ms = &markedStructure{canonicalTbl: canonicalTbl}
-	}
-
+	a.canonicalTbl = canonicalTbl
 	for _, opt := range options {
 		opt(a)
 	}
@@ -193,7 +186,7 @@ func (m *MarkedTx) getDb(entityNum Num, hash []byte, tx kv.Tx) (Bytes, error) {
 	a := m.ap
 	if hash == nil {
 		// find canonical hash
-		canHash, err := tx.GetOne(a.ms.canonicalTbl, a.encTs(entityNum))
+		canHash, err := tx.GetOne(a.canonicalTbl, a.encTs(entityNum))
 		if err != nil {
 			return nil, err
 		}
@@ -209,7 +202,7 @@ func (m *MarkedTx) GetNc(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
 func (m *MarkedTx) Put(num Num, hash []byte, val Bytes, tx kv.RwTx) error {
 	// can then val
 	a := m.ap
-	if err := tx.Append(a.ms.canonicalTbl, a.encTs(num), hash); err != nil {
+	if err := tx.Append(a.canonicalTbl, a.encTs(num), hash); err != nil {
 		return err
 	}
 
@@ -224,7 +217,7 @@ func (m *MarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 		return err
 	}
 	fromKey := a.encTs(efrom)
-	_, err = ae.DeleteRangeFromTbl(a.ms.canonicalTbl, fromKey, nil, MaxUint64, tx)
+	_, err = ae.DeleteRangeFromTbl(a.canonicalTbl, fromKey, nil, MaxUint64, tx)
 	return err
 }
 
@@ -236,7 +229,7 @@ func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.Rw
 		return 0, err
 	}
 	toKeyPrefix := a.encTs(eto)
-	if del, err := ae.DeleteRangeFromTbl(a.ms.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, tx); err != nil {
+	if del, err := ae.DeleteRangeFromTbl(a.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, tx); err != nil {
 		return del, err
 	}
 
