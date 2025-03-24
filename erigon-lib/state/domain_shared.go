@@ -1338,7 +1338,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	updateCount := sdc.updates.Size()
 	if sdc.sharedDomains.trace {
-		defer /*sdc.sharedDomains.logger.Trace*/ fmt.Println("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
+		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
 	}
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()

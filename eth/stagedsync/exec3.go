@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"runtime"
@@ -907,6 +906,7 @@ func ExecV3(ctx context.Context,
 
 		var lastBlockResult blockResult
 		var uncommittedGas uint64
+		var prunePending bool
 
 		err = func() error {
 			defer func() {
@@ -932,13 +932,11 @@ func ExecV3(ctx context.Context,
 
 						pe.rs.SetTxNum(applyResult.txNum, applyResult.blockNum)
 
-						if true {
-							if err := pe.rs.ApplyState4(ctx, applyTx,
-								applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
-								nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
-								pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false); err != nil {
-								return err
-							}
+						if err := pe.rs.ApplyState4(ctx, applyTx,
+							applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
+							nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
+							pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false); err != nil {
+							return err
 						}
 
 					case *blockResult:
@@ -950,7 +948,9 @@ func ExecV3(ctx context.Context,
 							uncommittedGas += applyResult.GasUsed
 						}
 
-						if !dbg.DiscardCommitment() && !dbg.BatchCommitments {
+						prunePending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
+
+						if !dbg.DiscardCommitment() && (!dbg.BatchCommitments || (prunePending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum)) {
 							var trace bool
 							if traceBlock(applyResult.BlockNum) {
 								trace = true
@@ -989,6 +989,11 @@ func ExecV3(ctx context.Context,
 
 								return errors.New("wrong trie root")
 							}
+
+							pe.lastCommittedBlockNum = lastBlockResult.BlockNum
+							pe.lastCommittedTxNum = lastBlockResult.lastTxNum
+							pe.committedGas += uncommittedGas
+							uncommittedGas = 0
 						}
 
 						//fmt.Println("Block Complete", blockResult.BlockNum)
@@ -1008,37 +1013,18 @@ func ExecV3(ctx context.Context,
 						logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
 					}
 				case <-pruneEvery:
-					if !dbg.DiscardCommitment() && dbg.BatchCommitments {
-						if pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes() && lastBlockResult.BlockNum > pe.lastCommittedBlockNum {
-							rhash, err := pe.doms.ComputeCommitment(ctx, applyTx, true, lastBlockResult.BlockNum, pe.logPrefix)
+					if prunePending {
+						prunePending = false
 
-							if err != nil {
+						if !pe.inMemExec {
+							ac := pe.agg.BeginFilesRo()
+							if _, err = ac.PruneSmallBatches(ctx, 150*time.Millisecond, applyTx); err != nil { // prune part of retired data, before commit
 								return err
 							}
+							ac.Close()
 
-							if !bytes.Equal(rhash, lastBlockResult.StateRoot.Bytes()) {
-								logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x",
-									pe.logPrefix, lastBlockResult.BlockNum, rhash, lastBlockResult.StateRoot.Bytes(), lastBlockResult.BlockHash))
-								return errors.New("wrong trie root")
-							}
-
-							fmt.Println("BC DONE", lastBlockResult.BlockNum, hex.EncodeToString(rhash), hex.EncodeToString(lastBlockResult.StateRoot.Bytes())) //Temp Done
-
-							pe.lastCommittedBlockNum = lastBlockResult.BlockNum
-							pe.lastCommittedTxNum = lastBlockResult.lastTxNum
-							pe.committedGas += uncommittedGas
-							uncommittedGas = 0
-
-							if !pe.inMemExec {
-								ac := pe.agg.BeginFilesRo()
-								if _, err = ac.PruneSmallBatches(ctx, 150*time.Millisecond, applyTx); err != nil { // prune part of retired data, before commit
-									return err
-								}
-								ac.Close()
-
-								if err := pe.doms.Flush(ctx, applyTx); err != nil {
-									return err
-								}
+							if err := pe.doms.Flush(ctx, applyTx); err != nil {
+								return err
 							}
 						}
 
