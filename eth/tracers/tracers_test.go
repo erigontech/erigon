@@ -112,7 +112,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to prestate tracer: %v", err)
 	}
-	evm := vm.NewEVM(context, txContext, statedb, params.AllProtocolChanges, vm.Config{Debug: true, Tracer: tracer.Hooks})
+	evm := vm.NewEVM(context, txContext, statedb, params.AllProtocolChanges, vm.Config{Tracer: tracer.Hooks})
 
 	msg, err := txn.AsMessage(*signer, nil, rules)
 	if err != nil {

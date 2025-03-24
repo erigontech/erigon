@@ -1139,7 +1139,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	blockCtx.GasLimit = math.MaxUint64
 	blockCtx.MaxGasLimit = true
 
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: ot.Tracer().Hooks})
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: ot.Tracer().Hooks})
 
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
@@ -1393,7 +1393,6 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			if traceTypeVmTrace {
 				traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 			}
-			vmConfig.Debug = true
 			vmConfig.Tracer = ot.Tracer().Hooks
 			tracer = ot.Tracer()
 		}
@@ -1607,7 +1606,6 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		if traceTypeVmTrace {
 			traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 		}
-		vmConfig.Debug = true
 		vmConfig.Tracer = ot.Tracer().Hooks
 		tracer = ot.Tracer()
 	}

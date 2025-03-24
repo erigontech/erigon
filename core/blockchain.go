@@ -128,7 +128,7 @@ func ExecuteBlockEphemerally(
 	// noop := state.NewNoopWriter()
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(i)
-		if vmConfig.Debug && vmConfig.Tracer == nil {
+		if vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, txn.Hash())
 			if err != nil {
 				return nil, fmt.Errorf("could not obtain tracer: %w", err)

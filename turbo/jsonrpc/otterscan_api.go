@@ -163,7 +163,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	if tracer == nil {
 		vmConfig = vm.Config{}
 	} else {
-		vmConfig = vm.Config{Debug: true, Tracer: tracer.Hooks}
+		vmConfig = vm.Config{Tracer: tracer.Hooks}
 	}
 	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 

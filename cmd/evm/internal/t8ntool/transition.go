@@ -196,7 +196,6 @@ func Main(ctx *cli.Context) error {
 
 	vmConfig := vm.Config{
 		Tracer:        nil,
-		Debug:         ctx.Bool(TraceFlag.Name),
 		StatelessExec: true,
 	}
 	// Construct the chainconfig

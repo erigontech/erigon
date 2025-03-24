@@ -189,7 +189,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 	default:
 		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), txTask.Tx.GetBlobGas())
 		if tracer := rw.consumer.NewTracer(); tracer != nil {
-			rw.vmConfig.Debug = true
 			rw.vmConfig.Tracer = tracer.TracingHooks()
 		}
 

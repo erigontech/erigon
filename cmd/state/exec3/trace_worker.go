@@ -79,7 +79,6 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineR
 		ibs:          state.New(stateReader),
 	}
 	if tracer != nil {
-		ie.vmConfig.Debug = true
 		ie.vmConfig.Tracer = tracer.TracingHooks()
 	}
 	return ie

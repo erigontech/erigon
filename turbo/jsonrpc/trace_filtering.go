@@ -595,7 +595,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ot.r = traceResult
 		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 		ot.traceAddr = []int{}
-		vmConfig.Debug = true
 		vmConfig.Tracer = ot.Tracer().Hooks
 		ibs := state.New(cachedReader)
 

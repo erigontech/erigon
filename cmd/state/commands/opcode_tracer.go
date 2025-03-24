@@ -459,7 +459,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil, nil, nil)
 
 	chainConfig := genesis.Config
-	vmConfig := vm.Config{Tracer: ot.Tracer().Hooks, Debug: true}
+	vmConfig := vm.Config{Tracer: ot.Tracer().Hooks}
 
 	noOpWriter := state.NewNoopWriter()
 

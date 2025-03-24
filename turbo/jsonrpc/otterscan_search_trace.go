@@ -121,7 +121,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, chainConfig)
 		TxContext := core.NewEVMTxContext(msg)
 
-		vmenv := vm.NewEVM(BlockContext, TxContext, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer.TracingHooks()})
+		vmenv := vm.NewEVM(BlockContext, TxContext, ibs, chainConfig, vm.Config{Tracer: tracer.TracingHooks()})
 		// FIXME (tracing): Geth has a new method ApplyEVMMessage or something like this that does the OnTxStart/OnTxEnd wrapping, let's port it too
 		if tracer != nil && tracer.TracingHooks().OnTxStart != nil {
 			tracer.TracingHooks().OnTxStart(vmenv.GetVMContext(), txn, msg.From())

@@ -25,11 +25,12 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/stack"
@@ -37,7 +38,6 @@ import (
 
 // Config are the configuration options for the Interpreter
 type Config struct {
-	Debug         bool // Enables debugging, DO WE NEED THIS IF WE CAN CHECK TRACER == NIL
 	Tracer        *tracing.Hooks
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
@@ -300,7 +300,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if steps%1000 == 0 && in.evm.Cancelled() {
 			break
 		}
-		if in.cfg.Debug || in.cfg.Tracer != nil { // dont check for debug, remove debug if possible
+		if in.cfg.Tracer != nil {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, _pc, contract.Gas
 		}

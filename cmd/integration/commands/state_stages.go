@@ -217,10 +217,9 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 	traceStart := func() {
 		structLogger = logger.NewStructLogger(&logger.LogConfig{})
 		vmConfig.Tracer = structLogger.Hooks()
-		vmConfig.Debug = true
 	}
 	traceStop := func(id int) {
-		if !vmConfig.Debug {
+		if vmConfig.Tracer == nil {
 			return
 		}
 		w, err3 := os.Create(fmt.Sprintf("trace_%d.txt", id))
@@ -239,7 +238,6 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 		}
 
 		vmConfig.Tracer = nil
-		vmConfig.Debug = false
 	}
 	_, _ = traceStart, traceStop
 
