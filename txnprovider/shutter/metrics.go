@@ -20,6 +20,8 @@ var (
 	decryptionKeysCount              = metrics.GetOrCreateSummary("shutter_decryption_keys_count")
 	decryptionKeysProcessingTimeSecs = metrics.GetOrCreateSummary("shutter_decryption_keys_processing_time_secs")
 	decryptionKeysGas                = metrics.GetOrCreateSummary("shutter_decryption_keys_gas")
+	decryptionKeysRejections         = metrics.GetOrCreateGauge("shutter_decryption_keys_rejections")
+	decryptionKeysIgnores            = metrics.GetOrCreateGauge("shutter_decryption_keys_ignores")
 	decryptionFailures               = metrics.GetOrCreateCounter("shutter_decryption_failures")
 	decryptionSuccesses              = metrics.GetOrCreateCounter("shutter_decryption_successes")
 

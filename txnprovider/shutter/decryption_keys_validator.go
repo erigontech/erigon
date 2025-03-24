@@ -265,7 +265,7 @@ func (v DecryptionKeysValidator) validateEonIndex(msg *proto.DecryptionKeys) (Eo
 
 func NewDecryptionKeysExtendedValidator(logger log.Logger, config Config, sc SlotCalculator, et EonTracker) pubsub.ValidatorEx {
 	dkv := NewDecryptionKeysValidator(config, sc, et)
-	return func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+	validator := func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		if topic := msg.GetTopic(); topic != DecryptionKeysTopic {
 			logger.Debug("rejecting decryption keys msg due to topic mismatch", "topic", topic, "peer", id)
 			return pubsub.ValidationReject
@@ -289,5 +289,17 @@ func NewDecryptionKeysExtendedValidator(logger log.Logger, config Config, sc Slo
 		}
 
 		return pubsub.ValidationAccept
+	}
+
+	// decorate the validator with rejections metric
+	return func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+		result := validator(ctx, id, msg)
+		if result == pubsub.ValidationReject {
+			decryptionKeysRejections.Inc()
+		}
+		if result == pubsub.ValidationIgnore {
+			decryptionKeysIgnores.Inc()
+		}
+		return result
 	}
 }
