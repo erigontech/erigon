@@ -13,12 +13,8 @@ import (
 
 const MaxUint64 = ^uint64(0)
 
-type DataId interface {
-	Num | Id
-}
-
-type RootRelationI[D DataId] interface {
-	RootNum2Num(from RootNum, tx kv.Tx) (D, error)
+type RootRelationI interface {
+	RootNum2Num(from RootNum, tx kv.Tx) (Num, error)
 }
 
 type BufferFactory interface {
@@ -29,10 +25,10 @@ type markedStructure struct {
 	canonicalTbl string
 }
 
-var _ StartRoTx[EntityTxI] = (*Appendable[EntityTxI, Num])(nil)
+var _ StartRoTx[EntityTxI] = (*Appendable[EntityTxI])(nil)
 var ErrNotFoundInSnapshot = errors.New("entity not found in snapshot")
 
-type Appendable[T EntityTxI, D DataId] struct {
+type Appendable[T EntityTxI] struct {
 	*ProtoAppendable
 
 	ms      *markedStructure
@@ -42,37 +38,37 @@ type Appendable[T EntityTxI, D DataId] struct {
 	pruneFrom       Num  // should this be rootnum? Num is fine for now.
 	beginFilesRoGen func() T
 
-	rel RootRelationI[D]
+	rel RootRelationI
 }
 
-type AppOpts[T EntityTxI, D DataId] func(a *Appendable[T, D])
+type AppOpts[T EntityTxI] func(a *Appendable[T])
 
-func App_WithFreezer[T EntityTxI, D DataId](freezer Freezer) AppOpts[T, D] {
-	return func(a *Appendable[T, D]) {
+func App_WithFreezer[T EntityTxI](freezer Freezer) AppOpts[T] {
+	return func(a *Appendable[T]) {
 		a.freezer = freezer
 	}
 }
 
-func App_WithIndexBuilders[T EntityTxI, D DataId](builders ...AccessorIndexBuilder) AppOpts[T, D] {
-	return func(a *Appendable[T, D]) {
+func App_WithIndexBuilders[T EntityTxI](builders ...AccessorIndexBuilder) AppOpts[T] {
+	return func(a *Appendable[T]) {
 		a.builders = builders
 	}
 }
 
-func App_WithTs4Bytes[T EntityTxI, D DataId](ts4Bytes bool) AppOpts[T, D] {
-	return func(a *Appendable[T, D]) {
+func App_WithTs4Bytes[T EntityTxI](ts4Bytes bool) AppOpts[T] {
+	return func(a *Appendable[T]) {
 		a.ts4Bytes = ts4Bytes
 	}
 }
 
-func App_WithPruneFrom[T EntityTxI, D DataId](pruneFrom Num) AppOpts[T, D] {
-	return func(a *Appendable[T, D]) {
+func App_WithPruneFrom[T EntityTxI](pruneFrom Num) AppOpts[T] {
+	return func(a *Appendable[T]) {
 		a.pruneFrom = pruneFrom
 	}
 }
 
 // func App
-func NewMarkedAppendable(id AppendableId, valsTbl string, canonicalTbl string, relation RootRelationI[Num], logger log.Logger, options ...AppOpts[MarkedTxI, Num]) (*Appendable[MarkedTxI, Num], error) {
+func NewMarkedAppendable(id AppendableId, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[MarkedTxI]) (*Appendable[MarkedTxI], error) {
 	a, err := create(id, Marked, valsTbl, canonicalTbl, relation, logger, options...)
 	if err != nil {
 		return nil, err
@@ -88,7 +84,7 @@ func NewMarkedAppendable(id AppendableId, valsTbl string, canonicalTbl string, r
 	return a, nil
 }
 
-func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelationI[Num], logger log.Logger, options ...AppOpts[UnmarkedTxI, Num]) (*Appendable[UnmarkedTxI, Num], error) {
+func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[UnmarkedTxI]) (*Appendable[UnmarkedTxI], error) {
 	a, err := create(id, Unmarked, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
@@ -116,21 +112,7 @@ func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 	return a, nil
 }
 
-func NewAppendingAppendable(id AppendableId, valsTbl string, relation RootRelationI[Id], logger log.Logger, options ...AppOpts[AppendingTxI, Id]) (*Appendable[AppendingTxI, Id], error) {
-	a, err := create(id, Appending, valsTbl, "", relation, logger, options...)
-	if err != nil {
-		return nil, err
-	}
-	a.beginFilesRoGen = func() AppendingTxI {
-		return &AppendingTx{
-			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
-			ap:                a,
-		}
-	}
-	return a, nil
-}
-
-func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelationI[Num], factory BufferFactory, logger log.Logger, options ...AppOpts[BufferedTxI, Num]) (*Appendable[BufferedTxI, Num], error) {
+func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelationI, factory BufferFactory, logger log.Logger, options ...AppOpts[BufferedTxI]) (*Appendable[BufferedTxI], error) {
 	a, err := create(id, Buffered, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
@@ -152,8 +134,8 @@ func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 	return a, nil
 }
 
-func create[T EntityTxI, D DataId](id AppendableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI[D], logger log.Logger, options ...AppOpts[T, D]) (*Appendable[T, D], error) {
-	a := &Appendable[T, D]{
+func create[T EntityTxI](id AppendableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[T]) (*Appendable[T], error) {
+	a := &Appendable[T]{
 		ProtoAppendable: NewProto(id, nil, nil, logger),
 	}
 	a.rel = relation
@@ -169,22 +151,22 @@ func create[T EntityTxI, D DataId](id AppendableId, strategy CanonicityStrategy,
 	return a, nil
 }
 
-func (a *Appendable[T, D]) PruneFrom() Num {
+func (a *Appendable[T]) PruneFrom() Num {
 	return a.pruneFrom
 }
 
-func (a *Appendable[T, D]) encTs(ts ae.EncToBytesI) []byte {
+func (a *Appendable[T]) encTs(ts ae.EncToBytesI) []byte {
 	return ts.EncToBytes(!a.ts4Bytes)
 }
 
-func (a *Appendable[T, D]) BeginFilesRo() T {
+func (a *Appendable[T]) BeginFilesRo() T {
 	return a.beginFilesRoGen()
 }
 
 // marked tx
 type MarkedTx struct {
 	*ProtoAppendableTx
-	ap *Appendable[MarkedTxI, Num]
+	ap *Appendable[MarkedTxI]
 }
 
 func (m *MarkedTx) Get(entityNum Num, tx kv.Tx) (value Bytes, foundInSnapshot bool, err error) {
@@ -274,7 +256,7 @@ func (m *MarkedTx) combK(ts Num, hash []byte) []byte {
 // unmarked tx
 type UnmarkedTx struct {
 	*ProtoAppendableTx
-	ap *Appendable[UnmarkedTxI, Num]
+	ap *Appendable[UnmarkedTxI]
 }
 
 func (m *UnmarkedTx) Get(entityNum Num, tx kv.Tx) (value Bytes, pruneCount bool, err error) {
@@ -318,71 +300,9 @@ func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 
-type AppendingTx struct {
-	*ProtoAppendableTx
-	ap *Appendable[AppendingTxI, Id]
-}
-
-// Get operates on snapshots only, it doesn't do resolution of
-// Num -> Id needed for finding canonical values in db.
-func (m *AppendingTx) Get(entityNum Num, tx kv.Tx) (value Bytes, foundInSnapshot bool, err error) {
-	// snapshots only
-	data, found, err := m.LookupFile(entityNum, tx)
-	if err != nil {
-		return nil, false, err
-	}
-	if !found {
-		return nil, false, ErrNotFoundInSnapshot
-	}
-	return data, true, nil
-}
-
-func (m *AppendingTx) GetNc(entityId Id, tx kv.Tx) (Bytes, error) {
-	return tx.GetOne(m.ap.valsTbl, m.ap.encTs(Num(entityId)))
-}
-
-func (m *AppendingTx) Append(entityId Id, value Bytes, tx kv.RwTx) error {
-	return tx.Append(m.ap.valsTbl, m.ap.encTs(Num(entityId)), value)
-}
-
-func (m *AppendingTx) IncrementSequence(amount uint64, tx kv.RwTx) (baseId uint64, err error) {
-	return tx.IncrementSequence(m.ap.valsTbl, amount)
-}
-
-func (m *AppendingTx) ReadSequence(tx kv.Tx) (uint64, error) {
-	return tx.ReadSequence(m.ap.valsTbl)
-}
-
-func (m *AppendingTx) ResetSequence(value uint64, tx kv.RwTx) error {
-	return tx.ResetSequence(m.ap.valsTbl, value)
-}
-
-func (m *AppendingTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
-	ap := m.ap
-	fromId, err := ap.rel.RootNum2Num(from, tx)
-	if err != nil {
-		return err
-	}
-	_, err = ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(fromId), nil, 0, tx)
-	return err
-}
-
-func (m *AppendingTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
-	ap := m.ap
-	toId, err := ap.rel.RootNum2Num(to, tx)
-	if err != nil {
-		return 0, err
-	}
-	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
-
-	eFrom := ap.encTs(ap.pruneFrom)
-	eTo := ap.encTs(toId)
-	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
-}
-
 type BufferedTx struct {
 	*ProtoAppendableTx
-	ap      *Appendable[BufferedTxI, Num]
+	ap      *Appendable[BufferedTxI]
 	values  *etl.Collector
 	factory BufferFactory
 }
@@ -439,8 +359,84 @@ func (m *BufferedTx) Close() {
 }
 
 var (
-	_ MarkedTxI    = (*MarkedTx)(nil)
-	_ UnmarkedTxI  = (*UnmarkedTx)(nil)
-	_ AppendingTxI = (*AppendingTx)(nil)
-	_ BufferedTxI  = (*BufferedTx)(nil)
+	_ MarkedTxI   = (*MarkedTx)(nil)
+	_ UnmarkedTxI = (*UnmarkedTx)(nil)
+	//_ AppendingTxI = (*AppendingTx)(nil)
+	_ BufferedTxI = (*BufferedTx)(nil)
 )
+
+// type AppendingTx struct {
+// 	*ProtoAppendableTx
+// 	ap *Appendable[AppendingTxI]
+// }
+
+// func NewAppendingAppendable(id AppendableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[AppendingTxI]) (*Appendable[AppendingTxI], error) {
+// 	a, err := create(id, Appending, valsTbl, "", relation, logger, options...)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	a.beginFilesRoGen = func() AppendingTxI {
+// 		return &AppendingTx{
+// 			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
+// 			ap:                a,
+// 		}
+// 	}
+// 	return a, nil
+// }
+
+// // Get operates on snapshots only, it doesn't do resolution of
+// // Num -> Id needed for finding canonical values in db.
+// func (m *AppendingTx) Get(entityNum Num, tx kv.Tx) (value Bytes, foundInSnapshot bool, err error) {
+// 	// snapshots only
+// 	data, found, err := m.LookupFile(entityNum, tx)
+// 	if err != nil {
+// 		return nil, false, err
+// 	}
+// 	if !found {
+// 		return nil, false, ErrNotFoundInSnapshot
+// 	}
+// 	return data, true, nil
+// }
+
+// func (m *AppendingTx) GetNc(entityId Id, tx kv.Tx) (Bytes, error) {
+// 	return tx.GetOne(m.ap.valsTbl, m.ap.encTs(Num(entityId)))
+// }
+
+// func (m *AppendingTx) Append(entityId Id, value Bytes, tx kv.RwTx) error {
+// 	return tx.Append(m.ap.valsTbl, m.ap.encTs(Num(entityId)), value)
+// }
+
+// func (m *AppendingTx) IncrementSequence(amount uint64, tx kv.RwTx) (baseId uint64, err error) {
+// 	return tx.IncrementSequence(m.ap.valsTbl, amount)
+// }
+
+// func (m *AppendingTx) ReadSequence(tx kv.Tx) (uint64, error) {
+// 	return tx.ReadSequence(m.ap.valsTbl)
+// }
+
+// func (m *AppendingTx) ResetSequence(value uint64, tx kv.RwTx) error {
+// 	return tx.ResetSequence(m.ap.valsTbl, value)
+// }
+
+// func (m *AppendingTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
+// 	ap := m.ap
+// 	fromId, err := ap.rel.RootNum2Num(from, tx)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	_, err = ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(fromId), nil, 0, tx)
+// 	return err
+// }
+
+// func (m *AppendingTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
+// 	ap := m.ap
+// 	toId, err := ap.rel.RootNum2Num(to, tx)
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
+
+// 	eFrom := ap.encTs(ap.pruneFrom)
+// 	eTo := ap.encTs(toId)
+// 	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
+// }

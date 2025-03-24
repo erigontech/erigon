@@ -11,7 +11,7 @@ import (
 // default freezer implementation for relational appendables (which have RootRelationI)
 // implements Freezer interface
 type SimpleRelationalFreezer struct {
-	rel     RootRelationI[Num]
+	rel     RootRelationI
 	valsTbl string
 	coll    Collector
 }

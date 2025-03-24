@@ -7,9 +7,9 @@ import (
 
 //// relations
 
-var _ RootRelationI[Num] = (*PointRelation)(nil)
-var _ RootRelationI[Num] = (*ManyToOneRelation)(nil)
-var _ RootRelationI[Num] = (*OneToManyRelation)(nil)
+var _ RootRelationI = (*PointRelation)(nil)
+var _ RootRelationI = (*ManyToOneRelation)(nil)
+var _ RootRelationI = (*OneToManyRelation)(nil)
 
 // 1:1; RootNum = Num
 type PointRelation struct{}
