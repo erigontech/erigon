@@ -666,24 +666,6 @@ func (s *Sync) maybePenalizePeerOnBadBlockEvent(ctx context.Context, event Event
 func (s *Sync) Run(ctx context.Context) error {
 	s.logger.Info(syncLogPrefix("waiting for execution client"))
 
-	if err := <-s.bridgeSync.Ready(ctx); err != nil {
-		return err
-	}
-
-	if err := <-s.heimdallSync.Ready(ctx); err != nil {
-		return err
-	}
-
-	if err := s.execution.Prepare(ctx); err != nil {
-		return err
-	}
-
-	if err := s.store.Prepare(ctx); err != nil {
-		return err
-	}
-
-	s.logger.Info(syncLogPrefix("running sync component"))
-
 	for {
 		// we have to check if the heimdall we are connected to is synchonised with the chain
 		// to prevent getting empty list of checkpoints/milestones during the sync
@@ -703,6 +685,24 @@ func (s *Sync) Run(ctx context.Context) error {
 			return err
 		}
 	}
+
+	if err := <-s.bridgeSync.Ready(ctx); err != nil {
+		return err
+	}
+
+	if err := <-s.heimdallSync.Ready(ctx); err != nil {
+		return err
+	}
+
+	if err := s.execution.Prepare(ctx); err != nil {
+		return err
+	}
+
+	if err := s.store.Prepare(ctx); err != nil {
+		return err
+	}
+
+	s.logger.Info(syncLogPrefix("running sync component"))
 
 	result, err := s.syncToTip(ctx)
 	if err != nil {
