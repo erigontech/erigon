@@ -49,7 +49,6 @@ import (
 	ecrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"golang.org/x/crypto/sha3"
-	"golang.org/x/sync/errgroup"
 )
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -2092,16 +2091,16 @@ func (phph *ParallelPatriciaHashed) Process(ctx context.Context, updates *Update
 	nibbleUpdates := make([]*nibbleUpdate, 0)
 	currentNibble := 16 // invalid nibble value
 
-	keyProcessing, ctx := errgroup.WithContext(ctx)
-	keyProcessing.SetLimit(TotalNibbles)
-
+	// keyProcessing, ctx := errgroup.WithContext(ctx)
+	// keyProcessing.SetLimit(TotalNibbles)
 	// collect updates for each starting nibble and submit it to goroutine for asynchronous unfolding/processing
 	updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		if currentNibble != int(hashedKey[0]) {
 			nu := append([]*nibbleUpdate{}, nibbleUpdates...)
-			keyProcessing.Go(func() error {
-				return phph.StartKeyProcessing(ctx, nu)
-			})
+			phph.StartKeyProcessing(ctx, nu)
+			// keyProcessing.Go(func() error {
+			// 	return phph.StartKeyProcessing(ctx, nu)
+			// })
 			nibbleUpdates = make([]*nibbleUpdate, 0)
 		}
 		currentNibble = int(hashedKey[0])
@@ -2109,13 +2108,14 @@ func (phph *ParallelPatriciaHashed) Process(ctx context.Context, updates *Update
 		return nil
 	})
 	// for the last nibble from the upadtes
-	keyProcessing.Go(func() error {
-		return phph.StartKeyProcessing(ctx, append([]*nibbleUpdate{}, nibbleUpdates...))
-	})
+	phph.StartKeyProcessing(ctx, append([]*nibbleUpdate{}, nibbleUpdates...))
+	// keyProcessing.Go(func() error {
+	// 	return phph.StartKeyProcessing(ctx, append([]*nibbleUpdate{}, nibbleUpdates...))
+	// })
 
-	if err := keyProcessing.Wait(); err != nil {
-		return nil, fmt.Errorf("processing keys failed: %w", err)
-	}
+	// if err := keyProcessing.Wait(); err != nil {
+	// 	return nil, fmt.Errorf("processing keys failed: %w", err)
+	// }
 
 	// Folding everything up to the root
 	for phph.activeRows > 0 {
