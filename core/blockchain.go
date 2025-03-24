@@ -125,26 +125,23 @@ func ExecuteBlockEphemerally(
 	var rejectedTxs []*RejectedTx
 	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
-	// noop := state.NewNoopWriter()
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(i)
+		writeTrace := false
 		if vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, txn.Hash())
 			if err != nil {
 				return nil, fmt.Errorf("could not obtain tracer: %w", err)
 			}
 			vmConfig.Tracer = tracer
-			// writeTrace = true
+			writeTrace = true
 		}
 		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, *vmConfig)
-		// TODO: check how to implement flushable tracer
-		// if writeTrace {
-		// 	if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
-		// 		ftracer.Flush(txn)
-		// 	}
+		if writeTrace && vmConfig.Tracer != nil && vmConfig.Tracer.Flush != nil {
+			vmConfig.Tracer.Flush(txn)
+			vmConfig.Tracer = nil
+		}
 
-		// 	vmConfig.Tracer = nil
-		// }
 		if err != nil {
 			if !vmConfig.StatelessExec {
 				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)

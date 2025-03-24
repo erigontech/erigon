@@ -153,6 +153,7 @@ func (l *StructLogger) Hooks() *tracing.Hooks {
 		OnTxEnd:   l.OnTxEnd,
 		OnExit:    l.OnExit,
 		OnOpcode:  l.OnOpcode,
+		Flush:     l.Flush,
 	}
 }
 

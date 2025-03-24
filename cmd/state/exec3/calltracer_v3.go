@@ -43,7 +43,7 @@ func (ct *CallTracer) Tracer() *tracers.Tracer {
 	if ct.hooks != nil {
 		hooks = *ct.hooks
 
-		if ct.hooks.OnEnter != nil { /// WTF??
+		if ct.hooks.OnEnter != nil {
 			hooks.OnEnter = func(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 				ct.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
 				ct.hooks.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)

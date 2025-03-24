@@ -184,6 +184,7 @@ type Hooks struct {
 	OnCodeChange    CodeChangeHook
 	OnStorageChange StorageChangeHook
 	OnLog           LogHook
+	Flush           func(tx types.Transaction)
 }
 
 // BalanceChangeReason is used to indicate the reason for a balance change, useful
