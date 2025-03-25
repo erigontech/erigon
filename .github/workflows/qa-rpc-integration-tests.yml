@@ -1,6 +1,7 @@
 name: QA - RPC Integration Tests
 
 on:
+  workflow_dispatch:     # Run manually
   push:
     branches:
       - main
@@ -10,8 +11,10 @@ on:
       - main
       - 'release/3.*'
     types:
+      - opened
+      - reopened
+      - synchronize
       - ready_for_review
-  workflow_dispatch:     # Run manually
 
 jobs:
   integration-test-suite:
@@ -161,3 +164,4 @@ jobs:
         run: |
           echo "::error::Error detected during tests: some tests failed, check the logs or the artifacts for more details"
           exit 1
+
