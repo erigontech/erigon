@@ -424,8 +424,10 @@ func sequencingBatchStep(
 			}
 
 			if len(batchState.blockState.transactionsForInclusion) == 0 {
-				log.Trace(fmt.Sprintf("[%s] Sleep on SequencerTimeoutOnEmptyTxPool", logPrefix), "time in ms", batchContext.cfg.zk.SequencerTimeoutOnEmptyTxPool.Milliseconds())
-				time.Sleep(batchContext.cfg.zk.SequencerTimeoutOnEmptyTxPool)
+				if !batchState.isAnyRecovery() {
+					log.Trace(fmt.Sprintf("[%s] Sleep on SequencerTimeoutOnEmptyTxPool", logPrefix), "time in ms", batchContext.cfg.zk.SequencerTimeoutOnEmptyTxPool.Milliseconds())
+					time.Sleep(batchContext.cfg.zk.SequencerTimeoutOnEmptyTxPool)
+				}
 			} else {
 				log.Trace(fmt.Sprintf("[%s] Yielded transactions from the pool", logPrefix), "txCount", len(batchState.blockState.transactionsForInclusion))
 			}
