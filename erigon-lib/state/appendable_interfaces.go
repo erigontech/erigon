@@ -37,15 +37,15 @@ type AccessorIndexBuilder interface {
 // generator for the two interfaces
 // T: temporal interface (db + files)
 // D: db interface
-// we don't need a separate interface for files...since tx is provided separately
-// anyway.
-type StartRoTx[T AppendableDbLessTxI] interface {
+// we don't need a separate interface for files...
+// since tx is provided separately anyway.
+type StartRoTx[T AppendableFilesTxI] interface {
 	BeginFilesTx() T
-	BeginDbTx() T
+	BeginNoFilesTx() T
 }
 
 // why we need temporal + db + snapshot txs
-// db, snapshot txs separate is low-level tx. Sometimes I just want to query only db or only snapshot
+// db, snapshot txs separate is low-level api. Sometimes I just want to query only db or only snapshot
 // for example...
 // temporal tx is about consistency...if i want to query snapshot first and then db
 // and use separate tx..it can lead to inconsistency (due to db data being pruned)
@@ -68,11 +68,6 @@ type AppendableFilesTxI interface {
 	GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error)
 }
 
-type AppendableDbLessTxI interface {
-	AppendableFilesTxI
-	AppendableTemporalCommonTxI
-}
-
 type AppendableDbCommonTxI interface {
 	Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error)
 	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
@@ -88,7 +83,8 @@ type MarkedDbTxI interface {
 
 type MarkedTxI interface {
 	MarkedDbTxI
-	AppendableDbLessTxI
+	AppendableFilesTxI
+	AppendableTemporalCommonTxI
 }
 
 // unmarked
@@ -100,7 +96,8 @@ type UnmarkedDbTxI interface {
 
 type UnmarkedTxI interface {
 	UnmarkedDbTxI
-	AppendableDbLessTxI
+	AppendableFilesTxI
+	AppendableTemporalCommonTxI
 }
 
 // appending
@@ -112,7 +109,8 @@ type AppendingDbTxI interface {
 
 type AppendingTxI interface {
 	AppendingDbTxI
-	AppendableDbLessTxI
+	AppendableFilesTxI
+	AppendableTemporalCommonTxI
 }
 
 // buffer values before writing to db supposed to store only canonical values
@@ -126,7 +124,8 @@ type BufferedDbTxI interface {
 
 type BufferedTxI interface {
 	BufferedDbTxI
-	AppendableDbLessTxI
+	AppendableFilesTxI
+	AppendableTemporalCommonTxI
 }
 
 type CanonicityStrategy uint8

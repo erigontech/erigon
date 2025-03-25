@@ -21,10 +21,10 @@ type BufferFactory interface {
 	New() etl.Buffer
 }
 
-var _ StartRoTx[AppendableDbLessTxI] = (*Appendable[AppendableDbLessTxI])(nil)
+var _ StartRoTx[AppendableFilesTxI] = (*Appendable[AppendableFilesTxI])(nil)
 var ErrNotFoundInSnapshot = errors.New("entity not found in snapshot")
 
-type Appendable[T AppendableDbLessTxI] struct {
+type Appendable[T AppendableFilesTxI] struct {
 	*ProtoAppendable
 
 	canonicalTbl string // for marked structures
@@ -138,7 +138,7 @@ func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 	return a, nil
 }
 
-func create[T AppendableDbLessTxI](id AppendableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Appendable[T], error) {
+func create[T AppendableFilesTxI](id AppendableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Appendable[T], error) {
 	a := &Appendable[T]{
 		ProtoAppendable: NewProto(id, nil, nil, logger),
 	}
@@ -164,7 +164,7 @@ func (a *Appendable[T]) BeginFilesTx() T {
 	return a.beginTxGen(true)
 }
 
-func (a *Appendable[T]) BeginDbTx() T {
+func (a *Appendable[T]) BeginNoFilesTx() T {
 	return a.beginTxGen(false)
 }
 
