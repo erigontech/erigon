@@ -1,6 +1,6 @@
 package rpc
 
-import "encoding/json"
+import "github.com/goccy/go-json"
 
 type AllowList map[string]struct{}
 

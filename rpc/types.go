@@ -18,7 +18,6 @@ package rpc
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -28,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/goccy/go-json"
 )
 
 // API describes the set of methods offered over the RPC interface

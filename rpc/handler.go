@@ -19,7 +19,6 @@ package rpc
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"reflect"
 	"strconv"
 	"strings"
@@ -30,6 +29,7 @@ import (
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/goccy/go-json"
 )
 
 // handler handles JSON-RPC messages. There is one handler per connection. Note that
