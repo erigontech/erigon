@@ -96,7 +96,7 @@ func (r *SnapshotsRepository) updateBlocks(view *freezeblocks.View) error {
 
 	startTime := time.Now()
 	for i := 0; i < count; i++ {
-		r.logger.Trace("[silkworm] snapshots updating blocks", "i", i, "count", count)
+		r.logger.Info("[silkworm] snapshots updating blocks", "i", i, "count", count)
 		segmentHeaders := segmentsHeaders[i].Src()
 		segmentBodies := segmentsBodies[i].Src()
 		segmentTransactions := segmentsTransactions[i].Src()
@@ -219,7 +219,7 @@ func (r *SnapshotsRepository) updateState(stateTx *state.AggregatorRoTx) error {
 
 	startTimeHistorical := time.Now()
 	for i := 0; i < countHistorical; i++ {
-		r.logger.Trace("[silkworm] snapshots updating historical", "i", i, "count", countHistorical)
+		r.logger.Info("[silkworm] snapshots updating historical", "i", i, "count", countHistorical)
 		err := r.silkworm.AddStateSnapshotBundleHistorical(StateSnapshotBundleHistorical{
 			Accounts: makeHistorySnapshot(historyFilesAccounts[i], historyIIFilesAccounts[i]),
 			Storage:  makeHistorySnapshot(historyFilesStorage[i], historyIIFilesStorage[i]),
@@ -247,7 +247,7 @@ func (r *SnapshotsRepository) updateState(stateTx *state.AggregatorRoTx) error {
 
 	startTimeLatest := time.Now()
 	for i := 0; i < countLatest; i++ {
-		r.logger.Trace("[silkworm] snapshots updating latest", "i", i, "count", countLatest)
+		r.logger.Info("[silkworm] snapshots updating latest", "i", i, "count", countLatest)
 		err := r.silkworm.AddStateSnapshotBundleLatest(StateSnapshotBundleLatest{
 			Accounts: makeDomainSnapshot(domainFilesAccounts[i]),
 			Storage:  makeDomainSnapshot(domainFilesStorage[i]),
@@ -261,7 +261,7 @@ func (r *SnapshotsRepository) updateState(stateTx *state.AggregatorRoTx) error {
 			return err
 		}
 	}
-	r.logger.Debug("[silkworm] snapshots updated latest", "count", countLatest, "duration", time.Since(startTimeLatest))
+	r.logger.Info("[silkworm] snapshots updated latest", "count", countLatest, "duration", time.Since(startTimeLatest))
 
 	return nil
 }
