@@ -2,9 +2,11 @@ package test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -31,7 +33,14 @@ func TestUnmarkedAppendableRegistration(t *testing.T) {
 }
 
 func setupBorSpans(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (AppendableId, *state.Appendable[UnmarkedTxI]) {
-	borspanId := registerEntity(dir, "borspans")
+	borspanId := registerEntityWithSnapshotConfig(dir, "borspans", &ae.SnapshotConfig{
+		SnapshotCreationConfig: &ae.SnapshotCreationConfig{
+			RootNumPerStep: 10,
+			MergeStages:    []uint64{200, 400},
+			MinimumSize:    10,
+			SafetyMargin:   5,
+		},
+	})
 	require.Equal(t, ae.AppendableId(0), borspanId)
 
 	indexb := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, false), borspanId, log)
@@ -63,7 +72,7 @@ func TestUnmarked_PutToDb(t *testing.T) {
 	dir, db, log := setup(t)
 	_, uma := setupBorSpans(t, log, dir, db)
 
-	uma_tx := uma.BeginFilesRo()
+	uma_tx := uma.BeginFilesTx()
 	defer uma_tx.Close()
 	rwtx, err := db.BeginRw(context.Background())
 	defer rwtx.Rollback()
@@ -74,11 +83,142 @@ func TestUnmarked_PutToDb(t *testing.T) {
 
 	err = uma_tx.Append(num, value, rwtx)
 	require.NoError(t, err)
-	returnv, found, err := uma_tx.Get(num, rwtx)
+	returnv, err := uma_tx.GetDb(num, rwtx)
 	require.NoError(t, err)
-	require.False(t, found)
 	require.Equal(t, value, returnv)
 
-	//returnv, err = uma_tx.GetNc(num, rwtx)
+	returnv, err = uma_tx.GetDb(Num(1), rwtx)
+	require.NoError(t, err)
+	//require.True(t, returnv == nil)a
+	require.True(t, returnv == nil)
+}
 
+func TestUnmarkedPrune(t *testing.T) {
+	for pruneTo := RootNum(0); ; pruneTo++ {
+		var entries_count uint64
+		t.Run(fmt.Sprintf("prune to %d", pruneTo), func(t *testing.T) {
+			dir, db, log := setup(t)
+			borSpanId, uma := setupBorSpans(t, log, dir, db)
+
+			ctx := context.Background()
+			cfg := borSpanId.SnapshotConfig()
+			entries_count := cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
+
+			uma_tx := uma.BeginFilesTx()
+			defer uma_tx.Close()
+			rwtx, err := db.BeginRw(ctx)
+			defer rwtx.Rollback()
+			require.NoError(t, err)
+
+			getData := func(i int) (Num, state.Bytes) {
+				return Num(i), state.Bytes(fmt.Sprintf("data%d", i))
+			}
+
+			for i := range int(entries_count) {
+				num, value := getData(i)
+				err = uma_tx.Append(num, value, rwtx)
+				require.NoError(t, err)
+			}
+
+			require.NoError(t, rwtx.Commit())
+			uma_tx.Close()
+
+			rwtx, err = db.BeginRw(ctx)
+			defer rwtx.Rollback()
+			require.NoError(t, err)
+
+			ndels, err := uma_tx.Prune(ctx, pruneTo, 1000, rwtx)
+			require.NoError(t, err)
+
+			spanId := heimdall.SpanIdAt(uint64(pruneTo))
+			require.Equal(t, ndels, uint64(spanId))
+
+			require.NoError(t, rwtx.Commit())
+			uma_tx = uma.BeginFilesTx()
+			defer uma_tx.Close()
+			rwtx, err = db.BeginRw(ctx)
+			require.NoError(t, err)
+			defer rwtx.Rollback()
+		})
+		if pruneTo >= RootNum(entries_count+1) {
+			break
+		}
+	}
+}
+
+func TestBuildFiles_Unmarked(t *testing.T) {
+	dir, db, log := setup(t)
+	borSpanId, uma := setupBorSpans(t, log, dir, db)
+	ctx := context.Background()
+
+	uma_tx := uma.BeginFilesTx()
+	defer uma_tx.Close()
+	rwtx, err := db.BeginRw(ctx)
+	defer rwtx.Rollback()
+	require.NoError(t, err)
+	cfg := borSpanId.SnapshotConfig()
+	num_files := uint64(5)
+	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
+
+	getData := func(i int) (Num, state.Bytes) {
+		return Num(i), state.Bytes(fmt.Sprintf("data%d", i))
+	}
+
+	for i := range int(entries_count) {
+		num, value := getData(i)
+		err = uma_tx.Append(num, value, rwtx)
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, rwtx.Commit())
+	uma_tx.Close()
+
+	ps := background.NewProgressSet()
+	files, err := uma.BuildFiles(ctx, 0, RootNum(entries_count), db, ps)
+	require.NoError(t, err)
+	require.Equal(t, len(files), int(num_files))
+
+	uma.IntegrateDirtyFiles(files)
+	uma.RecalcVisibleFiles(RootNum(entries_count))
+
+	uma_tx = uma.BeginFilesTx()
+	defer uma_tx.Close()
+
+	rwtx, err = db.BeginRw(ctx)
+	defer rwtx.Rollback()
+	require.NoError(t, err)
+
+	firstRootNumNotInSnap := uma_tx.VisibleFilesMaxRootNum()
+	firstSpanIdNotInSnap := Num(heimdall.SpanIdAt(uint64(firstRootNumNotInSnap)))
+	del, err := uma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, rwtx)
+	require.NoError(t, err)
+	require.Equal(t, del, uint64(firstSpanIdNotInSnap))
+
+	require.NoError(t, rwtx.Commit())
+	uma_tx = uma.BeginFilesTx()
+	defer uma_tx.Close()
+	rwtx, err = db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwtx.Rollback()
+
+	for i := range int(entries_count) {
+		num, value := getData(i)
+		returnv, err := uma_tx.GetDb(num, rwtx)
+		require.NoError(t, err)
+		if num < firstSpanIdNotInSnap {
+			require.True(t, returnv == nil)
+		} else {
+			require.Equal(t, returnv, value)
+		}
+
+		returnv, found, err := uma_tx.GetFromFiles(num)
+		require.NoError(t, err)
+		if num < firstSpanIdNotInSnap {
+			require.True(t, found)
+			require.Equal(t, returnv, value)
+		} else {
+			require.False(t, found)
+			require.True(t, returnv == nil)
+		}
+	}
 }

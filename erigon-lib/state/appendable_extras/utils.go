@@ -8,7 +8,7 @@ import (
 )
 
 func step[T ~uint64](n T, a AppendableId) uint64 {
-	return uint64(n) / a.SnapshotConfig().EntitiesPerStep
+	return uint64(n) / a.SnapshotConfig().RootNumPerStep
 }
 
 func EncToBytes[T ~uint64](x T, x8Bytes bool) (out []byte) {

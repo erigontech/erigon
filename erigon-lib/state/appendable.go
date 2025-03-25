@@ -256,6 +256,10 @@ type UnmarkedTx struct {
 	ap *Appendable[UnmarkedTxI]
 }
 
+func (m *UnmarkedTx) GetDb(num Num, tx kv.Tx) (Bytes, error) {
+	return tx.GetOne(m.ap.valsTbl, m.ap.encTs(num))
+}
+
 func (m *UnmarkedTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
 	return tx.Append(m.ap.valsTbl, m.ap.encTs(entityNum), value)
 }

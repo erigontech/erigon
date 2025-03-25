@@ -42,16 +42,18 @@ func TestMarkedAppendableRegistration(t *testing.T) {
 }
 
 func registerEntity(dirs datadir.Dirs, name string) ae.AppendableId {
-	return ae.RegisterAppendable(name, dirs, nil, ae.WithSnapshotCreationConfig(
-		&ae.SnapshotConfig{
-			SnapshotCreationConfig: &ae.SnapshotCreationConfig{
-				EntitiesPerStep: 10,
-				MergeStages:     []uint64{20, 40},
-				MinimumSize:     10,
-				SafetyMargin:    5,
-			},
+	return registerEntityWithSnapshotConfig(dirs, name, &ae.SnapshotConfig{
+		SnapshotCreationConfig: &ae.SnapshotCreationConfig{
+			RootNumPerStep: 10,
+			MergeStages:    []uint64{20, 40},
+			MinimumSize:    10,
+			SafetyMargin:   5,
 		},
-	))
+	})
+}
+
+func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *ae.SnapshotConfig) ae.AppendableId {
+	return ae.RegisterAppendable(name, dirs, nil, ae.WithSnapshotCreationConfig(cfg))
 }
 
 func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
@@ -111,15 +113,15 @@ func TestMarked_PutToDb(t *testing.T) {
 
 	err = ma_tx.Put(num, hash, value, rwtx)
 	require.NoError(t, err)
-	returnv, err := ma_tx.GetDb(num, nil, rwtx.(kv.Tx))
+	returnv, err := ma_tx.GetDb(num, nil, rwtx)
 	require.NoError(t, err)
 	require.Equal(t, value, returnv)
 
-	returnv, err = ma_tx.GetDb(num, hash, rwtx.(kv.Tx))
+	returnv, err = ma_tx.GetDb(num, hash, rwtx)
 	require.NoError(t, err)
 	require.Equal(t, value, returnv)
 
-	returnv, err = ma_tx.GetDb(num, []byte{1}, rwtx.(kv.Tx))
+	returnv, err = ma_tx.GetDb(num, []byte{1}, rwtx)
 	require.NoError(t, err)
 	require.True(t, returnv == nil) // Equal fails
 
@@ -193,7 +195,7 @@ func TestUnwind(t *testing.T) {
 	// unwind
 }
 
-func TestBuildFiles(t *testing.T) {
+func TestBuildFiles_Marked(t *testing.T) {
 	// put stuff until build files is called
 	// and snapshot is created (with indexes)
 	// check beginfilesro works with new visible file

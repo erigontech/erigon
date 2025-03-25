@@ -82,7 +82,7 @@ type AppendableDbCommonTxI interface {
 // marked
 type MarkedDbTxI interface {
 	AppendableDbCommonTxI
-	GetDb(num Num, hash []byte, tx kv.Tx) ([]byte, error) // db only (hash==nil => canonical value)
+	GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) // db only (hash==nil => canonical value)
 	Put(num Num, hash []byte, value Bytes, tx kv.RwTx) error
 }
 
@@ -94,6 +94,7 @@ type MarkedTxI interface {
 // unmarked
 type UnmarkedDbTxI interface {
 	AppendableDbCommonTxI
+	GetDb(num Num, tx kv.Tx) (Bytes, error)
 	Append(entityNum Num, value Bytes, tx kv.RwTx) error
 }
 
