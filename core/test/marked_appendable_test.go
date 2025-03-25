@@ -24,8 +24,9 @@ import (
 
 type Num = state.Num
 type RootNum = state.RootNum
-type EntityId = ae.AppendableId
+type AppendableId = ae.AppendableId
 type MarkedTxI = state.MarkedTxI
+type UnmarkedTxI = state.UnmarkedTxI
 
 // test marked appendable
 func TestMarkedAppendableRegistration(t *testing.T) {
@@ -61,7 +62,7 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	return dirs, db, logger
 }
 
-func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (EntityId, *state.Appendable[state.MarkedTxI]) {
+func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (AppendableId, *state.Appendable[state.MarkedTxI]) {
 	headerId := registerEntity(dir, "headers")
 	require.Equal(t, ae.AppendableId(0), headerId)
 
@@ -72,15 +73,9 @@ func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (En
 		state.WithIndexKeyFactory(&snaptype.HeaderAccessorIndexKeyFactory{}))
 
 	ma, err := state.NewMarkedAppendable(headerId, kv.Headers, kv.HeaderCanonical, ae.IdentityRootRelationInstance, log,
-<<<<<<< HEAD
-		state.App_WithFreezer[MarkedTxI](freezer),
-		state.App_WithPruneFrom[MarkedTxI](Num(1)),
-		state.App_WithIndexBuilders[MarkedTxI](builder),
-=======
 		state.App_WithFreezer(freezer),
 		state.App_WithPruneFrom(Num(1)),
 		state.App_WithIndexBuilders(builder),
->>>>>>> 42e5b0676f (files, db api segregated)
 	)
 	require.NoError(t, err)
 

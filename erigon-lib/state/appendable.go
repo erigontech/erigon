@@ -14,7 +14,7 @@ import (
 const MaxUint64 = ^uint64(0)
 
 type RootRelationI interface {
-	RootNum2Id(from RootNum, tx kv.Tx) (Id, error)
+	RootNum2Num(from RootNum, tx kv.Tx) (Num, error)
 }
 
 type BufferFactory interface {
@@ -115,7 +115,7 @@ func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 }
 
 func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelationI, factory BufferFactory, logger log.Logger, options ...AppOpts) (*Appendable[BufferedTxI], error) {
-	a, err := create(id, Buffered, valsTbl, "", relation, logger, options...)
+	a, err := create[BufferedTxI](id, Buffered, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +228,7 @@ func (m *MarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	a := m.ap
 	fromKeyPrefix := a.encTs(a.pruneFrom)
-	eto, err := a.rel.RootNum2Id(to, tx)
+	eto, err := a.rel.RootNum2Num(to, tx)
 	if err != nil {
 		return 0, err
 	}
@@ -262,24 +262,24 @@ func (m *UnmarkedTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
 
 func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 	ap := m.ap
-	fromId, err := ap.rel.RootNum2Id(from, tx)
+	fromN, err := ap.rel.RootNum2Num(from, tx)
 	if err != nil {
 		return err
 	}
-	_, err = ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(fromId), nil, 0, tx)
+	_, err = ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(fromN), nil, 0, tx)
 	return err
 }
 
 func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
-	toId, err := ap.rel.RootNum2Id(to, tx)
+	toNum, err := ap.rel.RootNum2Num(to, tx)
 	if err != nil {
 		return 0, err
 	}
-	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
+	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toNum)
 
 	eFrom := ap.encTs(ap.pruneFrom)
-	eTo := ap.encTs(toId)
+	eTo := ap.encTs(toNum)
 	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 
@@ -316,14 +316,14 @@ func (m *BufferedTx) Flush(ctx context.Context, tx kv.RwTx) error {
 
 func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
-	toId, err := ap.rel.RootNum2Id(to, tx)
+	toNum, err := ap.rel.RootNum2Num(to, tx)
 	if err != nil {
 		return 0, err
 	}
-	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
+	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toNum)
 
 	eFrom := ap.encTs(ap.pruneFrom)
-	eTo := ap.encTs(toId)
+	eTo := ap.encTs(toNum)
 	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 

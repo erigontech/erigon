@@ -81,14 +81,13 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 		defer sn.Close()
 
 		{
-			a.freezer.SetCollector(func(values []byte) error {
+			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, func(values []byte) error {
 				// TODO: look at block_Snapshots.go#dumpRange
 				// when snapshot is non-frozen range, it AddsUncompressedword (fast creation)
 				// else AddWord.
 				// But BuildFiles perhaps only used for fast builds...and merge is for slow builds.
 				return sn.AddUncompressedWord(values)
-			})
-			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, db); err != nil {
+			}, db); err != nil {
 				return dirtyFiles, err
 			}
 		}
