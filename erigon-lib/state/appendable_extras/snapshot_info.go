@@ -40,7 +40,7 @@ type SnapshotCreationConfig struct {
 
 	// preverified can have larger files than that indicated by `MergeSteps.last`.
 	// This is because previously, different values might have been used.
-	//Preverified       snapcfg.Preverifie
+	//Preverified       snapcfg.Preverified
 	preverifiedParsed []*FileInfo
 }
 
