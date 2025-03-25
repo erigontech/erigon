@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	gojson "github.com/goccy/go-json"
 	"github.com/golang-jwt/jwt/v4"
 	jsoniter "github.com/json-iterator/go"
 
@@ -115,7 +116,7 @@ func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg interface{}) e
 		return err
 	}
 	var respmsg jsonrpcMessage
-	if err := jsoniter.Unmarshal(respBody, &respmsg); err != nil {
+	if err := gojson.Unmarshal(respBody, &respmsg); err != nil {
 		return err
 	}
 	op.resp <- &respmsg
@@ -129,7 +130,7 @@ func (c *Client) sendBatchHTTP(ctx context.Context, op *requestOp, msgs []*jsonr
 		return err
 	}
 	var respmsgs []jsonrpcMessage
-	if err := jsoniter.Unmarshal(respBody, &respmsgs); err != nil {
+	if err := gojson.Unmarshal(respBody, &respmsgs); err != nil {
 		return err
 	}
 	for i := 0; i < len(respmsgs); i++ {
@@ -139,7 +140,7 @@ func (c *Client) sendBatchHTTP(ctx context.Context, op *requestOp, msgs []*jsonr
 }
 
 func (hc *httpConn) doRequest(ctx context.Context, msg interface{}) ([]byte, error) {
-	body, err := json.Marshal(msg)
+	body, err := gojson.Marshal(msg)
 	if err != nil {
 		return nil, err
 	}

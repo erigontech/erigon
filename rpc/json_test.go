@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	gojson "github.com/goccy/go-json"
 	jsoniter "github.com/json-iterator/go"
 )
 
@@ -176,13 +177,23 @@ func BenchmarkJsonMarshal(b *testing.B) {
 		}
 	})
 
-	var recipes []Recipe
 	b.Run("jsoniter-unmarshal", func(b *testing.B) {
+		var recipes []Recipe
 		b.ReportAllocs()
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 		for i := 0; i < b.N; i++ {
 			if err := json.Unmarshal(data, &recipes); err != nil {
-				b.Fatalf("Failed to unmarshal using standard lib. %v", err)
+				b.Fatalf("Failed to unmarshal using jsoniter. %v", err)
+			}
+		}
+	})
+
+	var recipes []Recipe
+	b.Run("gojson-unmarshal", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if err := gojson.Unmarshal(data, &recipes); err != nil {
+				b.Fatalf("Failed to unmarshal using go-json. %v", err)
 			}
 		}
 	})
@@ -201,7 +212,16 @@ func BenchmarkJsonMarshal(b *testing.B) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 		for i := 0; i < b.N; i++ {
 			if _, err := json.Marshal(recipes); err != nil {
-				b.Fatalf("Failed to marshal using standard lib. %v", err)
+				b.Fatalf("Failed to marshal using jsoniter. %v", err)
+			}
+		}
+	})
+
+	b.Run("gojson-marshal", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, err := gojson.Marshal(recipes); err != nil {
+				b.Fatalf("Failed to marshal using go-json. %v", err)
 			}
 		}
 	})

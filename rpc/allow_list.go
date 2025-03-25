@@ -1,16 +1,12 @@
 package rpc
 
-import (
-	"encoding/json"
-
-	jsoniter "github.com/json-iterator/go"
-)
+import "github.com/goccy/go-json"
 
 type AllowList map[string]struct{}
 
 func (a *AllowList) UnmarshalJSON(data []byte) error {
 	var keys []string
-	err := jsoniter.Unmarshal(data, &keys)
+	err := json.Unmarshal(data, &keys)
 	if err != nil {
 		return err
 	}

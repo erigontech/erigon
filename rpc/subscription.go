@@ -22,7 +22,6 @@ import (
 	crand "crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"math/rand"
 	"reflect"
@@ -30,7 +29,7 @@ import (
 	"sync"
 	"time"
 
-	jsoniter "github.com/json-iterator/go"
+	"github.com/goccy/go-json"
 )
 
 var (
@@ -321,7 +320,7 @@ func (sub *ClientSubscription) forward() (unsubscribeServer bool, err error) {
 
 func (sub *ClientSubscription) unmarshal(result json.RawMessage) (interface{}, error) {
 	val := reflect.New(sub.etype)
-	err := jsoniter.Unmarshal(result, val.Interface())
+	err := json.Unmarshal(result, val.Interface())
 	return val.Elem().Interface(), err
 }
 
