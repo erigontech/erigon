@@ -41,7 +41,7 @@ type SnapshotCreationConfig struct {
 	// preverified can have larger files than that indicated by `MergeSteps.last`.
 	// This is because previously, different values might have been used.
 	//Preverified       snapcfg.Preverifie
-	preverifiedParsed []*FileInfo
+	preverifiedParsed []*FileInfo2
 }
 
 type SnapshotConfig struct {
@@ -60,7 +60,7 @@ func (s *SnapshotConfig) SetupConfig(id AppendableId, snapshotDir string, pre sn
 	if s.preverifiedParsed != nil {
 		return
 	}
-	s.preverifiedParsed = make([]*FileInfo, 0, len(pre))
+	s.preverifiedParsed = make([]*FileInfo2, 0, len(pre))
 	for _, item := range []snapcfg.PreverifiedItem(pre) {
 		res, ok := ParseFileName(id, item.Name)
 		if !ok {
@@ -81,7 +81,7 @@ func (s *SnapshotConfig) SetupConfig(id AppendableId, snapshotDir string, pre sn
 }
 
 // parse snapshot file info
-type FileInfo struct {
+type FileInfo2 struct {
 	Version  snaptype.Version
 	From, To uint64
 	Name     string // filename
@@ -90,13 +90,13 @@ type FileInfo struct {
 	Id       AppendableId
 }
 
-func (f *FileInfo) IsIndex() bool { return strings.Compare(f.Ext, ".idx") == 0 }
+func (f *FileInfo2) IsIndex() bool { return strings.Compare(f.Ext, ".idx") == 0 }
 
-func (f *FileInfo) IsSeg() bool { return strings.Compare(f.Ext, ".seg") == 0 }
+func (f *FileInfo2) IsSeg() bool { return strings.Compare(f.Ext, ".seg") == 0 }
 
-func (f *FileInfo) Len() uint64 { return f.To - f.From }
+func (f *FileInfo2) Len() uint64 { return f.To - f.From }
 
-func (f *FileInfo) Dir() string { return filepath.Dir(f.Path) }
+func (f *FileInfo2) Dir() string { return filepath.Dir(f.Path) }
 
 // TODO: snaptype.Version should be replaced??
 
@@ -113,11 +113,11 @@ func IdxFilePath(id AppendableId, version snaptype.Version, from, to RootNum, id
 	return filepath.Join(id.SnapshotDir(), fileName(id.IndexPrefix()[idxNum], version, from.Step(id), to.Step(id))+".idx")
 }
 
-func ParseFileName(id AppendableId, fileName string) (res *FileInfo, ok bool) {
+func ParseFileName(id AppendableId, fileName string) (res *FileInfo2, ok bool) {
 	return ParseFileNameInDir(id, id.SnapshotDir(), fileName)
 }
 
-func ParseFileNameInDir(id AppendableId, dir, fileName string) (res *FileInfo, ok bool) {
+func ParseFileNameInDir(id AppendableId, dir, fileName string) (res *FileInfo2, ok bool) {
 	//	'v1-000000-000500-transactions.seg'
 	// 'v1-017000-017500-transactions-to-block.idx'
 	ext := filepath.Ext(fileName)
@@ -126,7 +126,7 @@ func ParseFileNameInDir(id AppendableId, dir, fileName string) (res *FileInfo, o
 	}
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.SplitN(onlyName, "-", 4)
-	res = &FileInfo{Path: filepath.Join(dir, fileName), Name: fileName, Ext: ext}
+	res = &FileInfo2{Path: filepath.Join(dir, fileName), Name: fileName, Ext: ext}
 
 	if len(parts) < 4 {
 		return nil, ok
