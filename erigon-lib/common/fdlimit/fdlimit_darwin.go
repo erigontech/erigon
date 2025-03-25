@@ -22,7 +22,7 @@ package fdlimit
 import "syscall"
 
 // hardlimit is the number of file descriptors allowed at max by the kernel.
-const hardlimit = 10240
+const hardlimit = 256000
 
 // Raise tries to maximize the file descriptor allowance of this process
 // to the maximum hard-limit allowed by the OS.

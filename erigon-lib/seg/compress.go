@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon-lib/common"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/etl"
@@ -82,8 +83,7 @@ var DefaultCfg = Cfg{
 	MaxDictPatterns: 64 * 1024,
 
 	DictReducerSoftLimit: 1_000_000,
-
-	Workers: 1,
+	Workers:              1,
 }
 
 // Compressor is the main operating type for performing per-word compression

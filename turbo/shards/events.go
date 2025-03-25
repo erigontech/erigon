@@ -278,3 +278,12 @@ func (r *RecentLogs) Add(receipts types.Receipts) {
 		}
 	}
 }
+
+func (r *RecentLogs) CopyAndReset(target *RecentLogs) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for blockNum, receipts := range r.receipts {
+		target.Add(receipts)
+		delete(r.receipts, blockNum)
+	}
+}

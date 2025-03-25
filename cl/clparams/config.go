@@ -111,12 +111,11 @@ const (
 )
 
 const (
-	MaxDialTimeout     = 15 * time.Second
-	VersionLength  int = 4
-	// 15 MiB
-	MaxChunkSize uint64        = 15728640
-	ReqTimeout   time.Duration = 5 * time.Second
-	RespTimeout  time.Duration = 15 * time.Second
+	MaxDialTimeout               = 15 * time.Second
+	VersionLength  int           = 4
+	MaxChunkSize   uint64        = 15 * 1024 * 1024
+	ReqTimeout     time.Duration = 5 * time.Second
+	RespTimeout    time.Duration = 10 * time.Second
 )
 
 const (
@@ -326,7 +325,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
-		RespTimeout:                     ConfigDurationSec(10 * time.Second),
+		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
@@ -1427,12 +1426,6 @@ func EmbeddedSupported(id uint64) bool {
 		id == 100 ||
 		id == 10200 ||
 		id == 560048
-}
-
-// Subset of supported networks where embedded CL is stable enough
-// (sufficient number of light-client peers) as to be enabled by default
-func EmbeddedEnabledByDefault(id uint64) bool {
-	return id == 1 || id == 5 || id == 11155111 || id == 560048
 }
 
 func SupportBackfilling(networkId uint64) bool {

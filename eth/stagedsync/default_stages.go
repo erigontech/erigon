@@ -274,7 +274,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 	}
 }
 
-// when uploading - potentially from zero we need to include headers and bodies stages otherwise we won't recover the POW portion of the chain
+// UploaderPipelineStages when uploading - potentially from zero we need to include headers and bodies stages otherwise we won't recover the POW portion of the chain
 func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, bodies BodiesCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{

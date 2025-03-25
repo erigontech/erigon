@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv/prune"
 
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
@@ -44,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 )

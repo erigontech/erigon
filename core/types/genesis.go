@@ -29,7 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 
 	"github.com/erigontech/erigon/params"
@@ -73,7 +73,7 @@ type Genesis struct {
 type AuRaSeal struct {
 	AuthorityRound struct {
 		Step      math.HexOrDecimal64 `json:"step"`
-		Signature hexutility.Bytes    `json:"signature"`
+		Signature hexutil.Bytes       `json:"signature"`
 	} `json:"authorityRound"`
 }
 
@@ -129,7 +129,7 @@ type GenesisAccount struct {
 type genesisSpecMarshaling struct {
 	Nonce         math.HexOrDecimal64
 	Timestamp     math.HexOrDecimal64
-	ExtraData     hexutility.Bytes
+	ExtraData     hexutil.Bytes
 	GasLimit      math.HexOrDecimal64
 	GasUsed       math.HexOrDecimal64
 	Number        math.HexOrDecimal64
@@ -141,12 +141,12 @@ type genesisSpecMarshaling struct {
 }
 
 type genesisAccountMarshaling struct {
-	Constructor hexutility.Bytes
-	Code        hexutility.Bytes
+	Constructor hexutil.Bytes
+	Code        hexutil.Bytes
 	Balance     *math.HexOrDecimal256
 	Nonce       math.HexOrDecimal64
 	Storage     map[storageJSON]storageJSON
-	PrivateKey  hexutility.Bytes
+	PrivateKey  hexutil.Bytes
 }
 
 // storageJSON represents a 256 bit byte array, but allows less than 256 bits when
@@ -166,7 +166,7 @@ func (h *storageJSON) UnmarshalText(text []byte) error {
 }
 
 func (h storageJSON) MarshalText() ([]byte, error) {
-	return hexutility.Bytes(h[:]).MarshalText()
+	return hexutil.Bytes(h[:]).MarshalText()
 }
 
 // GenesisMismatchError is raised when trying to overwrite an existing

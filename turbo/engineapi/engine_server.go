@@ -28,11 +28,11 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -69,6 +69,7 @@ type EngineServer struct {
 	test             bool
 	caplin           bool // we need to send errors for caplin.
 	executionService execution.ExecutionClient
+	txpool           txpool.TxpoolClient // needed for getBlobs
 
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
 	lock    sync.Mutex
@@ -119,11 +120,9 @@ func (e *EngineServer) Start(
 		e.engineLogSpamer.Start(ctx)
 	}
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil)
-
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
+	e.txpool = txPool
 
-	// engineImpl := NewEngineAPI(base, db, engineBackend)
-	// e.startEngineMessageHandler()
 	apiList := []rpc.API{
 		{
 			Namespace: "eth",
@@ -152,7 +151,7 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 	return nil
 }
 
-func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutility.Bytes) error {
+func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutil.Bytes) error {
 	if version < clparams.ElectraVersion {
 		if executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
@@ -163,7 +162,7 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutility.Bytes, version clparams.StateVersion,
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
@@ -511,9 +510,9 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 
 	data := resp.Data
-	var executionRequests []hexutility.Bytes
+	var executionRequests []hexutil.Bytes
 	if version >= clparams.ElectraVersion {
-		executionRequests = make([]hexutility.Bytes, 0)
+		executionRequests = make([]hexutil.Bytes, 0)
 		for _, r := range data.Requests.Requests {
 			executionRequests = append(executionRequests, r)
 		}
@@ -670,7 +669,7 @@ func extractPayloadBodyFromBody(body *types.RawBody) *engine_types.ExecutionPayl
 		return nil
 	}
 
-	bdTxs := make([]hexutility.Bytes, len(body.Transactions))
+	bdTxs := make([]hexutil.Bytes, len(body.Transactions))
 	for idx := range body.Transactions {
 		bdTxs[idx] = body.Transactions[idx]
 	}
@@ -884,6 +883,36 @@ func (e *EngineServer) HandlesForkChoice(
 
 func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
+}
+
+func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash) ([]*engine_types.BlobAndProofV1, error) {
+	if len(blobHashes) > 128 {
+		return nil, &engine_helpers.TooLargeRequestErr
+	}
+	req := &txpool.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(blobHashes))}
+	for i := range blobHashes {
+		req.BlobHashes[i] = gointerfaces.ConvertHashToH256(blobHashes[i])
+	}
+	res, err := e.txpool.GetBlobs(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
+	if len(blobHashes) != len(res.Blobs) || len(blobHashes) != len(res.Proofs) { // Some fault in the underlying txpool, but still return sane resp
+		log.Warn("[GetBlobsV1] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
+		return ret, nil
+	}
+	logLine := []string{}
+	for i := range res.Blobs {
+		if res.Blobs[i] != nil {
+			ret[i] = &engine_types.BlobAndProofV1{Blob: res.Blobs[i], Proof: res.Proofs[i]}
+			logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(res.Blobs[i]), len(res.Proofs[i])))
+		} else {
+			logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
+		}
+	}
+	e.logger.Debug("[GetBlobsV1]", "Responses", logLine)
+	return ret, nil
 }
 
 func waitForStuff(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {

@@ -265,7 +265,7 @@ func (sdb *IntraBlockState) Exist(addr libcommon.Address) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return s != nil && !s.deleted, err
+	return s != nil && !s.deleted, nil
 }
 
 // Empty returns whether the state object is either non-existent

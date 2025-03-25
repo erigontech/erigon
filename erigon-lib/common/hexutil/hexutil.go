@@ -17,6 +17,7 @@
 package hexutil
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -24,23 +25,6 @@ import (
 )
 
 const uintBits = 32 << (uint64(^uint(0)) >> 63)
-
-// These errors are from go-ethereum in order to keep compatibility with geth error codes.
-var (
-	ErrEmptyString   = &decError{"empty hex string"}
-	ErrSyntax        = &decError{"invalid hex string"}
-	ErrMissingPrefix = &decError{"hex string without 0x prefix"}
-	ErrOddLength     = &decError{"hex string of odd length"}
-	ErrEmptyNumber   = &decError{"hex string \"0x\""}
-	ErrLeadingZero   = &decError{"hex number with leading zero digits"}
-	ErrUint64Range   = &decError{"hex number > 64 bits"}
-	ErrUintRange     = &decError{fmt.Sprintf("hex number > %d bits", uintBits)}
-	ErrBig256Range   = &decError{"hex number > 256 bits"}
-)
-
-type decError struct{ msg string }
-
-func (err decError) Error() string { return err.msg }
 
 // Decode decodes a hex string with 0x prefix.
 func Decode(input string) ([]byte, error) {
@@ -157,6 +141,24 @@ func has0xPrefix(input string) bool {
 	return len(input) >= 2 && input[0] == '0' && (input[1] == 'x' || input[1] == 'X')
 }
 
+// IsValidQuantity checks if input is a valid hex-encoded quantity as per JSON-RPC spec.
+// It returns nil if the input is valid, otherwise an error.
+func IsValidQuantity(input string) error {
+	input, err := checkNumber(input)
+	if err != nil {
+		return err
+	}
+	if len(input) > 64 {
+		return ErrTooBigHexString
+	}
+	for _, b := range input {
+		if decodeNibble(byte(b)) == badNibble {
+			return ErrHexStringInvalid
+		}
+	}
+	return nil
+}
+
 func checkNumber(input string) (raw string, err error) {
 	if len(input) == 0 {
 		return "", ErrEmptyString
@@ -172,21 +174,6 @@ func checkNumber(input string) (raw string, err error) {
 		return "", ErrLeadingZero
 	}
 	return input, nil
-}
-
-const badNibble = ^uint64(0)
-
-func decodeNibble(in byte) uint64 {
-	switch {
-	case in >= '0' && in <= '9':
-		return uint64(in - '0')
-	case in >= 'A' && in <= 'F':
-		return uint64(in - 'A' + 10)
-	case in >= 'a' && in <= 'f':
-		return uint64(in - 'a' + 10)
-	default:
-		return badNibble
-	}
 }
 
 // ignore these errors to keep compatiblity with go ethereum
@@ -231,4 +218,85 @@ func DecompressNibbles(in []byte, out *[]byte) {
 		tmp = append(tmp, (in[i]>>4)&0x0F, in[i]&0x0F)
 	}
 	*out = tmp
+}
+
+func MustDecodeHex(in string) []byte {
+	in = strip0x(in)
+	if len(in)%2 == 1 {
+		in = "0" + in
+	}
+	payload, err := hex.DecodeString(in)
+	if err != nil {
+		panic(err)
+	}
+	return payload
+}
+
+func strip0x(str string) string {
+	if len(str) >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X') {
+		return str[2:]
+	}
+	return str
+}
+
+// EncodeTs encodes a TimeStamp (BlockNumber or TxNumber or other uin64) as big endian
+func EncodeTs(number uint64) []byte {
+	var enc [8]byte
+	binary.BigEndian.PutUint64(enc[:], number)
+	return enc[:]
+}
+
+// Encode encodes b as a hex string with 0x prefix.
+func Encode(b []byte) string {
+	enc := make([]byte, len(b)*2+2)
+	copy(enc, "0x")
+	hex.Encode(enc[2:], b)
+	return string(enc)
+}
+
+func FromHex(s string) []byte {
+	if Has0xPrefix(s) {
+		s = s[2:]
+	}
+	if len(s)%2 == 1 {
+		s = "0" + s
+	}
+	return Hex2Bytes(s)
+}
+
+// Has0xPrefix validates str begins with '0x' or '0X'.
+func Has0xPrefix(str string) bool {
+	return len(str) >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')
+}
+
+// Hex2Bytes returns the bytes represented by the hexadecimal string str.
+func Hex2Bytes(str string) []byte {
+	h, _ := hex.DecodeString(str)
+	return h
+}
+
+// IsHex validates whether each byte is valid hexadecimal string.
+func IsHex(str string) bool {
+	if len(str)%2 != 0 {
+		return false
+	}
+	for _, c := range []byte(str) {
+		if !isHexCharacter(c) {
+			return false
+		}
+	}
+	return true
+}
+
+// isHexCharacter returns bool of c being a valid hexadecimal.
+func isHexCharacter(c byte) bool {
+	return ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F')
+}
+
+func MustDecodeString(s string) []byte {
+	r, err := hex.DecodeString(s)
+	if err != nil {
+		panic(err)
+	}
+	return r
 }

@@ -573,7 +573,7 @@ func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
 		go sub.run(sctx, sub.sub, sub.sub.Topic())
 		sub.subscribed.Store(true)
 		sub.s.updateENROnSubscription(sub.sub.Topic(), true)
-		log.Info("[Gossip] Subscribed to topic", "topic", sub.sub.Topic())
+		log.Debug("[Gossip] Subscribed to topic", "topic", sub.sub.Topic())
 	}
 
 }

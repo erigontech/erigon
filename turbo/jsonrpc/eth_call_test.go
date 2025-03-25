@@ -29,7 +29,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
@@ -96,7 +95,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 
 	callData := hexutil.MustDecode("0x2e64cec1")
-	callDataBytes := hexutility.Bytes(callData)
+	callDataBytes := hexutil.Bytes(callData)
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &bankAddress,
@@ -113,7 +112,7 @@ func TestGetProof(t *testing.T) {
 	m, bankAddr, contractAddr := chainWithDeployedContract(t)
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, maxGetProofRewindBlockCount, 128, log.New())
 
-	key := func(b byte) hexutility.Bytes {
+	key := func(b byte) hexutil.Bytes {
 		result := libcommon.Hash{}
 		result[31] = b
 		return result.Bytes()
@@ -123,7 +122,7 @@ func TestGetProof(t *testing.T) {
 		name        string
 		blockNum    uint64
 		addr        libcommon.Address
-		storageKeys []hexutility.Bytes
+		storageKeys []hexutil.Bytes
 		stateVal    uint64
 		expectedErr string
 	}{
@@ -146,27 +145,27 @@ func TestGetProof(t *testing.T) {
 			name:        "currentBlockWithState",
 			addr:        contractAddr,
 			blockNum:    3,
-			storageKeys: []hexutility.Bytes{key(0), key(4), key(8), key(10)},
+			storageKeys: []hexutil.Bytes{key(0), key(4), key(8), key(10)},
 			stateVal:    2,
 		},
 		{
 			name:        "currentBlockWithMissingState",
 			addr:        contractAddr,
-			storageKeys: []hexutility.Bytes{hexutility.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
+			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
 			blockNum:    3,
 			stateVal:    0,
 		},
 		{
 			name:        "currentBlockEOAMissingState",
 			addr:        bankAddr,
-			storageKeys: []hexutility.Bytes{hexutility.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
+			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
 			blockNum:    3,
 			stateVal:    0,
 		},
 		{
 			name:        "currentBlockNoAccountMissingState",
 			addr:        libcommon.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
-			storageKeys: []hexutility.Bytes{hexutility.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
+			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
 			blockNum:    3,
 			stateVal:    0,
 		},
@@ -216,7 +215,7 @@ func TestGetProof(t *testing.T) {
 				found := false
 				for _, storageProof := range proof.StorageProof {
 					var proofKeyHash, storageKeyHash libcommon.Hash
-					proofKeyHash.SetBytes(hexutility.FromHex(storageProof.Key))
+					proofKeyHash.SetBytes(hexutil.FromHex(storageProof.Key))
 					storageKeyHash.SetBytes(uint256.NewInt(0).SetBytes(storageKey).Bytes())
 					if proofKeyHash != storageKeyHash {
 						continue

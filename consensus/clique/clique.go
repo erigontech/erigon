@@ -514,6 +514,7 @@ func (c *Clique) IsServiceTransaction(sender libcommon.Address, syscall consensu
 
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *Clique) Close() error {
+	c.DB.Close()
 	libcommon.SafeClose(c.exitCh)
 	return nil
 }

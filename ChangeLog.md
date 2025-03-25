@@ -1,27 +1,28 @@
 ChangeLog
 ---------
 
-## v3.0.1 (in development)
+## v3.1.0 (in development)
 
-https://github.com/erigontech/erigon/milestone/40
+**Improvements:**
 
-## v3.0.0 
+TODO
+
+**Bugfixes:**
+
+TODO
+
+### TODO
+
+- milestones:
+  https://github.com/erigontech/erigon/milestone/31
+
+
+## v3.0.0 (in development)
+
 
 ### Milestone
 
 https://github.com/erigontech/erigon/milestone/30
-
-
-## v3.0.0-rc3
-
-**Bugfixes:**
-
-- fixed txPool panics by @somnathb1 in https://github.com/erigontech/erigon/pull/14096
-- fixed sendRawTransaction and eth_getTransactionByHash by @shohamc1 in https://github.com/erigontech/erigon/pull/14077
-
-### Milestone
-
-https://github.com/erigontech/erigon/milestone/37
 
 ## v3.0.0-rc2
 
@@ -48,7 +49,7 @@ https://github.com/erigontech/erigon/milestone/36
 - polygon/heimdall: fix snapshot store last entity to check in snapshots too (#13845) by @taratorio in https://github.com/erigontech/erigon/pull/13938
 - Implemented wait if heimdall is not synced to the chain (#13807) by @taratorio in https://github.com/erigontech/erigon/pull/13939
 
-**Bugfixes:**
+**Known Problems:**
 
 - polygon: `eth_getLogs` if search by filters - doesn't return state-sync (state-sync events are not indexed yet). Without filter can see state-sync events. In `eth_getReceipts` also can see. [Will](https://github.com/erigontech/erigon/issues/14003) release fixed files in E3.1
 - polygon: `eth_getLogs` state-sync events have incorrect `index` field. [Will](https://github.com/erigontech/erigon/issues/14003) release fixed files in E3.1
@@ -60,7 +61,7 @@ https://github.com/erigontech/erigon/milestone/34
 ## v3.0.0-beta2
 
 ### Breaking changes
-- Reverts Optimize gas by default in eth_createAccessList #8337  
+- Reverts Optimize gas by default in eth_createAccessList #8337
 
 ### Improvements:
 
@@ -76,8 +77,8 @@ https://github.com/erigontech/erigon/milestone/34
 
 - milestone: https://github.com/erigontech/erigon/milestone/28
 - Known problem:
-    - external CL support
-    - `erigon_getLatestLogs` not implemented
+  - external CL support
+  - `erigon_getLatestLogs` not implemented
 
 ### Acknowledgements:
 
@@ -86,13 +87,13 @@ https://github.com/erigontech/erigon/milestone/34
 ### Breaking changes
 
 - Bor chains: enable our internal Consensus Layer by default (name: Astrid)
-    - The process should auto upgrade - in which case you may find that it starts creating new snapshots for checkpoints
-      and milestones.
-    - This may however fail, as there are a number of potential edge cases. If this happens the process will likely stop
-      with a failure message.
-    - In this situation you will need to do a clean sync, in which case the complete snapshot set will be downloaded and
-      astrid will sync.
-    - If you want to prevent this and retain the old behaviour start erigon with --polygon.sync=false
+  - The process should auto upgrade - in which case you may find that it starts creating new snapshots for checkpoints
+    and milestones.
+  - This may however fail, as there are a number of potential edge cases. If this happens the process will likely stop
+    with a failure message.
+  - In this situation you will need to do a clean sync, in which case the complete snapshot set will be downloaded and
+    astrid will sync.
+  - If you want to prevent this and retain the old behaviour start erigon with --polygon.sync=false
 
 ### Acknowledgements:
 

@@ -97,7 +97,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), blockNum, uint64(txIndex), block.BaseFee())
 		txs = append(txs, rpcTx)
 
-		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block.HeaderNoCopy(), txn, txIndex, txNum+1)
+		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block.HeaderNoCopy(), txn, txIndex, txNum)
 		if err != nil {
 			return nil, nil, false, err
 		}

@@ -154,3 +154,79 @@ func (c *MockSlotCalculatorCalcSlotAgeCall) DoAndReturn(f func(uint64) time.Dura
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// CalcSlotStartTimestamp mocks base method.
+func (m *MockSlotCalculator) CalcSlotStartTimestamp(slot uint64) uint64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CalcSlotStartTimestamp", slot)
+	ret0, _ := ret[0].(uint64)
+	return ret0
+}
+
+// CalcSlotStartTimestamp indicates an expected call of CalcSlotStartTimestamp.
+func (mr *MockSlotCalculatorMockRecorder) CalcSlotStartTimestamp(slot any) *MockSlotCalculatorCalcSlotStartTimestampCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CalcSlotStartTimestamp", reflect.TypeOf((*MockSlotCalculator)(nil).CalcSlotStartTimestamp), slot)
+	return &MockSlotCalculatorCalcSlotStartTimestampCall{Call: call}
+}
+
+// MockSlotCalculatorCalcSlotStartTimestampCall wrap *gomock.Call
+type MockSlotCalculatorCalcSlotStartTimestampCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSlotCalculatorCalcSlotStartTimestampCall) Return(arg0 uint64) *MockSlotCalculatorCalcSlotStartTimestampCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSlotCalculatorCalcSlotStartTimestampCall) Do(f func(uint64) uint64) *MockSlotCalculatorCalcSlotStartTimestampCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSlotCalculatorCalcSlotStartTimestampCall) DoAndReturn(f func(uint64) uint64) *MockSlotCalculatorCalcSlotStartTimestampCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SecondsPerSlot mocks base method.
+func (m *MockSlotCalculator) SecondsPerSlot() uint64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SecondsPerSlot")
+	ret0, _ := ret[0].(uint64)
+	return ret0
+}
+
+// SecondsPerSlot indicates an expected call of SecondsPerSlot.
+func (mr *MockSlotCalculatorMockRecorder) SecondsPerSlot() *MockSlotCalculatorSecondsPerSlotCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SecondsPerSlot", reflect.TypeOf((*MockSlotCalculator)(nil).SecondsPerSlot))
+	return &MockSlotCalculatorSecondsPerSlotCall{Call: call}
+}
+
+// MockSlotCalculatorSecondsPerSlotCall wrap *gomock.Call
+type MockSlotCalculatorSecondsPerSlotCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSlotCalculatorSecondsPerSlotCall) Return(arg0 uint64) *MockSlotCalculatorSecondsPerSlotCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSlotCalculatorSecondsPerSlotCall) Do(f func() uint64) *MockSlotCalculatorSecondsPerSlotCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSlotCalculatorSecondsPerSlotCall) DoAndReturn(f func() uint64) *MockSlotCalculatorSecondsPerSlotCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}

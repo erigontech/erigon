@@ -18,17 +18,13 @@ package rpctest
 
 import (
 	"fmt"
-	"net/http"
-	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 )
 
 func Bench2(erigon_url string) error {
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
+
 	req_id := 0
 	req_id++
 	blockNumTemplate := `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":%d}`

@@ -239,3 +239,7 @@ func (s *EthBackendClientDirect) BorTxnLookup(ctx context.Context, in *remote.Bo
 func (s *EthBackendClientDirect) BorEvents(ctx context.Context, in *remote.BorEventsRequest, opts ...grpc.CallOption) (*remote.BorEventsReply, error) {
 	return s.server.BorEvents(ctx, in)
 }
+
+func (s *EthBackendClientDirect) AAValidation(ctx context.Context, in *remote.AAValidationRequest, opts ...grpc.CallOption) (*remote.AAValidationReply, error) {
+	return s.server.AAValidation(ctx, in)
+}

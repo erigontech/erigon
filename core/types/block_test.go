@@ -33,7 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -200,14 +200,14 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 	feeCap, _ := uint256.FromBig(block.BaseFee())
 	var tx2 Transaction = &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			Nonce: 0,
-			To:    &to,
-			Gas:   123457,
-			Data:  []byte{},
+			Nonce:    0,
+			To:       &to,
+			GasLimit: 123457,
+			Data:     []byte{},
 		},
 		ChainID:    u256.Num1,
 		FeeCap:     feeCap,
-		Tip:        u256.Num0,
+		TipCap:     u256.Num0,
 		AccessList: accesses,
 	}
 	tx2, err := tx2.WithSignature(*LatestSignerForChainID(big.NewInt(1)), libcommon.Hex2Bytes("fe38ca4e44a30002ac54af7cf922a6ac2ba11b7d22f548e8ecb3f51f41cb31b06de6a5cbae13c0c856e33acf021b51819636cfc009d39eafb9f606d546e305a800"))
@@ -256,10 +256,10 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 	ten := new(uint256.Int).SetUint64(10)
 	var tx1 Transaction = &LegacyTx{
 		CommonTx: CommonTx{
-			Nonce: 0,
-			To:    &to,
-			Value: ten,
-			Gas:   50000,
+			Nonce:    0,
+			To:       &to,
+			Value:    ten,
+			GasLimit: 50000,
 		},
 		GasPrice: ten,
 	}
@@ -273,9 +273,9 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 		ChainID: chainID,
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
-				Nonce: 0,
-				To:    &to,
-				Gas:   123457,
+				Nonce:    0,
+				To:       &to,
+				GasLimit: 123457,
 			},
 			GasPrice: ten,
 		},
@@ -348,7 +348,7 @@ func makeBenchBlock() *Block {
 			panic(err)
 		}
 		txs[i] = signedTx
-		receipts[i] = NewReceipt(false, tx.GetGas())
+		receipts[i] = NewReceipt(false, tx.GetGasLimit())
 	}
 	for i := range uncles {
 		uncles[i] = &Header{
@@ -409,7 +409,7 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 	}
 	rlpBytes := libcommon.CopyBytes(writer.Bytes())
 	writer.Reset()
-	writer.WriteString(hexutility.Encode(rlpBytes))
+	writer.WriteString(hexutil.Encode(rlpBytes))
 
 	var rawBody RawBody
 	fromHex := libcommon.CopyBytes(libcommon.FromHex(writer.String()))
@@ -585,10 +585,10 @@ func TestCopyTxs(t *testing.T) {
 	var txs Transactions
 	txs = append(txs, &LegacyTx{
 		CommonTx: CommonTx{
-			Nonce: 0,
-			Value: new(uint256.Int).SetUint64(10000),
-			Gas:   50000,
-			Data:  []byte("Sparta"),
+			Nonce:    0,
+			Value:    new(uint256.Int).SetUint64(10000),
+			GasLimit: 50000,
+			Data:     []byte("Sparta"),
 		},
 		GasPrice: new(uint256.Int).SetUint64(10),
 	})
@@ -596,13 +596,6 @@ func TestCopyTxs(t *testing.T) {
 	populateBlobTxs()
 	for _, txn := range dummyBlobTxs {
 		if txn.To != nil { // BlobTx To field can not be nil
-			txs = append(txs, txn)
-		}
-	}
-
-	populateBlobWrapperTxs()
-	for _, txn := range dummyBlobWrapperTxs {
-		if txn.Tx.To != nil {
 			txs = append(txs, txn)
 		}
 	}

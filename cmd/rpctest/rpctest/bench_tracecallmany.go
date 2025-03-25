@@ -19,14 +19,10 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
-	"net/http"
 	"os"
-	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 // BenchTraceCallMany compares response of Erigon with Geth
@@ -35,9 +31,7 @@ import (
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
 	setRoutes(erigonURL, oeURL)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
+
 	var rec *bufio.Writer
 	if recordFile != "" {
 		f, err := os.Create(recordFile)
@@ -60,11 +54,8 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 	}
 
 	var res CallResult
-	reqGen := &RequestGenerator{
-		client: client,
-	}
+	reqGen := &RequestGenerator{}
 
-	reqGen.reqID++
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
@@ -75,7 +66,7 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 	}
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
 	for bn := blockFrom; bn <= blockTo; bn++ {
-		reqGen.reqID++
+
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
@@ -86,12 +77,12 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 		}
 
 		n := len(b.Result.Transactions)
-		from := make([]libcommon.Address, n)
-		to := make([]*libcommon.Address, n)
+		from := make([]common.Address, n)
+		to := make([]*common.Address, n)
 		gas := make([]*hexutil.Big, n)
 		gasPrice := make([]*hexutil.Big, n)
 		value := make([]*hexutil.Big, n)
-		data := make([]hexutility.Bytes, n)
+		data := make([]hexutil.Bytes, n)
 
 		for i := 0; i < n; i++ {
 			tx := b.Result.Transactions[i]
@@ -102,7 +93,6 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 			value[i] = &tx.Value
 			data[i] = tx.Input
 		}
-		reqGen.reqID++
 
 		request := reqGen.traceCallMany(from, to, gas, gasPrice, value, data, bn-1)
 		errCtx := fmt.Sprintf("block %d", bn)

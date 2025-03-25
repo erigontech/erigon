@@ -47,7 +47,7 @@ func ReadTxLookupEntry(db kv.Getter, txnHash libcommon.Hash) (blockNumber *uint6
 		return nil, nil, nil
 	}
 	numberBlockNum := binary.BigEndian.Uint64(data[:8])
-	numberTxNum := binary.BigEndian.Uint64(data[8:]) + 1
+	numberTxNum := binary.BigEndian.Uint64(data[8:])
 
 	return &numberBlockNum, &numberTxNum, nil
 }

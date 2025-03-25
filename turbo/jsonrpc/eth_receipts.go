@@ -56,6 +56,11 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, header, txn, index, txNum)
 }
 
+func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	return api.receiptsGenerator.GetReceiptsGasUsed(tx, block, txNumsReader)
+}
+
 func (api *BaseAPI) getCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
 	return api.receiptsGenerator.GetCachedReceipt(ctx, hash)
 }
@@ -474,18 +479,13 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	// Private API returns 0 if transaction is not found.
-	if blockNum == 0 && chainConfig.Bor != nil {
+	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
+
+	if isBorStateSyncTx {
 		if api.useBridgeReader {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
 			if err != nil {
 				return nil, err
-			}
-			if ok {
-				txNumNextBlock, err := txNumsReader.Min(tx, blockNum+1)
-				if err != nil {
-					return nil, err
-				}
-				txNum = txNumNextBlock
 			}
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
@@ -499,7 +499,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	if txNumMin+2 > txNum { //TODO: what a magic is this "2" and how to avoid it
+	if txNumMin+1 > txNum && !isBorStateSyncTx {
 		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 
@@ -508,14 +508,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	var txnIndex = int(txNum - txNumMin - 2)
-
-	txn, err := api._blockReader.TxnByIdxInBlock(ctx, tx, header.Number.Uint64(), txnIndex)
-	if err != nil {
-		return nil, err
-	}
-
-	if txn == nil && chainConfig.Bor != nil {
+	if isBorStateSyncTx {
 		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
@@ -539,6 +532,13 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		}
 
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false), nil
+	}
+
+	var txnIndex = int(txNum - txNumMin - 1)
+
+	txn, err := api._blockReader.TxnByIdxInBlock(ctx, tx, header.Number.Uint64(), txnIndex)
+	if err != nil {
+		return nil, err
 	}
 
 	receipt, err := api.getReceipt(ctx, chainConfig, tx, header, txn, txnIndex, txNum)

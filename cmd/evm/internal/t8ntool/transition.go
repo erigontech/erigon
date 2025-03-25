@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -413,11 +413,11 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	}
 
 	commonTx := types.CommonTx{
-		Nonce: uint64(txJson.Nonce),
-		To:    txJson.To,
-		Value: value,
-		Gas:   uint64(txJson.Gas),
-		Data:  txJson.Input,
+		Nonce:    uint64(txJson.Nonce),
+		To:       txJson.To,
+		Value:    value,
+		GasLimit: uint64(txJson.Gas),
+		Data:     txJson.Input,
 	}
 
 	commonTx.V.SetFromBig(txJson.V.ToInt())
@@ -441,17 +441,17 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			AccessList: *txJson.Accesses,
 		}, nil
 	} else if txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType {
-		var tip *uint256.Int
+		var tipCap *uint256.Int
 		var feeCap *uint256.Int
-		if txJson.Tip != nil {
-			tip, overflow = uint256.FromBig(txJson.Tip.ToInt())
+		if txJson.MaxPriorityFeePerGas != nil {
+			tipCap, overflow = uint256.FromBig(txJson.MaxPriorityFeePerGas.ToInt())
 			if overflow {
 				return nil, errors.New("maxPriorityFeePerGas field caused an overflow (uint256)")
 			}
 		}
 
-		if txJson.FeeCap != nil {
-			feeCap, overflow = uint256.FromBig(txJson.FeeCap.ToInt())
+		if txJson.MaxFeePerGas != nil {
+			feeCap, overflow = uint256.FromBig(txJson.MaxFeePerGas.ToInt())
 			if overflow {
 				return nil, errors.New("maxFeePerGas field caused an overflow (uint256)")
 			}
@@ -461,7 +461,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			//it's ok to copy here - because it's constructor of object - no parallel access yet
 			CommonTx:   commonTx, //nolint
 			ChainID:    chainId,
-			Tip:        tip,
+			TipCap:     tipCap,
 			FeeCap:     feeCap,
 			AccessList: *txJson.Accesses,
 		}
@@ -560,7 +560,7 @@ func saveFile(baseDir, filename string, data interface{}) error {
 
 // dispatchOutput writes the output data to either stderr or stdout, or to the specified
 // files
-func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExecResult, alloc Alloc, body hexutility.Bytes) error {
+func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
 	stdOutObject := make(map[string]interface{})
 	stdErrObject := make(map[string]interface{})
 	dispatch := func(baseDir, fName, name string, obj interface{}) error {

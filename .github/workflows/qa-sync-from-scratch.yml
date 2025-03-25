@@ -1,6 +1,9 @@
 name: QA - Sync from scratch
 
 on:
+  push:
+    branches:
+      - 'release/3.*'
   schedule:
     - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC
   workflow_dispatch:     # Run manually

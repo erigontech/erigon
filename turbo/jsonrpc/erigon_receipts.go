@@ -271,7 +271,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			maxLogCount = logOptions.LogCount - logCount
 		}
 		if logOptions.IgnoreTopicsOrder {
-			filtered = blockLogs.CointainTopics(addrMap, topicsMap, maxLogCount)
+			filtered = blockLogs.ContainingTopics(addrMap, topicsMap, maxLogCount)
 		} else {
 			filtered = blockLogs.Filter(addrMap, crit.Topics, maxLogCount)
 		}
@@ -336,6 +336,9 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 		blockNum, err := api._blockReader.HeaderNumber(ctx, tx, cannonicalBlockHash)
 		if err != nil {
 			return nil, err
+		}
+		if blockNum == nil {
+			return nil, fmt.Errorf("block not found %x", cannonicalBlockHash)
 		}
 		isCanonicalHash, err := api._blockReader.IsCanonical(ctx, tx, cannonicalBlockHash, *blockNum)
 		if err != nil {
