@@ -704,26 +704,6 @@ func (s *Sync) Run(ctx context.Context) error {
 
 	s.logger.Info(syncLogPrefix("running sync component"))
 
-	for {
-		// we have to check if the heimdall we are connected to is synchonised with the chain
-		// to prevent getting empty list of checkpoints/milestones during the sync
-
-		catchingUp, err := s.heimdallSync.IsCatchingUp(ctx)
-		if err != nil {
-			return err
-		}
-
-		if !catchingUp {
-			break
-		}
-
-		s.logger.Warn(syncLogPrefix("your heimdalld process is behind, please check its logs and <HEIMDALL_HOST>:1317/status api"))
-
-		if err := libcommon.Sleep(ctx, 30*time.Second); err != nil {
-			return err
-		}
-	}
-
 	result, err := s.syncToTip(ctx)
 	if err != nil {
 		return err

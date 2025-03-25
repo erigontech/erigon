@@ -26,6 +26,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 	if err := checkTxFee(txn.GetFeeCap().ToBig(), txn.GetGasLimit(), api.FeeCap); err != nil {
 		return common.Hash{}, err
 	}
+
 	if !txn.Protected() && !api.AllowUnprotectedTxs {
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
@@ -77,6 +78,7 @@ func checkTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
 	if gasCap == 0 {
 		return nil
 	}
+
 	feeEth := new(big.Float).Quo(new(big.Float).SetInt(new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gas))), new(big.Float).SetInt(big.NewInt(params.Ether)))
 	feeFloat, _ := feeEth.Float64()
 	if feeFloat > gasCap {
