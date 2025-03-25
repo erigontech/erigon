@@ -44,12 +44,12 @@ import (
 )
 
 var (
-	vMTraceFlag = cli.StringFlag{
+	vmTraceFlag = cli.StringFlag{
 		Name:  "vmtrace",
 		Usage: "Set the provider tracer",
 	}
 
-	vMTraceJsonConfigFlag = cli.StringFlag{
+	vmTraceJsonConfigFlag = cli.StringFlag{
 		Name:  "vmtrace.jsonconfig",
 		Usage: "Set the config of the tracer",
 	}
@@ -101,7 +101,7 @@ var (
 // Flags holds all command-line flags required for debugging.
 var Flags = []cli.Flag{
 	&pprofFlag, &pprofAddrFlag, &pprofPortFlag,
-	&cpuprofileFlag, &traceFlag, &vMTraceFlag, &vMTraceJsonConfigFlag,
+	&cpuprofileFlag, &traceFlag, &vmTraceFlag, &vmTraceJsonConfigFlag,
 }
 
 // SetupCobra sets up logging, profiling and tracing for cobra commands
@@ -199,12 +199,12 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 // SetupTracerCtx performs the tracing setup according to the parameters
 // containted in the given urfave context.
 func SetupTracerCtx(ctx *cli.Context) (*tracers.Tracer, error) {
-	tracerName := ctx.String(vMTraceFlag.Name)
+	tracerName := ctx.String(vmTraceFlag.Name)
 	if tracerName == "" {
 		return nil, nil
 	}
 
-	cfg := ctx.String(vMTraceJsonConfigFlag.Name)
+	cfg := ctx.String(vmTraceJsonConfigFlag.Name)
 
 	return tracers.New(tracerName, &tracers.Context{}, []byte(cfg))
 }

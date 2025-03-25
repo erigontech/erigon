@@ -353,7 +353,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	chainDB.Close()
 
-	ethBackend, err := eth.New(ctx, ethNode, &ethConfig, logger)
+	ethBackend, err := eth.New(ctx, ethNode, &ethConfig, logger, nil)
 	require.NoError(t, err)
 	err = ethBackend.Init(ethNode, &ethConfig, &chainConfig)
 	require.NoError(t, err)
@@ -452,7 +452,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	ethConfig.Shutter = shutterConfig
 	ethNode, err = node.New(ctx, &nodeConfig, logger)
 	require.NoError(t, err)
-	ethBackend, err = eth.New(ctx, ethNode, &ethConfig, logger)
+	ethBackend, err = eth.New(ctx, ethNode, &ethConfig, logger, nil)
 	require.NoError(t, err)
 	err = ethBackend.Init(ethNode, &ethConfig, &chainConfig)
 	require.NoError(t, err)
