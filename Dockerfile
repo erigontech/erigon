@@ -34,7 +34,7 @@ ARG BUILDER_IMAGE="golang:1.24-bookworm" \
        6060"
 
 ### Erigon Builder section:
-FROM --platform=$BUILDPLATFORM ${BUILDER_IMAGE} AS builder 
+FROM ${BUILDER_IMAGE} AS builder 
 ARG TARGETARCH \
     TARGETVARIANT \
     BUILD_DBTOOLS \
@@ -52,20 +52,20 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     echo "DEBUG: building on ${TARGETARCH}${TARGETVARIANT}" && \
     if [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "x" ]; then \
         echo "DEBUG: detected architecture AMD64v1"; \
-        export AMD_FLAGS="GOAMD64_VERSION=v1 GOARCH=amd64"; \
+        export CPU_FLAGS="GOAMD64_VERSION=v1 GOARCH=amd64"; \
     elif [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "xv2" ]; then \
         echo "DEBUG: detected architecture AMD64v2"; \
-        export AMD_FLAGS="GOAMD64_VERSION=v2 GOARCH=amd64"; \
+        export CPU_FLAGS="GOAMD64_VERSION=v2 GOARCH=amd64"; \
     elif [ "x${TARGETARCH}" == "xarm64" ]; then \
         echo "DEBUG: detected architecture ARM64"; \
-        export AMD_FLAGS="GOARCH=arm64"; \
+        export CPU_FLAGS="GOARCH=arm64"; \
     fi && \
     if [ "x${BUILD_SILKWORM}" != "xtrue" ] || [ "x${TARGETARCH}" == "xarm64" ] ; then \
         echo "DEBUG: add nosilkworm build tag - BUILD_SILKWORM is not true OR ARM64 architecture "; \
         export FLAG_SILKWORM=",nosilkworm"; \
     fi && \
-    echo "DEBUG: cmd - make ${AMD_FLAGS} ${BINARIES} GOBIN=/build FLAG_SILKWORM=${FLAG_SILKWORM} ." && \
-    make ${AMD_FLAGS} ${BINARIES} GOBIN=/build BUILD_TAGS=nosqlite,noboltdb${FLAG_SILKWORM} && \
+    echo "DEBUG: cmd - make ${CPU_FLAGS} ${BINARIES} GOBIN=/build FLAG_SILKWORM=${FLAG_SILKWORM} ." && \
+    make ${CPU_FLAGS} ${BINARIES} GOBIN=/build BUILD_TAGS=nosqlite,noboltdb${FLAG_SILKWORM} && \
     if [ "x${BUILD_SILKWORM}" == "xtrue" ] && [ "x${TARGETARCH}" == "xamd64" ]; then \
         echo "DEBUG: BUILD_SILKWORM=${BUILD_SILKWORM} - installing libsilkworm_capi.so lib on architecture ARM64"; \
         find $(go env GOMODCACHE)/github.com/erigontech -name libsilkworm_capi.so -exec install {} /build \; ;\
