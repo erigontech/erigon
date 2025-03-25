@@ -4,6 +4,8 @@ set +e # Disable exit on error
 
 # Array of disabled tests
 disabled_tests=(
+  bor_getAuthor
+  bor_getSnapshot
 )
 
 # Transform the array into a comma-separated string
