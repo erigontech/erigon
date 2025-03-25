@@ -1054,7 +1054,7 @@ func TestScanStaticFilesD(t *testing.T) {
 	}
 	d.scanDirtyFiles(files)
 	var found []string
-	d.dirtyFiles.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles2.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			found = append(found, fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
 		}
@@ -2497,7 +2497,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 
 	findFile := func(start, end uint64) *filesItem {
 		var foundFile *filesItem
-		dc.d.dirtyFiles.Walk(func(items []*filesItem) bool {
+		dc.d.dirtyFiles2.Walk(func(items []*filesItem) bool {
 			for _, item := range items {
 				if item.startTxNum == start && item.endTxNum == end {
 					foundFile = item

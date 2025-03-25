@@ -323,7 +323,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		err = rwTx.Commit() // otherwise agg.BuildFiles will not see data
 		require.NoError(err)
 		require.NoError(agg.BuildFiles(stepSize * 2))
-		require.Equal(1, agg.d[kv.StorageDomain].dirtyFiles.Len())
+		require.Equal(1, agg.d[kv.StorageDomain].dirtyFiles2.Len())
 
 		ac = agg.BeginFilesRo()
 		defer ac.Close()

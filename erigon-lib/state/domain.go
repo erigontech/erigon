@@ -81,7 +81,7 @@ type Domain struct {
 	//  - .bt - key -> offset index
 	//  - .kvei - key -> existence (bloom filter)
 
-	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
+	// dirtyFiles2 - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
 	// `_visible.files` derivative from field `file`, but without garbage:
@@ -90,7 +90,7 @@ type Domain struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// BeginRo() using _visible in zero-copy way
-	dirtyFiles *btree2.BTreeG[*filesItem]
+	dirtyFiles2 *btree2.BTreeG[*filesItem]
 
 	// _visible - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
@@ -142,9 +142,9 @@ func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error
 	}
 
 	d := &Domain{
-		domainCfg:  cfg,
-		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		_visible:   newDomainVisible(cfg.name, []visibleFile{}),
+		domainCfg:   cfg,
+		dirtyFiles2: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		_visible:    newDomainVisible(cfg.name, []visibleFile{}),
 	}
 
 	var err error
@@ -247,14 +247,14 @@ func (d *Domain) openFolder() error {
 
 func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	var toClose []*filesItem
-	d.dirtyFiles.Scan(func(item *filesItem) bool {
+	d.dirtyFiles2.Scan(func(item *filesItem) bool {
 		if item.startTxNum/d.aggregationStep >= lowerBound {
 			toClose = append(toClose, item)
 		}
 		return true
 	})
 	for _, item := range toClose {
-		d.dirtyFiles.Delete(item)
+		d.dirtyFiles2.Delete(item)
 		fName := ""
 		if item.decompressor != nil {
 			fName = item.decompressor.FileName()
@@ -313,8 +313,8 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) 
 		}
 		dirtyFile.frozen = false
 
-		if _, has := d.dirtyFiles.Get(dirtyFile); !has {
-			d.dirtyFiles.Set(dirtyFile)
+		if _, has := d.dirtyFiles2.Get(dirtyFile); !has {
+			d.dirtyFiles2.Set(dirtyFile)
 		}
 	}
 	return garbageFiles
@@ -323,7 +323,7 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) 
 func (d *Domain) openDirtyFiles() (err error) {
 	invalidFileItems := make([]*filesItem, 0)
 	invalidFileItemsLock := sync.Mutex{}
-	d.dirtyFiles.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles2.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			if item.decompressor == nil {
@@ -416,7 +416,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 
 	for _, item := range invalidFileItems {
 		item.closeFiles() // just close, not remove from disk
-		d.dirtyFiles.Delete(item)
+		d.dirtyFiles2.Delete(item)
 	}
 
 	return nil
@@ -428,7 +428,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 		protectFiles[f] = struct{}{}
 	}
 	var toClose []*filesItem
-	d.dirtyFiles.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles2.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor != nil {
 				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
@@ -441,12 +441,12 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 	})
 	for _, item := range toClose {
 		item.closeFiles()
-		d.dirtyFiles.Delete(item)
+		d.dirtyFiles2.Delete(item)
 	}
 }
 
 func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
-	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.AccessorList, false, toTxNum))
+	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles2, d.AccessorList, false, toTxNum))
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
@@ -1221,7 +1221,7 @@ func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
 	if !d.AccessorList.Has(AccessorBTree) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissingAccessors(d.dirtyFiles2, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
 		return []string{d.kvBtFilePath(fromStep, toStep), d.kvExistenceIdxFilePath(fromStep, toStep)}
 	})
 }
@@ -1230,7 +1230,7 @@ func (d *Domain) missedMapAccessors() (l []*filesItem) {
 	if !d.AccessorList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissingAccessors(d.dirtyFiles2, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
 		return []string{d.kvAccessorFilePath(fromStep, toStep)}
 	})
 }
@@ -1337,7 +1337,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.bloom
-	d.dirtyFiles.Set(fi)
+	d.dirtyFiles2.Set(fi)
 }
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
