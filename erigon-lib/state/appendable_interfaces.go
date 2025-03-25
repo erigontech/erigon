@@ -100,19 +100,6 @@ type UnmarkedTxI interface {
 	AppendableTemporalCommonTxI
 }
 
-// appending
-type AppendingDbTxI interface {
-	AppendableDbCommonTxI
-	GetDb(entityId Id, tx kv.Tx) (Bytes, error)
-	Append(entityId Id, value Bytes, tx kv.RwTx) error
-}
-
-type AppendingTxI interface {
-	AppendingDbTxI
-	AppendableFilesTxI
-	AppendableTemporalCommonTxI
-}
-
 // buffer values before writing to db supposed to store only canonical values
 // Note that values in buffer are not reflected in Get call.
 type BufferedDbTxI interface {
@@ -153,3 +140,16 @@ type AppendableConfig interface {
 	SetPruneFrom(pruneFrom Num)
 	// Any other option setters you need
 }
+
+// // appending
+// type AppendingDbTxI interface {
+// 	AppendableDbCommonTxI
+// 	GetDb(entityId Id, tx kv.Tx) (Bytes, error)
+// 	Append(entityId Id, value Bytes, tx kv.RwTx) error
+// }
+
+// type AppendingTxI interface {
+// 	AppendingDbTxI
+// 	AppendableFilesTxI
+// 	AppendableTemporalCommonTxI
+// }
