@@ -115,7 +115,7 @@ func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg interface{}) e
 		return err
 	}
 	var respmsg jsonrpcMessage
-	if err := json.Unmarshal(respBody, &respmsg); err != nil {
+	if err := jsoniter.Unmarshal(respBody, &respmsg); err != nil {
 		return err
 	}
 	op.resp <- &respmsg
@@ -129,7 +129,7 @@ func (c *Client) sendBatchHTTP(ctx context.Context, op *requestOp, msgs []*jsonr
 		return err
 	}
 	var respmsgs []jsonrpcMessage
-	if err := json.Unmarshal(respBody, &respmsgs); err != nil {
+	if err := jsoniter.Unmarshal(respBody, &respmsgs); err != nil {
 		return err
 	}
 	for i := 0; i < len(respmsgs); i++ {

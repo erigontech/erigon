@@ -18,7 +18,6 @@ package rpc
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -28,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	jsoniter "github.com/json-iterator/go"
 )
 
 // API describes the set of methods offered over the RPC interface
@@ -231,12 +231,12 @@ func AsBlockNumber(no interface{}) BlockNumber {
 		return BlockNumber(no)
 	case string:
 		var bn BlockNumber
-		if err := json.Unmarshal([]byte(strconv.Quote(no)), &bn); err == nil {
+		if err := jsoniter.Unmarshal([]byte(strconv.Quote(no)), &bn); err == nil {
 			return bn
 		}
 	case fmt.Stringer:
 		var bn BlockNumber
-		if err := json.Unmarshal([]byte(strconv.Quote(no.String())), &bn); err == nil {
+		if err := jsoniter.Unmarshal([]byte(strconv.Quote(no.String())), &bn); err == nil {
 			return bn
 		}
 	}
@@ -253,7 +253,7 @@ type BlockNumberOrHash struct {
 func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 	type erased BlockNumberOrHash
 	e := erased{}
-	err := json.Unmarshal(data, &e)
+	err := jsoniter.Unmarshal(data, &e)
 	if err == nil {
 		if e.BlockNumber != nil && e.BlockHash != nil {
 			return fmt.Errorf("cannot specify both BlockHash and BlockNumber, choose one or the other")
@@ -277,7 +277,7 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	var input string
-	if err := json.Unmarshal(data, &input); err != nil {
+	if err := jsoniter.Unmarshal(data, &input); err != nil {
 		return err
 	}
 	switch input {
