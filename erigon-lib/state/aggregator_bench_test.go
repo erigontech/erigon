@@ -403,7 +403,7 @@ func BenchmarkDb_BeginFiles_Throughput_IO(b *testing.B) {
 	aggStep := uint64(100_00)
 	db, _ := testDbAndAggregatorBench(b, aggStep)
 	ctx := context.Background()
- 
+
 	b.SetParallelism(*parallel) // p * maxprocs
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
