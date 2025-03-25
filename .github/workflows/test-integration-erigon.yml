@@ -17,6 +17,16 @@ on:
     - cron: '20 16 * * *' # daily at 16:20 UTC
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: ${{ !contains(fromJSON('[
+      "refs/heads/release/2.60",
+      "refs/heads/release/2.61",
+      "refs/heads/release/3.0",
+      "refs/heads/main"
+    ]'), github.ref) }}
+
+
 jobs:
   # 
   # This first job is used to determine if changes are within out-of-scope dirs or files (in such a case integration tests are not run because they would be meaningless)
