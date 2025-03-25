@@ -139,6 +139,8 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms state2.SharedDomains, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
 
+	fmt.Println("JG restoreTxNum start", doms.TxNum(), maxBlockNum)
+
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
 
 	inputTxNum = doms.TxNum()
@@ -229,6 +231,7 @@ func ExecV3(ctx context.Context,
 
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
+	fmt.Println("JG ExecV3 useExternalTx", useExternalTx)
 	if !useExternalTx {
 		if !parallel {
 			var err error
@@ -758,12 +761,12 @@ Loop:
 }
 
 // nolint
-func dumpPlainStateDebug(tx kv.RwTx, doms state2.SharedDomains) {
+func dumpPlainStateDebug(tx kv.TemporalRwTx, doms state2.SharedDomains) {
 	if doms != nil {
 		doms.Flush(context.Background(), tx)
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DebugRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -778,7 +781,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).RangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		it, err := tx.Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -791,7 +794,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).RangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
+		it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
