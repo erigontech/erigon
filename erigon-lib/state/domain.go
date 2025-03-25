@@ -133,7 +133,7 @@ var DomainCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
-func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
@@ -148,7 +148,7 @@ func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 	}
 
 	var err error
-	if d.History, err = NewHistory(cfg.hist, logger); err != nil {
+	if d.History, err = NewHistory(cfg.hist, aggStep, logger); err != nil {
 		return nil, err
 	}
 
@@ -301,9 +301,6 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) {
 	if d.filenameBase == "" {
 		panic("assert: empty `filenameBase`")
-	}
-	if d.aggregationStep == 0 {
-		panic("assert: empty `aggregationStep`")
 	}
 
 	l := scanDirtyFiles(fileNames, d.aggregationStep, d.filenameBase, "kv", d.logger)
@@ -1761,14 +1758,14 @@ func (dt *DomainRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, fromKey, toKey []
 	if err != nil {
 		return nil, err
 	}
-	lastestStateIt, err := dt.RangeLatest(tx, fromKey, toKey, kv.Unlim)
+	lastestStateIt, err := dt.DebugRangeLatest(tx, fromKey, toKey, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
 	return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
 }
 
-func (dt *DomainRoTx) RangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
+func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
 	s := &DomainLatestIterFile{
 		from: fromKey, to: toKey, limit: limit,
 		orderAscend: order.Asc,
@@ -2023,13 +2020,8 @@ func (sr *SegStreamReader) Next() (k, v []byte, err error) {
 	return k, v, nil
 }
 
-func (d *Domain) stepsRangeInDBAsStr(tx kv.Tx) string {
-	a1, a2 := d.History.InvertedIndex.stepsRangeInDB(tx)
-	//ad1, ad2 := d.stepsRangeInDB(tx)
-	//if ad2-ad1 < 0 {
-	//	fmt.Printf("aaa: %f, %f\n", ad1, ad2)
-	//}
-	return fmt.Sprintf("%s:%.1f", d.filenameBase, a2-a1)
+func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	return dt.ht.iit.stepsRangeInDB(tx)
 }
 
 func (dt *DomainRoTx) Files() (res []string) {

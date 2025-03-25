@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 
@@ -26,6 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"google.golang.org/grpc"
@@ -116,15 +116,16 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 // GetStorageAt implements eth_getStorageAt. Returns the value from a storage position at a given address.
 func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	var empty []byte
-	indexBytes := hexutil.FromHex(index)
-
-	if len(indexBytes) > 32 {
-		return "", errors.New("unable to decode storage key: hex string too long, want at most 32 bytes")
+	if err := hexutil.IsValidQuantity(index); err != nil {
+		log.Debug("GetStorageAt: Skipped quantity validation error " + "unable to decode storage key: " + err.Error())
 	}
-
-	tx, err1 := api.db.BeginTemporalRo(ctx)
-	if err1 != nil {
-		return hexutil.Encode(libcommon.LeftPadBytes(empty, 32)), err1
+	indexBytes := hexutil.FromHex(index)
+	if len(indexBytes) > 32 {
+		return "", hexutil.ErrTooBigHexString
+	}
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return hexutil.Encode(libcommon.LeftPadBytes(empty, 32)), err
 	}
 	defer tx.Rollback()
 

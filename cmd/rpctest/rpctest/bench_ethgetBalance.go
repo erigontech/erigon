@@ -18,8 +18,6 @@ package rpctest
 
 import (
 	"fmt"
-	"net/http"
-	"time"
 )
 
 // BenchEthGetBalance compares response of Erigon with Geth
@@ -30,13 +28,8 @@ import (
 //	use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64) error {
 	setRoutes(erigonURL, gethURL)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 
-	reqGen := &RequestGenerator{
-		client: client,
-	}
+	reqGen := &RequestGenerator{}
 
 	var res CallResult
 	var resultsCh chan CallResult = nil
@@ -46,7 +39,6 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 		go vegetaWrite(true, []string{"eth_getBalance"}, resultsCh)
 	}
 
-	reqGen.reqID++
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
@@ -56,7 +48,7 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
 	for bn := blockFrom; bn <= blockTo; bn++ {
-		reqGen.reqID++
+
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
@@ -86,7 +78,7 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 			tx := b.Result.Transactions[txn]
 			var balance EthBalance
 			account := tx.From
-			reqGen.reqID++
+
 			res = reqGen.Erigon("eth_getBalance", reqGen.getBalance(account, bn), &balance)
 			if !needCompare {
 				resultsCh <- res

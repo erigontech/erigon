@@ -72,9 +72,13 @@ type FilesItem interface {
 var _ FilesItem = (*filesItem)(nil)
 
 func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
+	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize, config3.StepsInFrozenFile)
+}
+
+func newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *filesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
-	frozen := endStep-startStep == config3.StepsInFrozenFile
+	frozen := endStep-startStep >= stepsInFrozenFile
 	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
 

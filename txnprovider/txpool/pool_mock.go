@@ -13,6 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
+	common "github.com/erigontech/erigon-lib/common"
 	remoteproto "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	kv "github.com/erigontech/erigon-lib/kv"
 	txpoolcfg "github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -189,6 +190,45 @@ func (c *MockPoolFilterKnownIdHashesCall) Do(f func(kv.Tx, Hashes) (Hashes, erro
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockPoolFilterKnownIdHashesCall) DoAndReturn(f func(kv.Tx, Hashes) (Hashes, error)) *MockPoolFilterKnownIdHashesCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetBlobs mocks base method.
+func (m *MockPool) GetBlobs(blobhashes []common.Hash) ([][]byte, [][]byte) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBlobs", blobhashes)
+	ret0, _ := ret[0].([][]byte)
+	ret1, _ := ret[1].([][]byte)
+	return ret0, ret1
+}
+
+// GetBlobs indicates an expected call of GetBlobs.
+func (mr *MockPoolMockRecorder) GetBlobs(blobhashes any) *MockPoolGetBlobsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBlobs", reflect.TypeOf((*MockPool)(nil).GetBlobs), blobhashes)
+	return &MockPoolGetBlobsCall{Call: call}
+}
+
+// MockPoolGetBlobsCall wrap *gomock.Call
+type MockPoolGetBlobsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPoolGetBlobsCall) Return(arg0, arg1 [][]byte) *MockPoolGetBlobsCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPoolGetBlobsCall) Do(f func([]common.Hash) ([][]byte, [][]byte)) *MockPoolGetBlobsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPoolGetBlobsCall) DoAndReturn(f func([]common.Hash) ([][]byte, [][]byte)) *MockPoolGetBlobsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
