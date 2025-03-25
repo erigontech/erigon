@@ -171,7 +171,7 @@ func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*filesIt
 func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
 	var item *filesItem
 	if item == nil {
-		dt.d.dirtyFiles2.Walk(func(files []*filesItem) bool {
+		dt.d.dirtyFiles.Walk(func(files []*filesItem) bool {
 			for _, f := range files {
 				if f.startTxNum == txFrom && f.endTxNum == txTo {
 					item = f
@@ -184,12 +184,12 @@ func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *fil
 
 	if item == nil || item.bindex == nil {
 		fileStepsss := ""
-		for _, item := range dt.d.dirtyFiles2.Items() {
+		for _, item := range dt.d.dirtyFiles.Items() {
 			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dt.d.aggregationStep, item.endTxNum/dt.d.aggregationStep)
 		}
 		dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file not found",
 			"stepFrom", txFrom/dt.d.aggregationStep, "stepTo", txTo/dt.d.aggregationStep,
-			"files", fileStepsss, "filesCount", dt.d.dirtyFiles2.Len())
+			"files", fileStepsss, "filesCount", dt.d.dirtyFiles.Len())
 
 		if item != nil && item.bindex == nil {
 			dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file found but not indexed", "f", item.decompressor.FileName())
@@ -211,7 +211,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 			dt.d.logger.Crit("lookupByShortenedKey panics",
 				"err", r,
 				"offset", offset, "short", fmt.Sprintf("%x", shortKey),
-				"cleanFilesCount", len(dt.files), "dirtyFilesCount", dt.d.dirtyFiles2.Len(),
+				"cleanFilesCount", len(dt.files), "dirtyFilesCount", dt.d.dirtyFiles.Len(),
 				"file", getter.FileName())
 		}
 	}()
