@@ -27,7 +27,7 @@ type BlsAggregateVerify struct {
 }
 
 func (b *BlsAggregateVerify) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
-	t.Skipf("Skippinggg BLS because it is done by library")
+	t.Skipf("Skipping BLS because it is done by library")
 	return
 	//var meta struct {
 	//	Input struct {
