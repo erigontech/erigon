@@ -983,10 +983,3 @@ func (l *steplog) setupObject() *goja.Object {
 	o.Set("contract", l.contract.setupObject())
 	return o
 }
-
-func min(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
-}
