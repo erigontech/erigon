@@ -90,15 +90,6 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 		return err
 	}
 
-	//
-	// TODO play around with go-libp2p-kad-dht for routing and discovery analogous to rolling-shutter
-	//      check if it improves number of peers for topic
-	//
-
-	//
-	// TODO persist connected nodes to be able to re-use on restart
-	//
-
 	eg, ctx := errgroup.WithContext(ctx)
 
 	eg.Go(func() error {
@@ -317,6 +308,7 @@ func (dkl DecryptionKeysListener) peerInfoLoop(ctx context.Context, pubSub *pubs
 		case <-ticker.C:
 			peers := pubSub.ListPeers(DecryptionKeysTopic)
 			dkl.logger.Info("decryption keys peer count", "peers", len(peers))
+			decryptionKeysTopicPeerCount.Set(float64(len(peers)))
 		}
 	}
 }
