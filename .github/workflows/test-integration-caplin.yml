@@ -13,7 +13,16 @@ on:
       - reopened
       - synchronize
       - ready_for_review
-    
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: >-
+    ${{
+      !startsWith(github.ref, 'refs/heads/release/') &&
+      github.ref != 'refs/heads/main'
+    }}
+
+
 jobs:
   tests:
     strategy:
