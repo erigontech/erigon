@@ -47,7 +47,7 @@ jobs:
       matrix:
         os:
           - ubuntu-22.04
-          - macos-latest
+          - macos-14
           # - ubuntu-latest-erigontests-large
     runs-on: ${{ matrix.os }}
 
