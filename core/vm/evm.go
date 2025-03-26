@@ -64,6 +64,7 @@ func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, err
 	return evm.interpreter.Run(contract, input, readOnly)
 }
 
+// Not tested on actual testnet, so unsafe
 func runEOF(evm *EVM, contract *Contract, input []byte, readOnly bool, headerEOF *eofHeader) ([]byte, error) {
 	return evm.interpreter.RunEOF(contract, input, readOnly, headerEOF)
 }

@@ -86,9 +86,9 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 	for {
 		// EOF validation guarantees that the code is not empty and <= 49152 bytes
 		// so need to check for steps
-		// if in.evm.Cancelled() {
-		// 	break
-		// }
+		if in.evm.Cancelled() {
+			break
+		}
 		if in.cfg.Debug {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, _pc, contract.Gas
@@ -197,6 +197,10 @@ func (in *EVMInterpreter) runNoDebug(contract *Contract, input []byte, readOnly 
 	}()
 
 	for {
+
+		if in.evm.Cancelled() {
+			break
+		}
 		op = OpCode(contract.Code[_pc])
 		operation = in.jtEOF[op]
 
