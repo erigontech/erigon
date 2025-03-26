@@ -819,9 +819,8 @@ func (api *TraceAPIImpl) callBlock(
 		msgs[i] = msg
 	}
 
-	var tracingHooks *tracing.Hooks
-	traces, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-		&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig, tracingHooks)
+	traces, tracingHooks, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
+		&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
 
 	if cmErr != nil {
 		return nil, nil, cmErr
