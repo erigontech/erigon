@@ -190,11 +190,6 @@ func TestMultipleAuthorizations(t *testing.T) {
 	assert.NoError(t, err)
 	require.True(t, pool != nil)
 
-	// Start the pool
-	err = pool.start(ctx)
-	assert.NoError(t, err)
-
-	// Initialize pool state
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
