@@ -93,7 +93,7 @@ func NewClient(ctx context.Context, server string, useTLS bool, checkTimeout tim
 		checkTimeout:     checkTimeout,
 		server:           server,
 		streamType:       StSequencer,
-		entryChan:        make(chan interface{}, 100000),
+		entryChan:        make(chan interface{}, DefaultEntryChannelSize),
 		maxEntryChanSize: maxEntryChanSize,
 		currentFork:      uint64(latestDownloadedForkId),
 		mtxStreaming:     &sync.Mutex{},
@@ -406,7 +406,12 @@ func (c *StreamClient) ExecutePerFile(bookmark *types.BookmarkProto, function fu
 
 func (c *StreamClient) clearEntryCHannel() {
 	defer func() {
-		for range c.entryChan {
+		for {
+			select {
+			case <-c.entryChan:
+			default:
+				return
+			}
 		}
 	}()
 	defer func() {
@@ -414,21 +419,26 @@ func (c *StreamClient) clearEntryCHannel() {
 			log.Warn("[datastream_client] Channel is already closed")
 		}
 	}()
-
-	close(c.entryChan)
 }
 
-// close old entry chan and read all elements before opening a new one
+// Drain all elements from channel and reuse same channel if the last size didn't change.
+// If the last size was bigger, we scale back down.
 func (c *StreamClient) RenewEntryChannel() {
 	c.clearEntryCHannel()
-	c.entryChan = make(chan interface{}, DefaultEntryChannelSize)
+	if cap(c.entryChan) > DefaultEntryChannelSize {
+		close(c.entryChan)
+		c.entryChan = make(chan interface{}, DefaultEntryChannelSize)
+	}
 }
 
-// close old entry chan and read all elements before opening a new one
+// close old entry chan and read all elements before opening a new one (if size didn't change).
 func (c *StreamClient) RenewMaxEntryChannel() {
 	c.clearEntryCHannel()
-	log.Warn(fmt.Sprintf("[datastream_client] Renewing max entry channel:%v", c.maxEntryChanSize))
-	c.entryChan = make(chan interface{}, c.maxEntryChanSize)
+	if cap(c.entryChan) < int(c.maxEntryChanSize) {
+		close(c.entryChan)
+		log.Warn(fmt.Sprintf("[datastream_client] Renewing max entry channel:%v", c.maxEntryChanSize))
+		c.entryChan = make(chan interface{}, c.maxEntryChanSize)
+	}
 }
 
 func (c *StreamClient) ReadAllEntriesToChannel() (err error) {
