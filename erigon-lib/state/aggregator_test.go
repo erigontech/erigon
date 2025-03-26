@@ -1320,6 +1320,26 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash.Bytes())
 }
 
+func wrapTxWithCtxForTest(tx kv.Tx, ctx *AggregatorRoTx) *Tx {
+	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), filesTx: ctx}
+}
+
+// wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
+// need to move non-unit-tests to own package
+func wrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *Tx {
+	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), filesTx: ctx}
+}
+
+// wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
+// need to move non-unit-tests to own package
+func wrapDbWithCtx(db kv.RwDB, ctx *Aggregator) kv.TemporalRwDB {
+	v, err := New(db, ctx)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	_db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
 		stepSize:                         20,

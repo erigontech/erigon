@@ -26,54 +26,73 @@ import (
 )
 
 var ( // Compile time interface checks
-	_ kv.TemporalRwDB    = (*dbWithCtx)(nil)
-	_ kv.TemporalRwTx    = (*txWithCtx)(nil)
-	_ kv.TemporalTx      = (*txWithCtx)(nil)
-	_ kv.TemporalDebugTx = (*txWithCtx)(nil)
+	_ kv.TemporalRwDB    = (*DB)(nil)
+	_ kv.TemporalRwTx    = (*Tx)(nil)
+	_ kv.TemporalTx      = (*Tx)(nil)
+	_ kv.TemporalDebugTx = (*Tx)(nil)
 )
 
-func wrapTxWithCtxForTest(tx kv.Tx, ctx *AggregatorRoTx) *txWithCtx {
-	return &txWithCtx{MdbxTx: tx.(*mdbx.MdbxTx), aggtx: ctx}
-}
+var ( // Compile time interface checks
+	_ kv.TemporalRwDB    = (*DB)(nil)
+	_ kv.TemporalRwTx    = (*Tx)(nil)
+	_ kv.TemporalDebugTx = (*Tx)(nil)
+)
 
-// wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
-// need to move non-unit-tests to own package
-func wrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *txWithCtx {
-	return &txWithCtx{MdbxTx: tx.(*mdbx.MdbxTx), aggtx: ctx}
-}
+//Variables Naming:
+//  tx - Database Transaction
+//  txn - Ethereum Transaction (and TxNum - is also number of Ethereum Transaction)
+//  RoTx - Read-Only Database Transaction. RwTx - read-write
+//  k, v - key, value
+//  ts - TimeStamp. Usually it's Ethereum's TransactionNumber (auto-increment ID). Or BlockNumber.
+//  Cursor - low-level mdbx-tide api to navigate over Table
+//  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Server-side-streaming friendly - less methods than Cursor, but constructor is powerful as `SELECT key, value FROM table WHERE key BETWEEN x1 AND x2 ORDER DESC LIMIT n`.
 
-// wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
-// need to move non-unit-tests to own package
-func wrapDbWithCtx(db kv.RwDB, ctx *Aggregator) kv.TemporalRwDB {
-	v, err := New(db, ctx)
-	if err != nil {
-		panic(err)
-	}
-	return v
-}
+//Methods Naming:
+//  Get: exact match of criterias
+//  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
+//  Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
 
-type dbWithCtx struct {
+//Abstraction Layers:
+// LowLevel:
+//      1. DB/Tx - low-level key-value database
+//      2. Snapshots/Freeze - immutable files with historical data. May be downloaded at first App
+//              start or auto-generate by moving old data from DB to Snapshots.
+// MediumLevel:
+//      1. TemporalDB - abstracting DB+Snapshots. Target is:
+//              - provide 'time-travel' API for data: consistent snapshot of data as of given Timestamp.
+//              - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
+//              - using next entities:
+//                      - InvertedIndex: supports range-scans
+//                      - History: can return value of key K as of given TimeStamp. Doesn't know about latest/current
+//                          value of key K. Returns NIL if K not changed after TimeStamp.
+//                      - Domain: as History but also aware about latest/current value of key K. Can move
+//                          cold (updated long time ago) parts of state from db to snapshots.
+
+// HighLevel:
+//      1. Application - rely on TemporalDB (Ex: ExecutionLayer) or just DB (Ex: TxPool, Sentry, Downloader).
+
+type DB struct {
 	kv.RwDB
 	agg *Aggregator
 }
 
-func New(db kv.RwDB, agg *Aggregator) (*dbWithCtx, error) {
-	return &dbWithCtx{RwDB: db, agg: agg}, nil
+func New(db kv.RwDB, agg *Aggregator) (*DB, error) {
+	return &DB{RwDB: db, agg: agg}, nil
 }
-func (db *dbWithCtx) Agg() any            { return db.agg }
-func (db *dbWithCtx) InternalDB() kv.RwDB { return db.RwDB }
+func (db *DB) Agg() any            { return db.agg }
+func (db *DB) InternalDB() kv.RwDB { return db.RwDB }
 
-func (db *dbWithCtx) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
-	tx := &txWithCtx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
+	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
 
-	tx.aggtx = db.agg.BeginFilesRo()
+	tx.filesTx = db.agg.BeginFilesRo()
 	return tx, nil
 }
-func (db *dbWithCtx) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
+func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -83,10 +102,10 @@ func (db *dbWithCtx) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) 
 }
 
 // TODO: it's temporary method, allowing inject TemproalTx without changing code. But it's not type-safe.
-func (db *dbWithCtx) BeginRo(ctx context.Context) (kv.Tx, error) {
+func (db *DB) BeginRo(ctx context.Context) (kv.Tx, error) {
 	return db.BeginTemporalRo(ctx)
 }
-func (db *dbWithCtx) View(ctx context.Context, f func(tx kv.Tx) error) error {
+func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -95,20 +114,20 @@ func (db *dbWithCtx) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return f(tx)
 }
 
-func (db *dbWithCtx) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
+func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	kvTx, err := db.RwDB.BeginRw(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
-	tx := &txWithCtx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
+	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
 
-	tx.aggtx = db.agg.BeginFilesRo()
+	tx.filesTx = db.agg.BeginFilesRo()
 	return tx, nil
 }
-func (db *dbWithCtx) BeginRw(ctx context.Context) (kv.RwTx, error) {
+func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	return db.BeginTemporalRw(ctx)
 }
-func (db *dbWithCtx) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
+func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
@@ -120,20 +139,20 @@ func (db *dbWithCtx) Update(ctx context.Context, f func(tx kv.RwTx) error) error
 	return tx.Commit()
 }
 
-func (db *dbWithCtx) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
+func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
-	tx := &txWithCtx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
+	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
 
-	tx.aggtx = db.agg.BeginFilesRo()
+	tx.filesTx = db.agg.BeginFilesRo()
 	return tx, nil
 }
-func (db *dbWithCtx) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
+func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return db.BeginTemporalRwNosync(ctx) //nolint:gocritic
 }
-func (db *dbWithCtx) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
+func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
 	tx, err := db.BeginTemporalRwNosync(ctx)
 	if err != nil {
 		return err
@@ -145,33 +164,33 @@ func (db *dbWithCtx) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error)
 	return tx.Commit()
 }
 
-func (db *dbWithCtx) Close() {
+func (db *DB) Close() {
 	db.RwDB.Close()
 	db.agg.Close()
 }
 
-func (db *dbWithCtx) OnFreeze(f kv.OnFreezeFunc) { db.agg.OnFreeze(f) }
+func (db *DB) OnFreeze(f kv.OnFreezeFunc) { db.agg.OnFreeze(f) }
 
-type txWithCtx struct {
+type Tx struct {
 	*mdbx.MdbxTx
-	db               *dbWithCtx
-	aggtx            *AggregatorRoTx
+	db               *DB
+	filesTx          *AggregatorRoTx
 	resourcesToClose []kv.Closer
 	ctx              context.Context
 }
 
-func (tx *txWithCtx) ForceReopenAggCtx() {
-	tx.aggtx.Close()
-	tx.aggtx = tx.Agg().BeginFilesRo()
+func (tx *Tx) ForceReopenAggCtx() {
+	tx.filesTx.Close()
+	tx.filesTx = tx.Agg().BeginFilesRo()
 }
-func (tx *txWithCtx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
-func (tx *txWithCtx) Debug() kv.TemporalDebugTx { return tx }
+func (tx *Tx) FreezeInfo() kv.FreezeInfo { return tx.filesTx }
+func (tx *Tx) Debug() kv.TemporalDebugTx { return tx }
 
-func (tx *txWithCtx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
-func (tx *txWithCtx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
-func (tx *txWithCtx) AggTx() any                { return tx.aggtx }
-func (tx *txWithCtx) Agg() *Aggregator          { return tx.db.agg }
-func (tx *txWithCtx) Rollback() {
+func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
+func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
+func (tx *Tx) AggTx() any                { return tx.filesTx }
+func (tx *Tx) Agg() *Aggregator          { return tx.db.agg }
+func (tx *Tx) Rollback() {
 	tx.autoClose()
 	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
@@ -180,13 +199,13 @@ func (tx *txWithCtx) Rollback() {
 	tx.MdbxTx = nil
 	mdbxTx.Rollback()
 }
-func (tx *txWithCtx) autoClose() {
+func (tx *Tx) autoClose() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
-	tx.aggtx.Close()
+	tx.filesTx.Close()
 }
-func (tx *txWithCtx) Commit() error {
+func (tx *Tx) Commit() error {
 	tx.autoClose()
 	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return nil
@@ -196,12 +215,12 @@ func (tx *txWithCtx) Commit() error {
 	return mdbxTx.Commit()
 }
 
-func (tx *txWithCtx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.aggtx.HistoryStartFrom(name)
+func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.filesTx.HistoryStartFrom(name)
 }
 
-func (tx *txWithCtx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.aggtx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
+func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
+	it, err := tx.filesTx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -209,8 +228,8 @@ func (tx *txWithCtx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uin
 	return it, nil
 }
 
-func (tx *txWithCtx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
-	v, step, ok, err := tx.aggtx.GetLatest(name, k, tx.MdbxTx)
+func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
+	v, step, ok, err := tx.filesTx.GetLatest(name, k, tx.MdbxTx)
 	if err != nil {
 		return nil, step, err
 	}
@@ -219,16 +238,16 @@ func (tx *txWithCtx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64,
 	}
 	return v, step, nil
 }
-func (tx *txWithCtx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.aggtx.GetAsOf(name, k, ts, tx.MdbxTx)
+func (tx *Tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.filesTx.GetAsOf(name, k, ts, tx.MdbxTx)
 }
 
-func (tx *txWithCtx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.aggtx.HistorySeek(name, key, ts, tx.MdbxTx)
+func (tx *Tx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.filesTx.HistorySeek(name, key, ts, tx.MdbxTx)
 }
 
-func (tx *txWithCtx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
-	timestamps, err = tx.aggtx.IndexRange(name, k, fromTs, toTs, asc, limit, tx.MdbxTx)
+func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
+	timestamps, err = tx.filesTx.IndexRange(name, k, fromTs, toTs, asc, limit, tx.MdbxTx)
 	if err != nil {
 		return nil, err
 	}
@@ -236,8 +255,8 @@ func (tx *txWithCtx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int,
 	return timestamps, nil
 }
 
-func (tx *txWithCtx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.aggtx.HistoryRange(name, fromTs, toTs, asc, limit, tx.MdbxTx)
+func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+	it, err := tx.filesTx.HistoryRange(name, fromTs, toTs, asc, limit, tx.MdbxTx)
 	if err != nil {
 		return nil, err
 	}
@@ -247,6 +266,6 @@ func (tx *txWithCtx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By
 
 // Debug methods
 
-func (tx *txWithCtx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
-	return tx.aggtx.DebugRangeLatest(tx.MdbxTx, domain, from, to, limit)
+func (tx *Tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	return tx.filesTx.DebugRangeLatest(tx.MdbxTx, domain, from, to, limit)
 }
