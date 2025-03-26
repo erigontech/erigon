@@ -1515,11 +1515,11 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	msg *types.Message, callParam TraceCallParam,
 	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndex int,
-	traceConfig *config.TraceConfig, tracingHooks *tracing.Hooks,
-) (*TraceCallResult, error) {
+	traceConfig *config.TraceConfig,
+) (*TraceCallResult, *tracing.Hooks, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	engine := api.engine()
 
@@ -1529,16 +1529,16 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	}
 	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, api.filters)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	noop := state.NewNoopWriter()
 
 	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), dbtx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if parentHeader == nil {
-		return nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
+		return nil, nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
 	}
 
 	// Setup context so it may be cancelled the call has completed
@@ -1572,7 +1572,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 	}
 	if err := libcommon.Stopped(ctx.Done()); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
@@ -1586,7 +1586,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		case TraceTypeVmTrace:
 			traceTypeVmTrace = true
 		default:
-			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
+			return nil, nil, fmt.Errorf("unrecognized trace type: %s", traceType)
 		}
 	}
 
@@ -1597,7 +1597,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		var ot OeTracer
 		ot.config, err = parseOeTracerConfig(traceConfig)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		ot.compat = api.compatibility
 		ot.r = traceResult
@@ -1608,7 +1608,6 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		if traceTypeVmTrace {
 			traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 		}
-		tracingHooks = ot.Tracer().Hooks
 		vmConfig.Tracer = ot.Tracer().Hooks
 		tracer = ot.Tracer()
 	}
@@ -1648,7 +1647,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		var stateSyncEvents []*types.Message
 		stateSyncEvents, err = api.stateSyncEvents(ctx, dbtx, header.Hash(), blockNumber, chainConfig)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		execResult, err = ptracer.TraceBorStateSyncTxnTraceAPI(
@@ -1673,7 +1672,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
+		return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 	}
 
 	chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
@@ -1682,34 +1681,34 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		initialIbs := state.New(cloneReader)
 		if !txFinalized {
 			if err = ibs.FinalizeTx(chainRules, sd); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
 		if sd != nil {
 			if err = sd.CompareStates(initialIbs, ibs); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
 		if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	} else {
 		if !txFinalized {
 			if err = ibs.FinalizeTx(chainRules, noop); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 		if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if !traceTypeTrace {
 		traceResult.Trace = []*ParityTrace{}
 	}
 
-	return traceResult, nil
+	return traceResult, tracer.Hooks, nil
 }
 
 // RawTransaction implements trace_rawTransaction.

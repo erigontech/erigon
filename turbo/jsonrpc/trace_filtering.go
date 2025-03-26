@@ -23,7 +23,6 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/turbo/shards"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -930,9 +929,8 @@ func (api *TraceAPIImpl) callTransaction(
 		isBorStateSyncTxn: cfg.Bor != nil,
 	}
 
-	var tracingHooks *tracing.Hooks
-	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
-		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig, tracingHooks)
+	trace, tracingHooks, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
+		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
 
 	if cmErr != nil {
 		return nil, nil, cmErr
