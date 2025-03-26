@@ -615,3 +615,44 @@ func TestCopyHeader(t *testing.T) {
 		require.Equal(t, h1, h2)
 	}
 }
+
+func TestEmptyUncleHash(t *testing.T) {
+	expected := libcommon.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
+	assert.Equal(t, expected, EmptyUncleHash)
+}
+
+func TestHoodiIssue(t *testing.T) {
+	bloom := Bloom{0, 0, 0, 0, 16, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+
+	header := Header{
+		ParentHash: libcommon.HexToHash("0x54e9eec8f2bbad6f63e9332f8ee387a6f7d52f6406deab99d54b3309626bf6f1"),
+		Coinbase:   libcommon.HexToAddress("0x71B981B8AEADE9AF6363AB9A2b8DC9B70Bf3C8C6"),
+		Root:       libcommon.HexToHash("0x1849ccd29f919583bfca2365250b67a3b3cbf3fc9160292f2e53322871c37e64"),
+		Bloom:      bloom,
+		BaseFee:    big.NewInt(0).SetUint64(925183430),
+		//Extra:       req.ExtraData,
+		Number:     big.NewInt(0).SetUint64(60422),
+		GasUsed:    35563657,
+		GasLimit:   36000000,
+		Time:       1742999964,
+		MixDigest:  libcommon.HexToHash("0xa24bc4de14366b658e9b98a5d2266ccf6ba3070f14c7553011ac6b71d0daed2c"),
+		UncleHash:  libcommon.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
+		Difficulty: big.NewInt(0),
+		//	Nonce:       merge.ProofOfStakeNonce,
+		ReceiptHash: libcommon.HexToHash("0xc81591e49cb53ce9030c5a1b0862de3889a96c471d195d294752bd4bf3f51517"),
+		TxHash:      libcommon.HexToHash("0x26e4a1aceca9beefae24b384e4dc8233a4b8e619ba7913ca3eec57a6d64a19e9"),
+	}
+	wihdrawalsHash := libcommon.HexToHash("0x2d4ca269859fca2160c935c07ca776cb7611f31eabbd94c635da7be97a55634c")
+	header.WithdrawalsHash = &wihdrawalsHash
+	requestHash := libcommon.HexToHash("0xbf1c7aabae47022c5b162c1c028763a2edc74b5800ae073c20a5d417a5fa4b3e")
+	header.RequestsHash = &requestHash
+	blobGasUsed := uint64(0) //uint64(0xc072a0c2a0)
+	header.BlobGasUsed = &blobGasUsed
+	excessBlobGas := uint64(0) // uint64(0xc072a0c2a8)
+	header.ExcessBlobGas = &excessBlobGas
+	parentBeaconBlockRoot := libcommon.HexToHash("0xa7bc855128f8acdf5b6211412c33b2c2b597a5c4e9e89fe4aaa49d79a61ae006")
+	header.ParentBeaconBlockRoot = &parentBeaconBlockRoot
+
+	blockHash := libcommon.HexToHash("0x619d45ba3ab929eb9cf57bb6f2deb0cda6317ade6f87f026b37587ffffbc3d1c")
+	assert.Equal(t, blockHash, header.Hash())
+}
