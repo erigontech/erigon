@@ -28,6 +28,7 @@ import (
 	"io"
 	"math/big"
 	"reflect"
+	"slices"
 	"sync/atomic"
 
 	"github.com/gballet/go-verkle"
@@ -41,6 +42,8 @@ var (
 	EmptyRootHash     = libcommon.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 	EmptyRequestsHash = libcommon.HexToHash("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") // sha256.Sum256([]byte(""))
 	EmptyUncleHash    = rlpHash([]*Header(nil))
+	// EmptyTxsHash is the known hash of the empty transaction set.
+	EmptyTxsHash = libcommon.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 	ExtraVanityLength = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
 	ExtraSealLength   = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
@@ -1475,6 +1478,21 @@ func (b *Block) WithSeal(header *Header) *Block {
 		uncles:       b.uncles,
 		withdrawals:  b.withdrawals,
 	}
+}
+
+// WithBody returns a new block with the original header and a deep copy of the
+// provided body.
+func (b *Block) WithBody(body Body) *Block {
+	block := &Block{
+		header:       b.header,
+		transactions: slices.Clone(body.Transactions),
+		uncles:       make([]*Header, len(body.Uncles)),
+		withdrawals:  slices.Clone(body.Withdrawals),
+	}
+	for i := range body.Uncles {
+		block.uncles[i] = CopyHeader(body.Uncles[i])
+	}
+	return block
 }
 
 // Hash returns the keccak256 hash of b's header.

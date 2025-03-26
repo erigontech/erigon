@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/secp256k1"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -186,6 +187,45 @@ func MustSignNewTx(prv *ecdsa.PrivateKey, s Signer, txn Transaction) Transaction
 		panic(err)
 	}
 	return tx1
+}
+
+// Sender returns the address derived from the signature (V, R, S) using secp256k1
+// elliptic curve and an error if it failed deriving or upon an incorrect
+// signature.
+//
+// Sender may cache the address, allowing it to be used regardless of
+// signing method. The cache is invalidated if the cached signer does
+// not match the signer used in the current call.
+func Sender(signer ISigner, tx Transaction) (common.Address, error) {
+	if cachedSender, ok := tx.cachedSender(); ok {
+		// If the signer used to derive from in a previous
+		// call is not the same as used current, invalidate
+		// the cache.
+		return cachedSender, nil
+	}
+
+	addr, err := signer.Sender(tx)
+	if err != nil {
+		return common.Address{}, err
+	}
+	return addr, nil
+}
+
+type ISigner interface {
+	// Sender returns the sender address of the transaction.
+	Sender(tx Transaction) (common.Address, error)
+
+	// SignatureValues returns the raw R, S, V values corresponding to the
+	// given signature.
+	SignatureValues(tx *Transaction, sig []byte) (r, s, v *big.Int, err error)
+	ChainID() *big.Int
+
+	// Hash returns 'signature hash', i.e. the transaction hash that is signed by the
+	// private key. This hash does not uniquely identify the transaction.
+	Hash(tx *Transaction) common.Hash
+
+	// Equal returns true if the given signer is the same as the receiver.
+	Equal(ISigner) bool
 }
 
 // Signer encapsulates transaction signature handling. The name of this type is slightly
