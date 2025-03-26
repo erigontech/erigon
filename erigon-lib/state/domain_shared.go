@@ -83,6 +83,7 @@ type SharedDomains struct {
 	aggTx  *AggregatorRoTx
 	sdCtx  *SharedDomainsCommitmentContext
 	roTx   kv.Tx
+	roTtx  kv.TemporalTx
 	logger log.Logger
 
 	txNum    uint64
@@ -679,6 +680,10 @@ func (sd *SharedDomains) SetTx(tx kv.Tx) {
 		panic("tx is nil")
 	}
 	sd.roTx = tx
+
+	if casted, ok := tx.(kv.TemporalTx); !ok {
+		sd.roTtx = casted
+	}
 
 	casted, ok := tx.(HasAggTx)
 	if !ok {
