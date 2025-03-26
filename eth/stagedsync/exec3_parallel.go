@@ -969,8 +969,6 @@ type parallelExecutor struct {
 	in          *exec.QueueWithRetry
 	rws         *exec.ResultsQueue
 	workerCount int
-	pruneEvery  *time.Ticker
-	logEvery    *time.Ticker
 
 	blockExecutors map[uint64]*blockExecutor
 }
@@ -1267,17 +1265,11 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()
 		defer pe.in.Close()
+		pe.resetTx(execLoopCtx)
 		return pe.execLoop(execLoopCtx)
 	})
 
 	return execLoopCtx, func() {
-		if pe.logEvery != nil {
-			pe.logEvery.Stop()
-		}
-		if pe.pruneEvery != nil {
-			pe.pruneEvery.Stop()
-		}
-
 		execLoopCtxCancel()
 		pe.wait(ctx)
 		pe.stopWorkers()

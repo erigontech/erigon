@@ -541,6 +541,7 @@ func ExecV3(ctx context.Context,
 
 	var executor executor
 	var executorContext context.Context
+	var executorCancel context.CancelFunc
 
 	if parallel {
 		pe := &parallelExecutor{
@@ -559,11 +560,8 @@ func ExecV3(ctx context.Context,
 				enableChaosMonkey:        execStage.CurrentSyncCycle.IsInitialCycle,
 			},
 			workerCount: workerCount,
-			pruneEvery:  pruneEvery,
-			logEvery:    logEvery,
 		}
 
-		var executorCancel context.CancelFunc
 		executorContext, executorCancel = pe.run(ctx)
 
 		defer executorCancel()
@@ -742,7 +740,7 @@ func ExecV3(ctx context.Context,
 					return nil
 				}
 
-				if true /*shouldGenerateChangesets*/ {
+				if shouldGenerateChangesets {
 					aggTx := libstate.AggTx(applyTx)
 					aggTx.RestrictSubsetFileDeletions(true)
 					start := time.Now()
@@ -893,17 +891,6 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 
-		var logEvery <-chan time.Time
-		var pruneEvery <-chan time.Time
-
-		if pe.logEvery != nil {
-			logEvery = pe.logEvery.C
-		}
-
-		if pe.pruneEvery != nil {
-			pruneEvery = pe.pruneEvery.C
-		}
-
 		var lastBlockResult blockResult
 		var uncommittedGas uint64
 		var prunePending bool
@@ -950,55 +937,62 @@ func ExecV3(ctx context.Context,
 
 						prunePending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
 
-						if !dbg.DiscardCommitment() && (!dbg.BatchCommitments || (prunePending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum)) {
-							var trace bool
-							if traceBlock(applyResult.BlockNum) {
-								trace = true
-							}
-							pe.doms.SetTrace(trace)
-							commitment.Captured = []string{}
-							rh, err := pe.doms.ComputeCommitment(ctx, applyWorker.Tx(), true, applyResult.BlockNum, pe.logPrefix)
-							pe.doms.SetTrace(false)
-							captured := commitment.Captured
-							commitment.Captured = nil
-							if err != nil {
-								return err
-							}
-							if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
-								logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
-								for _, line := range captured {
-									fmt.Println(line)
+						if !dbg.DiscardCommitment() {
+							if !dbg.BatchCommitments || lastBlockResult.BlockNum == maxBlockNum ||
+								(prunePending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
+								var trace bool
+								if traceBlock(applyResult.BlockNum) {
+									trace = true
 								}
-
-								maxTxIndex := len(applyResult.TxIO.Inputs()) - 1
-
-								for txIndex := -1; txIndex < maxTxIndex; txIndex++ {
-									fmt.Println(
-										fmt.Sprintf("%d (%d) RD", applyResult.BlockNum, txIndex), applyResult.TxIO.ReadSet(txIndex).Len(),
-										"WRT", len(applyResult.TxIO.WriteSet(txIndex)))
-
-									applyResult.TxIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
-										fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "RD", vr.String())
-										return true
-									})
-
-									for _, vw := range applyResult.TxIO.WriteSet(txIndex) {
-										fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "WRT", vw.String())
+								pe.doms.SetTrace(trace)
+								commitment.Captured = []string{}
+								rh, err := pe.doms.ComputeCommitment(ctx, applyWorker.Tx(), true, applyResult.BlockNum, pe.logPrefix)
+								pe.doms.SetTrace(false)
+								captured := commitment.Captured
+								commitment.Captured = nil
+								if err != nil {
+									return err
+								}
+								if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
+									logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
+									for _, line := range captured {
+										fmt.Println(line)
 									}
+
+									maxTxIndex := len(applyResult.TxIO.Inputs()) - 1
+
+									for txIndex := -1; txIndex < maxTxIndex; txIndex++ {
+										fmt.Println(
+											fmt.Sprintf("%d (%d) RD", applyResult.BlockNum, txIndex), applyResult.TxIO.ReadSet(txIndex).Len(),
+											"WRT", len(applyResult.TxIO.WriteSet(txIndex)))
+
+										applyResult.TxIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
+											fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "RD", vr.String())
+											return true
+										})
+
+										for _, vw := range applyResult.TxIO.WriteSet(txIndex) {
+											fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "WRT", vw.String())
+										}
+									}
+
+									return errors.New("wrong trie root")
 								}
 
-								return errors.New("wrong trie root")
+								pe.lastCommittedBlockNum = lastBlockResult.BlockNum
+								pe.lastCommittedTxNum = lastBlockResult.lastTxNum
+								pe.committedGas += uncommittedGas
+								uncommittedGas = 0
 							}
-
-							pe.lastCommittedBlockNum = lastBlockResult.BlockNum
-							pe.lastCommittedTxNum = lastBlockResult.lastTxNum
-							pe.committedGas += uncommittedGas
-							uncommittedGas = 0
 						}
 
 						//fmt.Println("Block Complete", blockResult.BlockNum)
 						if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
 							return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
+						}
+
+						if maxBlockNum == applyResult.BlockNum {
+							return nil
 						}
 
 					}
@@ -1007,13 +1001,13 @@ func ExecV3(ctx context.Context,
 					return fmt.Errorf("executor context failed: %w", err)
 				case <-ctx.Done():
 					return ctx.Err()
-				case <-logEvery:
+				case <-logEvery.C:
 					pe.LogExecuted(applyTx)
 					if pe.agg.HasBackgroundFilesBuild() {
 						logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
 					}
-				case <-pruneEvery:
-					if false /*prunePending*/ {
+				case <-pruneEvery.C:
+					if prunePending {
 						prunePending = false
 
 						if !pe.inMemExec {
@@ -1088,6 +1082,8 @@ func ExecV3(ctx context.Context,
 			}
 		}()
 
+		executorCancel()
+
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				return err
@@ -1108,7 +1104,7 @@ func ExecV3(ctx context.Context,
 	fmt.Println("Wait")
 	executor.wait(ctx)
 
-	if u != nil && !u.HasUnwindPoint() {
+	if !parallel && u != nil && !u.HasUnwindPoint() {
 		if b != nil {
 			commitStart := time.Now()
 
@@ -1117,16 +1113,13 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 
-			if !parallel {
-				se := executor.(*serialExecutor)
-				se.lastCommittedBlockNum = b.NumberU64()
-				se.lastCommittedTxNum = inputTxNum
-				se.committedGas += uncommittedGas
-				uncommittedGas = 0
+			se := executor.(*serialExecutor)
+			se.lastCommittedBlockNum = b.NumberU64()
+			se.lastCommittedTxNum = inputTxNum
+			se.committedGas += uncommittedGas
+			uncommittedGas = 0
 
-				executor.LogCommitted(applyTx, commitStart)
-			}
-
+			executor.LogCommitted(applyTx, commitStart)
 		} else {
 			fmt.Printf("[dbg] mmmm... do we need action here????\n")
 		}
