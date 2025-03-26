@@ -199,8 +199,8 @@ func (ot *opcodeTracer) Tracer() *tracers.Tracer {
 func (ot *opcodeTracer) captureStartOrEnter(from, to libcommon.Address, create bool, input []byte) {
 	//fmt.Fprint(ot.summary, ot.lastLine)
 
-	// When a CaptureStart is called, a Txn is starting. Create its entry in our list and initialize it with the partial data available
-	//calculate the "address" of the Txn in its tree
+	// When a OnEnter is called, a txn is starting. Create its entry in our list and initialize it with the partial data available
+	// calculate the "address" of the txn in its tree
 	ltid := len(ot.txsInDepth)
 	if ltid-1 != ot.depth {
 		panic(fmt.Sprintf("Wrong addr slice depth: d=%d, slice len=%d", ot.depth, ltid))
@@ -231,7 +231,7 @@ func (ot *opcodeTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, 
 
 func (ot *opcodeTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ot.depth = depth
-	ot.captureStartOrEnter(from, to, vm.OpCode(typ) == vm.CREATE, input)
+	ot.captureStartOrEnter(from, to, to == libcommon.Address{}, input)
 }
 
 func (ot *opcodeTracer) captureEndOrExit(err error) {
@@ -405,9 +405,6 @@ func (ot *opcodeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tra
 }
 
 func (ot *opcodeTracer) OnFault(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, opDepth int, err error) {
-	// CaptureFault sees the system as it is after the fault happens
-
-	// CaptureState might have already recorded the opcode before it failed. Let's centralize the processing there.
 	ot.OnOpcode(pc, op, gas, cost, scope, nil, opDepth, err)
 }
 
