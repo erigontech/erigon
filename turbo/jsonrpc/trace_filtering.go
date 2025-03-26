@@ -23,6 +23,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/turbo/shards"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -818,15 +819,16 @@ func (api *TraceAPIImpl) callBlock(
 		msgs[i] = msg
 	}
 
+	var tracingHooks *tracing.Hooks
 	traces, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-		&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
+		&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig, tracingHooks)
 
 	if cmErr != nil {
 		return nil, nil, cmErr
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, nil)
+		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, tracingHooks)
 	}
 
 	return traces, syscall, nil
@@ -929,15 +931,16 @@ func (api *TraceAPIImpl) callTransaction(
 		isBorStateSyncTxn: cfg.Bor != nil,
 	}
 
+	var tracingHooks *tracing.Hooks
 	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
-		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
+		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig, tracingHooks)
 
 	if cmErr != nil {
 		return nil, nil, cmErr
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, nil)
+		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, tracingHooks)
 	}
 
 	return trace, syscall, nil

@@ -1291,14 +1291,14 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	ibs := state.New(cachedReader)
 
 	return api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, parentNrOrHash, nil, true /* gasBailout */, traceConfig)
+		txns, msgs, callParams, parentNrOrHash, nil, true /* gasBailout */, traceConfig, nil)
 }
 
 func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txns []types.Transaction, msgs []*types.Message, callParams []TraceCallParam,
 	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool,
-	traceConfig *config.TraceConfig,
+	traceConfig *config.TraceConfig, tracingHooks *tracing.Hooks,
 ) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
@@ -1393,6 +1393,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			if traceTypeVmTrace {
 				traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 			}
+			tracingHooks = ot.Tracer().Hooks
 			vmConfig.Tracer = ot.Tracer().Hooks
 			tracer = ot.Tracer()
 		}
@@ -1513,7 +1514,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	msg *types.Message, callParam TraceCallParam,
 	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndex int,
-	traceConfig *config.TraceConfig,
+	traceConfig *config.TraceConfig, tracingHooks *tracing.Hooks,
 ) (*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
@@ -1606,6 +1607,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		if traceTypeVmTrace {
 			traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 		}
+		tracingHooks = ot.Tracer().Hooks
 		vmConfig.Tracer = ot.Tracer().Hooks
 		tracer = ot.Tracer()
 	}
