@@ -438,7 +438,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 		// sd cache values as is (without transformation) so safe to return
 		return v, prevStep, nil
 	}
-	v, step, found, err := aggTx.d[kv.CommitmentDomain].getLatestFromDb(prefix, sd.roTx)
+	v, step, found, err := aggTx.d[kv.CommitmentDomain].getLatestFromDB(prefix, sd.roTx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
@@ -447,9 +447,9 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 		return v, step, nil
 	}
 
-	// getFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
+	// getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 	// of file where the value is stored (not exact step when kv has been set)
-	v, _, startTx, endTx, err := aggTx.d[kv.CommitmentDomain].getFromFiles(prefix, 0)
+	v, _, startTx, endTx, err := aggTx.d[kv.CommitmentDomain].getLatestFromFiles(prefix, 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
