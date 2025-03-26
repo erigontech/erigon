@@ -1350,6 +1350,9 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 		if closeFiles {
 			mf.Close()
 		}
+
+		// Merge is background operation. It must not crush application.
+		// Convert panic to error.
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("[snapshots] background mergeFiles: %s, %s, %s", r.String(), rec, dbg.Stack())
 		}
