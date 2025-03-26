@@ -26,6 +26,12 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 )
 
+var ( // Compile time interface checks
+	_ kv.TemporalRwDB    = (*DB)(nil)
+	_ kv.TemporalRwTx    = (*Tx)(nil)
+	_ kv.TemporalDebugTx = (*Tx)(nil)
+)
+
 //Variables Naming:
 //  tx - Database Transaction
 //  txn - Ethereum Transaction (and TxNum - is also number of Ethereum Transaction)
