@@ -41,7 +41,7 @@ import (
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	minimax := d.History.dirtyFilesEndTxNumMinimax()
-	if _max, ok := d.dirtyFiles.Max(); ok {
+	if _max, ok := d.dirtyFiles2.Max(); ok {
 		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
 			minimax = endTxNum
@@ -907,11 +907,11 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 func (d *Domain) integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) {
 	d.History.integrateMergedDirtyFiles(indexOuts, historyOuts, indexIn, historyIn)
 	if valuesIn != nil {
-		d.dirtyFiles.Set(valuesIn)
+		d.dirtyFiles2.Set(valuesIn)
 
 		// `kill -9` may leave some garbage
 		// but it still may be useful for merges, until we finish merge frozen file
-		d.dirtyFiles.Walk(func(items []*filesItem) bool {
+		d.dirtyFiles2.Walk(func(items []*filesItem) bool {
 			for _, item := range items {
 				if item.frozen {
 					continue
@@ -934,7 +934,7 @@ func (d *Domain) integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts []
 		if out == nil {
 			panic("must not happen")
 		}
-		d.dirtyFiles.Delete(out)
+		d.dirtyFiles2.Delete(out)
 		out.canDelete.Store(true)
 	}
 }
@@ -989,7 +989,7 @@ func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *files
 		return
 	}
 	outs := dt.garbage(mergedDomain)
-	deleteMergeFile(dt.d.dirtyFiles, outs, dt.d.filenameBase, dt.d.logger)
+	deleteMergeFile(dt.d.dirtyFiles2, outs, dt.d.filenameBase, dt.d.logger)
 }
 
 // cleanAfterMerge - sometime inverted_index may be already merged, but history not yet. and power-off happening.
@@ -1026,7 +1026,7 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 	}
 	// `kill -9` may leave some garbage
 	// AggContext doesn't have such files, only Agg.files does
-	dt.d.dirtyFiles.Walk(func(items []*filesItem) bool {
+	dt.d.dirtyFiles2.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
 				continue

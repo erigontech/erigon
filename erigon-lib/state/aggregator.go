@@ -368,7 +368,7 @@ func (a *Aggregator) LS() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
-		doLS(d.dirtyFiles)
+		doLS(d.dirtyFiles2)
 		doLS(d.History.dirtyFiles)
 		doLS(d.History.InvertedIndex.dirtyFiles)
 	}
@@ -1159,7 +1159,7 @@ func (at *AggregatorRoTx) EndTxNumNoCommitment() uint64 {
 func (a *Aggregator) EndTxNumMinimax() uint64 { return a.visibleFilesMinimaxTxNum.Load() }
 func (a *Aggregator) FilesAmount() (res []int) {
 	for _, d := range a.d {
-		res = append(res, d.dirtyFiles.Len())
+		res = append(res, d.dirtyFiles2.Len())
 	}
 	for _, ii := range a.iis {
 		res = append(res, ii.dirtyFiles.Len())

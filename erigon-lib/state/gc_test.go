@@ -135,7 +135,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			// - make sure there is no canDelete file
 			hc := h.BeginFilesRo()
 			_ = hc
-			lastOnFs, _ := h.dirtyFiles.Max()
+			lastOnFs, _ := h.dirtyFiles2.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			h.integrateMergedDirtyFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)
 			require.NotNil(lastOnFs.decompressor)
@@ -156,7 +156,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			hc.Close()
 			require.Nil(lastOnFs.decompressor)
 
-			nonDeletedOnFs, _ := h.dirtyFiles.Max()
+			nonDeletedOnFs, _ := h.dirtyFiles2.Max()
 			require.False(nonDeletedOnFs.frozen)
 			require.NotNil(nonDeletedOnFs.decompressor) // non-canDelete files are not closed
 
@@ -176,7 +176,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			// - del cold file
 			// - new reader must not see canDelete file
 			hc := h.BeginFilesRo()
-			lastOnFs, _ := h.dirtyFiles.Max()
+			lastOnFs, _ := h.dirtyFiles2.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			h.integrateMergedDirtyFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)
 			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
