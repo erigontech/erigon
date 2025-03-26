@@ -137,7 +137,7 @@ func (tt *TestCmd) matchExactOutput(want []byte) error {
 	if n < len(want) || !bytes.Equal(buf, want) {
 		// Grab any additional buffered output in case of mismatch
 		// because it might help with debugging.
-		buf = append(buf, make([]byte, tt.stdout.Buffered())...)
+		buf = append(buf, make([]byte, tt.stdout.Buffered())...) // nozero
 		tt.stdout.Read(buf[n:])
 		// Find the mismatch position.
 		for i := 0; i < n; i++ {

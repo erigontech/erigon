@@ -148,12 +148,12 @@ func (r *Record) Set(e Entry) {
 	case i < len(r.pairs):
 		// insert pair before i-th elem
 		el := pair{e.ENRKey(), blob}
-		pairs = append(pairs, pair{})
+		pairs = append(pairs, pair{}) // nozero
 		copy(pairs[i+1:], pairs[i:])
 		pairs[i] = el
 	default:
 		// element should be placed at the end of r.pairs
-		pairs = append(pairs, pair{e.ENRKey(), blob})
+		pairs = append(pairs, pair{e.ENRKey(), blob}) // nozero
 	}
 	r.pairs = pairs
 }
