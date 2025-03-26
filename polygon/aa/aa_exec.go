@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core"
@@ -274,110 +273,6 @@ func capRefund(getRefund uint64, gasUsed uint64) uint64 {
 		return getRefund
 	}
 	return refund
-}
-
-func InjectAALogs(tx *types.AccountAbstractionTransaction, executionStatus, blockNum uint64, execReturnData, postOpReturnData []byte, ibs *state.IntraBlockState) error {
-	err := injectRIP7560TransactionEvent(tx, executionStatus, blockNum, ibs)
-	if err != nil {
-		return err
-	}
-	if tx.Deployer != nil {
-		err = injectRIP7560AccountDeployedEvent(tx, blockNum, ibs)
-		if err != nil {
-			return err
-		}
-	}
-	if executionStatus == types.ExecutionStatusExecutionFailure || executionStatus == types.ExecutionStatusExecutionAndPostOpFailure {
-		err = injectRIP7560TransactionRevertReasonEvent(tx, execReturnData, blockNum, ibs)
-		if err != nil {
-			return err
-		}
-	}
-	if executionStatus == types.ExecutionStatusPostOpFailure || executionStatus == types.ExecutionStatusExecutionAndPostOpFailure {
-		err = injectRIP7560TransactionPostOpRevertReasonEvent(tx, postOpReturnData, blockNum, ibs)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func injectRIP7560AccountDeployedEvent(
-	txn *types.AccountAbstractionTransaction,
-	blockNum uint64,
-	ibs *state.IntraBlockState,
-) error {
-	topics, data, err := types.EncodeRIP7560AccountDeployedEvent(txn.Paymaster, txn.Deployer, txn.SenderAddress)
-	if err != nil {
-		return err
-	}
-	err = injectEvent(topics, data, blockNum, ibs)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func injectRIP7560TransactionRevertReasonEvent(
-	txn *types.AccountAbstractionTransaction,
-	revertData []byte,
-	blockNum uint64,
-	ibs *state.IntraBlockState,
-) error {
-	topics, data, err := types.EncodeRIP7560TransactionRevertReasonEvent(revertData, txn.Nonce, txn.NonceKey, txn.SenderAddress)
-	if err != nil {
-		return err
-	}
-	err = injectEvent(topics, data, blockNum, ibs)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func injectRIP7560TransactionPostOpRevertReasonEvent(
-	txn *types.AccountAbstractionTransaction,
-	revertData []byte,
-	blockNum uint64,
-	ibs *state.IntraBlockState,
-) error {
-	topics, data, err := types.EncodeRIP7560TransactionPostOpRevertReasonEvent(revertData, txn.Nonce, txn.NonceKey, txn.Paymaster, txn.SenderAddress)
-	if err != nil {
-		return err
-	}
-	err = injectEvent(topics, data, blockNum, ibs)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func injectRIP7560TransactionEvent(
-	txn *types.AccountAbstractionTransaction,
-	executionStatus uint64,
-	blockNum uint64,
-	ibs *state.IntraBlockState,
-) error {
-	topics, data, err := types.EncodeRIP7560TransactionEvent(executionStatus, txn.Nonce, txn.NonceKey, txn.Paymaster, txn.Deployer, txn.SenderAddress)
-	if err != nil {
-		return err
-	}
-	err = injectEvent(topics, data, blockNum, ibs)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func injectEvent(topics []common.Hash, data []byte, blockNumber uint64, ibs *state.IntraBlockState) error {
-	transactionLog := &types.Log{
-		Address:     types.AA_ENTRY_POINT,
-		Topics:      topics,
-		Data:        data,
-		BlockNumber: blockNumber,
-	}
-	ibs.AddLog(transactionLog)
-	return nil
 }
 
 func PerformTxnStaticValidation(
