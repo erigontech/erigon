@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv/prune"
+	"github.com/erigontech/erigon/core/tracing"
+
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -151,7 +153,11 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 	var err error
 	header := txTask.Header
 
+	var hooks *tracing.Hooks
 	tracer := rw.consumer.NewTracer()
+	if tracer != nil {
+		hooks = tracer.TracingHooks()
+	}
 
 	switch {
 	case txTask.TxIndex == -1:
@@ -168,7 +174,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 
 		// Block initialisation
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, constCall /* constCall */, tracer.TracingHooks())
+			return core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks)
 		}
 		rw.execArgs.Engine.Initialize(rw.execArgs.ChainConfig, rw.chain, header, ibs, syscall, rw.logger, nil)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
@@ -179,7 +185,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, false /* constCall */, tracer.TracingHooks())
+			return core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks)
 		}
 
 		_, _, _, err := rw.execArgs.Engine.Finalize(rw.execArgs.ChainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, true /* skipReceiptsEval */, rw.logger)
@@ -189,7 +195,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 	default:
 		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), txTask.Tx.GetBlobGas())
 		if tracer := rw.consumer.NewTracer(); tracer != nil {
-			rw.vmConfig.Tracer = tracer.TracingHooks()
+			rw.vmConfig.Tracer = hooks
 		}
 
 		rw.vmConfig.SkipAnalysis = txTask.SkipAnalysis
