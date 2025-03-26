@@ -688,6 +688,8 @@ func (sd *SharedDomains) SetTx(tx kv.Tx) {
 	if casted, ok := tx.(kv.TemporalTx); !ok {
 		sd.roTtx = casted
 		sd.roDebugTtx = casted.Debug()
+	} else {
+		panic(fmt.Sprintf("%T is not TemporalTx", tx))
 	}
 
 	casted, ok := tx.(HasAggTx)
