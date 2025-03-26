@@ -10,15 +10,11 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 )
 
-//const EntitiesPerStep = uint64(1000)
-
+// aggregate set level snapshot creation config
 type SnapshotCreationConfig struct {
-	// number of entities per step
-	// should be same for all entitiin a entity set
-	EntitiesPerStep uint64
-
-	// all the following configs are in terms of number of entities
-	// 1 step has `EntitiesPerStep` entities
+	// number of RootNums per step
+	// should be same for all entity in an entity set
+	RootNumPerStep uint64
 
 	// how many (root) entities to leave in db (and not consider for freezing) this is needed
 	// since blockchains reorg and so we don't freeze latest entities.
@@ -29,11 +25,11 @@ type SnapshotCreationConfig struct {
 	// decreasing order expected, each step is a multiple of the previous one
 	// e.g. [1000, 20000, 600000] --> first stage creates files of size 1000; then 20 of these merged to
 	// create size 10000; then 30 of these merged to create size 100000
-	// each must be divisible by `EntitiesPerStep`
+	// each must be divisible by `RootNumPerStep`
 	MergeStages []uint64
 
-	// minimum snapshot size
-	// must be divisible by `EntitiesPerStep`
+	// minimum snapshot size - number of "RootNums" in the minimum-sized file.
+	// must be divisible by `RootNumPerStep`
 	MinimumSize uint64
 
 	// SeedableSize uint64 // TODO: minimum size of file for it to be seedable.
@@ -53,7 +49,7 @@ type SnapshotConfig struct {
 }
 
 func (s *SnapshotConfig) StepsInFrozenFile() uint64 {
-	return s.MergeStages[len(s.MergeStages)-1] / s.EntitiesPerStep
+	return s.MergeStages[len(s.MergeStages)-1] / s.RootNumPerStep
 }
 
 func (s *SnapshotConfig) SetupConfig(id AppendableId, snapshotDir string, pre snapcfg.Preverified) {
@@ -71,12 +67,12 @@ func (s *SnapshotConfig) SetupConfig(id AppendableId, snapshotDir string, pre sn
 
 	// some validation
 	for i := range s.MergeStages {
-		if s.MergeStages[i]%s.EntitiesPerStep != 0 {
+		if s.MergeStages[i]%s.RootNumPerStep != 0 {
 			panic(fmt.Sprintf("MergeStages[%d] must be divisible by EntitiesPerStep", i))
 		}
 	}
-	if s.MinimumSize%s.EntitiesPerStep != 0 {
-		panic(fmt.Sprintf("MinimumSize must be divisible by EntitiesPerStep"))
+	if s.MinimumSize%s.RootNumPerStep != 0 {
+		panic(fmt.Sprintf("MinimumSize(%d) must be divisible by EntitiesPerStep(%d)", s.MinimumSize, s.RootNumPerStep))
 	}
 }
 
@@ -142,7 +138,7 @@ func ParseFileNameInDir(id AppendableId, dir, fileName string) (res *FileInfo, o
 	if err != nil {
 		return res, false
 	}
-	eps := id.SnapshotConfig().EntitiesPerStep
+	eps := id.SnapshotConfig().RootNumPerStep
 	res.From = from * eps
 	to, err := strconv.ParseUint(parts[2], 10, 64)
 	if err != nil {
@@ -189,7 +185,7 @@ func GetFreezingRange(rootFrom, rootTo RootNum, id AppendableId) (freezeFrom Roo
 	to = (to / cfg.MinimumSize) * cfg.MinimumSize
 
 	mergeLimit := getMergeLimit(id, from)
-	maxJump := cfg.EntitiesPerStep
+	maxJump := cfg.RootNumPerStep
 
 	if from%mergeLimit == 0 {
 		maxJump = mergeLimit
