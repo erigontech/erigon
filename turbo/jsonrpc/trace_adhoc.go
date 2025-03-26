@@ -1354,6 +1354,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 	var tracer *tracers.Tracer
+	var tracingHooks *tracing.Hooks
 
 	for txIndex, msg := range msgs {
 		if isHistoricalStateReader {
@@ -1396,6 +1397,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 				traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 			}
 			vmConfig.Tracer = ot.Tracer().Hooks
+			tracingHooks = ot.Tracer().Hooks
 			tracer = ot.Tracer()
 		}
 
@@ -1508,7 +1510,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		results = append(results, traceResult)
 	}
 
-	return results, tracer.Hooks, nil
+	return results, tracingHooks, nil
 }
 
 func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
@@ -1593,6 +1595,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: args.txHash}
 	vmConfig := vm.Config{}
 	var tracer *tracers.Tracer
+	var tracingHooks *tracing.Hooks
 	if traceTypeTrace || traceTypeVmTrace {
 		var ot OeTracer
 		ot.config, err = parseOeTracerConfig(traceConfig)
@@ -1609,6 +1612,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 			traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 		}
 		vmConfig.Tracer = ot.Tracer().Hooks
+		tracingHooks = ot.Tracer().Hooks
 		tracer = ot.Tracer()
 	}
 
@@ -1708,7 +1712,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		traceResult.Trace = []*ParityTrace{}
 	}
 
-	return traceResult, tracer.Hooks, nil
+	return traceResult, tracingHooks, nil
 }
 
 // RawTransaction implements trace_rawTransaction.
