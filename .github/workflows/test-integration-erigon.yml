@@ -46,7 +46,7 @@ jobs:
     strategy:
       matrix:
         os:
-          - ubuntu-latest
+          - ubuntu-22.04
           - macos-latest
           # - ubuntu-latest-erigontests-large
     runs-on: ${{ matrix.os }}
