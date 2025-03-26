@@ -66,13 +66,13 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 		require.NoError(t, err)
 
 		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, nil, nil)
-		rootHashDirect, err := hph.Process(ctx, upds, "")
+		rootHashDirect, err := hph.Process(ctx, nil, upds, "")
 		require.NoError(t, err)
 		require.Len(t, rootHashDirect, length.Hash, "invalid root hash length")
 		upds.Close()
 
 		anotherUpds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, nil, nil)
-		rootHashUpdate, err := hphAnother.Process(ctx, anotherUpds, "")
+		rootHashUpdate, err := hphAnother.Process(ctx, nil, anotherUpds, "")
 		require.NoError(t, err)
 		require.Len(t, rootHashUpdate, length.Hash, "invalid root hash length")
 		require.EqualValues(t, rootHashDirect, rootHashUpdate, "storage-based and update-based rootHash mismatch")
@@ -150,7 +150,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 			require.NoError(t, err)
 
 			updsDirect := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-			rootHashDirect, err := hph.Process(ctx, updsDirect, "")
+			rootHashDirect, err := hph.Process(ctx, nil, updsDirect, "")
 			updsDirect.Close()
 			require.NoError(t, err)
 			require.Len(t, rootHashDirect, length.Hash, "invalid root hash length")
@@ -159,7 +159,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 			require.NoError(t, err)
 
 			upds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-			rootHashAnother, err := hphAnother.Process(ctx, upds, "")
+			rootHashAnother, err := hphAnother.Process(ctx, nil, upds, "")
 			upds.Close()
 			require.NoError(t, err)
 			require.Len(t, rootHashAnother, length.Hash, "invalid root hash length")
@@ -216,7 +216,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 		defer upds.Close()
 
-		rootHash, err := hph.Process(ctx, upds, "")
+		rootHash, err := hph.Process(ctx, nil, upds, "")
 		require.NoError(t, err)
 		require.Lenf(t, rootHash, length.Hash, "invalid root hash length")
 	})
