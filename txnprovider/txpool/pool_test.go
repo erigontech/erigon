@@ -190,6 +190,11 @@ func TestMultipleAuthorizations(t *testing.T) {
 	assert.NoError(t, err)
 	require.True(t, pool != nil)
 
+	// Start the pool
+	err = pool.start(ctx)
+	assert.NoError(t, err)
+
+	// Initialize pool state
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -1625,4 +1630,91 @@ type sender struct {
 
 func newSender(nonce uint64, balance uint256.Int) *sender {
 	return &sender{nonce: nonce, balance: balance}
+}
+
+func BenchmarkProcessRemoteTxns(b *testing.B) {
+	assert, require := assert.New(b), require.New(b)
+	ch := make(chan Announcements, 100)
+	coreDB, _ := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	db := memdb.NewTestPoolDB(b)
+	ctx, cancel := context.WithCancel(context.Background())
+	b.Cleanup(cancel)
+	cfg := txpoolcfg.DefaultConfig
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	assert.NoError(err)
+	require.True(pool != nil)
+
+	// Start the transaction pool
+	err = pool.start(ctx)
+	assert.NoError(err)
+
+	// Set up initial blockchain state
+	var stateVersionID uint64 = 0
+	pendingBaseFee := uint64(200000)
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remote.StateChangeBatch{
+		StateVersionId:      stateVersionID,
+		PendingBlockBaseFee: pendingBaseFee,
+		BlockGasLimit:       1000000,
+		ChangeBatch: []*remote.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+
+	// Create 100 test accounts with 1 ETH balance each
+	for i := 0; i < 100; i++ {
+		var addr [20]byte
+		addr[0] = uint8(i + 1)
+		acc := accounts3.Account{
+			Nonce:       0,
+			Balance:     *uint256.NewInt(1 * common.Ether),
+			CodeHash:    common.Hash{},
+			Incarnation: 1,
+		}
+		v := accounts3.SerialiseV3(&acc)
+		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+			Action:  remote.Action_UPSERT,
+			Address: gointerfaces.ConvertAddressToH160(addr),
+			Data:    v,
+		})
+	}
+
+	// Apply the initial state to the pool
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	assert.NoError(err)
+
+	// Create test transactions for benchmarking
+	var testTxns TxnSlots
+	for i := 0; i < b.N; i++ {
+		var addr [20]byte
+		addr[0] = uint8(i%100 + 1) // Use one of our test accounts
+		txnSlot := &TxnSlot{
+			Tip:    *uint256.NewInt(300000),
+			FeeCap: *uint256.NewInt(300000),
+			Gas:    100000,
+			Nonce:  uint64(i / 100), // Different nonce for each account
+		}
+		txnSlot.IDHash[0] = uint8(i + 1)
+		testTxns.Append(txnSlot, addr[:], true)
+	}
+
+	b.ResetTimer()
+
+	// Run the benchmark: process transactions one by one
+	// This measures the performance of adding and processing remote transactions
+	for i := 0; i < b.N; i++ {
+		pool.AddRemoteTxns(ctx, TxnSlots{testTxns.Txns[i : i+1], testTxns.Senders[i : i+1], testTxns.IsLocal[i : i+1]})
+		err := pool.processRemoteTxns(ctx)
+		assert.NoError(err)
+	}
+
+	b.StopTimer()
+
+	// Log final pool statistics after processing all transactions
+	pending, baseFee, queued := pool.CountContent()
+	b.Logf("Final pool stats - pending: %d, baseFee: %d, queued: %d", pending, baseFee, queued)
 }
