@@ -489,13 +489,22 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		ret   []byte
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
 	)
+
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
+		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout, rules.IsOsaka)
+		if errors.Is(vmerr, vm.ErrInvalidEOFInitcode) {
+			if nonce, _err := st.state.GetNonce(sender.Address()); _err != nil {
+				return nil, _err
+			} else {
+				st.state.SetNonce(msg.From(), nonce+1)
+			}
+		}
 	} else {
+		// Increment the nonce for the next transaction
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 

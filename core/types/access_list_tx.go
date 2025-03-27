@@ -173,7 +173,7 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 		if err := rlp.EncodeStructSizePrefix(tupleLen, w, b); err != nil {
 			return err
 		}
-		if err := rlp.EncodeOptionalAddress(&al[i].Address, w, b); err != nil { // TODO(racytech): change addr to []byte?
+		if err := rlp.EncodeOptionalAddress(&al[i].Address, w, b); err != nil {
 			return err
 		}
 		if err := rlp.EncodeStructSizePrefix(storageLen, w, b); err != nil {
