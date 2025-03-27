@@ -207,7 +207,7 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	return binary.BigEndian.Uint64(lstIdx) / d.aggregationStep
 }
 
-func (dt *DomainRoTx) NewWriter() *domainBufferedWriter { return dt.newWriter(dt.d.dirs.Tmp, false) }
+func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter { return dt.newWriter(dt.d.dirs.Tmp, false) }
 
 // OpenList - main method to open list of files.
 // It's ok if some files was open earlier.
@@ -462,7 +462,7 @@ func (d *Domain) Close() {
 	d.closeWhatNotInList([]string{})
 }
 
-func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevStep uint64) error {
+func (w *DomainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevStep uint64) error {
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
 		fmt.Printf("PutWithPrev(%s, txn %d, key[%x][%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, w.h.ii.txNum, key1, key2, val, preval)
@@ -476,7 +476,7 @@ func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevS
 	return w.addValue(key1, key2, val)
 }
 
-func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep uint64) (err error) {
+func (w *DomainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep uint64) (err error) {
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
 		fmt.Printf("DeleteWithPrev(%s, txn %d, key[%x][%x] preval[%x])\n", w.h.ii.filenameBase, w.h.ii.txNum, key1, key2, prev)
@@ -490,16 +490,17 @@ func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep 
 	return w.addValue(key1, key2, nil)
 }
 
-func (w *domainBufferedWriter) SetTxNum(v uint64) {
+func (w *DomainBufferedWriter) SetTxNum(v uint64) {
 	w.setTxNumOnce = true
 	w.h.SetTxNum(v)
 	binary.BigEndian.PutUint64(w.stepBytes[:], ^(v / w.h.ii.aggregationStep))
 }
+func (w *DomainBufferedWriter) SetDiff(diff *DomainDiff) { w.diff = diff }
 
-func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWriter {
+func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.historyDisabled
 
-	w := &domainBufferedWriter{
+	w := &DomainBufferedWriter{
 		discard:   discard,
 		aux:       make([]byte, 0, 128),
 		valsTable: dt.d.valuesTable,
@@ -512,7 +513,7 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWrit
 	return w
 }
 
-type domainBufferedWriter struct {
+type DomainBufferedWriter struct {
 	values *etl.Collector
 
 	setTxNumOnce bool
@@ -524,12 +525,12 @@ type domainBufferedWriter struct {
 	stepBytes [8]byte // current inverted step representation
 	aux       []byte  // auxilary buffer for key1 + key2
 	aux2      []byte  // auxilary buffer for step + val
-	diff      *StateDiffDomain
+	diff      *DomainDiff
 
 	h *historyBufferedWriter
 }
 
-func (w *domainBufferedWriter) close() {
+func (w *DomainBufferedWriter) Close() {
 	if w == nil { // allow dobule-close
 		return
 	}
@@ -557,7 +558,7 @@ func loadSkipFunc() etl.LoadFunc {
 		return nil
 	}
 }
-func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
+func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}
@@ -569,7 +570,7 @@ func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
-		w.close()
+		w.Close()
 		return nil
 	}
 
@@ -599,12 +600,12 @@ func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
-	w.close()
+	w.Close()
 
 	return nil
 }
 
-func (w *domainBufferedWriter) addValue(key1, key2, value []byte) error {
+func (w *DomainBufferedWriter) addValue(key1, key2, value []byte) error {
 	if w.discard {
 		return nil
 	}
@@ -738,7 +739,7 @@ func (c Collation) Close() {
 	c.HistoryCollation.Close()
 }
 
-func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo, txnFrom, txnTo uint64, wal *domainBufferedWriter, vt valueTransformer) error {
+func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo, txnFrom, txnTo uint64, wal *DomainBufferedWriter, vt valueTransformer) error {
 	if stepFrom == stepTo {
 		return nil
 	}
@@ -747,11 +748,11 @@ func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo, txnF
 	}
 
 	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.values, vt)
-	defer wal.close()
+	defer wal.Close()
 	if err != nil {
 		return err
 	}
-	wal.close()
+	wal.Close()
 
 	ps := background.NewProgressSet()
 	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps)

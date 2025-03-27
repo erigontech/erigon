@@ -21,67 +21,70 @@ type BufferFactory interface {
 	New() etl.Buffer
 }
 
-var _ StartRoTx[EntityTxI] = (*Appendable[EntityTxI])(nil)
+var _ StartRoTx[AppendableFilesTxI] = (*Appendable[AppendableFilesTxI])(nil)
 var ErrNotFoundInSnapshot = errors.New("entity not found in snapshot")
 
-type Appendable[T EntityTxI] struct {
+type Appendable[T AppendableFilesTxI] struct {
 	*ProtoAppendable
 
 	canonicalTbl string // for marked structures
 	valsTbl      string
 
-	ts4Bytes        bool // caplin entities are encoded as 4 bytes
-	pruneFrom       Num  // should this be rootnum? Num is fine for now.
-	beginFilesRoGen func() T
+	ts4Bytes   bool               // caplin entities are encoded as 4 bytes
+	pruneFrom  Num                // should this be rootnum? Num is fine for now.
+	beginTxGen func(files bool) T // returns a tx, with "files ro tx" or not
 
 	rel RootRelationI
 }
 
-type AppOpts[T EntityTxI] func(a *Appendable[T])
+type AppOpts func(AppendableConfig)
 
-func App_WithFreezer[T EntityTxI](freezer Freezer) AppOpts[T] {
-	return func(a *Appendable[T]) {
-		a.freezer = freezer
+func App_WithFreezer(freezer Freezer) AppOpts {
+	return func(a AppendableConfig) {
+		a.SetFreezer(freezer)
 	}
 }
 
-func App_WithIndexBuilders[T EntityTxI](builders ...AccessorIndexBuilder) AppOpts[T] {
-	return func(a *Appendable[T]) {
-		a.builders = builders
+func App_WithIndexBuilders(builders ...AccessorIndexBuilder) AppOpts {
+	return func(a AppendableConfig) {
+		a.SetIndexBuilders(builders...)
 	}
 }
 
-func App_WithTs4Bytes[T EntityTxI](ts4Bytes bool) AppOpts[T] {
-	return func(a *Appendable[T]) {
-		a.ts4Bytes = ts4Bytes
+func App_WithTs4Bytes(ts4Bytes bool) AppOpts {
+	return func(a AppendableConfig) {
+		a.SetTs4Bytes(ts4Bytes)
 	}
 }
 
-func App_WithPruneFrom[T EntityTxI](pruneFrom Num) AppOpts[T] {
-	return func(a *Appendable[T]) {
-		a.pruneFrom = pruneFrom
+func App_WithPruneFrom(pruneFrom Num) AppOpts {
+	return func(a AppendableConfig) {
+		a.SetPruneFrom(pruneFrom)
 	}
 }
 
 // func App
-func NewMarkedAppendable(id AppendableId, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[MarkedTxI]) (*Appendable[MarkedTxI], error) {
-	a, err := create(id, Marked, valsTbl, canonicalTbl, relation, logger, options...)
+func NewMarkedAppendable(id AppendableId, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Appendable[MarkedTxI], error) {
+	a, err := create[MarkedTxI](id, Marked, valsTbl, canonicalTbl, relation, logger, options...)
 	if err != nil {
 		return nil, err
 	}
 
-	a.beginFilesRoGen = func() MarkedTxI {
-		return &MarkedTx{
-			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
-			ap:                a,
+	a.beginTxGen = func(files bool) MarkedTxI {
+		m := &MarkedTx{ap: a}
+		if files {
+			m.ProtoAppendableTx = a.ProtoAppendable.BeginFilesRo()
+		} else {
+			m.ProtoAppendableTx = a.ProtoAppendable.BeginNoFilesRo()
 		}
+		return m
 	}
 
 	return a, nil
 }
 
-func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[UnmarkedTxI]) (*Appendable[UnmarkedTxI], error) {
-	a, err := create(id, Unmarked, valsTbl, "", relation, logger, options...)
+func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Appendable[UnmarkedTxI], error) {
+	a, err := create[UnmarkedTxI](id, Unmarked, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -98,18 +101,21 @@ func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 		a.builders = []AccessorIndexBuilder{builder}
 	}
 
-	a.beginFilesRoGen = func() UnmarkedTxI {
-		return &UnmarkedTx{
-			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
-			ap:                a,
+	a.beginTxGen = func(files bool) UnmarkedTxI {
+		m := &UnmarkedTx{ap: a}
+		if files {
+			m.ProtoAppendableTx = a.ProtoAppendable.BeginFilesRo()
+		} else {
+			m.ProtoAppendableTx = a.ProtoAppendable.BeginNoFilesRo()
 		}
+		return m
 	}
 
 	return a, nil
 }
 
-func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelationI, factory BufferFactory, logger log.Logger, options ...AppOpts[BufferedTxI]) (*Appendable[BufferedTxI], error) {
-	a, err := create(id, Buffered, valsTbl, "", relation, logger, options...)
+func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelationI, factory BufferFactory, logger log.Logger, options ...AppOpts) (*Appendable[BufferedTxI], error) {
+	a, err := create[BufferedTxI](id, Buffered, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -118,19 +124,21 @@ func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 		panic("no factory")
 	}
 
-	a.beginFilesRoGen = func() BufferedTxI {
-		return &BufferedTx{
-			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
-			ap:                a,
-			factory:           factory,
+	a.beginTxGen = func(files bool) BufferedTxI {
+		m := &BufferedTx{ap: a}
+		if files {
+			m.ProtoAppendableTx = a.ProtoAppendable.BeginFilesRo()
+		} else {
+			m.ProtoAppendableTx = a.ProtoAppendable.BeginNoFilesRo()
 		}
+		return m
 	}
 
 	// TODO: default builders and index builders
 	return a, nil
 }
 
-func create[T EntityTxI](id AppendableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[T]) (*Appendable[T], error) {
+func create[T AppendableFilesTxI](id AppendableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Appendable[T], error) {
 	a := &Appendable[T]{
 		ProtoAppendable: NewProto(id, nil, nil, logger),
 	}
@@ -152,8 +160,28 @@ func (a *Appendable[T]) encTs(ts ae.EncToBytesI) []byte {
 	return ts.EncToBytes(!a.ts4Bytes)
 }
 
-func (a *Appendable[T]) BeginFilesRo() T {
-	return a.beginFilesRoGen()
+func (a *Appendable[T]) BeginFilesTx() T {
+	return a.beginTxGen(true)
+}
+
+func (a *Appendable[T]) BeginNoFilesTx() T {
+	return a.beginTxGen(false)
+}
+
+func (a *Appendable[T]) SetFreezer(freezer Freezer) {
+	a.freezer = freezer
+}
+
+func (a *Appendable[T]) SetIndexBuilders(builders ...AccessorIndexBuilder) {
+	a.builders = builders
+}
+
+func (a *Appendable[T]) SetPruneFrom(pruneFrom Num) {
+	a.pruneFrom = pruneFrom
+}
+
+func (a *Appendable[T]) SetTs4Bytes(ts4Bytes bool) {
+	a.ts4Bytes = ts4Bytes
 }
 
 // marked tx
@@ -162,41 +190,17 @@ type MarkedTx struct {
 	ap *Appendable[MarkedTxI]
 }
 
-func (m *MarkedTx) Get(entityNum Num, tx kv.Tx) (value Bytes, foundInSnapshot bool, err error) {
-	data, found, err := m.LookupFile(entityNum, tx)
-	if err != nil {
-		return nil, false, err
-	}
-	if !found {
-		data, err := m.getDb(entityNum, nil, tx)
-		return data, false, err
-	}
-
-	switch m.ap.a.Name() {
-	case "headers":
-		// remove the first byte; it's first byte of header hash
-		// we should ultimately remove this first byte...as it's an old implementation of
-		// LessFalsePositives=True
-		data = data[1:]
-	}
-	return data, true, nil
-}
-
-func (m *MarkedTx) getDb(entityNum Num, hash []byte, tx kv.Tx) (Bytes, error) {
+func (m *MarkedTx) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
 	a := m.ap
 	if hash == nil {
 		// find canonical hash
-		canHash, err := tx.GetOne(a.canonicalTbl, a.encTs(entityNum))
+		canHash, err := tx.GetOne(a.canonicalTbl, a.encTs(num))
 		if err != nil {
 			return nil, err
 		}
 		hash = canHash
 	}
-	return tx.GetOne(a.valsTbl, m.combK(entityNum, hash))
-}
-
-func (m *MarkedTx) GetNc(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
-	return m.getDb(num, hash, tx)
+	return tx.GetOne(a.valsTbl, m.combK(num, hash))
 }
 
 func (m *MarkedTx) Put(num Num, hash []byte, val Bytes, tx kv.RwTx) error {
@@ -252,18 +256,8 @@ type UnmarkedTx struct {
 	ap *Appendable[UnmarkedTxI]
 }
 
-func (m *UnmarkedTx) Get(entityNum Num, tx kv.Tx) (value Bytes, pruneCount bool, err error) {
-	ap := m.ap
-	data, found, err := m.LookupFile(entityNum, tx)
-	if err != nil {
-		return nil, false, err
-	}
-	if !found {
-		data, err := tx.GetOne(ap.valsTbl, ap.encTs(entityNum))
-		return data, false, err
-	}
-
-	return data, true, nil
+func (m *UnmarkedTx) GetDb(num Num, tx kv.Tx) (Bytes, error) {
+	return tx.GetOne(m.ap.valsTbl, m.ap.encTs(num))
 }
 
 func (m *UnmarkedTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
@@ -272,24 +266,24 @@ func (m *UnmarkedTx) Append(entityNum Num, value Bytes, tx kv.RwTx) error {
 
 func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 	ap := m.ap
-	fromId, err := ap.rel.RootNum2Num(from, tx)
+	fromN, err := ap.rel.RootNum2Num(from, tx)
 	if err != nil {
 		return err
 	}
-	_, err = ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(fromId), nil, 0, tx)
+	_, err = ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(fromN), nil, 0, tx)
 	return err
 }
 
 func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
-	toId, err := ap.rel.RootNum2Num(to, tx)
+	toNum, err := ap.rel.RootNum2Num(to, tx)
 	if err != nil {
 		return 0, err
 	}
-	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
+	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toNum)
 
 	eFrom := ap.encTs(ap.pruneFrom)
-	eTo := ap.encTs(toId)
+	eTo := ap.encTs(toNum)
 	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 
@@ -301,9 +295,8 @@ type BufferedTx struct {
 }
 
 // Get doesn't reflect the values currently in Buffer
-func (m *BufferedTx) Get(entityNum Num, tx kv.Tx) (data Bytes, foundInSnapshot bool, err error) {
-	data, err = tx.GetOne(m.ap.valsTbl, m.ap.encTs(entityNum))
-	return data, false, err
+func (m *BufferedTx) GetDb(entityNum Num, tx kv.Tx) (data Bytes, err error) {
+	return tx.GetOne(m.ap.valsTbl, m.ap.encTs(entityNum))
 }
 
 func (m *BufferedTx) Put(entityNum Num, value Bytes) error {
@@ -327,14 +320,14 @@ func (m *BufferedTx) Flush(ctx context.Context, tx kv.RwTx) error {
 
 func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (pruneCount uint64, err error) {
 	ap := m.ap
-	toId, err := ap.rel.RootNum2Num(to, tx)
+	toNum, err := ap.rel.RootNum2Num(to, tx)
 	if err != nil {
 		return 0, err
 	}
-	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
+	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toNum)
 
 	eFrom := ap.encTs(ap.pruneFrom)
-	eTo := ap.encTs(toId)
+	eTo := ap.encTs(toNum)
 	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 

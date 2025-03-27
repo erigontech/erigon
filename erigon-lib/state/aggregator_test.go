@@ -65,7 +65,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -186,7 +186,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	}()
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -317,7 +317,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(tx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -394,11 +394,11 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	startTx := anotherAgg.EndTxNumMinimax()
 	ac2 := anotherAgg.BeginFilesRo()
 	defer ac2.Close()
-	dom2, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac2), log.New())
+	dom2, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac2), log.New())
 	require.NoError(t, err)
 	defer dom2.Close()
 
-	_, err = dom2.SeekCommitment(ctx, WrapTxWithCtx(rwTx, ac2))
+	_, err = dom2.SeekCommitment(ctx, wrapTxWithCtx(rwTx, ac2))
 	sstartTx := dom2.TxNum()
 
 	require.NoError(t, err)
@@ -460,7 +460,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(tx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -792,7 +792,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	}()
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(tx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -864,7 +864,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	ac = newAgg.BeginFilesRo()
 	defer ac.Close()
-	tx2 := WrapTxWithCtx(newTx, ac)
+	tx2 := wrapTxWithCtx(newTx, ac)
 	newDoms, err := NewSharedDomains(tx2, log.New())
 	require.NoError(t, err)
 	defer newDoms.Close()
@@ -923,7 +923,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(tx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -937,7 +937,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		tx, err = db.BeginRw(context.Background())
 		require.NoError(t, err)
 		ac = agg.BeginFilesRo()
-		domains, err = NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
+		domains, err = NewSharedDomains(wrapTxWithCtx(tx, ac), log.New())
 		require.NoError(t, err)
 		atomic.StoreUint64(&latestCommitTxNum, txn)
 		return nil
@@ -1176,7 +1176,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	changesetAt5 := &StateChangeSet{}
@@ -1228,7 +1228,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err = NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	diffs := [kv.DomainLen][]DomainEntryDiff{}
@@ -1273,7 +1273,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err = NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	for idx := range changesetAt3.Diffs {
@@ -1320,11 +1320,32 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash.Bytes())
 }
 
+func wrapTxWithCtxForTest(tx kv.Tx, ctx *AggregatorRoTx) *Tx {
+	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), filesTx: ctx}
+}
+
+// wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
+// need to move non-unit-tests to own package
+func wrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *Tx {
+	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), filesTx: ctx}
+}
+
+// wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
+// need to move non-unit-tests to own package
+func wrapDbWithCtx(db kv.RwDB, ctx *Aggregator) kv.TemporalRwDB {
+	v, err := New(db, ctx)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
-	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
+	_db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
 		stepSize:                         20,
 		disableCommitmentBranchTransform: false,
 	})
+	db := wrapDbWithCtx(_db, agg)
 
 	ac := agg.BeginFilesRo()
 	roots := make([]common.Hash, 0)
@@ -1391,7 +1412,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	finalRoot, err := RebuildCommitmentFiles(ctx, agg, nil, &rawdbv3.TxNums, agg.logger)
+	finalRoot, err := RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, agg.logger)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)
 	require.NotEqualValues(t, commitment.EmptyRootHash, finalRoot)
