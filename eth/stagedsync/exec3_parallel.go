@@ -460,7 +460,7 @@ func (pe *parallelExecutor) run(ctx context.Context, maxTxNum uint64, logger log
 	pe.in = state.NewQueueWithRetry(100_000)
 
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
-		pe.RWMutex.RLocker(), pe.accumulator, logger, ctx, true, pe.cfg.db, pe.rs, pe.in,
+		pe.RWMutex.RLocker(), pe.accumulator, logger, nil, ctx, true, pe.cfg.db, pe.rs, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.workerCount+1, pe.cfg.dirs, pe.isMining)
 
 	rwLoopCtx, rwLoopCtxCancel := context.WithCancel(ctx)

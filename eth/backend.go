@@ -102,6 +102,7 @@ import (
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/ethstats"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -241,7 +242,7 @@ const blockBufferSize = 128
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
+func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Sign() <= 0 {
 		logger.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
@@ -307,6 +308,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		if genesisConfig != nil {
 			config.Genesis = genesisConfig
+		}
+
+		if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
+			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
 		}
 
 		h, err := rawdb.ReadCanonicalHash(tx, 0)
@@ -476,7 +481,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		go func() {
-			logEvery := time.NewTicker(180 * time.Second)
+			logEvery := time.NewTicker(90 * time.Second)
 			defer logEvery.Stop()
 
 			var logItems []interface{}
@@ -584,7 +589,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
-			dirs, notifications, blockReader, blockWriter, backend.silkworm, terseLogger)
+			dirs, notifications, blockReader, blockWriter, backend.silkworm, terseLogger, nil)
 		chainReader := consensuschain.NewReader(chainConfig, txc.Tx, blockReader, logger)
 		// We start the mining step
 		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain, config.ImportMode); err != nil {
@@ -744,8 +749,24 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logger,
 		)
 		contractBackend := contracts.NewDirectBackend(ethApi)
-		secondaryTxnProvider := backend.txPool
-		backend.shutterPool = shutter.NewPool(logger, config.Shutter, secondaryTxnProvider, contractBackend, backend.stateDiffClient)
+		baseTxnProvider := backend.txPool
+		currentBlockNumReader := func(ctx context.Context) (*uint64, error) {
+			tx, err := backend.chainDB.BeginRo(ctx)
+			if err != nil {
+				return nil, err
+			}
+
+			defer tx.Rollback()
+			return chain.CurrentBlockNumber(tx)
+		}
+		backend.shutterPool = shutter.NewPool(
+			logger,
+			config.Shutter,
+			baseTxnProvider,
+			contractBackend,
+			backend.stateDiffClient,
+			currentBlockNumReader,
+		)
 		txnProvider = backend.shutterPool
 	}
 
@@ -964,12 +985,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.stopNode,
 			&engineAPISwitcher{backend: backend},
 			backend,
+			tracer,
 		)
 		backend.syncUnwindOrder = stagedsync.PolygonSyncUnwindOrder
 		backend.syncPruneOrder = stagedsync.PolygonSyncPruneOrder
 	} else {
 		backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-			blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger)
+			blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger, tracer)
 		backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 		backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 	}
@@ -1001,9 +1023,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	checkStateRoot := true
-	pipelineStages := stages2.NewPipelineStages(ctx, backend.chainDB, config, p2pConfig, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, logger, checkStateRoot)
+	pipelineStages := stages2.NewPipelineStages(ctx, backend.chainDB, config, p2pConfig, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, logger, tracer, checkStateRoot)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
-	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, ctx)
+	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentLogs, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, ctx)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine

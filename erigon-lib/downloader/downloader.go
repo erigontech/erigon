@@ -2444,7 +2444,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 			}
 		} else {
 			if ff.Type == nil {
-				panic(fmt.Sprintf("nil ptr after parsing file: %s", name))
+				return fmt.Errorf("nil ptr after parsing file: %s", name)
 			}
 			if !d.cfg.SnapshotConfig.Seedable(ff) {
 				return nil

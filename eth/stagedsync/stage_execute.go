@@ -129,8 +129,8 @@ func StageExecuteBlocksCfg(
 		historyV3:         true,
 		syncCfg:           syncCfg,
 		silkworm:          silkworm,
-		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
-		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
+		applyWorker:       exec3.NewWorker(nil, log.Root(), vmConfig.Tracer, context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
+		applyWorkerMining: exec3.NewWorker(nil, log.Root(), vmConfig.Tracer, context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
 	}
 }
 
@@ -156,7 +156,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 	}
 
 	parallel := txc.Tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, initialCycle, isMining); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, cfg.vmConfig.Tracer, initialCycle, isMining); err != nil {
 		return err
 	}
 	return nil

@@ -143,7 +143,7 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 		blockContext := evm.Context
 		blockContext.Coinbase = state.SystemAddress
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, engine, true /* constCall */)
+			return SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, engine, true /* constCall */, nil)
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
@@ -155,6 +155,26 @@ type EntryPointCall struct {
 	Input        []byte
 	From         libcommon.Address
 	Error        error
+}
+
+func (epc *EntryPointCall) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	if epc.OnEnterSuper != nil {
+		epc.OnEnterSuper(depth, typ, from, to, precompile, input, gas, value, code)
+	}
+
+	isRip7560EntryPoint := to.Cmp(types.AA_ENTRY_POINT) == 0
+	if !isRip7560EntryPoint {
+		return
+	}
+
+	if epc.Input != nil {
+		epc.Error = errors.New("illegal repeated call to the EntryPoint callback")
+		return
+	}
+
+	epc.Input = make([]byte, len(input))
+	copy(epc.Input, input)
+	epc.From = from
 }
 
 func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool, validateFrame func(ibs evmtypes.IntraBlockState, epc *EntryPointCall) error) (*evmtypes.ExecutionResult, error) {
@@ -230,6 +250,11 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
 		return err
 	}
+
+	if st.evm.Config().Tracer != nil && st.evm.Config().Tracer.OnGasChange != nil {
+		st.evm.Config().Tracer.OnGasChange(0, st.msg.Gas(), tracing.GasChangeTxInitialBalance)
+	}
+
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
 	st.evm.BlobFee = blobGasVal
@@ -329,18 +354,11 @@ func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlock
 
 	epc := &EntryPointCall{}
 	st.state.SetHooks(&tracing.Hooks{
-		OnEnter: epc.OnEnterSuper,
+		OnEnter: epc.OnEnter,
 	})
 
 	if err := st.buyGas(false); err != nil {
 		return nil, err
-	}
-
-	if st.evm.Config().Debug {
-		st.evm.Config().Tracer.CaptureTxStart(st.initialGas)
-		defer func() {
-			st.evm.Config().Tracer.CaptureTxEnd(st.gasRemaining)
-		}()
 	}
 
 	msg := st.msg
@@ -515,12 +533,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	if err := st.preCheck(gasBailout); err != nil {
 		return nil, err
 	}
-	if st.evm.Config().Debug {
-		st.evm.Config().Tracer.CaptureTxStart(st.initialGas)
-		defer func() {
-			st.evm.Config().Tracer.CaptureTxEnd(st.gasRemaining)
-		}()
-	}
 
 	msg := st.msg
 	sender := vm.AccountRef(msg.From())
@@ -632,6 +644,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	if st.gasRemaining < gas || st.gasRemaining < floorGas7623 {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(gas, floorGas7623))
 	}
+
+	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
+		t.OnGasChange(st.gasRemaining, st.gasRemaining-gas, tracing.GasChangeTxIntrinsicGas)
+	}
 	st.gasRemaining -= gas
 
 	var bailout bool
@@ -722,7 +738,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		CoinbaseInitBalance: coinbaseInitBalance,
 		FeeTipped:           amount,
 		EvmRefund:           st.state.GetRefund(),
-		EvmGasUsed:          st.gasUsed(),
 	}
 
 	if st.evm.Context.PostApplyMessage != nil {

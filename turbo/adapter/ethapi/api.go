@@ -39,27 +39,28 @@ import (
 
 // CallArgs represents the arguments for a call.
 type CallArgs struct {
-	From                 *libcommon.Address `json:"from"`
-	To                   *libcommon.Address `json:"to"`
-	Gas                  *hexutil.Uint64    `json:"gas"`
-	GasPrice             *hexutil.Big       `json:"gasPrice"`
-	MaxPriorityFeePerGas *hexutil.Big       `json:"maxPriorityFeePerGas"`
-	MaxFeePerGas         *hexutil.Big       `json:"maxFeePerGas"`
-	MaxFeePerBlobGas     *hexutil.Big       `json:"maxFeePerBlobGas"`
-	Value                *hexutil.Big       `json:"value"`
-	Nonce                *hexutil.Uint64    `json:"nonce"`
-	Data                 *hexutil.Bytes     `json:"data"`
-	Input                *hexutil.Bytes     `json:"input"`
-	AccessList           *types.AccessList  `json:"accessList"`
-	ChainID              *hexutil.Big       `json:"chainId,omitempty"`
+	From                 *libcommon.Address        `json:"from"`
+	To                   *libcommon.Address        `json:"to"`
+	Gas                  *hexutil.Uint64           `json:"gas"`
+	GasPrice             *hexutil.Big              `json:"gasPrice"`
+	MaxPriorityFeePerGas *hexutil.Big              `json:"maxPriorityFeePerGas"`
+	MaxFeePerGas         *hexutil.Big              `json:"maxFeePerGas"`
+	MaxFeePerBlobGas     *hexutil.Big              `json:"maxFeePerBlobGas"`
+	Value                *hexutil.Big              `json:"value"`
+	Nonce                *hexutil.Uint64           `json:"nonce"`
+	Data                 *hexutil.Bytes            `json:"data"`
+	Input                *hexutil.Bytes            `json:"input"`
+	AccessList           *types.AccessList         `json:"accessList"`
+	ChainID              *hexutil.Big              `json:"chainId,omitempty"`
+	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 }
 
 // from retrieves the transaction sender address.
-func (arg *CallArgs) from() libcommon.Address {
-	if arg.From == nil {
+func (args *CallArgs) from() libcommon.Address {
+	if args.From == nil {
 		return libcommon.Address{}
 	}
-	return *arg.From
+	return *args.From
 }
 
 // ToMessage converts CallArgs to the Message type used by the core evm
@@ -160,10 +161,89 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	}
 
 	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerBlobGas)
+
+	if args.AuthorizationList != nil {
+		authorizations := make([]types.Authorization, len(args.AuthorizationList))
+		for i, auth := range args.AuthorizationList {
+			var err error
+			authorizations[i], err = auth.ToAuthorization()
+			if err != nil {
+				return nil, err
+			}
+		}
+		msg.SetAuthorizations(authorizations)
+	}
+
 	return msg, nil
 }
 
-// account indicates the overriding fields of account during the execution of
+// ToTransaction converts CallArgs to the Transaction type used by the core evm
+func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (types.Transaction, error) {
+	chainID, overflow := uint256.FromBig((*big.Int)(args.ChainID))
+	if overflow {
+		return nil, errors.New("chainId field caused an overflow (uint256)")
+	}
+
+	msg, err := args.ToMessage(globalGasCap, baseFee)
+	if err != nil {
+		return nil, err
+	}
+
+	var tx types.Transaction
+	switch {
+	case args.MaxFeePerGas != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		tx = &types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				Nonce:    msg.Nonce(),
+				GasLimit: msg.Gas(),
+				To:       args.To,
+				Value:    msg.Value(),
+				Data:     msg.Data(),
+			},
+			ChainID:    chainID,
+			FeeCap:     msg.FeeCap(),
+			TipCap:     msg.TipCap(),
+			AccessList: al,
+		}
+	case args.AccessList != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		tx = &types.AccessListTx{
+			LegacyTx: types.LegacyTx{
+				CommonTx: types.CommonTx{
+					Nonce:    msg.Nonce(),
+					GasLimit: msg.Gas(),
+					To:       args.To,
+					Value:    msg.Value(),
+					Data:     msg.Data(),
+				},
+				GasPrice: msg.GasPrice(),
+			},
+			ChainID:    chainID,
+			AccessList: al,
+		}
+	default:
+		tx = &types.LegacyTx{
+			CommonTx: types.CommonTx{
+				Nonce:    msg.Nonce(),
+				GasLimit: msg.Gas(),
+				To:       args.To,
+				Value:    msg.Value(),
+				Data:     msg.Data(),
+			},
+			GasPrice: msg.GasPrice(),
+		}
+	}
+	return tx, nil
+}
+
+// Account indicates the overriding fields of account during the execution of
 // a message call.
 // Note, state and stateDiff can't be specified at the same time. If state is
 // set, message execution will only use the data in the given state. Otherwise

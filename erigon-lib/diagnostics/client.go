@@ -107,7 +107,7 @@ func createDb(ctx context.Context, dbDir string) (db kv.RwDB, err error) {
 	return db, nil
 }
 
-func (d *DiagnosticClient) Setup() {
+func (d *DiagnosticClient) Setup(txpool bool) {
 
 	rootCtx, _ := common.RootContext()
 
@@ -120,7 +120,10 @@ func (d *DiagnosticClient) Setup() {
 	d.setupBodiesDiagnostics(rootCtx)
 	d.setupResourcesUsageDiagnostics(rootCtx)
 	d.setupSpeedtestDiagnostics(rootCtx)
-	d.setupTxPoolDiagnostics(rootCtx)
+
+	if txpool {
+		d.setupTxPoolDiagnostics(rootCtx)
+	}
 
 	d.runSaveProcess(rootCtx)
 
