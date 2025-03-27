@@ -124,7 +124,7 @@ func createDb(ctx context.Context, dbDir string) (db kv.RwDB, err error) {
 	return db, nil
 }
 
-func (d *DiagnosticClient) Setup(txpool bool) {
+func (d *DiagnosticClient) Setup() {
 
 	rootCtx, _ := common.RootContext()
 
