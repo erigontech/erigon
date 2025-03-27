@@ -172,6 +172,7 @@ func (tx *Tx) ForceReopenAggCtx() {
 	tx.filesTx = tx.Agg().BeginFilesRo()
 }
 func (tx *Tx) FreezeInfo() kv.FreezeInfo { return tx.filesTx }
+func (tx *Tx) Debug() kv.TemporalDebugTx { return tx }
 
 func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
 func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
@@ -249,4 +250,10 @@ func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit
 	}
 	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
+}
+
+// Debug methods
+
+func (tx *Tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	return tx.filesTx.DebugRangeLatest(tx.MdbxTx, domain, from, to, limit)
 }

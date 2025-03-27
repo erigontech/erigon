@@ -24,6 +24,7 @@ import "C"
 
 import (
 	"context"
+
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -92,6 +93,8 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, e
 		logger.Info("Starting Erigon on Holesky testnet...")
 	case networkname.Sepolia:
 		logger.Info("Starting Erigon on Sepolia testnet...")
+	case networkname.Hoodi:
+		logger.Info("Starting Erigon on Hoodi testnet...")
 	case networkname.Dev:
 		logger.Info("Starting Erigon in ephemeral dev mode...")
 	case networkname.Amoy:

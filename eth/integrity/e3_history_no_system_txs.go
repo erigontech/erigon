@@ -36,6 +36,7 @@ import (
 
 // History - usually don't have anything attributed to 1-st system txs (except genesis)
 func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader) error {
+	defer log.Info("[integrity] HistoryCheckNoSystemTxs done")
 	count := atomic.Uint64{}
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -53,7 +54,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 				defer tx.Rollback()
 
 				var minStep uint64 = math.MaxUint64
-				keys, err := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).RangeLatest(tx, kv.AccountsDomain, []byte{byte(j), byte(jj)}, []byte{byte(j), byte(jj + 1)}, -1)
+				keys, err := tx.Debug().RangeLatest(kv.AccountsDomain, []byte{byte(j), byte(jj)}, []byte{byte(j), byte(jj + 1)}, -1)
 				if err != nil {
 					return err
 				}

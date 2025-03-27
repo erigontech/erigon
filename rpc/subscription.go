@@ -118,7 +118,7 @@ func NewLocalNotifier(namespace string, resc chan<- any, closec <-chan any) *Loc
 	}
 }
 
-func (n LocalNotifier) CreateSubscription() *Subscription {
+func (n *LocalNotifier) CreateSubscription() *Subscription {
 	if n.sub != nil {
 		panic("can't create multiple subscriptions with LocalNotifier")
 	}
@@ -132,7 +132,7 @@ func (n LocalNotifier) CreateSubscription() *Subscription {
 	return n.sub
 }
 
-func (n LocalNotifier) Notify(id ID, data interface{}) error {
+func (n *LocalNotifier) Notify(id ID, data interface{}) error {
 	if n.sub == nil {
 		panic("can't Notify before subscription is created")
 	} else if n.sub.ID != id {
@@ -147,7 +147,7 @@ func (n LocalNotifier) Notify(id ID, data interface{}) error {
 	}
 }
 
-func (n LocalNotifier) Closed() <-chan interface{} {
+func (n *LocalNotifier) Closed() <-chan interface{} {
 	return n.closec
 }
 
