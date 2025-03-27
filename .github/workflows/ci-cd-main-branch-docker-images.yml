@@ -26,9 +26,9 @@ on:
 jobs:
 
   Build:
-    runs-on: ubuntu-latest ## revert it to "ubuntu-latest" once https://github.com/actions/runner-images/issues/11471 fixed
-    #runs-on: 
-    #  group: devops-prod
+    #runs-on: ubuntu-latest ## revert it to "ubuntu-latest" once https://github.com/actions/runner-images/issues/11471 fixed
+    runs-on: 
+      group: devops-prod
 
     timeout-minutes: 45
     outputs:
