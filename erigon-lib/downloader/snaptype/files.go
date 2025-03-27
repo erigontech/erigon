@@ -290,7 +290,7 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 }
 
 func (f FileInfo) As(t Type) FileInfo {
-	name := fmt.Sprintf("v%d-%06d-%06d-%s%s", f.Version, f.From/1_000, f.To/1_000, t, f.Ext)
+	name := fmt.Sprintf("%s-%06d-%06d-%s%s", f.Version.String(), f.From/1_000, f.To/1_000, t, f.Ext)
 	return FileInfo{
 		Version: f.Version,
 		From:    f.From,
