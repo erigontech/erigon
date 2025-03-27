@@ -35,7 +35,7 @@ var phase0BeaconSnappyTest []byte
 
 func TestBeaconStateCapellaEncodingDecoding(t *testing.T) {
 	state := New(&clparams.MainnetBeaconConfig)
-	decodedSSZ, err := utils.DecompressSnappy(capellaBeaconSnappyTest)
+	decodedSSZ, err := utils.DecompressSnappy(capellaBeaconSnappyTest, true)
 	require.NoError(t, err)
 	require.NoError(t, state.DecodeSSZ(decodedSSZ, int(clparams.CapellaVersion)))
 	root, err := state.HashSSZ()
@@ -46,7 +46,7 @@ func TestBeaconStateCapellaEncodingDecoding(t *testing.T) {
 
 func TestBeaconStatePhase0EncodingDecoding(t *testing.T) {
 	state := New(&clparams.MainnetBeaconConfig)
-	decodedSSZ, err := utils.DecompressSnappy(phase0BeaconSnappyTest)
+	decodedSSZ, err := utils.DecompressSnappy(phase0BeaconSnappyTest, true)
 	require.NoError(t, err)
 	state.DecodeSSZ(decodedSSZ, int(clparams.Phase0Version))
 	root, err := state.HashSSZ()

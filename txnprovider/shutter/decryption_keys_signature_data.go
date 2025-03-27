@@ -78,6 +78,13 @@ func IdentityPreimageFromBytes(b []byte) (*IdentityPreimage, error) {
 	return &ip, err
 }
 
+func IdentityPreimageFromSenderPrefix(prefix [32]byte, sender libcommon.Address) *IdentityPreimage {
+	var ip IdentityPreimage
+	copy(ip[:len(prefix)], prefix[:])
+	copy(ip[len(prefix):], sender.Bytes())
+	return &ip
+}
+
 type IdentityPreimages []*IdentityPreimage
 
 func (ips IdentityPreimages) ToListSSZ() *solid.ListSSZ[*IdentityPreimage] {

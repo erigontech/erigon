@@ -81,7 +81,16 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 		if err != nil {
 			return nil, err
 		}
-		if err := returnState.DecodeSSZ(encodedState, int(clparams.BellatrixVersion)); err != nil {
+		if err := returnState.DecodeSSZ(encodedState, int(clparams.Phase0Version)); err != nil {
+			return nil, err
+		}
+	case clparams.HoodiNetwork:
+		// Download genesis state by wget the url
+		encodedState, err := downloadGenesisState("https://github.com/eth-clients/hoodi/raw/main/metadata/genesis.ssz")
+		if err != nil {
+			return nil, err
+		}
+		if err := returnState.DecodeSSZ(encodedState, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
 	default:
@@ -91,5 +100,5 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 }
 
 func IsGenesisStateSupported(network clparams.NetworkType) bool {
-	return network == clparams.MainnetNetwork || network == clparams.SepoliaNetwork || network == clparams.GnosisNetwork || network == clparams.ChiadoNetwork || network == clparams.HoleskyNetwork
+	return network == clparams.MainnetNetwork || network == clparams.SepoliaNetwork || network == clparams.GnosisNetwork || network == clparams.ChiadoNetwork || network == clparams.HoleskyNetwork || network == clparams.HoodiNetwork
 }

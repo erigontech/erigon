@@ -58,7 +58,7 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 			panic(err)
 		}
 		txs[i] = signedTx
-		receipts[i] = types.NewReceipt(false, tx.GetGas())
+		receipts[i] = types.NewReceipt(false, tx.GetGasLimit())
 	}
 	for i := range uncles {
 		uncles[i] = &types.Header{

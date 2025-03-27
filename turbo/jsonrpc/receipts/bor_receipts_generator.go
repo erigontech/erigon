@@ -60,7 +60,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 		return nil, err
 	}
 
-	cumGasUsedInLastBlock, _, _, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
+	cumGasUsedInLastBlock, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 	gp := new(core.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
 
-	receipt, err := applyBorTransaction(msgs, evm, gp, ibs, block, cumGasUsedInLastBlock, 0)
+	receipt, err := applyBorTransaction(msgs, evm, gp, ibs, block, cumGasUsedInLastBlock, uint(firstLogIndex))
 	if err != nil {
 		return nil, err
 	}
@@ -103,9 +103,9 @@ func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state
 	receiptLogs := ibs.GetLogs(0, bortypes.ComputeBorTxHash(blockNum, blockHash), blockNum, blockHash)
 
 	// set fields
-	for i, log := range receiptLogs {
-		log.TxIndex = txIndex
-		log.Index = logIndex + uint(i)
+	for i, l := range receiptLogs {
+		l.TxIndex = txIndex
+		l.Index = logIndex + uint(i)
 	}
 	return receiptLogs, nil
 }

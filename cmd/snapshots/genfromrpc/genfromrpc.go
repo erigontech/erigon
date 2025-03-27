@@ -108,8 +108,8 @@ func buildDynamicFeeFields(tx *types.DynamicFeeTransaction, rawTx map[string]int
 	if accessListRaw, ok := rawTx["accessList"].([]interface{}); ok {
 		tx.AccessList = decodeAccessList(accessListRaw)
 	}
-	if tip := getUint256FromField(rawTx, "maxPriorityFeePerGas"); tip != nil {
-		tx.Tip = tip
+	if tipCap := getUint256FromField(rawTx, "maxPriorityFeePerGas"); tipCap != nil {
+		tx.TipCap = tipCap
 	}
 	if feeCap := getUint256FromField(rawTx, "maxFeePerGas"); feeCap != nil {
 		tx.FeeCap = feeCap
@@ -130,7 +130,7 @@ func parseCommonTx(rawTx map[string]interface{}) (*types.CommonTx, error) {
 	if !ok {
 		return nil, errors.New("missing gas")
 	}
-	commonTx.Gas = convertHexToBigInt(gasStr).Uint64()
+	commonTx.GasLimit = convertHexToBigInt(gasStr).Uint64()
 
 	if toStr, ok := rawTx["to"].(string); ok && toStr != "" {
 		addr := common.HexToAddress(toStr)
@@ -194,14 +194,14 @@ func decodeBlobVersionedHashes(rawVersionedHashes []string) []common.Hash {
 func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
 	tx := &types.LegacyTx{
 		CommonTx: types.CommonTx{
-			Nonce: commonTx.Nonce,
-			Gas:   commonTx.Gas,
-			To:    commonTx.To,
-			Value: commonTx.Value,
-			Data:  commonTx.Data,
-			V:     commonTx.V,
-			R:     commonTx.R,
-			S:     commonTx.S,
+			Nonce:    commonTx.Nonce,
+			GasLimit: commonTx.GasLimit,
+			To:       commonTx.To,
+			Value:    commonTx.Value,
+			Data:     commonTx.Data,
+			V:        commonTx.V,
+			R:        commonTx.R,
+			S:        commonTx.S,
 		},
 		GasPrice: getUint256FromField(rawTx, "gasPrice"),
 	}
@@ -213,14 +213,14 @@ func makeAccessListTx(commonTx *types.CommonTx, rawTx map[string]interface{}) ty
 	tx := &types.AccessListTx{
 		LegacyTx: types.LegacyTx{
 			CommonTx: types.CommonTx{
-				Nonce: commonTx.Nonce,
-				Gas:   commonTx.Gas,
-				To:    commonTx.To,
-				Value: commonTx.Value,
-				Data:  commonTx.Data,
-				V:     commonTx.V,
-				R:     commonTx.R,
-				S:     commonTx.S,
+				Nonce:    commonTx.Nonce,
+				GasLimit: commonTx.GasLimit,
+				To:       commonTx.To,
+				Value:    commonTx.Value,
+				Data:     commonTx.Data,
+				V:        commonTx.V,
+				R:        commonTx.R,
+				S:        commonTx.S,
 			},
 			GasPrice: getUint256FromField(rawTx, "gasPrice"),
 		},
@@ -237,14 +237,14 @@ func makeAccessListTx(commonTx *types.CommonTx, rawTx map[string]interface{}) ty
 // makeEip1559Tx builds an EIP-1559 dynamic fee transaction.
 func makeEip1559Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
 	tx := &types.DynamicFeeTransaction{CommonTx: types.CommonTx{
-		Nonce: commonTx.Nonce,
-		Gas:   commonTx.Gas,
-		To:    commonTx.To,
-		Value: commonTx.Value,
-		Data:  commonTx.Data,
-		V:     commonTx.V,
-		R:     commonTx.R,
-		S:     commonTx.S,
+		Nonce:    commonTx.Nonce,
+		GasLimit: commonTx.GasLimit,
+		To:       commonTx.To,
+		Value:    commonTx.Value,
+		Data:     commonTx.Data,
+		V:        commonTx.V,
+		R:        commonTx.R,
+		S:        commonTx.S,
 	}}
 	buildDynamicFeeFields(tx, rawTx)
 	return tx
@@ -254,14 +254,14 @@ func makeEip1559Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
 	blobTx := &types.BlobTx{
 		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{
-			Nonce: commonTx.Nonce,
-			Gas:   commonTx.Gas,
-			To:    commonTx.To,
-			Value: commonTx.Value,
-			Data:  commonTx.Data,
-			V:     commonTx.V,
-			R:     commonTx.R,
-			S:     commonTx.S,
+			Nonce:    commonTx.Nonce,
+			GasLimit: commonTx.GasLimit,
+			To:       commonTx.To,
+			Value:    commonTx.Value,
+			Data:     commonTx.Data,
+			V:        commonTx.V,
+			R:        commonTx.R,
+			S:        commonTx.S,
 		}},
 	}
 	buildDynamicFeeFields(&blobTx.DynamicFeeTransaction, rawTx)
@@ -284,14 +284,14 @@ func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
 	tx := &types.SetCodeTransaction{
 		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{
-			Nonce: commonTx.Nonce,
-			Gas:   commonTx.Gas,
-			To:    commonTx.To,
-			Value: commonTx.Value,
-			Data:  commonTx.Data,
-			V:     commonTx.V,
-			R:     commonTx.R,
-			S:     commonTx.S,
+			Nonce:    commonTx.Nonce,
+			GasLimit: commonTx.GasLimit,
+			To:       commonTx.To,
+			Value:    commonTx.Value,
+			Data:     commonTx.Data,
+			V:        commonTx.V,
+			R:        commonTx.R,
+			S:        commonTx.S,
 		}},
 	}
 	buildDynamicFeeFields(&tx.DynamicFeeTransaction, rawTx)

@@ -782,8 +782,8 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 		} else {
 			inv = inv[:n]
 		}
-		for i := 0; i < n; i++ {
-			inv[filtered[i]] = int32(i)
+		for i := int32(0); i < int32(n); i++ {
+			inv[filtered[i]] = i
 		}
 		//logger.Info("Inverted array done")
 		var k int

@@ -33,7 +33,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/go-chi/chi/v5"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -75,43 +75,6 @@ var (
 
 var defaultGraffitiString = "Caplin"
 
-const missedTimeout = 500 * time.Millisecond
-
-func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context.Context, syncedData synced_data.SyncedData, epoch uint64) error {
-	timer := time.NewTimer(missedTimeout)
-	checkIfSlotIsThere := func() (bool, error) {
-		tx, err := a.indiciesDB.BeginRo(ctx)
-		if err != nil {
-			return false, err
-		}
-		defer tx.Rollback()
-		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
-		if err != nil {
-			return false, err
-		}
-		return blockRoot != (libcommon.Hash{}), nil
-	}
-
-	defer timer.Stop()
-	for {
-		select {
-		case <-timer.C:
-			return nil
-		case <-ctx.Done():
-			return fmt.Errorf("waiting for head state to reach slot %d: %w", epoch, ctx.Err())
-		default:
-		}
-		ready, err := checkIfSlotIsThere()
-		if err != nil {
-			return err
-		}
-		if ready {
-			return nil
-		}
-		time.Sleep(30 * time.Millisecond)
-	}
-}
-
 func (a *ApiHandler) waitForHeadSlot(slot uint64) {
 	stopCh := time.After(time.Second)
 	for {
@@ -149,11 +112,6 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 	start := time.Now()
 
-	// wait until the head state is at the target slot or later
-	err = a.waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(r.Context(), a.syncedData, *slot/a.beaconChainCfg.SlotsPerEpoch)
-	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
-	}
 	tx, err := a.indiciesDB.BeginRo(r.Context())
 	if err != nil {
 		return nil, err

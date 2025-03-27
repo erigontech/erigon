@@ -27,10 +27,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"

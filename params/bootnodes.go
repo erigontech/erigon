@@ -53,6 +53,15 @@ var SepoliaBootnodes = []string{
 	"enode://9e9492e2e8836114cc75f5b929784f4f46c324ad01daf87d956f98b3b6c5fcba95524d6e5cf9861dc96a2c8a171ea7105bb554a197455058de185fa870970c7c@138.68.123.152:30303", // sepolia-bootnode-1-ams3
 }
 
+// HoodiBootnodes are the enode URLs of the P2P bootstrap nodes running on the
+// Hoodi test network.
+var HoodiBootnodes = []string{
+	// EF DevOps
+	"enode://2112dd3839dd752813d4df7f40936f06829fc54c0e051a93967c26e5f5d27d99d886b57b4ffcc3c475e930ec9e79c56ef1dbb7d86ca5ee83a9d2ccf36e5c240c@134.209.138.84:30303",
+	"enode://60203fcb3524e07c5df60a14ae1c9c5b24023ea5d47463dfae051d2c9f3219f309657537576090ca0ae641f73d419f53d8e8000d7a464319d4784acd7d2abc41@209.38.124.160:30303",
+	"enode://8ae4a48101b2299597341263da0deb47cc38aa4d3ef4b7430b897d49bfa10eb1ccfe1655679b1ed46928ef177fbf21b86837bd724400196c508427a6f41602cd@134.199.184.23:30303",
+}
+
 var SepoliaStaticPeers = []string{
 	// from https://github.com/erigontech/erigon/issues/6134#issuecomment-1354923418
 	"enode://8ae4559db1b1e160be8cc46018d7db123ed6d03fbbfe481da5ec05f71f0aa4d5f4b02ad059127096aa994568706a0d02933984083b87c5e1e3de2b7692444d37@35.161.233.158:46855",
@@ -132,6 +141,8 @@ func KnownDNSNetwork(genesis libcommon.Hash, protocol string) string {
 		net = "sepolia"
 	case HoleskyGenesisHash:
 		net = "holesky"
+	case HoodiGenesisHash:
+		net = "hoodi"
 	case BorMainnetGenesisHash:
 		return "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io"
 	default:
@@ -146,6 +157,8 @@ func BootnodeURLsOfChain(chain string) []string {
 		return MainnetBootnodes
 	case networkname.Holesky:
 		return HoleskyBootnodes
+	case networkname.Hoodi:
+		return HoodiBootnodes
 	case networkname.Sepolia:
 		return SepoliaBootnodes
 	case networkname.Amoy:

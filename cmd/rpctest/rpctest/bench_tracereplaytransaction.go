@@ -19,16 +19,11 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
-	"net/http"
 	"os"
-	"time"
 )
 
 func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
 	setRoutes(erigonUrl, gethUrl)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 
 	var rec *bufio.Writer
 	if recordFile != "" {
@@ -52,11 +47,7 @@ func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, bl
 	}
 
 	var res CallResult
-	reqGen := &RequestGenerator{
-		client: client,
-	}
-
-	reqGen.reqID++
+	reqGen := &RequestGenerator{}
 
 	for bn := blockFrom; bn < blockTo; bn++ {
 		var b EthBlockByNumber
@@ -68,7 +59,7 @@ func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, bl
 			return fmt.Errorf("retrieving block (Erigon): %d %s", b.Error.Code, b.Error.Message)
 		}
 		for _, txn := range b.Result.Transactions {
-			reqGen.reqID++
+
 			request := reqGen.traceReplayTransaction(txn.Hash)
 			errCtx := fmt.Sprintf("block %d, txn %s", bn, txn.Hash)
 			if err := requestAndCompare(request, "trace_replayTransaction", errCtx, reqGen, needCompare, rec, errs, nil,

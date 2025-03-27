@@ -19,15 +19,10 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
-	"net/http"
 	"os"
-	"time"
 )
 
 func Bench5(erigonURL string) error {
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 
 	file, err := os.Open("txs.txt")
 	if err != nil {

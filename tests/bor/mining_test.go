@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -74,6 +75,11 @@ func TestMiningBenchmark(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
+
+		t.Cleanup(func() {
+			err := stack.Close()
+			require.NoError(t, err)
+		})
 
 		if err := stack.Start(); err != nil {
 			panic(err)

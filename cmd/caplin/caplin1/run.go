@@ -72,7 +72,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/stages"
 	"github.com/erigontech/erigon/cl/pool"
 
-	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon/cl/utils/bls"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"

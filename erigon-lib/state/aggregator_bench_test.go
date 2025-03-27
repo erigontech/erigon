@@ -22,20 +22,18 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 )
@@ -142,7 +140,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	defer os.RemoveAll(tmp)
 	dataPath := "../../data/storage.256-288.kv"
 
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	comp := seg.CompressKeys | seg.CompressVals
 	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
@@ -174,7 +172,7 @@ func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression
 	b.Cleanup(func() { os.RemoveAll(tmp) })
 
 	dataPath := generateKV(b, tmp, 52, 10, 1000000, logger, 0)
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bt")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
 
 	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
 

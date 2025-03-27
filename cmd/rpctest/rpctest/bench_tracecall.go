@@ -19,9 +19,7 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
-	"net/http"
 	"os"
-	"time"
 )
 
 // bench1 compares response of Erigon with Geth
@@ -30,9 +28,7 @@ import (
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 func BenchTraceCall(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
 	setRoutes(erigonURL, oeURL)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
+
 	var rec *bufio.Writer
 	if recordFile != "" {
 		f, err := os.Create(recordFile)
@@ -55,11 +51,8 @@ func BenchTraceCall(erigonURL, oeURL string, needCompare bool, blockFrom uint64,
 	}
 
 	var res CallResult
-	reqGen := &RequestGenerator{
-		client: client,
-	}
+	reqGen := &RequestGenerator{}
 
-	reqGen.reqID++
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
@@ -70,7 +63,7 @@ func BenchTraceCall(erigonURL, oeURL string, needCompare bool, blockFrom uint64,
 	}
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
 	for bn := blockFrom; bn <= blockTo; bn++ {
-		reqGen.reqID++
+
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
@@ -82,7 +75,7 @@ func BenchTraceCall(erigonURL, oeURL string, needCompare bool, blockFrom uint64,
 		}
 
 		for _, txn := range b.Result.Transactions {
-			reqGen.reqID++
+
 			request := reqGen.traceCall(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input, bn-1)
 			errCtx := fmt.Sprintf("block %d, txn %s", bn, txn.Hash)
 			if err := requestAndCompare(request, "trace_call", errCtx, reqGen, needCompare, rec, errs, nil /* insertOnlyIfSuccess */, false); err != nil {

@@ -165,7 +165,7 @@ type EngineWriter interface {
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
 	Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainReader, syscall SystemCall, logger log.Logger,
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainReader, syscall SystemCall, skipReceiptsEval bool, logger log.Logger,
 	) (types.Transactions, types.Receipts, types.FlatRequests, error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block

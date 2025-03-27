@@ -398,7 +398,7 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 			}
 
 			// resolve first conflict right here: it's faster and conflict-free
-			pe.applyWorker.RunTxTaskNoLock(txTask.Reset(), pe.isMining)
+			pe.applyWorker.RunTxTaskNoLock(txTask.Reset(), pe.isMining, false)
 			if txTask.Error != nil {
 				//fmt.Println("RETRY", txTask.TxNum, txTask.Error)
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)

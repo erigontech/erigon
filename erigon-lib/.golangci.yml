@@ -36,6 +36,9 @@ linters:
 #    - stylecheck
 
 linters-settings:
+  gosec:
+    excludes:
+      - G115 #TODO: enable me
   gocritic: # see https://golangci-lint.run/usage/linters/#gocritic and https://go-critic.github.io/overview#checks-overview
     enabled-tags:
       - performance

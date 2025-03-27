@@ -9,6 +9,7 @@ import (
 	"net"
 	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -596,5 +597,40 @@ func TestConcurrent(t *testing.T) {
 		if val != 10000 {
 			t.Fatalf("Wrong number of messages for context: %+v", res)
 		}
+	}
+}
+
+func TestCallStack(t *testing.T) {
+	l := New()
+	h, r := testHandler()
+
+	scenarios := map[string]struct {
+		handler Handler
+	}{
+		//"CallerStackHandler": {CallerStackHandler("%+v", h)}, // -trimpath flag will cause this to fail
+		"CallerFuncHandler": {CallerFuncHandler(h)},
+		"CallerFileHandler": {CallerFileHandler(h)},
+	}
+
+	for name, scenario := range scenarios {
+		t.Run(name, func(t *testing.T) {
+			l.SetHandler(scenario.handler)
+			l.Warn("test")
+
+			// ctx = [0] "stack" [1] "[stack1 stack2 stack3...]"
+			stackStr, ok := r.Ctx[1].(string)
+			if !ok {
+				t.Fatalf("Expected string in record context. Got %T", r.Ctx[1])
+			}
+
+			// convert stack to slice
+			trimmed := strings.Trim(stackStr, "[]")
+			entries := strings.Fields(trimmed)
+
+			// we should only have 1 entry in the stack
+			if len(entries) > 1 || len(entries) < 1 {
+				t.Fatalf("Expected only one stack entry, got %d", len(entries))
+			}
+		})
 	}
 }

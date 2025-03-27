@@ -1019,7 +1019,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	headerNumber := header.Number.Uint64()
 

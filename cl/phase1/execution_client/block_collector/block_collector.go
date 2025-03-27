@@ -98,7 +98,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 		if len(v) == 0 {
 			return nil
 		}
-		v, err = utils.DecompressSnappy(v)
+		v, err = utils.DecompressSnappy(v, false)
 		if err != nil {
 			return err
 		}

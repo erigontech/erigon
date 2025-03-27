@@ -66,13 +66,13 @@ func Uint64ToLE(i uint64) []byte {
 	return buf
 }
 
-func DecompressSnappy(data []byte) ([]byte, error) {
+func DecompressSnappy(data []byte, lengthCheck bool) ([]byte, error) {
 	// Decode the snappy
 	lenDecoded, err := snappy.DecodedLen(data)
 	if err != nil {
 		return nil, err
 	}
-	if lenDecoded > int(maxDecodeLenAllowed) {
+	if lengthCheck && lenDecoded > int(maxDecodeLenAllowed) {
 		return nil, errors.New("snappy: decoded length is too large")
 	}
 	decodedData := make([]byte, lenDecoded)

@@ -379,7 +379,7 @@ func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, un
 // rewards given.
 func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	return txs, r, nil, nil
 }
@@ -514,6 +514,7 @@ func (c *Clique) IsServiceTransaction(sender libcommon.Address, syscall consensu
 
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *Clique) Close() error {
+	c.DB.Close()
 	libcommon.SafeClose(c.exitCh)
 	return nil
 }

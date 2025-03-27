@@ -12,7 +12,8 @@ import (
 )
 
 func TestIdentityPreimageEncodeDecodeSSZ(t *testing.T) {
-	ip := testhelpers.Uint64ToIdentityPreimage(t, 123)
+	ip, err := testhelpers.Uint64ToIdentityPreimage(123)
+	require.NoError(t, err)
 	buf, err := ip.EncodeSSZ(nil)
 	require.NoError(t, err)
 	ip2, err := shutter.IdentityPreimageFromBytes(buf)
@@ -30,7 +31,8 @@ func TestIdentityPreimageDecodeSSZWithInvalidLength(t *testing.T) {
 }
 
 func TestDecryptionKeysSignatureDataWithInvalidPreimagesLength(t *testing.T) {
-	ips := testhelpers.MockIdentityPreimages(t, 1025)
+	ips, err := testhelpers.MockIdentityPreimages(1025)
+	require.NoError(t, err)
 	sigData := shutter.DecryptionKeysSignatureData{
 		InstanceId:        1,
 		Eon:               2,
@@ -39,7 +41,7 @@ func TestDecryptionKeysSignatureDataWithInvalidPreimagesLength(t *testing.T) {
 		IdentityPreimages: ips.ToListSSZ(),
 	}
 
-	err := sigData.Validate()
+	err = sigData.Validate()
 	require.ErrorIs(t, err, shutter.ErrTooManyIdentityPreimages)
 	_, err = sigData.HashSSZ()
 	require.ErrorIs(t, err, shutter.ErrTooManyIdentityPreimages)
@@ -54,12 +56,14 @@ func TestDecryptionKeysSignatureDataHashSSZ(t *testing.T) {
 	// for the same signature data input
 	want := "259bf7718b7430abc238ec0ac3260574dd73d23005adec26eed1a655ccdcc1ec"
 	slot := uint64(6336)
+	ips, err := testhelpers.MockIdentityPreimagesWithSlotIp(slot, 2)
+	require.NoError(t, err)
 	sigData := shutter.DecryptionKeysSignatureData{
 		InstanceId:        123,
 		Eon:               76,
 		Slot:              slot,
 		TxnPointer:        556,
-		IdentityPreimages: testhelpers.MockIdentityPreimagesWithSlotIp(t, slot, 2).ToListSSZ(),
+		IdentityPreimages: ips.ToListSSZ(),
 	}
 
 	have, err := sigData.HashSSZ()

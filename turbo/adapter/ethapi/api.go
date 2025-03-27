@@ -39,19 +39,20 @@ import (
 
 // CallArgs represents the arguments for a call.
 type CallArgs struct {
-	From                 *libcommon.Address `json:"from"`
-	To                   *libcommon.Address `json:"to"`
-	Gas                  *hexutil.Uint64    `json:"gas"`
-	GasPrice             *hexutil.Big       `json:"gasPrice"`
-	MaxPriorityFeePerGas *hexutil.Big       `json:"maxPriorityFeePerGas"`
-	MaxFeePerGas         *hexutil.Big       `json:"maxFeePerGas"`
-	MaxFeePerBlobGas     *hexutil.Big       `json:"maxFeePerBlobGas"`
-	Value                *hexutil.Big       `json:"value"`
-	Nonce                *hexutil.Uint64    `json:"nonce"`
-	Data                 *hexutil.Bytes     `json:"data"`
-	Input                *hexutil.Bytes     `json:"input"`
-	AccessList           *types.AccessList  `json:"accessList"`
-	ChainID              *hexutil.Big       `json:"chainId,omitempty"`
+	From                 *libcommon.Address        `json:"from"`
+	To                   *libcommon.Address        `json:"to"`
+	Gas                  *hexutil.Uint64           `json:"gas"`
+	GasPrice             *hexutil.Big              `json:"gasPrice"`
+	MaxPriorityFeePerGas *hexutil.Big              `json:"maxPriorityFeePerGas"`
+	MaxFeePerGas         *hexutil.Big              `json:"maxFeePerGas"`
+	MaxFeePerBlobGas     *hexutil.Big              `json:"maxFeePerBlobGas"`
+	Value                *hexutil.Big              `json:"value"`
+	Nonce                *hexutil.Uint64           `json:"nonce"`
+	Data                 *hexutil.Bytes            `json:"data"`
+	Input                *hexutil.Bytes            `json:"input"`
+	AccessList           *types.AccessList         `json:"accessList"`
+	ChainID              *hexutil.Big              `json:"chainId,omitempty"`
+	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 }
 
 // from retrieves the transaction sender address.
@@ -160,6 +161,19 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	}
 
 	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerBlobGas)
+
+	if args.AuthorizationList != nil {
+		authorizations := make([]types.Authorization, len(args.AuthorizationList))
+		for i, auth := range args.AuthorizationList {
+			var err error
+			authorizations[i], err = auth.ToAuthorization()
+			if err != nil {
+				return nil, err
+			}
+		}
+		msg.SetAuthorizations(authorizations)
+	}
+
 	return msg, nil
 }
 
@@ -369,29 +383,29 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
-	BlockHash           *libcommon.Hash            `json:"blockHash"`
-	BlockNumber         *hexutil.Big               `json:"blockNumber"`
-	From                libcommon.Address          `json:"from"`
-	Gas                 hexutil.Uint64             `json:"gas"`
-	GasPrice            *hexutil.Big               `json:"gasPrice,omitempty"`
-	Tip                 *hexutil.Big               `json:"maxPriorityFeePerGas,omitempty"`
-	FeeCap              *hexutil.Big               `json:"maxFeePerGas,omitempty"`
-	Hash                libcommon.Hash             `json:"hash"`
-	Input               hexutil.Bytes              `json:"input"`
-	Nonce               hexutil.Uint64             `json:"nonce"`
-	To                  *libcommon.Address         `json:"to"`
-	TransactionIndex    *hexutil.Uint64            `json:"transactionIndex"`
-	Value               *hexutil.Big               `json:"value"`
-	Type                hexutil.Uint64             `json:"type"`
-	Accesses            *types.AccessList          `json:"accessList,omitempty"`
-	ChainID             *hexutil.Big               `json:"chainId,omitempty"`
-	MaxFeePerBlobGas    *hexutil.Big               `json:"maxFeePerBlobGas,omitempty"`
-	BlobVersionedHashes []libcommon.Hash           `json:"blobVersionedHashes,omitempty"`
-	Authorizations      *[]types.JsonAuthorization `json:"authorizationList,omitempty"`
-	V                   *hexutil.Big               `json:"v"`
-	YParity             *hexutil.Big               `json:"yParity,omitempty"`
-	R                   *hexutil.Big               `json:"r"`
-	S                   *hexutil.Big               `json:"s"`
+	BlockHash            *libcommon.Hash            `json:"blockHash"`
+	BlockNumber          *hexutil.Big               `json:"blockNumber"`
+	From                 libcommon.Address          `json:"from"`
+	Gas                  hexutil.Uint64             `json:"gas"`
+	GasPrice             *hexutil.Big               `json:"gasPrice,omitempty"`
+	MaxPriorityFeePerGas *hexutil.Big               `json:"maxPriorityFeePerGas,omitempty"`
+	MaxFeePerGas         *hexutil.Big               `json:"maxFeePerGas,omitempty"`
+	Hash                 libcommon.Hash             `json:"hash"`
+	Input                hexutil.Bytes              `json:"input"`
+	Nonce                hexutil.Uint64             `json:"nonce"`
+	To                   *libcommon.Address         `json:"to"`
+	TransactionIndex     *hexutil.Uint64            `json:"transactionIndex"`
+	Value                *hexutil.Big               `json:"value"`
+	Type                 hexutil.Uint64             `json:"type"`
+	Accesses             *types.AccessList          `json:"accessList,omitempty"`
+	ChainID              *hexutil.Big               `json:"chainId,omitempty"`
+	MaxFeePerBlobGas     *hexutil.Big               `json:"maxFeePerBlobGas,omitempty"`
+	BlobVersionedHashes  []libcommon.Hash           `json:"blobVersionedHashes,omitempty"`
+	Authorizations       *[]types.JsonAuthorization `json:"authorizationList,omitempty"`
+	V                    *hexutil.Big               `json:"v"`
+	YParity              *hexutil.Big               `json:"yParity,omitempty"`
+	R                    *hexutil.Big               `json:"r"`
+	S                    *hexutil.Big               `json:"s"`
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
@@ -404,7 +418,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 	chainId := uint256.NewInt(0)
 	result := &RPCTransaction{
 		Type:  hexutil.Uint64(txn.Type()),
-		Gas:   hexutil.Uint64(txn.GetGas()),
+		Gas:   hexutil.Uint64(txn.GetGasLimit()),
 		Hash:  txn.Hash(),
 		Input: hexutil.Bytes(txn.GetData()),
 		Nonce: hexutil.Uint64(txn.GetNonce()),
@@ -426,7 +440,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 		if !chainId.IsZero() {
 			result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		}
-		result.GasPrice = (*hexutil.Big)(txn.GetPrice().ToBig())
+		result.GasPrice = (*hexutil.Big)(txn.GetTipCap().ToBig())
 	} else {
 		chainId.Set(txn.GetChainID())
 		result.ChainID = (*hexutil.Big)(chainId.ToBig())
@@ -435,11 +449,11 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 		result.Accesses = &acl
 
 		if txn.Type() == types.AccessListTxType {
-			result.GasPrice = (*hexutil.Big)(txn.GetPrice().ToBig())
+			result.GasPrice = (*hexutil.Big)(txn.GetTipCap().ToBig())
 		} else {
 			result.GasPrice = computeGasPrice(txn, blockHash, baseFee)
-			result.Tip = (*hexutil.Big)(txn.GetTip().ToBig())
-			result.FeeCap = (*hexutil.Big)(txn.GetFeeCap().ToBig())
+			result.MaxPriorityFeePerGas = (*hexutil.Big)(txn.GetTipCap().ToBig())
+			result.MaxFeePerGas = (*hexutil.Big)(txn.GetFeeCap().ToBig())
 		}
 
 		if txn.Type() == types.BlobTxType {
@@ -475,7 +489,7 @@ func computeGasPrice(txn types.Transaction, blockHash libcommon.Hash, baseFee *b
 	fee, overflow := uint256.FromBig(baseFee)
 	if fee != nil && !overflow && blockHash != (libcommon.Hash{}) {
 		// price = min(tip + baseFee, gasFeeCap)
-		price := math.Min256(new(uint256.Int).Add(txn.GetTip(), fee), txn.GetFeeCap())
+		price := math.Min256(new(uint256.Int).Add(txn.GetTipCap(), fee), txn.GetFeeCap())
 		return (*hexutil.Big)(price.ToBig())
 	}
 	return nil
@@ -489,7 +503,7 @@ func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash libcommon.Hash, bl
 		Type:     hexutil.Uint64(txn.Type()),
 		ChainID:  (*hexutil.Big)(new(big.Int)),
 		GasPrice: (*hexutil.Big)(txn.GasPrice.ToBig()),
-		Gas:      hexutil.Uint64(txn.GetGas()),
+		Gas:      hexutil.Uint64(txn.GetGasLimit()),
 		Hash:     txHash,
 		Input:    hexutil.Bytes(txn.GetData()),
 		Nonce:    hexutil.Uint64(txn.GetNonce()),
