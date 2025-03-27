@@ -401,7 +401,7 @@ func TestStreamClientGetL2BlockByNumber(t *testing.T) {
 
 	c := NewClient(context.Background(), "", false, 500*time.Millisecond, 0, DefaultEntryChannelSize)
 	c.header = &types.HeaderEntry{
-		TotalEntries: 4,
+		TotalEntries: 5,
 	}
 	c.conn = clientConn
 	c.allowStops = false
