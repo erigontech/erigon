@@ -98,7 +98,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 		panic(opts.GetLabel())
 	}
 	opts.Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync }).
-		SyncBytes(uint(512 * datasize.MB)).
+		SyncBytes(uint(2 * 512 * datasize.MB)).
 		SyncPeriod(2 * time.Second)
 
 	rawDB := opts.MustOpen()
