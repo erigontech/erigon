@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/diagnostics"
+	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/params"
 	erigonapp "github.com/erigontech/erigon/turbo/app"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
@@ -59,11 +60,12 @@ func main() {
 
 func runErigon(cliCtx *cli.Context) error {
 	var logger log.Logger
+	var tracer *tracers.Tracer
 	var err error
 	var metricsMux *http.ServeMux
 	var pprofMux *http.ServeMux
 
-	if logger, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, tracer, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 
@@ -95,7 +97,7 @@ func runErigon(cliCtx *cli.Context) error {
 
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
-	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger)
+	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger, tracer)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err

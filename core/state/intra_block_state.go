@@ -447,7 +447,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 			sdb.balanceInc[addr] = bi
 		}
 
-		if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
+		if !amount.IsZero() && sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
 			// TODO: discuss if we should ignore error
 			prev := new(uint256.Int)
 			account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)

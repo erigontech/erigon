@@ -193,15 +193,8 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 		return err
 	}
 
-	for idx, d := range sd.aggTx.d {
-		if err := d.Unwind(ctx, rwTx, step, txUnwindTo, changeset[idx]); err != nil {
-			return err
-		}
-	}
-	for _, ii := range sd.aggTx.iis {
-		if err := ii.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
-			return err
-		}
+	if err := sd.aggTx.Unwind(ctx, rwTx, txUnwindTo, changeset, logEvery); err != nil {
+		return err
 	}
 
 	sd.ClearRam(true)
