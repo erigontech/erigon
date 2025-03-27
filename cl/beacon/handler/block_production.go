@@ -467,7 +467,8 @@ func (a *ApiHandler) produceBlock(
 		// setup blinded block
 		block.BlindedBeaconBody = blindedBody.
 			SetHeader(builderHeader.Data.Message.Header).
-			SetBlobKzgCommitments(cpyCommitments)
+			SetBlobKzgCommitments(cpyCommitments).
+			SetExecutionRequests(builderHeader.Data.Message.ExecutionRequests)
 		block.ExecutionValue = builderValue
 	}
 	return block, nil
@@ -510,7 +511,7 @@ func (a *ApiHandler) getBuilderPayload(
 		ethHeader.SetVersion(baseState.Version())
 	}
 	// check kzg commitments
-	if baseState.Version() >= clparams.DenebVersion {
+	if baseState.Version() >= clparams.DenebVersion && header.Data.Message.BlobKzgCommitments != nil {
 		if header.Data.Message.BlobKzgCommitments.Len() >= cltypes.MaxBlobsCommittmentsPerBlock {
 			return nil, fmt.Errorf("too many blob kzg commitments: %d", header.Data.Message.BlobKzgCommitments.Len())
 		}
@@ -522,6 +523,19 @@ func (a *ApiHandler) getBuilderPayload(
 			if len(c) != length.Bytes48 {
 				return nil, errors.New("invalid blob kzg commitment length")
 			}
+		}
+	}
+	if baseState.Version() >= clparams.ElectraVersion && header.Data.Message.ExecutionRequests != nil {
+		// check execution requests
+		r := header.Data.Message.ExecutionRequests
+		if r.Deposits != nil && r.Deposits.Len() > int(a.beaconChainCfg.MaxDepositRequestsPerPayload) {
+			return nil, fmt.Errorf("too many deposit requests: %d", r.Deposits.Len())
+		}
+		if r.Withdrawals != nil && r.Withdrawals.Len() > int(a.beaconChainCfg.MaxWithdrawalRequestsPerPayload) {
+			return nil, fmt.Errorf("too many withdrawal requests: %d", r.Withdrawals.Len())
+		}
+		if r.Consolidations != nil && r.Consolidations.Len() > int(a.beaconChainCfg.MaxConsolidationRequestsPerPayload) {
+			return nil, fmt.Errorf("too many consolidation requests: %d", r.Consolidations.Len())
 		}
 	}
 
@@ -623,7 +637,7 @@ func (a *ApiHandler) produceBeaconBody(
 			case <-stopTimer.C:
 				return
 			case <-ticker.C:
-				payload, bundles, blockValue, err := a.engine.GetAssembledBlock(ctx, idBytes)
+				payload, bundles, requestsBundle, blockValue, err := a.engine.GetAssembledBlock(ctx, idBytes)
 				if err != nil {
 					log.Error("BlockProduction: Failed to get payload", "err", err)
 					continue
@@ -667,6 +681,33 @@ func (a *ApiHandler) produceBeaconBody(
 					copy(c[:], bundles.Commitments[i])
 					beaconBody.BlobKzgCommitments.Append(&c)
 				}
+
+				// Add the requests bundle
+				if requestsBundle != nil && requestsBundle.GetRequests() != nil {
+					for _, request := range requestsBundle.GetRequests() {
+						rType := request[0]
+						requestData := request[1:]
+						switch rType {
+						case types.DepositRequestType:
+							if beaconBody.ExecutionRequests.Deposits.Len() > 0 {
+								log.Error("BlockProduction: Deposit request already exists")
+							} else if err := beaconBody.ExecutionRequests.Deposits.DecodeSSZ(requestData, int(stateVersion)); err != nil {
+								log.Error("BlockProduction: Failed to decode deposit request", "err", err)
+							}
+						case types.WithdrawalRequestType:
+							if beaconBody.ExecutionRequests.Withdrawals.Len() > 0 {
+								log.Error("BlockProduction: Withdrawal request already exists")
+							} else if err := beaconBody.ExecutionRequests.Withdrawals.DecodeSSZ(requestData, int(stateVersion)); err != nil {
+								log.Error("BlockProduction: Failed to decode withdrawal request", "err", err)
+							}
+						case types.ConsolidationRequestType:
+							if err := beaconBody.ExecutionRequests.Consolidations.DecodeSSZ(requestData, int(stateVersion)); err != nil {
+								log.Error("BlockProduction: Failed to decode consolidation request", "err", err)
+							}
+						}
+					}
+				}
+
 				// Setup executionPayload
 				executionPayload = cltypes.NewEth1Block(beaconBody.Version, a.beaconChainCfg)
 				executionPayload.BlockHash = payload.BlockHash
@@ -697,7 +738,6 @@ func (a *ApiHandler) produceBeaconBody(
 					},
 				)
 				executionPayload.Transactions = payload.Transactions
-
 				return
 			}
 		}
