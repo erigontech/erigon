@@ -56,7 +56,7 @@ func (ct *OverlayCreateTracer) OnEnter(depth int, typ byte, from libcommon.Addre
 		return
 	}
 
-	if vm.OpCode(typ) == vm.CREATE && to == ct.contractAddress {
+	if (vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2) && to == ct.contractAddress {
 		ct.isCapturing = true
 		_, _, _, err := ct.evm.OverlayCreate(vm.AccountRef(from), vm.NewCodeAndHash(ct.code), ct.gasCap, value, to, vm.OpCode(typ), true /* incrementNonce */)
 		if err != nil {
