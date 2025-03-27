@@ -133,7 +133,7 @@ var DomainCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
-func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
@@ -148,7 +148,7 @@ func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 	}
 
 	var err error
-	if d.History, err = NewHistory(cfg.hist, logger); err != nil {
+	if d.History, err = NewHistory(cfg.hist, aggStep, logger); err != nil {
 		return nil, err
 	}
 
@@ -301,9 +301,6 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) {
 	if d.filenameBase == "" {
 		panic("assert: empty `filenameBase`")
-	}
-	if d.aggregationStep == 0 {
-		panic("assert: empty `aggregationStep`")
 	}
 
 	l := scanDirtyFiles(fileNames, d.aggregationStep, d.filenameBase, "kv", d.logger)
@@ -1345,7 +1342,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []DomainEntryDiff) error {
+func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []DomainEntryDiff) error {
 	// fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
 	d := dt.d
 
@@ -1755,14 +1752,14 @@ func (dt *DomainRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, fromKey, toKey []
 	if err != nil {
 		return nil, err
 	}
-	lastestStateIt, err := dt.RangeLatest(tx, fromKey, toKey, kv.Unlim)
+	lastestStateIt, err := dt.DebugRangeLatest(tx, fromKey, toKey, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
 	return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
 }
 
-func (dt *DomainRoTx) RangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
+func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
 	s := &DomainLatestIterFile{
 		from: fromKey, to: toKey, limit: limit,
 		orderAscend: order.Asc,

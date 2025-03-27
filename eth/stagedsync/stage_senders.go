@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/secp256k1"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -42,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )

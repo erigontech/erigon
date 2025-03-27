@@ -52,7 +52,7 @@ import (
 // 2.2.0 - add NodesInfo function
 // 3.0.0 - adding PoS interfaces
 // 3.1.0 - add Subscribe to logs
-// 3.2.0 - add EngineGetBlobsBundleV1
+// 3.2.0 - add EngineGetBlobsBundleV1k
 // 3.3.0 - merge EngineGetBlobsBundleV1 into EngineGetPayload
 var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 3, Patch: 0}
 
@@ -450,7 +450,7 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	_, txContext, err := transactions.ComputeTxContext(ibs, nil, nil, nil, currentBlock, s.chainConfig, 0)
 
 	ot := commands.NewOpcodeTracer(header.Number.Uint64(), true, false)
-	_ = vm.NewEVM(blockContext, txContext, ibs, s.chainConfig, vm.Config{Tracer: ot, ReadOnly: true})
+	_ = vm.NewEVM(blockContext, txContext, ibs, s.chainConfig, vm.Config{Tracer: ot.Tracer().Hooks, ReadOnly: true})
 	_ = aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit
 
 	// call validation and read tracer

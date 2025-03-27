@@ -34,6 +34,9 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon-lib/kv/prune"
+	"github.com/erigontech/erigon/core/tracing"
+
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/erigontech/secp256k1"
 
@@ -63,7 +66,6 @@ import (
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/migrations"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
@@ -1061,8 +1063,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	if txtrace {
 		// Activate tracing and writing into json files for each transaction
-		vmConfig.Tracer = nil
-		vmConfig.Debug = true
+		vmConfig.Tracer = &tracing.Hooks{}
 	}
 
 	var batchSize datasize.ByteSize
@@ -1221,8 +1222,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 
 	if txtrace {
 		// Activate tracing and writing into json files for each transaction
-		vmConfig.Tracer = nil
-		vmConfig.Debug = true
+		vmConfig.Tracer = &tracing.Hooks{}
 	}
 
 	var batchSize datasize.ByteSize
@@ -1559,7 +1559,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), borSn)
 	}
 	stageList := stages2.NewDefaultStages(context.Background(), db, snapDb, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
-		heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger)
+		heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger, nil)
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 
 	miner := stagedsync.NewMiningState(&cfg.Miner)
