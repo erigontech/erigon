@@ -61,7 +61,7 @@ func (ct *CallTracer) captureStartOrEnter(from, to libcommon.Address, create boo
 }
 
 func (ct *CallTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	create := vm.OpCode(typ) == vm.CREATE
+	create := vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2
 	ct.captureStartOrEnter(from, to, create, code)
 }
 
