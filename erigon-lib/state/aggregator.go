@@ -1650,6 +1650,21 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 	return at.d[domain].GetLatest(k, tx)
 }
 
+func (at *AggregatorRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txNumUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff, logEvery *time.Ticker) error {
+	step := txNumUnwindTo / at.StepSize()
+	for idx, d := range at.d {
+		if err := d.unwind(ctx, rwTx, step, txNumUnwindTo, changeset[idx]); err != nil {
+			return err
+		}
+	}
+	for _, ii := range at.iis {
+		if err := ii.unwind(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // --- Domain part END ---
 
 func (at *AggregatorRoTx) madvNormal() {

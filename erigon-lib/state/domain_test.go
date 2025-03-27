@@ -2100,7 +2100,7 @@ func TestDomain_Unwind(t *testing.T) {
 			}
 		}
 
-		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, totalDiff)
+		err = dc.unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, totalDiff)
 		currTx = unwindTo
 		require.NoError(t, err)
 		dc.Close()
