@@ -61,6 +61,7 @@ type DiagnosticClient struct {
 
 var (
 	instance *DiagnosticClient
+	once     sync.Once
 )
 
 // Client returns the singleton instance of DiagnosticClient
@@ -71,36 +72,40 @@ func Client() *DiagnosticClient {
 	return instance
 }
 
-func (d *DiagnosticClient) Initialize(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool, webseedsList []string) error {
+func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool, webseedsList []string) (*DiagnosticClient, error) {
 	dirPath := filepath.Join(dataDirPath, "diagnostics")
 	db, err := createDb(ctx, dirPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	hInfo, ss, snpdwl, snpidx, snpfd := ReadSavedData(db)
 
-	d.ctx = ctx
-	d.db = db
-	d.metricsMux = metricsMux
-	d.dataDirPath = dataDirPath
-	d.speedTest = speedTest
-	d.syncStages = ss
-	d.syncStats = SyncStatistics{
-		SnapshotDownload: snpdwl,
-		SnapshotIndexing: snpidx,
-		SnapshotFillDB:   snpfd,
-	}
-	d.hardwareInfo = hInfo
-	d.snapshotFileList = SnapshoFilesList{}
-	d.bodies = BodiesInfo{}
-	d.resourcesUsage = ResourcesUsage{
-		MemoryUsage: []MemoryStats{},
-	}
-	d.peersStats = NewPeerStats(1000) // 1000 is the limit of peers; TODO: make it configurable through a flag
-	d.webseedsList = webseedsList
+	once.Do(func() {
+		instance = &DiagnosticClient{
+			ctx:         ctx,
+			db:          db,
+			metricsMux:  metricsMux,
+			dataDirPath: dataDirPath,
+			speedTest:   speedTest,
+			syncStages:  ss,
+			syncStats: SyncStatistics{
+				SnapshotDownload: snpdwl,
+				SnapshotIndexing: snpidx,
+				SnapshotFillDB:   snpfd,
+			},
+			hardwareInfo:     hInfo,
+			snapshotFileList: SnapshoFilesList{},
+			bodies:           BodiesInfo{},
+			resourcesUsage: ResourcesUsage{
+				MemoryUsage: []MemoryStats{},
+			},
+			peersStats:   NewPeerStats(1000), // 1000 is the limit of peers; TODO: make it configurable through a flag
+			webseedsList: webseedsList,
+		}
+	})
 
-	return nil
+	return instance, nil
 }
 
 func createDb(ctx context.Context, dbDir string) (db kv.RwDB, err error) {
@@ -132,6 +137,7 @@ func (d *DiagnosticClient) Setup() {
 	d.setupBodiesDiagnostics(rootCtx)
 	d.setupResourcesUsageDiagnostics(rootCtx)
 	d.setupSpeedtestDiagnostics(rootCtx)
+
 	d.setupTxPoolDiagnostics(rootCtx)
 
 	d.runSaveProcess(rootCtx)

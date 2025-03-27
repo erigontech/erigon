@@ -76,12 +76,10 @@ func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, p
 	}
 
 	speedTest := ctx.Bool(diagnoticsSpeedTestFlag)
-	diagnosticsClient := diaglib.Client()
-
-	err := diagnosticsClient.Initialize(ctx.Context, diagMux, node.Backend().DataDir(), speedTest, webseedsList)
+	diagnostic, err := diaglib.NewDiagnosticClient(ctx.Context, diagMux, node.Backend().DataDir(), speedTest, webseedsList)
 	if err == nil {
-		diagnosticsClient.Setup()
-		SetupEndpoints(ctx, node, diagMux, diagnosticsClient)
+		diagnostic.Setup()
+		SetupEndpoints(ctx, node, diagMux, diagnostic)
 	} else {
 		log.Error("[Diagnostics] Failure in setting up diagnostics", "err", err)
 	}
