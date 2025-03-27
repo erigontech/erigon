@@ -19,7 +19,6 @@ package downloader
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
