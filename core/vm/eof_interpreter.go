@@ -28,11 +28,11 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 		mem         = pool.Get().(*Memory)
 		locStack    = stack.New()
 		callContext = &ScopeContext{
-			Memory:       mem,
-			Stack:        locStack,
-			Contract:     contract,
-			_eofHeader:   header,
-			_returnStack: make([]uint64, 0, 1024),
+			Memory:      mem,
+			Stack:       locStack,
+			Contract:    contract,
+			eofHeader:   header,
+			returnStack: make([][2]uint64, 0, 32),
 		}
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
@@ -63,13 +63,13 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 	in.depth++
 	defer func() {
 		// first: capture data/memory/state/depth/etc... then clenup them
-		if in.cfg.Debug && err != nil {
-			if !logged {
-				in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
-			} else {
-				in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
-			}
+
+		if !logged {
+			in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, nil, nil, err) //nolint:errcheck
+		} else {
+			in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
 		}
+
 		// this function must execute _after_: the `CaptureState` needs the stacks before
 		pool.Put(mem)
 		stack.ReturnNormalStack(locStack)
@@ -89,15 +89,16 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 		if in.evm.Cancelled() {
 			break
 		}
-		if in.cfg.Debug {
-			// Capture pre-execution values for tracing.
-			logged, pcCopy, gasCopy = false, _pc, contract.Gas
-		}
+
+		// Capture pre-execution values for tracing.
+		logged, pcCopy, gasCopy = false, _pc, contract.Gas
+		section := callContext.seciontIdx
+		fnDepth := uint64(len(callContext.returnStack)) + 1
 
 		op = OpCode(contract.Code[_pc])
 		operation = in.jtEOF[op]
 
-		// no need to validate stack for EOF at the runtime
+		// no need to check for stack overflow and underflow for EOF at the runtime
 
 		if !contract.UseGas(operation.constantGas, tracing.GasChangeIgnored) {
 			return nil, ErrOutOfGas
@@ -125,10 +126,8 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 			mem.Resize(memorySize)
 		}
 
-		if in.cfg.Debug {
-			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, operation.constantGas+dynamicCost, callContext, in.returnData, in.depth, err) //nolint:errcheck
-			logged = true
-		}
+		in.cfg.Tracer.CaptureState(_pc, op, gasCopy, operation.constantGas+dynamicCost, callContext, in.returnData, in.depth, &section, &fnDepth, err) //nolint:errcheck
+		logged = true
 
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
@@ -151,17 +150,17 @@ func (in *EVMInterpreter) runNoDebug(contract *Contract, input []byte, readOnly 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
 	in.returnData = nil
-	// fmt.Println("--------------------------- RUN NO DEBUG ---------------------------")
+
 	var (
 		op          OpCode // current opcode
 		mem         = pool.Get().(*Memory)
 		locStack    = stack.New()
 		callContext = &ScopeContext{
-			Memory:       mem,
-			Stack:        locStack,
-			Contract:     contract,
-			_eofHeader:   header,
-			_returnStack: make([]uint64, 0, 1024),
+			Memory:      mem,
+			Stack:       locStack,
+			Contract:    contract,
+			eofHeader:   header,
+			returnStack: make([][2]uint64, 0, 32),
 		}
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC

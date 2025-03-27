@@ -354,7 +354,7 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		length     = scope.Stack.Pop()
 	)
 
-	if scope._eofHeader != nil { // EOF code
+	if scope.eofHeader != nil { // EOF code
 		offset64 := dataOffset.Uint64()
 		length64 := length.Uint64()
 		returnDataSize := uint64(len(interpreter.returnData))

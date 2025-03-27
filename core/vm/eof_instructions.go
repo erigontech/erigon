@@ -53,7 +53,7 @@ func opRjumpv(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	idx := binary.BigEndian.Uint16(scope.Contract.Code[*pc+1:])
 
-	typSectionOffset := getTypeSectionOffset(idx, scope._eofHeader)
+	typSectionOffset := getTypeSectionOffset(idx, scope.eofHeader)
 	inputs := int(scope.Contract.Code[typSectionOffset])
 	sectionMaxStack := int(scope.Contract.Code[typSectionOffset+2])<<8 |
 		int(scope.Contract.Code[typSectionOffset+3])
@@ -61,25 +61,30 @@ func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 		return nil, fmt.Errorf("CALLF stack overflow: StackLen: %v, sectionMaxStack: %v, sectionInputs: %v", scope.Stack.Len(), sectionMaxStack, inputs)
 	}
 
-	if len(scope._returnStack) >= 1024 {
+	if len(scope.returnStack) >= 1024 {
 		return nil, fmt.Errorf("CALLF return_stack limit reached")
 	}
-	scope._returnStack = append(scope._returnStack, *pc+2)
-	*pc = uint64(scope._eofHeader.codeOffsets[idx]) - 1 // we do pc++ in the interpreter loop
+	scope.returnStack = append(
+		scope.returnStack,
+		[2]uint64{*pc + 2, scope.seciontIdx},
+	)
+	*pc = uint64(scope.eofHeader.codeOffsets[idx]) - 1 // we do pc++ in the interpreter loop
+	scope.seciontIdx = uint64(idx)
 	return nil, nil
 }
 
 func opRetf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	*pc = scope._returnStack[len(scope._returnStack)-1]
-	scope._returnStack = scope._returnStack[:len(scope._returnStack)-1]
+	*pc = scope.returnStack[len(scope.returnStack)-1][0]
+	scope.seciontIdx = scope.returnStack[len(scope.returnStack)-1][1]
+	scope.returnStack = scope.returnStack[:len(scope.returnStack)-1]
 	return nil, nil
 }
 
 func opJumpf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	idx := binary.BigEndian.Uint16(scope.Contract.Code[*pc+1:])
-	*pc = uint64(scope._eofHeader.codeOffsets[idx]) - 1 // we do pc++ in the interpreter loop
+	*pc = uint64(scope.eofHeader.codeOffsets[idx]) - 1 // we do pc++ in the interpreter loop
 
-	typSectionOffset := getTypeSectionOffset(idx, scope._eofHeader)
+	typSectionOffset := getTypeSectionOffset(idx, scope.eofHeader)
 	inputs := int(scope.Contract.Code[typSectionOffset])
 	sectionMaxStack := int(scope.Contract.Code[typSectionOffset+2])<<8 |
 		int(scope.Contract.Code[typSectionOffset+3])
@@ -115,7 +120,7 @@ func opExchange(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 
 func opDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	index := scope.Stack.Peek()
-	data := scope.Contract.Code[scope._eofHeader.dataOffset:]
+	data := scope.Contract.Code[scope.eofHeader.dataOffset:]
 	dataLen := uint256.NewInt(uint64(len(data)))
 	b := [32]byte{}
 	if index.Gt(dataLen) {
@@ -132,7 +137,7 @@ func opDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 }
 
 func opDataLoadN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	data := scope.Contract.Code[scope._eofHeader.dataOffset:]
+	data := scope.Contract.Code[scope.eofHeader.dataOffset:]
 	offset := int(binary.BigEndian.Uint16(scope.Contract.Code[*pc+1:]))
 	val := new(uint256.Int).SetBytes(data[offset : offset+32])
 	scope.Stack.Push(val)
@@ -142,7 +147,7 @@ func opDataLoadN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 }
 
 func opDataSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	val := new(uint256.Int).SetUint64(uint64(scope._eofHeader.dataSize))
+	val := new(uint256.Int).SetUint64(uint64(scope.eofHeader.dataSize))
 	scope.Stack.Push(val)
 	return nil, nil
 }
@@ -153,7 +158,7 @@ func opDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 		dataIndex256 = scope.Stack.Pop()
 		size256      = scope.Stack.Pop()
 
-		data        = scope.Contract.Code[scope._eofHeader.dataOffset:]
+		data        = scope.Contract.Code[scope.eofHeader.dataOffset:]
 		dataSize256 = uint256.NewInt(uint64(len(data)))
 		// dataLen            = uint64(len(data))
 		// dataIndex          = dataIndex256.Uint64()
@@ -199,8 +204,8 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	)
 	*pc += 1
 
-	_offset := scope._eofHeader.containerOffsets[initContainerIdx]
-	_size := scope._eofHeader.containerSizes[initContainerIdx]
+	_offset := scope.eofHeader.containerOffsets[initContainerIdx]
+	_size := scope.eofHeader.containerSizes[initContainerIdx]
 	initContainer := scope.Contract.Code[_offset : _offset+_size]
 
 	// TODO(racytech): this should be done in `dynamicGas` func, leave it here for now
@@ -243,12 +248,12 @@ func opReturnCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 	offset256 := scope.Stack.Pop()
 	size256 := scope.Stack.Pop()
 	deployContainerIdx := int(scope.Contract.Code[*pc+1])
-	if deployContainerIdx >= len(scope._eofHeader.containerSizes) {
-		return nil, fmt.Errorf("invalid subcontainer index: deployContainerIdx=%v, len(scope._eofHeader.containerSizes)=%v", deployContainerIdx, len(scope._eofHeader.containerSizes))
+	if deployContainerIdx >= len(scope.eofHeader.containerSizes) {
+		return nil, fmt.Errorf("invalid subcontainer index: deployContainerIdx=%v, len(scope.eofHeader.containerSizes)=%v", deployContainerIdx, len(scope.eofHeader.containerSizes))
 	}
 
-	_offset := scope._eofHeader.containerOffsets[deployContainerIdx] //  container offset
-	_size := scope._eofHeader.containerSizes[deployContainerIdx]     // container size
+	_offset := scope.eofHeader.containerOffsets[deployContainerIdx] //  container offset
+	_size := scope.eofHeader.containerSizes[deployContainerIdx]     // container size
 	container := make([]byte, _size)
 	copy(container, scope.Contract.Code[_offset:_offset+_size])
 
@@ -267,7 +272,7 @@ func opReturnCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 		return nil, fmt.Errorf("newDataSize > 65535")
 	}
 	if newDataSize < int(header.dataSize) {
-		return nil, fmt.Errorf("newDataSize < scope._eofHeader.dataSize")
+		return nil, fmt.Errorf("newDataSize < scope.eofHeader.dataSize")
 	}
 	container = append(container, auxData...)
 	dataSizePos := header.dataSizePos

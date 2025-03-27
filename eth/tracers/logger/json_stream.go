@@ -78,7 +78,7 @@ func (l *JsonStreamLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, t
 // CaptureState logs a new structured log message and pushes it out to the environment
 //
 // CaptureState also tracks SLOAD/SSTORE ops to track storage change.
-func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, section, fnDepth *uint64, err error) {
 	contract := scope.Contract
 	memory := scope.Memory
 	stack := scope.Stack

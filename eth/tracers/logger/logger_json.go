@@ -60,7 +60,7 @@ func (l *JSONLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libc
 }
 
 // CaptureState outputs state information on the logger.
-func (l *JSONLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+func (l *JSONLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, section, fnDepth *uint64, err error) {
 	memory := scope.Memory
 	stack := scope.Stack
 
@@ -73,6 +73,8 @@ func (l *JSONLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 		Storage:       nil,
 		Depth:         depth,
 		RefundCounter: l.env.IntraBlockState().GetRefund(),
+		Section:       section,
+		FnDepth:       fnDepth,
 		Err:           err,
 	}
 	if !l.cfg.DisableMemory {

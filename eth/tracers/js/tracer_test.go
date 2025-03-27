@@ -200,10 +200,10 @@ func TestHaltBetweenSteps(t *testing.T) {
 		Contract: vm.NewContract(&account{}, libcommon.Address{}, uint256.NewInt(0), 0, false /* skipAnalysis */, c),
 	}
 	tracer.CaptureStart(env, libcommon.Address{}, libcommon.Address{}, false /* precompile */, false /* create */, []byte{}, 0, uint256.NewInt(0), []byte{} /* code */)
-	tracer.CaptureState(0, 0, 0, 0, scope, nil, 0, nil)
+	tracer.CaptureState(0, 0, 0, 0, scope, nil, 0, nil, nil, nil)
 	timeout := errors.New("stahp")
 	tracer.Stop(timeout)
-	tracer.CaptureState(0, 0, 0, 0, scope, nil, 0, nil)
+	tracer.CaptureState(0, 0, 0, 0, scope, nil, 0, nil, nil, nil)
 
 	if _, err := tracer.GetResult(); !strings.Contains(err.Error(), timeout.Error()) {
 		t.Errorf("Expected timeout error, got %v", err)

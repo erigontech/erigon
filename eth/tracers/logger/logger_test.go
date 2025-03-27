@@ -74,7 +74,7 @@ func TestStoreCapture(t *testing.T) {
 		Memory:   mem,
 		Stack:    stack,
 		Contract: contract,
-	}, nil, 0, nil)
+	}, nil, 0, nil, nil, nil)
 
 	if len(logger.storage[contract.Address()]) == 0 {
 		t.Fatalf("expected exactly 1 changed value on address %x, got %d", contract.Address(), len(logger.storage[contract.Address()]))

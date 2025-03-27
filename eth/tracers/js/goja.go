@@ -259,7 +259,7 @@ func (t *jsTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommo
 }
 
 // CaptureState implements the Tracer interface to trace a single step of VM execution.
-func (t *jsTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+func (t *jsTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, section, fnDepth *uint64, err error) {
 	if !t.traceStep {
 		return
 	}

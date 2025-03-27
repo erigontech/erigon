@@ -28,6 +28,8 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 		Storage       map[common.Hash]common.Hash `json:"-"`
 		Depth         int                         `json:"depth"`
 		RefundCounter uint64                      `json:"refund"`
+		Section       *uint64                     `json:"section,omitempty"`
+		FnDepth       *uint64                     `json:"fnDepth,omitempty"`
 		Err           error                       `json:"-"`
 		OpName        string                      `json:"opName"`
 		ErrorString   string                      `json:"error"`
@@ -49,6 +51,8 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 	enc.Storage = s.Storage
 	enc.Depth = s.Depth
 	enc.RefundCounter = s.RefundCounter
+	enc.Section = s.Section
+	enc.FnDepth = s.FnDepth
 	enc.Err = s.Err
 	enc.OpName = s.OpName()
 	enc.ErrorString = s.ErrorString()
@@ -69,6 +73,8 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 		Storage       map[common.Hash]common.Hash `json:"-"`
 		Depth         *int                        `json:"depth"`
 		RefundCounter *uint64                     `json:"refund"`
+		Section       *uint64                     `json:"section,omitempty"`
+		FnDepth       *uint64                     `json:"fnDepth,omitempty"`
 		Err           error                       `json:"-"`
 	}
 	var dec StructLog
@@ -110,6 +116,12 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 	}
 	if dec.RefundCounter != nil {
 		s.RefundCounter = *dec.RefundCounter
+	}
+	if dec.Section != nil {
+		s.Section = dec.Section
+	}
+	if dec.FnDepth != nil {
+		s.FnDepth = dec.FnDepth
 	}
 	if dec.Err != nil {
 		s.Err = dec.Err

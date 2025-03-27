@@ -43,7 +43,7 @@ type EVMLogger interface {
 	CaptureEnter(typ OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte)
 	CaptureExit(output []byte, usedGas uint64, err error)
 	// Opcode level
-	CaptureState(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error)
+	CaptureState(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, section, fnDepth *uint64, err error)
 	CaptureFault(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error)
 }
 

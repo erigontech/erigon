@@ -22,10 +22,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"math"
 	"strings"
+
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/holiman/uint256"
 
@@ -479,7 +480,7 @@ func (ot *OeTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	ot.captureEndOrExit(true /* deep */, output, usedGas, err)
 }
 
-func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
+func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, section, fnDepth *uint64, err error) {
 	memory := scope.Memory
 	st := scope.Stack
 
