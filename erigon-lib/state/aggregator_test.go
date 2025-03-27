@@ -1321,13 +1321,13 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 }
 
 func wrapTxWithCtxForTest(tx kv.Tx, ctx *AggregatorRoTx) *Tx {
-	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), filesTx: ctx}
+	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), aggtx: ctx}
 }
 
 // wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
 // need to move non-unit-tests to own package
 func wrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *Tx {
-	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), filesTx: ctx}
+	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), aggtx: ctx}
 }
 
 // wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
