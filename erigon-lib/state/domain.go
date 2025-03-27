@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"math"
 	"path/filepath"
 	"sort"
@@ -115,6 +116,8 @@ type domainCfg struct {
 
 	// restricts subset file deletions on domain open/close. Needed to hold files until commitment is merged
 	restrictSubsetFileDeletions bool
+
+	version snaptype.Version
 }
 
 type domainVisible struct {
@@ -155,16 +158,16 @@ func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error
 	return d, nil
 }
 func (d *Domain) kvFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v%s-%s.%d-%d.kv", d.version.String(), d.filenameBase, fromStep, toStep))
 }
 func (d *Domain) kvAccessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v%s-%s.%d-%d.kvi", d.version.String(), d.filenameBase, fromStep, toStep))
 }
 func (d *Domain) kvExistenceIdxFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v%s-%s.%d-%d.kvei", d.version.String(), d.filenameBase, fromStep, toStep))
 }
 func (d *Domain) kvBtFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v%s-%s.%d-%d.bt", d.version.String(), d.filenameBase, fromStep, toStep))
 }
 
 // maxStepInDB - return the latest available step in db (at-least 1 value in such step)
