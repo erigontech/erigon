@@ -46,8 +46,8 @@ jobs:
     strategy:
       matrix:
         os:
-          - ubuntu-22.04
-          - macos-14
+          - ubuntu-latest
+          - macos-latest
           # - ubuntu-latest-erigontests-large
     runs-on: ${{ matrix.os }}
 
@@ -90,7 +90,7 @@ jobs:
     needs: source-of-changes
     strategy:
       matrix:
-        os: [ windows-2022 ]
+        os: [ windows-latest ]
     runs-on: ${{ matrix.os }}
 
     steps:
