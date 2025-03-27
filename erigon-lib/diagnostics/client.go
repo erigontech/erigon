@@ -72,11 +72,11 @@ func Client() *DiagnosticClient {
 	return instance
 }
 
-func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool, webseedsList []string) (*DiagnosticClient, error) {
+func (d *DiagnosticClient) Initialize(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool, webseedsList []string) error {
 	dirPath := filepath.Join(dataDirPath, "diagnostics")
 	db, err := createDb(ctx, dirPath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	hInfo, ss, snpdwl, snpidx, snpfd := ReadSavedData(db)
@@ -105,7 +105,7 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 		}
 	})
 
-	return instance, nil
+	return nil
 }
 
 func createDb(ctx context.Context, dbDir string) (db kv.RwDB, err error) {
@@ -124,7 +124,7 @@ func createDb(ctx context.Context, dbDir string) (db kv.RwDB, err error) {
 	return db, nil
 }
 
-func (d *DiagnosticClient) Setup(txpool bool) {
+func (d *DiagnosticClient) Setup() {
 
 	rootCtx, _ := common.RootContext()
 
