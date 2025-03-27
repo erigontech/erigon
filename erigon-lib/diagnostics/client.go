@@ -61,7 +61,6 @@ type DiagnosticClient struct {
 
 var (
 	instance *DiagnosticClient
-	once     sync.Once
 )
 
 // Client returns the singleton instance of DiagnosticClient
@@ -81,29 +80,25 @@ func (d *DiagnosticClient) Initialize(ctx context.Context, metricsMux *http.Serv
 
 	hInfo, ss, snpdwl, snpidx, snpfd := ReadSavedData(db)
 
-	once.Do(func() {
-		instance = &DiagnosticClient{
-			ctx:         ctx,
-			db:          db,
-			metricsMux:  metricsMux,
-			dataDirPath: dataDirPath,
-			speedTest:   speedTest,
-			syncStages:  ss,
-			syncStats: SyncStatistics{
-				SnapshotDownload: snpdwl,
-				SnapshotIndexing: snpidx,
-				SnapshotFillDB:   snpfd,
-			},
-			hardwareInfo:     hInfo,
-			snapshotFileList: SnapshoFilesList{},
-			bodies:           BodiesInfo{},
-			resourcesUsage: ResourcesUsage{
-				MemoryUsage: []MemoryStats{},
-			},
-			peersStats:   NewPeerStats(1000), // 1000 is the limit of peers; TODO: make it configurable through a flag
-			webseedsList: webseedsList,
-		}
-	})
+	d.ctx = ctx
+	d.db = db
+	d.metricsMux = metricsMux
+	d.dataDirPath = dataDirPath
+	d.speedTest = speedTest
+	d.syncStages = ss
+	d.syncStats = SyncStatistics{
+		SnapshotDownload: snpdwl,
+		SnapshotIndexing: snpidx,
+		SnapshotFillDB:   snpfd,
+	}
+	d.hardwareInfo = hInfo
+	d.snapshotFileList = SnapshoFilesList{}
+	d.bodies = BodiesInfo{}
+	d.resourcesUsage = ResourcesUsage{
+		MemoryUsage: []MemoryStats{},
+	}
+	d.peersStats = NewPeerStats(1000) // 1000 is the limit of peers; TODO: make it configurable through a flag
+	d.webseedsList = webseedsList
 
 	return nil
 }
