@@ -637,7 +637,6 @@ func TestEip2929Cases(t *testing.T) {
 	tmpdir := t.TempDir()
 	id := 1
 	prettyPrint := func(comment string, code []byte) {
-		return
 		instrs := make([]string, 0)
 		it := asm.NewInstructionIterator(code)
 		for it.Next() {
