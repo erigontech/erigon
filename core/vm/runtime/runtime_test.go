@@ -239,10 +239,12 @@ func BenchmarkCall(b *testing.B) {
 		}
 	}
 }
+
 func benchmarkEVM_Create(b *testing.B, code string) {
 	db := testTemporalDB(b)
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(b, err)
+	defer tx.Rollback()
 	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
@@ -635,7 +637,7 @@ func TestEip2929Cases(t *testing.T) {
 	tmpdir := t.TempDir()
 	id := 1
 	prettyPrint := func(comment string, code []byte) {
-
+		return
 		instrs := make([]string, 0)
 		it := asm.NewInstructionIterator(code)
 		for it.Next() {
