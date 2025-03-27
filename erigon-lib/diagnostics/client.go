@@ -137,12 +137,7 @@ func (d *DiagnosticClient) Setup(txpool bool) {
 	d.setupBodiesDiagnostics(rootCtx)
 	d.setupResourcesUsageDiagnostics(rootCtx)
 	d.setupSpeedtestDiagnostics(rootCtx)
-
-	if txpool {
-		d.setupTxPoolDiagnostics(rootCtx)
-	}
-
-	d.SetupNotifier()
+	d.setupTxPoolDiagnostics(rootCtx)
 
 	d.runSaveProcess(rootCtx)
 

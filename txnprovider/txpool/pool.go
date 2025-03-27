@@ -2506,9 +2506,13 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 
 func sendChangeBatchEventToDiagnostics(pool string, event string, txnHashes [][32]byte) {
 	//Not sending empty events or diagnostics disabled
+	fmt.Println("sendChangeBatchEventToDiagnostics")
 	if len(txnHashes) == 0 || !diagnostics.Client().Connected() {
+		fmt.Println("return ", len(txnHashes), !diagnostics.Client().Connected())
 		return
 	}
+
+	fmt.Println("actual send len ", len(txnHashes))
 
 	toRemoveBatch := make([]diagnostics.PoolChangeBatch, 0)
 	toRemoveBatch = append(toRemoveBatch, diagnostics.PoolChangeBatch{
