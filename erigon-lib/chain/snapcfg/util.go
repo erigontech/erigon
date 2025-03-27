@@ -154,11 +154,11 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			continue
 		}
 
-		if version < minVersion {
+		if version.Less(minVersion) {
 			continue
 		}
 
-		if version > preferredVersion {
+		if preferredVersion.Less(version) {
 			continue
 		}
 
@@ -166,7 +166,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			v, _, _ := strings.Cut(current.Name, "-")
 			cv, _ := snaptype.ParseVersion(v)
 
-			if version > cv {
+			if cv.Less(version) {
 				bestVersions.Set(name, p)
 			}
 		} else {
@@ -227,11 +227,11 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 			continue
 		}
 
-		if version < minVersion {
+		if version.Less(minVersion) {
 			continue
 		}
 
-		if version > preferredVersion {
+		if preferredVersion.Less(version) {
 			continue
 		}
 
@@ -239,7 +239,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 			v, _, _ := strings.Cut(current.Name, "-")
 			cv, _ := snaptype.ParseVersion(v)
 
-			if version > cv {
+			if cv.Less(version) {
 				bestVersions.Set(name, p)
 			}
 		} else {
@@ -299,7 +299,7 @@ func ExtractBlockFromName(name string, v snaptype.Version) (block uint64, err er
 		return 0, err
 	}
 
-	if v != 0 && v != version {
+	if !v.IsZero() && v != version {
 		return 0, errWrongVersion
 	}
 
@@ -372,7 +372,7 @@ func doSort(in map[string]string) Preverified {
 }
 
 func newCfg(networkName string, preverified Preverified) *Cfg {
-	maxBlockNum, _ := preverified.MaxBlock(0)
+	maxBlockNum, _ := preverified.MaxBlock(snaptype.ZeroVersion)
 	cfg := &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
 	cfg.PreverifiedParsed = make([]*snaptype.FileInfo, len(preverified))
 	for i, p := range cfg.Preverified {
