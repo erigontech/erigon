@@ -389,34 +389,6 @@ func (d *WebSeeds) ByFileName(name string) (metainfo.UrlList, bool) {
 	return v, ok
 }
 
-var ErrInvalidEtag = errors.New("invalid etag")
-var ErrEtagNotFound = errors.New("not found")
-
-func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodHead, file.String(), nil)
-	if err != nil {
-		return "", err
-	}
-
-	resp, err := d.client.Do(request.WithContext(ctx))
-	if err != nil {
-		return "", fmt.Errorf("webseed.http: %w, url=%s", err, file.String())
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusNotFound {
-			return "", ErrEtagNotFound
-		}
-		return "", fmt.Errorf("webseed.http: status code %d, url=%s", resp.StatusCode, file.String())
-	}
-
-	etag := resp.Header.Get("Etag") // file md5
-	if etag == "" {
-		return "", fmt.Errorf("webseed.http: file has no etag, url=%s", file.String())
-	}
-	return etag, nil
-}
-
 func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
 	// allow: host.com/v2/manifest.txt
 	u := webSeedProviderUrl.JoinPath("manifest.txt")
