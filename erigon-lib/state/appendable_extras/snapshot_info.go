@@ -102,7 +102,7 @@ func (f *FileInfo) Dir() string { return filepath.Dir(f.Path) }
 
 func fileName(baseName string, version snaptype.Version, from, to uint64) string {
 	// from, to are in units of steps and not in number of entities
-	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from, to, baseName)
+	return fmt.Sprintf("%s-%06d-%06d-%s", version.String(), from, to, baseName)
 }
 
 func SnapFilePath(id AppendableId, version snaptype.Version, from, to RootNum) string {
