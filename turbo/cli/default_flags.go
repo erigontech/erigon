@@ -326,4 +326,5 @@ var DefaultFlags = []cli.Flag{
 	&utils.BadTxAllowance,
 	&utils.BadTxStoreValue,
 	&utils.BadTxPurge,
+	&utils.ZkevmLogExcludeFlags,
 }
