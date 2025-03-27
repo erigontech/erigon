@@ -22,7 +22,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/c2h5oh/datasize"
+	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
@@ -90,6 +93,10 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 	if opts.GetLabel() != kv.ChainDB {
 		panic(opts.GetLabel())
 	}
+	opts.Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync }).
+		SyncBytes(uint(128 * datasize.MB)).
+		SyncPeriod(2 * time.Second)
+
 	rawDB := opts.MustOpen()
 	if applyMigrations {
 		migrator := migrations.NewMigrator(opts.GetLabel())
