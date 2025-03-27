@@ -106,10 +106,11 @@ func (flusher *PeriodicFlusher) FlushInBackground(ctx context.Context) {
 		for {
 			select {
 			case <-flusher.ticker.C:
-				fmt.Printf("[dbg] FlushInBackground: %d\n", 1)
+				t := time.Now()
 				if err := flusher.env.Sync(true, false); err != nil {
 					flusher.opts.log.Error("Error during periodic mdbx sync", "err", err, "dbName", flusher.opts.label)
 				}
+				fmt.Printf("[dbg] FlushInBackground: %s\n", time.Since(t))
 			case <-flusher.quitChan:
 				return
 			case <-ctx.Done():
