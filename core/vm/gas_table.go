@@ -655,7 +655,3 @@ func gasEOFCreate(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory,
 	// }
 	return gas, nil
 }
-
-func gasZeroCost(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	return 0, nil
-}

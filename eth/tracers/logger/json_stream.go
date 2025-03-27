@@ -202,7 +202,7 @@ func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 
 // CaptureFault implements the Tracer interface to trace an execution fault
 // while running an opcode.
-func (l *JsonStreamLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (l *JsonStreamLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, section, fnDepth *uint64, err error) {
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.

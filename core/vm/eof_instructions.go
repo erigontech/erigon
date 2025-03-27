@@ -275,9 +275,9 @@ func opReturnCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 		return nil, fmt.Errorf("newDataSize < scope.eofHeader.dataSize")
 	}
 	container = append(container, auxData...)
-	dataSizePos := header.dataSizePos
-	container[dataSizePos] = byte(newDataSize >> 8)
-	container[dataSizePos+1] = byte(newDataSize)
+
+	container[header.dataSizePos] = byte(newDataSize >> 8)
+	container[header.dataSizePos+1] = byte(newDataSize)
 
 	*pc += 1
 	return container, errStopToken

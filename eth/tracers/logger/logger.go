@@ -77,7 +77,7 @@ type StructLog struct {
 	Depth         int                               `json:"depth"`
 	RefundCounter uint64                            `json:"refund"`
 	Section       *uint64                           `json:"section,omitempty"`
-	FnDepth       *uint64                           `json:"fnDepth,omitempty"`
+	FnDepth       *uint64                           `json:"functionDepth,omitempty"`
 	Err           error                             `json:"-"`
 }
 
@@ -226,7 +226,7 @@ func (l *StructLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 
 // CaptureFault implements the Tracer interface to trace an execution fault
 // while running an opcode.
-func (l *StructLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (l *StructLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, section, fnDepth *uint64, err error) {
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
@@ -420,7 +420,7 @@ func (t *mdLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope
 	}
 }
 
-func (t *mdLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (t *mdLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, section, fnDepth *uint64, err error) {
 	fmt.Fprintf(t.out, "\nError: at pc=%d, op=%v: %v\n", pc, op, err)
 }
 

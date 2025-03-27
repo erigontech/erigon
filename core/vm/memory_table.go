@@ -143,7 +143,3 @@ func memoryEOFCreate(stack *stack.Stack) (uint64, bool) {
 func memoryReturnContract(stack *stack.Stack) (uint64, bool) {
 	return calcMemSize64(stack.Back(0), stack.Back(1))
 }
-
-func memoryZeroCost(stack *stack.Stack) (uint64, bool) {
-	return 0, false
-}

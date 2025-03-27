@@ -55,7 +55,7 @@ func (ct *CallTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to lib
 }
 func (ct *CallTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, section, fnDepth *uint64, err error) {
 }
-func (ct *CallTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (ct *CallTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, section, fnDepth *uint64, err error) {
 }
 func (ct *CallTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 }

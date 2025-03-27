@@ -640,11 +640,10 @@ func (evm *EVM) GetEOFHeader(code []byte, typ OpCode) (*eofHeader, error) {
 				// do not allow to create EOF from legacy calls
 				if typ == CREATE || typ == CREATE2 {
 					return nil, fmt.Errorf("attmept to create EOF from legacy call (CREATE, CREATE2)")
-					// return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err) //
 				}
 				// subsequent execution frames do not validate anything
 				if headerEOF, err = ParseEOFHeader(code, evm.interpreter.EOFTable(), initcode, false, 0); err != nil {
-					return nil, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
+					return nil, err
 				}
 			}
 		}

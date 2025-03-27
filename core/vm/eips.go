@@ -337,8 +337,6 @@ func enableEOFv1(jt *JumpTable) {
 
 	undefined := &operation{
 		execute:     opUndefined,
-		dynamicGas:  gasZeroCost,
-		memorySize:  memoryZeroCost,
 		constantGas: 0,
 		numPop:      0,
 		numPush:     0,
@@ -490,17 +488,5 @@ func enableEOFv1(jt *JumpTable) {
 	for op := 0x60; op < 0x60+32; op++ {
 		jt[op].immediateSize = immSize
 		immSize++
-	}
-
-	for op := 0; op < 256; op++ {
-		if jt[op] == nil {
-			jt[op] = undefined
-		}
-		if jt[op].dynamicGas == nil {
-			jt[op].dynamicGas = gasZeroCost
-		}
-		if jt[op].memorySize == nil {
-			jt[op].memorySize = memoryZeroCost
-		}
 	}
 }

@@ -45,10 +45,11 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 		operation   *operation
 
 		// copies used by tracer
-		pcCopy  uint64 // needed for the deferred Tracer
-		gasCopy uint64 // for Tracer to log gas remaining before execution
-		logged  bool   // deferred Tracer should ignore already logged steps
-		res     []byte // result of the opcode execution function
+		pcCopy           uint64 // needed for the deferred Tracer
+		gasCopy          uint64 // for Tracer to log gas remaining before execution
+		logged           bool   // deferred Tracer should ignore already logged steps
+		res              []byte // result of the opcode execution function
+		section, fnDepth uint64
 	)
 
 	mem.Reset()
@@ -65,9 +66,9 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 		// first: capture data/memory/state/depth/etc... then clenup them
 
 		if !logged {
-			in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, nil, nil, err) //nolint:errcheck
+			in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, &section, &fnDepth, err) //nolint:errcheck
 		} else {
-			in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
+			in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, &section, &fnDepth, err)
 		}
 
 		// this function must execute _after_: the `CaptureState` needs the stacks before
@@ -92,41 +93,48 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 
 		// Capture pre-execution values for tracing.
 		logged, pcCopy, gasCopy = false, _pc, contract.Gas
-		section := callContext.seciontIdx
-		fnDepth := uint64(len(callContext.returnStack)) + 1
+		section = callContext.seciontIdx
+		fnDepth = uint64(len(callContext.returnStack)) + 1
 
 		op = OpCode(contract.Code[_pc])
 		operation = in.jtEOF[op]
+		cost = operation.constantGas // For tracing
 
 		// no need to check for stack overflow and underflow for EOF at the runtime
 
 		if !contract.UseGas(operation.constantGas, tracing.GasChangeIgnored) {
 			return nil, ErrOutOfGas
 		}
-		memSize, overflow := operation.memorySize(locStack)
-		if overflow {
-			return nil, ErrGasUintOverflow
-		}
-		// memory is expanded in words of 32 bytes. Gas
-		// is also calculated in words.
-		if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-			return nil, ErrGasUintOverflow
+
+		if operation.dynamicGas != nil {
+
+			if operation.memorySize != nil {
+				memSize, overflow := operation.memorySize(locStack)
+				if overflow {
+					return nil, ErrGasUintOverflow
+				}
+				// memory is expanded in words of 32 bytes. Gas
+				// is also calculated in words.
+				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
+					return nil, ErrGasUintOverflow
+				}
+			}
+
+			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
+			}
+			cost += dynamicCost
+			if !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
+				return nil, ErrOutOfGas
+			}
+
+			if memorySize > 0 {
+				mem.Resize(memorySize)
+			}
 		}
 
-		dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
-		}
-
-		if !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
-			return nil, ErrOutOfGas
-		}
-
-		if memorySize > 0 {
-			mem.Resize(memorySize)
-		}
-
-		in.cfg.Tracer.CaptureState(_pc, op, gasCopy, operation.constantGas+dynamicCost, callContext, in.returnData, in.depth, &section, &fnDepth, err) //nolint:errcheck
+		in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, &section, &fnDepth, err) //nolint:errcheck
 		logged = true
 
 		// execute the operation
@@ -208,27 +216,33 @@ func (in *EVMInterpreter) runNoDebug(contract *Contract, input []byte, readOnly 
 		if !contract.UseGas(operation.constantGas, tracing.GasChangeIgnored) {
 			return nil, ErrOutOfGas
 		}
-		memSize, overflow := operation.memorySize(locStack)
-		if overflow {
-			return nil, ErrGasUintOverflow
-		}
-		// memory is expanded in words of 32 bytes. Gas
-		// is also calculated in words.
-		if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-			return nil, ErrGasUintOverflow
-		}
 
-		dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
-		}
+		if operation.dynamicGas != nil {
 
-		if !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
-			return nil, ErrOutOfGas
-		}
+			if operation.memorySize != nil {
+				memSize, overflow := operation.memorySize(locStack)
+				if overflow {
+					return nil, ErrGasUintOverflow
+				}
+				// memory is expanded in words of 32 bytes. Gas
+				// is also calculated in words.
+				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
+					return nil, ErrGasUintOverflow
+				}
+			}
 
-		if memorySize > 0 {
-			mem.Resize(memorySize)
+			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
+			}
+
+			if !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
+				return nil, ErrOutOfGas
+			}
+
+			if memorySize > 0 {
+				mem.Resize(memorySize)
+			}
 		}
 
 		// execute the operation

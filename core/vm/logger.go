@@ -44,7 +44,7 @@ type EVMLogger interface {
 	CaptureExit(output []byte, usedGas uint64, err error)
 	// Opcode level
 	CaptureState(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, section, fnDepth *uint64, err error)
-	CaptureFault(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error)
+	CaptureFault(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, section, fnDepth *uint64, err error)
 }
 
 // FlushableTracer is a Tracer extension whose accumulated traces has to be

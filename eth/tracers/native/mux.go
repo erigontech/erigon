@@ -85,9 +85,9 @@ func (t *muxTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 }
 
 // CaptureFault implements the EVMLogger interface to trace an execution fault.
-func (t *muxTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (t *muxTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, secion, fnDepth *uint64, err error) {
 	for _, t := range t.tracers {
-		t.CaptureFault(pc, op, gas, cost, scope, depth, err)
+		t.CaptureFault(pc, op, gas, cost, scope, depth, secion, fnDepth, err)
 	}
 }
 

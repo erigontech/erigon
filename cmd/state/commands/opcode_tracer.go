@@ -400,11 +400,11 @@ func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 	currentEntry.lastOp = op
 }
 
-func (ot *opcodeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
+func (ot *opcodeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, section, fnDepth *uint64, err error) {
 	// CaptureFault sees the system as it is after the fault happens
 
 	// CaptureState might have already recorded the opcode before it failed. Let's centralize the processing there.
-	ot.CaptureState(pc, op, gas, cost, scope, nil, opDepth, nil, nil, err)
+	ot.CaptureState(pc, op, gas, cost, scope, nil, opDepth, section, fnDepth, err)
 }
 
 type segPrefix struct {

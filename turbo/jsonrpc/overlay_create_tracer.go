@@ -68,5 +68,5 @@ func (ct *OverlayCreateTracer) CaptureExit(output []byte, usedGas uint64, err er
 // Opcode level
 func (ct *OverlayCreateTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, section, fnDepth *uint64, err error) {
 }
-func (ct *OverlayCreateTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (ct *OverlayCreateTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, section, fnDepth *uint64, err error) {
 }
