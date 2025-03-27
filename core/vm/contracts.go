@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto/bn256"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/crypto/secp256r1"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/params"
 
 	//lint:ignore SA1019 Needed for precompile
@@ -208,12 +209,17 @@ func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64,
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, tracer *tracing.Hooks,
 ) (ret []byte, remainingGas uint64, err error) {
 	gasCost := p.RequiredGas(input)
 	if suppliedGas < gasCost {
 		return nil, 0, ErrOutOfGas
 	}
+
+	if tracer != nil && tracer.OnGasChange != nil {
+		tracer.OnGasChange(suppliedGas, suppliedGas-gasCost, tracing.GasChangeCallPrecompiledContract)
+	}
+
 	suppliedGas -= gasCost
 	output, err := p.Run(input)
 	return output, suppliedGas, err

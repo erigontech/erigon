@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -165,6 +166,9 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	// set the receiver's (the executing contract) code for execution.
 	cfg.State.SetCode(address, code)
 	// Call the code with the given configuration.
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
+		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, libcommon.Address{})
+	}
 	ret, _, err := vmenv.Call(
 		sender,
 		libcommon.BytesToAddress([]byte("contract")),
@@ -173,6 +177,9 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		cfg.Value,
 		false, /* bailout */
 	)
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
+		cfg.EVMConfig.Tracer.OnTxEnd(nil, err)
+	}
 
 	return ret, cfg.State, err
 }
