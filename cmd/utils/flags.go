@@ -908,6 +908,21 @@ var (
 		Usage: "Exclude zkevm flags from startup logging on zkevm flags.",
 		Value: cli.NewStringSlice("zkevm.l1-rpc-url"),
 	}
+	Hardfork = cli.StringFlag{
+		Name:  "zkevm.hardfork",
+		Usage: "Values { hermez | ethereum }. Default, hermez.",
+		Value: "hermez",
+	}
+	Commitment = cli.StringFlag{
+		Name:  "zkevm.commitment",
+		Usage: "Values { smt | pmt }. Default, smt.",
+		Value: "smt",
+	}
+	InjectGers = cli.BoolFlag{
+		Name:  "zkevm.inject-gers",
+		Usage: "Inject L1 information into the scalable contract and ger manager. Default true.",
+		Value: true,
+	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
 		Usage: "Number of entries to print from the ACL history on node start up",
