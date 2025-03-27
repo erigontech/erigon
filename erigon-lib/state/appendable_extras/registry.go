@@ -103,6 +103,9 @@ func WithIndexFileType(indexFileType []string) EntityIdOption {
 	}
 }
 
+// TODO: at appendable boundary, we want this to be value type
+// so changes don't effect config appendables own. Once we get it in
+// as value, we can use reference in other places within appendables.
 func WithSnapshotCreationConfig(cfg *SnapshotConfig) EntityIdOption {
 	return func(a *holder) {
 		a.snapshotCreationConfig = cfg
