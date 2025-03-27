@@ -13,12 +13,21 @@ on:
       - reopened
       - synchronize
       - ready_for_review
-    
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: >-
+    ${{
+      !startsWith(github.ref, 'refs/heads/release/') &&
+      github.ref != 'refs/heads/main'
+    }}
+
+
 jobs:
   tests:
     strategy:
       matrix:
-        #        disable macos-11 until https://github.com/erigontech/erigon/issues/8789
+        #       disable macos-11 until https://github.com/erigontech/erigon/issues/8789
         os: [ ubuntu-22.04 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
