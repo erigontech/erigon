@@ -927,7 +927,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 
 	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, nil)
 	if err != nil {
-		return fmt.Errorf("%w: %s, lable: %s, %w. Tip: try run `integration run_migrations`", ErrTableDoesntExists, name, tx.db.opts.label, err)
+		return fmt.Errorf("%w: %s, label: %s, %w. Tip: try run `integration run_migrations`", ErrTableDoesntExists, name, tx.db.opts.label, err)
 	}
 	cnfCopy.DBI = kv.DBI(dbi)
 
