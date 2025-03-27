@@ -28,9 +28,10 @@ import (
 	"path/filepath"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/kv"
 	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/kv"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -79,13 +80,11 @@ func stateTestCmd(ctx *cli.Context) error {
 		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
 		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
 	}
-	cfg := vm.Config{
-		Debug: ctx.Bool(DebugFlag.Name) || ctx.Bool(MachineFlag.Name),
-	}
+	cfg := vm.Config{}
 	if machineFriendlyOutput {
-		cfg.Tracer = logger.NewJSONLogger(config, os.Stderr)
+		cfg.Tracer = logger.NewJSONLogger(config, os.Stderr).Tracer().Hooks
 	} else if ctx.Bool(DebugFlag.Name) {
-		cfg.Tracer = logger.NewStructLogger(config)
+		cfg.Tracer = logger.NewStructLogger(config).Tracer().Hooks
 	}
 
 	if len(ctx.Args().First()) != 0 {

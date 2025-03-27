@@ -26,9 +26,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
-
 	"github.com/pelletier/go-toml/v2"
+	"github.com/pkg/errors"
 	"github.com/tidwall/btree"
 
 	snapshothashes "github.com/erigontech/erigon-snapshot"
@@ -37,12 +36,10 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/version"
 )
 
-// TODO(yperbasis) move into params/version.go
-const DefaultSnapshotGitBranch = "main"
-
-var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", DefaultSnapshotGitBranch)
+var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", version.DefaultSnapshotGitBranch)
 
 var (
 	Mainnet    = fromToml(snapshothashes.Mainnet)

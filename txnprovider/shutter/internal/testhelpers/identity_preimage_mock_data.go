@@ -28,35 +28,51 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter"
 )
 
-func MockIdentityPreimagesWithSlotIp(t *testing.T, slot uint64, count uint64) shutter.IdentityPreimages {
-	return append(shutter.IdentityPreimages{MakeSlotIdentityPreimage(t, slot)}, MockIdentityPreimages(t, count)...)
-}
-
-func MockIdentityPreimages(t *testing.T, count uint64) shutter.IdentityPreimages {
-	ips := make([]*shutter.IdentityPreimage, count)
-	for i := uint64(0); i < count; i++ {
-		ips[i] = Uint64ToIdentityPreimage(t, i)
+func MockIdentityPreimagesWithSlotIp(slot uint64, count uint64) (shutter.IdentityPreimages, error) {
+	slotIp, err := MakeSlotIdentityPreimage(slot)
+	if err != nil {
+		return nil, err
 	}
 
+	ips, err := MockIdentityPreimages(count)
+	if err != nil {
+		return nil, err
+	}
+
+	return append(shutter.IdentityPreimages{slotIp}, ips...), nil
+}
+
+func TestMustMockIdentityPreimages(t *testing.T, count uint64) shutter.IdentityPreimages {
+	ips, err := MockIdentityPreimages(count)
+	require.NoError(t, err)
 	return ips
 }
 
-func MakeSlotIdentityPreimage(t *testing.T, slot uint64) *shutter.IdentityPreimage {
+func MockIdentityPreimages(count uint64) (shutter.IdentityPreimages, error) {
+	ips := make([]*shutter.IdentityPreimage, count)
+	for i := uint64(0); i < count; i++ {
+		var err error
+		ips[i], err = Uint64ToIdentityPreimage(i)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return ips, nil
+}
+
+func MakeSlotIdentityPreimage(slot uint64) (*shutter.IdentityPreimage, error) {
 	// 32 bytes of zeros plus the block number as 20 byte big endian (ie starting with lots of
 	// zeros as well). This ensures the block identity preimage is always alphanumerically before
 	// any transaction identity preimages, because sender addresses cannot be that small.
 	var buf bytes.Buffer
 	buf.Write(libcommon.BigToHash(libcommon.Big0).Bytes())
 	buf.Write(libcommon.BigToHash(new(big.Int).SetUint64(slot)).Bytes()[12:])
-	ip, err := shutter.IdentityPreimageFromBytes(buf.Bytes())
-	require.NoError(t, err)
-	return ip
+	return shutter.IdentityPreimageFromBytes(buf.Bytes())
 }
 
-func Uint64ToIdentityPreimage(t *testing.T, i uint64) *shutter.IdentityPreimage {
+func Uint64ToIdentityPreimage(i uint64) (*shutter.IdentityPreimage, error) {
 	buf := make([]byte, 52)
 	binary.BigEndian.PutUint64(buf[:8], i)
-	ip, err := shutter.IdentityPreimageFromBytes(buf)
-	require.NoError(t, err)
-	return ip
+	return shutter.IdentityPreimageFromBytes(buf)
 }

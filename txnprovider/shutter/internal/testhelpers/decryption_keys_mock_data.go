@@ -41,7 +41,13 @@ type MockDecryptionKeysEnvelopeDataOptions struct {
 	Version       string
 }
 
-func MockDecryptionKeysEnvelopeData(t *testing.T, opts MockDecryptionKeysEnvelopeDataOptions) []byte {
+func TestMustMockDecryptionKeysEnvelopeData(t *testing.T, opts MockDecryptionKeysEnvelopeDataOptions) []byte {
+	data, err := MockDecryptionKeysEnvelopeData(opts)
+	require.NoError(t, err)
+	return data
+}
+
+func MockDecryptionKeysEnvelopeData(opts MockDecryptionKeysEnvelopeDataOptions) ([]byte, error) {
 	decryptionKeys := &shutterproto.DecryptionKeys{
 		InstanceId: opts.InstanceId,
 		Eon:        uint64(opts.EonIndex),
@@ -61,13 +67,19 @@ func MockDecryptionKeysEnvelopeData(t *testing.T, opts MockDecryptionKeysEnvelop
 	}
 
 	decryptionKeysMsg, err := anypb.New(decryptionKeys)
-	require.NoError(t, err)
+	if err != nil {
+		return nil, err
+	}
+
 	envelopeData, err := proto.Marshal(&shutterproto.Envelope{
 		Version: opts.Version,
 		Message: decryptionKeysMsg,
 	})
-	require.NoError(t, err)
-	return envelopeData
+	if err != nil {
+		return nil, err
+	}
+
+	return envelopeData, nil
 }
 
 func MockDecryptionKeysMsg(topic string, envelopeData []byte) *pubsub.Message {

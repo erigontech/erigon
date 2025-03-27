@@ -194,15 +194,8 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 		return err
 	}
 
-	for idx, d := range sd.aggTx.d {
-		if err := d.Unwind(ctx, rwTx, step, txUnwindTo, changeset[idx]); err != nil {
-			return err
-		}
-	}
-	for _, ii := range sd.aggTx.iis {
-		if err := ii.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
-			return err
-		}
+	if err := sd.aggTx.Unwind(ctx, rwTx, txUnwindTo, changeset, logEvery); err != nil {
+		return err
 	}
 
 	sd.ClearRam(true)
@@ -253,12 +246,12 @@ func (sd *SharedDomains) discardWrites(d kv.Domain) {
 	sd.domainWriters[d].h.discard = true
 }
 
-func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, next func() (bool, []byte), cfg *rebuiltCommitment, logger log.Logger) (*rebuiltCommitment, error) {
+func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, roTx kv.Tx, aggTx *AggregatorRoTx, next func() (bool, []byte), cfg *rebuiltCommitment, logger log.Logger) (*rebuiltCommitment, error) {
 	sd.discardWrites(kv.AccountsDomain)
 	sd.discardWrites(kv.StorageDomain)
 	sd.discardWrites(kv.CodeDomain)
 
-	visComFiles := sd.roTx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
+	visComFiles := roTx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
 	logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
 		"totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum(),
 		"commitment files before dump step", cfg.StepTo,
@@ -285,11 +278,11 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, next func() 
 	sb := time.Now()
 
 	// rng := MergeRange{from: cfg.TxnFrom, to: cfg.TxnTo}
-	// vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
+	// vt, err := aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, aggTx.d[kv.AccountsDomain], aggTx.d[kv.StorageDomain], nil, nil)
 	// if err != nil {
 	// 	return nil, err
 	// }
-	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, cfg.TxnFrom, cfg.TxnTo, sd.domainWriters[kv.CommitmentDomain], nil)
+	err = aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, cfg.TxnFrom, cfg.TxnTo, sd.domainWriters[kv.CommitmentDomain], nil)
 	if err != nil {
 		return nil, err
 	}
@@ -433,11 +426,12 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {
+	aggTx := sd.aggTx
 	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
 		return v, prevStep, nil
 	}
-	v, step, found, err := sd.aggTx.d[kv.CommitmentDomain].getLatestFromDb(prefix, sd.roTx)
+	v, step, found, err := aggTx.d[kv.CommitmentDomain].getLatestFromDb(prefix, sd.roTx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
@@ -448,17 +442,17 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 
 	// getFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 	// of file where the value is stored (not exact step when kv has been set)
-	v, _, startTx, endTx, err := sd.aggTx.d[kv.CommitmentDomain].getFromFiles(prefix, 0)
+	v, _, startTx, endTx, err := aggTx.d[kv.CommitmentDomain].getFromFiles(prefix, 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
 
-	if !sd.aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
+	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
 		return v, endTx / sd.StepSize(), nil
 	}
 
 	// replace shortened keys in the branch with full keys to allow HPH work seamlessly
-	rv, err := sd.replaceShortenedKeysInBranch(prefix, commitment.BranchData(v), startTx, endTx)
+	rv, err := sd.replaceShortenedKeysInBranch(prefix, commitment.BranchData(v), startTx, endTx, aggTx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -466,36 +460,39 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 }
 
 // replaceShortenedKeysInBranch replaces shortened keys in the branch with full keys
-func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64) (commitment.BranchData, error) {
-	if !sd.aggTx.d[kv.CommitmentDomain].d.replaceKeysInValues && sd.aggTx.a.commitmentValuesTransform {
+func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64, aggTx *AggregatorRoTx) (commitment.BranchData, error) {
+	logger := sd.logger
+	stepSize := aggTx.StepSize()
+
+	if !aggTx.d[kv.CommitmentDomain].d.replaceKeysInValues && aggTx.a.commitmentValuesTransform {
 		panic("domain.replaceKeysInValues is disabled, but agg.commitmentValuesTransform is enabled")
 	}
 
-	if !sd.aggTx.a.commitmentValuesTransform ||
+	if !aggTx.a.commitmentValuesTransform ||
 		len(branch) == 0 ||
-		sd.aggTx.TxNumsInFiles(kv.StateDomains...) == 0 ||
+		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 ||
 		bytes.Equal(prefix, keyCommitmentState) ||
-		((fEndTxNum-fStartTxNum)/sd.aggTx.StepSize())%2 != 0 { // this checks if file has even number of steps, singular files does not transform values.
+		((fEndTxNum-fStartTxNum)/stepSize)%2 != 0 { // this checks if file has even number of steps, singular files does not transform values.
 
 		return branch, nil // do not transform, return as is
 	}
 
-	sto := sd.aggTx.d[kv.StorageDomain]
-	acc := sd.aggTx.d[kv.AccountsDomain]
+	sto := aggTx.d[kv.StorageDomain]
+	acc := aggTx.d[kv.AccountsDomain]
 	storageItem, err := sto.rawLookupFileByRange(fStartTxNum, fEndTxNum)
 	if err != nil {
-		sd.logger.Crit("dereference key during commitment read", "failed", err.Error())
+		logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err
 	}
 	accountItem, err := acc.rawLookupFileByRange(fStartTxNum, fEndTxNum)
 	if err != nil {
-		sd.logger.Crit("dereference key during commitment read", "failed", err.Error())
+		logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err
 	}
 	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.Compression)
 	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.Compression)
 	metricI := 0
-	for i, f := range sd.aggTx.d[kv.CommitmentDomain].files {
+	for i, f := range aggTx.d[kv.CommitmentDomain].files {
 		if i > 5 {
 			metricI = 5
 			break
@@ -517,8 +514,8 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 			// Optimised key referencing a state file record (file number and offset within the file)
 			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
 			if !found {
-				s0, s1 := fStartTxNum/sd.aggTx.StepSize(), fEndTxNum/sd.aggTx.StepSize()
-				sd.logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
+				s0, s1 := fStartTxNum/stepSize, fEndTxNum/stepSize
+				logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
 					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
 			}
@@ -534,8 +531,8 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		}
 		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
 		if !found {
-			s0, s1 := fStartTxNum/sd.StepSize(), fEndTxNum/sd.StepSize()
-			sd.logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
+			s0, s1 := fStartTxNum/stepSize, fEndTxNum/stepSize
+			logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
 		}
