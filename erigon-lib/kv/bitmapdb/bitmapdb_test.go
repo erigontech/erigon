@@ -62,10 +62,10 @@ func TestCutLeft(t *testing.T) {
 	lft := bitmapdb.CutLeft(bm, N)
 	require.Positive(t, lft.GetSerializedSizeInBytes())
 	require.Equal(t, lft.GetCardinality(), 1)
-	require.Equal(t, bm.GetCardinality(), 0)
+	require.Zero(t, bm.GetCardinality())
 
 	bm = roaring.New()
 	lft = bitmapdb.CutLeft(bm, N)
-	require.Equal(t, lft, nil)
-	require.Equal(t, bm.GetCardinality(), 0)
+	require.Nil(t, lft)
+	require.Zero(t, bm.GetCardinality())
 }
