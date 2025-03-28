@@ -50,6 +50,7 @@ type DiagTxn struct {
 	IsLocal             bool          `json:"isLocal"`
 	DiscardReason       string        `json:"discardReason"`
 	Pool                string        `json:"pool"`
+	RLP                 []byte        `json:"rlp"`
 }
 
 type IncomingTxnUpdate struct {

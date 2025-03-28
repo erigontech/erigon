@@ -558,6 +558,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 				IsLocal:             false,
 				DiscardReason:       reason.String(),
 				Pool:                subpool,
+				RLP:                 txn.Rlp,
 			}
 
 			diagTxns = append(diagTxns, diagTxn)
