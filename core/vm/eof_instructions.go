@@ -46,7 +46,7 @@ func opRjumpv(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 		return nil, nil
 	}
 	relOffset := readInt16Be(scope.Contract.Code[*pc+2+2*_case.Uint64():])
-	// *pc = pcPost + uint64(relOffset) // may be uint64(pcPost + relOffset)
+	// *pc = pcPost + uint64(relOffset) // may be uint64(pcPost + relOffset)?
 	*pc = uint64(int64(pcPost) + int64(relOffset))
 	return nil, nil
 }
@@ -106,7 +106,7 @@ func opDupN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 
 func opSwapN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	idx := int(scope.Contract.Code[*pc+1]) + 1
-	scope.Stack.Swap0(idx)
+	scope.Stack.SwapTop(idx)
 	*pc += 1
 	return nil, nil
 }
@@ -114,7 +114,8 @@ func opSwapN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 func opExchange(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	n := (int(scope.Contract.Code[*pc+1]) >> 4) + 1
 	m := (int(scope.Contract.Code[*pc+1]) & 0x0f) + 1
-	scope.Stack.Exchange(n, n+m)
+	stackTop := scope.Stack.Len() - 1
+	scope.Stack.Exchange(stackTop-n, stackTop-n-m)
 	*pc += 1
 	return nil, nil
 }
@@ -186,14 +187,11 @@ func opDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 
 func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 
-	// if (state.in_static_mode())
-	// return {EVMC_STATIC_MODE_VIOLATION, gas_left};
 	if interpreter.readOnly { // STATICCALL
 		return nil, fmt.Errorf("calling EOFCreate in static mode")
 	}
 
 	var (
-		// code             = scope.Contract.CodeAt(scope.CodeSection)
 		initContainerIdx = scope.Contract.Code[*pc+1]
 
 		endowment = scope.Stack.Pop()
@@ -214,7 +212,7 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	if ok := scope.Contract.UseGas(hashingCharge, tracing.GasChangeCallContractEOFCreation); !ok {
 		return nil, ErrOutOfGas
 	}
-	igas := int64(gas) - int64(hashingCharge) // TODO(racytech): make it better (doesn't look good)
+	igas := int64(gas) - int64(hashingCharge)
 	if igas <= 0 {
 		return nil, ErrOutOfGas
 	}

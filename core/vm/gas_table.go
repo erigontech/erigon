@@ -649,9 +649,6 @@ func gasEOFCreate(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory,
 	if err != nil {
 		return 0, err
 	}
-	// var overflow bool
-	// if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
-	// 	return 0, ErrGasUintOverflow
-	// }
+
 	return gas, nil
 }

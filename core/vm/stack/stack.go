@@ -73,8 +73,8 @@ func (st *Stack) Swap(n int) {
 	st.Data[len(st.Data)-n], st.Data[len(st.Data)-1] = st.Data[len(st.Data)-1], st.Data[len(st.Data)-n]
 }
 
-func (st *Stack) Swap0(m int) {
-	st.Data[0], st.Data[m] = st.Data[m], st.Data[0]
+func (st *Stack) SwapTop(m int) {
+	st.Data[len(st.Data)-1-m], st.Data[len(st.Data)-1] = st.Data[len(st.Data)-1], st.Data[len(st.Data)-1-m]
 }
 
 func (st *Stack) Exchange(n, m int) {
