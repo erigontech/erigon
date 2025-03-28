@@ -321,6 +321,8 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, errors.New("proofs are available only for the 'latest' block")
 	}
 
+	api.logger.Info(fmt.Sprintf("proof requested for the block 0x%s\n", fmt.Sprintf("%x", latestBlock)))
+
 	storageKeysConverted := make([]libcommon.Hash, len(storageKeys))
 	for i, s := range storageKeys {
 		storageKeysConverted[i].SetBytes(s)
