@@ -306,12 +306,12 @@ func TestIncrementRead(t *testing.T) {
 	require.NoError(t, err)
 	chaV, err := tx.ReadSequence(table)
 	require.NoError(t, err)
-	require.Equal(t, chaV, uint64(12))
+	require.Equal(t, uint64(12), chaV)
 	_, err = tx.IncrementSequence(table, uint64(240))
 	require.NoError(t, err)
 	chaV, err = tx.ReadSequence(table)
 	require.NoError(t, err)
-	require.Equal(t, chaV, uint64(252))
+	require.Equal(t, uint64(252), chaV)
 }
 
 func TestHasDelete(t *testing.T) {
@@ -451,8 +451,8 @@ func TestAppendFirstLast(t *testing.T) {
 
 	k, v, err = c.Last()
 	require.NoError(t, err)
-	require.Equal(t, k, []byte("key6"))
-	require.Equal(t, v, []byte("value6.1"))
+	require.Equal(t, []byte("key6"), k)
+	require.Equal(t, []byte("value6.1"), v)
 
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key6"}, keys)
