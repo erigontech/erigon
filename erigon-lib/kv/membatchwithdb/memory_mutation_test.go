@@ -56,11 +56,11 @@ func TestPutAppendHas(t *testing.T) {
 	require.NoError(t, batch.AppendDup(kv.HeaderNumber, []byte("CBAA"), []byte("value3.1")))
 	require.Error(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
 
-	require.Nil(t, batch.Flush(context.Background(), rwTx))
+	require.NoError(t, batch.Flush(context.Background(), rwTx))
 
 	exist, err := batch.Has(kv.HeaderNumber, []byte("AAAA"))
 	require.NoError(t, err)
-	require.Equal(t, exist, true)
+	require.True(t, exist)
 
 	val, err := batch.GetOne(kv.HeaderNumber, []byte("AAAA"))
 	require.NoError(t, err)
@@ -181,7 +181,7 @@ func TestForEach(t *testing.T) {
 		values = append(values, string(v))
 		return nil
 	})
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Nil(t, keys)
 	require.Nil(t, values)
 
@@ -190,7 +190,7 @@ func TestForEach(t *testing.T) {
 		values = append(values, string(v))
 		return nil
 	})
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, []string{"CCAA", "FCAA"}, keys)
 	require.Equal(t, []string{"value3", "value5"}, values)
 
@@ -202,7 +202,7 @@ func TestForEach(t *testing.T) {
 		values1 = append(values1, string(v))
 		return nil
 	})
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, []string{"AAAA", "CAAA", "CBAA", "CCAA", "FCAA"}, keys1)
 	require.Equal(t, []string{"value", "value1", "value2", "value3", "value5"}, values1)
 }

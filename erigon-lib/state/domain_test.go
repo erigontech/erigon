@@ -1060,7 +1060,7 @@ func TestScanStaticFilesD(t *testing.T) {
 		}
 		return true
 	})
-	require.Equal(t, 6, len(found))
+	require.Len(t, found, 6)
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {
@@ -1647,8 +1647,8 @@ func TestDomainRange(t *testing.T) {
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(lim, len(keys))
-		require.Equal(lim, len(vals))
+		require.Len(keys, lim)
+		require.Len(vals, lim)
 	}
 }
 
