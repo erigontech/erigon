@@ -1050,7 +1050,7 @@ func TestSequenceOps(t *testing.T) {
 	t.Run("empty read", func(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 		_, err := tx.ReadSequence(string(table1))
-		require.Equal(t, nil, err)
+		require.NoError(t, err)
 	})
 
 	t.Run("putting things and reading back", func(t *testing.T) {

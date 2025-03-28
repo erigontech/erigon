@@ -49,18 +49,18 @@ func TestSetCurrentSyncStage(t *testing.T) {
 
 	err = d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "Snapshots"})
 	require.NoError(t, err)
-	require.Equal(t, d.GetSyncStages()[0].State, diagnostics.Running)
+	require.Equal(t, diagnostics.Running, d.GetSyncStages()[0].State)
 
 	err = d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "BlockHashes"})
 	require.NoError(t, err)
-	require.Equal(t, d.GetSyncStages()[0].State, diagnostics.Completed)
-	require.Equal(t, d.GetSyncStages()[1].State, diagnostics.Running)
+	require.Equal(t, diagnostics.Completed, d.GetSyncStages()[0].State)
+	require.Equal(t, diagnostics.Running, d.GetSyncStages()[1].State)
 
 	err = d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "Snapshots"})
 	require.NoError(t, err)
-	require.Equal(t, d.GetSyncStages()[0].State, diagnostics.Completed)
-	require.Equal(t, d.GetSyncStages()[1].State, diagnostics.Running)
-	require.Equal(t, d.GetSyncStages()[2].State, diagnostics.Queued)
+	require.Equal(t, diagnostics.Completed, d.GetSyncStages()[0].State)
+	require.Equal(t, diagnostics.Running, d.GetSyncStages()[1].State)
+	require.Equal(t, diagnostics.Queued, d.GetSyncStages()[2].State)
 
 	//test not existed stage
 	err = d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "NotExistedStage"})
@@ -80,16 +80,16 @@ func TestSetCurrentSyncSubStage(t *testing.T) {
 	err = d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "Snapshots"})
 	require.NoError(t, err)
 	d.SetCurrentSyncSubStage(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
-	require.Equal(t, d.GetSyncStages()[0].SubStages[0].State, diagnostics.Running)
+	require.Equal(t, diagnostics.Running, d.GetSyncStages()[0].SubStages[0].State)
 
 	d.SetCurrentSyncSubStage(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	require.Equal(t, d.GetSyncStages()[0].SubStages[0].State, diagnostics.Completed)
-	require.Equal(t, d.GetSyncStages()[0].SubStages[1].State, diagnostics.Running)
+	require.Equal(t, diagnostics.Completed, d.GetSyncStages()[0].SubStages[0].State)
+	require.Equal(t, diagnostics.Running, d.GetSyncStages()[0].SubStages[1].State)
 
 	d.SetCurrentSyncSubStage(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
-	require.Equal(t, d.GetSyncStages()[0].SubStages[0].State, diagnostics.Completed)
-	require.Equal(t, d.GetSyncStages()[0].SubStages[1].State, diagnostics.Running)
-	require.Equal(t, d.GetSyncStages()[0].SubStages[2].State, diagnostics.Queued)
+	require.Equal(t, diagnostics.Completed, d.GetSyncStages()[0].SubStages[0].State)
+	require.Equal(t, diagnostics.Running, d.GetSyncStages()[0].SubStages[1].State)
+	require.Equal(t, diagnostics.Queued, d.GetSyncStages()[0].SubStages[2].State)
 }
 
 func TestGetStageState(t *testing.T) {
@@ -103,7 +103,7 @@ func TestGetStageState(t *testing.T) {
 	for _, stageId := range nodeStages {
 		state, err := d.GetStageState(stageId)
 		require.NoError(t, err)
-		require.Equal(t, state, diagnostics.Queued)
+		require.Equal(t, diagnostics.Queued, state)
 	}
 
 	//Test get not existed stage state
@@ -115,17 +115,17 @@ func TestGetStageState(t *testing.T) {
 	require.NoError(t, err)
 	state, err := d.GetStageState("Snapshots")
 	require.NoError(t, err)
-	require.Equal(t, state, diagnostics.Running)
+	require.Equal(t, diagnostics.Running, state)
 
 	//Test Snapshots Completed and BlockHashes running state
 	err = d.SetCurrentSyncStage(diagnostics.CurrentSyncStage{Stage: "BlockHashes"})
 	require.NoError(t, err)
 	state, err = d.GetStageState("Snapshots")
 	require.NoError(t, err)
-	require.Equal(t, state, diagnostics.Completed)
+	require.Equal(t, diagnostics.Completed, state)
 	state, err = d.GetStageState("BlockHashes")
 	require.NoError(t, err)
-	require.Equal(t, state, diagnostics.Running)
+	require.Equal(t, diagnostics.Running, state)
 }
 
 func TestGetStageIndexes(t *testing.T) {

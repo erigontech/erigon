@@ -302,7 +302,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(idxFiles))
-		require.Equal(t, 0, len(histFiles))
+		require.Empty(t, histFiles)
 	})
 	t.Run("history merge progress ahead of idx", func(t *testing.T) {
 		ii, h := newTestDomain()
