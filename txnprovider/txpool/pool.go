@@ -526,7 +526,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
 
-	isDiagEnabled := diagnostics.TypeOf(diagnostics.IncomingTxnUpdate{}).Enabled()
+	isDiagEnabled := diagnostics.Client().Connected()
 
 	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
 	for i, reason := range reasons {
@@ -2506,8 +2506,7 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 
 func sendChangeBatchEventToDiagnostics(pool string, event string, txnHashes [][32]byte) {
 	//Not sending empty events or diagnostics disabled
-	isDiagEnabled := diagnostics.TypeOf(diagnostics.PoolChangeBatchEvent{}).Enabled()
-	if len(txnHashes) == 0 || !isDiagEnabled {
+	if len(txnHashes) == 0 || !diagnostics.Client().Connected() {
 		return
 	}
 
