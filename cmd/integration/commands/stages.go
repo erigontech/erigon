@@ -638,6 +638,15 @@ func init() {
 	cmdSetPrune.Flags().Uint64Var(&pruneCBefore, "prune.c.before", 0, "")
 	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
 	rootCmd.AddCommand(cmdSetPrune)
+
+	withStartBlockNum(cmdCrossReferenceBlockHashes)
+	withEndBlockNum(cmdCrossReferenceBlockHashes)
+	withRpcUrl(cmdCrossReferenceBlockHashes)
+	withSecondaryRpcUrl(cmdCrossReferenceBlockHashes)
+	withRpcMaxRetries(cmdCrossReferenceBlockHashes)
+	withRpcBackOffDuration(cmdCrossReferenceBlockHashes)
+	withMaxParallelRequests(cmdCrossReferenceBlockHashes)
+	rootCmd.AddCommand(cmdCrossReferenceBlockHashes)
 }
 
 func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
