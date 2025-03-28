@@ -871,7 +871,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 				return nil
 			})
 			require.Greater(afterPrune, uint64(0))
-			require.NoError(t, err)
+			require.NoError(err)
 		} else {
 			found, err := bitmapdb.Get64(tx, kv.E2AccountsHistory, address[:], 0, 1024)
 			require.NoError(err)
