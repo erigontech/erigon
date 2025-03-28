@@ -19,10 +19,12 @@ package initial_state_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestMainnet(t *testing.T) {

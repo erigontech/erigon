@@ -19,9 +19,11 @@ package cltypes
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestProposerSlashing(t *testing.T) {

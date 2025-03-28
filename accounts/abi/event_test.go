@@ -348,9 +348,9 @@ func TestEventTupleUnpack(t *testing.T) {
 
 func unpackTestEventData(dest interface{}, hexData string, jsonEvent []byte, assert *assert.Assertions) error {
 	data, err := hex.DecodeString(hexData)
-	require.NoError(err, "Hex data should be a correct hex-string")
+	assert.NoError(err, "Hex data should be a correct hex-string")
 	var e Event
-	require.NoError(json.Unmarshal(jsonEvent, &e), "Should be able to unmarshal event ABI")
+	assert.NoError(json.Unmarshal(jsonEvent, &e), "Should be able to unmarshal event ABI")
 	a := ABI{Events: map[string]Event{"e": e}}
 	return a.UnpackIntoInterface(dest, "e", data)
 }
