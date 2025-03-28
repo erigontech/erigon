@@ -83,23 +83,23 @@ func TestPercentDiownloaded(t *testing.T) {
 
 	//Test metadata not ready
 	progress := diagnostics.GetShanpshotsPercentDownloaded(downloaded, total, torrentMetadataReady, files)
-	require.Equal(t, progress, "calculating...")
+	require.Equal(t, "calculating...", progress)
 
 	//Test metadata ready
 	progress = diagnostics.GetShanpshotsPercentDownloaded(downloaded, total, files, files)
-	require.Equal(t, progress, "10%")
+	require.Equal(t, "10%", progress)
 
 	//Test 100 %
 	progress = diagnostics.GetShanpshotsPercentDownloaded(total, total, files, files)
-	require.Equal(t, progress, "100%")
+	require.Equal(t, "100%", progress)
 
 	//Test 0 %
 	progress = diagnostics.GetShanpshotsPercentDownloaded(0, total, files, files)
-	require.Equal(t, progress, "0%")
+	require.Equal(t, "0%", progress)
 
 	//Test more than 100 %
 	progress = diagnostics.GetShanpshotsPercentDownloaded(total+1, total, files, files)
-	require.Equal(t, progress, "100%")
+	require.Equal(t, "100%", progress)
 }
 
 func TestFillDBFromSnapshots(t *testing.T) {
