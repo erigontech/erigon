@@ -1496,19 +1496,7 @@ func (dt *DomainRoTx) HistoryStartFrom() uint64 {
 	return dt.ht.files[0].startTxNum
 }
 
-func (dt *DomainRoTx) GetAsOfFile(key []byte, txNum uint64) ([]byte, bool, error) {
-	var v []byte
-	var foundStep uint64
-	var found bool
-	var err error
-
-	if traceGetLatest == dt.name {
-		defer func() {
-			fmt.Printf("getAsOfFile(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
-				dt.name.String(), key, v, found, foundStep, dt.files.EndTxNum()/dt.d.aggregationStep)
-		}()
-	}
-
+func (dt *DomainRoTx) getAsOfFile(key []byte, txNum uint64) ([]byte, bool, error) {
 	v, foundInFile, _, _, err := dt.getLatestFromFiles(key, txNum)
 	if err != nil {
 		return nil, false, fmt.Errorf("getLatestFromFiles: %w", err)
