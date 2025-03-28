@@ -68,7 +68,7 @@ func TestPutAppendHas(t *testing.T) {
 
 	exist, err = batch.Has(kv.HeaderNumber, []byte("KKKK"))
 	require.Nil(t, err)
-	require.Equal(t, exist, false)
+	require.False(t, exist)
 }
 
 func TestLastMiningDB(t *testing.T) {

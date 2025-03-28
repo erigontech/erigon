@@ -17,6 +17,7 @@
 package kvcache
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -252,10 +253,14 @@ func TestAPI(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range res1 {
-			require.Nil(<-res1[i])
+			if <-res1[i] != nil {
+				panic(fmt.Sprintf("epxected nil"))
+			}
 		}
 		for i := range res2 {
-			require.Equal(account1Enc, <-res2[i])
+			if !bytes.Equal(account1Enc, <-res2[i]) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", res1[i], res2[i]))
+			}
 		}
 		fmt.Printf("done1: \n")
 	}()

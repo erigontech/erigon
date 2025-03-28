@@ -727,7 +727,7 @@ func TestNewSegStreamReader(t *testing.T) {
 	for sr.HasNext() {
 		k, v, err := sr.Next()
 		if prevK != nil {
-			require.True(t, bytes.Compare(prevK, k) < 0)
+			require.Negative(t, bytes.Compare(prevK, k))
 		}
 		prevK = common.Copy(k)
 

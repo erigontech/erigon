@@ -20,7 +20,6 @@ package mdbx_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -60,7 +59,7 @@ func TestBucketCRUD(t *testing.T) {
 	}
 
 	require.True(migrator.ExistsBucket(normalBucket))
-	require.True(errors.Is(migrator.DropBucket(normalBucket), kv.ErrAttemptToDeleteNonDeprecatedBucket))
+	require.ErrorIs(migrator.DropBucket(normalBucket), kv.ErrAttemptToDeleteNonDeprecatedBucket)
 
 	require.False(migrator.ExistsBucket(deprecatedBucket))
 	require.NoError(migrator.CreateBucket(deprecatedBucket))

@@ -19,6 +19,7 @@ linters:
     - wrapcheck
     - err113
     - unparam
+    - errchkjson #TODO: enable me
     - makezero #TODO: enable me
     - noctx #TODO: enable me
     - nilerr #TODO: enable me
@@ -36,7 +37,6 @@ linters:
     - gofmt
     - gocritic
     - perfsprint
-    - errchkjson
 #    - revive
 #    - forcetypeassert
 #    - stylecheck

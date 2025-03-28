@@ -95,7 +95,7 @@ func iteration(t *testing.T, c kv.RwCursorDupSort, start []byte, val []byte) ([]
 	var err error
 	i := 0
 	for k, v, err := start, val, err; k != nil; k, v, err = c.Next() {
-		require.Nil(t, err)
+		require.NoError(t, err)
 		keys = append(keys, string(k))
 		values = append(values, string(v))
 		i += 1
@@ -289,7 +289,7 @@ func TestPutGet(t *testing.T) {
 
 	var v []byte
 	v, err := tx.GetOne("Table", []byte("key1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, v, []byte("value1.1"))
 
 	v, err = tx.GetOne("RANDOM", []byte("key1"))
@@ -303,7 +303,7 @@ func TestIncrementRead(t *testing.T) {
 	table := "Table"
 
 	_, err := tx.IncrementSequence(table, uint64(12))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	chaV, err := tx.ReadSequence(table)
 	require.Nil(t, err)
 	require.Equal(t, chaV, uint64(12))

@@ -189,7 +189,7 @@ func TestFileDataProviders(t *testing.T) {
 	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil, logger)
 	assert.NoError(t, err)
 
-	assert.Equal(t, 10, len(collector.dataProviders))
+	assert.Len(t, collector.dataProviders, 10)
 
 	for _, p := range collector.dataProviders {
 		fp, ok := p.(*fileDataProvider)
@@ -221,7 +221,7 @@ func TestRAMDataProviders(t *testing.T) {
 	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil, logger)
 	assert.NoError(t, err)
 
-	assert.Equal(t, 1, len(collector.dataProviders))
+	assert.Len(t, collector.dataProviders, 1)
 
 	for _, p := range collector.dataProviders {
 		mp, ok := p.(*memoryDataProvider)
@@ -269,7 +269,7 @@ func TestEmptySourceBucket(t *testing.T) {
 		TransformArgs{},
 		logger,
 	)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 }
 
