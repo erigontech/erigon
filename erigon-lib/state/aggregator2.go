@@ -2,8 +2,6 @@ package state
 
 import (
 	"context"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
-
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
@@ -64,13 +62,12 @@ func init() {
 		cfg.AccessorList = AccessorBTree | AccessorExistence
 		Schema[kv.CommitmentDomain] = cfg
 	}
+	InitSchemas()
 }
 
 var Schema = map[kv.Domain]domainCfg{
 	kv.AccountsDomain: {
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
-
-		version: snaptype.V1_0,
 
 		AccessorList:         AccessorBTree | AccessorExistence,
 		crossDomainIntegrity: domainIntegrityCheck,
@@ -86,7 +83,6 @@ var Schema = map[kv.Domain]domainCfg{
 			historyIdx:         kv.AccountsHistoryIdx,
 
 			iiCfg: iiCfg{
-				version:   snaptype.V1_0,
 				keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
 				withExistence: false, compressorCfg: seg.DefaultCfg,
 				filenameBase: kv.AccountsDomain.String(), //TODO: looks redundant
@@ -95,8 +91,6 @@ var Schema = map[kv.Domain]domainCfg{
 	},
 	kv.StorageDomain: {
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
-
-		version: snaptype.V1_0,
 
 		AccessorList: AccessorBTree | AccessorExistence,
 		Compression:  seg.CompressKeys,
@@ -111,7 +105,6 @@ var Schema = map[kv.Domain]domainCfg{
 			historyIdx:         kv.StorageHistoryIdx,
 
 			iiCfg: iiCfg{
-				version:   snaptype.V1_0,
 				keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
 				withExistence: false, compressorCfg: seg.DefaultCfg,
 				filenameBase: kv.StorageDomain.String(),
@@ -120,8 +113,6 @@ var Schema = map[kv.Domain]domainCfg{
 	},
 	kv.CodeDomain: {
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
-
-		version: snaptype.V1_0,
 
 		AccessorList: AccessorBTree | AccessorExistence,
 		Compression:  seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
@@ -137,7 +128,6 @@ var Schema = map[kv.Domain]domainCfg{
 			historyIdx:         kv.CodeHistoryIdx,
 
 			iiCfg: iiCfg{
-				version:       snaptype.V1_0,
 				withExistence: false, compressorCfg: seg.DefaultCfg,
 				keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
 				filenameBase: kv.CodeDomain.String(),
@@ -146,8 +136,6 @@ var Schema = map[kv.Domain]domainCfg{
 	},
 	kv.CommitmentDomain: {
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
-
-		version: snaptype.V1_0,
 
 		AccessorList:        AccessorHashMap,
 		Compression:         seg.CompressKeys,
@@ -165,7 +153,6 @@ var Schema = map[kv.Domain]domainCfg{
 			historyDisabled:    true,
 
 			iiCfg: iiCfg{
-				version:   snaptype.V1_0,
 				keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
 				withExistence: false, compressorCfg: seg.DefaultCfg,
 				filenameBase: kv.CommitmentDomain.String(),
@@ -174,8 +161,6 @@ var Schema = map[kv.Domain]domainCfg{
 	},
 	kv.ReceiptDomain: {
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
-
-		version: snaptype.V1_1,
 
 		AccessorList: AccessorBTree | AccessorExistence,
 		Compression:  seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
@@ -190,7 +175,6 @@ var Schema = map[kv.Domain]domainCfg{
 			historyIdx:         kv.ReceiptHistoryIdx,
 
 			iiCfg: iiCfg{
-				version:   snaptype.V1_0,
 				keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
 				withExistence: false, compressorCfg: seg.DefaultCfg,
 				filenameBase: kv.ReceiptDomain.String(),
@@ -201,22 +185,18 @@ var Schema = map[kv.Domain]domainCfg{
 
 var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
 	kv.LogAddrIdx: {
-		version:     snaptype.V1_1,
 		compression: seg.CompressNone,
 		name:        kv.LogAddrIdx,
 	},
 	kv.LogTopicIdx: {
-		version:     snaptype.V1_1,
 		compression: seg.CompressNone,
 		name:        kv.LogTopicIdx,
 	},
 	kv.TracesFromIdx: {
-		version:     snaptype.V1_0,
 		compression: seg.CompressNone,
 		name:        kv.TracesFromIdx,
 	},
 	kv.TracesToIdx: {
-		version:     snaptype.V1_0,
 		compression: seg.CompressNone,
 		name:        kv.TracesToIdx,
 	},

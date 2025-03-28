@@ -1032,7 +1032,7 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	salt := uint32(1)
 	cfg.hist.iiCfg.salt = &salt
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
-	cfg.hist.iiCfg.name = kv.InvertedIdx("dummy")
+	cfg.hist.iiCfg.name = kv.InvertedIdx(20)
 	cfg.hist.iiCfg.version = snaptype.V1_0
 
 	d, err := NewDomain(cfg, aggStep, log.New())

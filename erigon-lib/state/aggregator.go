@@ -214,7 +214,7 @@ func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.D
 		valuesTable:  indexTable,
 
 		compression: schema.compression,
-		version:     schema.version,
+		versionType: schema.versionType,
 		name:        schema.name,
 	}
 

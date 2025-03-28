@@ -215,7 +215,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 			}
 		}
 	}
-	return &MergeRange{string(iit.name), minFound, startTxNum, endTxNum}
+	return &MergeRange{iit.name.String(), minFound, startTxNum, endTxNum}
 }
 
 type HistoryRanges struct {
