@@ -20,12 +20,14 @@
 package eth_test
 
 import (
+	"math"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
@@ -48,6 +50,215 @@ var (
 	// testAddr is the Ethereum address of the tester account.
 	testAddr = crypto.PubkeyToAddress(testKey.PublicKey)
 )
+
+func TestGetBlockHeaders(t *testing.T) {
+	// Create a batch of tests for various scenarios
+	limit := uint64(100)
+	backend := mockWithGenerator(t, int(limit), nil)
+	tx, err := backend.DB.BeginTemporalRo(backend.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	// Create a "random" unknown hash for testing
+	var unknown common.Hash
+	for i := range unknown {
+		unknown[i] = byte(i)
+	}
+
+	var blocks []*types.Block
+	for i := uint64(0); i < limit; i++ {
+		block, err := backend.BlockReader.BlockByNumber(backend.Ctx, tx, i)
+		require.NoError(t, err)
+		blocks = append(blocks, block)
+	}
+
+	currentBlock, err := backend.BlockReader.CurrentBlock(tx)
+	require.NoError(t, err)
+
+	getHashes := func(from, limit uint64) (hashes []common.Hash) {
+		for i := uint64(0); i < limit; i++ {
+			hashes = append(hashes, blocks[from-1-i].Hash())
+		}
+		return hashes
+	}
+
+	tests := []struct {
+		query  *eth.GetBlockHeadersPacket // The query to execute for header retrieval
+		expect []common.Hash              // The hashes of the block whose headers are expected
+	}{
+		// A single random block should be retrievable by hash
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Hash: blocks[limit/2].Hash()}, Amount: 1},
+			[]common.Hash{blocks[limit/2].Hash()},
+		},
+		// A single random block should be retrievable by number
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: limit / 2}, Amount: 1},
+			[]common.Hash{blocks[limit/2].Hash()},
+		},
+		// Multiple headers should be retrievable in both directions
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: limit / 2}, Amount: 3},
+			[]common.Hash{
+				blocks[limit/2].Hash(),
+				blocks[limit/2+1].Hash(),
+				blocks[limit/2+2].Hash(),
+			},
+		},
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: limit / 2}, Amount: 3, Reverse: true},
+			[]common.Hash{
+				blocks[limit/2].Hash(),
+				blocks[limit/2-1].Hash(),
+				blocks[limit/2-2].Hash(),
+			},
+		},
+		// Multiple headers with skip lists should be retrievable
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: limit / 2}, Skip: 3, Amount: 3},
+			[]common.Hash{
+				blocks[limit/2].Hash(),
+				blocks[limit/2+4].Hash(),
+				blocks[limit/2+8].Hash(),
+			},
+		},
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: limit / 2}, Skip: 3, Amount: 3, Reverse: true},
+			[]common.Hash{
+				blocks[limit/2].Hash(),
+				blocks[limit/2-4].Hash(),
+				blocks[limit/2-8].Hash(),
+			},
+		},
+		// The chain endpoints should be retrievable
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 0}, Amount: 1},
+			[]common.Hash{blocks[0].Hash()},
+		},
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64()}, Amount: 1},
+			[]common.Hash{currentBlock.Hash()},
+		},
+		{ // If the peer requests a bit into the future, we deliver what we have
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64()}, Amount: 10},
+			[]common.Hash{currentBlock.Hash()},
+		},
+		// Ensure protocol limits are honored
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64() - 1}, Amount: limit + 10, Reverse: true},
+			getHashes(currentBlock.Number().Uint64(), limit),
+		},
+		// Check that requesting more than available is handled gracefully
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64() - 4}, Skip: 3, Amount: 3},
+			[]common.Hash{
+				blocks[currentBlock.Number().Uint64()-4].Hash(),
+				currentBlock.Hash(),
+			},
+		},
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 4}, Skip: 3, Amount: 3, Reverse: true},
+			[]common.Hash{
+				blocks[4].Hash(),
+				blocks[0].Hash(),
+			},
+		},
+		// Check that requesting more than available is handled gracefully, even if mid skip
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64() - 4}, Skip: 2, Amount: 3},
+			[]common.Hash{
+				blocks[currentBlock.Number().Uint64()-4].Hash(),
+				blocks[currentBlock.Number().Uint64()-1].Hash(),
+			},
+		}, {
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 4}, Skip: 2, Amount: 3, Reverse: true},
+			[]common.Hash{
+				blocks[4].Hash(),
+				blocks[1].Hash(),
+			},
+		},
+		// Check a corner case where requesting more can iterate past the endpoints
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 2}, Amount: 5, Reverse: true},
+			[]common.Hash{
+				blocks[2].Hash(),
+				blocks[1].Hash(),
+				blocks[0].Hash(),
+			},
+		},
+		// Check a corner case where skipping causes overflow with reverse=false
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 1}, Amount: 2, Reverse: false, Skip: math.MaxUint64 - 1},
+			[]common.Hash{
+				blocks[1].Hash(),
+			},
+		},
+		// Check a corner case where skipping causes overflow with reverse=true
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 1}, Amount: 2, Reverse: true, Skip: math.MaxUint64 - 1},
+			[]common.Hash{
+				blocks[1].Hash(),
+			},
+		},
+		// Check another corner case where skipping causes overflow with reverse=false
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 1}, Amount: 2, Reverse: false, Skip: math.MaxUint64},
+			[]common.Hash{
+				blocks[1].Hash(),
+			},
+		},
+		// Check another corner case where skipping causes overflow with reverse=true
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 1}, Amount: 2, Reverse: true, Skip: math.MaxUint64},
+			[]common.Hash{
+				blocks[1].Hash(),
+			},
+		},
+		// Check a corner case where skipping overflow loops back into the chain start
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Hash: blocks[3].Hash()}, Amount: 2, Reverse: false, Skip: math.MaxUint64 - 1},
+			[]common.Hash{
+				blocks[3].Hash(),
+			},
+		},
+		// Check a corner case where skipping overflow loops back to the same header
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Hash: blocks[1].Hash()}, Amount: 2, Reverse: false, Skip: math.MaxUint64},
+			[]common.Hash{
+				blocks[1].Hash(),
+			},
+		},
+		// Check that non existing headers aren't returned
+		{
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Hash: unknown}, Amount: 1},
+			[]common.Hash{},
+		}, {
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64() + 1}, Amount: 1},
+			[]common.Hash{},
+		},
+	}
+	for i, tt := range tests {
+		_ = i
+		var expectedHeaders []*types.Header
+		for _, hash := range tt.expect {
+			block, err := backend.BlockReader.BlockByHash(backend.Ctx, tx, hash)
+			require.NoError(t, err)
+			expectedHeaders = append(expectedHeaders, block.Header())
+		}
+		backend.StreamWg.Wait()
+		backend.ReceiveWg.Add(1)
+		encodedMessage, err := rlp.EncodeToBytes(eth.GetBlockHeadersPacket66{RequestId: 1, GetBlockHeadersPacket: tt.query})
+		require.NoError(t, err)
+		for _, err = range backend.Send(&sentry.InboundMessage{Id: eth.ToProto[direct.ETH68][eth.GetBlockHeadersMsg], Data: encodedMessage, PeerId: backend.PeerId}) {
+			require.NoError(t, err)
+		}
+		expect, err := rlp.EncodeToBytes(eth.BlockHeadersPacket66{RequestId: 1, BlockHeadersPacket: expectedHeaders})
+		require.NoError(t, err)
+		backend.ReceiveWg.Wait()
+		sentMessage := backend.SentMessage(i)
+		require.Equal(t, eth.ToProto[backend.SentryClient.Protocol()][eth.BlockHeadersMsg], sentMessage.Id)
+		require.Equal(t, expect, sentMessage.Data)
+	}
+}
 
 func TestGetBlockReceipts(t *testing.T) {
 	if !sentry_multi_client.EnableP2PReceipts {
