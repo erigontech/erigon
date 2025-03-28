@@ -598,7 +598,7 @@ func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue1)
-	assert.Nil(t, err, "should successfully insert code")
+	require.NoError(t, err, "should successfully insert code")
 
 	acc.Nonce = uint64(random.Int63())
 	balance = new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
