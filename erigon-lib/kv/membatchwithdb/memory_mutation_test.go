@@ -402,7 +402,7 @@ func TestIncReadSequence(t *testing.T) {
 
 	val, err := batch.ReadSequence(kv.HeaderNumber)
 	require.NoError(t, err)
-	require.Equal(t, val, uint64(12))
+	require.Equal(t, uint64(12), val)
 }
 
 func initializeDbDupSort(rwTx kv.RwTx) {

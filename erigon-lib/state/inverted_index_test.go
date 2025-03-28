@@ -687,7 +687,7 @@ func TestCtxFiles(t *testing.T) {
 			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.startTxNum, item.endTxNum, visibleFiles[i-1].startTxNum, visibleFiles[i-1].endTxNum)
 		}
 	}
-	require.Equal(t, 3, len(visibleFiles))
+	require.Len(t, visibleFiles, 3)
 
 	require.Equal(t, 0, int(visibleFiles[0].startTxNum))
 	require.Equal(t, 4, int(visibleFiles[0].endTxNum))

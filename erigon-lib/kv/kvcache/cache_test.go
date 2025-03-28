@@ -75,12 +75,12 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.Equal(2, c.stateEvict.Len())
 
 	c.selectOrCreateRoot(6)
-	require.Equal(3, len(c.roots))
+	require.Len(c.roots, 3)
 	require.Equal(2, int(c.latestStateVersionID))
 	require.False(c.roots[6].isCanonical) // parrent exists, but parent has isCanonical=false
 
 	c.advanceRoot(3)
-	require.Equal(4, len(c.roots))
+	require.Len(c.roots, 4)
 	require.Equal(3, int(c.latestStateVersionID))
 	require.True(c.roots[3].isCanonical)
 

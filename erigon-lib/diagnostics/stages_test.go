@@ -142,14 +142,14 @@ func TestGetStageIndexes(t *testing.T) {
 	d.SetCurrentSyncSubStage(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
 
 	idxs := d.GetCurrentSyncIdxs()
-	require.Equal(t, idxs, diagnostics.CurrentSyncStagesIdxs{Stage: 0, SubStage: 0})
+	require.Equal(t, diagnostics.CurrentSyncStagesIdxs{Stage: 0, SubStage: 0}, idxs)
 }
 
 func TestStagesState(t *testing.T) {
 	//Test StageState to string
-	require.Equal(t, diagnostics.StageState(0).String(), "Queued")
-	require.Equal(t, diagnostics.StageState(1).String(), "Running")
-	require.Equal(t, diagnostics.StageState(2).String(), "Completed")
+	require.Equal(t, "Queued", diagnostics.StageState(0).String())
+	require.Equal(t, "Running", diagnostics.StageState(1).String())
+	require.Equal(t, "Completed", diagnostics.StageState(2).String())
 }
 
 var (
