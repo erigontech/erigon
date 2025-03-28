@@ -19,9 +19,11 @@ package solid
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestSyncCommittee(t *testing.T) {
