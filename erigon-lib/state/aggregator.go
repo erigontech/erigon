@@ -1600,7 +1600,7 @@ func (at *AggregatorRoTx) KeyCountInFiles(d kv.Domain, start, end uint64) (total
 	return totalKeys
 }
 
-func (at *AggregatorRoTx) SingleFileStream(name kv.Domain, fromTxNum, toTxNum uint64) (stream.KV, error) {
+func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) (stream.KV, error) {
 	dt := at.d[name]
 
 	fi := -1
