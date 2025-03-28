@@ -65,7 +65,7 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.Equal(1, c.stateEvict.Len())
 
 	c.selectOrCreateRoot(5)
-	require.Equal(2, len(c.roots))
+	require.Len(c.roots, 2)
 	require.Equal(2, int(c.latestStateVersionID))
 	require.False(c.roots[5].isCanonical)
 
