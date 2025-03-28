@@ -195,9 +195,9 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
-		require.True(t, strings.HasSuffix(c.valuesPath, "v1-accounts.0-1.kv"))
+		require.True(t, strings.HasSuffix(c.valuesPath, "v1.0-accounts.0-1.kv"))
 		require.Equal(t, 2, c.valuesCount)
-		require.True(t, strings.HasSuffix(c.historyPath, "v1-accounts.0-1.v"))
+		require.True(t, strings.HasSuffix(c.historyPath, "v1.0-accounts.0-1.v"))
 		require.Equal(t, 3, c.historyComp.Count())
 		require.Equal(t, 2*c.valuesCount, c.efHistoryComp.Count())
 
@@ -1045,12 +1045,12 @@ func TestScanStaticFilesD(t *testing.T) {
 	d := emptyTestDomain(1)
 
 	files := []string{
-		"v1-accounts.0-1.kv",
-		"v1-accounts.1-2.kv",
-		"v1-accounts.0-4.kv",
-		"v1-accounts.2-3.kv",
-		"v1-accounts.3-4.kv",
-		"v1-accounts.4-5.kv",
+		"v1.0-accounts.0-1.kv",
+		"v1.0-accounts.1-2.kv",
+		"v1.0-accounts.0-4.kv",
+		"v1.0-accounts.2-3.kv",
+		"v1.0-accounts.3-4.kv",
+		"v1.0-accounts.4-5.kv",
 	}
 	d.scanDirtyFiles(files)
 	var found []string
@@ -1111,9 +1111,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	c, err := d.collate(ctx, 0, 0, maxTx, tx)
 
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "v1-accounts.0-1.kv"))
+	require.True(t, strings.HasSuffix(c.valuesPath, "v1.0-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
-	require.True(t, strings.HasSuffix(c.historyPath, "v1-accounts.0-1.v"))
+	require.True(t, strings.HasSuffix(c.historyPath, "v1.0-accounts.0-1.v"))
 	require.EqualValues(t, 3*maxTx, c.historyCount)
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 
