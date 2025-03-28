@@ -951,19 +951,19 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx, prune bool) erro
 			return err
 		}
 	}
-	/*
-		for _, w := range sd.domainWriters {
-			if w == nil {
-				continue
-			}
-			w.close()
+
+	for _, w := range sd.domainWriters {
+		if w == nil {
+			continue
 		}
-		for _, w := range sd.iiWriters {
-			if w == nil {
-				continue
-			}
-			w.close()
-		}*/
+		w.close()
+	}
+	for _, w := range sd.iiWriters {
+		if w == nil {
+			continue
+		}
+		w.close()
+	}
 	return nil
 }
 
