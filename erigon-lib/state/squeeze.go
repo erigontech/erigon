@@ -370,11 +370,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			return nil, err
 		}
 
-		streamAcc, err := acRo.SingleFileStream(kv.AccountsDomain, fromTxNumRange, toTxNumRange)
+		streamAcc, err := acRo.FileStream(kv.AccountsDomain, fromTxNumRange, toTxNumRange)
 		if err != nil {
 			return nil, err
 		}
-		streamSto, err := acRo.SingleFileStream(kv.StorageDomain, fromTxNumRange, toTxNumRange)
+		streamSto, err := acRo.FileStream(kv.StorageDomain, fromTxNumRange, toTxNumRange)
 		if err != nil {
 			return nil, err
 		}
