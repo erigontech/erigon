@@ -450,11 +450,17 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	header := currentBlock.HeaderNoCopy()
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, nil, s.chainConfig)
 	_, txContext, err := transactions.ComputeTxContext(ibs, nil, nil, nil, currentBlock, s.chainConfig, 0)
+	if err != nil {
+		return nil, err
+	}
 
 	ot := commands.NewOpcodeTracer(header.Number.Uint64(), true, false)
 	evm := vm.NewEVM(blockContext, txContext, ibs, s.chainConfig, vm.Config{Tracer: ot.Tracer().Hooks, ReadOnly: true})
 	validationGasLimit := aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit
 	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(core.GasPool).AddGas(validationGasLimit), header, evm, s.chainConfig)
+	if err != nil {
+		return &remote.AAValidationReply{Valid: false}, nil
+	}
 
 	// read tracer
 

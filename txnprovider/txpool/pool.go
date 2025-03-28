@@ -1168,10 +1168,7 @@ func AAStaticValidation(
 	}
 
 	if !hasDeployer && !hasCodeSender {
-		return fmt.Errorf(
-			"account is not deployed and no deployer is specified",
-		)
-
+		return errors.New("account is not deployed and no deployer is specified")
 	}
 
 	return nil

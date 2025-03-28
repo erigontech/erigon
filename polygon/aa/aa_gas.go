@@ -82,12 +82,10 @@ func payCoinbase(
 	coinbase common.Address,
 ) error {
 	baseFee := uint256.MustFromBig(header.BaseFee)
-	effectiveTip := tx.Tip
+	effectiveTip := u256.Num0
 
 	if tx.FeeCap.Gt(baseFee) {
 		effectiveTip = math.Min256(tx.Tip, new(uint256.Int).Sub(tx.FeeCap, baseFee))
-	} else {
-		effectiveTip = u256.Num0
 	}
 
 	amount := new(uint256.Int).SetUint64(gasUsed)

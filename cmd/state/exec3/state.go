@@ -18,6 +18,7 @@ package exec3
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -280,7 +281,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
 			if !rw.chainConfig.AllowAA {
-				txTask.Error = fmt.Errorf("account abstraction transactions are not allowed")
+				txTask.Error = errors.New("account abstraction transactions are not allowed")
 				break
 			}
 

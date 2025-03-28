@@ -240,17 +240,15 @@ func ExecuteAATransaction(
 	}
 	if applyRes.Failed() {
 		if executionStatus == types.ExecutionStatusExecutionFailure {
-			executionStatus = types.ExecutionStatusExecutionFailure
+			executionStatus = types.ExecutionStatusExecutionAndPostOpFailure
 		} else {
 			executionStatus = types.ExecutionStatusPostOpFailure
 		}
-
-		validationGasPenalty := (tx.PostOpGasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
-		gasRefund += capRefund(tx.PostOpGasLimit-applyRes.UsedGas, applyRes.UsedGas)
-		gasUsed += applyRes.UsedGas + validationGasPenalty
-
-		return 0, nil, nil, errors.New("paymaster post-op failed")
 	}
+
+	validationGasPenalty := (tx.PostOpGasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
+	gasRefund += capRefund(tx.PostOpGasLimit-applyRes.UsedGas, applyRes.UsedGas)
+	gasUsed += applyRes.UsedGas + validationGasPenalty
 	postOpReturnData = applyRes.ReturnData
 
 	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
@@ -325,7 +323,7 @@ func newValidationPhaseError(
 	var errorMessage string
 	contractSubst := ""
 	if revertEntityName != "" {
-		contractSubst = fmt.Sprintf(" in contract %s", revertEntityName)
+		contractSubst = "in contract " + revertEntityName
 	}
 	if innerErr != nil {
 		errorMessage = fmt.Sprintf(
@@ -334,7 +332,7 @@ func newValidationPhaseError(
 			innerErr.Error(),
 		)
 	} else {
-		errorMessage = fmt.Sprintf("validation phase failed%s", contractSubst)
+		errorMessage = "validation phase failed " + contractSubst
 	}
 	// TODO: use "vm.ErrorX" for RIP-7560 specific errors as well!
 	err := errors.New(errorMessage)
