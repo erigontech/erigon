@@ -423,38 +423,21 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return true, k
 			}
 
-			var rwTx kv.RwTx
-			var domains *SharedDomains
-			var ac *AggregatorRoTx
+			rwTx, err := rwDb.BeginRw(ctx)
+			if err != nil {
+				return nil, err
+			}
+			defer rwTx.Rollback()
 
-			if rwDb != nil {
-				// regular case
-				rwTx, err = rwDb.BeginRw(ctx)
-				if err != nil {
-					return nil, err
-				}
-				defer rwTx.Rollback()
+			domains, err := NewSharedDomains(rwTx, log.New())
+			if err != nil {
+				return nil, err
+			}
 
-				domains, err = NewSharedDomains(rwTx, log.New())
-				if err != nil {
-					return nil, err
-				}
-
-				var ok bool
-				ac, ok = domains.AggTx().(*AggregatorRoTx)
-				if !ok {
-					return nil, errors.New("failed to get state aggregatorTx")
-				}
-
-			} else {
-				// case when we do testing and temporal db with aggtx is not available
-				ac = a.BeginFilesRo()
-
-				domains, err = NewSharedDomains(roTx, log.New())
-				if err != nil {
-					ac.Close()
-					return nil, err
-				}
+			var ok bool
+			ac, ok := domains.AggTx().(*AggregatorRoTx)
+			if !ok {
+				return nil, errors.New("failed to get state aggregatorTx")
 			}
 			defer ac.Close()
 
@@ -490,10 +473,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.Close()
 
 			a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
-			if rwTx != nil {
-				rwTx.Rollback()
-				rwTx = nil
-			}
+			rwTx.Rollback()
 
 			if shardTo+shardSize > lastShard && shardSize > 1 {
 				shardSize /= 2
@@ -545,6 +525,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		fmt.Printf("rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")
 		return nil, err
 	}
+
 	return latestRoot, nil
 }
 

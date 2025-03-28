@@ -1320,14 +1320,10 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash.Bytes())
 }
 
-func wrapTxWithCtxForTest(tx kv.Tx, ctx *AggregatorRoTx) *Tx {
-	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), aggtx: ctx}
-}
-
 // wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
 // need to move non-unit-tests to own package
-func wrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *Tx {
-	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), aggtx: ctx}
+func wrapTxWithCtx(tx kv.Tx, aggTx *AggregatorRoTx) *Tx {
+	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), filesTx: aggTx}
 }
 
 // wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
