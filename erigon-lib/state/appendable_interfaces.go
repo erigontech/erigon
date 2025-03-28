@@ -79,7 +79,11 @@ type AppendableBaseTxI interface {
 	AppendableDbCommonTxI
 	AppendableTemporalCommonTxI
 	Get(num Num, tx kv.Tx) (Bytes, error)
+}
+
+type AppendableDebugAPI[T AppendableDbCommonTxI] interface {
 	DebugFiles() AppendableFilesTxI
+	DebugDb() T
 }
 
 // marked
@@ -91,8 +95,8 @@ type MarkedDbTxI interface {
 
 type MarkedTxI interface {
 	AppendableBaseTxI
+	AppendableDebugAPI[MarkedDbTxI]
 	Put(num Num, hash []byte, value Bytes, tx kv.RwTx) error
-	DebugDb() MarkedDbTxI
 }
 
 // unmarked
@@ -104,8 +108,8 @@ type UnmarkedDbTxI interface {
 
 type UnmarkedTxI interface {
 	AppendableBaseTxI
+	AppendableDebugAPI[UnmarkedDbTxI]
 	Append(entityNum Num, value Bytes, tx kv.RwTx) error
-	DebugDb() UnmarkedDbTxI
 }
 
 // buffer values before writing to db supposed to store only canonical values
@@ -119,10 +123,10 @@ type BufferedDbTxI interface {
 
 type BufferedTxI interface {
 	AppendableBaseTxI
+	AppendableDebugAPI[BufferedDbTxI]
 	Get(Num, kv.Tx) (Bytes, error)
 	Put(Num, Bytes) error
 	Flush(context.Context, kv.RwTx) error
-	DebugDb() BufferedDbTxI
 }
 
 type CanonicityStrategy uint8
