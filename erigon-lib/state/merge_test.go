@@ -537,7 +537,7 @@ func TestMergeFiles(t *testing.T) {
 	}
 
 	require.NoError(t, w.Flush(context.Background(), rwTx))
-	w.close()
+	w.Close()
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
