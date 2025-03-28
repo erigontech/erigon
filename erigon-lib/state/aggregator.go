@@ -683,7 +683,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 		return false, nil
 	}
 
-	outs, err := aggTx.StaticFilesInRange(r)
+	outs, err := aggTx.FilesInRange(r)
 	defer func() {
 		if closeAll {
 			outs.Close()

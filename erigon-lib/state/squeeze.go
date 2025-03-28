@@ -133,7 +133,7 @@ func SqueezeCommitmentFiles(at *AggregatorRoTx, logger log.Logger) error {
 			},
 		},
 	}
-	sf, err := at.StaticFilesInRange(rng)
+	sf, err := at.FilesInRange(rng)
 	if err != nil {
 		return err
 	}
@@ -322,7 +322,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			},
 		},
 	}
-	sf, err := acRo.StaticFilesInRange(rng)
+	sf, err := acRo.FilesInRange(rng)
 	if err != nil {
 		return nil, err
 	}

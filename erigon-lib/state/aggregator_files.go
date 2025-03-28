@@ -65,7 +65,7 @@ func (sf *SelectedStaticFiles) Close() {
 	}
 }
 
-func (at *AggregatorRoTx) StaticFilesInRange(r *Ranges) (*SelectedStaticFiles, error) {
+func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*SelectedStaticFiles, error) {
 	sf := &SelectedStaticFiles{ii: make([][]*filesItem, len(r.invertedIndex))}
 	for id := range at.d {
 		if !r.domain[id].any() {
