@@ -1627,7 +1627,7 @@ func newSender(nonce uint64, balance uint256.Int) *sender {
 }
 
 func BenchmarkProcessRemoteTxns(b *testing.B) {
-	assert, require := assert.New(b), require.New(b)
+	require := require.New(b)
 	ch := make(chan Announcements, 100)
 	coreDB, _ := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
 	db := memdb.NewTestPoolDB(b)
