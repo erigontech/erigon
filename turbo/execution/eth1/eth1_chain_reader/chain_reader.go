@@ -414,18 +414,18 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash libcommon.Hash, attributes
 	return resp.Id, nil
 }
 
-func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error) {
+func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *types2.RequestsBundle, *big.Int, error) {
 	resp, err := c.executionModule.GetAssembledBlock(context.Background(), &execution.GetAssembledBlockRequest{
 		Id: id,
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if resp.Busy {
-		return nil, nil, nil, errors.New("execution data is still syncing")
+		return nil, nil, nil, nil, errors.New("execution data is still syncing")
 	}
 	if resp.Data == nil {
-		return nil, nil, nil, nil
+		return nil, nil, nil, nil, nil
 	}
 
 	bundle := engine_types.ConvertBlobsFromRpc(resp.Data.BlobsBundle)
@@ -470,5 +470,5 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 		})
 	}
 	block.Withdrawals = withdrawals
-	return block, bundle, blockValue, nil
+	return block, bundle, resp.Data.Requests, blockValue, nil
 }
