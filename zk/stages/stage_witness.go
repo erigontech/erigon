@@ -122,9 +122,23 @@ func SpawnStageWitness(
 		return fmt.Errorf("GetStageProgress: %w", err)
 	}
 
+	latestBatchEndBlock, err := reader.GetLatestBatchEndBlock()
+	if err != nil {
+		return fmt.Errorf("GetLatestBatchEndBlock: %w", err)
+	}
+
+	if latestBlock > latestBatchEndBlock {
+		latestBlock = latestBatchEndBlock
+	}
+
 	latestExecutedBatchNo, err := reader.GetBatchNoByL2Block(latestBlock)
 	if err != nil {
 		return fmt.Errorf("GetBatchNoByL2Block: %w", err)
+	}
+
+	if latestExecutedBatchNo == 0 {
+		log.Warn(fmt.Sprintf("[%s] No executed batches found", logPrefix))
+		return nil
 	}
 
 	latestCachedWitnessBatchNo, err := reader.GetLatestCachedWitnessBatchNo()
