@@ -23,7 +23,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/remotedb"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/log/v3"
