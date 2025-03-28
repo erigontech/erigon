@@ -249,7 +249,7 @@ func TestTransformRAMOnly(t *testing.T) {
 		TransformArgs{},
 		logger,
 	)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 }
 
@@ -291,7 +291,7 @@ func TestTransformExtractStartKey(t *testing.T) {
 		TransformArgs{ExtractStartKey: []byte(fmt.Sprintf("%10d-key-%010d", 5, 5))},
 		logger,
 	)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	compareBuckets(t, tx, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
 }
 
@@ -315,7 +315,7 @@ func TestTransformThroughFiles(t *testing.T) {
 		},
 		logger,
 	)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 }
 
@@ -337,7 +337,7 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 		TransformArgs{},
 		logger,
 	)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	compareBucketsDouble(t, tx, sourceBucket, destBucket)
 }
 
@@ -359,7 +359,7 @@ func TestTransformDoubleOnLoad(t *testing.T) {
 		TransformArgs{},
 		logger,
 	)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	compareBucketsDouble(t, tx, sourceBucket, destBucket)
 }
 

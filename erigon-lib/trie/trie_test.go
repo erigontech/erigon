@@ -323,7 +323,7 @@ func TestCodeNodeValid(t *testing.T) {
 
 		trie.UpdateAccount(crypto.Keccak256(addresses[i][:]), &acc)
 		err := trie.UpdateAccountCode(crypto.Keccak256(addresses[i][:]), codeValues[i])
-		assert.Nil(t, err, "should successfully insert code")
+		assert.NoError(t, err, "should successfully insert code")
 	}
 
 	for i := 0; i < len(addresses); i++ {
@@ -352,7 +352,7 @@ func TestCodeNodeUpdateNotExisting(t *testing.T) {
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue)
-	assert.Nil(t, err, "should successfully insert code")
+	assert.NoError(t, err, "should successfully insert code")
 
 	nonExistingAddress := getAddressForIndex(9999)
 	codeValue2 := genRandomByteArrayOfLen(128)

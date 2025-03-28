@@ -27,7 +27,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 func TestEvictionInUnexpectedOrder(t *testing.T) {
@@ -199,7 +199,7 @@ func TestAPI(t *testing.T) {
 			wg.Add(1)
 			res[i] = make(chan []byte)
 			go func(out chan []byte) {
-				require.NoError(db.View(context.Background(), func(tx kv.Tx) error {
+				err := db.View(context.Background(), func(tx kv.Tx) error {
 					if expectTxnID != tx.ViewID() {
 						panic(fmt.Sprintf("epxected: %d, got: %d", expectTxnID, tx.ViewID()))
 					}
@@ -216,7 +216,10 @@ func TestAPI(t *testing.T) {
 					fmt.Println("get", key, v)
 					out <- common.Copy(v)
 					return nil
-				}))
+				})
+				if err != nil {
+					panic(err)
+				}
 			}(res[i])
 		}
 		wg.Wait() // ensure that all goroutines started their transactions
@@ -301,7 +304,6 @@ func TestAPI(t *testing.T) {
 			if !bytes.Equal(account1Enc, v) {
 				panic(fmt.Sprintf("epxected: %x, got: %x", account1Enc, v))
 			}
-			require.Equal(account1Enc, <-res4[i])
 		}
 		fmt.Printf("done2: \n")
 	}()
@@ -329,11 +331,17 @@ func TestAPI(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range res5 {
-			require.Equal(account2Enc, <-res5[i])
+			v := <-res5[i]
+			if !bytes.Equal(account2Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account2Enc, v))
+			}
 		}
 		fmt.Printf("-----21\n")
 		for i := range res6 {
-			require.Equal(account1Enc, <-res6[i])
+			v := <-res6[i]
+			if !bytes.Equal(account1Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account1Enc, v))
+			}
 		}
 		fmt.Printf("done3: \n")
 	}()
@@ -383,10 +391,16 @@ func TestAPI(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range res7 {
-			require.Equal(account4Enc, <-res7[i])
+			v := <-res7[i]
+			if !bytes.Equal(account4Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account4Enc, v))
+			}
 		}
 		for i := range res8 {
-			require.Equal(account1Enc, <-res8[i])
+			v := <-res8[i]
+			if !bytes.Equal(account1Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account1Enc, v))
+			}
 		}
 		fmt.Printf("done4: \n")
 	}()
