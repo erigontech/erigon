@@ -246,13 +246,13 @@ func TestRangeDupSort(t *testing.T) {
 		require.NoError(t, err)
 		_, vals, err := stream.ToArrayKV(it)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(vals))
+		require.Len(t, vals, 2)
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1.3"), []byte("value1.1"), order.Desc, -1)
 		require.NoError(t, err)
 		_, vals, err = stream.ToArrayKV(it)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(vals))
+		require.Len(t, vals, 1)
 	})
 }
 

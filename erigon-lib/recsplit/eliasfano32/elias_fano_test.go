@@ -512,7 +512,7 @@ func BenchmarkEF(b *testing.B) {
 			it.Seek(1_230)
 			n, err := it.Next()
 			require.NoError(b, err)
-			require.Equal(b, n, uint64(1_230))
+			require.Equal(b, uint64(1_230), n)
 		}
 	})
 	b.Run("naive reverse iterator", func(b *testing.B) {

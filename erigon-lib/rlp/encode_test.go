@@ -524,8 +524,8 @@ func TestStringLen56(t *testing.T) {
 
 	dataPos, dataLen, err := ParseString(encoded, 0)
 	require.NoError(t, err)
-	assert.Equal(t, dataPos, 2)
-	assert.Equal(t, dataLen, 56)
+	assert.Equal(t, 2, dataPos)
+	assert.Equal(t, 56, dataLen)
 }
 
 // Any buffer of 32 bytes or more should be fine for EncodeUint256.

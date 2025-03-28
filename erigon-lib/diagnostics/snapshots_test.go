@@ -109,7 +109,7 @@ func TestFillDBFromSnapshots(t *testing.T) {
 	d.SetFillDBInfo(diagnostics.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10})
 	stats := d.SyncStatistics()
 	require.NotEmpty(t, stats.SnapshotFillDB.Stages)
-	require.Equal(t, stats.SnapshotFillDB.Stages[0], diagnostics.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10})
+	require.Equal(t, diagnostics.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10}, stats.SnapshotFillDB.Stages[0])
 }
 
 func TestAddOrUpdateSegmentIndexingState(t *testing.T) {
@@ -158,7 +158,7 @@ func TestAddOrUpdateSegmentIndexingState(t *testing.T) {
 	})
 
 	stats = d.SyncStatistics()
-	require.Equal(t, stats.SnapshotIndexing.Segments[0].Percent, 100)
+	require.Equal(t, 100, stats.SnapshotIndexing.Segments[0].Percent)
 
 	finished := d.UpdateIndexingStatus()
 	require.False(t, finished)

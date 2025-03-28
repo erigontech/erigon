@@ -49,15 +49,15 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	cfg.NewBlockWait = 0
 	c := New(cfg)
 	c.selectOrCreateRoot(2)
-	require.Equal(1, len(c.roots))
-	require.Equal(0, int(c.latestStateVersionID))
+	require.Len(c.roots, 1)
+	require.Zero(int(c.latestStateVersionID))
 	require.False(c.roots[2].isCanonical)
 
 	c.add([]byte{1}, nil, c.roots[2], 2)
-	require.Equal(0, c.stateEvict.Len())
+	require.Zero(c.stateEvict.Len())
 
 	c.advanceRoot(2)
-	require.Equal(1, len(c.roots))
+	require.Len(c.roots, 1)
 	require.Equal(2, int(c.latestStateVersionID))
 	require.True(c.roots[2].isCanonical)
 
@@ -85,22 +85,22 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.True(c.roots[3].isCanonical)
 
 	c.advanceRoot(4)
-	require.Equal(5, len(c.roots))
+	require.Len(c.roots, 5)
 	require.Equal(4, int(c.latestStateVersionID))
 	require.True(c.roots[4].isCanonical)
 
 	c.selectOrCreateRoot(5)
-	require.Equal(5, len(c.roots))
+	require.Len(c.roots, 5)
 	require.Equal(4, int(c.latestStateVersionID))
 	require.False(c.roots[5].isCanonical)
 
 	c.advanceRoot(5)
-	require.Equal(5, len(c.roots))
+	require.Len(c.roots, 5)
 	require.Equal(5, int(c.latestStateVersionID))
 	require.True(c.roots[5].isCanonical)
 
 	c.advanceRoot(100)
-	require.Equal(6, len(c.roots))
+	require.Len(c.roots, 6)
 	require.Equal(100, int(c.latestStateVersionID))
 	require.True(c.roots[100].isCanonical)
 
