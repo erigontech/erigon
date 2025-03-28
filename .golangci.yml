@@ -29,7 +29,6 @@ linters:
     - protogetter
     - recvcheck #TODO: enable me
   enable:
-    - errchkjson #TODO: enable me
     - unconvert
     #    - predeclared #TODO: enable me
     #    - thelper #TODO: enable me
@@ -37,6 +36,7 @@ linters:
     - gofmt
     - gocritic
     - perfsprint
+    - errchkjson
 #    - revive
 #    - forcetypeassert
 #    - stylecheck
