@@ -40,7 +40,7 @@ func TestMapmutation_Flush_Close(t *testing.T) {
 	defer func() {
 		batch.Close()
 	}()
-	assert.Equal(t, batch.size, 0)
+	assert.Zero(t, batch.size)
 	err = batch.Put(kv.ChaindataTables[0], []byte{1}, []byte{1})
 	require.NoError(t, err)
 	assert.Equal(t, batch.size, 2)

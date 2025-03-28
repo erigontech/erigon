@@ -139,7 +139,7 @@ func TestUnionPairs(t *testing.T) {
 		it2 := stream.PairsWithError(12)
 		keys, _, err := stream.ToArrayKV(stream.UnionKV(it, it2, -1))
 		require.Equal("expected error at iteration: 10", err.Error())
-		require.Equal(10, len(keys))
+		require.Len(keys, 10)
 	})
 }
 

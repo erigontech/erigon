@@ -514,7 +514,7 @@ func BenchmarkEncodeBigInts(b *testing.B) {
 
 func TestStringLen56(t *testing.T) {
 	str := hexutil.MustDecodeHex("7907ca011864321def1e92a3021868f397516ce37c959f25f8dddd3161d7b8301152b35f135c814fae9f487206471b6b0d713cd51a2d3598")
-	require.Equal(t, 56, len(str))
+	require.Len(t, str, 56)
 
 	strLen := StringLen(str)
 	assert.Equal(t, 56+2, strLen)

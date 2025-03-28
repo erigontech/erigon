@@ -227,8 +227,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.history.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(idxFiles))
-		require.Equal(t, 2, len(histFiles))
+		require.Len(t, idxFiles, 2)
+		require.Len(t, histFiles, 2)
 	})
 	t.Run("idx merged and small files lost", func(t *testing.T) {
 		ii, h := newTestDomain()
@@ -301,7 +301,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, uint64(2), r.index.to)
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(idxFiles))
+		require.Len(t, idxFiles, 2)
 		require.Empty(t, histFiles)
 	})
 	t.Run("history merge progress ahead of idx", func(t *testing.T) {
@@ -382,8 +382,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.history.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(idxFiles))
-		require.Equal(t, 2, len(histFiles))
+		require.Len(t, idxFiles, 2)
+		require.Len(t, histFiles, 2)
 	})
 	t.Run("idx merged, but garbage left", func(t *testing.T) {
 		ii, h := newTestDomain()

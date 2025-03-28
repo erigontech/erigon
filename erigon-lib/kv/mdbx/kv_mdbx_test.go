@@ -1076,7 +1076,7 @@ func TestSequenceOps(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 		t1, err := tx.ReadSequence(string(table1))
 		require.NoError(t, err)
-		require.Equal(t, t1, uint64(0))
+		require.Equal(t, uint64(0), t1)
 
 		// increment sequence and then reset and test value
 		// start
