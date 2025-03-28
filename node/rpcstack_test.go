@@ -29,16 +29,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-
 	"github.com/gorilla/websocket"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/testlog"
-
-	"github.com/stretchr/testify/assert"
 )
 
 // TestCorsHandler makes sure CORS are properly handled on the http server.
