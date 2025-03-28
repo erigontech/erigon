@@ -111,7 +111,7 @@ func SqueezeCommitmentFiles(at *AggregatorRoTx, logger log.Logger) error {
 		return nil
 	}
 
-	rng := &RangesV3{
+	rng := &Ranges{
 		domain: [5]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
@@ -312,7 +312,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
 
-	rng := &RangesV3{
+	rng := &Ranges{
 		domain: [5]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
@@ -370,24 +370,20 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			return nil, err
 		}
 
-		txnRangeTo := int(toTxNumRange)
-		txnRangeFrom := int(fromTxNumRange)
-
-		accReader, err := acRo.nastyFileRead(kv.AccountsDomain, fromTxNumRange, toTxNumRange)
+		streamAcc, err := acRo.SingleFileStream(kv.AccountsDomain, fromTxNumRange, toTxNumRange)
 		if err != nil {
 			return nil, err
 		}
-		stoReader, err := acRo.nastyFileRead(kv.StorageDomain, fromTxNumRange, toTxNumRange)
+		streamSto, err := acRo.SingleFileStream(kv.StorageDomain, fromTxNumRange, toTxNumRange)
 		if err != nil {
 			return nil, err
 		}
 
-		streamAcc := NewSegStreamReader(accReader, -1)
-		streamSto := NewSegStreamReader(stoReader, -1)
 		keyIter := stream.UnionKV(streamAcc, streamSto, -1)
 
-		totalKeys := acRo.KeyCountInDomainRange(kv.AccountsDomain, uint64(txnRangeFrom), uint64(txnRangeTo)) +
-			acRo.KeyCountInDomainRange(kv.StorageDomain, uint64(txnRangeFrom), uint64(txnRangeTo))
+		txnRangeTo, txnRangeFrom := toTxNumRange, fromTxNumRange
+		totalKeys := acRo.KeyCountInFiles(kv.AccountsDomain, fromTxNumRange, txnRangeTo) +
+			acRo.KeyCountInFiles(kv.StorageDomain, txnRangeFrom, txnRangeTo)
 
 		shardFrom, shardTo := fromTxNumRange/a.StepSize(), toTxNumRange/a.StepSize()
 		batchSize := totalKeys / (shardTo - shardFrom)
