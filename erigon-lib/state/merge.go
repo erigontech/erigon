@@ -1044,7 +1044,6 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 				if dt.d.restrictSubsetFileDeletions {
 					continue
 				}
-				fmt.Printf("garbage: %s is subset of %s", item.decompressor.FileName(), merged.decompressor.FileName())
 				outs = append(outs, item)
 			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
