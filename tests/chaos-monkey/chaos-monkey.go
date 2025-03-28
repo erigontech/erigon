@@ -2,8 +2,9 @@ package chaos_monkey
 
 import (
 	"fmt"
+	rand2 "math/rand/v2"
+
 	"github.com/erigontech/erigon/consensus"
-	rand2 "golang.org/x/exp/rand"
 )
 
 const (
