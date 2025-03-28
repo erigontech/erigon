@@ -43,7 +43,7 @@ import (
 )
 
 func TestGetLogs(t *testing.T) {
-	assert := assert.New(t)
+	assert, require := assert.New(t), require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	{
 		ethApi := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
