@@ -963,10 +963,23 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if c.config.IsSprintEnd(number) {
-		spanID := uint64(heimdall.SpanIdAt(number + 1))
-		newValidators, err := c.spanner.GetCurrentProducers(spanID, chain.(ChainHeaderReader))
-		if err != nil {
-			return errUnknownValidators
+		var newValidators []*valset.Validator
+
+		if c.useSpanReader {
+			validators, err := c.spanReader.Producers(context.Background(), number+1)
+			if err != nil {
+				return err
+			}
+
+			newValidators = validators.Validators
+		} else {
+			var err error
+			spanID := uint64(heimdall.SpanIdAt(number + 1))
+
+			newValidators, err = c.spanner.GetCurrentProducers(spanID, chain.(ChainHeaderReader))
+			if err != nil {
+				return errUnknownValidators
+			}
 		}
 
 		// sort validator by address
