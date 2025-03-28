@@ -383,6 +383,7 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 	t.Helper()
 	assert, ctx := assert.New(t), context.Background()
+	require := require.New(t)
 
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		c1, err := tx.Cursor(bucket1)
