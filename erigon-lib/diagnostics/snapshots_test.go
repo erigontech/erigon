@@ -36,7 +36,7 @@ func TestUpdateFileDownloadingStats(t *testing.T) {
 
 	sd := d.SyncStatistics().SnapshotDownload.SegmentsDownloading
 	require.NotNil(t, sd)
-	require.NotEqual(t, len(sd), 0)
+	require.NotEmpty(t, sd)
 
 	require.Equal(t, sd["test"], segmentDownloadStatsMock)
 
@@ -134,7 +134,7 @@ func TestAddOrUpdateSegmentIndexingState(t *testing.T) {
 	require.NotEmpty(t, stats.SnapshotIndexing)
 	require.NotEmpty(t, stats.SnapshotIndexing.Segments)
 	require.Equal(t, stats.SnapshotIndexing.Segments[0], dts[0])
-	require.True(t, stats.SnapshotIndexing.TimeElapsed == 0)
+	require.Zero(t, stats.SnapshotIndexing.TimeElapsed)
 	require.False(t, stats.SnapshotIndexing.IndexingFinished)
 
 	dts = []diagnostics.SnapshotSegmentIndexingStatistics{
