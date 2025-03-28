@@ -701,7 +701,9 @@ func (a *ApiHandler) produceBeaconBody(
 								log.Error("BlockProduction: Failed to decode withdrawal request", "err", err)
 							}
 						case types.ConsolidationRequestType:
-							if err := beaconBody.ExecutionRequests.Consolidations.DecodeSSZ(requestData, int(stateVersion)); err != nil {
+							if beaconBody.ExecutionRequests.Consolidations.Len() > 0 {
+								log.Error("BlockProduction: Consolidation request already exists")
+							} else if err := beaconBody.ExecutionRequests.Consolidations.DecodeSSZ(requestData, int(stateVersion)); err != nil {
 								log.Error("BlockProduction: Failed to decode consolidation request", "err", err)
 							}
 						}
