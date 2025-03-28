@@ -18,6 +18,8 @@ package dbg
 
 import (
 	"context"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type debugContextKey struct{}
@@ -32,6 +34,81 @@ func Enabled(ctx context.Context) bool {
 		return false
 	}
 	return v.(bool)
+}
+
+type dbgLog struct {
+	lvl      log.Lvl
+	prefixFn func() string
+	msg      string
+	msgSet   bool
+	entries  []interface{}
+	logger   log.Logger
+}
+
+func (d *dbgLog) Msg(msg string) *dbgLog {
+	if d == nil {
+		return d
+	}
+
+	d.msg = d.prefixFn() + msg
+	d.msgSet = true
+	return d
+}
+
+func (d *dbgLog) Entry(key string, lazyValue func() string) *dbgLog {
+	if d == nil {
+		return d
+	}
+
+	d.entries = append(d.entries, key, log.Lazy{Fn: lazyValue})
+	return d
+}
+
+func (d *dbgLog) Log() {
+	if d == nil {
+		return
+	}
+
+	if !d.msgSet {
+		d.msg = d.prefixFn()
+	}
+
+	d.logger.Log(d.lvl, d.msg, d.entries...)
+}
+
+func DbgLog(ctx context.Context, level log.Lvl, lazyPrefix func() string) *dbgLog {
+	return ConditionalLog(Enabled(ctx), level, lazyPrefix, log.Root())
+}
+
+func ConditionalLog(evaluation bool, level log.Lvl, lazyPrefix func() string, logger log.Logger) *dbgLog {
+	if !evaluation {
+		return nil
+	}
+	return &dbgLog{
+		lvl:      level,
+		prefixFn: lazyPrefix,
+		logger:   logger,
+	}
+}
+
+type ConditionalLogger struct {
+	log.Logger
+	condition func() bool
+}
+
+func NewConditionalLogger(logger log.Logger, condition func() bool) ConditionalLogger {
+	return ConditionalLogger{
+		Logger:    logger,
+		condition: condition,
+	}
+}
+
+func (c ConditionalLogger) CLog2(level log.Lvl, lazyPrefix func() string) *dbgLog {
+	return ConditionalLog(c.condition(), level, lazyPrefix, c.Logger)
+}
+
+func (c *ConditionalLogger) CLog(level log.Lvl, lazyMsg func() string) {
+	ConditionalLog(c.condition(), level, lazyMsg, c.Logger).Log()
 }
 
 // https://stackoverflow.com/a/3561399 -> https://www.rfc-editor.org/rfc/rfc6648
