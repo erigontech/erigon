@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/seg/sais"
 )
 
-func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
+func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64, usedPatterns map[uint64]struct{}, m *sync.RWMutex, effectiveDictLimit int) ([]byte, []int, []int) {
 	matches := mf2.FindLongestMatches(input)
 
 	if len(matches) == 0 {
@@ -68,6 +68,18 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 	for i := len(matches); i > 0; i-- {
 		f := matches[i-1]
 		p := f.Val.(*Pattern)
+
+		skipPattern := func() bool {
+			m.RLock()
+			defer m.RUnlock()
+			if _, ok := usedPatterns[p.code]; !ok && len(usedPatterns) >= effectiveDictLimit {
+				return true
+			}
+			return false
+		}
+		if skipPattern() {
+			continue
+		}
 		firstCell := cellRing.Get(0)
 		maxCompression := firstCell.compression
 		maxScore := firstCell.score
@@ -164,6 +176,9 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 		output = append(output, numBuf[:n]...)
 		atomic.AddUint64(&p.uses, 1)
 		patternIdx = patterns[patternIdx+1]
+		m.Lock()
+		usedPatterns[p.code] = struct{}{}
+		m.Unlock()
 	}
 	if len(input) > lastUncovered {
 		uncovered = append(uncovered, lastUncovered, len(input))
@@ -178,7 +193,7 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 	return output, patterns, uncovered
 }
 
-func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64) {
+func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64, usedPatterns map[uint64]struct{}, m *sync.RWMutex, effectiveDictLimit int) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -190,7 +205,7 @@ func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh
 		wordLen := uint64(len(compW.word))
 		n := binary.PutUvarint(numBuf[:], wordLen)
 		output = append(output[:0], numBuf[:n]...) // Prepend with the encoding of length
-		output, patterns, uncovered = coverWordByPatterns(trace, compW.word, mf2, output, uncovered, patterns, cellRing, posMap)
+		output, patterns, uncovered = coverWordByPatterns(trace, compW.word, mf2, output, uncovered, patterns, cellRing, posMap, usedPatterns, m, effectiveDictLimit)
 		compW.word = append(compW.word[:0], output...)
 		outCh <- compW
 		inputSize.Add(1 + wordLen)
@@ -271,6 +286,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	heap.Init(&compressionQueue)
 	queueLimit := 128 * 1024
 
+	var usedPatterns = make(map[uint64]struct{})
+	var m = &sync.RWMutex{}
+
 	// For the case of workers == 1
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -287,7 +305,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			posMap := make(map[uint64]uint64)
 			posMaps = append(posMaps, posMap)
 			wg.Add(1)
-			go coverWordsByPatternsWorker(trace, ch, out, &wg, &pt, inputSize, outputSize, posMap)
+			go coverWordsByPatternsWorker(trace, ch, out, &wg, &pt, inputSize, outputSize, posMap, usedPatterns, m, cfg.EffectiveDictLimit)
 		}
 	}
 	t := time.Now()
@@ -373,7 +391,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 			if wordLen > 0 {
 				if compression {
-					output, patterns, uncovered = coverWordByPatterns(trace, v, mf2, output[:0], uncovered, patterns, cellRing, uncompPosMap)
+					output, patterns, uncovered = coverWordByPatterns(trace, v, mf2, output[:0], uncovered, patterns, cellRing, uncompPosMap, usedPatterns, m, cfg.EffectiveDictLimit)
 					if _, e := intermediateW.Write(output); e != nil {
 						return e
 					}
@@ -939,6 +957,7 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	db.finish(cfg.MaxDictPatterns)
 
 	db.Sort()
+	fmt.Println("len of dict", db.Len())
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] BuildDict", logPrefix), "took", time.Since(t), "rev_total", dictAggregator.receivedWords, "recv_distribution", dictAggregator.dist, "hard_limit", cfg.MaxDictPatterns, "soft_limit", cfg.DictReducerSoftLimit)
 	}
