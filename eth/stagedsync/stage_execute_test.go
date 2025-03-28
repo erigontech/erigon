@@ -62,7 +62,7 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 			}
 
 			if n == from+numberOfBlocks-1 {
-				if err := domains.Flush(context.Background(), tx); err != nil {
+				if err := domains.Flush(context.Background(), tx, false); err != nil {
 					panic(err)
 				}
 			}

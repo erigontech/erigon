@@ -45,7 +45,7 @@ func TestAppendReceipt(t *testing.T) {
 
 	doms.SetTxNum(5) // block2
 
-	err = doms.Flush(context.Background(), tx)
+	err = doms.Flush(context.Background(), tx, false)
 	require.NoError(err)
 
 	v, ok, err := ttx.HistorySeek(kv.ReceiptDomain, FirstLogIndexKey, 0)

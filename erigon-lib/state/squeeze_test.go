@@ -63,7 +63,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 		}
 	}
 
-	err = domains.Flush(context.Background(), rwTx)
+	err = domains.Flush(context.Background(), rwTx, false)
 	require.NoError(tb, err)
 	domains.Close() // closes ac
 

@@ -327,7 +327,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 	var txc wrap.TxContainer
 	txc.Tx = tx
 
-	defer domains.Flush(context2.Background(), tx)
+	defer domains.Flush(context2.Background(), tx, false)
 	txc.Doms = domains
 
 	w := rpchelper.NewLatestStateWriter(txc, nil, blockNr-1)

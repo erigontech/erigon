@@ -536,8 +536,8 @@ func ExecV3(ctx context.Context,
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	pruneEvery := time.NewTicker(2 * time.Second)
-	defer pruneEvery.Stop()
+	flushEvery := time.NewTicker(2 * time.Second)
+	defer flushEvery.Stop()
 
 	var executor executor
 	var executorContext context.Context
@@ -893,7 +893,7 @@ func ExecV3(ctx context.Context,
 
 		var lastBlockResult blockResult
 		var uncommittedGas uint64
-		var prunePending bool
+		var flushPending bool
 
 		err = func() error {
 			defer func() {
@@ -935,11 +935,11 @@ func ExecV3(ctx context.Context,
 							uncommittedGas += applyResult.GasUsed
 						}
 
-						prunePending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
+						flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
 
 						if !dbg.DiscardCommitment() {
 							if !dbg.BatchCommitments || lastBlockResult.BlockNum == maxBlockNum ||
-								(prunePending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
+								(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
 								var trace bool
 								if traceBlock(applyResult.BlockNum) {
 									trace = true
@@ -1006,9 +1006,9 @@ func ExecV3(ctx context.Context,
 					if pe.agg.HasBackgroundFilesBuild() {
 						logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
 					}
-				case <-pruneEvery.C:
-					if prunePending {
-						prunePending = false
+				case <-flushEvery.C:
+					if flushPending {
+						flushPending = false
 
 						if !pe.inMemExec {
 							ac := pe.agg.BeginFilesRo()
@@ -1017,7 +1017,7 @@ func ExecV3(ctx context.Context,
 							}
 							ac.Close()
 
-							if err := pe.doms.Flush(ctx, applyTx); err != nil {
+							if err := pe.doms.Flush(ctx, applyTx, true); err != nil {
 								return err
 							}
 						}
@@ -1039,9 +1039,6 @@ func ExecV3(ctx context.Context,
 							t2 = time.Since(tt)
 							tt = time.Now()
 
-							if err := pe.doms.Flush(ctx, applyTx); err != nil {
-								return err
-							}
 							pe.doms.ClearRam(true)
 							t3 = time.Since(tt)
 
@@ -1090,7 +1087,7 @@ func ExecV3(ctx context.Context,
 			}
 		}
 
-		if err := pe.doms.Flush(ctx, applyTx); err != nil {
+		if err := pe.doms.Flush(ctx, applyTx, true); err != nil {
 			return err
 		}
 
@@ -1101,7 +1098,6 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	fmt.Println("Wait")
 	executor.wait(ctx)
 
 	if !parallel && u != nil && !u.HasUnwindPoint() {
@@ -1141,7 +1137,7 @@ func ExecV3(ctx context.Context,
 // nolint
 func dumpPlainStateDebug(tx kv.RwTx, doms *libstate.SharedDomains) {
 	if doms != nil {
-		doms.Flush(context.Background(), tx)
+		doms.Flush(context.Background(), tx, false)
 	}
 	{
 		it, err := libstate.AggTx(tx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
@@ -1222,7 +1218,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	if bytes.Equal(rh, header.Root.Bytes()) {
 		if !inMemExec {
-			if err := doms.Flush(ctx, applyTx); err != nil {
+			if err := doms.Flush(ctx, applyTx, true); err != nil {
 				return false, err
 			}
 			if err = libstate.AggTx(applyTx).PruneCommitHistory(ctx, applyTx, nil); err != nil {

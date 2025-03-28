@@ -125,7 +125,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		if err := customTraceBatch(ctx, cfg, ttx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
 			return err
 		}
-		if err := doms.Flush(ctx, tx); err != nil {
+		if err := doms.Flush(ctx, tx, false); err != nil {
 			return err
 		}
 		lastTxNum = doms.TxNum()

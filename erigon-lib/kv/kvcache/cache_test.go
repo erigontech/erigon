@@ -229,7 +229,7 @@ func TestAPI(t *testing.T) {
 			}
 			prevVals[string(k)] = v
 			counter.Add(1)
-			return d.Flush(context.Background(), tx)
+			return d.Flush(context.Background(), tx, false)
 		}))
 		return txID
 	}

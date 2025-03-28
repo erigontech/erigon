@@ -125,7 +125,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 		}
 
-		err = domains.Flush(context.Background(), rwTx)
+		err = domains.Flush(context.Background(), rwTx, false)
 		require.NoError(t, err)
 
 		require.NoError(t, err)
@@ -232,7 +232,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			state[string(addrs[txNum].Bytes())+string(locs[txNum].Bytes())] = []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
 		}
 
-		err = domains.Flush(context.Background(), rwTx)
+		err = domains.Flush(context.Background(), rwTx, false)
 		require.NoError(t, err)
 
 		err = rwTx.Commit()

@@ -58,7 +58,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	data := generateSharedDomainsUpdates(t, domains, rwTx, maxTx, rnd, length.Addr, 10, stepSize)
 	fillRawdbTxNumsIndexForSharedDomains(t, rwTx, maxTx, stepSize)
 
-	err = domains.Flush(ctx, rwTx)
+	err = domains.Flush(ctx, rwTx, false)
 	require.NoError(t, err)
 
 	// 2. remove just one key and compute commitment
@@ -175,7 +175,7 @@ Loop:
 		}
 	}
 
-	err = domains.Flush(ctx, rwTx)
+	err = domains.Flush(ctx, rwTx, false)
 	require.NoError(t, err)
 
 	unwindTo := uint64(commitStep * rnd.IntN(int(maxTx)/commitStep))
@@ -265,7 +265,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	}
 
 	{ // no deletes
-		err = domains.Flush(ctx, rwTx)
+		err = domains.Flush(ctx, rwTx, false)
 		require.NoError(err)
 		domains.Close()
 
@@ -275,7 +275,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize), iterCount(domains))
 	}
 	{ // delete marker is in RAM
-		require.NoError(domains.Flush(ctx, rwTx))
+		require.NoError(domains.Flush(ctx, rwTx, false))
 		domains.Close()
 		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
@@ -303,7 +303,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete marker is in DB
 		_, err = domains.ComputeCommitment(ctx, rwTx, true, domains.TxNum()/2, "")
 		require.NoError(err)
-		err = domains.Flush(ctx, rwTx)
+		err = domains.Flush(ctx, rwTx, false)
 		require.NoError(err)
 		domains.Close()
 
@@ -339,7 +339,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	}
 
 	{ // delete/update more keys in RAM
-		require.NoError(domains.Flush(ctx, rwTx))
+		require.NoError(domains.Flush(ctx, rwTx, false))
 		domains.Close()
 		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
@@ -357,7 +357,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // flush delete/updates to DB
 		_, err = domains.ComputeCommitment(ctx, rwTx, true, domains.TxNum()/2, "")
 		require.NoError(err)
-		err = domains.Flush(ctx, rwTx)
+		err = domains.Flush(ctx, rwTx, false)
 		require.NoError(err)
 		domains.Close()
 
@@ -367,7 +367,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
 	}
 	{ // delete everything - must see 0
-		err = domains.Flush(ctx, rwTx)
+		err = domains.Flush(ctx, rwTx, false)
 		require.NoError(err)
 		domains.Close()
 
@@ -450,7 +450,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	}
 	fmt.Printf("calling build files step %d\n", maxTx/stepSize)
-	err = domains.Flush(ctx, rwTx)
+	err = domains.Flush(ctx, rwTx, false)
 	require.NoError(t, err)
 	domains.Close()
 
@@ -519,7 +519,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		require.Zero(t, notRemoved)
 	}
 
-	err = domains.Flush(ctx, rwTx)
+	err = domains.Flush(ctx, rwTx, false)
 	require.NoError(t, err)
 	rwTx.Rollback()
 
