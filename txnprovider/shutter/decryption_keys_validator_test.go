@@ -43,11 +43,13 @@ func TestDecryptionKeysValidators(t *testing.T) {
 	eonIndex := shutter.EonIndex(76)
 	threshold := uint64(2)
 	numKeypers := uint64(3)
-	ekg := testhelpers.MockEonKeyGeneration(t, eonIndex, threshold, numKeypers)
+	ekg, err := testhelpers.MockEonKeyGeneration(eonIndex, threshold, numKeypers, 32123)
+	require.NoError(t, err)
 	eon := ekg.Eon()
 	slot := uint64(6336)
 	txnPointer := uint64(556)
-	ips := testhelpers.MockIdentityPreimagesWithSlotIp(t, slot, 2)
+	ips, err := testhelpers.MockIdentityPreimagesWithSlotIp(slot, 2)
+	require.NoError(t, err)
 	sigData := shutter.DecryptionKeysSignatureData{
 		InstanceId:        instanceId,
 		Eon:               eonIndex,
@@ -57,11 +59,15 @@ func TestDecryptionKeysValidators(t *testing.T) {
 	}
 	signerIndices := []uint64{1, 2}
 	signers := []testhelpers.Keyper{ekg.Keypers[signerIndices[0]], ekg.Keypers[signerIndices[1]]}
-	keys := ekg.DecryptionKeys(t, signers, ips)
-	sigs := testhelpers.Signatures(t, signers, sigData)
+	keys, err := ekg.DecryptionKeys(signers, ips)
+	require.NoError(t, err)
+	sigs, err := testhelpers.Signatures(signers, sigData)
+	require.NoError(t, err)
 	maliciousSigners := []testhelpers.Keyper{ekg.Keypers[0], ekg.MaliciousKeyper}
-	maliciousKeys := ekg.DecryptionKeys(t, maliciousSigners, ips)
-	maliciousSigs := testhelpers.Signatures(t, maliciousSigners, sigData)
+	maliciousKeys, err := ekg.DecryptionKeys(maliciousSigners, ips)
+	require.NoError(t, err)
+	maliciousSigs, err := testhelpers.Signatures(maliciousSigners, sigData)
+	require.NoError(t, err)
 
 	for _, baseAndExtendedTc := range []decryptionKeysValidationTestCase{
 		{
@@ -69,7 +75,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: 999999,
 				}),
@@ -85,7 +91,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   math.MaxInt64 + 1,
@@ -102,7 +108,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   eonIndex,
@@ -121,7 +127,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   2,
@@ -144,7 +150,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   156,
@@ -167,7 +173,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   eonIndex,
@@ -190,7 +196,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   eonIndex,
@@ -211,11 +217,11 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   eonIndex,
-					Keys:       ekg.DecryptionKeys(t, signers, testhelpers.MockIdentityPreimages(t, maxNumKeysPerMessage+1)),
+					Keys:       testhelpers.TestMustGenerateDecryptionKeys(t, ekg, signers, testhelpers.TestMustMockIdentityPreimages(t, maxNumKeysPerMessage+1)),
 				}),
 			),
 			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
@@ -232,7 +238,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   eonIndex,
@@ -254,7 +260,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   eonIndex,
@@ -276,7 +282,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   eonIndex,
@@ -299,7 +305,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   eonIndex,
@@ -324,7 +330,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:    shutterproto.EnvelopeVersion,
 					InstanceId: instanceId,
 					EonIndex:   eonIndex,
@@ -350,7 +356,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:       shutterproto.EnvelopeVersion,
 					InstanceId:    instanceId,
 					EonIndex:      eonIndex,
@@ -374,7 +380,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:       shutterproto.EnvelopeVersion,
 					InstanceId:    instanceId,
 					EonIndex:      eonIndex,
@@ -398,7 +404,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:       shutterproto.EnvelopeVersion,
 					InstanceId:    instanceId,
 					EonIndex:      eonIndex,
@@ -422,7 +428,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:       shutterproto.EnvelopeVersion,
 					InstanceId:    instanceId,
 					EonIndex:      eonIndex,
@@ -447,7 +453,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:       shutterproto.EnvelopeVersion,
 					InstanceId:    instanceId,
 					EonIndex:      eonIndex,
@@ -472,7 +478,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:       shutterproto.EnvelopeVersion,
 					InstanceId:    instanceId,
 					EonIndex:      eonIndex,
@@ -500,7 +506,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:       shutterproto.EnvelopeVersion,
 					InstanceId:    instanceId,
 					EonIndex:      eonIndex,
@@ -525,7 +531,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			config: config,
 			msg: testhelpers.MockDecryptionKeysMsg(
 				shutter.DecryptionKeysTopic,
-				testhelpers.MockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
 					Version:       shutterproto.EnvelopeVersion,
 					InstanceId:    instanceId,
 					EonIndex:      eonIndex,

@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package rpc_helper
+package jwt
 
 import (
 	"fmt"
@@ -24,16 +24,16 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 )
 
-type JWTRoundTripper struct {
-	underlyingTransport http.RoundTripper
-	jwtSecret           []byte
+type HttpRoundTripper struct {
+	base      http.RoundTripper
+	jwtSecret []byte
 }
 
-func NewJWTRoundTripper(jwtSecret []byte) *JWTRoundTripper {
-	return &JWTRoundTripper{underlyingTransport: http.DefaultTransport, jwtSecret: jwtSecret}
+func NewHttpRoundTripper(base http.RoundTripper, jwtSecret []byte) *HttpRoundTripper {
+	return &HttpRoundTripper{base: base, jwtSecret: jwtSecret}
 }
 
-func (t *JWTRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *HttpRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"iat": time.Now().Unix(),
 	})
@@ -44,5 +44,5 @@ func (t *JWTRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	req.Header.Set("Authorization", "Bearer "+tokenString)
-	return t.underlyingTransport.RoundTrip(req)
+	return t.base.RoundTrip(req)
 }

@@ -28,7 +28,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
@@ -324,7 +323,6 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		}
 	case sentry.MessageId_POOLED_TRANSACTIONS_66, sentry.MessageId_TRANSACTIONS_66:
 		txns := TxnSlots{}
-		knownTxns := [][]byte{}
 		if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 			return nil
 		}); err != nil {
@@ -340,7 +338,6 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 						return err
 					}
 					if known {
-						knownTxns = append(knownTxns, hash)
 						return ErrRejected
 					}
 					return nil
@@ -359,7 +356,6 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 						return err
 					}
 					if known {
-						knownTxns = append(knownTxns, hash)
 						return ErrRejected
 					}
 					return nil
@@ -377,33 +373,6 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			return nil
 		}
 
-		diagTxns := make([]diagnostics.DiagTxn, len(txns.Txns))
-		for i, txn := range txns.Txns {
-			diagTxns[i] = diagnostics.DiagTxn{
-				IDHash:              txn.IDHash,
-				SenderID:            txn.SenderID,
-				Nonce:               txn.Nonce,
-				Value:               txn.Value,
-				Gas:                 txn.Gas,
-				FeeCap:              txn.FeeCap,
-				Tip:                 txn.Tip,
-				Size:                txn.Size,
-				Type:                txn.Type,
-				Creation:            txn.Creation,
-				DataLen:             txn.DataLen,
-				AccessListAddrCount: txn.AccessListAddrCount,
-				AccessListStorCount: txn.AccessListStorCount,
-				BlobHashes:          txn.BlobHashes,
-				Blobs:               txn.Blobs,
-			}
-		}
-
-		diagnostics.Send(diagnostics.IncomingTxnUpdate{
-			Txns:      diagTxns,
-			Senders:   txns.Senders,
-			IsLocal:   txns.IsLocal,
-			KnownTxns: knownTxns,
-		})
 		f.pool.AddRemoteTxns(ctx, txns)
 	default:
 		defer f.logger.Trace("[txpool] dropped p2p message", "id", req.Id)
