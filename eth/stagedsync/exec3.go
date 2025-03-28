@@ -596,8 +596,6 @@ func ExecV3(ctx context.Context,
 		executor.LogComplete(applyTx)
 	}()
 
-	blockComplete := true
-
 	ts := time.Duration(0)
 	blockNum = executor.domains().BlockNum()
 
@@ -913,7 +911,6 @@ func ExecV3(ctx context.Context,
 				case applyResult := <-applyResults:
 					switch applyResult := applyResult.(type) {
 					case *txResult:
-						blockComplete = false
 						pe.executedGas += applyResult.gasUsed
 						pe.lastExecutedTxNum = applyResult.txNum
 
@@ -1011,9 +1008,11 @@ func ExecV3(ctx context.Context,
 						flushPending = false
 
 						if !pe.inMemExec {
+							pe.doms.SetTrace(true)
 							if err := pe.doms.Flush(ctx, applyTx, true); err != nil {
 								return err
 							}
+							pe.doms.SetTrace(false)
 						}
 
 						if pe.inMemExec || useExternalTx {
@@ -1022,7 +1021,7 @@ func ExecV3(ctx context.Context,
 
 						var t0, t1, t2, t3, t4 time.Duration
 						commitStart := time.Now()
-						logger.Info("Committing (parallel)...", "blockComplete", blockComplete)
+						logger.Info("Committing (parallel)...")
 						if err := func() error {
 							t0 = time.Since(commitStart)
 							pe.Lock() // This is to prevent workers from starting work on any new txTask
