@@ -400,11 +400,11 @@ func TestPrefix(t *testing.T) {
 	table := "Table"
 	var keys, keys1, keys2 []string
 	kvs1, err := tx.Prefix(table, []byte("key"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer kvs1.Close()
 	for kvs1.HasNext() {
 		k1, _, err := kvs1.Next()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		keys = append(keys, string(k1))
 	}
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
@@ -485,13 +485,13 @@ func TestSeekExact(t *testing.T) {
 	_, _, c := BaseCase(t)
 
 	k, v, err := c.SeekExact([]byte("key3"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values := iteration(t, c, k, v)
 	require.Equal(t, []string{"key3", "key3"}, keys)
 	require.Equal(t, []string{"value3.1", "value3.3"}, values)
 
 	k, v, err = c.SeekExact([]byte("key"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Nil(t, keys)
 	require.Nil(t, values)
@@ -501,25 +501,25 @@ func TestSeekBothExact(t *testing.T) {
 	_, _, c := BaseCase(t)
 
 	k, v, err := c.SeekBothExact([]byte("key1"), []byte("value1.2"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values := iteration(t, c, k, v)
 	require.Nil(t, keys)
 	require.Nil(t, values)
 
 	k, v, err = c.SeekBothExact([]byte("key2"), []byte("value1.1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Nil(t, keys)
 	require.Nil(t, values)
 
 	k, v, err = c.SeekBothExact([]byte("key1"), []byte("value1.1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
 
 	k, v, err = c.SeekBothExact([]byte("key3"), []byte("value3.3"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key3"}, keys)
 	require.Equal(t, []string{"value3.3"}, values)
@@ -544,43 +544,43 @@ func TestNextDups(t *testing.T) {
 	require.NoError(t, c.Put([]byte("key"), []byte("value1.7")))
 
 	k, v, err := c.Current()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values := iteration(t, c, k, v)
 	require.Equal(t, []string{"key", "key2", "key2", "key3"}, keys)
 	require.Equal(t, []string{"value1.7", "value1.1", "value1.2", "value1.6"}, values)
 
 	v, err = c.FirstDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key", "key2", "key2", "key3"}, keys)
 	require.Equal(t, []string{"value1.7", "value1.1", "value1.2", "value1.6"}, values)
 
 	k, v, err = c.NextNoDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key2", "key2", "key3"}, keys)
 	require.Equal(t, []string{"value1.1", "value1.2", "value1.6"}, values)
 
 	k, v, err = c.NextDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key2", "key3"}, keys)
 	require.Equal(t, []string{"value1.2", "value1.6"}, values)
 
 	v, err = c.LastDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key2", "key3"}, keys)
 	require.Equal(t, []string{"value1.2", "value1.6"}, values)
 
 	k, v, err = c.NextDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Nil(t, keys)
 	require.Nil(t, values)
 
 	k, v, err = c.NextNoDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key3"}, keys)
 	require.Equal(t, []string{"value1.6"}, values)
@@ -590,14 +590,14 @@ func TestCurrentDup(t *testing.T) {
 	_, _, c := BaseCase(t)
 
 	count, err := c.CountDuplicates()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, uint64(2), count)
 
 	require.Error(t, c.PutNoDupData([]byte("key3"), []byte("value3.3")))
 	require.NoError(t, c.DeleteCurrentDuplicates())
 
 	k, v, err := c.SeekExact([]byte("key1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values := iteration(t, c, k, v)
 	require.Equal(t, []string{"key1", "key1"}, keys)
 	require.Equal(t, []string{"value1.1", "value1.3"}, values)
@@ -610,18 +610,18 @@ func TestDupDelete(t *testing.T) {
 	_, tx, c := BaseCase(t)
 
 	k, _, err := c.Current()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, []byte("key3"), k)
 
 	err = c.DeleteCurrentDuplicates()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	err = c.Delete([]byte("key1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	//TODO: find better way
 	count, err := tx.Count("Table")
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Zero(t, count)
 }
 
@@ -668,7 +668,7 @@ func testCloseWaitsAfterTxBegin(
 	var txs []kv.Getter
 	for i := 0; i < count; i++ {
 		tx, err := txBeginFunc(db)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		txs = append(txs, tx)
 	}
 
@@ -687,7 +687,7 @@ func testCloseWaitsAfterTxBegin(
 		assert.False(t, isClosed.Load())
 
 		err := txEndFunc(tx)
-		require.Nil(t, err)
+		require.NoError(t, err)
 	}
 
 	<-closeDone

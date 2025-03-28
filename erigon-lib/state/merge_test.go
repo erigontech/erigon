@@ -82,7 +82,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, string(ii.name), mr.name)
 
 		idxF := ic.staticFilesInRange(mr.from, mr.to)
-		assert.Equal(t, 3, len(idxF))
+		assert.Len(t, idxF, 3)
 	})
 	t.Run("hist: > 2 unmerged files", func(t *testing.T) {
 		ii, h := newTestDomain()
