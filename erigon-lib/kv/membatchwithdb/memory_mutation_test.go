@@ -236,18 +236,18 @@ func TestPrefix(t *testing.T) {
 	initializeDbNonDupSort(rwTx)
 
 	kvs1, err := rwTx.Prefix(kv.HeaderNumber, []byte("AB"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer kvs1.Close()
 	require.False(t, kvs1.HasNext())
 
 	var keys1 []string
 	var values1 []string
 	kvs2, err := rwTx.Prefix(kv.HeaderNumber, []byte("AAAA"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer kvs2.Close()
 	for kvs2.HasNext() {
 		k1, v1, err := kvs2.Next()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		keys1 = append(keys1, string(k1))
 		values1 = append(values1, string(v1))
 	}
@@ -257,11 +257,11 @@ func TestPrefix(t *testing.T) {
 	var keys []string
 	var values []string
 	kvs3, err := rwTx.Prefix(kv.HeaderNumber, []byte("C"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer kvs3.Close()
 	for kvs3.HasNext() {
 		k1, v1, err := kvs3.Next()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		keys = append(keys, string(k1))
 		values = append(values, string(v1))
 	}
@@ -285,7 +285,7 @@ func TestForAmount(t *testing.T) {
 		return nil
 	})
 
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, []string{"CAAA", "CBAA", "CCAA"}, keys)
 	require.Equal(t, []string{"value1", "value2", "value3"}, values)
 
@@ -297,7 +297,7 @@ func TestForAmount(t *testing.T) {
 		return nil
 	})
 
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, []string{"CAAA", "CBAA", "CCAA"}, keys1)
 	require.Equal(t, []string{"value1", "value2", "value3"}, values1)
 }
@@ -311,17 +311,17 @@ func TestGetOneAfterClearBucket(t *testing.T) {
 	defer batch.Close()
 
 	err := batch.ClearBucket(kv.HeaderNumber)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	cond := batch.isTableCleared(kv.HeaderNumber)
 	require.True(t, cond)
 
 	val, err := batch.GetOne(kv.HeaderNumber, []byte("A"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Nil(t, val)
 
 	val, err = batch.GetOne(kv.HeaderNumber, []byte("AAAA"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Nil(t, val)
 }
 
@@ -334,7 +334,7 @@ func TestSeekExactAfterClearBucket(t *testing.T) {
 	defer batch.Close()
 
 	err := batch.ClearBucket(kv.HeaderNumber)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	cond := batch.isTableCleared(kv.HeaderNumber)
 	require.True(t, cond)
@@ -343,20 +343,20 @@ func TestSeekExactAfterClearBucket(t *testing.T) {
 	require.NoError(t, err)
 
 	key, val, err := cursor.SeekExact([]byte("AAAA"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Nil(t, key)
 	assert.Nil(t, val)
 
 	err = cursor.Put([]byte("AAAA"), []byte("valueX"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	key, val, err = cursor.SeekExact([]byte("AAAA"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []byte("AAAA"), key)
 	assert.Equal(t, []byte("valueX"), val)
 
 	key, val, err = cursor.SeekExact([]byte("BBBB"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Nil(t, key)
 	assert.Nil(t, val)
 }
@@ -370,21 +370,21 @@ func TestFirstAfterClearBucket(t *testing.T) {
 	defer batch.Close()
 
 	err := batch.ClearBucket(kv.HeaderNumber)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	err = batch.Put(kv.HeaderNumber, []byte("BBBB"), []byte("value5"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
 
 	key, val, err := cursor.First()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []byte("BBBB"), key)
 	assert.Equal(t, []byte("value5"), val)
 
 	key, val, err = cursor.Next()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Nil(t, key)
 	assert.Nil(t, val)
 }
@@ -398,10 +398,10 @@ func TestIncReadSequence(t *testing.T) {
 	defer batch.Close()
 
 	_, err := batch.IncrementSequence(kv.HeaderNumber, uint64(12))
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	val, err := batch.ReadSequence(kv.HeaderNumber)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, val, uint64(12))
 }
 
@@ -426,32 +426,32 @@ func TestNext(t *testing.T) {
 	require.NoError(t, err)
 
 	k, v, err := cursor.First()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []byte("key1"), k)
 	assert.Equal(t, []byte("value1.1"), v)
 
 	k, v, err = cursor.Next()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []byte("key1"), k)
 	assert.Equal(t, []byte("value1.2"), v)
 
 	k, v, err = cursor.Next()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []byte("key1"), k)
 	assert.Equal(t, []byte("value1.3"), v)
 
 	k, v, err = cursor.Next()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []byte("key3"), k)
 	assert.Equal(t, []byte("value3.1"), v)
 
 	k, v, err = cursor.Next()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []byte("key3"), k)
 	assert.Equal(t, []byte("value3.3"), v)
 
 	k, v, err = cursor.Next()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Nil(t, k)
 	assert.Nil(t, v)
 }
@@ -471,15 +471,15 @@ func TestNextNoDup(t *testing.T) {
 	require.NoError(t, err)
 
 	k, _, err := cursor.First()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []byte("key1"), k)
 
 	k, _, err = cursor.NextNoDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []byte("key2"), k)
 
 	k, _, err = cursor.NextNoDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []byte("key3"), k)
 }
 
