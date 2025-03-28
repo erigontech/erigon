@@ -484,9 +484,9 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	require.Equal(t, 1, see)
 
 	// buffers are not lost
-	require.Zero(t, len(buf.data))
-	require.Zero(t, len(buf.lens))
-	require.Zero(t, len(buf.offsets))
+	require.Empty(t, buf.data)
+	require.Empty(t, buf.lens)
+	require.Empty(t, buf.offsets)
 	require.NotZero(t, cap(buf.data))
 	require.NotZero(t, cap(buf.lens))
 	require.NotZero(t, cap(buf.offsets))
