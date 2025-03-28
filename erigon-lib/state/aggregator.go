@@ -1244,7 +1244,7 @@ type Ranges struct {
 	invertedIndex []*MergeRange
 }
 
-func NewRangesV3(domain [kv.DomainLen]DomainRanges, invertedIndex []*MergeRange) Ranges {
+func NewRanges(domain [kv.DomainLen]DomainRanges, invertedIndex []*MergeRange) Ranges {
 	return Ranges{domain: domain, invertedIndex: invertedIndex}
 }
 
