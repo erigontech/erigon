@@ -1011,12 +1011,6 @@ func ExecV3(ctx context.Context,
 						flushPending = false
 
 						if !pe.inMemExec {
-							ac := pe.agg.BeginFilesRo()
-							if _, err = ac.PruneSmallBatches(ctx, 150*time.Millisecond, applyTx); err != nil { // prune part of retired data, before commit
-								return err
-							}
-							ac.Close()
-
 							if err := pe.doms.Flush(ctx, applyTx, true); err != nil {
 								return err
 							}
