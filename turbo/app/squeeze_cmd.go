@@ -53,7 +53,7 @@ var (
 
 func doSqueeze(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -101,7 +101,7 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 	}
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	if err := ac.SqueezeCommitmentFiles(); err != nil {
+	if err := state.SqueezeCommitmentFiles(ac, logger); err != nil {
 		return err
 	}
 	ac.Close()
@@ -156,7 +156,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	acOld := aggOld.BeginFilesRo()
 	defer acOld.Close()
 
-	if err = acOld.SqueezeCommitmentFiles(); err != nil {
+	if err = state.SqueezeCommitmentFiles(acOld, logger); err != nil {
 		return err
 	}
 	acOld.Close()

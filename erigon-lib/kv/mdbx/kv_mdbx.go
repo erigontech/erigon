@@ -59,14 +59,76 @@ func WithChaindataTables(defaultBuckets kv.TableCfg) kv.TableCfg {
 	return defaultBuckets
 }
 
+// handles background process of periodically flushing commits to disk
+type PeriodicFlusher struct {
+	env        *mdbx.Env // mdbx environment to flush to
+	opts       MdbxOpts
+	ticker     *time.Ticker  // set ticker
+	syncPeriod time.Duration // how often to flush
+	closed     atomic.Bool
+	quitChan   chan struct{} // channel to signal closing
+	doneWg     sync.WaitGroup
+}
+
+func newPeriodicFlusher(env *mdbx.Env, opts MdbxOpts, syncPeriod time.Duration) *PeriodicFlusher {
+	return &PeriodicFlusher{
+		env:        env,
+		opts:       opts,
+		ticker:     time.NewTicker(syncPeriod),
+		syncPeriod: syncPeriod,
+		quitChan:   make(chan struct{}, 1),
+		doneWg:     sync.WaitGroup{},
+	}
+}
+
+func (flusher *PeriodicFlusher) shutdown() {
+	// flusher.lock.Lock()
+	// defer flusher.lock.Unlock()
+	swapped := flusher.closed.CompareAndSwap(false, true)
+	if !swapped {
+		return
+	}
+	if flusher.ticker != nil {
+		flusher.ticker.Stop() // Stop the ticker
+	}
+	flusher.quitChan <- struct{}{} // non-blocking send due to buffered chan
+}
+
+func (flusher *PeriodicFlusher) Close() {
+	flusher.shutdown()
+	flusher.doneWg.Wait()
+}
+
+func (flusher *PeriodicFlusher) FlushInBackground(ctx context.Context) {
+	flusher.doneWg.Add(1)
+	go func(ctx context.Context) {
+		defer flusher.doneWg.Done()
+		for {
+			select {
+			case <-flusher.ticker.C:
+				if err := flusher.env.Sync(true, false); err != nil {
+					flusher.opts.log.Error("Error during periodic mdbx sync", "err", err, "dbName", flusher.opts.label)
+				}
+			case <-flusher.quitChan:
+				return
+			case <-ctx.Done():
+				// here the flusher is not closed explicitly from outside,
+				// so we must close it from within
+				flusher.shutdown()
+				return
+			}
+		}
+	}(ctx)
+}
+
 type MdbxOpts struct {
 	// must be in the range from 12.5% (almost empty) to 50% (half empty)
 	// which corresponds to the range from 8192 and to 32768 in units respectively
 	log             log.Logger
-	roTxsLimiter    *semaphore.Weighted
 	bucketsCfg      TableCfgFunc
 	path            string
-	syncPeriod      time.Duration
+	syncPeriod      time.Duration // to be used only in combination with SafeNoSync flag. The dirty data will automatically be flushed to disk periodically in the background.
+	syncBytes       *uint         // to be used only in combination with SafeNoSync flag. The dirty data will be flushed to disk when this threshold is reached.
 	mapSize         datasize.ByteSize
 	growthStep      datasize.ByteSize
 	shrinkThreshold int
@@ -77,6 +139,11 @@ type MdbxOpts struct {
 	verbosity       kv.DBVerbosityLvl
 	label           kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
 	inMem           bool
+
+	// roTxsLimiter - without this limiter - it's possible to reach 10K threads (if 10K rotx will wait for IO) - and golang will crush https://groups.google.com/g/golang-dev/c/igMoDruWNwo
+	// most of db must set explicit `roTxsLimiter <= 9K`.
+	// There is way to increase the 10,000 thread limit: https://golang.org/pkg/runtime/debug/#SetMaxThreads
+	roTxsLimiter *semaphore.Weighted
 
 	metrics bool
 }
@@ -114,10 +181,12 @@ func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts       { opts.pageSiz
 func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
+func (opts MdbxOpts) SyncBytes(threshold uint) MdbxOpts           { opts.syncBytes = &threshold; return opts }
 func (opts MdbxOpts) DBVerbosity(v kv.DBVerbosityLvl) MdbxOpts    { opts.verbosity = v; return opts }
 func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts       { opts.mapSize = sz; return opts }
 func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts       { opts.mergeThreshold = v; return opts }
 func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts        { opts.bucketsCfg = f; return opts }
+func (opts MdbxOpts) WithMetrics() MdbxOpts                       { opts.metrics = true; return opts }
 
 // Flags
 func (opts MdbxOpts) HasFlag(flag uint) bool           { return opts.flags&flag != 0 }
@@ -211,7 +280,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	}
 
-	env, err := mdbx.NewEnv()
+	env, err := mdbx.NewEnv(mdbx.Default)
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +359,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			dirtySpace = mmap.TotalMemory() / 42 // it's default of mdbx, but our package also supports cgroups and GOMEMLIMIT
 			// clamp to max size
 			const dirtySpaceMaxChainDB = uint64(1 * datasize.GB)
-			const dirtySpaceMaxDefault = uint64(128 * datasize.MB)
+			const dirtySpaceMaxDefault = uint64(64 * datasize.MB)
 
 			if opts.label == kv.ChainDB && dirtySpace > dirtySpaceMaxChainDB {
 				dirtySpace = dirtySpaceMaxChainDB
@@ -334,15 +403,12 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		return nil, err
 	}
 
-	if opts.syncPeriod != 0 {
-		if err = env.SetSyncPeriod(opts.syncPeriod); err != nil {
+	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncBytes != nil {
+		if err = env.SetSyncBytes(*opts.syncBytes); err != nil {
 			env.Close()
 			return nil, err
 		}
 	}
-	//if err := env.SetOption(mdbx.OptSyncBytes, uint64(math2.MaxUint64)); err != nil {
-	//	return nil, err
-	//}
 
 	if opts.roTxsLimiter == nil {
 		targetSemCount := int64(runtime.GOMAXPROCS(-1) * 16)
@@ -366,6 +432,12 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 		MaxBatchSize:  DefaultMaxBatchSize,
 		MaxBatchDelay: DefaultMaxBatchDelay,
+	}
+
+	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
+		db.periodicFlusher = newPeriodicFlusher(env, opts, opts.syncPeriod)
+		db.periodicFlusher.FlushInBackground(ctx) // start flushing in background
+
 	}
 
 	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
@@ -465,6 +537,9 @@ type MdbxKV struct {
 
 	batchMu sync.Mutex
 	batch   *batch
+
+	periodicFlusher *PeriodicFlusher // only used when opts.syncPeriod is set, to periodically flush to disk committed changes
+
 }
 
 func (db *MdbxKV) Path() string                { return db.opts.path }
@@ -553,7 +628,9 @@ func (db *MdbxKV) Close() {
 		return
 	}
 	db.waitTxsAllDoneOnClose()
-
+	if db.periodicFlusher != nil {
+		db.periodicFlusher.Close()
+	}
 	db.env.Close()
 	db.env = nil
 
@@ -713,6 +790,7 @@ func (tx *MdbxTx) CollectMetrics() {
 	kv.MDBXGauges.DbPgopsSpill.WithLabelValues(dbLabel).SetUint64(info.PageOps.Spill)
 	kv.MDBXGauges.DbPgopsUnspill.WithLabelValues(dbLabel).SetUint64(info.PageOps.Unspill)
 	kv.MDBXGauges.DbPgopsWops.WithLabelValues(dbLabel).SetUint64(info.PageOps.Wops)
+	kv.MDBXGauges.UnsyncedBytes.WithLabelValues(dbLabel).SetUint64(uint64(info.UnsyncedBytes))
 
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {

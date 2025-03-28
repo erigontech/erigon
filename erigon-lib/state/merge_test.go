@@ -39,9 +39,8 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 
 	cfg.salt = &salt
 	cfg.dirs = datadir.New(os.TempDir())
-	cfg.aggregationStep = aggStep
 
-	ii, err := NewInvertedIndex(cfg, log.New())
+	ii, err := NewInvertedIndex(cfg, aggStep, log.New())
 	ii.indexList = 0
 	if err != nil {
 		panic(err)
@@ -538,7 +537,7 @@ func TestMergeFiles(t *testing.T) {
 	}
 
 	require.NoError(t, w.Flush(context.Background(), rwTx))
-	w.close()
+	w.Close()
 	err = rwTx.Commit()
 	require.NoError(t, err)
 

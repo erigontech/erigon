@@ -14,10 +14,10 @@ jobs:
       matrix:
         include:
           - chain: mainnet
-            backend: Erigon3
+            backend: RpcSpecific
           #- chain: bor-mainnet
           #  backend: Polygon
-    runs-on: [ self-hosted, "${{ matrix.backend }}" ]
+    runs-on: [ self-hosted, qa, "${{ matrix.backend }}" ]
     env:
       ERIGON_DIR: /opt/erigon-versions/reference-version
       ERIGON_DATA_DIR: /opt/erigon-versions/reference-version/datadir
@@ -185,7 +185,8 @@ jobs:
           run_perf mainnet eth_createAccessList stress_test_eth_createAccessList_16M 1:1,100:30,1000:20,10000:20,20000:20          
           
           # Save the subsection reached status
-          echo "::set-output name=test_executed::true"
+          
+          echo "test_executed=true" >> $GITHUB_OUTPUT
           
           if [ $failed_test -eq 0 ]; then
                   echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
@@ -196,11 +197,11 @@ jobs:
           fi
 
       - name: Stop Erigon RpcDaemon
-        if: steps.rpcdaemon_running_step.outputs.rpc_daemon_started == 'true'
+        if: always()
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           # Clean up rpcdaemon process if it's still running
-          if kill -0 $RPC_DAEMON_PID 2> /dev/null; then
+          if [ -n "$RPC_DAEMON_PID" ] && kill -0 $RPC_DAEMON_PID 2> /dev/null; then
             echo "RpcDaemon stopping..."
             kill $RPC_DAEMON_PID
             echo "RpcDaemon stopped"
@@ -212,19 +213,20 @@ jobs:
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
-      #- name: Run change point analysis
-      #  if: steps.test_step.outputs.TEST_RESULT == 'success'
-      #  working-directory: ${{runner.workspace}}/rpc-tests/perf/reports/mainnet
-      #  run: |
-      #    set +e # Disable exit on error
-      #    open_change_points=0
-      #   python3 $ERIGON_QA_PATH/test_system/qa-tests/change-points/change_point_analysis.py
-      #    open_change_points=$?
-      #    cp change_point_analysis.pdf $past_test_dir
-      #    if [ $open_change_points -ne 0 ]; then
-      #      echo "Change point analysis found points that need to be investigated"
-      #      #echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"  -- enable in the future
-      #    fi
+      - name: Run change point analysis
+        if: steps.test_step.outputs.TEST_RESULT == 'success'
+        working-directory: ${{runner.workspace}}/rpc-tests/perf/reports/mainnet
+        run: |
+          set +e # Disable exit on error
+          open_change_points=0
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/change-points/change_point_analysis.py --repo erigon
+          open_change_points=$?
+          cp change_point_analysis.pdf $past_test_dir
+          if [ $open_change_points -ne 0 ]; then
+            echo "Change point analysis found points that need to be investigated"
+            echo "::warning title=Change Point Analysis::Found change points that need to be investigated"
+            #echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"  -- enable in the future
+          fi
 
       - name: Upload test results
         if: steps.test_step.outputs.test_executed == 'true'
@@ -232,6 +234,14 @@ jobs:
         with:
           name: test-results
           path: ${{ env.past_test_dir }}
+
+      - name: Action to check failure condition
+        if: failure()
+        run: |
+          if [ "${{ steps.test_step.outputs.test_executed }}" != "true" ]; then
+            echo "::warning::Test not executed, workflow failed for infrastructure reasons"
+          fi
+          #exit 1
 
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'

@@ -177,7 +177,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil, chainConfig)
 
 	// Get a new instance of the EVM
-	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{Debug: false})
+	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{})
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 	rules := chainConfig.Rules(blockNum, blockCtx.Time)
 
@@ -191,7 +191,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 			return nil, err
 		}
 		txCtx = core.NewEVMTxContext(msg)
-		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})
+		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
 		// Execute the transaction message
 		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
@@ -213,13 +213,13 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	contractAddr := crypto.CreateAddress(msg.From(), msg.Nonce())
 	if creationTx.GetTo() == nil && contractAddr == address {
 		// CREATE: adapt message with new code so it's replaced instantly
-		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.Tip(), *code, msg.AccessList(), msg.CheckNonce(), msg.IsFree(), msg.MaxFeePerBlobGas())
+		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), *code, msg.AccessList(), msg.CheckNonce(), msg.IsFree(), msg.MaxFeePerBlobGas())
 	} else {
 		msg.ChangeGas(api.GasCap, api.GasCap)
 	}
 	txCtx = core.NewEVMTxContext(msg)
 	ct := OverlayCreateTracer{contractAddress: address, code: *code, gasCap: api.GasCap}
-	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: true, Tracer: &ct})
+	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
 
 	// Execute the transaction message
 	_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
@@ -481,7 +481,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
-	vmConfig := vm.Config{Debug: false}
+	vmConfig := vm.Config{}
 	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vmConfig)
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {

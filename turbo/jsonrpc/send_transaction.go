@@ -9,7 +9,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	txPoolProto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
@@ -22,23 +21,10 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return common.Hash{}, err
 	}
 
-	if txn.Type() == types.BlobTxType || txn.Type() == types.DynamicFeeTxType || txn.Type() == types.SetCodeTxType {
-		baseFeeBig, err := api.BaseFee(ctx)
-		if err != nil {
-			return common.Hash{}, err
-		}
-
-		// If the transaction fee cap is already specified, ensure the
-		// effective gas fee is less than fee cap.
-		if err := checkDynamicTxFee(txn.GetFeeCap(), baseFeeBig); err != nil {
-			return common.Hash{}, err
-		}
-	} else {
-		// If the transaction fee cap is already specified, ensure the
-		// fee of the given transaction is _reasonable_.
-		if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
-			return common.Hash{}, err
-		}
+	// If the transaction fee cap is already specified, ensure the
+	// fee of the given transaction is _reasonable_.
+	if err := checkTxFee(txn.GetFeeCap().ToBig(), txn.GetGasLimit(), api.FeeCap); err != nil {
+		return common.Hash{}, err
 	}
 
 	if !txn.Protected() && !api.AllowUnprotectedTxs {
@@ -97,22 +83,6 @@ func checkTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
 	feeFloat, _ := feeEth.Float64()
 	if feeFloat > gasCap {
 		return fmt.Errorf("tx fee (%.2f ether) exceeds the configured cap (%.2f ether)", feeFloat, gasCap)
-	}
-
-	return nil
-}
-
-// checkTxFee is an internal function used to check whether the fee of
-// the given transaction is _reasonable_(under the cap).
-func checkDynamicTxFee(gasCap *uint256.Int, baseFeeBig *hexutil.Big) error {
-	baseFee := uint256.NewInt(0)
-	overflow := baseFee.SetFromBig(baseFeeBig.ToInt())
-	if overflow {
-		return errors.New("opts.Value higher than 2^256-1")
-	}
-
-	if gasCap.Lt(baseFee) {
-		return errors.New("fee cap is lower than the base fee")
 	}
 
 	return nil

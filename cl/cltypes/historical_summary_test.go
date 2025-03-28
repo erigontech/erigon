@@ -32,7 +32,7 @@ var (
 )
 
 func TestHistoricalSummary(t *testing.T) {
-	decompressed, _ := utils.DecompressSnappy(serializedHistoricalSummarySnappy)
+	decompressed, _ := utils.DecompressSnappy(serializedHistoricalSummarySnappy, false)
 	obj := &cltypes.HistoricalSummary{}
 	require.NoError(t, obj.DecodeSSZ(decompressed, 0))
 	root, err := obj.HashSSZ()

@@ -42,15 +42,15 @@ const (
 
 type IdentityPreimage [identityPreimageSize]byte
 
-func (ip IdentityPreimage) EncodingSizeSSZ() int {
+func (ip *IdentityPreimage) EncodingSizeSSZ() int {
 	return identityPreimageSize
 }
 
-func (ip IdentityPreimage) EncodeSSZ(dst []byte) ([]byte, error) {
+func (ip *IdentityPreimage) EncodeSSZ(dst []byte) ([]byte, error) {
 	return append(dst, ip[:]...), nil
 }
 
-func (ip IdentityPreimage) DecodeSSZ(buf []byte, _ int) error {
+func (ip *IdentityPreimage) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) != identityPreimageSize {
 		return fmt.Errorf("%w: len=%d", ErrIncorrectIdentityPreimageSize, len(ip))
 	}
@@ -59,28 +59,35 @@ func (ip IdentityPreimage) DecodeSSZ(buf []byte, _ int) error {
 	return nil
 }
 
-func (ip IdentityPreimage) Clone() clonable.Clonable {
+func (ip *IdentityPreimage) Clone() clonable.Clonable {
 	clone := IdentityPreimage(slices.Clone(ip[:]))
 	return &clone
 }
 
-func (ip IdentityPreimage) HashSSZ() ([32]byte, error) {
+func (ip *IdentityPreimage) HashSSZ() ([32]byte, error) {
 	return merkletree.BytesRoot(ip[:])
 }
 
-func (ip IdentityPreimage) String() string {
+func (ip *IdentityPreimage) String() string {
 	return hexutil.Encode(ip[:])
 }
 
-func IdentityPreimageFromBytes(b []byte) (IdentityPreimage, error) {
+func IdentityPreimageFromBytes(b []byte) (*IdentityPreimage, error) {
 	var ip IdentityPreimage
 	err := ip.DecodeSSZ(b, 0)
-	return ip, err
+	return &ip, err
 }
 
-type IdentityPreimages []IdentityPreimage
+func IdentityPreimageFromSenderPrefix(prefix [32]byte, sender libcommon.Address) *IdentityPreimage {
+	var ip IdentityPreimage
+	copy(ip[:len(prefix)], prefix[:])
+	copy(ip[len(prefix):], sender.Bytes())
+	return &ip
+}
 
-func (ips IdentityPreimages) ToListSSZ() *solid.ListSSZ[IdentityPreimage] {
+type IdentityPreimages []*IdentityPreimage
+
+func (ips IdentityPreimages) ToListSSZ() *solid.ListSSZ[*IdentityPreimage] {
 	return solid.NewStaticListSSZFromList(ips, identityPreimagesLimit, identityPreimageSize)
 }
 
@@ -89,7 +96,7 @@ type DecryptionKeysSignatureData struct {
 	Eon               EonIndex
 	Slot              uint64
 	TxnPointer        uint64
-	IdentityPreimages *solid.ListSSZ[IdentityPreimage]
+	IdentityPreimages *solid.ListSSZ[*IdentityPreimage]
 }
 
 func (d DecryptionKeysSignatureData) HashSSZ() ([32]byte, error) {

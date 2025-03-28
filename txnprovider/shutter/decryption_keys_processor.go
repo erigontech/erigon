@@ -23,7 +23,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"golang.org/x/sync/errgroup"
@@ -42,8 +44,9 @@ type DecryptionKeysProcessor struct {
 	config            Config
 	encryptedTxnsPool *EncryptedTxnsPool
 	decryptedTxnsPool *DecryptedTxnsPool
-	blockListener     BlockListener
+	blockListener     *BlockListener
 	slotCalculator    SlotCalculator
+	txnParseCtxMu     sync.Mutex
 	txnParseCtx       *txpool.TxnParseContext
 	queue             chan *proto.DecryptionKeys
 	processed         mapset.Set[ProcessedMark]
@@ -54,10 +57,10 @@ func NewDecryptionKeysProcessor(
 	config Config,
 	encryptedTxnsPool *EncryptedTxnsPool,
 	decryptedTxnsPool *DecryptedTxnsPool,
-	blockListener BlockListener,
+	blockListener *BlockListener,
 	slotCalculator SlotCalculator,
-) DecryptionKeysProcessor {
-	return DecryptionKeysProcessor{
+) *DecryptionKeysProcessor {
+	return &DecryptionKeysProcessor{
 		logger:            logger,
 		config:            config,
 		encryptedTxnsPool: encryptedTxnsPool,
@@ -70,21 +73,36 @@ func NewDecryptionKeysProcessor(
 	}
 }
 
-func (dkp DecryptionKeysProcessor) Enqueue(msg *proto.DecryptionKeys) {
+func (dkp *DecryptionKeysProcessor) Enqueue(msg *proto.DecryptionKeys) {
 	dkp.queue <- msg
 }
 
-func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
+func (dkp *DecryptionKeysProcessor) Run(ctx context.Context) error {
 	defer dkp.logger.Info("decryption keys processor stopped")
 	dkp.logger.Info("running decryption keys processor")
 
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error { return dkp.processKeys(ctx) })
-	eg.Go(func() error { return dkp.cleanupLoop(ctx) })
+
+	eg.Go(func() error {
+		err := dkp.processKeys(ctx)
+		if err != nil {
+			return fmt.Errorf("decryption keys processing loop: %w", err)
+		}
+		return nil
+	})
+
+	eg.Go(func() error {
+		err := dkp.cleanupLoop(ctx)
+		if err != nil {
+			return fmt.Errorf("decryption keys processor cleanup loop: %w", err)
+		}
+		return nil
+	})
+
 	return eg.Wait()
 }
 
-func (dkp DecryptionKeysProcessor) processKeys(ctx context.Context) error {
+func (dkp *DecryptionKeysProcessor) processKeys(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -98,21 +116,23 @@ func (dkp DecryptionKeysProcessor) processKeys(ctx context.Context) error {
 	}
 }
 
-func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
+func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
+	processingTimeStart := time.Now()
+	slot := msg.GetGnosis().Slot
+	eonIndex := EonIndex(msg.Eon)
 	dkp.logger.Debug(
 		"processing decryption keys message",
 		"instanceId", msg.InstanceId,
-		"eon", msg.Eon,
-		"slot", msg.GetGnosis().Slot,
-		"txPointer", msg.GetGnosis().TxPointer,
+		"eonIndex", eonIndex,
+		"slot", slot,
+		"txnIndex", msg.GetGnosis().TxPointer,
 		"keys", len(msg.Keys),
 	)
 
 	keys := msg.Keys[1:] // skip placeholder (we can safely do this because msg has already been validated)
-	eonIndex := EonIndex(msg.Eon)
 	from := TxnIndex(msg.GetGnosis().TxPointer)
 	to := from + TxnIndex(len(keys)) // [from,to)
-	processedMark := ProcessedMark{Slot: msg.GetGnosis().Slot, Eon: eonIndex, From: from, To: to}
+	processedMark := ProcessedMark{Slot: slot, Eon: eonIndex, From: from, To: to}
 	if dkp.processed.Contains(processedMark) {
 		dkp.logger.Debug(
 			"skipping decryption keys message - already processed",
@@ -137,15 +157,16 @@ func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 	var eg errgroup.Group
 	eg.SetLimit(estimate.AlmostAllCPUs())
 	txns := make([]types.Transaction, len(encryptedTxns))
-	totalGasLimit := atomic.Uint64{}
+	var totalGasLimit atomic.Uint64
+	var totalBytes atomic.Int64
 	for i, encryptedTxn := range encryptedTxns {
 		eg.Go(func() error {
 			txn, err := dkp.decryptTxn(txnIndexToKey, encryptedTxn)
 			if err != nil {
-				dkp.logger.Warn(
+				dkp.logger.Debug(
 					"failed to decrypt transaction - skipping",
-					"slot", msg.GetGnosis().Slot,
-					"eonIndex", msg.Eon,
+					"slot", slot,
+					"eonIndex", eonIndex,
 					"txnIndex", encryptedTxn.TxnIndex,
 					"err", err,
 				)
@@ -156,6 +177,11 @@ func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 
 			txns[i] = txn
 			totalGasLimit.Add(encryptedTxn.GasLimit.Uint64())
+			// note this is rlp encoding size and so it doesn't reflect 1:1 mem size occupied by the go struct,
+			// but it gives us somewhat of an estimate - this is probably ok for our metrics for now
+			txnSize := txn.EncodingSize()
+			totalBytes.Add(int64(txnSize))
+			decryptedTxnSizeBytes.Observe(float64(txnSize))
 			return nil
 		})
 	}
@@ -175,14 +201,28 @@ func (dkp DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 		filteredTxns = append(filteredTxns, txn)
 	}
 
-	decryptionMark := DecryptionMark{Slot: msg.GetGnosis().Slot, Eon: eonIndex}
-	txnBatch := TxnBatch{Transactions: filteredTxns, TotalGasLimit: totalGasLimit.Load()}
+	decryptionMark := DecryptionMark{Slot: slot, Eon: eonIndex}
+	txnBatch := TxnBatch{Transactions: filteredTxns, TotalGasLimit: totalGasLimit.Load(), TotalBytes: totalBytes.Load()}
 	dkp.decryptedTxnsPool.AddDecryptedTxns(decryptionMark, txnBatch)
 	dkp.processed.Add(processedMark)
+
+	failures := len(txns) - len(filteredTxns)
+	if failures > 0 {
+		dkp.logger.Debug("decryption failures for decryption keys", "slot", slot, "eonIndex", eonIndex, "count", failures)
+	}
+
+	decryptionKeysCount.Observe(float64(len(keys)))
+	decryptionKeysGas.Observe(float64(totalGasLimit.Load()))
+	decryptionSuccesses.Add(float64(len(filteredTxns)))
+	decryptionFailures.Add(float64(failures))
+	decryptionKeysProcessingTimeSecs.ObserveDuration(processingTimeStart)
+	slotStartTime := time.Unix(int64(dkp.slotCalculator.CalcSlotStartTimestamp(slot)), 0)
+	decryptionKeysSlotDelaySecs.ObserveDuration(slotStartTime)
 	return nil
 }
 
-func (dkp DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub EncryptedTxnSubmission) (types.Transaction, error) {
+func (dkp *DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub EncryptedTxnSubmission) (types.Transaction, error) {
+	dkp.logger.Debug("decrypting txn", "txnIndex", sub.TxnIndex)
 	key, ok := keys[sub.TxnIndex]
 	if !ok {
 		return nil, fmt.Errorf("key not found for txn index %d", sub.TxnIndex)
@@ -209,9 +249,7 @@ func (dkp DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub 
 		return nil, fmt.Errorf("failed to decrypt message: %w", err)
 	}
 
-	var txnSlot txpool.TxnSlot
-	var sender libcommon.Address
-	_, err = dkp.txnParseCtx.ParseTransaction(decryptedMessage, 0, &txnSlot, sender[:], true, true, nil)
+	txnSlot, sender, err := dkp.threadSafeParseTxn(decryptedMessage)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse decrypted transaction: %w", err)
 	}
@@ -225,14 +263,30 @@ func (dkp DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub 
 		return nil, errors.New("blob txns not allowed in shutter")
 	}
 
-	if subGasLimit := sub.GasLimit.Uint64(); txn.GetGas() != subGasLimit {
-		return nil, fmt.Errorf("txn gas limit mismatch: txn=%d, encryptedTxnSubmission=%d", txn.GetGas(), subGasLimit)
+	if subGasLimit := sub.GasLimit.Uint64(); txn.GetGasLimit() != subGasLimit {
+		return nil, fmt.Errorf("txn gas limit mismatch: txn=%d, encryptedTxnSubmission=%d", txn.GetGasLimit(), subGasLimit)
 	}
 
+	txn.SetSender(sender)
 	return txn, nil
 }
 
-func (dkp DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
+// threadSafeParseTxn is needed because txnParseCtx.ParseTransaction is not thread safe
+func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnSlot, libcommon.Address, error) {
+	dkp.txnParseCtxMu.Lock()
+	defer dkp.txnParseCtxMu.Unlock()
+
+	var txnSlot txpool.TxnSlot
+	var sender libcommon.Address
+	_, err := dkp.txnParseCtx.ParseTransaction(rlp, 0, &txnSlot, sender[:], true, true, nil)
+	if err != nil {
+		return nil, libcommon.Address{}, err
+	}
+
+	return &txnSlot, sender, nil
+}
+
+func (dkp *DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
 	blockEventC := make(chan BlockEvent)
 	unregister := dkp.blockListener.RegisterObserver(func(event BlockEvent) {
 		select {
@@ -255,16 +309,21 @@ func (dkp DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
 	}
 }
 
-func (dkp DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEvent) error {
+func (dkp *DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEvent) error {
 	slot, err := dkp.slotCalculator.CalcSlot(blockEvent.LatestBlockTime)
 	if err != nil {
 		return err
 	}
 
 	// decryptedTxnsPool is not re-org aware since it is slot based - we can clean it up straight away
-	decryptedTxnsDeletions := dkp.decryptedTxnsPool.DeleteDecryptedTxnsUpToSlot(slot)
-	if decryptedTxnsDeletions > 0 {
-		dkp.logger.Debug("cleaned up decrypted txns up to", "slot", slot, "deletions", decryptedTxnsDeletions)
+	decryptedMarkDeletions, decryptedTxnsDeletions := dkp.decryptedTxnsPool.DeleteDecryptedTxnsUpToSlot(slot)
+	if decryptedMarkDeletions > 0 {
+		dkp.logger.Debug(
+			"cleaned up decrypted txns up to",
+			"slot", slot,
+			"decryptedMarkDeletions", decryptedMarkDeletions,
+			"decryptedTxnsDeletions", decryptedTxnsDeletions,
+		)
 	}
 
 	// encryptedTxnPool on the other hand may be sensitive to re-orgs - clean it up with some delay

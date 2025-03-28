@@ -105,7 +105,7 @@ type histCfg struct {
 	integrity rangeIntegrityChecker
 }
 
-func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
+func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
@@ -130,7 +130,7 @@ func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
 	}
 
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, logger)
+	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggStep, logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", cfg.iiCfg.filenameBase, err)
 	}
@@ -512,7 +512,7 @@ type historyBufferedWriter struct {
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	largeValues bool
 
-	ii *invertedIndexBufferedWriter
+	ii *InvertedIndexBufferedWriter
 }
 
 func (w *historyBufferedWriter) SetTxNum(v uint64) { w.ii.SetTxNum(v) }
