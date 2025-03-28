@@ -60,7 +60,7 @@ func (l *JSONLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libc
 }
 
 // CaptureState outputs state information on the logger.
-func (l *JSONLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, section, fnDepth *uint64, err error) {
+func (l *JSONLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 	memory := scope.Memory
 	stack := scope.Stack
 
@@ -73,12 +73,18 @@ func (l *JSONLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 		Storage:       nil,
 		Depth:         depth,
 		RefundCounter: l.env.IntraBlockState().GetRefund(),
-		Section:       section,
-		FnDepth:       fnDepth,
+		Section:       nil,
+		FnDepth:       nil,
 		Err:           err,
 	}
 	if !l.cfg.DisableMemory {
 		log.Memory = memory.Data()
+	}
+	if scope.EofHeader != nil {
+		section_ := scope.SectionIdx
+		fnDepth_ := uint64(len(scope.ReturnStack)) + 1
+		log.Section = &section_
+		log.FnDepth = &fnDepth_
 	}
 	if !l.cfg.DisableStack {
 		//TODO(@holiman) improve this
@@ -92,7 +98,7 @@ func (l *JSONLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 }
 
 // CaptureFault outputs state information on the logger.
-func (l *JSONLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, section, fnDepth *uint64, err error) {
+func (l *JSONLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
 
 // CaptureEnd is triggered at end of execution.

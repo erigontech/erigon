@@ -163,7 +163,7 @@ func (l *StructLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, to li
 // CaptureState logs a new structured log message and pushes it out to the environment
 //
 // CaptureState also tracks SLOAD/SSTORE ops to track storage change.
-func (l *StructLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, section, fnDepth *uint64, err error) {
+func (l *StructLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 	memory := scope.Memory
 	stack := scope.Stack
 	contract := scope.Contract
@@ -220,13 +220,13 @@ func (l *StructLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 		copy(rdata, rData)
 	}
 	// create a new snapshot of the EVM.
-	log := StructLog{pc, op, gas, cost, mem, memory.Len(), stck, rdata, storage, depth, l.env.IntraBlockState().GetRefund(), section, fnDepth, err}
+	log := StructLog{pc, op, gas, cost, mem, memory.Len(), stck, rdata, storage, depth, l.env.IntraBlockState().GetRefund(), nil, nil, err}
 	l.logs = append(l.logs, log)
 }
 
 // CaptureFault implements the Tracer interface to trace an execution fault
 // while running an opcode.
-func (l *StructLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, section, fnDepth *uint64, err error) {
+func (l *StructLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
@@ -301,6 +301,12 @@ func FormatLogs(logs []StructLog) []StructLogRes {
 				storage[fmt.Sprintf("%x", i)] = fmt.Sprintf("%x", storageValue)
 			}
 			formatted[index].Storage = &storage
+		}
+		if trace.Section != nil {
+			formatted[index].Section = int(*trace.Section)
+		}
+		if trace.FnDepth != nil {
+			formatted[index].FnDepth = int(*trace.FnDepth)
 		}
 	}
 	return formatted
@@ -399,7 +405,7 @@ func (t *mdLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcom
 	t.captureStartOrEnter(from, to, create, input, gas, value)
 }
 
-func (t *mdLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, section, fnDepth *uint64, err error) {
+func (t *mdLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 	stack := scope.Stack
 
 	fmt.Fprintf(t.out, "| %4d  | %10v  |  %3d |", pc, op, cost)
@@ -420,7 +426,7 @@ func (t *mdLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope
 	}
 }
 
-func (t *mdLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, section, fnDepth *uint64, err error) {
+func (t *mdLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 	fmt.Fprintf(t.out, "\nError: at pc=%d, op=%v: %v\n", pc, op, err)
 }
 

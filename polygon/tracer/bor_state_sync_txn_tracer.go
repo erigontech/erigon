@@ -114,11 +114,10 @@ func (bsstt *borStateSyncTxnTracer) CaptureState(
 	scope *vm.ScopeContext,
 	rData []byte,
 	depth int,
-	section, fnDepth *uint64,
 	err error,
 ) {
 	// trick tracer to think it is 1 level deeper
-	bsstt.EVMLogger.CaptureState(pc, op, gas, cost, scope, rData, depth+1, section, fnDepth, err)
+	bsstt.EVMLogger.CaptureState(pc, op, gas, cost, scope, rData, depth+1, err)
 }
 
 func (bsstt *borStateSyncTxnTracer) CaptureFault(
@@ -128,11 +127,10 @@ func (bsstt *borStateSyncTxnTracer) CaptureFault(
 	cost uint64,
 	scope *vm.ScopeContext,
 	depth int,
-	section, fnDepth *uint64,
 	err error,
 ) {
 	// trick tracer to think it is 1 level deeper
-	bsstt.EVMLogger.CaptureFault(pc, op, gas, cost, scope, depth+1, section, fnDepth, err)
+	bsstt.EVMLogger.CaptureFault(pc, op, gas, cost, scope, depth+1, err)
 }
 
 func (bsstt *borStateSyncTxnTracer) GetResult() (json.RawMessage, error) {

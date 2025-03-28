@@ -31,8 +31,8 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 			Memory:      mem,
 			Stack:       locStack,
 			Contract:    contract,
-			eofHeader:   header,
-			returnStack: make([][2]uint64, 0, 32),
+			EofHeader:   header,
+			ReturnStack: make([][2]uint64, 0, 32),
 		}
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
@@ -45,11 +45,10 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 		operation   *operation
 
 		// copies used by tracer
-		pcCopy           uint64 // needed for the deferred Tracer
-		gasCopy          uint64 // for Tracer to log gas remaining before execution
-		logged           bool   // deferred Tracer should ignore already logged steps
-		res              []byte // result of the opcode execution function
-		section, fnDepth uint64
+		pcCopy  uint64 // needed for the deferred Tracer
+		gasCopy uint64 // for Tracer to log gas remaining before execution
+		logged  bool   // deferred Tracer should ignore already logged steps
+		res     []byte // result of the opcode execution function
 	)
 
 	mem.Reset()
@@ -66,9 +65,9 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 		// first: capture data/memory/state/depth/etc... then clenup them
 
 		if !logged {
-			in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, &section, &fnDepth, err) //nolint:errcheck
+			in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 		} else {
-			in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, &section, &fnDepth, err)
+			in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
 		}
 
 		// this function must execute _after_: the `CaptureState` needs the stacks before
@@ -93,8 +92,6 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 
 		// Capture pre-execution values for tracing.
 		logged, pcCopy, gasCopy = false, _pc, contract.Gas
-		section = callContext.seciontIdx
-		fnDepth = uint64(len(callContext.returnStack)) + 1
 
 		op = OpCode(contract.Code[_pc])
 		operation = in.jtEOF[op]
@@ -134,7 +131,7 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 			}
 		}
 
-		in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, &section, &fnDepth, err) //nolint:errcheck
+		in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 		logged = true
 
 		// execute the operation
@@ -167,8 +164,8 @@ func (in *EVMInterpreter) runNoDebug(contract *Contract, input []byte, readOnly 
 			Memory:      mem,
 			Stack:       locStack,
 			Contract:    contract,
-			eofHeader:   header,
-			returnStack: make([][2]uint64, 0, 32),
+			EofHeader:   header,
+			ReturnStack: make([][2]uint64, 0, 32),
 		}
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC

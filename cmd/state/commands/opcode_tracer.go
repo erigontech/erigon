@@ -266,7 +266,7 @@ func (ot *opcodeTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	ot.depth--
 }
 
-func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, section, fnDepth *uint64, err error) {
+func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
 	//CaptureState sees the system as it is before the opcode is run. It seems to never get an error.
 	contract := scope.Contract
 
@@ -400,11 +400,11 @@ func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 	currentEntry.lastOp = op
 }
 
-func (ot *opcodeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, section, fnDepth *uint64, err error) {
+func (ot *opcodeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
 	// CaptureFault sees the system as it is after the fault happens
 
 	// CaptureState might have already recorded the opcode before it failed. Let's centralize the processing there.
-	ot.CaptureState(pc, op, gas, cost, scope, nil, opDepth, section, fnDepth, err)
+	ot.CaptureState(pc, op, gas, cost, scope, nil, opDepth, err)
 }
 
 type segPrefix struct {

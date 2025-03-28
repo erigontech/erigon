@@ -89,9 +89,9 @@ type ScopeContext struct {
 	Stack    *stack.Stack
 	Contract *Contract
 
-	eofHeader   *eofHeader
-	returnStack [][2]uint64
-	seciontIdx  uint64 // Current EOF section being executed
+	EofHeader   *eofHeader
+	ReturnStack [][2]uint64
+	SectionIdx  uint64 // Current EOF section being executed
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -247,9 +247,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// first: capture data/memory/state/depth/etc... then clenup them
 		if in.cfg.Debug && err != nil {
 			if !logged {
-				in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, nil, nil, err) //nolint:errcheck
+				in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 			} else {
-				in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, nil, nil, err)
+				in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
 			}
 		}
 		// this function must execute _after_: the `CaptureState` needs the stacks before
@@ -320,14 +320,14 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 			// Do tracing before memory expansion
 			if in.cfg.Debug {
-				in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, nil, nil, err) //nolint:errcheck
+				in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 				logged = true
 			}
 			if memorySize > 0 {
 				mem.Resize(memorySize)
 			}
 		} else if in.cfg.Debug {
-			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, nil, nil, err) //nolint:errcheck
+			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 			logged = true
 		}
 		// execute the operation
