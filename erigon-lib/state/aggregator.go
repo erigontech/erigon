@@ -1662,6 +1662,12 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {
 	return at.d[domain].GetLatest(k, tx)
 }
+func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, uint64, bool, error) {
+	return at.d[domain].getLatestFromDB(key, tx)
+}
+func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	return at.d[domain].getLatestFromFiles(k, maxTxNum)
+}
 
 func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff, logEvery *time.Ticker) error {
 	step := txNumUnwindTo / at.StepSize()
