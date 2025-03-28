@@ -46,7 +46,8 @@ func opRjumpv(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 		return nil, nil
 	}
 	relOffset := readInt16Be(scope.Contract.Code[*pc+2+2*_case.Uint64():])
-	*pc = pcPost + uint64(relOffset)
+	// *pc = pcPost + uint64(relOffset) // may be uint64(pcPost + relOffset)
+	*pc = uint64(int64(pcPost) + int64(relOffset))
 	return nil, nil
 }
 
