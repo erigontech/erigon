@@ -40,15 +40,15 @@ func TestHashVector(t *testing.T) {
 
 	// Test Encoding and Decoding
 	buf, err := hashVector.EncodeSSZ(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	newHashVector := NewHashVector(vectorSize)
 	err = newHashVector.DecodeSSZ(buf, 0)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, hashVector, newHashVector)
 
 	// Test HashSSZ
 	hash, err = hashVector.HashSSZ()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, hash)
 
 	// Test Clone
@@ -71,15 +71,15 @@ func TestByteBasedUint64Slice(t *testing.T) {
 
 	// Test Encoding and Decoding
 	buf, err := uint64Slice.EncodeSSZ(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	newUint64Slice := NewUint64Slice(sliceSize)
 	err = newUint64Slice.DecodeSSZ(buf, 0)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, uint64Slice, newUint64Slice)
 
 	// Test HashSSZ
 	hash, err := uint64Slice.HashVectorSSZ()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, hash)
 
 	// Test Pop
@@ -207,21 +207,21 @@ func TestTransactionsSSZ(t *testing.T) {
 
 	// Test DecodeSSZ
 	encodedData, err := transactionsSSZ.EncodeSSZ(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	decodedTransactionsSSZ := &TransactionsSSZ{}
 	err = decodedTransactionsSSZ.DecodeSSZ(encodedData, len(encodedData))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, transactionsSSZ, decodedTransactionsSSZ)
 
 	// Test EncodeSSZ
 	encodedData, err = transactionsSSZ.EncodeSSZ(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotEmpty(t, encodedData)
 
 	// Test HashSSZ
 	expectedRoot := common.HexToHash("55b3a5969a59aaac27189b17dba3e6f17f64ff9b9f52734cafa9fd5d9010cb3b") // Example expected root
 	root, err := transactionsSSZ.HashSSZ()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, expectedRoot, libcommon.Hash(root))
 
 	// Test EncodingSizeSSZ

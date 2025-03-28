@@ -142,7 +142,7 @@ func TestSortedGetAndSet(t *testing.T) {
 		for i, w := range tt.want {
 			// set got's key from r.pair[i], so that we preserve order of pairs
 			got := pair{k: r.pairs[i].k}
-			assert.NoError(t, r.Load(WithEntry(w.k, &got.v)))
+			require.NoError(t, r.Load(WithEntry(w.k, &got.v)))
 			assert.Equal(t, w, got)
 		}
 	}
@@ -161,7 +161,7 @@ func TestDirty(t *testing.T) {
 		t.Error("record is not signed")
 	}
 	_, err := rlp.EncodeToBytes(r)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	r.SetSeq(3)
 	if len(r.signature) != 0 {

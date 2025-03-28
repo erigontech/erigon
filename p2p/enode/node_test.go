@@ -61,7 +61,7 @@ func TestPythonInterop(t *testing.T) {
 	want := map[enr.Entry]interface{}{new(enr.IPv4): &wantIP, new(enr.UDP): &wantUDP}
 	for k, v := range want {
 		desc := fmt.Sprintf("loading key %q", k.ENRKey())
-		if assert.NoError(t, n.Load(k), desc) {
+		if require.NoError(t, n.Load(k), desc) {
 			assert.Equal(t, k, v, desc)
 		}
 	}

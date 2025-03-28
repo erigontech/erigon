@@ -257,7 +257,7 @@ func TestEliasFano(t *testing.T) {
 
 	buf := bytes.NewBuffer(nil)
 	err := ef.Write(buf)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, ef.AppendBytes(nil), buf.Bytes())
 
 	ef2, _ := ReadEliasFano(buf.Bytes())

@@ -43,7 +43,7 @@ func TestNewPolynomial(t *testing.T) {
 
 	for _, cs := range validCoefficients {
 		p, err := NewPolynomial(cs)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		for i, c := range cs {
 			assert.Equal(t, c, (*p)[i])
 		}
@@ -68,18 +68,18 @@ func TestNewPolynomial(t *testing.T) {
 
 func TestEval(t *testing.T) {
 	p1, err := NewPolynomial([]*big.Int{big.NewInt(10), big.NewInt(20), big.NewInt(30)})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 0, big.NewInt(10).Cmp(p1.Eval(big.NewInt(0))))
 	assert.Equal(t, 0, big.NewInt(10+20*10+30*100).Cmp(p1.Eval(big.NewInt(10))))
 
 	p2, err := NewPolynomial([]*big.Int{big.NewInt(0), new(big.Int).Sub(order, big.NewInt(1))})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 0, big.NewInt(0).Cmp(p2.Eval(big.NewInt(0))))
 	assert.Equal(t, 0, new(big.Int).Sub(order, big.NewInt(1)).Cmp(p2.Eval(big.NewInt(1))))
 	assert.Equal(t, 0, new(big.Int).Sub(order, big.NewInt(2)).Cmp(p2.Eval(big.NewInt(2))))
 
 	p3, err := NewPolynomial([]*big.Int{big.NewInt(0), big.NewInt(1)})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 0, big.NewInt(0).Cmp(p3.Eval(big.NewInt(0))))
 	assert.Equal(t, 0, big.NewInt(0).Cmp(p3.Eval(order)))
 	assert.Equal(t, 0, big.NewInt(0).Cmp(p3.Eval(new(big.Int).Mul(order, big.NewInt(5)))))
@@ -87,7 +87,7 @@ func TestEval(t *testing.T) {
 
 func TestEvalForKeyper(t *testing.T) {
 	p, err := NewPolynomial([]*big.Int{big.NewInt(10), big.NewInt(20), big.NewInt(30)})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	v0 := p.EvalForKeyper(0)
 	v1 := p.EvalForKeyper(1)
 	assert.Equal(t, v0, p.Eval(KeyperX(0)))
@@ -119,7 +119,7 @@ func TestValidEval(t *testing.T) {
 
 func TestRandomPolynomial(t *testing.T) {
 	p, err := RandomPolynomial(rand.Reader, uint64(5))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, p.Degree(), uint64(5))
 }
 
@@ -129,7 +129,7 @@ func TestGammas(t *testing.T) {
 		big.NewInt(10),
 		big.NewInt(20),
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	gammas := p.Gammas()
 	assert.Equal(t, p.Degree(), uint64(len(*gammas))-1)
 	assert.Equal(t, p.Degree(), gammas.Degree())
@@ -159,10 +159,10 @@ func TestVerifyPolyEval(t *testing.T) {
 	threshold := uint64(2)
 
 	p1, err := RandomPolynomial(randReader, threshold-1)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	p2, err := RandomPolynomial(randReader, threshold-1)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
 		xi := KeyperX(i)
@@ -209,7 +209,7 @@ func TestGammasGobable(t *testing.T) {
 		big.NewInt(10),
 		big.NewInt(20),
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	gammas := p.Gammas()
 	deserialized := new(Gammas)

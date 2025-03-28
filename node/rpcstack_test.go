@@ -247,12 +247,12 @@ func createAndStartServer(t *testing.T, conf *httpConfig, ws bool, wsConf *wsCon
 	t.Helper()
 
 	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpccfg.DefaultHTTPTimeouts)
-	assert.NoError(t, srv.enableRPC(nil, *conf, nil))
+	require.NoError(t, srv.enableRPC(nil, *conf, nil))
 	if ws {
-		assert.NoError(t, srv.enableWS(nil, *wsConf, nil))
+		require.NoError(t, srv.enableWS(nil, *wsConf, nil))
 	}
-	assert.NoError(t, srv.setListenAddr("localhost", 0))
-	assert.NoError(t, srv.start())
+	require.NoError(t, srv.setListenAddr("localhost", 0))
+	require.NoError(t, srv.start())
 	return srv
 }
 
@@ -263,12 +263,12 @@ func createAndStartServerWithAllowList(t *testing.T, conf httpConfig, ws bool, w
 
 	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) //don't allow RPC modules
 
-	assert.NoError(t, srv.enableRPC(nil, conf, allowList))
+	require.NoError(t, srv.enableRPC(nil, conf, allowList))
 	if ws {
-		assert.NoError(t, srv.enableWS(nil, wsConf, allowList))
+		require.NoError(t, srv.enableWS(nil, wsConf, allowList))
 	}
-	assert.NoError(t, srv.setListenAddr("localhost", 0))
-	assert.NoError(t, srv.start())
+	require.NoError(t, srv.setListenAddr("localhost", 0))
+	require.NoError(t, srv.start())
 	return srv
 }
 
@@ -308,7 +308,7 @@ func testCustomRequest(t *testing.T, srv *httpServer, method string) bool {
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(resp.Body)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	return !strings.Contains(string(respBody), "error")
 }

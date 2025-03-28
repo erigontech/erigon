@@ -107,11 +107,11 @@ func TestEonPublicKeyShare(t *testing.T) {
 func TestEonSharesMatch(t *testing.T) {
 	threshold := uint64(2)
 	p1, err := RandomPolynomial(rand.Reader, threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	p2, err := RandomPolynomial(rand.Reader, threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	p3, err := RandomPolynomial(rand.Reader, threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	x1 := KeyperX(0)
 	x2 := KeyperX(1)
@@ -152,11 +152,11 @@ func TestEonPublicKey(t *testing.T) {
 
 	threshold := uint64(2)
 	p1, err := RandomPolynomial(rand.Reader, threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	p2, err := RandomPolynomial(rand.Reader, threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	p3, err := RandomPolynomial(rand.Reader, threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	k1 := ComputeEonPublicKey([]*Gammas{p1.Gammas()})
 	assert.True(t, (*blst.P2Affine)(k1).Equals([]*blst.P2Affine(*p1.Gammas())[0]))
@@ -169,11 +169,11 @@ func TestEonPublicKey(t *testing.T) {
 func TestEonPublicKeyMatchesSecretKey(t *testing.T) {
 	threshold := uint64(2)
 	p1, err := RandomPolynomial(rand.Reader, threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	p2, err := RandomPolynomial(rand.Reader, threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	p3, err := RandomPolynomial(rand.Reader, threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	esk := big.NewInt(0)
 	for _, p := range []*Polynomial{p1, p2, p3} {
@@ -203,7 +203,7 @@ func TestInverse(t *testing.T) {
 	}
 	for i := 0; i < 100; i++ {
 		x, err := rand.Int(rand.Reader, order)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		if x.Sign() == 0 {
 			continue
 		}
@@ -268,7 +268,7 @@ func TestLagrangeCoefficients(t *testing.T) {
 
 func TestLagrangeReconstruct(t *testing.T) {
 	p, err := RandomPolynomial(rand.Reader, uint64(2))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	l1 := lagrangeCoefficient(0, []int{0, 1, 2})
 	l2 := lagrangeCoefficient(1, []int{0, 1, 2})
@@ -306,11 +306,11 @@ func TestVerifyEpochSecretKeyShare(t *testing.T) {
 	threshold := uint64(2)
 	epochID := ComputeEpochID([]byte("epoch1"))
 	p1, err := RandomPolynomial(rand.Reader, threshold-1)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	p2, err := RandomPolynomial(rand.Reader, threshold-1)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	p3, err := RandomPolynomial(rand.Reader, threshold-1)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	gammas := []*Gammas{
 		p1.Gammas(),
@@ -339,7 +339,7 @@ func TestVerifyEpochSecretKeyShare(t *testing.T) {
 
 func TestVerifyEpochSecretKey(t *testing.T) {
 	p, err := RandomPolynomial(rand.Reader, 0)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	eonPublicKey := ComputeEonPublicKey([]*Gammas{p.Gammas()})
 
 	epochIDBytes := []byte("epoch1")
@@ -353,24 +353,24 @@ func TestVerifyEpochSecretKey(t *testing.T) {
 		[]*EpochSecretKeyShare{epochSecretKeyShare},
 		1,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	ok, err := VerifyEpochSecretKey(epochSecretKey, eonPublicKey, epochIDBytes)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, ok)
 
 	ok, err = VerifyEpochSecretKey(epochSecretKey, eonPublicKey, append(epochIDBytes, 0xab))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, !ok)
 
 	var sigma Block
 	message := []byte("msg")
 	ok, err = VerifyEpochSecretKeyDeterministic(epochSecretKey, eonPublicKey, epochIDBytes, sigma, message)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, ok)
 
 	ok, err = VerifyEpochSecretKeyDeterministic(epochSecretKey, eonPublicKey, append(epochIDBytes, 0xab), sigma, message)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, !ok)
 }
 
@@ -382,7 +382,7 @@ func TestComputeEpochSecretKey(t *testing.T) {
 	ps := []*Polynomial{}
 	for i := 0; i < n; i++ {
 		p, err := RandomPolynomial(rand.Reader, threshold-1)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		ps = append(ps, p)
 	}
 
@@ -413,17 +413,17 @@ func TestComputeEpochSecretKey(t *testing.T) {
 		[]int{0, 1},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[1]},
 		threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	epochSecretKey13, err := ComputeEpochSecretKey(
 		[]int{0, 2},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[2]},
 		threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	epochSecretKey23, err := ComputeEpochSecretKey(
 		[]int{1, 2},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[1], epochSecretKeyShares[2]},
 		threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	assert.True(t, epochSecretKey12.Equal(epochSecretKey13))
 	assert.True(t, epochSecretKey12.Equal(epochSecretKey23))
@@ -438,7 +438,7 @@ func TestFull(t *testing.T) {
 	gammas := []*Gammas{}
 	for i := 0; i < n; i++ {
 		p, err := RandomPolynomial(rand.Reader, threshold-1)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		ps = append(ps, p)
 		gammas = append(gammas, p.Gammas())
 	}
@@ -475,18 +475,18 @@ func TestFull(t *testing.T) {
 		[]int{0, 1},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[1]},
 		threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	epochSecretKey13, err := ComputeEpochSecretKey(
 		[]int{0, 2},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[2]},
 		threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	epochSecretKey23, err := ComputeEpochSecretKey(
 		[]int{1, 2},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[1], epochSecretKeyShares[2]},
 		threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, epochSecretKey.Equal(epochSecretKey13))
 	assert.True(t, epochSecretKey.Equal(epochSecretKey23))
 }

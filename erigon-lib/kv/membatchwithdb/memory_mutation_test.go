@@ -59,15 +59,15 @@ func TestPutAppendHas(t *testing.T) {
 	require.Nil(t, batch.Flush(context.Background(), rwTx))
 
 	exist, err := batch.Has(kv.HeaderNumber, []byte("AAAA"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, exist, true)
 
 	val, err := batch.GetOne(kv.HeaderNumber, []byte("AAAA"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, val, []byte("value1.3"))
 
 	exist, err = batch.Has(kv.HeaderNumber, []byte("KKKK"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.False(t, exist)
 }
 

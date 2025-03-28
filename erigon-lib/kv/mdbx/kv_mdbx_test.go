@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -33,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
 )
 
 func BaseCaseDB(t *testing.T) kv.RwDB {
@@ -214,13 +214,13 @@ func TestRangeDupSort(t *testing.T) {
 		require.NoError(t, err)
 		_, vals, err := stream.ToArrayKV(it)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(vals))
+		require.Len(t, vals, 2)
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), []byte("value1.3"), order.Asc, -1)
 		require.NoError(t, err)
 		_, vals, err = stream.ToArrayKV(it)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(vals))
+		require.Len(t, vals, 1)
 	})
 	t.Run("Desc", func(t *testing.T) {
 		_, tx, _ := BaseCase(t)
@@ -332,19 +332,19 @@ func TestHasDelete(t *testing.T) {
 	require.NoError(t, c.DeleteExact([]byte("key2"), []byte("value1.1"))) //valid key but wrong value
 
 	res, err := tx.Has(table, []byte("key1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.False(t, res)
 
 	res, err = tx.Has(table, []byte("key2"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.True(t, res)
 
 	res, err = tx.Has(table, []byte("key3"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.True(t, res) //There is another key3 left
 
 	res, err = tx.Has(table, []byte("k"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.False(t, res)
 }
 
@@ -363,7 +363,7 @@ func TestForAmount(t *testing.T) {
 		keys = append(keys, string(k))
 		return nil
 	})
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, []string{"key3", "key3"}, keys)
 
 	var keys1 []string
@@ -372,7 +372,7 @@ func TestForAmount(t *testing.T) {
 		keys1 = append(keys1, string(k))
 		return nil
 	})
-	require.Nil(t, err1)
+	require.NoError(t, err1)
 	require.Equal(t, []string{"key1", "key1", "key2", "key3", "key3", "key4", "key5"}, keys1)
 
 	var keys2 []string
@@ -381,7 +381,7 @@ func TestForAmount(t *testing.T) {
 		keys2 = append(keys2, string(k))
 		return nil
 	})
-	require.Nil(t, err2)
+	require.NoError(t, err2)
 	require.Nil(t, keys2)
 
 	var keys3 []string
@@ -390,7 +390,7 @@ func TestForAmount(t *testing.T) {
 		keys3 = append(keys3, string(k))
 		return nil
 	})
-	require.Nil(t, err3)
+	require.NoError(t, err3)
 	require.Nil(t, keys3)
 }
 
@@ -410,21 +410,21 @@ func TestPrefix(t *testing.T) {
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 
 	kvs2, err := tx.Prefix(table, []byte("key1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer kvs2.Close()
 	for kvs2.HasNext() {
 		k1, _, err := kvs2.Next()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		keys1 = append(keys1, string(k1))
 	}
 	require.Equal(t, []string{"key1", "key1"}, keys1)
 
 	kvs3, err := tx.Prefix(table, []byte("e"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer kvs3.Close()
 	for kvs3.HasNext() {
 		k1, _, err := kvs3.Next()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		keys2 = append(keys2, string(k1))
 	}
 	require.Nil(t, keys2)
@@ -441,7 +441,7 @@ func TestAppendFirstLast(t *testing.T) {
 	require.NoError(t, tx.AppendDup(table, []byte("key2"), []byte("value1.11")))
 
 	k, v, err := c.First()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, k, []byte("key1"))
 	require.Equal(t, v, []byte("value1.1"))
 
@@ -450,7 +450,7 @@ func TestAppendFirstLast(t *testing.T) {
 	require.Equal(t, []string{"value1.1", "value1.3", "value1.11", "value3.1", "value3.3", "value6.1"}, values)
 
 	k, v, err = c.Last()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, k, []byte("key6"))
 	require.Equal(t, v, []byte("value6.1"))
 
@@ -463,19 +463,19 @@ func TestSeek(t *testing.T) {
 	_, _, c := BaseCase(t)
 
 	k, v, err := c.Seek([]byte("k"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values := iteration(t, c, k, v)
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
 
 	k, v, err = c.Seek([]byte("key3"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key3", "key3"}, keys)
 	require.Equal(t, []string{"value3.1", "value3.3"}, values)
 
 	k, v, err = c.Seek([]byte("xyz"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Nil(t, keys)
 	require.Nil(t, values)
