@@ -922,48 +922,49 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx, prune bool) erro
 		_, f, l, _ := runtime.Caller(1)
 		fmt.Printf("[SD aggTx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggTx.id, sd.TxNum(), fh, filepath.Base(f), l)
 	}
-	for di, w := range sd.domainWriters {
-		if w == nil {
-			continue
+	/*
+		for di, w := range sd.domainWriters {
+			if w == nil {
+				continue
+			}
+			if err := w.Flush(ctx, tx); err != nil {
+				return err
+			}
+			sd.aggTx.d[di].closeValsCursor()
 		}
-		if err := w.Flush(ctx, tx); err != nil {
-			return err
+		for _, w := range sd.iiWriters {
+			if w == nil {
+				continue
+			}
+			if err := w.Flush(ctx, tx); err != nil {
+				return err
+			}
 		}
-		sd.aggTx.d[di].closeValsCursor()
-	}
-	for _, w := range sd.iiWriters {
-		if w == nil {
-			continue
-		}
-		if err := w.Flush(ctx, tx); err != nil {
-			return err
-		}
-	}
-	if prune || dbg.PruneOnFlushTimeout != 0 {
-		timeout := dbg.PruneOnFlushTimeout
+		if prune || dbg.PruneOnFlushTimeout != 0 {
+			timeout := dbg.PruneOnFlushTimeout
 
-		if timeout==0 {
-			timeout = 150*time.Millisecond
+			if timeout==0 {
+				timeout = 150*time.Millisecond
+			}
+
+			_, err = sd.aggTx.PruneSmallBatches(ctx, timeout, tx)
+			if err != nil {
+				return err
+			}
 		}
 
-		_, err = sd.aggTx.PruneSmallBatches(ctx, timeout, tx)
-		if err != nil {
-			return err
+		for _, w := range sd.domainWriters {
+			if w == nil {
+				continue
+			}
+			w.close()
 		}
-	}
-
-	for _, w := range sd.domainWriters {
-		if w == nil {
-			continue
-		}
-		w.close()
-	}
-	for _, w := range sd.iiWriters {
-		if w == nil {
-			continue
-		}
-		w.close()
-	}
+		for _, w := range sd.iiWriters {
+			if w == nil {
+				continue
+			}
+			w.close()
+		}*/
 	return nil
 }
 
