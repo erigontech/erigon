@@ -316,8 +316,8 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	}
 
 	from, to := ic.stepsRangeInDB(tx)
-	require.Equal(t, float64(0), from)
-	require.Equal(t, float64(0), to)
+	require.Equal(t, float64(0), from) //nolint:testifylint
+	require.Equal(t, float64(0), to)   //nolint:testifylint
 }
 
 func filledInvIndex(tb testing.TB, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
