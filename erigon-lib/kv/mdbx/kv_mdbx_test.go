@@ -305,12 +305,12 @@ func TestIncrementRead(t *testing.T) {
 	_, err := tx.IncrementSequence(table, uint64(12))
 	require.NoError(t, err)
 	chaV, err := tx.ReadSequence(table)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, chaV, uint64(12))
 	_, err = tx.IncrementSequence(table, uint64(240))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	chaV, err = tx.ReadSequence(table)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, chaV, uint64(252))
 }
 

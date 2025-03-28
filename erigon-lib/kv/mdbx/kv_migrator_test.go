@@ -83,7 +83,7 @@ func TestBucketCRUD(t *testing.T) {
 
 	buckets, err := migrator.ListBuckets()
 	require.NoError(err)
-	require.True(len(buckets) > 10)
+	require.Greater(len(buckets), 10)
 
 	// check thad buckets have unique DBI's
 	uniquness = map[kv.DBI]bool{}

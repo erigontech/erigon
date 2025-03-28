@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/types/accounts"
-
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -258,8 +257,9 @@ func TestAPI(t *testing.T) {
 			}
 		}
 		for i := range res2 {
-			if !bytes.Equal(account1Enc, <-res2[i]) {
-				panic(fmt.Sprintf("epxected: %x, got: %x", res1[i], res2[i]))
+			v := <-res2[i]
+			if !bytes.Equal(account1Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account1Enc, v))
 			}
 		}
 		fmt.Printf("done1: \n")
@@ -291,9 +291,16 @@ func TestAPI(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range res3 {
-			require.Equal(account2Enc, <-res3[i])
+			v := <-res3[i]
+			if !bytes.Equal(account2Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account2Enc, v))
+			}
 		}
 		for i := range res4 {
+			v := <-res4[i]
+			if !bytes.Equal(account1Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account1Enc, v))
+			}
 			require.Equal(account1Enc, <-res4[i])
 		}
 		fmt.Printf("done2: \n")
