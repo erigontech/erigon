@@ -68,7 +68,7 @@ func (v StateVersion) AfterOrEqual(other StateVersion) bool {
 	return v >= other
 }
 
-// stringToClVersion converts the string to the current state version.
+// StringToClVersion converts the string to the current state version.
 func StringToClVersion(s string) (StateVersion, error) {
 	switch s {
 	case "phase0":
