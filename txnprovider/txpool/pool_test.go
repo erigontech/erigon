@@ -25,11 +25,8 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/state"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
-
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -46,9 +43,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNonceFromAddress(t *testing.T) {

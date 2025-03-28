@@ -19,11 +19,13 @@ package cltypes
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestEth1Header(t *testing.T) {
