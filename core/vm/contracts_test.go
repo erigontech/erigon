@@ -27,11 +27,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/stretchr/testify/require"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -270,7 +269,7 @@ func TestModExpPrecompilePotentialOutOfRange(t *testing.T) {
 	input := hexutil.MustDecode(hexString)
 	maxGas := uint64(math.MaxUint64)
 	_, _, err := RunPrecompiledContract(modExpContract, input, maxGas, nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }
 
 // Tests the sample inputs from the elliptic curve scalar multiplication EIP 213.

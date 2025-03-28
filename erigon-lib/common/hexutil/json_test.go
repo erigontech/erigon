@@ -264,7 +264,7 @@ func TestUnmarshalFixedUnprefixedText(t *testing.T) {
 			err := UnmarshalFixedUnprefixedText("x", []byte(test.input), out)
 			checkError(t, test.input, err, test.wantErr)
 			if test.want != nil {
-				require.EqualValues(t, out, test.want)
+				require.EqualValues(t, test.want, out)
 			}
 		})
 	}

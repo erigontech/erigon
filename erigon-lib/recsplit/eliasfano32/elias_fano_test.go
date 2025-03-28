@@ -257,7 +257,7 @@ func TestEliasFano(t *testing.T) {
 
 	buf := bytes.NewBuffer(nil)
 	err := ef.Write(buf)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, ef.AppendBytes(nil), buf.Bytes())
 
 	ef2, _ := ReadEliasFano(buf.Bytes())
@@ -512,7 +512,7 @@ func BenchmarkEF(b *testing.B) {
 			it.Seek(1_230)
 			n, err := it.Next()
 			require.NoError(b, err)
-			require.Equal(b, n, uint64(1_230))
+			require.Equal(b, uint64(1_230), n)
 		}
 	})
 	b.Run("naive reverse iterator", func(b *testing.B) {
