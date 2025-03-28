@@ -257,8 +257,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 	}
 
-	// TODO: add 7560 support here
-
 	slot.Size = uint32(len(slot.Rlp))
 
 	return p, err
