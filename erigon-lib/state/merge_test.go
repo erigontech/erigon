@@ -23,8 +23,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/stretchr/testify/assert"
@@ -35,7 +33,7 @@ import (
 
 func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	salt := uint32(1)
-	cfg := Schema[kv.AccountsDomain].hist.iiCfg
+	cfg := Schema.AccountsDomain.hist.iiCfg
 
 	cfg.salt = &salt
 	cfg.dirs = datadir.New(os.TempDir())
