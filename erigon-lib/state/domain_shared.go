@@ -904,8 +904,6 @@ func (sd *SharedDomains) Close() {
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx, pruneTimeout time.Duration) error {
-	defer fmt.Println("FLUSHED")
-
 	for key, changeset := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
 		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
@@ -941,7 +939,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx, pruneTimeout tim
 			return err
 		}
 	}
-	fmt.Println("Puning")
+	
 	if pruneTimeout == 0 && dbg.PruneOnFlushTimeout != 0 {
 		pruneTimeout := dbg.PruneOnFlushTimeout
 
@@ -954,7 +952,6 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx, pruneTimeout tim
 		}
 	}
 
-	fmt.Println("Closing")
 	for _, w := range sd.domainWriters {
 		if w == nil {
 			continue

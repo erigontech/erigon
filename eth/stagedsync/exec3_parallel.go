@@ -529,6 +529,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 }
 
 func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool, resetTx func(ctx context.Context) error) (kv.RwTx, time.Duration, error) {
+	defer fmt.Println("done commit")
 	te.doms.ClearRam(true)
 	te.doms.Close()
 
@@ -566,6 +567,8 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 		}
 	}
 
+	fmt.Println("doms")
+
 	te.doms, err = state2.NewSharedDomains(tx, te.logger)
 	if err != nil {
 		tx.Rollback()
@@ -573,6 +576,8 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 	}
 	te.doms.SetTxNum(te.lastCommittedTxNum)
 	te.rs = te.rs.WithDomains(te.doms)
+
+	fmt.Println("reset-tx")
 
 	err = resetTx(ctx)
 
