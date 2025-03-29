@@ -1006,6 +1006,7 @@ func ExecV3(ctx context.Context,
 							pe.doms.SetTrace(false)
 						}
 
+						fmt.Println("FLUSHED")
 						var t2 time.Duration
 						commitStart := time.Now()
 						applyTx, t2, err = pe.commit(ctx, execStage, applyTx, useExternalTx)
