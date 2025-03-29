@@ -13,6 +13,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
+	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
+	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
@@ -85,6 +87,9 @@ type executor interface {
 	//these are reset by commit - so need to be read from the executor once its processing
 	readState() *state.StateV3Buffered
 	domains() *libstate.SharedDomains
+
+	commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool) (kv.RwTx, time.Duration, error)
+	resetTx(ctx context.Context) error
 
 	LogExecuted(tx kv.Tx)
 	LogCommitted(tx kv.Tx, commitStart time.Time)
@@ -521,6 +526,64 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 	})
 
 	return nil
+}
+
+func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool, resetTx func(ctx context.Context) error) (kv.RwTx, time.Duration, error) {
+	te.doms.ClearRam(true)
+	te.doms.Close()
+
+	err := execStage.Update(tx, te.lastCommittedBlockNum)
+
+	if err != nil {
+		return nil, 0, err
+	}
+
+	_, err = rawdb.IncrementStateVersion(tx)
+
+	if err != nil {
+		return nil, 0, fmt.Errorf("writing plain state version: %w", err)
+	}
+
+	tx.CollectMetrics()
+
+	var t2 time.Duration
+
+	if !useExternalTx {
+		tt := time.Now()
+		err = tx.Commit()
+
+		if err != nil {
+			return nil, 0, err
+		}
+
+		t2 = time.Since(tt)
+		te.agg.BuildFilesInBackground(te.lastCommittedTxNum)
+
+		tx, err = te.cfg.db.BeginRw(ctx)
+
+		if err != nil {
+			return nil, t2, err
+		}
+	}
+
+	te.doms, err = state2.NewSharedDomains(tx, te.logger)
+	if err != nil {
+		tx.Rollback()
+		return nil, t2, err
+	}
+	te.doms.SetTxNum(te.lastCommittedTxNum)
+	te.rs = te.rs.WithDomains(te.doms)
+
+	err = resetTx(ctx)
+
+	if err == nil {
+		if !useExternalTx {
+			tx.Rollback()
+		}
+
+		return nil, t2, err
+	}
+	return tx, t2, nil
 }
 
 type execRequest struct {
@@ -985,22 +1048,18 @@ func (pe *parallelExecutor) LogComplete(tx kv.Tx) {
 	pe.progress.LogComplete(tx, pe.rs.StateV3, pe)
 }
 
-func (pe *parallelExecutor) resetTx(ctx context.Context) (err error) {
+func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool) (kv.RwTx, time.Duration, error) {
+	return pe.txExecutor.commit(ctx, execStage, tx, useExternalTx, pe.resetTx)
+}
+
+func (pe *parallelExecutor) resetTx(ctx context.Context) error {
 	pe.Lock()
-	applyTx := pe.applyTx
-	pe.applyTx, err = pe.cfg.db.BeginRo(ctx)
+	pe.applyTx = nil
 	pe.Unlock()
-
-	if applyTx != nil {
-		applyTx.Rollback()
-	}
-
-	if err != nil {
-		return err
-	}
 
 	for _, worker := range pe.execWorkers {
 		worker.ResetTx(nil)
+		worker.ResetState(pe.rs, nil, nil, pe.accumulator)
 	}
 
 	return nil
@@ -1028,7 +1087,30 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		}
 	}()
 
+	pe.RLock()
+	applyTx := pe.applyTx
+	pe.RUnlock()
+
 	for {
+		pe.Lock()
+		if applyTx != pe.applyTx {
+			if applyTx != nil {
+				applyTx.Rollback()
+			}
+		}
+
+		if pe.applyTx == nil {
+			pe.applyTx, err = pe.cfg.db.BeginRo(context.Background()) //nolint
+
+			if err != nil {
+				return err
+			}
+
+			applyTx = pe.applyTx
+		}
+
+		pe.Unlock()
+
 		select {
 		case exec := <-pe.execRequests:
 			if err := pe.processRequest(ctx, exec); err != nil {
@@ -1053,7 +1135,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		blockResult, err := func() (*blockResult, error) {
 			pe.RLock()
 			defer pe.RUnlock()
-			return pe.processResults(ctx, pe.applyTx)
+			return pe.processResults(ctx, applyTx)
 		}()
 
 		if err != nil {
@@ -1081,7 +1163,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.RLock()
 					defer pe.RUnlock()
 
-					ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderParallelV3(pe.rs.Domains(), pe.applyTx)))
+					ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderParallelV3(pe.rs.Domains(), applyTx)))
 					ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
 					ibs.SetVersion(result.Version().Incarnation)
 
@@ -1091,7 +1173,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						return core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false)
 					}
 
-					chainReader := consensuschain.NewReader(pe.cfg.chainConfig, pe.applyTx, pe.cfg.blockReader, pe.logger)
+					chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
 					if pe.isMining {
 						_, txTask.Txs, blockReceipts, _, err =
 							pe.cfg.engine.FinalizeAndAssemble(

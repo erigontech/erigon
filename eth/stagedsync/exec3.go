@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -568,8 +567,6 @@ func ExecV3(ctx context.Context,
 
 		executor = pe
 	} else {
-		applyWorker.ResetTx(applyTx)
-
 		se := &serialExecutor{
 			txExecutor: txExecutor{
 				cfg:                      cfg,
@@ -591,6 +588,8 @@ func ExecV3(ctx context.Context,
 
 		executor = se
 	}
+
+	executor.resetTx(ctx)
 
 	defer func() {
 		executor.LogComplete(applyTx)
@@ -842,7 +841,7 @@ func ExecV3(ctx context.Context,
 					t3 = time.Since(tt)
 
 					var t2 time.Duration
-					applyTx, t2, err = se.commit(ctx, execStage, applyTx, inputTxNum, useExternalTx)
+					applyTx, t2, err = se.commit(ctx, execStage, applyTx, useExternalTx)
 					if err != nil {
 						return err
 					}
@@ -1015,58 +1014,14 @@ func ExecV3(ctx context.Context,
 							pe.doms.SetTrace(false)
 						}
 
-						if pe.inMemExec || useExternalTx {
-							break
-						}
-
-						var t0, t1, t2, t3, t4 time.Duration
+						var t2 time.Duration
 						commitStart := time.Now()
-						logger.Info("Committing (parallel)...")
-						if err := func() error {
-							t0 = time.Since(commitStart)
-							pe.Lock() // This is to prevent workers from starting work on any new txTask
-							defer pe.Unlock()
-
-							t1 = time.Since(commitStart)
-							tt := time.Now()
-							t2 = time.Since(tt)
-							tt = time.Now()
-
-							pe.doms.ClearRam(true)
-							t3 = time.Since(tt)
-
-							if execStage != nil {
-								if err := execStage.Update(applyTx, lastBlockResult.BlockNum); err != nil {
-									return err
-								}
-							}
-
-							if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
-								return fmt.Errorf("writing plain state version: %w", err)
-							}
-
-							applyTx.CollectMetrics()
-							tt = time.Now()
-							if err := applyTx.Commit(); err != nil {
-								return err
-							}
-							t4 = time.Since(tt)
-							for i := 0; i < len(pe.execWorkers); i++ {
-								pe.execWorkers[i].ResetTx(nil)
-							}
-
-							return nil
-						}(); err != nil {
-							return err
-						}
-						var err error
-						if applyTx, err = pe.cfg.db.BeginRw(ctx); err != nil {
+						applyTx, t2, err = pe.commit(ctx, execStage, applyTx, useExternalTx)
+						if err != nil {
 							return err
 						}
 
-						logger.Info("Committed", "time", time.Since(commitStart), "drain", t0, "drain_and_lock", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
-
-						pe.resetTx(ctx)
+						logger.Info("Committed", "time", time.Since(commitStart), "commit", t2)
 					}
 				}
 			}
@@ -1183,13 +1138,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
-	if err := e.Update(applyTx, maxBlockNum); err != nil {
-		return false, err
-	}
-	if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
-		return false, fmt.Errorf("writing plain state version: %w", err)
-	}
-
 	if header == nil {
 		return false, errors.New("header is nil")
 	}

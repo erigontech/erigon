@@ -13,7 +13,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
@@ -45,6 +44,28 @@ func (se *serialExecutor) LogComplete(tx kv.Tx) {
 }
 
 func (se *serialExecutor) wait(ctx context.Context) error {
+	return nil
+}
+
+func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool) (kv.RwTx, time.Duration, error) {
+	return se.txExecutor.commit(ctx, execStage, tx, useExternalTx, se.resetTx)
+}
+
+func (se *serialExecutor) resetTx(ctx context.Context) (err error) {
+
+	if se.applyTx != nil {
+		se.applyTx.Rollback()
+	}
+
+	se.applyTx, err = se.cfg.db.BeginRo(context.Background()) //nolint
+	if err != nil {
+		se.applyTx.Rollback()
+		return err
+	}
+
+	se.applyWorker.ResetTx(se.applyTx)
+	se.applyWorker.ResetState(se.rs, nil, nil, se.accumulator)
+
 	return nil
 }
 
@@ -208,53 +229,4 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 	}
 
 	return true, nil
-}
-
-func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, txNum uint64, useExternalTx bool) (kv.RwTx, time.Duration, error) {
-	se.doms.Close()
-	err := execStage.Update(tx, se.lastBlockResult.lastTxNum)
-
-	if err != nil {
-		return tx, 0, err
-	}
-
-	tx.CollectMetrics()
-
-	var t2 time.Duration
-
-	if !useExternalTx {
-		tt := time.Now()
-		if err = tx.Commit(); err != nil {
-			return nil, 0, err
-		}
-
-		t2 = time.Since(tt)
-		se.agg.BuildFilesInBackground(se.lastBlockResult.lastTxNum)
-
-		se.applyTx.Rollback()
-
-		tx, err = se.cfg.db.BeginRw(context.Background()) //nolint
-		if err != nil {
-			return nil, t2, err
-		}
-
-		se.applyTx, err = se.cfg.db.BeginRo(context.Background()) //nolint
-		if err != nil {
-			tx.Rollback()
-			return nil, t2, err
-		}
-
-		se.doms, err = state2.NewSharedDomains(se.applyTx, se.logger)
-		if err != nil {
-			tx.Rollback()
-			return nil, t2, err
-		}
-		se.doms.SetTxNum(txNum)
-		se.rs = state.NewStateV3Buffered(state.NewStateV3(se.doms, se.logger))
-
-		se.applyWorker.ResetTx(se.applyTx)
-		se.applyWorker.ResetState(se.rs, nil, nil, se.accumulator)
-	}
-
-	return tx, t2, nil
 }

@@ -300,6 +300,13 @@ func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
 	return bufferedState
 }
 
+func (s *StateV3Buffered) WithDomains(domains *state.SharedDomains) *StateV3Buffered {
+	return &StateV3Buffered{
+		StateV3:  NewStateV3(domains, s.logger),
+		accounts: s.accounts,
+	}
+}
+
 // StateWriterBufferedV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
 type StateWriterBufferedV3 struct {
 	rs           *StateV3Buffered
