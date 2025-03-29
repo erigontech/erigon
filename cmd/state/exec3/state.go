@@ -240,7 +240,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */, rw.hooks)
+			ret, _, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */, rw.hooks)
+			return ret, err
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, rw.hooks)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
@@ -251,7 +252,24 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 		// End of block transaction in a block
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, rw.hooks)
+			ret, logs, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, rw.hooks)
+			if err != nil {
+				return nil, err
+			}
+
+			for _, lg := range logs {
+				if err := rw.rs.Domains().IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
+					return nil, err
+				}
+
+				for _, topic := range lg.Topics {
+					if err := rw.rs.Domains().IndexAdd(kv.LogTopicIdx, topic[:]); err != nil {
+						return nil, err
+					}
+				}
+			}
+
+			return ret, err
 		}
 
 		if isMining {
