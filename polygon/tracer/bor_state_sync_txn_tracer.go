@@ -22,19 +22,20 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 )
 
 func NewBorStateSyncTxnTracer(
 	tracer *tracers.Tracer,
-	stateSyncEventsCount int,
 	stateReceiverContractAddress libcommon.Address,
 ) *tracers.Tracer {
 	l := &borStateSyncTxnTracer{
 		Tracer:                       tracer,
-		stateSyncEventsCount:         stateSyncEventsCount,
 		stateReceiverContractAddress: stateReceiverContractAddress,
 	}
 	return &tracers.Tracer{
@@ -68,8 +69,8 @@ func NewBorStateSyncTxnTracer(
 // state sync events bor transaction.
 type borStateSyncTxnTracer struct { /// LOOKS WRONG
 	Tracer                       *tracers.Tracer
-	stateSyncEventsCount         int
 	stateReceiverContractAddress libcommon.Address
+	createdTopLevel              bool
 }
 
 func (bsstt *borStateSyncTxnTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
@@ -79,38 +80,30 @@ func (bsstt *borStateSyncTxnTracer) OnTxStart(env *tracing.VMContext, tx types.T
 }
 
 func (bsstt *borStateSyncTxnTracer) OnTxEnd(receipt *types.Receipt, err error) {
+	// close top level call
+	if bsstt.Tracer.OnExit != nil {
+		bsstt.Tracer.OnExit(0, nil, 0, err, err != nil)
+	}
+
 	if bsstt.Tracer.OnTxEnd != nil {
 		bsstt.Tracer.OnTxEnd(receipt, err)
 	}
 }
 
 func (bsstt *borStateSyncTxnTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	if bsstt.stateSyncEventsCount == 0 {
-		// guard against unexpected use
-		panic("unexpected extra call to borStateSyncTxnTracer.OnExit")
-	}
-
-	// finished executing 1 event
-	bsstt.stateSyncEventsCount--
-
 	if bsstt.Tracer.OnExit != nil {
-		bsstt.Tracer.OnExit(depth, output, gasUsed, err, reverted)
-	}
-
-	if bsstt.stateSyncEventsCount == 0 && bsstt.Tracer.OnTxEnd != nil {
-		// trick tracer to think it is a OnTxEnd
-		status := uint64(1)
-		if reverted {
-			status = 0
-		}
-
-		bsstt.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed, Status: status}, err)
+		bsstt.Tracer.OnExit(depth+1, output, gasUsed, err, reverted)
 	}
 }
 
 func (bsstt *borStateSyncTxnTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if bsstt.Tracer.OnEnter != nil {
-		bsstt.Tracer.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
+		if !bsstt.createdTopLevel {
+			bsstt.Tracer.OnEnter(0, byte(vm.CALL), state.SystemAddress, bsstt.stateReceiverContractAddress, false, nil, 0, u256.N0, nil)
+			bsstt.createdTopLevel = true
+		}
+
+		bsstt.Tracer.OnEnter(depth+1, typ, from, to, precompile, input, gas, value, code)
 	}
 }
 
