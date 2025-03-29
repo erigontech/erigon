@@ -206,13 +206,14 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 }
 
 func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
+	schema := StandaloneIISchema[idx]
 	idxCfg := iiCfg{
 		salt: salt, dirs: dirs,
 		filenameBase: filenameBase,
 		keysTable:    indexKeysTable,
 		valuesTable:  indexTable,
-		compression:  seg.CompressNone,
-		name:         idx,
+		compression:  schema.compression,
+		name:         schema.name,
 	}
 
 	if ii := a.searchII(idx); ii != nil {
