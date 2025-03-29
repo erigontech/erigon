@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
@@ -59,12 +58,9 @@ func TraceBorStateSyncTxnDebugAPI(
 	}
 
 	defer cancel()
-	stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
-	tracer = NewBorStateSyncTxnTracer(tracer, len(msgs), stateReceiverContract)
 	rules := chainConfig.Rules(blockNum, blockTime)
 	stateWriter := state.NewNoopWriter()
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
-		tracer.OnTxStart(evm.GetVMContext(), bortypes.NewBorTransaction(), libcommon.Address{})
 		res, err := traceBorStateSyncTxn(ctx, ibs, stateWriter, msgs, evm, rules, txCtx, refunds)
 		if err != nil {
 			return res, err
@@ -90,9 +86,8 @@ func TraceBorStateSyncTxnTraceAPI(
 	msgs []*types.Message,
 	tracer *tracers.Tracer,
 ) (*evmtypes.ExecutionResult, error) {
-	stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
 	if tracer != nil {
-		vmConfig.Tracer = NewBorStateSyncTxnTracer(tracer, len(msgs), stateReceiverContract).Hooks
+		vmConfig.Tracer = tracer.Hooks
 	}
 
 	txCtx := initStateSyncTxContext(blockNum, blockHash)
@@ -112,6 +107,9 @@ func traceBorStateSyncTxn(
 	txCtx evmtypes.TxContext,
 	refunds bool,
 ) (*evmtypes.ExecutionResult, error) {
+	totalGasUsed := uint64(0)
+
+	evm.Config().Tracer.OnTxStart(evm.GetVMContext(), bortypes.NewBorTransaction(), libcommon.Address{})
 	for _, msg := range msgs {
 		select {
 		case <-ctx.Done():
@@ -120,10 +118,12 @@ func traceBorStateSyncTxn(
 		}
 
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-		_, err := core.ApplyMessage(evm, msg, gp, refunds, false /* gasBailout */, nil /* engine */)
+		res, err := core.ApplyMessage(evm, msg, gp, refunds, false /* gasBailout */, nil /* engine */)
 		if err != nil {
 			return nil, err
 		}
+
+		totalGasUsed += res.UsedGas
 
 		err = ibs.FinalizeTx(rules, stateWriter)
 		if err != nil {
@@ -133,6 +133,7 @@ func traceBorStateSyncTxn(
 		// reset to reuse
 		evm.Reset(txCtx, ibs)
 	}
+	evm.Config().Tracer.OnTxEnd(&types.Receipt{GasUsed: totalGasUsed, Status: 1}, nil)
 
 	return &evmtypes.ExecutionResult{}, nil
 }
