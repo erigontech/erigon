@@ -338,7 +338,7 @@ type BodyEntry struct {
 func splitEntries(files []fs.DirEntry, version snaptype.Version, firstBlock, lastBlock uint64) (hents []fs.DirEntry, bents []*BodyEntry) {
 	for _, ent := range files {
 		if info, err := ent.Info(); err == nil {
-			if snapInfo, ok := info.Sys().(downloader.SnapInfo); ok && snapInfo.Version() > 0 {
+			if snapInfo, ok := info.Sys().(downloader.SnapInfo); ok && !snapInfo.Version().IsZero() {
 				if version == snapInfo.Version() &&
 					(firstBlock == 0 || snapInfo.From() >= firstBlock) &&
 					(lastBlock == 0 || snapInfo.From() < lastBlock) {

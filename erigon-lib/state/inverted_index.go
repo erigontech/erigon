@@ -80,6 +80,8 @@ type iiCfg struct {
 	salt *uint32
 	dirs datadir.Dirs
 
+	version IIVersionTypes
+
 	filenameBase string // filename base for all files of this inverted index
 	keysTable    string // bucket name for index keys;    txnNum_u64 -> key (k+auto_increment)
 	valuesTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
@@ -129,10 +131,10 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 }
 
 func (ii *InvertedIndex) efAccessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.version.AccessorEFI.String(), ii.filenameBase, fromStep, toStep))
 }
 func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("v1-%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.version.DataEF.String(), ii.filenameBase, fromStep, toStep))
 }
 
 func filesFromDir(dir string) ([]string, error) {

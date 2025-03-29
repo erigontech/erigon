@@ -172,7 +172,7 @@ func (i *filesItem) closeFilesAndRemove() {
 }
 
 func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*filesItem) {
-	re := regexp.MustCompile("^v([0-9]+)-" + filenameBase + ".([0-9]+)-([0-9]+)." + ext + "$")
+	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`)
 	var err error
 
 	for _, name := range fileNames {

@@ -79,7 +79,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.True(t, mr.needMerge)
 		assert.Equal(t, 0, int(mr.from))
 		assert.Equal(t, 4, int(mr.to))
-		assert.Equal(t, string(ii.name), mr.name)
+		assert.Equal(t, ii.name.String(), mr.name)
 
 		idxF := ic.staticFilesInRange(mr.from, mr.to)
 		assert.Len(t, idxF, 3)
@@ -439,7 +439,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.True(t, mr.needMerge)
 		require.Zero(t, int(mr.from))
 		require.Equal(t, 4, int(mr.to))
-		require.Equal(t, string(ii.name), mr.name)
+		require.Equal(t, ii.name.String(), mr.name)
 		idxFiles := ic.staticFilesInRange(mr.from, mr.to)
 		require.Len(t, idxFiles, 3)
 	})

@@ -313,7 +313,7 @@ func DirtySegmentLess(i, j *DirtySegment) bool {
 	if i.to != j.to {
 		return i.to < j.to
 	}
-	return int(i.version) < int(j.version)
+	return i.version.Less(j.version)
 }
 
 func (s *DirtySegment) Type() snaptype.Type {

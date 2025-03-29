@@ -2,7 +2,6 @@ package state
 
 import (
 	"context"
-
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
@@ -59,14 +58,57 @@ var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
 
 func init() {
 	if dbgCommBtIndex {
-		cfg := Schema[kv.CommitmentDomain]
-		cfg.AccessorList = AccessorBTree | AccessorExistence
-		Schema[kv.CommitmentDomain] = cfg
+		Schema.CommitmentDomain.AccessorList = AccessorBTree | AccessorExistence
+	}
+	InitSchemas()
+}
+
+type SchemaGen struct {
+	AccountsDomain   domainCfg
+	StorageDomain    domainCfg
+	CodeDomain       domainCfg
+	CommitmentDomain domainCfg
+	ReceiptDomain    domainCfg
+	LogAddrIdx       iiCfg
+	LogTopicIdx      iiCfg
+	TracesFromIdx    iiCfg
+	TracesToIdx      iiCfg
+}
+
+func (s SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
+	switch name {
+	case kv.AccountsDomain:
+		return s.AccountsDomain
+	case kv.StorageDomain:
+		return s.StorageDomain
+	case kv.CodeDomain:
+		return s.CodeDomain
+	case kv.CommitmentDomain:
+		return s.CommitmentDomain
+	case kv.ReceiptDomain:
+		return s.ReceiptDomain
+	default:
+		return domainCfg{}
 	}
 }
 
-var Schema = map[kv.Domain]domainCfg{
-	kv.AccountsDomain: {
+func (s SchemaGen) GetIICfg(name kv.InvertedIdx) iiCfg {
+	switch name {
+	case kv.LogAddrIdx:
+		return s.LogAddrIdx
+	case kv.LogTopicIdx:
+		return s.LogTopicIdx
+	case kv.TracesFromIdx:
+		return s.TracesFromIdx
+	case kv.TracesToIdx:
+		return s.TracesToIdx
+	default:
+		return iiCfg{}
+	}
+}
+
+var Schema = SchemaGen{
+	AccountsDomain: domainCfg{
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 
 		AccessorList:         AccessorBTree | AccessorExistence,
@@ -89,7 +131,7 @@ var Schema = map[kv.Domain]domainCfg{
 			},
 		},
 	},
-	kv.StorageDomain: {
+	StorageDomain: domainCfg{
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 
 		AccessorList: AccessorBTree | AccessorExistence,
@@ -111,7 +153,7 @@ var Schema = map[kv.Domain]domainCfg{
 			},
 		},
 	},
-	kv.CodeDomain: {
+	CodeDomain: domainCfg{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
 
 		AccessorList: AccessorBTree | AccessorExistence,
@@ -134,7 +176,7 @@ var Schema = map[kv.Domain]domainCfg{
 			},
 		},
 	},
-	kv.CommitmentDomain: {
+	CommitmentDomain: domainCfg{
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 
 		AccessorList:        AccessorHashMap,
@@ -159,7 +201,7 @@ var Schema = map[kv.Domain]domainCfg{
 			},
 		},
 	},
-	kv.ReceiptDomain: {
+	ReceiptDomain: domainCfg{
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
 
 		AccessorList: AccessorBTree | AccessorExistence,
@@ -180,5 +222,21 @@ var Schema = map[kv.Domain]domainCfg{
 				filenameBase: kv.ReceiptDomain.String(),
 			},
 		},
+	},
+	LogAddrIdx: iiCfg{
+		compression: seg.CompressNone,
+		name:        kv.LogAddrIdx,
+	},
+	LogTopicIdx: iiCfg{
+		compression: seg.CompressNone,
+		name:        kv.LogTopicIdx,
+	},
+	TracesFromIdx: iiCfg{
+		compression: seg.CompressNone,
+		name:        kv.TracesFromIdx,
+	},
+	TracesToIdx: iiCfg{
+		compression: seg.CompressNone,
+		name:        kv.TracesToIdx,
 	},
 }
