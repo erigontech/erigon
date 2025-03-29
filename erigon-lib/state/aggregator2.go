@@ -182,3 +182,22 @@ var Schema = map[kv.Domain]domainCfg{
 		},
 	},
 }
+
+var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
+	kv.LogAddrIdx: {
+		compression: seg.CompressNone,
+		name:        kv.LogAddrIdx,
+	},
+	kv.LogTopicIdx: {
+		compression: seg.CompressNone,
+		name:        kv.LogTopicIdx,
+	},
+	kv.TracesFromIdx: {
+		compression: seg.CompressNone,
+		name:        kv.TracesFromIdx,
+	},
+	kv.TracesToIdx: {
+		compression: seg.CompressNone,
+		name:        kv.TracesToIdx,
+	},
+}
