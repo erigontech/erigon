@@ -1059,7 +1059,6 @@ func (pe *parallelExecutor) resetTx(ctx context.Context) error {
 
 	for _, worker := range pe.execWorkers {
 		worker.ResetTx(nil)
-		worker.ResetState(pe.rs, nil, nil, pe.accumulator)
 	}
 
 	return nil
