@@ -109,7 +109,9 @@ func traceBorStateSyncTxn(
 ) (*evmtypes.ExecutionResult, error) {
 	totalGasUsed := uint64(0)
 
-	evm.Config().Tracer.OnTxStart(evm.GetVMContext(), bortypes.NewBorTransaction(), libcommon.Address{})
+	if evm.Config().Tracer.OnTxStart != nil {
+		evm.Config().Tracer.OnTxStart(evm.GetVMContext(), bortypes.NewBorTransaction(), libcommon.Address{})
+	}
 	for _, msg := range msgs {
 		select {
 		case <-ctx.Done():
@@ -133,7 +135,9 @@ func traceBorStateSyncTxn(
 		// reset to reuse
 		evm.Reset(txCtx, ibs)
 	}
-	evm.Config().Tracer.OnTxEnd(&types.Receipt{GasUsed: totalGasUsed, Status: 1}, nil)
+	if evm.Config().Tracer.OnTxEnd != nil {
+		evm.Config().Tracer.OnTxEnd(&types.Receipt{GasUsed: totalGasUsed, Status: 1}, nil)
+	}
 
 	return &evmtypes.ExecutionResult{}, nil
 }
