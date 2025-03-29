@@ -576,7 +576,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 
 	err = resetTx(ctx)
 
-	if err == nil {
+	if err != nil {
 		if !useExternalTx {
 			tx.Rollback()
 		}

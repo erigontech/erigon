@@ -214,14 +214,16 @@ func (vr *versionedStateReader) ReadAccountData(address libcommon.Address) (*acc
 	}
 
 	if vr.stateReader != nil {
-		account, err := vr.stateReader.ReadAccountDataForDebug(address)
+		account, err := vr.stateReader.ReadAccountData(address)
 
 		if err != nil {
 			return nil, err
 		}
 
-		updated := vr.applyVersionedUpdates(address, *account)
-		return &updated, nil
+		if account != nil {
+			updated := vr.applyVersionedUpdates(address, *account)
+			return &updated, nil
+		}
 	}
 
 	return nil, nil
