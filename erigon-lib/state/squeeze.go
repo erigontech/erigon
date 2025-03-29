@@ -111,7 +111,7 @@ func SqueezeCommitmentFiles(at *AggregatorRoTx, logger log.Logger) error {
 		return nil
 	}
 
-	rng := &RangesV3{
+	rng := &Ranges{
 		domain: [5]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
@@ -133,7 +133,7 @@ func SqueezeCommitmentFiles(at *AggregatorRoTx, logger log.Logger) error {
 			},
 		},
 	}
-	sf, err := at.StaticFilesInRange(rng)
+	sf, err := at.FilesInRange(rng)
 	if err != nil {
 		return err
 	}
@@ -312,7 +312,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
 
-	rng := &RangesV3{
+	rng := &Ranges{
 		domain: [5]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
@@ -322,7 +322,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			},
 		},
 	}
-	sf, err := acRo.StaticFilesInRange(rng)
+	sf, err := acRo.FilesInRange(rng)
 	if err != nil {
 		return nil, err
 	}
@@ -370,24 +370,20 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			return nil, err
 		}
 
-		txnRangeTo := int(toTxNumRange)
-		txnRangeFrom := int(fromTxNumRange)
-
-		accReader, err := acRo.nastyFileRead(kv.AccountsDomain, fromTxNumRange, toTxNumRange)
+		streamAcc, err := acRo.FileStream(kv.AccountsDomain, fromTxNumRange, toTxNumRange)
 		if err != nil {
 			return nil, err
 		}
-		stoReader, err := acRo.nastyFileRead(kv.StorageDomain, fromTxNumRange, toTxNumRange)
+		streamSto, err := acRo.FileStream(kv.StorageDomain, fromTxNumRange, toTxNumRange)
 		if err != nil {
 			return nil, err
 		}
 
-		streamAcc := NewSegStreamReader(accReader, -1)
-		streamSto := NewSegStreamReader(stoReader, -1)
 		keyIter := stream.UnionKV(streamAcc, streamSto, -1)
 
-		totalKeys := acRo.KeyCountInDomainRange(kv.AccountsDomain, uint64(txnRangeFrom), uint64(txnRangeTo)) +
-			acRo.KeyCountInDomainRange(kv.StorageDomain, uint64(txnRangeFrom), uint64(txnRangeTo))
+		txnRangeTo, txnRangeFrom := toTxNumRange, fromTxNumRange
+		totalKeys := acRo.KeyCountInFiles(kv.AccountsDomain, fromTxNumRange, txnRangeTo) +
+			acRo.KeyCountInFiles(kv.StorageDomain, txnRangeFrom, txnRangeTo)
 
 		shardFrom, shardTo := fromTxNumRange/a.StepSize(), toTxNumRange/a.StepSize()
 		batchSize := totalKeys / (shardTo - shardFrom)
@@ -434,24 +430,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return nil, err
 			}
 
-			var ok bool
-			ac, ok := domains.AggTx().(*AggregatorRoTx)
-			if !ok {
-				return nil, errors.New("failed to get state aggregatorTx")
-			}
-			defer ac.Close()
-
-			////domains, err := NewSharedDomains(wrapTxWithCtx(roTx, ac), log.New())
-			//if err != nil {
-			//	return nil, err
-			//}
-
-			//ac, ok := domains.AggTx().(*AggregatorRoTx)
-			//if !ok {
-			//	return nil, errors.New("failed to get state aggregatorTx")
-			//}
-			//defer ac.Close()
-
 			domains.SetBlockNum(blockNum)
 			domains.SetTxNum(lastTxnumInShard - 1)
 			domains.sdCtx.SetLimitReadAsOfTxNum(domains.TxNum() + 1) // this helps to read state from correct file during commitment
@@ -469,7 +447,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			logger.Info(fmt.Sprintf("shard %d-%d of range %s finished (%d%%)", shardFrom, shardTo, r.String("", a.StepSize()), processed*100/totalKeys),
 				"keys", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)))
 
-			ac.Close()
 			domains.Close()
 
 			a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())

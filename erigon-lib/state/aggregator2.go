@@ -12,13 +12,13 @@ import (
 
 // this is supposed to register domains/iis
 
-func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	salt, err := getStateIndicesSalt(dirs.Snap)
 	if err != nil {
 		return nil, err
 	}
 
-	a, err := NewAggregator(ctx, dirs, aggregationStep, db, logger)
+	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, logger)
 	if err != nil {
 		return nil, err
 	}
