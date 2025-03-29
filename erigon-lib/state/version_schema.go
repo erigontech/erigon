@@ -43,14 +43,14 @@ func InitSchemas() {
 	Schema.LogAddrIdx.version.DataEF = snaptype.V1_1
 	Schema.LogAddrIdx.version.AccessorEFI = snaptype.V1_1
 
-	Schema.LogAddrIdx.version.DataEF = snaptype.V1_1
-	Schema.LogAddrIdx.version.AccessorEFI = snaptype.V1_1
+	Schema.LogTopicIdx.version.DataEF = snaptype.V1_1
+	Schema.LogTopicIdx.version.AccessorEFI = snaptype.V1_1
 
-	Schema.LogAddrIdx.version.DataEF = snaptype.V1_0
-	Schema.LogAddrIdx.version.AccessorEFI = snaptype.V1_0
+	Schema.TracesFromIdx.version.DataEF = snaptype.V1_0
+	Schema.TracesFromIdx.version.AccessorEFI = snaptype.V1_0
 
-	Schema.LogAddrIdx.version.DataEF = snaptype.V1_0
-	Schema.LogAddrIdx.version.AccessorEFI = snaptype.V1_0
+	Schema.TracesToIdx.version.DataEF = snaptype.V1_0
+	Schema.TracesToIdx.version.AccessorEFI = snaptype.V1_0
 }
 
 type DomainVersionTypes struct {
