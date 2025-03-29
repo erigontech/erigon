@@ -589,7 +589,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
-			dirs, notifications, blockReader, blockWriter, backend.silkworm, terseLogger, nil)
+			dirs, notifications, blockReader, blockWriter, backend.silkworm, terseLogger)
 		chainReader := consensuschain.NewReader(chainConfig, txc.Tx, blockReader, logger)
 		// We start the mining step
 		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain, config.ImportMode); err != nil {
@@ -1633,7 +1633,7 @@ func (s *Ethereum) Start() error {
 		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("polygon sync goroutine terminated")
+			defer s.logger.Info("[polygon.sync] goroutine terminated")
 			// when we're running in stand alone mode we need to run the downloader before we start the
 			// polygon services becuase they will wait for it to complete before opening thier stores
 			// which make use of snapshots and expect them to be initialize
@@ -1642,7 +1642,7 @@ func (s *Ethereum) Start() error {
 				err := stages2.StageLoopIteration(s.sentryCtx, s.chainDB, wrap.TxContainer{}, s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
 
 				if err != nil && !errors.Is(err, context.Canceled) {
-					s.logger.Error("downloader stage crashed - stopping node", "err", err)
+					s.logger.Error("[polygon.sync] downloader stage crashed - stopping node", "err", err)
 					err = s.stopNode()
 					if err != nil {
 						s.logger.Error("could not stop node", "err", err)
@@ -1656,11 +1656,11 @@ func (s *Ethereum) Start() error {
 				return err
 			}
 
-			s.logger.Error("polygon sync crashed - stopping node", "err", err)
+			s.logger.Error("[polygon.sync] crashed - stopping node", "err", err)
 			go func() { // call stopNode in another goroutine to avoid deadlock
 				stopErr := s.stopNode()
 				if stopErr != nil {
-					s.logger.Error("could not stop node", "err", stopErr)
+					s.logger.Error("[polygon.sync] could not stop node", "err", stopErr)
 				}
 			}()
 
@@ -1692,10 +1692,10 @@ func (s *Ethereum) Start() error {
 		// to initialize it properly.
 		// 2) we cannot propose for block 1 regardless.
 		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("devp2p txn pool goroutine terminated")
+			defer s.logger.Info("[devp2p] txn pool goroutine terminated")
 			err := s.txPool.Run(s.sentryCtx)
 			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("txPool.Run error", "err", err)
+				s.logger.Error("[devp2p] Run error", "err", err)
 			}
 			return err
 		})
@@ -1703,10 +1703,10 @@ func (s *Ethereum) Start() error {
 
 	if s.shutterPool != nil {
 		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("shutter pool goroutine terminated")
+			defer s.logger.Info("[shutter] pool goroutine terminated")
 			err := s.shutterPool.Run(s.sentryCtx)
 			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("shutterPool.Run error", "err", err)
+				s.logger.Error("[shutter] Run error", "err", err)
 			}
 			return err
 		})

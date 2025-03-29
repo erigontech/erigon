@@ -74,7 +74,7 @@ func TestShanghaiIntrinsicGas(t *testing.T) {
 func TestZeroDataIntrinsicGas(t *testing.T) {
 	assert := assert.New(t)
 	gas, floorGas7623, overflow := CalcIntrinsicGas(0, 0, 0, 0, 0, false, true, true, true, true, false)
-	assert.Equal(overflow, false)
-	assert.Equal(gas, TxGas)
-	assert.Equal(floorGas7623, TxGas)
+	assert.False(overflow)
+	assert.Equal(TxGas, gas)
+	assert.Equal(TxGas, floorGas7623)
 }
