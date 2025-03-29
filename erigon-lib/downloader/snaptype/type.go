@@ -39,8 +39,8 @@ import (
 )
 
 type Version struct {
-	Major uint8
-	Minor uint8
+	Major uint64
+	Minor uint64
 }
 
 var (
@@ -94,8 +94,8 @@ func ParseVersion(v string) (Version, error) {
 		}
 
 		return Version{
-			Major: uint8(major),
-			Minor: uint8(minor),
+			Major: major,
+			Minor: minor,
 		}, nil
 	}
 

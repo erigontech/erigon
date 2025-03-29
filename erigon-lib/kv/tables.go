@@ -774,6 +774,14 @@ func (idx InvertedIdx) String() string {
 		return "CommitmentHistoryIdx"
 	case ReceiptHistoryIdx:
 		return "ReceiptHistoryIdx"
+	case LogAddrIdx:
+		return "LogAddrIdx"
+	case LogTopicIdx:
+		return "LogTopicIdx"
+	case TracesFromIdx:
+		return "TracesFromIdx"
+	case TracesToIdx:
+		return "TracesToIdx"
 	default:
 		return "unknown index"
 	}
@@ -791,8 +799,16 @@ func String2InvertedIdx(in string) (InvertedIdx, error) {
 		return CommitmentHistoryIdx, nil
 	case "ReceiptHistoryIdx":
 		return ReceiptHistoryIdx, nil
+	case "LogAddrIdx":
+		return LogAddrIdx, nil
+	case "LogTopicIdx":
+		return LogTopicIdx, nil
+	case "TracesFromIdx":
+		return TracesFromIdx, nil
+	case "TracesToIdx":
+		return TracesToIdx, nil
 	default:
-		return InvertedIdx(0), fmt.Errorf("unknown inverted index name: %s", in)
+		return InvertedIdx(MaxUint16), fmt.Errorf("unknown inverted index name: %s", in)
 	}
 }
 

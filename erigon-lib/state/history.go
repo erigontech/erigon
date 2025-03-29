@@ -104,7 +104,7 @@ type histCfg struct {
 	//TODO: re-visit this check - maybe we don't need it. It's about kill in the middle of merge
 	integrity rangeIntegrityChecker
 
-	versionType HistVersionTypes
+	version HistVersionTypes
 }
 
 func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error) {
@@ -141,13 +141,13 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 }
 
 func (h *History) vFileName(fromStep, toStep uint64) string {
-	return fmt.Sprintf("%s-%s.%d-%d.v", h.versionType.DataV.String(), h.filenameBase, fromStep, toStep)
+	return fmt.Sprintf("%s-%s.%d-%d.v", h.version.DataV.String(), h.filenameBase, fromStep, toStep)
 }
 func (h *History) vFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
 }
 func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.versionType.AccessorVI.String(), h.filenameBase, fromStep, toStep))
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.version.AccessorVI.String(), h.filenameBase, fromStep, toStep))
 }
 
 // openList - main method to open list of files.

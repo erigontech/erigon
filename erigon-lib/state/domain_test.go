@@ -82,7 +82,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
-	cfg.hist.iiCfg.versionType = IIVersionTypes{snaptype.V1_0, snaptype.V1_0}
+	cfg.hist.iiCfg.version = IIVersionTypes{snaptype.V1_0, snaptype.V1_0}
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt = &salt
 	d, err := NewDomain(cfg, aggStep, logger)
@@ -1033,7 +1033,7 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.hist.iiCfg.salt = &salt
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
-	cfg.hist.iiCfg.versionType = IIVersionTypes{snaptype.V1_0, snaptype.V1_0}
+	cfg.hist.iiCfg.version = IIVersionTypes{snaptype.V1_0, snaptype.V1_0}
 
 	d, err := NewDomain(cfg, aggStep, log.New())
 	if err != nil {
