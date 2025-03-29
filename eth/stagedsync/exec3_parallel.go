@@ -1058,12 +1058,13 @@ func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, t
 }
 
 func (pe *parallelExecutor) resetTx(ctx context.Context) error {
+	fmt.Println("reseting txs")
+	defer fmt.Println("done reseting txs")
 	pe.Lock()
 	pe.applyTx = nil
 	pe.Unlock()
-
-	for i, worker := range pe.execWorkers {
-		fmt.Println("Reset", i)
+	fmt.Println("reseting workers")
+	for _, worker := range pe.execWorkers {
 		worker.ResetTx(nil)
 	}
 
@@ -1097,24 +1098,30 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	pe.RUnlock()
 
 	for {
-		pe.Lock()
-		if applyTx != pe.applyTx {
-			if applyTx != nil {
-				applyTx.Rollback()
-			}
-		}
-
-		if pe.applyTx == nil {
-			pe.applyTx, err = pe.cfg.db.BeginRo(context.Background()) //nolint
-
-			if err != nil {
-				return err
+		err := func() error {
+			pe.Lock()
+			defer pe.Unlock()
+			if applyTx != pe.applyTx {
+				if applyTx != nil {
+					applyTx.Rollback()
+				}
 			}
 
-			applyTx = pe.applyTx
-		}
+			if pe.applyTx == nil {
+				pe.applyTx, err = pe.cfg.db.BeginRo(ctx)
 
-		pe.Unlock()
+				if err != nil {
+					return err
+				}
+
+				applyTx = pe.applyTx
+			}
+			return nil
+		}()
+
+		if err != nil {
+			return err
+		}
 
 		select {
 		case exec := <-pe.execRequests:
