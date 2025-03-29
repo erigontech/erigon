@@ -209,7 +209,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	sf := time.Now()
 	defer mxUnwindSharedTook.ObserveDuration(sf)
 
-	if err := sd.Flush(ctx, rwTx, false); err != nil {
+	if err := sd.Flush(ctx, rwTx, 0); err != nil {
 		return err
 	}
 
@@ -227,7 +227,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	sd.ClearRam(true)
 	sd.SetTxNum(txUnwindTo)
 	sd.SetBlockNum(blockUnwindTo)
-	return sd.Flush(ctx, rwTx, false)
+	return sd.Flush(ctx, rwTx, 0)
 }
 
 func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, blockNum uint64) ([]byte, error) {
@@ -903,7 +903,7 @@ func (sd *SharedDomains) Close() {
 	}
 }
 
-func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx, prune bool) error {
+func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx, pruneTimeout time.Duration) error {
 	for key, changeset := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
 		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
@@ -939,16 +939,15 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx, prune bool) erro
 			return err
 		}
 	}
-	if prune || dbg.PruneOnFlushTimeout != 0 {
-		timeout := dbg.PruneOnFlushTimeout
+	if pruneTimeout == 0 && dbg.PruneOnFlushTimeout != 0 {
+		pruneTimeout := dbg.PruneOnFlushTimeout
 
-		if timeout == 0 {
-			timeout = 150 * time.Millisecond
-		}
+		if pruneTimeout != 0 {
+			_, err = sd.aggTx.PruneSmallBatches(ctx, pruneTimeout, tx)
+			if err != nil {
+				return err
+			}
 
-		_, err = sd.aggTx.PruneSmallBatches(ctx, timeout, tx)
-		if err != nil {
-			return err
 		}
 	}
 

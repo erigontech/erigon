@@ -795,8 +795,6 @@ func ExecV3(ctx context.Context,
 					//	}
 					//}
 
-					aggregatorRo := libstate.AggTx(applyTx)
-
 					needCalcRoot := false && (executor.readState().SizeEstimate() >= commitThreshold ||
 						havePartialBlock) //|| // If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
 					//TEMP aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
@@ -812,12 +810,12 @@ func ExecV3(ctx context.Context,
 						commitStart = time.Now()
 						tt          = time.Now()
 
-						t1, t3 time.Duration
+						t1 time.Duration
 					)
 
 					se := executor.(*serialExecutor)
 
-					if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, logger, u, inMemExec); err != nil {
+					if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, 10*time.Hour, logger, u, inMemExec); err != nil {
 						return err
 					} else {
 						if !ok {
@@ -834,12 +832,6 @@ func ExecV3(ctx context.Context,
 
 					t1 = time.Since(tt) + ts
 
-					tt = time.Now()
-					if _, err := aggregatorRo.PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
-						return err
-					}
-					t3 = time.Since(tt)
-
 					var t2 time.Duration
 					applyTx, t2, err = se.commit(ctx, execStage, applyTx, useExternalTx)
 					if err != nil {
@@ -853,7 +845,7 @@ func ExecV3(ctx context.Context,
 					logger.Info("Committed", "time", time.Since(commitStart),
 						"block", executor.domains().BlockNum(), "txNum", executor.domains().TxNum(),
 						"step", fmt.Sprintf("%.1f", float64(executor.domains().TxNum())/float64(agg.StepSize())),
-						"flush+commitment", t1, "tx.commit", t2, "prune", t3)
+						"flush+commitment+prune", t1, "tx.commit", t2)
 				default:
 				}
 
@@ -1008,7 +1000,7 @@ func ExecV3(ctx context.Context,
 
 						if !pe.inMemExec {
 							pe.doms.SetTrace(true)
-							if err := pe.doms.Flush(ctx, applyTx, true); err != nil {
+							if err := pe.doms.Flush(ctx, applyTx, 150*time.Millisecond); err != nil {
 								return err
 							}
 							pe.doms.SetTrace(false)
@@ -1035,7 +1027,7 @@ func ExecV3(ctx context.Context,
 			}
 		}
 
-		if err := pe.doms.Flush(ctx, applyTx, true); err != nil {
+		if err := pe.doms.Flush(ctx, applyTx, 150*time.Millisecond); err != nil {
 			return err
 		}
 
@@ -1052,7 +1044,7 @@ func ExecV3(ctx context.Context,
 		if b != nil {
 			commitStart := time.Now()
 
-			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, logger, u, inMemExec)
+			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, 150*time.Millisecond, logger, u, inMemExec)
 			if err != nil {
 				return err
 			}
@@ -1085,7 +1077,7 @@ func ExecV3(ctx context.Context,
 // nolint
 func dumpPlainStateDebug(tx kv.RwTx, doms *libstate.SharedDomains) {
 	if doms != nil {
-		doms.Flush(context.Background(), tx, false)
+		doms.Flush(context.Background(), tx, 0)
 	}
 	{
 		it, err := libstate.AggTx(tx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
@@ -1134,7 +1126,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *libstate.SharedDomains) {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *libstate.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *libstate.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, pruneTimeout time.Duration, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
 
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
@@ -1159,7 +1151,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	if bytes.Equal(rh, header.Root.Bytes()) {
 		if !inMemExec {
-			if err := doms.Flush(ctx, applyTx, true); err != nil {
+			if err := doms.Flush(ctx, applyTx, pruneTimeout); err != nil {
 				return false, err
 			}
 			if err = libstate.AggTx(applyTx).PruneCommitHistory(ctx, applyTx, nil); err != nil {

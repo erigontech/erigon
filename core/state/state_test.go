@@ -452,7 +452,7 @@ func TestDump(t *testing.T) {
 	blockWriter := NewWriterV4(domains, tx)
 	err = st.CommitBlock(&chain.Rules{}, blockWriter)
 	require.NoError(t, err)
-	err = domains.Flush(context.Background(), tx, false)
+	err = domains.Flush(context.Background(), tx, 0)
 	require.NoError(t, err)
 
 	// check that dump contains the state objects that are in trie
