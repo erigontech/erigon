@@ -1144,11 +1144,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 		}
 
-		blockResult, err := func() (*blockResult, error) {
-			pe.RLock()
-			defer pe.RUnlock()
-			return pe.processResults(ctx, applyTx)
-		}()
+		blockResult, err := pe.processResults(ctx, applyTx)
 
 		if err != nil {
 			return err
