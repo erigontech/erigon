@@ -1,6 +1,8 @@
 package multiencseq
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/recsplit/simpleseq"
@@ -56,7 +58,7 @@ func Count(baseNum uint64, data []byte) uint64 {
 		return uint64(data[0]&SimpleEncodingSizeMask) + 1
 	}
 
-	panic("unknown encoding")
+	panic(fmt.Sprintf("unknown sequence encoding: %d", data[0]))
 }
 
 // TODO: optimize me - to avoid object allocation (this TODO was inherited from elias_fano.go)
@@ -76,7 +78,7 @@ func (s *SequenceReader) Get(i uint64) uint64 {
 		return s.ref.Get(i)
 	}
 
-	panic("unknown encoding")
+	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 }
 
 func (s *SequenceReader) Min() uint64 {
@@ -86,7 +88,7 @@ func (s *SequenceReader) Min() uint64 {
 		return s.ref.Min()
 	}
 
-	panic("unknown encoding")
+	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 }
 
 func (s *SequenceReader) Max() uint64 {
@@ -96,7 +98,7 @@ func (s *SequenceReader) Max() uint64 {
 		return s.ref.Max()
 	}
 
-	panic("unknown encoding")
+	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 }
 
 func (s *SequenceReader) Count() uint64 {
@@ -106,7 +108,7 @@ func (s *SequenceReader) Count() uint64 {
 		return s.ref.Count()
 	}
 
-	panic("unknown encoding")
+	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 }
 
 func (s *SequenceReader) Reset(baseNum uint64, raw []byte) {
@@ -131,7 +133,7 @@ func (s *SequenceReader) Reset(baseNum uint64, raw []byte) {
 		return
 	}
 
-	panic("unknown encoding")
+	panic(fmt.Sprintf("unknown sequence encoding: %d", raw[0]))
 }
 
 func (s *SequenceReader) search(v uint64) (uint64, bool) {
@@ -141,7 +143,7 @@ func (s *SequenceReader) search(v uint64) (uint64, bool) {
 		return s.ref.Search(v)
 	}
 
-	panic("unknown encoding")
+	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 }
 
 func (s *SequenceReader) Iterator(v int) stream.U64 {
@@ -159,7 +161,7 @@ func (s *SequenceReader) Iterator(v int) stream.U64 {
 		return it
 	}
 
-	panic("unknown encoding")
+	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 }
 
 func (s *SequenceReader) ReverseIterator(v int) stream.U64 {
@@ -177,5 +179,5 @@ func (s *SequenceReader) ReverseIterator(v int) stream.U64 {
 		return it
 	}
 
-	panic("unknown encoding")
+	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 }
