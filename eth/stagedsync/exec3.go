@@ -999,14 +999,11 @@ func ExecV3(ctx context.Context,
 						flushPending = false
 
 						if !pe.inMemExec {
-							pe.doms.SetTrace(true)
 							if err := pe.doms.Flush(ctx, applyTx, 150*time.Millisecond); err != nil {
 								return err
 							}
-							pe.doms.SetTrace(false)
 						}
 
-						fmt.Println("FLUSHED")
 						var t2 time.Duration
 						commitStart := time.Now()
 						applyTx, t2, err = pe.commit(ctx, execStage, applyTx, useExternalTx)

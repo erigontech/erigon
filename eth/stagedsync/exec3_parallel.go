@@ -1037,7 +1037,6 @@ type parallelExecutor struct {
 	in          *exec.QueueWithRetry
 	rws         *exec.ResultsQueue
 	workerCount int
-
 	blockExecutors map[uint64]*blockExecutor
 }
 
@@ -1058,12 +1057,9 @@ func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, t
 }
 
 func (pe *parallelExecutor) resetTx(ctx context.Context) error {
-	fmt.Println("reseting txs")
-	defer fmt.Println("done reseting txs")
 	pe.Lock()
 	pe.applyTx = nil
 	pe.Unlock()
-	fmt.Println("reseting workers")
 	for _, worker := range pe.execWorkers {
 		worker.ResetTx(nil)
 	}

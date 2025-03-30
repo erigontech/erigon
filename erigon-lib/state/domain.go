@@ -654,8 +654,7 @@ type DomainRoTx struct {
 
 	comBuf []byte
 
-	valsC      kv.Cursor
-	valCViewID uint64 // to make sure that valsC reading from the same view with given kv.Tx
+	valsCs map[kv.Tx]kv.Cursor
 
 	getFromFileCache *DomainGetFromFileCache
 }
@@ -1657,49 +1656,47 @@ func (dt *DomainRoTx) closeValsCursor() {
 	dt.readerMutex.Lock()
 	defer dt.readerMutex.Unlock()
 
-	if dt.valsC != nil {
-		dt.valsC.Close()
-		dt.valCViewID = 0
-		dt.valsC = nil
-		// dt.vcParentPtr.Store(0)
+	for _, c := range dt.valsCs {
+		c.Close()
 	}
-}
-
-type canCheckClosed interface {
-	IsClosed() bool
+	dt.valsCs = nil
 }
 
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	if dt.valsC != nil { // run in assert mode only
-		if asserts {
-			if tx.ViewID() != dt.valCViewID {
-				panic(fmt.Errorf("%w: DomainRoTx=%s cursor ViewID=%d; given tx.ViewID=%d", sdTxImmutabilityInvariant, dt.d.filenameBase, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
-			}
-			if mc, ok := dt.valsC.(canCheckClosed); !ok && mc.IsClosed() {
-				panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.filenameBase))
-			}
-			// if dt.d.largeValues {
-			// 	if mc, ok := dt.valsC.(*mdbx.MdbxCursor); ok && mc.IsClosed() {
-			// 		panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.filenameBase))
-			// 	}
-			// } else {
-			// 	if mc, ok := dt.valsC.(*mdbx.MdbxDupSortCursor); ok && mc.IsClosed() {
-			// 		panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than DupCursor (=> than tx opened that cursor)", dt.d.filenameBase))
-			// 	}
-			// }
-		}
-		return dt.valsC, nil
+	dt.readerMutex.RLock()
+	if dt.valsCs != nil {
+		c = dt.valsCs[tx]
+	}
+	dt.readerMutex.RUnlock()
+
+	if c != nil {
+		return c, nil
 	}
 
-	if asserts {
-		dt.valCViewID = tx.ViewID()
+	dt.readerMutex.Lock()
+	defer dt.readerMutex.Unlock()
+
+	if dt.valsCs == nil {
+		dt.valsCs = map[kv.Tx]kv.Cursor{}
+	} else {
+		if c = dt.valsCs[tx]; c != nil {
+			return c, nil
+		}
 	}
+
 	if dt.d.largeValues {
-		dt.valsC, err = tx.Cursor(dt.d.valuesTable)
-		return dt.valsC, err
+		c, err = tx.Cursor(dt.d.valuesTable)
+		if err != nil {
+			dt.valsCs[tx] = c
+		}
+		return c, err
+
 	}
-	dt.valsC, err = tx.CursorDupSort(dt.d.valuesTable)
-	return dt.valsC, err
+	c, err = tx.CursorDupSort(dt.d.valuesTable)
+	if err != nil {
+		dt.valsCs[tx] = c
+	}
+	return c, err
 }
 
 func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
