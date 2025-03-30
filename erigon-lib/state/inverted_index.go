@@ -269,12 +269,25 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 				if !exists {
-					_, fName := filepath.Split(fPath)
-					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
-					invalidFileItemsLock.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFileItemsLock.Unlock()
-					continue
+					ii.version.DataEF = ii.version.DataEF.Downgrade()
+					fPath = ii.efFilePath(fromStep, toStep)
+					existsDowngrade, err := dir.FileExist(fPath)
+					if err != nil {
+						_, fName := filepath.Split(fPath)
+						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FileExists error", "f", fName, "err", err)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						continue
+					}
+					if !existsDowngrade {
+						_, fName := filepath.Split(fPath)
+						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						continue
+					}
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {

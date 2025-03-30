@@ -72,6 +72,13 @@ func (v Version) Cmp(rhd Version) int {
 	return 0
 }
 
+func (v Version) Downgrade() Version {
+	if v.Minor == 0 {
+		return Version{v.Major - 1, 0}
+	}
+	return Version{v.Major, v.Minor - 1}
+}
+
 func (v Version) IsZero() bool {
 	return v.Major == 0 && v.Minor == 0
 }
