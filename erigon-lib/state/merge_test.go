@@ -82,7 +82,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, string(ii.name), mr.name)
 
 		idxF := ic.staticFilesInRange(mr.from, mr.to)
-		assert.Equal(t, 3, len(idxF))
+		assert.Len(t, idxF, 3)
 	})
 	t.Run("hist: > 2 unmerged files", func(t *testing.T) {
 		ii, h := newTestDomain()
@@ -227,8 +227,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.history.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(idxFiles))
-		require.Equal(t, 2, len(histFiles))
+		require.Len(t, idxFiles, 2)
+		require.Len(t, histFiles, 2)
 	})
 	t.Run("idx merged and small files lost", func(t *testing.T) {
 		ii, h := newTestDomain()
@@ -301,8 +301,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, uint64(2), r.index.to)
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(idxFiles))
-		require.Equal(t, 0, len(histFiles))
+		require.Len(t, idxFiles, 2)
+		require.Empty(t, histFiles)
 	})
 	t.Run("history merge progress ahead of idx", func(t *testing.T) {
 		ii, h := newTestDomain()
@@ -343,8 +343,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 4, int(r.index.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
-		require.Equal(t, 3, len(idxFiles))
-		require.Equal(t, 3, len(histFiles))
+		require.Len(t, idxFiles, 3)
+		require.Len(t, histFiles, 3)
 	})
 	t.Run("idx merge progress ahead of history", func(t *testing.T) {
 		ii, h := newTestDomain()
@@ -382,8 +382,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.history.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(idxFiles))
-		require.Equal(t, 2, len(histFiles))
+		require.Len(t, idxFiles, 2)
+		require.Len(t, histFiles, 2)
 	})
 	t.Run("idx merged, but garbage left", func(t *testing.T) {
 		ii, h := newTestDomain()
@@ -437,11 +437,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		defer ic.Close()
 		mr := ic.findMergeRange(4, 32)
 		assert.True(t, mr.needMerge)
-		require.Equal(t, 0, int(mr.from))
+		require.Zero(t, int(mr.from))
 		require.Equal(t, 4, int(mr.to))
 		require.Equal(t, string(ii.name), mr.name)
 		idxFiles := ic.staticFilesInRange(mr.from, mr.to)
-		require.Equal(t, 3, len(idxFiles))
+		require.Len(t, idxFiles, 3)
 	})
 }
 func Test_mergeEliasFano(t *testing.T) {
@@ -537,7 +537,7 @@ func TestMergeFiles(t *testing.T) {
 	}
 
 	require.NoError(t, w.Flush(context.Background(), rwTx))
-	w.close()
+	w.Close()
 	err = rwTx.Commit()
 	require.NoError(t, err)
 

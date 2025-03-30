@@ -316,8 +316,8 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	}
 
 	from, to := ic.stepsRangeInDB(tx)
-	require.Equal(t, float64(0), from)
-	require.Equal(t, float64(0), to)
+	require.Equal(t, float64(0), from) //nolint:testifylint
+	require.Equal(t, float64(0), to)   //nolint:testifylint
 }
 
 func filledInvIndex(tb testing.TB, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
@@ -687,7 +687,7 @@ func TestCtxFiles(t *testing.T) {
 			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.startTxNum, item.endTxNum, visibleFiles[i-1].startTxNum, visibleFiles[i-1].endTxNum)
 		}
 	}
-	require.Equal(t, 3, len(visibleFiles))
+	require.Len(t, visibleFiles, 3)
 
 	require.Equal(t, 0, int(visibleFiles[0].startTxNum))
 	require.Equal(t, 4, int(visibleFiles[0].endTxNum))

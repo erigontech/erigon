@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -103,7 +104,7 @@ func Main(ctx *cli.Context) error {
 		err     error
 		baseDir = ""
 	)
-	var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
+	var getTracer func(txIndex int, txHash libcommon.Hash) (*tracing.Hooks, error)
 
 	// If user specified a basedir, make sure it exists
 	if ctx.IsSet(OutputBasedir.Name) {
@@ -130,7 +131,7 @@ func Main(ctx *cli.Context) error {
 				prevFile.Close()
 			}
 		}()
-		getTracer = func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error) {
+		getTracer = func(txIndex int, txHash libcommon.Hash) (*tracing.Hooks, error) {
 			if prevFile != nil {
 				prevFile.Close()
 			}
@@ -139,10 +140,10 @@ func Main(ctx *cli.Context) error {
 				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err2))
 			}
 			prevFile = traceFile
-			return trace_logger.NewJSONLogger(logConfig, traceFile), nil
+			return trace_logger.NewJSONLogger(logConfig, traceFile).Tracer().Hooks, nil
 		}
 	} else {
-		getTracer = func(txIndex int, txHash libcommon.Hash) (tracer vm.EVMLogger, err error) {
+		getTracer = func(txIndex int, txHash libcommon.Hash) (tracer *tracing.Hooks, err error) {
 			return nil, nil
 		}
 	}
@@ -195,7 +196,6 @@ func Main(ctx *cli.Context) error {
 
 	vmConfig := vm.Config{
 		Tracer:        nil,
-		Debug:         ctx.Bool(TraceFlag.Name),
 		StatelessExec: true,
 	}
 	// Construct the chainconfig
