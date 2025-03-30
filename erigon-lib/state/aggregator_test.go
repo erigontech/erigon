@@ -1399,7 +1399,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NoError(t, rwTx.Commit())
 
 	for _, fn := range fnames {
-		if strings.Contains(fn, "v1-commitment") {
+		if strings.Contains(fn, "v1-commitment") || strings.Contains(fn, "v1.0-commitment") {
 			require.NoError(t, os.Remove(fn))
 			t.Logf("removed file %s", filepath.Base(fn))
 		}
