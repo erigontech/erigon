@@ -95,7 +95,7 @@ func TestSimpleSequence(t *testing.T) {
 
 		require.False(t, it.HasNext())
 		v, err = it.Next()
-		require.ErrorIs(t, stream.ErrIteratorExhausted, err)
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
 		require.Equal(t, uint64(0), v)
 	})
 
@@ -117,7 +117,7 @@ func TestSimpleSequence(t *testing.T) {
 
 		require.False(t, it.HasNext())
 		v, err = it.Next()
-		require.ErrorIs(t, stream.ErrIteratorExhausted, err)
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
 		require.Equal(t, uint64(0), v)
 	})
 
@@ -139,7 +139,7 @@ func TestSimpleSequence(t *testing.T) {
 
 		require.False(t, it.HasNext())
 		v, err = it.Next()
-		require.ErrorIs(t, stream.ErrIteratorExhausted, err)
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
 		require.Equal(t, uint64(0), v)
 	})
 
@@ -150,7 +150,7 @@ func TestSimpleSequence(t *testing.T) {
 		it.Seek(1029)
 		require.False(t, it.HasNext())
 		v, err := it.Next()
-		require.ErrorIs(t, stream.ErrIteratorExhausted, err)
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
 		require.Equal(t, uint64(0), v)
 	})
 
@@ -181,7 +181,7 @@ func TestSimpleSequence(t *testing.T) {
 
 		require.False(t, it.HasNext())
 		v, err = it.Next()
-		require.ErrorIs(t, stream.ErrIteratorExhausted, err)
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
 		require.Equal(t, uint64(0), v)
 	})
 
@@ -211,7 +211,7 @@ func TestSimpleSequence(t *testing.T) {
 
 		require.False(t, it.HasNext())
 		v, err = it.Next()
-		require.ErrorIs(t, stream.ErrIteratorExhausted, err)
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
 		require.Equal(t, uint64(0), v)
 	})
 
@@ -233,7 +233,7 @@ func TestSimpleSequence(t *testing.T) {
 
 		require.False(t, it.HasNext())
 		v, err = it.Next()
-		require.ErrorIs(t, stream.ErrIteratorExhausted, err)
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
 		require.Equal(t, uint64(0), v)
 	})
 
@@ -255,7 +255,7 @@ func TestSimpleSequence(t *testing.T) {
 
 		require.False(t, it.HasNext())
 		v, err = it.Next()
-		require.ErrorIs(t, stream.ErrIteratorExhausted, err)
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
 		require.Equal(t, uint64(0), v)
 	})
 
@@ -266,7 +266,7 @@ func TestSimpleSequence(t *testing.T) {
 		it.Seek(1000)
 		require.False(t, it.HasNext())
 		v, err := it.Next()
-		require.ErrorIs(t, stream.ErrIteratorExhausted, err)
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
 		require.Equal(t, uint64(0), v)
 	})
 
@@ -277,7 +277,7 @@ func TestSimpleSequence(t *testing.T) {
 		it.Seek(999)
 		require.False(t, it.HasNext())
 		v, err := it.Next()
-		require.ErrorIs(t, stream.ErrIteratorExhausted, err)
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
 		require.Equal(t, uint64(0), v)
 	})
 }
