@@ -43,7 +43,6 @@ func (f *ForkChoiceStore) accountWeights(votes, weights map[libcommon.Hash]uint6
 		}
 		curr = header.ParentRoot
 	}
-	return
 }
 
 const (
