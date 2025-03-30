@@ -205,15 +205,10 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	return nil
 }
 
-func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
-	idxCfg := iiCfg{
-		salt: salt, dirs: dirs,
-		filenameBase: filenameBase,
-		keysTable:    indexKeysTable,
-		valuesTable:  indexTable,
-		compression:  seg.CompressNone,
-		name:         idx,
-	}
+func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
+	idxCfg := StandaloneIISchema[idx]
+	idxCfg.salt = salt
+	idxCfg.dirs = dirs
 
 	if ii := a.searchII(idx); ii != nil {
 		return fmt.Errorf("inverted index %s already registered", idx)

@@ -150,6 +150,37 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
 }
 
+type EntryPointCall struct {
+	OnEnterSuper tracing.EnterHook
+	Input        []byte
+	From         libcommon.Address
+	Error        error
+}
+
+func (epc *EntryPointCall) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	if epc.OnEnterSuper != nil {
+		epc.OnEnterSuper(depth, typ, from, to, precompile, input, gas, value, code)
+	}
+
+	isRip7560EntryPoint := to.Cmp(types.AA_ENTRY_POINT) == 0
+	if !isRip7560EntryPoint {
+		return
+	}
+
+	if epc.Input != nil {
+		epc.Error = errors.New("illegal repeated call to the EntryPoint callback")
+		return
+	}
+
+	epc.Input = make([]byte, len(input))
+	copy(epc.Input, input)
+	epc.From = from
+}
+
+func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool, validateFrame func(ibs evmtypes.IntraBlockState, epc *EntryPointCall) error) (*evmtypes.ExecutionResult, error) {
+	return NewStateTransition(evm, msg, gp).ApplyFrame(validateFrame)
+}
+
 // to returns the recipient of the message.
 func (st *StateTransition) to() libcommon.Address {
 	if st.msg == nil || st.msg.To() == nil /* contract creation */ {
@@ -308,6 +339,160 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	return st.buyGas(gasBailout)
 }
 
+func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlockState, epc *EntryPointCall) error) (*evmtypes.ExecutionResult, error) {
+	coinbase := st.evm.Context.Coinbase
+	senderInitBalance, err := st.state.GetBalance(st.msg.From())
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+	}
+	senderInitBalance = senderInitBalance.Clone()
+	coinbaseInitBalance, err := st.state.GetBalance(coinbase)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+	}
+	coinbaseInitBalance = coinbaseInitBalance.Clone()
+
+	epc := &EntryPointCall{}
+	st.state.SetHooks(&tracing.Hooks{
+		OnEnter: epc.OnEnter,
+	})
+
+	if err := st.buyGas(false); err != nil {
+		return nil, err
+	}
+
+	msg := st.msg
+	sender := vm.AccountRef(msg.From())
+	contractCreation := msg.To() == nil
+	rules := st.evm.ChainRules()
+	vmConfig := st.evm.Config()
+	isEIP3860 := vmConfig.HasEip3860(rules)
+	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
+
+	// set code tx
+	auths := msg.Authorizations()
+	verifiedAuthorities := make([]libcommon.Address, 0)
+	if len(auths) > 0 {
+		if contractCreation {
+			return nil, errors.New("contract creation not allowed with type4 txs")
+		}
+		var b [33]byte
+		data := bytes.NewBuffer(nil)
+		for i, auth := range auths {
+			data.Reset()
+
+			// 1. chainId check
+			if !auth.ChainID.IsZero() && rules.ChainID.String() != auth.ChainID.String() {
+				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
+				continue
+			}
+
+			// 2. authority recover
+			authorityPtr, err := auth.RecoverSigner(data, b[:])
+			if err != nil {
+				log.Debug("authority recover failed, skipping", "err", err, "auth index", i)
+				continue
+			}
+			authority := *authorityPtr
+
+			// 3. add authority account to accesses_addresses
+			verifiedAuthorities = append(verifiedAuthorities, authority)
+			// authority is added to accessed_address in prepare step
+
+			// 4. authority code should be empty or already delegated
+			codeHash, err := st.state.GetCodeHash(authority)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
+			if codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
+				// check for delegation
+				_, ok, err := st.state.GetDelegatedDesignation(authority)
+				if err != nil {
+					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+				}
+				if !ok {
+					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
+					continue
+				}
+				// noop: has delegated designation
+			}
+
+			// 5. nonce check
+			authorityNonce, err := st.state.GetNonce(authority)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
+			if authorityNonce != auth.Nonce {
+				log.Debug("invalid nonce, skipping", "auth index", i)
+				continue
+			}
+
+			// 6. Add PER_EMPTY_ACCOUNT_COST - PER_AUTH_BASE_COST gas to the global refund counter if authority exists in the trie.
+			exists, err := st.state.Exist(authority)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
+			if exists {
+				st.state.AddRefund(fixedgas.PerEmptyAccountCost - fixedgas.PerAuthBaseCost)
+			}
+
+			// 7. set authority code
+			if auth.Address == (libcommon.Address{}) {
+				if err := st.state.SetCode(authority, nil); err != nil {
+					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+				}
+			} else {
+				if err := st.state.SetCode(authority, types.AddressToDelegation(auth.Address)); err != nil {
+					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+				}
+			}
+
+			// 8. increase the nonce of authority
+			if err := st.state.SetNonce(authority, authorityNonce+1); err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
+		}
+	}
+
+	// Check whether the init code size has been exceeded.
+	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
+		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
+	}
+
+	// Execute the preparatory steps for state transition which includes:
+	// - prepare accessList(post-berlin; eip-7702)
+	// - reset transient storage(eip 1153)
+	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples, verifiedAuthorities)
+
+	var (
+		ret   []byte
+		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
+	)
+
+	ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
+
+	result := &evmtypes.ExecutionResult{
+		UsedGas:             st.gasUsed(),
+		Err:                 vmerr,
+		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
+		ReturnData:          ret,
+		SenderInitBalance:   senderInitBalance,
+		CoinbaseInitBalance: coinbaseInitBalance,
+	}
+
+	if st.evm.Context.PostApplyMessage != nil {
+		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
+	}
+
+	if validateFrame != nil {
+		if err := validateFrame(st.state, epc); err != nil {
+			return nil, err
+		}
+	}
+
+	return result, nil
+}
+
 // TransitionDb will transition the state by applying the current message and
 // returning the evm execution result with following fields.
 //
@@ -452,7 +637,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, floorGas7623, overflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, uint64(len(auths)))
+	gas, floorGas7623, overflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
