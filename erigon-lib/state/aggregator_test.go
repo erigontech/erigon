@@ -929,7 +929,8 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	var latestCommitTxNum uint64
 	commit := func(txn uint64) error {
-		domains.Flush(ctx, tx)
+		err = domains.Flush(ctx, tx)
+		require.NoError(t, err)
 		ac.Close()
 		err = tx.Commit()
 		require.NoError(t, err)
