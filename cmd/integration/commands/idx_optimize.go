@@ -1,8 +1,8 @@
 package commands
 
 import (
+	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,7 +10,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/config3"
-	lllog "github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
@@ -82,10 +82,11 @@ var idxOptimize = &cobra.Command{
 
 		files, err := fs.ReadDir(idxDir, ".")
 		if err != nil {
-			log.Fatalf("Failed to read directory contents: %v", err)
+			logger.Error("Failed to read directory contents", "error", err)
+			return
 		}
 
-		log.Println("Sumarizing idx files...")
+		logger.Info("Sumarizing idx files...")
 		cEF := 0
 		for _, file := range files {
 			if file.IsDir() || !strings.HasSuffix(file.Name(), ".ef") {
@@ -94,7 +95,7 @@ var idxOptimize = &cobra.Command{
 			cEF++
 		}
 
-		log.Println("Optimizing idx files...")
+		logger.Info("Optimizing idx files...")
 		cOpt := 0
 		for _, file := range files {
 			if file.IsDir() || !strings.HasSuffix(file.Name(), ".ef") {
@@ -105,7 +106,7 @@ var idxOptimize = &cobra.Command{
 			if err != nil {
 				logger.Error("Failed to parse file info: ", err)
 			}
-			log.Printf("Optimizing file %s [%d/%d]...", file.Name(), cOpt, cEF)
+			logger.Info("Optimizing...", "file", file.Name(), "n", cOpt, "total", cEF)
 
 			cOpt++
 			baseTxNum := efInfo.startStep * config3.DefaultStepSize
@@ -114,13 +115,15 @@ var idxOptimize = &cobra.Command{
 
 			idxInput, err := seg.NewDecompressor(datadirCli + "/snapshots/idx/" + file.Name())
 			if err != nil {
-				log.Fatalf("Failed to open decompressor: %v", err)
+				logger.Error("Failed to open decompressor", "error", err)
+				return
 			}
 			defer idxInput.Close()
 
-			idxOutput, err := seg.NewCompressor(ctx, "optimizoor", datadirCli+"/snapshots/idx/"+file.Name()+".new", tmpDir, seg.DefaultCfg, lllog.LvlInfo, logger)
+			idxOutput, err := seg.NewCompressor(ctx, "optimizoor", datadirCli+"/snapshots/idx/"+file.Name()+".new", tmpDir, seg.DefaultCfg, log.LvlInfo, logger)
 			if err != nil {
-				log.Fatalf("Failed to open compressor: %v", err)
+				logger.Error("Failed to open compressor", "error", err)
+				return
 			}
 			defer idxOutput.Close()
 
@@ -135,19 +138,22 @@ var idxOptimize = &cobra.Command{
 			for reader.HasNext() {
 				k, _ := reader.Next(nil)
 				if !reader.HasNext() {
-					log.Fatal("reader doesn't have next!")
+					logger.Error("reader doesn't have next!")
+					return
 				}
 				if err := writer.AddWord(k); err != nil {
-					log.Fatalf("error while writing key %v", err)
+					logger.Error("error while writing key", "error", err)
 				}
 
 				v, _ := reader.Next(nil)
 				v, err := doConvert(baseTxNum, v)
 				if err != nil {
-					log.Fatalf("error while optimizing value %v", err)
+					logger.Error("error while optimizing value", "error", err)
+					return
 				}
 				if err := writer.AddWord(v); err != nil {
-					log.Fatalf("error while writing value %v", err)
+					logger.Error("error while writing value", "error", err)
+					return
 				}
 
 				select {
@@ -157,7 +163,8 @@ var idxOptimize = &cobra.Command{
 				}
 			}
 			if err := writer.Compress(); err != nil {
-				log.Fatalf("error while writing optimized file %v", err)
+				logger.Error("error while writing optimized file", "error", err)
+				return
 			}
 			idxInput.Close()
 			writer.Close()
@@ -166,7 +173,8 @@ var idxOptimize = &cobra.Command{
 			// rebuid .efi; COPIED FROM InvertedIndex.buildMapAccessor
 			salt, err := state.GetStateIndicesSalt(datadirCli + "/snapshots/")
 			if err != nil {
-				log.Fatalf("Failed to build accessor: %v", err)
+				logger.Error("Failed to build accessor", "error", err)
+				return
 			}
 			idxPath := datadirCli + "/snapshots/accessor/" + file.Name() + "i.new"
 			cfg := recsplit.RecSplitArgs{
@@ -182,14 +190,16 @@ var idxOptimize = &cobra.Command{
 			}
 			data, err := seg.NewDecompressor(datadirCli + "/snapshots/idx/" + file.Name() + ".new")
 			if err != nil {
-				log.Fatalf("Failed to build accessor: %v", err)
+				logger.Error("Failed to build accessor", "error", err)
+				return
 			}
 			if err := state.BuildAccessor(ctx, data, seg.CompressNone, idxPath, false, cfg, ps, logger); err != nil {
-				log.Fatalf("Failed to build accessor: %v", err)
+				logger.Error("Failed to build accessor", "error", err)
+				return
 			}
 		}
 
-		log.Printf("Optimized %d of %d files!!!", cOpt, cEF)
+		logger.Info(fmt.Sprintf("Optimized %d of %d files!!!", cOpt, cEF))
 	},
 }
 

@@ -2,8 +2,8 @@ package commands
 
 import (
 	"bytes"
+	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,10 +11,12 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/spf13/cobra"
 )
 
@@ -24,16 +26,18 @@ var idxVerify = &cobra.Command{
 	Short: "After a genesis sync + snapshot regen, deep compare original and optimized .ef files of 2 E3 instances",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common.RootContext()
+		logger := debug.SetupCobra(cmd, "integration")
 
 		sourceIdxPath := filepath.Join(sourceDirCli, "snapshots", "idx")
 		sourceIdxDir := os.DirFS(sourceIdxPath)
 
 		files, err := fs.ReadDir(sourceIdxDir, ".")
 		if err != nil {
-			log.Fatalf("Failed to read directory contents: %v", err)
+			logger.Error("Failed to read directory contents", "error", err)
+			return
 		}
 
-		log.Println("Comparing idx files:")
+		logger.Info("Comparing idx files:")
 	F:
 		for _, file := range files {
 			if file.IsDir() || !strings.HasSuffix(file.Name(), ".ef") {
@@ -42,7 +46,8 @@ var idxVerify = &cobra.Command{
 
 			efInfo, err := parseEFFilename(file.Name())
 			if err != nil {
-				log.Fatalf("Failed to parse file info: %v", err)
+				logger.Error("Failed to parse file info", "error", err)
+				return
 			}
 			baseTxNum := efInfo.startStep * config3.DefaultStepSize
 
@@ -52,7 +57,8 @@ var idxVerify = &cobra.Command{
 			}
 			targetEfi, err := recsplit.OpenIndex(targetIndexFilename)
 			if err != nil {
-				log.Fatalf("Failed to open index: %v", err)
+				logger.Error("Failed to open index", "error", err)
+				return
 			}
 			defer targetEfi.Close()
 
@@ -63,7 +69,8 @@ var idxVerify = &cobra.Command{
 			sourceFilename := sourceDirCli + "/snapshots/idx/" + file.Name()
 			sourceIdx, err := seg.NewDecompressor(sourceFilename)
 			if err != nil {
-				log.Fatalf("Failed to open decompressor: %v", err)
+				logger.Error("Failed to open decompressor", "error", err)
+				return
 			}
 			defer sourceIdx.Close()
 
@@ -74,11 +81,12 @@ var idxVerify = &cobra.Command{
 			}
 			targetIdx, err := seg.NewDecompressor(targetFilename)
 			if err != nil {
-				log.Fatalf("Failed to open decompressor: %v", err)
+				logger.Error("Failed to open decompressor", "error", err)
+				return
 			}
 			defer targetIdx.Close()
 
-			log.Printf("Deep checking files %s -> %s, %s...", sourceFilename, targetFilename, targetIndexFilename)
+			logger.Info("Deep checking files...", "source", sourceFilename, "target", targetFilename, "targetIndex", targetIndexFilename)
 
 			g := sourceIdx.MakeGetter()
 			sourceReader := seg.NewReader(g, seg.CompressNone)
@@ -92,37 +100,37 @@ var idxVerify = &cobra.Command{
 			shouldSkipEfiCheck := false
 			for sourceReader.HasNext() {
 				if !targetReader.HasNext() {
-					log.Printf("target reader doesn't have next!")
-					log.Println("skipping to next file...")
+					logger.Warn("target reader doesn't have next!")
+					logger.Info("skipping to next file...")
 					continue F
 				}
 
 				sourceK, _ := sourceReader.Next(nil)
 				targetK, _ := targetReader.Next(nil)
 				if !bytes.Equal(sourceK, targetK) {
-					log.Printf("key mismatch!")
-					log.Println("skipping to next file...")
+					logger.Warn("key mismatch!")
+					logger.Info("skipping to next file...")
 					continue F
 				}
 
 				if !sourceReader.HasNext() {
-					log.Println("source reader doesn't have next!")
-					log.Println("skipping to next file...")
+					logger.Warn("source reader doesn't have next!")
+					logger.Info("skipping to next file...")
 					continue F
 				}
 				if !targetReader.HasNext() {
-					log.Println("target reader doesn't have next!")
-					log.Println("skipping to next file...")
+					logger.Warn("target reader doesn't have next!")
+					logger.Info("skipping to next file...")
 					continue F
 				}
 
 				// source/target semantic value comparison
 				sourceV, _ := sourceReader.Next(nil)
 				targetV, nextKeyOffset := targetReader.Next(nil)
-				if !compareSequences(sourceK, sourceV, targetV, baseTxNum) {
-					log.Println("value mismatch!")
-					log.Println("skipping to next key...")
-					log.Println("skipping .efi offset checks for this file...")
+				if !compareSequences(logger, sourceK, sourceV, targetV, baseTxNum) {
+					logger.Warn("value mismatch!")
+					logger.Info("skipping to next key...")
+					logger.Info("skipping .efi offset checks for this file...")
 					shouldSkipEfiCheck = true
 					continue // next KEY, not FILE
 				}
@@ -131,13 +139,13 @@ var idxVerify = &cobra.Command{
 				if !shouldSkipEfiCheck {
 					offset, found := targetEfiReader.TwoLayerLookup(targetK)
 					if !found {
-						log.Printf("key %v not found in efi", hexutil.Encode(targetK))
-						log.Println("skipping to next file...")
+						logger.Warn("key not found in efi", "k", hexutil.Encode(targetK))
+						logger.Info("skipping to next file...")
 						continue F
 					}
 					if offset != prevKeyOffset {
-						log.Printf("offset mismatch: %d != %d", offset, prevKeyOffset)
-						log.Println("skipping to next file...")
+						logger.Warn("offset mismatch", "offset", offset, "prevKeyOffset", prevKeyOffset)
+						logger.Info("skipping to next file...")
 						continue F
 					}
 					prevKeyOffset = nextKeyOffset
@@ -157,13 +165,13 @@ var idxVerify = &cobra.Command{
 	},
 }
 
-func compareSequences(sourceK, sourceV, targetV []byte, baseTxNum uint64) bool {
+func compareSequences(logger log.Logger, sourceK, sourceV, targetV []byte, baseTxNum uint64) bool {
 	// log.Printf("k=%s sv=%s tv=%s baseTxNum=%d", hexutility.Encode(sourceK), hexutility.Encode(sourceV), hexutility.Encode(targetV), baseTxNum)
 	sourceEf, _ := eliasfano32.ReadEliasFano(sourceV)
 	targetSeq := multiencseq.ReadMultiEncSeq(baseTxNum, targetV)
 
 	if targetSeq.EncodingType() == multiencseq.PlainEliasFano {
-		log.Printf("target encoding type can't be PlainEliasFano")
+		logger.Warn("target encoding type can't be PlainEliasFano")
 		return false
 	}
 	// if targetSeq.Count() > sourceEf.Count() {
@@ -189,11 +197,13 @@ func compareSequences(sourceK, sourceV, targetV []byte, baseTxNum uint64) bool {
 	for sourceIt.HasNext() && targetIt.HasNext() {
 		sourceN, err = sourceIt.Next()
 		if err != nil {
-			log.Fatalf("Failed to read next: %v", err)
+			logger.Error("Failed to read next", "error", err)
+			return false
 		}
 		targetN, err = targetIt.Next()
 		if err != nil {
-			log.Fatalf("Failed to read next: %v", err)
+			logger.Error("Failed to read next", "error", err)
+			return false
 		}
 
 		if sourceN == targetN {
@@ -201,34 +211,36 @@ func compareSequences(sourceK, sourceV, targetV []byte, baseTxNum uint64) bool {
 		}
 
 		if !diff {
-			log.Printf("key=%s", hexutil.Encode(sourceK))
-			log.Printf("source min=%d max=%d count=%d", sourceEf.Min(), sourceEf.Max(), sourceEf.Count())
-			log.Printf("target min=%d max=%d count=%d", targetSeq.Min(), targetSeq.Max(), targetSeq.Count())
+			logger.Info("!diff", "key", hexutil.Encode(sourceK))
+			logger.Info("source", "min", sourceEf.Min(), "max", sourceEf.Max(), "count", sourceEf.Count())
+			logger.Info("target", "min", targetSeq.Min(), "max", targetSeq.Max(), "count", targetSeq.Count())
 		}
 		diff = true
 		for sourceN != targetN && sourceIt.HasNext() && targetIt.HasNext() {
 			if sourceN < targetN {
 				for sourceN < targetN {
-					log.Printf("> %d", sourceN)
+					logger.Info(fmt.Sprintf("> %d", sourceN))
 					if !sourceIt.HasNext() {
 						break
 					}
 
 					sourceN, err = sourceIt.Next()
 					if err != nil {
-						log.Fatalf("Failed to read next: %v", err)
+						logger.Error("Failed to read next", "error", err)
+						return false
 					}
 				}
 			} else {
 				for sourceN > targetN {
-					log.Printf("< %d", targetN)
+					logger.Info(fmt.Sprintf("< %d", targetN))
 					if !targetIt.HasNext() {
 						break
 					}
 
 					targetN, err = targetIt.Next()
 					if err != nil {
-						log.Fatalf("Failed to read next: %v", err)
+						logger.Error("Failed to read next", "error", err)
+						return false
 					}
 				}
 			}
@@ -248,18 +260,20 @@ func compareSequences(sourceK, sourceV, targetV []byte, baseTxNum uint64) bool {
 		for sourceIt.HasNext() {
 			sourceN, err = sourceIt.Next()
 			if err != nil {
-				log.Fatalf("Failed to read next: %v", err)
+				logger.Error("Failed to read next", "error", err)
+				return false
 			}
-			log.Printf("> %d", sourceN)
+			logger.Info(fmt.Sprintf("> %d", sourceN))
 		}
 	}
 	if !sourceIt.HasNext() && targetIt.HasNext() {
 		for targetIt.HasNext() {
 			targetN, err = targetIt.Next()
 			if err != nil {
-				log.Fatalf("Failed to read next: %v", err)
+				logger.Error("Failed to read next", "error", err)
+				return false
 			}
-			log.Printf("< %d", targetN)
+			logger.Info(fmt.Sprintf("< %d", targetN))
 		}
 	}
 
