@@ -77,6 +77,10 @@ type Worker struct {
 }
 
 func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs) *Worker {
+	if lock == nil {
+		lock = &sync.RWMutex{}
+	}
+
 	w := &Worker{
 		lock:        lock,
 		logger:      logger,
