@@ -841,9 +841,9 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		}()
 	}
 
-	logger.Info("JsonRpc endpoint opened", info...)
+	logger.Info("[rpc] endpoint opened", info...)
 	<-ctx.Done()
-	logger.Info("Exiting...")
+	logger.Info("[rpc] Exiting...")
 	return nil
 }
 

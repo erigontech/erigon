@@ -43,12 +43,12 @@ func TestSignedVoluntaryExit(t *testing.T) {
 
 	// Encode SignedVoluntaryExit to SSZ
 	encodedExit, err := signedExit.EncodeSSZ(nil)
-	assert.NoError(t, err, "Failed to encode SignedVoluntaryExit")
+	require.NoError(t, err, "Failed to encode SignedVoluntaryExit")
 
 	// Decode SSZ to a new SignedVoluntaryExit object
 	decodedExit := &cltypes.SignedVoluntaryExit{}
 	err = decodedExit.DecodeSSZ(encodedExit, 0)
-	assert.NoError(t, err, "Failed to decode SSZ to SignedVoluntaryExit")
+	require.NoError(t, err, "Failed to decode SSZ to SignedVoluntaryExit")
 
 	// Compare the original and decoded SignedVoluntaryExit
 	assert.Equal(t, signedExit.VoluntaryExit.Epoch, decodedExit.VoluntaryExit.Epoch, "Decoded SignedVoluntaryExit has incorrect epoch")
@@ -67,12 +67,12 @@ func TestDepositData(t *testing.T) {
 
 	// Encode DepositData to SSZ
 	encodedData, err := depositData.EncodeSSZ(nil)
-	assert.NoError(t, err, "Failed to encode DepositData")
+	require.NoError(t, err, "Failed to encode DepositData")
 
 	// Decode SSZ to a new DepositData object
 	decodedData := &cltypes.DepositData{}
 	err = decodedData.DecodeSSZ(encodedData, 0)
-	assert.NoError(t, err, "Failed to decode SSZ to DepositData")
+	require.NoError(t, err, "Failed to decode SSZ to DepositData")
 
 	// Compare the original and decoded DepositData
 	assert.Equal(t, depositData.PubKey, decodedData.PubKey, "Decoded DepositData has incorrect public key")
