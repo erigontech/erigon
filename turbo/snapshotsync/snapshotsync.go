@@ -185,7 +185,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 		var err error
 		if isStateSnapshot(name) {
 			// parse "from" (0) and "to" (64) from the name
-			// parse the snapshot "kind". e.g kind of 'idx/v1-accounts.0-64.ef' is "idx/v1-accounts"
+			// parse the snapshot "kind". e.g kind of 'idx/v1.0-accounts.0-64.ef' is "idx/v1.0-accounts"
 			rangeString := strings.Split(name, ".")[1]
 			rangeNums := strings.Split(rangeString, "-")
 			// convert the range to uint64
@@ -198,7 +198,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 			}
 			blackList[name] = struct{}{}
 		} else {
-			// e.g 'v1-000000-000100-beaconblocks.seg'
+			// e.g 'v1.0-000000-000100-beaconblocks.seg'
 			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
 			s, _, ok := snaptype.ParseFileName("", name)
 			if !ok {

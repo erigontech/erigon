@@ -636,12 +636,12 @@ func TestScanStaticFiles(t *testing.T) {
 
 	ii := emptyTestInvertedIndex(1)
 	files := []string{
-		"v1-accounts.0-1.ef",
-		"v1-accounts.1-2.ef",
-		"v1-accounts.0-4.ef",
-		"v1-accounts.2-3.ef",
-		"v1-accounts.3-4.ef",
-		"v1-accounts.4-5.ef",
+		"v1.0-accounts.0-1.ef",
+		"v1.0-accounts.1-2.ef",
+		"v1.0-accounts.0-4.ef",
+		"v1.0-accounts.2-3.ef",
+		"v1.0-accounts.3-4.ef",
+		"v1.0-accounts.4-5.ef",
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())
@@ -656,16 +656,16 @@ func TestScanStaticFiles(t *testing.T) {
 func TestCtxFiles(t *testing.T) {
 	ii := emptyTestInvertedIndex(1)
 	files := []string{
-		"v1-accounts.0-1.ef", // overlap with same `endTxNum=4`
-		"v1-accounts.1-2.ef",
-		"v1-accounts.0-4.ef",
-		"v1-accounts.2-3.ef",
-		"v1-accounts.3-4.ef",
-		"v1-accounts.4-5.ef",     // no overlap
-		"v1-accounts.480-484.ef", // overlap with same `startTxNum=480`
-		"v1-accounts.480-488.ef",
-		"v1-accounts.480-496.ef",
-		"v1-accounts.480-512.ef",
+		"v1.0-accounts.0-1.ef", // overlap with same `endTxNum=4`
+		"v1.0-accounts.1-2.ef",
+		"v1.0-accounts.0-4.ef",
+		"v1.0-accounts.2-3.ef",
+		"v1.0-accounts.3-4.ef",
+		"v1.0-accounts.4-5.ef",     // no overlap
+		"v1.0-accounts.480-484.ef", // overlap with same `startTxNum=480`
+		"v1.0-accounts.480-488.ef",
+		"v1.0-accounts.480-496.ef",
+		"v1.0-accounts.480-512.ef",
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())

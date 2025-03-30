@@ -59,9 +59,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("ii: > 2 unmerged files", func(t *testing.T) {
 		ii, _ := newTestDomain()
 		ii.scanDirtyFiles([]string{
-			"v1-accounts.0-2.ef",
-			"v1-accounts.2-3.ef",
-			"v1-accounts.3-4.ef",
+			"v1.0-accounts.0-2.ef",
+			"v1.0-accounts.2-3.ef",
+			"v1.0-accounts.3-4.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -85,10 +85,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("hist: > 2 unmerged files", func(t *testing.T) {
 		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
-			"v1-accounts.0-1.ef",
-			"v1-accounts.1-2.ef",
-			"v1-accounts.2-3.ef",
-			"v1-accounts.3-4.ef",
+			"v1.0-accounts.0-1.ef",
+			"v1.0-accounts.1-2.ef",
+			"v1.0-accounts.2-3.ef",
+			"v1.0-accounts.3-4.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -98,10 +98,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
-			"v1-accounts.0-1.v",
-			"v1-accounts.1-2.v",
-			"v1-accounts.2-3.v",
-			"v1-accounts.3-4.v",
+			"v1.0-accounts.0-1.v",
+			"v1.0-accounts.1-2.v",
+			"v1.0-accounts.2-3.v",
+			"v1.0-accounts.3-4.v",
 		})
 		h.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -120,10 +120,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("not equal amount of files", func(t *testing.T) {
 		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
-			"v1-accounts.0-1.ef",
-			"v1-accounts.1-2.ef",
-			"v1-accounts.2-3.ef",
-			"v1-accounts.3-4.ef",
+			"v1.0-accounts.0-1.ef",
+			"v1.0-accounts.1-2.ef",
+			"v1.0-accounts.2-3.ef",
+			"v1.0-accounts.3-4.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -133,8 +133,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
-			"v1-accounts.0-1.v",
-			"v1-accounts.1-2.v",
+			"v1.0-accounts.0-1.v",
+			"v1.0-accounts.1-2.v",
 		})
 		h.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -156,9 +156,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("idx merged, history not yet", func(t *testing.T) {
 		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
-			"v1-accounts.0-2.ef",
-			"v1-accounts.2-3.ef",
-			"v1-accounts.3-4.ef",
+			"v1.0-accounts.0-2.ef",
+			"v1.0-accounts.2-3.ef",
+			"v1.0-accounts.3-4.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -168,8 +168,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
-			"v1-accounts.0-1.v",
-			"v1-accounts.1-2.v",
+			"v1.0-accounts.0-1.v",
+			"v1.0-accounts.1-2.v",
 		})
 		h.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -190,11 +190,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("idx merged, history not yet, 2", func(t *testing.T) {
 		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
-			"v1-accounts.0-1.ef",
-			"v1-accounts.1-2.ef",
-			"v1-accounts.2-3.ef",
-			"v1-accounts.3-4.ef",
-			"v1-accounts.0-4.ef",
+			"v1.0-accounts.0-1.ef",
+			"v1.0-accounts.1-2.ef",
+			"v1.0-accounts.2-3.ef",
+			"v1.0-accounts.3-4.ef",
+			"v1.0-accounts.0-4.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -204,10 +204,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
-			"v1-accounts.0-1.v",
-			"v1-accounts.1-2.v",
-			"v1-accounts.2-3.v",
-			"v1-accounts.3-4.v",
+			"v1.0-accounts.0-1.v",
+			"v1.0-accounts.1-2.v",
+			"v1.0-accounts.2-3.v",
+			"v1.0-accounts.3-4.v",
 		})
 		h.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -231,7 +231,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("idx merged and small files lost", func(t *testing.T) {
 		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
-			"v1-accounts.0-4.ef",
+			"v1.0-accounts.0-4.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -241,10 +241,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
-			"v1-accounts.0-1.v",
-			"v1-accounts.1-2.v",
-			"v1-accounts.2-3.v",
-			"v1-accounts.3-4.v",
+			"v1.0-accounts.0-1.v",
+			"v1.0-accounts.1-2.v",
+			"v1.0-accounts.2-3.v",
+			"v1.0-accounts.3-4.v",
 		})
 		h.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -267,8 +267,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("history merged, but index not and history garbage left", func(t *testing.T) {
 		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
-			"v1-accounts.0-1.ef",
-			"v1-accounts.1-2.ef",
+			"v1.0-accounts.0-1.ef",
+			"v1.0-accounts.1-2.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -279,9 +279,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 		h.scanDirtyFiles([]string{
-			"v1-accounts.0-1.v",
-			"v1-accounts.1-2.v",
-			"v1-accounts.0-2.v",
+			"v1.0-accounts.0-1.v",
+			"v1.0-accounts.1-2.v",
+			"v1.0-accounts.0-2.v",
 		})
 		h.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -305,11 +305,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("history merge progress ahead of idx", func(t *testing.T) {
 		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
-			"v1-accounts.0-1.ef",
-			"v1-accounts.1-2.ef",
-			"v1-accounts.0-2.ef",
-			"v1-accounts.2-3.ef",
-			"v1-accounts.3-4.ef",
+			"v1.0-accounts.0-1.ef",
+			"v1.0-accounts.1-2.ef",
+			"v1.0-accounts.0-2.ef",
+			"v1.0-accounts.2-3.ef",
+			"v1.0-accounts.3-4.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -319,11 +319,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
-			"v1-accounts.0-1.v",
-			"v1-accounts.1-2.v",
-			"v1-accounts.0-2.v",
-			"v1-accounts.2-3.v",
-			"v1-accounts.3-4.v",
+			"v1.0-accounts.0-1.v",
+			"v1.0-accounts.1-2.v",
+			"v1.0-accounts.0-2.v",
+			"v1.0-accounts.2-3.v",
+			"v1.0-accounts.3-4.v",
 		})
 		h.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -347,10 +347,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("idx merge progress ahead of history", func(t *testing.T) {
 		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
-			"v1-accounts.0-1.ef",
-			"v1-accounts.1-2.ef",
-			"v1-accounts.0-2.ef",
-			"v1-accounts.2-3.ef",
+			"v1.0-accounts.0-1.ef",
+			"v1.0-accounts.1-2.ef",
+			"v1.0-accounts.0-2.ef",
+			"v1.0-accounts.2-3.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -360,9 +360,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
-			"v1-accounts.0-1.v",
-			"v1-accounts.1-2.v",
-			"v1-accounts.2-3.v",
+			"v1.0-accounts.0-1.v",
+			"v1.0-accounts.1-2.v",
+			"v1.0-accounts.2-3.v",
 		})
 		h.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -386,9 +386,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("idx merged, but garbage left", func(t *testing.T) {
 		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
-			"v1-accounts.0-1.ef",
-			"v1-accounts.1-2.ef",
-			"v1-accounts.0-2.ef",
+			"v1.0-accounts.0-1.ef",
+			"v1.0-accounts.1-2.ef",
+			"v1.0-accounts.0-2.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -398,10 +398,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h.scanDirtyFiles([]string{
-			"v1-accounts.0-1.v",
-			"v1-accounts.1-2.v",
-			"v1-accounts.0-2.v",
-			"v1-accounts.2-3.v",
+			"v1.0-accounts.0-1.v",
+			"v1.0-accounts.1-2.v",
+			"v1.0-accounts.0-2.v",
+			"v1.0-accounts.2-3.v",
 		})
 		h.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -419,11 +419,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("idx merged, but garbage left2", func(t *testing.T) {
 		ii, _ := newTestDomain()
 		ii.scanDirtyFiles([]string{
-			"v1-accounts.0-1.ef",
-			"v1-accounts.1-2.ef",
-			"v1-accounts.0-2.ef",
-			"v1-accounts.2-3.ef",
-			"v1-accounts.3-4.ef",
+			"v1.0-accounts.0-1.ef",
+			"v1.0-accounts.1-2.ef",
+			"v1.0-accounts.0-2.ef",
+			"v1.0-accounts.2-3.ef",
+			"v1.0-accounts.3-4.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)

@@ -114,8 +114,8 @@ func ParseFileName(id AppendableId, fileName string) (res *FileInfo, ok bool) {
 }
 
 func ParseFileNameInDir(id AppendableId, dir, fileName string) (res *FileInfo, ok bool) {
-	//	'v1-000000-000500-transactions.seg'
-	// 'v1-017000-017500-transactions-to-block.idx'
+	//	'v1.0-000000-000500-transactions.seg'
+	// 'v1.0-017000-017500-transactions-to-block.idx'
 	ext := filepath.Ext(fileName)
 	if ext != ".seg" && ext != ".idx" {
 		return nil, false
