@@ -547,6 +547,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 			diagTxn := diagnostics.DiagTxn{
 				IDHash:              hex.EncodeToString(txn.IDHash[:]),
 				SenderID:            txn.SenderID,
+				SenderAddress:       p.senders.senderID2Addr[txn.SenderID].String(),
 				Nonce:               txn.Nonce,
 				Value:               txn.Value,
 				Gas:                 txn.Gas,
