@@ -308,6 +308,7 @@ func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, ch
 		nil,  // maxFeePerBlobGas
 	)
 	ibs.SetHooks(innerTracer)
+	defer ibs.SetHooks(tracer)
 	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall, Tracer: innerTracer}
 	// Create a new context to be used in the EVM environment
 	var txContext evmtypes.TxContext
@@ -330,7 +331,6 @@ func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, ch
 		return nil, nil, nil
 	}
 
-	ibs.SetHooks(tracer)
 	return ret, logs, err
 }
 
