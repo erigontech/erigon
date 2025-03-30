@@ -28,12 +28,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
