@@ -77,7 +77,7 @@ type SchemaGen struct {
 	TracesToIdx      iiCfg
 }
 
-func (s SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
+func (s *SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
 	switch name {
 	case kv.AccountsDomain:
 		return s.AccountsDomain
@@ -94,7 +94,7 @@ func (s SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
 	}
 }
 
-func (s SchemaGen) GetIICfg(name kv.InvertedIdx) iiCfg {
+func (s *SchemaGen) GetIICfg(name kv.InvertedIdx) iiCfg {
 	switch name {
 	case kv.LogAddrIdx:
 		return s.LogAddrIdx
