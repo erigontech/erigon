@@ -257,17 +257,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				return nil, err
 			}
 
-			for _, lg := range logs {
-				if err := rw.rs.Domains().IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
-					return nil, err
-				}
-
-				for _, topic := range lg.Topics {
-					if err := rw.rs.Domains().IndexAdd(kv.LogTopicIdx, topic[:]); err != nil {
-						return nil, err
-					}
-				}
-			}
+			txTask.Logs = append(txTask.Logs, logs...)
 
 			return ret, err
 		}
