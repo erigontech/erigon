@@ -1387,7 +1387,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	buckets, err := rwTx.ListBuckets()
 	require.NoError(t, err)
 	for i, b := range buckets {
-		if strings.Contains(strings.ToLower(b), "commitment") {
+		if strings.Contains(strings.ToLower(b), kv.CommitmentDomain.String()) {
 			size, err := rwTx.BucketSize(b)
 			require.NoError(t, err)
 			t.Logf("cleaned table #%d %s: %d keys", i, b, size)
