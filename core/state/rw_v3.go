@@ -289,21 +289,23 @@ type bufferedAccount struct {
 type StateV3Buffered struct {
 	*StateV3
 	accounts      map[common.Address]*bufferedAccount
-	accountsMutex sync.RWMutex
+	accountsMutex *sync.RWMutex
 }
 
 func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
 	bufferedState := &StateV3Buffered{
-		StateV3:  state,
-		accounts: map[common.Address]*bufferedAccount{},
+		StateV3:       state,
+		accounts:      map[common.Address]*bufferedAccount{},
+		accountsMutex: &sync.RWMutex{},
 	}
 	return bufferedState
 }
 
 func (s *StateV3Buffered) WithDomains(domains *state.SharedDomains) *StateV3Buffered {
 	return &StateV3Buffered{
-		StateV3:  NewStateV3(domains, s.logger),
-		accounts: s.accounts,
+		StateV3:       NewStateV3(domains, s.logger),
+		accounts:      s.accounts,
+		accountsMutex: s.accountsMutex,
 	}
 }
 
