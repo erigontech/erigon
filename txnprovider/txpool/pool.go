@@ -540,21 +540,13 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 			}
 
 			diagTxn := diagnostics.DiagTxn{
-				IDHash:              hex.EncodeToString(txn.IDHash[:]),
 				SenderID:            txn.SenderID,
-				Nonce:               txn.Nonce,
-				Value:               txn.Value,
-				Gas:                 txn.Gas,
-				FeeCap:              txn.FeeCap,
-				Tip:                 txn.Tip,
 				Size:                txn.Size,
-				Type:                txn.Type,
 				Creation:            txn.Creation,
 				DataLen:             txn.DataLen,
 				AccessListAddrCount: txn.AccessListAddrCount,
 				AccessListStorCount: txn.AccessListStorCount,
 				BlobHashes:          txn.BlobHashes,
-				Blobs:               txn.Blobs,
 				IsLocal:             false,
 				DiscardReason:       reason.String(),
 				Pool:                subpool,
