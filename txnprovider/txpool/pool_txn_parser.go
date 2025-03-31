@@ -171,7 +171,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 		// For legacy transaction, the entire payload in expected to be in "rlp" field
 		// whereas for non-legacy, only the content of the envelope (start with position p)
-		slot.Rlp = payload[0 : dataPos+dataLen]
+		slot.Rlp = payload[p-1 : dataPos+dataLen]
 
 		if slot.Type == BlobTxnType && wrappedWithBlobs {
 			p = dataPos
