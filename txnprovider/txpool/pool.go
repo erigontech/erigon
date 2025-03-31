@@ -1111,10 +1111,10 @@ func AAStaticValidation(
 	paymasterValidationGasLimit uint64,
 	senderCodeSize, paymasterCodeSize, deployerCodeSize int,
 ) error {
-	hasPaymaster := paymasterAddress != nil && paymasterAddress.Cmp(common.Address{}) != 0
+	hasPaymaster := paymasterAddress != nil
 	hasPaymasterData := paymasterData != nil && len(paymasterData) != 0
 	hasPaymasterGasLimit := paymasterValidationGasLimit != 0
-	hasDeployer := deployerAddress != nil && deployerAddress.Cmp(common.Address{}) != 0
+	hasDeployer := deployerAddress != nil
 	hasDeployerData := deployerData != nil && len(deployerData) != 0
 	hasCodeSender := senderCodeSize != 0
 	hasCodeDeployer := deployerCodeSize != 0
