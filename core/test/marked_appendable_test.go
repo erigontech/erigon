@@ -113,15 +113,15 @@ func TestMarked_PutToDb(t *testing.T) {
 
 	err = ma_tx.Put(num, hash, value, rwtx)
 	require.NoError(t, err)
-	returnv, err := ma_tx.GetDb(num, nil, rwtx)
+	returnv, err := ma_tx.Get(num, rwtx)
 	require.NoError(t, err)
 	require.Equal(t, value, returnv)
 
-	returnv, err = ma_tx.GetDb(num, hash, rwtx)
+	returnv, err = ma_tx.DebugDb().GetDb(num, hash, rwtx)
 	require.NoError(t, err)
 	require.Equal(t, value, returnv)
 
-	returnv, err = ma_tx.GetDb(num, []byte{1}, rwtx)
+	returnv, err = ma_tx.DebugDb().GetDb(num, []byte{1}, rwtx)
 	require.NoError(t, err)
 	require.True(t, returnv == nil) // Equal fails
 
@@ -253,7 +253,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 	defer rwtx.Rollback()
 	require.NoError(t, err)
 
-	firstRootNumNotInSnap := ma_tx.VisibleFilesMaxRootNum()
+	firstRootNumNotInSnap := ma_tx.DebugFiles().VisibleFilesMaxRootNum()
 	del, err := ma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, rwtx)
 	require.NoError(t, err)
 	require.Equal(t, del, uint64(firstRootNumNotInSnap)-uint64(ma.PruneFrom()))
@@ -268,7 +268,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 	// check unified interface
 	for i := range int(entries_count) {
 		num, hash, value := getData(i)
-		returnv, err := ma_tx.GetDb(num, nil, rwtx)
+		returnv, err := ma_tx.DebugDb().GetDb(num, nil, rwtx)
 		require.NoError(t, err)
 		if num < Num(firstRootNumNotInSnap) && num >= ma.PruneFrom() {
 			require.True(t, returnv == nil)
@@ -279,7 +279,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 		// just look in db....
 		if num < ma.PruneFrom() || num >= Num(firstRootNumNotInSnap) {
 			// these should be in db
-			returnv, err = ma_tx.GetDb(num, hash, rwtx)
+			returnv, err = ma_tx.DebugDb().GetDb(num, hash, rwtx)
 			require.NoError(t, err)
 			require.Equal(t, value, returnv)
 

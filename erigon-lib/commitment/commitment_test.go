@@ -229,7 +229,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 		return key[:4], nil
 	})
 	require.NoError(t, err)
-	require.Truef(t, len(replaced) < len(enc), "replaced expected to be shorter than original enc")
+	require.Lessf(t, len(replaced), len(enc), "replaced expected to be shorter than original enc")
 
 	keyI := 0
 	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {

@@ -18,12 +18,14 @@ package exec3
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/polygon/aa"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -178,6 +180,11 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
+type validationResult struct {
+	PaymasterContext []byte
+	GasUsed          uint64
+}
+
 func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvaluaion bool) {
 	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
@@ -233,7 +240,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */, rw.hooks)
+			ret, _, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */, rw.hooks)
+			return ret, err
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, rw.hooks)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
@@ -244,7 +252,14 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 		// End of block transaction in a block
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, rw.hooks)
+			ret, logs, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, rw.hooks)
+			if err != nil {
+				return nil, err
+			}
+
+			txTask.Logs = append(txTask.Logs, logs...)
+
+			return ret, err
 		}
 
 		if isMining {
@@ -271,6 +286,73 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
 		tx := txTask.Tx
+
+		if txTask.Tx.Type() == types.AccountAbstractionTxType {
+			if !rw.chainConfig.AllowAA {
+				txTask.Error = errors.New("account abstraction transactions are not allowed")
+				break
+			}
+
+			batchHeaderTxn, ok := txTask.Tx.(*types.AccountAbstractionBatchHeaderTransaction)
+			if !ok {
+				break // this is an AA transaction that should have already been executed at batch header
+			}
+
+			startIdx := uint64(txTask.TxIndex + 1)
+			endIdx := startIdx + batchHeaderTxn.TransactionCount
+
+			validationResults := make([]validationResult, batchHeaderTxn.TransactionCount)
+
+			var outerErr error
+			for i := startIdx; i <= endIdx; i++ {
+				// check if next n transactions are AA transactions and run validation
+				if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
+					aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
+					if !ok {
+						outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
+						break
+					}
+
+					paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, rw.taskGasPool, header, rw.evm, rw.chainConfig)
+					if err != nil {
+						outerErr = err
+						break
+					}
+
+					validationResults[i-startIdx] = validationResult{
+						PaymasterContext: paymasterContext,
+						GasUsed:          validationGasUsed,
+					}
+				} else {
+					outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
+					break
+				}
+			}
+
+			if outerErr != nil {
+				txTask.Error = outerErr
+				break
+			}
+
+			// execute batch txns
+			for i := startIdx; i <= endIdx; i++ {
+				aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction) // type cast checked earlier
+				validationRes := validationResults[i-startIdx]
+
+				_, _, _, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, header, rw.ibs)
+				if err != nil {
+					outerErr = err
+					break
+				}
+			}
+
+			if outerErr != nil {
+				txTask.Error = outerErr
+				break
+			}
+
+		}
+
 		msg := txTask.TxAsMessage
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)

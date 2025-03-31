@@ -52,6 +52,6 @@ func TestFileItemWithMissingAccessor(t *testing.T) {
 	}
 
 	fileItems := fileItemsWithMissingAccessors(btree, aggStep, accessorFor)
-	require.Equal(t, 1, len(fileItems))
+	require.Len(t, fileItems, 1)
 	require.Equal(t, f3, fileItems[0])
 }

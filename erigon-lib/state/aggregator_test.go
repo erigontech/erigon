@@ -435,7 +435,7 @@ func TestNewBtIndex(t *testing.T) {
 	defer kv.Close()
 	require.NotNil(t, kv)
 	require.NotNil(t, bt)
-	require.True(t, len(bt.bplus.mx) >= keyCount/int(DefaultBtreeM))
+	require.GreaterOrEqual(t, len(bt.bplus.mx), keyCount/int(DefaultBtreeM))
 
 	for i := 1; i < len(bt.bplus.mx); i++ {
 		require.NotZero(t, bt.bplus.mx[i].di)
@@ -1323,7 +1323,7 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 // wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
 // need to move non-unit-tests to own package
 func wrapTxWithCtx(tx kv.Tx, aggTx *AggregatorRoTx) *Tx {
-	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), filesTx: aggTx}
+	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), aggtx: aggTx}
 }
 
 // wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests

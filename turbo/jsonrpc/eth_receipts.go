@@ -302,6 +302,12 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 		if isFinalTxn {
 			if chainConfig.Bor != nil {
+				if header == nil {
+					header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+					if err != nil {
+						return nil, err
+					}
+				}
 				// check for state sync event logs
 				events, err := api.stateSyncEvents(ctx, tx, header.Hash(), blockNum, chainConfig)
 				if err != nil {

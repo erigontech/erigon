@@ -727,7 +727,7 @@ func TestNewSegStreamReader(t *testing.T) {
 	for sr.HasNext() {
 		k, v, err := sr.Next()
 		if prevK != nil {
-			require.True(t, bytes.Compare(prevK, k) < 0)
+			require.Negative(t, bytes.Compare(prevK, k))
 		}
 		prevK = common.Copy(k)
 
@@ -1060,7 +1060,7 @@ func TestScanStaticFilesD(t *testing.T) {
 		}
 		return true
 	})
-	require.Equal(t, 6, len(found))
+	require.Len(t, found, 6)
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {
@@ -1647,8 +1647,8 @@ func TestDomainRange(t *testing.T) {
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(lim, len(keys))
-		require.Equal(lim, len(vals))
+		require.Len(keys, lim)
+		require.Len(vals, lim)
 	}
 }
 
@@ -2512,7 +2512,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	var ki int
 	for key, updates := range data {
 
-		v, found, st, en, err := dc.getFromFiles([]byte(key), 0)
+		v, found, st, en, err := dc.getLatestFromFiles([]byte(key), 0)
 		require.True(t, found)
 		require.NoError(t, err)
 		for i := len(updates) - 1; i >= 0; i-- {

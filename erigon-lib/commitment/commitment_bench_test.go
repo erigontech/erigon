@@ -107,7 +107,7 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 			return key[:4], nil
 		})
 		require.NoError(b, err)
-		require.Truef(b, len(replaced) < len(enc), "replaced expected to be shorter than original enc")
+		require.Lessf(b, len(replaced), len(enc), "replaced expected to be shorter than original enc")
 
 		keyI := 0
 		replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
