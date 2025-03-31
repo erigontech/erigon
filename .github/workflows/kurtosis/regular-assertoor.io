@@ -11,6 +11,8 @@ network_params:
   #electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
+  seconds_per_slot: 1
+
 additional_services:
   - assertoor
 assertoor_params:
