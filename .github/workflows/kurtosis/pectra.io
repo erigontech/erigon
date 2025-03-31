@@ -23,4 +23,3 @@ assertoor_params:
     - file: https://raw.githubusercontent.com/ethpandaops/assertoor/refs/heads/master/playbooks/pectra-dev/kurtosis/all.yaml
     - file: https://raw.githubusercontent.com/ethpandaops/assertoor/refs/heads/master/playbooks/pectra-dev/blockhash-test-with-rpc-call.yaml
     - file: https://raw.githubusercontent.com/ethpandaops/assertoor/refs/heads/master/playbooks/pectra-dev/eip7002-all.yaml
-    - file: https://raw.githubusercontent.com/ethpandaops/assertoor/blob/master/playbooks/pectra-dev/eip7251-all.yaml
