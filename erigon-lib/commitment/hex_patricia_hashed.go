@@ -1909,7 +1909,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 
 func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateUpdate *Update) (err error) {
 	//if hph.trace {
-	//	fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
+	// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
 	//}
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
@@ -1917,11 +1917,15 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			return fmt.Errorf("fold: %w", err)
 		}
 	}
+	// if hph.mountedNib == 3 {
+	// hph.SetTrace(true)
+	// }
 	// Now unfold until we step on an empty cell
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		if err := hph.unfold(hashedKey, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
+		// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
 	}
 
 	if stateUpdate == nil {
@@ -1953,12 +1957,14 @@ func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, int, error) {
 		fmt.Printf("=======[%x] folding rows %d depths %+v\n", hph.mountedNib, hph.activeRows, hph.depths[:hph.activeRows])
 		defer func() { fmt.Printf("=======[%x] folded =========\n", hph.mountedNib) }()
 	}
+	// fmt.Printf("===[%x] folding prefix %x (len %d)\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.currentKeyLen)
 
 	for hph.activeRows > 0 {
 		if hph.activeRows == 1 && hph.depths[hph.activeRows-1] == 1 {
 			if hph.trace {
 				fmt.Printf("mount early as nibble %02x %s\n", hph.mountedNib, hph.grid[0][hph.mountedNib].String())
 			}
+			// fmt.Printf("=====[%x] stop folding at %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen])
 			return hph.grid[0][hph.mountedNib], hph.mountedNib, nil
 		}
 		if err := hph.fold(); err != nil {
@@ -2663,17 +2669,11 @@ func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 }
 
 func (p *ParallelPatriciaHashed) foldNibble(nib int) error {
-	// prevbyte - can we avoid it?
 	c, d, err := p.mounts[nib].foldMounted(nib)
 	if err != nil {
 		return err
 	}
 	_ = d
-	// etl.TransformArgs{Quit: ctx.Done()}
-	// FLUSH to sd
-	// if err := p.mounts[nib].branchEncoder.Load(p.ctx[nib], etl.TransformArgs{}); err != nil {
-	// 	return err
-	// }
 
 	p.rootMu.Lock()
 	defer p.rootMu.Unlock()
@@ -2702,12 +2702,12 @@ func (p *ParallelPatriciaHashed) unfoldRoot() error {
 	if p.root.trace {
 		fmt.Printf("=============ROOT unfold============\n")
 	}
-	zero := []byte{0}
-	for unfolding := p.root.needUnfolding(zero); unfolding > 0; unfolding = p.root.needUnfolding(zero) {
-		if err := p.root.unfold(zero, unfolding); err != nil {
-			return fmt.Errorf("unfold: %w", err)
-		}
-	}
+	//zero := []byte{0}
+	//for unfolding := p.root.needUnfolding(zero); unfolding > 0; unfolding = p.root.needUnfolding(zero) {
+	//	if err := p.root.unfold(zero, unfolding); err != nil {
+	//		return fmt.Errorf("unfold: %w", err)
+	//	}
+	//}
 	if p.root.trace {
 		fmt.Printf("=========END=ROOT unfold============\n")
 	}
@@ -2767,6 +2767,8 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 	//g, ctx := errgroup.WithContext(ctx)
 	//g.SetLimit(16)
 
+	// latestKeys := [16][2][]byte{}
+	counts := [16]uint{}
 	for n := 0; n < len(t.nibbles); n++ {
 		nib := t.nibbles[n]
 		phnib := pph.mounts[n]
@@ -2779,23 +2781,39 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 			if phnib.trace {
 				fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", n, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
 			}
+			// latestKeys[n][0] = common.Copy(hashedKey)
+			// latestKeys[n][1] = common.Copy(plainKey)
+
 			return phnib.followAndUpdate(hashedKey, plainKey, nil)
 		}, etl.TransformArgs{Quit: ctx.Done()})
+
 		if err != nil {
 			panic(err)
 			// return err
 		}
-		if cnt > 0 {
-			if err = pph.foldNibble(n); err != nil {
-				return err
-			}
-		}
+
+		counts[n] = uint(cnt)
+		// if cnt > 0 {
+		// 	fmt.Printf("ask to fold %x %d\n", n, cnt)
+		// 	if err = pph.foldNibble(n); err != nil {
+		// 		return err
+		// 	}
+		// }
 		//return nil
 		//})
 	}
-
 	clear(t.keys)
 	//return g.Wait()
+
+	for i := 0; i < len(pph.mounts); i++ {
+		if counts[i] == 0 {
+			continue
+		}
+
+		if err := pph.foldNibble(i); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -2830,11 +2848,6 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 		fmt.Printf("======= folding root done =========\n")
 	}
 
-	// FLUSH to sd
-	// err = p.root.branchEncoder.Load(p.root.ctx, etl.TransformArgs{Quit: ctx.Done()})
-	// if err != nil {
-	// 	return nil, fmt.Errorf("branch update failed: %w", err)
-	// }
 	return rootHash, nil
 }
 

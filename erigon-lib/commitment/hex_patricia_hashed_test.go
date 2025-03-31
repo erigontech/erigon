@@ -301,6 +301,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 		keyLen := 20
 		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq, stateSeq.TempDir())
+
 		trieBatchR := NewHexPatriciaHashed(keyLen, stateBatch, stateSeq.TempDir())
 		trieBatch := NewParallelPatriciaHashed(trieBatchR, stateBatch, stateSeq.TempDir())
 
@@ -330,11 +331,23 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			}
 		}
 		{
-			fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
-			err := stateBatch.applyPlainUpdates(plainKeys, updates)
+			// exec few lines first so root is not empty
+			err := stateBatch.applyPlainUpdates(plainKeys[:3], updates[:3])
 			require.NoError(t, err)
 
-			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:3], updates[:3])
+
+			startRoot, err := trieBatchR.Process(ctx, updsOne, "")
+			require.NoError(t, err)
+
+			fmt.Printf("\nBatch will start with %x\n", startRoot)
+
+			fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
+
+			err = stateBatch.applyPlainUpdates(plainKeys[3:], updates[3:])
+			require.NoError(t, err)
+
+			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[3:], updates[3:])
 
 			rh, err := trieBatch.Process(ctx, updsTwo, "")
 			require.NoError(t, err)
