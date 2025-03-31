@@ -3,7 +3,7 @@ participants:
     el_image: test/erigon:current
     el_extra_params:
       - "--http.api=eth,erigon,ots,web3,net,debug,trace,txpool"
-        "--beacon.api=beacon,builder,config,debug,events,node,validator,lighthouse"
+      - "--beacon.api=beacon,builder,config,debug,events,node,validator,lighthouse"
     vc_type: lighthouse
     validator_count: 128
 network_params:
