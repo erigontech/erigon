@@ -104,12 +104,17 @@ type SubscribeStreamC struct {
 }
 
 func (c *SubscribeStreamC) Recv() (*remote.SubscribeReply, error) {
-	m, ok := <-c.ch
-	if !ok || m == nil {
-		return nil, io.EOF
+	select {
+	case m, ok := <-c.ch:
+		if !ok || m == nil {
+			return nil, io.EOF
+		}
+		return m.r, m.err
+	case <-c.ctx.Done():
+		return nil, c.ctx.Err()
 	}
-	return m.r, m.err
 }
+
 func (c *SubscribeStreamC) Context() context.Context { return c.ctx }
 
 // -- end Subscribe
@@ -160,11 +165,15 @@ func (s *SubscribeLogsStreamS) Send(m *remote.SubscribeLogsReply) error {
 }
 
 func (s *SubscribeLogsStreamS) Recv() (*remote.LogsFilterRequest, error) {
-	m, ok := <-s.chRecv
-	if !ok || m == nil {
-		return nil, io.EOF
+	select {
+	case m, ok := <-s.chRecv:
+		if !ok || m == nil {
+			return nil, io.EOF
+		}
+		return m.r, m.err
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
 	}
-	return m.r, m.err
 }
 
 func (s *SubscribeLogsStreamS) Err(err error) {
@@ -187,11 +196,15 @@ func (c *SubscribeLogsStreamC) Send(m *remote.LogsFilterRequest) error {
 }
 
 func (c *SubscribeLogsStreamC) Recv() (*remote.SubscribeLogsReply, error) {
-	m, ok := <-c.chRecv
-	if !ok || m == nil {
-		return nil, io.EOF
+	select {
+	case m, ok := <-c.chRecv:
+		if !ok || m == nil {
+			return nil, io.EOF
+		}
+		return m.r, m.err
+	case <-c.ctx.Done():
+		return nil, c.ctx.Err()
 	}
-	return m.r, m.err
 }
 
 // -- end SubscribeLogs

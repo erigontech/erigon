@@ -50,14 +50,6 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregato
 	return db, agg
 }
 
-type txWithCtx struct {
-	kv.Tx
-	ac *AggregatorRoTx
-}
-
-func WrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *txWithCtx { return &txWithCtx{Tx: tx, ac: ctx} }
-func (tx *txWithCtx) AggTx() any                             { return tx.ac }
-
 func BenchmarkAggregator_Processing(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -80,7 +72,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(tx, ac), log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 

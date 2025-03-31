@@ -144,7 +144,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	writer.SetTxNum(2)
 
@@ -286,7 +286,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer d.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	var (
 		k1 = []byte("key1")
@@ -380,7 +380,7 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	var prev [32][]byte
 	// keys are encodings of numbers 1..31
@@ -612,7 +612,7 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	val := []byte("value1")
 	writer.SetTxNum(1)
@@ -665,7 +665,7 @@ func TestDomain_Delete(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	// Put on even txNum, delete on odd txNum
 	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
@@ -727,7 +727,7 @@ func TestNewSegStreamReader(t *testing.T) {
 	for sr.HasNext() {
 		k, v, err := sr.Next()
 		if prevK != nil {
-			require.True(t, bytes.Compare(prevK, k) < 0)
+			require.Negative(t, bytes.Compare(prevK, k))
 		}
 		prevK = common.Copy(k)
 
@@ -830,7 +830,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
@@ -1060,7 +1060,7 @@ func TestScanStaticFilesD(t *testing.T) {
 		}
 		return true
 	})
-	require.Equal(t, 6, len(found))
+	require.Len(t, found, 6)
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {
@@ -1081,7 +1081,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	d.aggregationStep = maxTx
 
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	var preval1, preval2, preval3 []byte
 
@@ -1176,7 +1176,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	var prev []byte
 	for i = 0; i < len(vals); i++ {
@@ -1275,7 +1275,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
@@ -1481,7 +1481,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer d.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
@@ -1558,7 +1558,7 @@ func TestDomainRange(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer d.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	keySize1 := uint64(2)
 	keySize2 := uint64(2)
@@ -1647,8 +1647,8 @@ func TestDomainRange(t *testing.T) {
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(lim, len(keys))
-		require.Equal(lim, len(vals))
+		require.Len(keys, lim)
+		require.Len(vals, lim)
 	}
 }
 
@@ -1670,7 +1670,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
@@ -1765,7 +1765,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
@@ -1914,7 +1914,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
@@ -2038,10 +2038,10 @@ func TestDomain_Unwind(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 		writer := dc.NewWriter()
-		defer writer.close()
+		defer writer.Close()
 		var preval1, preval2, preval3, preval4 []byte
 		for i := uint64(0); i < maxTx; i++ {
-			writer.diff = &StateDiffDomain{}
+			writer.diff = &DomainDiff{}
 			writer.SetTxNum(i)
 			if i%3 == 0 && i > 0 { // once in 3 txn put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 txn delete key3 before update
@@ -2088,7 +2088,7 @@ func TestDomain_Unwind(t *testing.T) {
 		dc := d.BeginFilesRo()
 		defer dc.Close()
 		writer := dc.NewWriter()
-		defer writer.close()
+		defer writer.Close()
 
 		totalDiff := []DomainEntryDiff{}
 		if currTx > unwindTo {
@@ -2289,7 +2289,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 		writer := dc.NewWriter()
-		defer writer.close()
+		defer writer.Close()
 
 		for i := 0; uint64(i) < maxTx; i++ {
 			writer.SetTxNum(uint64(i))
@@ -2460,7 +2460,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
@@ -2512,7 +2512,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	var ki int
 	for key, updates := range data {
 
-		v, found, st, en, err := dc.getFromFiles([]byte(key), 0)
+		v, found, st, en, err := dc.getLatestFromFiles([]byte(key), 0)
 		require.True(t, found)
 		require.NoError(t, err)
 		for i := len(updates) - 1; i >= 0; i-- {
@@ -2547,7 +2547,7 @@ func TestCanBuild(t *testing.T) {
 	dc.files = append(dc.files, visibleFile{startTxNum: 0, endTxNum: d.aggregationStep})
 
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	k, v := []byte{1}, []byte{1}
 	// db has data which already in files

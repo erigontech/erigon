@@ -29,6 +29,7 @@ var (
 
 type TxMessage struct {
 	MessageID sentryproto.MessageId
+	Payload   []byte
 }
 
 type p2pClient struct {
@@ -91,6 +92,11 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		return nil, nil, err
 	}
 
+	ready, err := p.notifyWhenReady()
+	if err != nil {
+		return nil, nil, err
+	}
+
 	grpcServer := sentry.NewGrpcServer(context.TODO(), nil, func() *eth.NodeInfo { return nil }, cfg, direct.ETH68, log.New())
 	sentry := direct.NewSentryClientDirect(direct.ETH68, grpcServer)
 
@@ -125,11 +131,6 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 
 	gotTxCh := make(chan TxMessage, txChanSize)
 	errCh := make(chan error)
-
-	ready, err := p.notifyWhenReady()
-	if err != nil {
-		return nil, nil, err
-	}
 
 	go p.serve(conn, gotTxCh, errCh)
 	<-ready
@@ -196,6 +197,7 @@ func (p *p2pClient) serve(conn sentryproto.Sentry_MessagesClient, gotTxCh chan<-
 
 		gotTxCh <- TxMessage{
 			MessageID: req.Id,
+			Payload:   req.Data,
 		}
 	}
 }

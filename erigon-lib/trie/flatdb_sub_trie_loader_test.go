@@ -83,19 +83,19 @@ func TestIsBefore(t *testing.T) {
 	assert := assert.New(t)
 
 	is := keyIsBefore([]byte("a"), []byte("b"))
-	assert.Equal(true, is)
+	assert.True(is)
 
 	is = keyIsBefore([]byte("b"), []byte("a"))
-	assert.Equal(false, is)
+	assert.False(is)
 
 	is = keyIsBefore([]byte("b"), []byte(""))
-	assert.Equal(false, is)
+	assert.False(is)
 
 	is = keyIsBefore(nil, []byte("b"))
-	assert.Equal(false, is)
+	assert.False(is)
 
 	is = keyIsBefore([]byte("b"), nil)
-	assert.Equal(true, is)
+	assert.True(is)
 
 	contract := fmt.Sprintf("2%063x", 0)
 	storageKey := common.Hex2Bytes(contract + "ffffffff" + fmt.Sprintf("10%062x", 0))

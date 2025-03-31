@@ -38,7 +38,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	require.NoError(tb, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
 
@@ -96,7 +96,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -118,7 +118,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err = NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment

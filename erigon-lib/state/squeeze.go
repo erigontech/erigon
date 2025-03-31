@@ -303,23 +303,12 @@ func SqueezeCommitmentFiles(at *AggregatorRoTx, logger log.Logger) error {
 	return nil
 }
 
-// wraps tx and aggregator for tests. (when temporal db is unavailable)
-type wrappedTxWithCtx struct {
-	kv.Tx
-	ac *AggregatorRoTx
-}
-
-func (w *wrappedTxWithCtx) AggTx() any                { return w.ac }
-func (w *wrappedTxWithCtx) FreezeInfo() kv.FreezeInfo { return w.ac }
-
-func wrapTxWithCtxForTest(tx kv.Tx, ctx *AggregatorRoTx) *wrappedTxWithCtx {
-	return &wrappedTxWithCtx{Tx: tx, ac: ctx}
-}
-
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
-func RebuildCommitmentFiles(ctx context.Context, a *Aggregator, rwDb kv.RwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger) (latestRoot []byte, err error) {
+func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger) (latestRoot []byte, err error) {
+	a := rwDb.(HasAgg).Agg().(*Aggregator)
+
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
 
@@ -434,38 +423,21 @@ func RebuildCommitmentFiles(ctx context.Context, a *Aggregator, rwDb kv.RwDB, tx
 				return true, k
 			}
 
-			var rwTx kv.RwTx
-			var domains *SharedDomains
-			var ac *AggregatorRoTx
+			rwTx, err := rwDb.BeginRw(ctx)
+			if err != nil {
+				return nil, err
+			}
+			defer rwTx.Rollback()
 
-			if rwDb != nil {
-				// regular case
-				rwTx, err = rwDb.BeginRw(ctx)
-				if err != nil {
-					return nil, err
-				}
-				defer rwTx.Rollback()
+			domains, err := NewSharedDomains(rwTx, log.New())
+			if err != nil {
+				return nil, err
+			}
 
-				domains, err = NewSharedDomains(rwTx, log.New())
-				if err != nil {
-					return nil, err
-				}
-
-				var ok bool
-				ac, ok = domains.AggTx().(*AggregatorRoTx)
-				if !ok {
-					return nil, errors.New("failed to get state aggregatorTx")
-				}
-
-			} else {
-				// case when we do testing and temporal db with aggtx is not available
-				ac = a.BeginFilesRo()
-
-				domains, err = NewSharedDomains(wrapTxWithCtxForTest(roTx, ac), log.New())
-				if err != nil {
-					ac.Close()
-					return nil, err
-				}
+			var ok bool
+			ac, ok := domains.AggTx().(*AggregatorRoTx)
+			if !ok {
+				return nil, errors.New("failed to get state aggregatorTx")
 			}
 			defer ac.Close()
 
@@ -501,10 +473,7 @@ func RebuildCommitmentFiles(ctx context.Context, a *Aggregator, rwDb kv.RwDB, tx
 			domains.Close()
 
 			a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
-			if rwTx != nil {
-				rwTx.Rollback()
-				rwTx = nil
-			}
+			rwTx.Rollback()
 
 			if shardTo+shardSize > lastShard && shardSize > 1 {
 				shardSize /= 2
@@ -556,7 +525,75 @@ func RebuildCommitmentFiles(ctx context.Context, a *Aggregator, rwDb kv.RwDB, tx
 		fmt.Printf("rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")
 		return nil, err
 	}
+
 	return latestRoot, nil
+}
+
+// discardWrites disables updates collection for further flushing into db.
+// Instead, it keeps them temporarily available until .ClearRam/.Close will make them unavailable.
+func (sd *SharedDomains) discardWrites(d kv.Domain) {
+	if d >= kv.DomainLen {
+		return
+	}
+	sd.domainWriters[d].discard = true
+	sd.domainWriters[d].h.discard = true
+}
+
+func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, roTx kv.Tx, aggTx *AggregatorRoTx, next func() (bool, []byte), cfg *rebuiltCommitment, logger log.Logger) (*rebuiltCommitment, error) {
+	sd.discardWrites(kv.AccountsDomain)
+	sd.discardWrites(kv.StorageDomain)
+	sd.discardWrites(kv.CodeDomain)
+
+	visComFiles := roTx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
+	logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
+		"totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum(),
+		"commitment files before dump step", cfg.StepTo,
+		"files", fmt.Sprintf("%d %v", len(visComFiles), visComFiles))
+
+	sf := time.Now()
+	var processed uint64
+	for ok, key := next(); ; ok, key = next() {
+		sd.sdCtx.TouchKey(kv.AccountsDomain, string(key), nil)
+		processed++
+		if !ok {
+			break
+		}
+	}
+	collectionSpent := time.Since(sf)
+	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, sd.BlockNum(), fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("sealing", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
+		"root", hex.EncodeToString(rh), "commitment", time.Since(sf).String(),
+		"collection", collectionSpent.String())
+
+	sb := time.Now()
+
+	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, cfg.TxnFrom, cfg.TxnTo, sd.domainWriters[kv.CommitmentDomain], nil)
+	if err != nil {
+		return nil, err
+	}
+
+	logger.Info("shard built", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String(), "file dump", time.Since(sb).String())
+
+	return &rebuiltCommitment{
+		RootHash: rh,
+		StepFrom: cfg.StepFrom,
+		StepTo:   cfg.StepTo,
+		TxnFrom:  cfg.TxnFrom,
+		TxnTo:    cfg.TxnTo,
+		Keys:     processed,
+	}, nil
+}
+
+type rebuiltCommitment struct {
+	RootHash []byte
+	StepFrom uint64
+	StepTo   uint64
+	TxnFrom  uint64
+	TxnTo    uint64
+	Keys     uint64
 }
 
 func domainFiles(dirs datadir.Dirs, domain kv.Domain) []string {

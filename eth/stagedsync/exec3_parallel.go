@@ -10,6 +10,8 @@ import (
 
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -24,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/turbo/shards"
-	"golang.org/x/sync/errgroup"
 )
 
 /*

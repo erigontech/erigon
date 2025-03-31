@@ -147,6 +147,7 @@ type TxPool struct {
 	p2pFetcher              *Fetch
 	p2pSender               *Send
 	newSlotsStreams         *NewSlotsStreams
+	ethBackend              remote.ETHBACKENDClient
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
 	auths                   map[common.Address]*metaTxn // All accounts with a pooled authorization
@@ -154,6 +155,10 @@ type TxPool struct {
 		index   int
 		txnHash common.Hash
 	}
+}
+
+type ValidateAA interface {
+	ValidateAA() (bool, error)
 }
 
 type FeeCalculator interface {
@@ -526,7 +531,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
 
-	isDiagEnabled := diagnostics.TypeOf(diagnostics.IncomingTxnUpdate{}).Enabled()
+	isDiagEnabled := diagnostics.Client().Connected()
 
 	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
 	for i, reason := range reasons {
@@ -542,6 +547,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 			diagTxn := diagnostics.DiagTxn{
 				IDHash:              hex.EncodeToString(txn.IDHash[:]),
 				SenderID:            txn.SenderID,
+				SenderAddress:       p.senders.senderID2Addr[txn.SenderID].String(),
 				Nonce:               txn.Nonce,
 				Value:               txn.Value,
 				Gas:                 txn.Gas,
@@ -821,8 +827,9 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
+		isAATxn := mt.TxnSlot.Type == types.AccountAbstractionTxType
 		authorizationLen := uint64(len(mt.TxnSlot.Authorizations))
-		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isShanghai, isPrague)
+		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isShanghai, isPrague, isAATxn)
 		if isPrague && floorGas > intrinsicGas {
 			intrinsicGas = floorGas
 		}
@@ -984,6 +991,45 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
+	if txn.Type == types.AccountAbstractionTxType {
+		if !p.cfg.AllowAA {
+			return txpoolcfg.TypeNotActivated
+		}
+
+		senderCode, err := stateCache.GetCode(txn.SenderAddress[:])
+		if err != nil {
+			return txpoolcfg.ErrGetCode
+		}
+
+		paymasterCode, err := stateCache.GetCode(txn.Paymaster[:])
+		if err != nil {
+			return txpoolcfg.ErrGetCode
+		}
+
+		deployerCode, err := stateCache.GetCode(txn.Deployer[:])
+		if err != nil {
+			return txpoolcfg.ErrGetCode
+		}
+
+		err = AAStaticValidation(
+			txn.Paymaster, txn.Deployer, txn.SenderAddress,
+			txn.PaymasterData, txn.DeployerData,
+			txn.PaymasterValidationGasLimit,
+			len(senderCode), len(paymasterCode), len(deployerCode),
+		)
+		if err != nil {
+			return txpoolcfg.InvalidAA
+		}
+
+		res, err := p.ethBackend.AAValidation(context.Background(), &remote.AAValidationRequest{Tx: txn.ToProtoAccountAbstractionTxn()}) // enforces ERC-7562 rules
+		if err != nil {
+			return txpoolcfg.InvalidAA
+		}
+		if !res.Valid {
+			return txpoolcfg.InvalidAA
+		}
+	}
+
 	authorizationLen := len(txn.Authorizations)
 	if txn.Type == SetCodeTxnType {
 		if !p.isPrague() {
@@ -1005,7 +1051,8 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		return txpoolcfg.UnderPriced
 	}
 
-	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isShanghai, p.isPrague())
+	isAATxn := txn.Type == types.AccountAbstractionTxType
+	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isShanghai, p.isPrague(), isAATxn)
 	if p.isPrague() && floorGas > gas {
 		gas = floorGas
 	}
@@ -1056,6 +1103,76 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		return txpoolcfg.InsufficientFunds
 	}
 	return txpoolcfg.Success
+}
+
+func AAStaticValidation(
+	paymasterAddress, deployerAddress, senderAddress *common.Address,
+	paymasterData, deployerData []byte,
+	paymasterValidationGasLimit uint64,
+	senderCodeSize, paymasterCodeSize, deployerCodeSize int,
+) error {
+	hasPaymaster := paymasterAddress != nil
+	hasPaymasterData := paymasterData != nil && len(paymasterData) != 0
+	hasPaymasterGasLimit := paymasterValidationGasLimit != 0
+	hasDeployer := deployerAddress != nil
+	hasDeployerData := deployerData != nil && len(deployerData) != 0
+	hasCodeSender := senderCodeSize != 0
+	hasCodeDeployer := deployerCodeSize != 0
+
+	if !hasDeployer && hasDeployerData {
+		return fmt.Errorf(
+			"deployer data of size %d is provided but deployer address is not set",
+			len(deployerData),
+		)
+
+	}
+	if !hasPaymaster && (hasPaymasterData || hasPaymasterGasLimit) {
+		return fmt.Errorf(
+			"paymaster data of size %d (or a gas limit: %d) is provided but paymaster address is not set",
+			len(deployerData), paymasterValidationGasLimit,
+		)
+
+	}
+
+	if hasPaymaster {
+		if !hasPaymasterGasLimit {
+			return fmt.Errorf(
+				"paymaster address  %s is provided but 'paymasterVerificationGasLimit' is zero",
+				paymasterAddress.String(),
+			)
+
+		}
+		hasCodePaymaster := paymasterCodeSize != 0
+		if !hasCodePaymaster {
+			return fmt.Errorf(
+				"paymaster address %s is provided but contract has no code deployed",
+				paymasterAddress.String(),
+			)
+
+		}
+	}
+
+	if hasDeployer {
+		if !hasCodeDeployer {
+			return fmt.Errorf(
+				"deployer address %s is provided but contract has no code deployed",
+				deployerAddress.String(),
+			)
+
+		}
+		if hasCodeSender {
+			return fmt.Errorf(
+				"sender address %s and deployer address %s are provided but sender is already deployed",
+				senderAddress.String(), deployerAddress.String(),
+			)
+		}
+	}
+
+	if !hasDeployer && !hasCodeSender {
+		return errors.New("account is not deployed and no deployer is specified")
+	}
+
+	return nil
 }
 
 var maxUint256 = new(uint256.Int).SetAllOne()
@@ -2506,8 +2623,7 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 
 func sendChangeBatchEventToDiagnostics(pool string, event string, txnHashes [][32]byte) {
 	//Not sending empty events or diagnostics disabled
-	isDiagEnabled := diagnostics.TypeOf(diagnostics.PoolChangeBatchEvent{}).Enabled()
-	if len(txnHashes) == 0 || !isDiagEnabled {
+	if len(txnHashes) == 0 || !diagnostics.Client().Connected() {
 		return
 	}
 

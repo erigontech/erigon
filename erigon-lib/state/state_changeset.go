@@ -31,7 +31,7 @@ import (
 )
 
 type StateChangeSet struct {
-	Diffs [kv.DomainLen]StateDiffDomain // there are 4 domains of state changes
+	Diffs [kv.DomainLen]DomainDiff // there are 4 domains of state changes
 }
 
 func (s *StateChangeSet) Copy() *StateChangeSet {
@@ -48,8 +48,8 @@ type DomainEntryDiff struct {
 	PrevStepBytes []byte
 }
 
-// StateDiffDomain represents a domain of state changes.
-type StateDiffDomain struct {
+// DomainDiff represents a domain of state changes.
+type DomainDiff struct {
 	// We can probably flatten these into single slices for GC/cache optimization
 	keys          map[string][]byte
 	prevValues    map[string][]byte
@@ -58,12 +58,12 @@ type StateDiffDomain struct {
 	prevStepBuf, keyBuf []byte
 }
 
-func (d *StateDiffDomain) Copy() *StateDiffDomain {
-	return &StateDiffDomain{keys: maps.Clone(d.keys), prevValues: maps.Clone(d.prevValues)}
+func (d *DomainDiff) Copy() *DomainDiff {
+	return &DomainDiff{keys: maps.Clone(d.keys), prevValues: maps.Clone(d.prevValues)}
 }
 
 // RecordDelta records a state change.
-func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, prevStep uint64) {
+func (d *DomainDiff) DomainUpdate(key1, key2, prevValue, stepBytes []byte, prevStep uint64) {
 	if d.keys == nil {
 		d.keys = make(map[string][]byte, 16)
 		d.prevValues = make(map[string][]byte, 16)
@@ -89,7 +89,7 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 	}
 }
 
-func (d *StateDiffDomain) GetDiffSet() (keysToValue []DomainEntryDiff) {
+func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 	if len(d.prevValsSlice) != 0 {
 		return d.prevValsSlice
 	}

@@ -262,7 +262,7 @@ func rlpHash(x interface{}) (h libcommon.Hash) {
 	return h
 }
 
-func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, tracing *tracing.Hooks) (result []byte, err error) {
+func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, tracing *tracing.Hooks) (result []byte, logs []*types.Log, err error) {
 	isBor := chainConfig.Bor != nil
 	var author *libcommon.Address
 	if isBor {
@@ -274,13 +274,25 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, engine, constCall, tracing)
 }
 
-func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, blockContext evmtypes.BlockContext, engine consensus.EngineReader, constCall bool, tracing *tracing.Hooks) (result []byte, err error) {
-	if tracing != nil {
-		if tracing.OnSystemCallStart != nil {
-			tracing.OnSystemCallStart()
+func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, blockContext evmtypes.BlockContext, engine consensus.EngineReader, constCall bool, tracer *tracing.Hooks) (result []byte, logs []*types.Log, err error) {
+	innerTracer := &tracing.Hooks{}
+	if tracer != nil {
+		innerTracer = tracer
+		if tracer.OnSystemCallStart != nil {
+			tracer.OnSystemCallStart()
 		}
-		if tracing.OnSystemCallEnd != nil {
-			defer tracing.OnSystemCallEnd()
+		if tracer.OnSystemCallEnd != nil {
+			defer tracer.OnSystemCallEnd()
+		}
+	}
+
+	isBor := chainConfig.Bor != nil
+	if isBor {
+		innerTracer.OnLog = func(log *types.Log) {
+			logs = append(logs, log)
+			if tracer != nil && tracer.OnLog != nil {
+				tracer.OnLog(log)
+			}
 		}
 	}
 
@@ -295,9 +307,10 @@ func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, ch
 		true, // isFree
 		nil,  // maxFeePerBlobGas
 	)
-	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall, Tracer: tracing}
+	ibs.SetHooks(innerTracer)
+	defer ibs.SetHooks(tracer)
+	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall, Tracer: innerTracer}
 	// Create a new context to be used in the EVM environment
-	isBor := chainConfig.Bor != nil
 	var txContext evmtypes.TxContext
 	if isBor {
 		txContext = evmtypes.TxContext{}
@@ -315,9 +328,10 @@ func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, ch
 		false,
 	)
 	if isBor && err != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return ret, err
+
+	return ret, logs, err
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
@@ -361,7 +375,8 @@ func FinalizeBlockExecution(
 	tracer *tracing.Hooks,
 ) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, retRequests types.FlatRequests, err error) {
 	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, tracer)
+		ret, _, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, tracer)
+		return ret, err
 	}
 
 	if isMining {
@@ -389,7 +404,8 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
 ) error {
 	engine.Initialize(cc, chain, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-		return SysCallContract(contract, data, cc, ibState, header, engine, constCall, tracer)
+		ret, _, err := SysCallContract(contract, data, cc, ibState, header, engine, constCall, tracer)
+		return ret, err
 	}, logger, tracer)
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()

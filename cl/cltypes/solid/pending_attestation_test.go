@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPendingAttestation(t *testing.T) {
@@ -53,10 +54,10 @@ func TestPendingAttestation(t *testing.T) {
 
 	// Test EncodeSSZ and DecodeSSZ
 	encodedData, err := pendingAttestation.EncodeSSZ(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	decodedPendingAttestation := &PendingAttestation{}
 	err = decodedPendingAttestation.DecodeSSZ(encodedData, encodingSize)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	h1, _ := pendingAttestation.HashSSZ()
 	h2, _ := decodedPendingAttestation.HashSSZ()
 	assert.Equal(t, h1, h2)

@@ -139,7 +139,7 @@ func TestUnionPairs(t *testing.T) {
 		it2 := stream.PairsWithError(12)
 		keys, _, err := stream.ToArrayKV(stream.UnionKV(it, it2, -1))
 		require.Equal("expected error at iteration: 10", err.Error())
-		require.Equal(10, len(keys))
+		require.Len(keys, 10)
 	})
 }
 
@@ -179,7 +179,7 @@ func TestIntersect(t *testing.T) {
 		s3 := stream.Intersect[uint64](s1, s2, -1)
 		res, err := stream.ToArray[uint64](s3)
 		require.NoError(t, err)
-		require.Nil(t, nil, res)
+		require.Nil(t, res)
 
 		s1 = stream.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s3 = stream.Intersect[uint64](s1, nil, -1)
