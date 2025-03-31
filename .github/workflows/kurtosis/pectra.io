@@ -2,11 +2,15 @@ participants_matrix:
   el:
     - el_type: erigon
       el_image: test/erigon:current
+      extra_args:
+        - "--http.api=eth,erigon,ots,web3,net,debug,trace,txpool"
+        - "--beacon.api=beacon,builder,config,debug,events,node,validator,lighthouse"
 network_params:
   electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
   churn_limit_quotient: 16
+  num_validators: 64
 additional_services:
   - assertoor
 snooper_enabled: true
