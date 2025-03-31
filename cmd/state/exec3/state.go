@@ -132,25 +132,30 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, stateReader state.Resett
 func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
 func (rw *Worker) DiscardReadList() { rw.stateReader.DiscardReadList() }
 func (rw *Worker) ResetTx(chainTx kv.Tx) {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
+
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
-		rw.chainTx = nil
 	}
-	if chainTx != nil {
-		rw.chainTx = chainTx
-		type resettable interface {
-			SetTx(kv.Tx)
-		}
+	rw.chainTx = chainTx
 
-		if resettable, ok := rw.stateReader.(resettable); ok {
-			resettable.SetTx(rw.chainTx)
-		}
+	type resettable interface {
+		SetTx(kv.Tx)
+	}
 
-		if resettable, ok := rw.stateWriter.(resettable); ok {
-			resettable.SetTx(rw.chainTx)
-		}
+	if resettable, ok := rw.stateReader.(resettable); ok {
+		resettable.SetTx(rw.chainTx)
+	}
 
+	if resettable, ok := rw.stateWriter.(resettable); ok {
+		resettable.SetTx(rw.chainTx)
+	}
+
+	if rw.chainTx != nil {
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
+	} else {
+		rw.chain = nil
 	}
 }
 
