@@ -7,7 +7,7 @@ participants_matrix:
         - "--beacon.api=beacon,builder,config,debug,events,node,validator,lighthouse"
   vc:
     - vc_type: lighthouse
-      validator_count: 128
+  validator_count: 128
 network_params:
   electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
