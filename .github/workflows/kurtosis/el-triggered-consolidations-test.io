@@ -6,6 +6,8 @@ config:
   #walletPrivkey: ""
   sourceValidatorIndex: 6610
   targetValidatorIndex: 6611
+  waitForSlot: 41
+
 tasks:
 - name: check_clients_are_healthy
   title: "Check if at least one client is ready"

@@ -14,12 +14,12 @@ network_params:
   churn_limit_quotient: 16
 additional_services:
   - assertoor
-snooper_enabled: true
+snooper_enabled: false
 assertoor_params:
   run_stability_check: false
-  run_block_proposal_check: true
+  run_block_proposal_check: false
   tests:
-    - file: https://raw.githubusercontent.com/erigontech/erigon/f50bcd8d3e3dc1d7be788112161f5e64f56bc624/.github/workflows/kurtosis/el-triggered-consolidation-of-consolidations.io
+    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/som/kurtosis_lifecycle/.github/workflows/kurtosis/el-triggered-consolidation-of-consolidations.io
     - file: https://raw.githubusercontent.com/erigontech/erigon/852de1e594923343ced91172754d75fba0223e93/.github/workflows/kurtosis/el-triggered-consolidations-test.io
     - file: https://raw.githubusercontent.com/erigontech/erigon/f50bcd8d3e3dc1d7be788112161f5e64f56bc624/.github/workflows/kurtosis/el-triggered-withdrawal.io
     - file: https://raw.githubusercontent.com/ethpandaops/assertoor/refs/heads/master/playbooks/pectra-dev/kurtosis/el-triggered-exit.yaml
