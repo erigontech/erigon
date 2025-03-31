@@ -159,6 +159,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: unknown transaction type: %d", ErrParseTxn, slot.Type)
 		}
 		p++
+		if slot.Type == AATxnType {
+			p++ // this byte is for the subtype, however we can't receive the batch header over P2P so we can skip it
+		}
 		if p >= len(payload) {
 			return 0, fmt.Errorf("%w: unexpected end of payload after txnType", ErrParseTxn)
 		}
