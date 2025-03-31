@@ -1,13 +1,11 @@
-participants_matrix:
-  el:
-    - el_type: erigon
-      el_image: test/erigon:current
-      el_extra_params:
-        - "--http.api=eth,erigon,ots,web3,net,debug,trace,txpool"
-        - "--beacon.api=beacon,builder,config,debug,events,node,validator,lighthouse"
-  vc:
-    - vc_type: lighthouse
-  validator_count: 128
+participants:
+  - el_type: erigon
+    el_image: test/erigon:current
+    el_extra_params:
+      - "--http.api=eth,erigon,ots,web3,net,debug,trace,txpool"
+        "--beacon.api=beacon,builder,config,debug,events,node,validator,lighthouse"
+    vc_type: lighthouse
+    validator_count: 128
 network_params:
   electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
