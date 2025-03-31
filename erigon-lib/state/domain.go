@@ -1664,9 +1664,7 @@ func (dt *DomainRoTx) closeValsCursor() {
 
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	dt.readerMutex.RLock()
-	if dt.valsCs != nil {
-		c = dt.valsCs[tx]
-	}
+	c = dt.valsCs[tx]
 	dt.readerMutex.RUnlock()
 
 	if c != nil {

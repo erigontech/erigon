@@ -939,7 +939,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx, pruneTimeout tim
 			return err
 		}
 	}
-	
+
 	if pruneTimeout == 0 && dbg.PruneOnFlushTimeout != 0 {
 		pruneTimeout := dbg.PruneOnFlushTimeout
 
@@ -969,6 +969,9 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx, pruneTimeout tim
 
 // TemporalDomain satisfaction
 func (sd *SharedDomains) GetLatest(domain kv.Domain, roTx kv.Tx, k []byte) (v []byte, step uint64, err error) {
+	if roTx == nil {
+		return nil, 0, fmt.Errorf("storage %x read error: unexpected nil tx", k)
+	}
 	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(roTx, k)
 	}
