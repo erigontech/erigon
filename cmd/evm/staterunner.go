@@ -153,15 +153,16 @@ func aggregateResultsFromStateTests(
 	}
 	defer db.Close()
 
-	tx, txErr := db.BeginRw(context.Background())
-	if txErr != nil {
-		return nil, txErr
-	}
-	defer tx.Rollback()
 	results := make([]StatetestResult, 0, len(stateTests))
 
 	for key, test := range stateTests {
 		for _, st := range test.Subtests() {
+			// need to reset the state for each test
+			tx, txErr := db.BeginRw(context.Background())
+			if txErr != nil {
+				return nil, txErr
+			}
+
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
 
@@ -182,6 +183,7 @@ func aggregateResultsFromStateTests(
 				}
 			}
 			results = append(results, *result)
+			tx.Rollback() // reset state
 		}
 	}
 	return results, nil
