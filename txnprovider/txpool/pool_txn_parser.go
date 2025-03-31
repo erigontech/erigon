@@ -775,13 +775,13 @@ func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot, sender []byte)
 func getAddress(payload []byte, p int, name string) (*common.Address, int, error) {
 	dataPos, dataLen, err := rlp.ParseString(payload, p)
 	if err != nil {
-		return &common.Address{}, 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err) //nolint
+		return nil, 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err) //nolint
 	}
 	if dataLen != 0 && dataLen != length.Addr {
-		return &common.Address{}, 0, fmt.Errorf("%w: unexpected length of '%s' field: %d", ErrParseTxn, name, dataLen)
+		return nil, 0, fmt.Errorf("%w: unexpected length of '%s' field: %d", ErrParseTxn, name, dataLen)
 	}
 	if dataLen == 0 {
-		return nil, dataPos + dataLen, err
+		return nil, dataPos + dataLen, nil
 	}
 
 	address := common.BytesToAddress(payload[dataPos : dataPos+dataLen])
