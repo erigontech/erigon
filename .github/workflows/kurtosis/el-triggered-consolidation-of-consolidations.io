@@ -1,6 +1,6 @@
 
-id: el-triggered-consolidation
-name: "EL-triggered consolidation test"
+id: el-triggered-consolidation-of-consolidation
+name: "Consolidation of Consolidations"
 timeout: 1h
 config:
   #walletPrivkey: ""
