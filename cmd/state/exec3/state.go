@@ -121,9 +121,9 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 		rw.SetReader(stateReader)
 	} else {
 		if rw.background {
-			rw.SetReader(state.NewReaderParallelV3(rs.Domains(), rw.chainTx))
+			rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderParallelV3(rs.Domains(), rw.chainTx)))
 		} else {
-			rw.SetReader(state.NewReaderV3(rs.Domains(), rw.chainTx))
+			rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rs.Domains(), rw.chainTx)))
 		}
 	}
 
