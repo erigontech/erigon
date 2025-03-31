@@ -470,11 +470,13 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
-	if len(b) != 20 {
+
+	if len(b) == 20 {
+		tx.Deployer = &common.Address{}
+		copy((*tx.Deployer)[:], b)
+	} else if len(b) != 0 {
 		return fmt.Errorf("wrong size for Deployer: %d", len(b))
 	}
-	tx.Deployer = &common.Address{}
-	copy((*tx.Deployer)[:], b)
 
 	if tx.DeployerData, err = s.Bytes(); err != nil {
 		return err
@@ -483,11 +485,13 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
-	if len(b) != 20 {
+
+	if len(b) == 20 {
+		tx.Paymaster = &common.Address{}
+		copy((*tx.Paymaster)[:], b)
+	} else if len(b) != 0 {
 		return fmt.Errorf("wrong size for Paymaster: %d", len(b))
 	}
-	tx.Paymaster = &common.Address{}
-	copy((*tx.Paymaster)[:], b)
 
 	if tx.PaymasterData, err = s.Bytes(); err != nil {
 		return err

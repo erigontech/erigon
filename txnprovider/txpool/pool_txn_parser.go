@@ -171,7 +171,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 		// For legacy transaction, the entire payload in expected to be in "rlp" field
 		// whereas for non-legacy, only the content of the envelope (start with position p)
-		slot.Rlp = payload[p-1 : dataPos+dataLen]
+		slot.Rlp = payload[0 : dataPos+dataLen]
 
 		if slot.Type == BlobTxnType && wrappedWithBlobs {
 			p = dataPos
@@ -346,7 +346,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	}
 
 	if slot.Type == AATxnType {
-		return parseTransactionBodyAA(payload, p, slot)
+		return parseTransactionBodyAA(payload, p, slot, sender)
 	}
 
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
@@ -670,7 +670,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	return p, nil
 }
 
-func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot) (int, error) {
+func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot, sender []byte) (int, error) {
 	p, err := rlp.ParseU256(payload, p, &slot.ChainID)
 	if err != nil {
 		return 0, fmt.Errorf("%w: chainID: %s", ErrParseTxn, err)
@@ -690,13 +690,16 @@ func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	slot.SenderAddress = &address
+	slot.SenderAddress = &common.Address{}
+	copy((slot.SenderAddress)[:], address[:])
+	copy(sender, address[:])
 
 	address, p, err = getAddress(payload, p, "deployerAddress")
 	if err != nil {
 		return 0, err
 	}
-	slot.Deployer = &address
+	slot.Deployer = &common.Address{}
+	copy((slot.Deployer)[:], address[:])
 
 	slot.DeployerData, p, err = getData(payload, p)
 	if err != nil {
@@ -707,7 +710,8 @@ func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	slot.Paymaster = &address
+	slot.Paymaster = &common.Address{}
+	copy((slot.Paymaster)[:], address[:])
 
 	slot.PaymasterData, p, err = getData(payload, p)
 	if err != nil {
