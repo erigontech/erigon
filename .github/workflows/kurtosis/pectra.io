@@ -12,6 +12,7 @@ network_params:
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
   churn_limit_quotient: 16
+  num_validator_keys_per_node: 64
 additional_services:
   - assertoor
 snooper_enabled: true
