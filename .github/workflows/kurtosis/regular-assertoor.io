@@ -5,8 +5,8 @@ participants_matrix:
   cl:
     - cl_type: lighthouse
       cl_image: sigp/lighthouse:v6.0.0
-    - cl_type: nimbus
-      cl_image: statusim/nimbus-eth2:multiarch-v24.11.0
+    - cl_type: prysm
+      cl_image: prysmaticlabs/prysm-beacon-chain:v5.3.2
 network_params:
   #electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
