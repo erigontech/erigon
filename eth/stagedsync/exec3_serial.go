@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
@@ -23,7 +22,6 @@ import (
 
 type serialExecutor struct {
 	txExecutor
-	applyWorker *exec3.Worker
 	// outputs
 	txCount         uint64
 	usedGas         uint64
@@ -48,10 +46,10 @@ func (se *serialExecutor) wait(ctx context.Context) error {
 }
 
 func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool) (kv.RwTx, time.Duration, error) {
-	return se.txExecutor.commit(ctx, execStage, tx, useExternalTx, se.resetTx)
+	return se.txExecutor.commit(ctx, execStage, tx, useExternalTx, se.resetWorkers)
 }
 
-func (se *serialExecutor) resetTx(ctx context.Context) (err error) {
+func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered) (err error) {
 
 	if se.applyTx != nil {
 		se.applyTx.Rollback()
@@ -63,8 +61,8 @@ func (se *serialExecutor) resetTx(ctx context.Context) (err error) {
 		return err
 	}
 
-	se.applyWorker.ResetTx(se.applyTx)
-	se.applyWorker.ResetState(se.rs, nil, nil, se.accumulator)
+	se.cfg.applyWorker.ResetTx(se.applyTx)
+	se.cfg.applyWorker.ResetState(rs, se.applyTx, nil, nil, se.accumulator)
 
 	return nil
 }
@@ -86,7 +84,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
 
-		result := se.applyWorker.RunTxTaskNoLock(txTask)
+		result := se.cfg.applyWorker.RunTxTaskNoLock(txTask)
 
 		if err := func() error {
 			if errors.Is(result.Err, context.Canceled) {

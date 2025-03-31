@@ -109,8 +109,13 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 
 func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
 
-func (rw *Worker) ResetState(rs *state.StateV3Buffered, stateReader state.ResettableStateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
+func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateReader state.ResettableStateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
+
 	rw.rs = rs
+
+	rw.resetTx(chainTx)
 
 	if stateReader != nil {
 		rw.SetReader(stateReader)
@@ -134,7 +139,10 @@ func (rw *Worker) DiscardReadList() { rw.stateReader.DiscardReadList() }
 func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
+	rw.resetTx(chainTx)
+}
 
+func (rw *Worker) resetTx(chainTx kv.Tx) {
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
 	}
@@ -235,8 +243,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 		rw.ibs.SetTxContext(txTask.Version().BlockNum, txIndex)
 	}
 
-	result := txTask.Execute(rw.evm, rw.vmCfg, rw.engine, rw.genesis, rw.taskGasPool, rw.rs, rw.ibs,
-		rw.stateWriter, rw.stateReader, rw.chainConfig, rw.chain, rw.dirs, true)
+	result := txTask.Execute(rw.evm, rw.vmCfg, rw.engine, rw.genesis, rw.taskGasPool, rw.ibs,
+		rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
 
 	if result.Task == nil {
 		result.Task = txTask
@@ -265,13 +273,15 @@ func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger lo
 		for i := 0; i < workerCount; i++ {
 			reconWorkers[i] = NewWorker(lock, logger, ctx, background, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs)
 
-			reader := stateReader
+			if rs != nil {
+				reader := stateReader
 
-			if reader == nil {
-				reader = state.NewBufferedReader(rs, state.NewReaderParallelV3(rs.Domains(), nil))
+				if reader == nil {
+					reader = state.NewBufferedReader(rs, state.NewReaderParallelV3(rs.Domains(), nil))
+				}
+
+				reconWorkers[i].ResetState(rs, nil, reader, stateWriter, accumulator)
 			}
-
-			reconWorkers[i].ResetState(rs, reader, stateWriter, accumulator)
 		}
 		if background {
 			for i := 0; i < workerCount; i++ {

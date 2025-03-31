@@ -438,17 +438,16 @@ func ExecV3(ctx context.Context,
 	if useExternalTx {
 		applyTx = txc.Tx
 	} else {
-		if !parallel {
-			var err error
-			applyTx, err = cfg.db.BeginRw(ctx) //nolint
-			if err != nil {
-				return err
-			}
-			defer func() { // need callback - because tx may be committed
-				applyTx.Rollback()
-			}()
+		var err error
+		applyTx, err = cfg.db.BeginRw(ctx) //nolint
+		if err != nil {
+			return err
 		}
+		defer func() { // need callback - because tx may be committed
+			applyTx.Rollback()
+		}()
 	}
+	
 	agg := cfg.db.(libstate.HasAgg).Agg().(*libstate.Aggregator)
 	if !inMemExec && !isMining {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
@@ -526,10 +525,7 @@ func ExecV3(ctx context.Context,
 	}
 	rs := state.NewStateV3Buffered(state.NewStateV3(doms, logger))
 
-	applyWorker := cfg.applyWorker
-	defer applyWorker.LogLRUStats()
-
-	applyWorker.ResetState(rs, nil, nil, accumulator)
+	defer cfg.applyWorker.LogLRUStats()
 
 	commitThreshold := cfg.batchSize.Bytes()
 
@@ -583,13 +579,12 @@ func ExecV3(ctx context.Context,
 				progress:                 NewProgress(blockNum, outputTxNum.Load(), commitThreshold, false, execStage.LogPrefix(), logger),
 				enableChaosMonkey:        execStage.CurrentSyncCycle.IsInitialCycle,
 			},
-			applyWorker: applyWorker,
 		}
 
 		executor = se
 	}
 
-	executor.resetTx(ctx)
+	executor.resetWorkers(ctx, rs)
 
 	defer func() {
 		executor.LogComplete(applyTx)
@@ -934,7 +929,7 @@ func ExecV3(ctx context.Context,
 								}
 								pe.doms.SetTrace(trace)
 								commitment.Captured = []string{}
-								rh, err := pe.doms.ComputeCommitment(ctx, applyWorker.Tx(), true, applyResult.BlockNum, pe.logPrefix)
+								rh, err := pe.doms.ComputeCommitment(ctx, applyTx, true, applyResult.BlockNum, pe.logPrefix)
 								pe.doms.SetTrace(false)
 								captured := commitment.Captured
 								commitment.Captured = nil

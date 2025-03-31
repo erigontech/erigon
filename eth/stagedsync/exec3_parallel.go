@@ -13,7 +13,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
@@ -89,7 +88,7 @@ type executor interface {
 	domains() *libstate.SharedDomains
 
 	commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool) (kv.RwTx, time.Duration, error)
-	resetTx(ctx context.Context) error
+	resetWorkers(ctx context.Context, rs *state.StateV3Buffered) error
 
 	LogExecuted(tx kv.Tx)
 	LogCommitted(tx kv.Tx, commitStart time.Time)
@@ -276,10 +275,8 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	engine consensus.Engine,
 	genesis *types.Genesis,
 	gasPool *core.GasPool,
-	rs *state.StateV3Buffered,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,
-	stateReader state.ResettableStateReader,
 	chainConfig *chain.Config,
 	chainReader consensus.ChainReader,
 	dirs datadir.Dirs,
@@ -308,8 +305,8 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		start = time.Now()
 	}
 
-	result = ev.execTask.Execute(evm, vmCfg, engine, genesis, gasPool, rs, ibs,
-		stateWriter, stateReader, chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
+	result = ev.execTask.Execute(evm, vmCfg, engine, genesis, gasPool, ibs,
+		stateWriter, chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
 	if result.Err != nil {
 		return result
@@ -528,10 +525,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 	return nil
 }
 
-func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool, resetTx func(ctx context.Context) error) (kv.RwTx, time.Duration, error) {
+func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool, resetWorkers func(ctx context.Context, rs *state.StateV3Buffered) error) (kv.RwTx, time.Duration, error) {
 	defer fmt.Println("done commit")
-	te.doms.ClearRam(true)
-	te.doms.Close()
 
 	err := execStage.Update(tx, te.lastCommittedBlockNum)
 
@@ -567,19 +562,19 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 		}
 	}
 
-	fmt.Println("doms")
+	doms, err := libstate.NewSharedDomains(tx, te.logger)
 
-	te.doms, err = state2.NewSharedDomains(tx, te.logger)
 	if err != nil {
 		tx.Rollback()
 		return nil, t2, err
 	}
-	te.doms.SetTxNum(te.lastCommittedTxNum)
-	te.rs = te.rs.WithDomains(te.doms)
+
+	doms.SetTxNum(te.lastCommittedTxNum)
+	rs := te.rs.WithDomains(doms)
 
 	fmt.Println("reset-tx")
 
-	err = resetTx(ctx)
+	err = resetWorkers(ctx, rs)
 
 	if err != nil {
 		if !useExternalTx {
@@ -588,6 +583,13 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 
 		return nil, t2, err
 	}
+
+	te.doms.ClearRam(true)
+	te.doms.Close()
+
+	te.rs = rs
+	te.doms = doms
+
 	return tx, t2, nil
 }
 
@@ -1031,12 +1033,12 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 
 type parallelExecutor struct {
 	txExecutor
-	execWorkers []*exec3.Worker
-	stopWorkers func()
-	waitWorkers func()
-	in          *exec.QueueWithRetry
-	rws         *exec.ResultsQueue
-	workerCount int
+	execWorkers    []*exec3.Worker
+	stopWorkers    func()
+	waitWorkers    func()
+	in             *exec.QueueWithRetry
+	rws            *exec.ResultsQueue
+	workerCount    int
 	blockExecutors map[uint64]*blockExecutor
 }
 
@@ -1053,15 +1055,17 @@ func (pe *parallelExecutor) LogComplete(tx kv.Tx) {
 }
 
 func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool) (kv.RwTx, time.Duration, error) {
-	return pe.txExecutor.commit(ctx, execStage, tx, useExternalTx, pe.resetTx)
+	return pe.txExecutor.commit(ctx, execStage, tx, useExternalTx, pe.resetWorkers)
 }
 
-func (pe *parallelExecutor) resetTx(ctx context.Context) error {
+func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered) error {
 	pe.Lock()
+	defer pe.Unlock()
+
 	pe.applyTx = nil
-	pe.Unlock()
+
 	for _, worker := range pe.execWorkers {
-		worker.ResetTx(nil)
+		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), pe.accumulator)
 	}
 
 	return nil
@@ -1342,7 +1346,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.in = exec.NewQueueWithRetry(100_000)
 
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
-		nil /*no shared lock*/, pe.accumulator, pe.logger, ctx, true, pe.cfg.db, pe.rs, nil, state.NewNoopWriter(), pe.in,
+		nil /*no shared lock*/, pe.accumulator, pe.logger, ctx, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.workerCount+1, pe.cfg.dirs, pe.isMining)
 
 	execLoopCtx, execLoopCtxCancel := context.WithCancel(ctx)
@@ -1351,7 +1355,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()
 		defer pe.in.Close()
-		pe.resetTx(execLoopCtx)
+		pe.resetWorkers(execLoopCtx, pe.rs)
 		return pe.execLoop(execLoopCtx)
 	})
 

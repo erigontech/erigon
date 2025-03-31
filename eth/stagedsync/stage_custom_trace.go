@@ -211,6 +211,9 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 						CumulativeGasUsed:        cumulativeGasUsed,
 						FirstLogIndexWithinBlock: firstLogIndex,
 					})
+					if err != nil {
+						return err
+					}
 					if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), receipt, cumulativeBlobGasUsedInBlock); err != nil {
 						return err
 					}
