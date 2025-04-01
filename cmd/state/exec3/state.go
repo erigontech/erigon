@@ -110,18 +110,22 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
 
 func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateReader state.ResettableStateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
+	fmt.Println("reset state")
+	defer fmt.Println("reset state done")
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 
+	fmt.Println("reset tx")
 	rw.rs = rs
 	rw.resetTx(chainTx)
+	fmt.Println("reader")
 
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
 		rw.SetReader(state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains(), rw.chainTx)))
 	}
-
+	fmt.Println("writer")
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
