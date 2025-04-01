@@ -140,8 +140,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	}
 
 	txnHash := txn.Hash()
-	mu := g.blockExecMutex.lock(txnHash)
-	defer g.blockExecMutex.unlock(mu, txnHash)
+	mu := g.txnExecMutex.lock(txnHash)
+	defer g.txnExecMutex.unlock(mu, txnHash)
 	if receipt, ok := g.receiptCache.Get(txnHash); ok {
 		return receipt, nil
 	}
