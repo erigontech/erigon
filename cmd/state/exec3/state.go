@@ -115,14 +115,11 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 
 	rw.rs = rs
 	rw.resetTx(chainTx)
+
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
-		if rw.background {
-			rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderParallelV3(rs.Domains(), rw.chainTx)))
-		} else {
-			rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rs.Domains(), rw.chainTx)))
-		}
+		rw.SetReader(state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains(), rw.chainTx)))
 	}
 
 	if stateWriter != nil {
@@ -148,28 +145,30 @@ func (rw *Worker) resetTx(chainTx kv.Tx) {
 		rw.chainTx.Rollback()
 	} else {
 		if chainTx != nil {
-			fmt.Println("reset nil", "->", chainTx.ViewID())
+			fmt.Printf("reset nil -> %p:%d\n", chainTx, chainTx.ViewID())
 		}
 	}
 
 	rw.chainTx = chainTx
 
-	type resettable interface {
-		SetTx(kv.Tx)
-	}
-
-	if resettable, ok := rw.stateReader.(resettable); ok {
-		resettable.SetTx(rw.chainTx)
-	}
-
-	if resettable, ok := rw.stateWriter.(resettable); ok {
-		resettable.SetTx(rw.chainTx)
-	}
-
 	if rw.chainTx != nil {
+		type resettable interface {
+			SetTx(kv.Tx)
+		}
+
+		if resettable, ok := rw.stateReader.(resettable); ok {
+			resettable.SetTx(rw.chainTx)
+		}
+
+		if resettable, ok := rw.stateWriter.(resettable); ok {
+			resettable.SetTx(rw.chainTx)
+		}
+
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	} else {
 		rw.chain = nil
+		rw.stateReader = nil
+		rw.stateWriter = nil
 	}
 }
 
@@ -220,20 +219,20 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 		// Needed to correctly evaluate spent gas and other things.
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.IsHistoric() && rw.historyMode {
-		if rw.background {
-			rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderParallelV3(rw.rs.Domains(), rw.chainTx)))
-		} else {
-			rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains(), rw.chainTx)))
-		}
+		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains(), rw.chainTx)))
 	}
 
 	if rw.background && rw.chainTx == nil {
-		var err error
-		if rw.chainTx, err = rw.chainDb.(kv.TemporalRoDB).BeginTemporalRo(rw.ctx); err != nil {
-			panic(err)
+		chainTx, err := rw.chainDb.(kv.TemporalRoDB).BeginTemporalRo(rw.ctx)
+
+		if err != nil {
+			return &exec.Result{
+				Task: txTask,
+				Err:  err,
+			}
 		}
-		rw.stateReader.SetTx(rw.chainTx)
-		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
+
+		rw.resetTx(chainTx)
 	}
 
 	txIndex := txTask.Version().TxIndex
@@ -282,7 +281,7 @@ func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger lo
 				reader := stateReader
 
 				if reader == nil {
-					reader = state.NewBufferedReader(rs, state.NewReaderParallelV3(rs.Domains(), nil))
+					reader = state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains(), nil))
 				}
 
 				reconWorkers[i].ResetState(rs, nil, reader, stateWriter, accumulator)

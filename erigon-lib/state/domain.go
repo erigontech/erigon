@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -654,7 +655,7 @@ type DomainRoTx struct {
 
 	comBuf []byte
 
-	valsCs map[uint64]kv.Cursor
+	valsCs map[kv.Tx]kv.Cursor
 
 	getFromFileCache *DomainGetFromFileCache
 }
@@ -709,13 +710,16 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 		}
 	}
 
-	return &DomainRoTx{
+	dt := &DomainRoTx{
 		name:    d.name,
 		d:       d,
 		ht:      d.History.BeginFilesRo(),
 		visible: d._visible,
 		files:   d._visible.files,
 	}
+	_, f, l, _ := runtime.Caller(4)
+	fmt.Printf("%s:%p, caller %s:%d\n", d.name, dt, filepath.Base(f), l)
+	return dt
 }
 
 // Collation is the set of compressors created after aggregation
@@ -1664,7 +1668,7 @@ func (dt *DomainRoTx) closeValsCursor() {
 
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	dt.readerMutex.RLock()
-	c = dt.valsCs[tx.ViewID()]
+	c = dt.valsCs[tx]
 	dt.readerMutex.RUnlock()
 
 	if c != nil {
@@ -1675,9 +1679,9 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	defer dt.readerMutex.Unlock()
 
 	if dt.valsCs == nil {
-		dt.valsCs = map[uint64]kv.Cursor{}
+		dt.valsCs = map[kv.Tx]kv.Cursor{}
 	} else {
-		if c = dt.valsCs[tx.ViewID()]; c != nil {
+		if c = dt.valsCs[tx]; c != nil {
 			return c, nil
 		}
 	}
@@ -1685,16 +1689,16 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if dt.d.largeValues {
 		c, err = tx.Cursor(dt.d.valuesTable)
 		if err == nil {
-			fmt.Println("added cursor", tx.ViewID())
-			dt.valsCs[tx.ViewID()] = c
+			dt.valsCs[tx] = c
+			fmt.Printf("%s:%p: added cursor %p:%d (%d)\n", dt.name, dt, tx, tx.ViewID(), len(dt.valsCs))
 		}
 		return c, err
 
 	}
 	c, err = tx.CursorDupSort(dt.d.valuesTable)
 	if err == nil {
-		fmt.Println("added cursor", tx.ViewID())
-		dt.valsCs[tx.ViewID()] = c
+		dt.valsCs[tx] = c
+		fmt.Printf("%s:%p: added cursor %p:%d (%d)\n", dt.name, dt, tx, tx.ViewID(), len(dt.valsCs))
 	}
 	return c, err
 }
@@ -1731,7 +1735,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 		_, stepWithVal, err := func() (_ []byte, _ []byte, err error) {
 			defer func() {
 				if rec := recover(); rec != nil {
-					fmt.Println("seek failed for:", roTx.ViewID(), "reason", rec, "stack", dbg.Stack())
+					fmt.Println(fmt.Sprintf("%p: seek failed for: %d", dt, roTx.ViewID()), "reason", rec, "stack", dbg.Stack())
 					err = fmt.Errorf("paniced ")
 				}
 			}()

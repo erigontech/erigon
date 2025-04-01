@@ -18,7 +18,6 @@ package state
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"sync"
 	"time"
@@ -696,83 +695,6 @@ func (r *ReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error
 	return 0, nil
 }
 
-type ReaderParallelV3 struct {
-	ReaderV3
-	discardReadList bool
-	readLists       map[string]*state.KvList
-}
-
-func NewReaderParallelV3(sd *state.SharedDomains, tx kv.Tx) *ReaderParallelV3 {
-	return &ReaderParallelV3{
-		//trace:     true,
-		ReaderV3:  ReaderV3{sd: sd, tx: tx},
-		readLists: newReadList(),
-	}
-}
-
-func (r *ReaderParallelV3) DiscardReadList() { r.discardReadList = true }
-
-func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, acc, err := r.ReaderV3.readAccountData(address)
-	if err != nil {
-		return nil, err
-	}
-	if !r.discardReadList {
-		// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
-		r.readLists[kv.AccountsDomain.String()].Push(string(address[:]), enc)
-	}
-
-	return acc, nil
-}
-
-// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
-// Used to get `prev` account balance
-func (r *ReaderParallelV3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
-	return r.ReaderV3.ReadAccountDataForDebug(address)
-}
-
-func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, incarnation uint64, key common.Hash) (uint256.Int, bool, error) {
-	enc, ok, err := r.ReaderV3.ReadAccountStorage(address, incarnation, key)
-	if err != nil {
-		return uint256.Int{}, false, err
-	}
-	if ok && !r.discardReadList {
-		var composite [20 + 32]byte
-		copy(composite[0:20], address[0:20])
-		copy(composite[20:], key[:])
-		r.readLists[kv.StorageDomain.String()].Push(string(composite[:]), enc.Bytes())
-	}
-
-	return enc, ok, nil
-}
-
-func (r *ReaderParallelV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
-	enc, err := r.ReaderV3.ReadAccountCode(address, incarnation)
-	if err != nil {
-		return nil, err
-	}
-
-	if !r.discardReadList {
-		r.readLists[kv.CodeDomain.String()].Push(string(address[:]), enc)
-	}
-
-	return enc, nil
-}
-
-func (r *ReaderParallelV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
-	size, err := r.ReaderV3.ReadAccountCodeSize(address, incarnation)
-	if err != nil {
-		return 0, err
-	}
-	if !r.discardReadList {
-		var sizebuf [8]byte
-		binary.BigEndian.PutUint64(sizebuf[:], uint64(size))
-		r.readLists[state.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
-	}
-
-	return size, nil
-}
-
 type bufferedReader struct {
 	reader        ResettableStateReader
 	bufferedState *StateV3Buffered
@@ -783,7 +705,7 @@ func NewBufferedReader(bufferedState *StateV3Buffered, reader ResettableStateRea
 }
 
 func (r *bufferedReader) SetTrace(trace bool) {
-	r.reader.(*ReaderParallelV3).trace = trace
+	r.reader.(*ReaderV3).trace = trace
 }
 
 func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
@@ -796,7 +718,7 @@ func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Acco
 	r.bufferedState.accountsMutex.RUnlock()
 
 	if data != nil {
-		if reader, ok := r.reader.(*ReaderParallelV3); ok && reader.trace {
+		if reader, ok := r.reader.(*ReaderV3); ok && reader.trace {
 			fmt.Printf("ReadAccountData (buf) [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, data.Nonce, &data.Balance, data.CodeHash, reader.txNum)
 		}
 
