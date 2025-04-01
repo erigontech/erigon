@@ -1586,18 +1586,19 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	var upCell *cell
 	var nibble, upDepth int
 	row := hph.activeRows - 1
+	upRow := row - 1
 	if row == 0 {
 		if hph.trace {
 			fmt.Printf("fold: parent is root %s\n", hph.root.FullString())
 		}
 		upCell = &hph.root
 	} else {
-		upDepth = hph.depths[hph.activeRows-2]
+		upDepth = hph.depths[upRow]
 		nibble = int(hph.currentKey[upDepth-1])
 		if hph.trace {
-			fmt.Printf("fold: parent (%d, %x, depth=%d)\n", row-1, nibble, upDepth)
+			fmt.Printf("fold: parent (%d, %x, depth=%d)\n", upRow, nibble, upDepth)
 		}
-		upCell = &hph.grid[row-1][nibble]
+		upCell = &hph.grid[upRow][nibble]
 	}
 
 	depth := hph.depths[row]
