@@ -142,6 +142,7 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 
 func (rw *Worker) resetTx(chainTx kv.Tx) {
 	if rw.background && rw.chainTx != nil {
+		fmt.Println("reset", rw.chainTx.ViewID(), "->", chainTx.ViewID())
 		rw.chainTx.Rollback()
 	}
 	rw.chainTx = chainTx

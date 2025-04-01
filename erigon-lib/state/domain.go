@@ -1728,11 +1728,11 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 		v = val
 		foundStep = ^binary.BigEndian.Uint64(fullkey[len(fullkey)-8:])
 	} else {
-		_, stepWithVal, err := func() ([]byte, []byte, error) {
+		_, stepWithVal, err := func() (_ []byte, _ []byte, err error) {
 			defer func() {
 				if rec := recover(); rec != nil {
 					fmt.Println("seek failed for:", roTx.ViewID(), "reason", rec, "stack", dbg.Stack())
-					panic(rec)
+					err = fmt.Errorf("paniced ")
 				}
 			}()
 			return valsC.SeekExact(key)
