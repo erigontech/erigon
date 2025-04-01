@@ -12,13 +12,13 @@ import (
 
 // this is supposed to register domains/iis
 
-func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	salt, err := getStateIndicesSalt(dirs.Snap)
 	if err != nil {
 		return nil, err
 	}
 
-	a, err := NewAggregator(ctx, dirs, aggregationStep, db, logger)
+	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -37,16 +37,16 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogAddrIdx, salt, dirs, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
+	if err := a.registerII(kv.LogAddrIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogTopicIdx, salt, dirs, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger); err != nil {
+	if err := a.registerII(kv.LogTopicIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesFromIdx, salt, dirs, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger); err != nil {
+	if err := a.registerII(kv.TracesFromIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesToIdx, salt, dirs, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
+	if err := a.registerII(kv.TracesToIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
@@ -180,5 +180,32 @@ var Schema = map[kv.Domain]domainCfg{
 				filenameBase: kv.ReceiptDomain.String(),
 			},
 		},
+	},
+}
+
+var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
+	kv.LogAddrIdx: {
+		filenameBase: kv.FileLogAddressIdx, keysTable: kv.TblLogAddressKeys, valuesTable: kv.TblLogAddressIdx,
+
+		compression: seg.CompressNone,
+		name:        kv.LogAddrIdx,
+	},
+	kv.LogTopicIdx: {
+		filenameBase: kv.FileLogTopicsIdx, keysTable: kv.TblLogTopicsKeys, valuesTable: kv.TblLogTopicsIdx,
+
+		compression: seg.CompressNone,
+		name:        kv.LogTopicIdx,
+	},
+	kv.TracesFromIdx: {
+		filenameBase: kv.FileTracesFromIdx, keysTable: kv.TblTracesFromKeys, valuesTable: kv.TblTracesFromIdx,
+
+		compression: seg.CompressNone,
+		name:        kv.TracesFromIdx,
+	},
+	kv.TracesToIdx: {
+		filenameBase: kv.FileTracesToIdx, keysTable: kv.TblTracesToKeys, valuesTable: kv.TblTracesToIdx,
+
+		compression: seg.CompressNone,
+		name:        kv.TracesToIdx,
 	},
 }

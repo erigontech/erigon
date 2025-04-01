@@ -44,6 +44,7 @@ const (
 	DynamicFeeTxnType byte = 2 // EIP-1559
 	BlobTxnType       byte = 3 // EIP-4844
 	SetCodeTxnType    byte = 4 // EIP-7702
+	AATxnType         byte = 5 // RIP-7560
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -154,10 +155,13 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// If it is non-legacy transaction, the transaction type follows, and then the list
 	if !legacy {
 		slot.Type = payload[p]
-		if slot.Type > SetCodeTxnType {
+		if slot.Type > AATxnType {
 			return 0, fmt.Errorf("%w: unknown transaction type: %d", ErrParseTxn, slot.Type)
 		}
 		p++
+		if slot.Type == AATxnType {
+			p++ // this byte is for the subtype, however we can't receive the batch header over P2P so we can skip it
+		}
 		if p >= len(payload) {
 			return 0, fmt.Errorf("%w: unexpected end of payload after txnType", ErrParseTxn)
 		}
@@ -341,12 +345,16 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		}
 	}
 
+	if slot.Type == AATxnType {
+		return parseTransactionBodyAA(payload, p, slot)
+	}
+
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
 	sigHashPos := p
 	if !legacy {
 		p, err = rlp.ParseU256(payload, p, &ctx.ChainID)
 		if err != nil {
-			return 0, fmt.Errorf("%w: chainId len: %s", ErrParseTxn, err) //nolint
+			return 0, fmt.Errorf("%w: chainID len: %s", ErrParseTxn, err) //nolint
 		}
 		if ctx.ChainID.IsZero() { // zero indicates that the chain ID was not specified in the tx.
 			if ctx.chainIDRequired {
@@ -357,6 +365,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		if !ctx.ChainID.Eq(&ctx.cfg.ChainID) {
 			return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.ChainID.Uint64(), ctx.cfg.ChainID.Uint64())
 		}
+		slot.ChainID = ctx.ChainID
 	}
 	// Next follows the nonce, which we need to parse
 	p, slot.Nonce, err = rlp.ParseU64(payload, p)
@@ -400,12 +409,13 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	if err != nil {
 		return 0, fmt.Errorf("%w: value: %s", ErrParseTxn, err) //nolint
 	}
-	// Next goes data, but we are only interested in its length
+	// Next goes data
 	dataPos, dataLen, err = rlp.ParseString(payload, p)
 	if err != nil {
 		return 0, fmt.Errorf("%w: data len: %s", ErrParseTxn, err) //nolint
 	}
 	slot.DataLen = dataLen
+	slot.ExecutionData = payload[p : dataPos+dataLen]
 
 	// Zero and non-zero bytes are priced differently
 	slot.DataNonZeroLen = 0
@@ -658,6 +668,127 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	copy(sender, ctx.buf[12:32])
 
 	return p, nil
+}
+
+func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot) (int, error) {
+	p, err := rlp.ParseU256(payload, p, &slot.ChainID)
+	if err != nil {
+		return 0, fmt.Errorf("%w: chainID: %s", ErrParseTxn, err)
+	}
+
+	p, err = rlp.ParseU256(payload, p, &slot.NonceKey)
+	if err != nil {
+		return 0, fmt.Errorf("%w: nonceKey: %s", ErrParseTxn, err)
+	}
+
+	p, slot.Nonce, err = rlp.ParseU64(payload, p)
+	if err != nil {
+		return 0, fmt.Errorf("%w: chainID: %s", ErrParseTxn, err)
+	}
+
+	address, p, err := getAddress(payload, p, "senderAddress")
+	if err != nil {
+		return 0, err
+	}
+	slot.SenderAddress = &address
+
+	address, p, err = getAddress(payload, p, "deployerAddress")
+	if err != nil {
+		return 0, err
+	}
+	slot.Deployer = &address
+
+	slot.DeployerData, p, err = getData(payload, p)
+	if err != nil {
+		return 0, err
+	}
+
+	address, p, err = getAddress(payload, p, "paymasterAddress")
+	if err != nil {
+		return 0, err
+	}
+	slot.Paymaster = &address
+
+	slot.PaymasterData, p, err = getData(payload, p)
+	if err != nil {
+		return 0, err
+	}
+
+	slot.ExecutionData, p, err = getData(payload, p)
+	if err != nil {
+		return 0, err
+	}
+
+	p, err = rlp.ParseU256(payload, p, &slot.BuilderFee)
+	if err != nil {
+		return 0, fmt.Errorf("%w: builderFee: %s", ErrParseTxn, err)
+	}
+
+	p, err = rlp.ParseU256(payload, p, &slot.Tip)
+	if err != nil {
+		return 0, fmt.Errorf("%w: tip: %s", ErrParseTxn, err) //nolint
+	}
+
+	p, err = rlp.ParseU256(payload, p, &slot.FeeCap)
+	if err != nil {
+		return 0, fmt.Errorf("%w: feeCap: %s", ErrParseTxn, err) //nolint
+	}
+
+	p, slot.ValidationGasLimit, err = rlp.ParseU64(payload, p)
+	if err != nil {
+		return 0, fmt.Errorf("%w: validationGasLimit: %s", ErrParseTxn, err)
+	}
+
+	p, slot.PaymasterValidationGasLimit, err = rlp.ParseU64(payload, p)
+	if err != nil {
+		return 0, fmt.Errorf("%w: paymasterValidationGasLimit: %s", ErrParseTxn, err)
+	}
+
+	p, slot.PostOpGasLimit, err = rlp.ParseU64(payload, p)
+	if err != nil {
+		return 0, fmt.Errorf("%w: postOpGasLimit: %s", ErrParseTxn, err)
+	}
+
+	p, slot.Gas, err = rlp.ParseU64(payload, p)
+	if err != nil {
+		return 0, fmt.Errorf("%w: postOpGasLimit: %s", ErrParseTxn, err)
+	}
+
+	var execData []byte
+	execData = append(execData, slot.DeployerData...)
+	execData = append(execData, slot.PaymasterData...)
+	execData = append(execData, slot.ExecutionData...)
+	slot.DataLen = len(execData)
+
+	nonZeroDataLen := 0
+	for b := range execData {
+		if b != 0 {
+			nonZeroDataLen++
+		}
+	}
+	slot.DataNonZeroLen = nonZeroDataLen
+
+	return p, nil
+}
+
+func getAddress(payload []byte, p int, name string) (common.Address, int, error) {
+	dataPos, dataLen, err := rlp.ParseString(payload, p)
+	if err != nil {
+		return common.Address{}, 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err) //nolint
+	}
+	if dataLen != 0 && dataLen != length.Addr {
+		return common.Address{}, 0, fmt.Errorf("%w: unexpected length of '%s' field: %d", ErrParseTxn, name, dataLen)
+	}
+
+	return common.BytesToAddress(payload[dataPos : dataPos+dataLen]), dataPos + dataLen, nil
+}
+
+func getData(payload []byte, p int) ([]byte, int, error) {
+	dataPos, dataLen, err := rlp.ParseString(payload, p)
+	if err != nil {
+		return nil, 0, fmt.Errorf("%w: data len: %s", ErrParseTxn, err) //nolint
+	}
+	return payload[dataPos : dataPos+dataLen], dataPos + dataLen, nil
 }
 
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
