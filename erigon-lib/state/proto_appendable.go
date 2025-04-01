@@ -139,54 +139,6 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 	return dirtyFiles, nil
 }
 
-func (a *ProtoAppendable) OpenFolder() error {
-	aps, err := filesFromDir(a.a.SnapshotDir())
-	if err != nil {
-		return err
-	}
-
-	a.closeWhatNotInList(aps)
-	a.scanDirtyFiles(aps)
-
-	return nil
-}
-
-func (a *ProtoAppendable) scanDirtyFiles(aps []string) (res []*filesItem) {
-	cfg := a.a.SnapshotConfig()
-	for _, ap := range aps {
-		fileInfo, ok := a.parser.Parse(ap)
-		if !ok {
-			a.logger.Trace("can't parse file name", "file", ap)
-			continue
-		}
-		res = append(res, newFilesItemWithSnapConfig(fileInfo.From, fileInfo.To, cfg))
-	}
-	return res
-}
-
-func (a *ProtoAppendable) closeWhatNotInList(fNames []string) {
-	protectFiles := make(map[string]struct{}, len(fNames))
-	for _, f := range fNames {
-		protectFiles[f] = struct{}{}
-	}
-	var toClose []*filesItem
-	a.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.decompressor != nil {
-				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
-					continue
-				}
-			}
-			toClose = append(toClose, item)
-		}
-		return true
-	})
-	for _, item := range toClose {
-		item.closeFiles()
-		a.dirtyFiles.Delete(item)
-	}
-}
-
 func (a *ProtoAppendable) Close() {
 	var toClose []*filesItem
 	a.dirtyFiles.Walk(func(items []*filesItem) bool {
