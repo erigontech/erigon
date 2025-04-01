@@ -1066,6 +1066,7 @@ func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, t
 func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered) error {
 	pe.Lock()
 	defer pe.Unlock()
+
 	pe.applyTx = nil
 
 	for _, worker := range pe.execWorkers {

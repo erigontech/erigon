@@ -177,7 +177,6 @@ func (rw *Worker) Run() (err error) {
 	}()
 
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
-		//fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
 		result := rw.RunTxTask(txTask)
 		if err := rw.resultCh.Add(rw.ctx, result); err != nil {
 			return err
@@ -187,6 +186,8 @@ func (rw *Worker) Run() (err error) {
 }
 
 func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
+	fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
+	defer fmt.Println("RTX Done")
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	return rw.RunTxTaskNoLock(txTask)
