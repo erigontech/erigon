@@ -1685,6 +1685,7 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if dt.d.largeValues {
 		c, err = tx.Cursor(dt.d.valuesTable)
 		if err == nil {
+			fmt.Println("added cursor", tx.ViewID())
 			dt.valsCs[tx.ViewID()] = c
 		}
 		return c, err
@@ -1692,6 +1693,7 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	}
 	c, err = tx.CursorDupSort(dt.d.valuesTable)
 	if err == nil {
+		fmt.Println("added cursor", tx.ViewID())
 		dt.valsCs[tx.ViewID()] = c
 	}
 	return c, err
@@ -1726,7 +1728,15 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 		v = val
 		foundStep = ^binary.BigEndian.Uint64(fullkey[len(fullkey)-8:])
 	} else {
-		_, stepWithVal, err := valsC.SeekExact(key)
+		_, stepWithVal, err := func() ([]byte, []byte, error) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					fmt.Println("seek failed for:", roTx.ViewID(), "reason", rec, "stack", dbg.Stack())
+					panic(rec)
+				}
+			}()
+			return valsC.SeekExact(key)
+		}()
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.SeekExact: %w", err)
 		}
