@@ -1003,11 +1003,15 @@ func ExecV3(ctx context.Context,
 						fmt.Println("commiting")
 						var t2 time.Duration
 						commitStart := time.Now()
+						pe.pause()
+						for len(asyncTxChan) > 0 {
+							(<-asyncTxChan).Apply()
+						}
 						applyTx, t2, err = pe.commit(ctx, execStage, applyTx, useExternalTx)
 						if err != nil {
 							return err
 						}
-
+						pe.resume()
 						logger.Info("Committed", "time", time.Since(commitStart), "commit", t2)
 					}
 				}

@@ -1056,6 +1056,18 @@ func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, t
 	return pe.txExecutor.commit(ctx, execStage, tx, useExternalTx, pe.resetWorkers)
 }
 
+func (pe *parallelExecutor) pause() {
+	for _, worker := range pe.execWorkers {
+		worker.Pause()
+	}
+}
+
+func (pe *parallelExecutor) resume() {
+	for _, worker := range pe.execWorkers {
+		worker.Pause()
+	}
+}
+
 func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered) error {
 	fmt.Println("resetting")
 	defer fmt.Println("resetting done")
@@ -1343,7 +1355,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.in = exec.NewQueueWithRetry(100_000)
 
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
-		nil /*no shared lock*/, pe.accumulator, pe.logger, ctx, true, pe.cfg.db, nil, nil, nil, pe.in,
+		pe.accumulator, pe.logger, ctx, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.workerCount+1, pe.cfg.dirs, pe.isMining)
 
 	execLoopCtx, execLoopCtxCancel := context.WithCancel(ctx)
