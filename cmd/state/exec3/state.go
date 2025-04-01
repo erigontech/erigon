@@ -294,7 +294,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 
 			if txTask.InBatch {
-				break // this is an AA transaction that should have already been executed at header
+				break // this is a batched AA transaction that should have already been executed at the batch header
 			}
 
 			startIdx := uint64(txTask.TxIndex)
