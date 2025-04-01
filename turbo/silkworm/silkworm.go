@@ -152,3 +152,30 @@ func ExecuteTx(s *Silkworm, txn kv.Tx, txTask *state.TxTask) error {
 
 	return err
 }
+
+func BlockExecStart(s *Silkworm, txn kv.Tx, txTask *state.TxTask) error {
+	var txnHandle unsafe.Pointer
+	if txn != nil {
+		txnHandle = txn.CHandle()
+	}
+
+	err := s.BlockExecStart(txnHandle, txTask.BlockNum, silkworm_go.Hash(txTask.BlockHash))
+
+	return err
+}
+
+func BlockExecEnd(s *Silkworm, txn kv.Tx, memDbTxn kv.Tx) error {
+	var txnHandle unsafe.Pointer
+	if txn != nil {
+		txnHandle = txn.CHandle()
+	}
+
+	var memDbTxnHandle unsafe.Pointer
+	if memDbTxn != nil {
+		memDbTxnHandle = memDbTxn.CHandle()
+	}
+
+	err := s.BlockExecEnd(txnHandle, memDbTxnHandle)
+
+	return err
+}

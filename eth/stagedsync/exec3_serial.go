@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"os"
 	"time"
 
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
@@ -35,12 +39,25 @@ func (se *serialExecutor) status(ctx context.Context, commitThreshold uint64) er
 }
 
 func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (cont bool, err error) {
+	var silkwormMemTx kv.RwTx
+
+	if se.cfg.silkworm != nil {
+		tmpDB := mdbx.New(kv.TemporaryDB, se.logger).InMem(os.TempDir()).GrowthStep(4 * datasize.MB).MapSize(8 * datasize.MB).MustOpen()
+		var err error
+		silkwormMemTx, err = tmpDB.BeginRw(ctx) // nolint:gocritic
+		if err != nil {
+			panic(err)
+		}
+		defer tmpDB.Close()
+		defer silkwormMemTx.Rollback()
+	}
+
 	for _, txTask := range tasks {
 		if txTask.Error != nil {
 			return false, nil
 		}
 
-		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.skipPostEvaluation, se.cfg.silkworm, se.applyTx)
+		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.skipPostEvaluation, se.cfg.silkworm, se.applyTx, silkwormMemTx)
 		if err := func() error {
 			if errors.Is(txTask.Error, context.Canceled) {
 				return txTask.Error
@@ -58,6 +75,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			//TODO: JG add receipts from silkworm
 			if se.cfg.silkworm == nil {
 				txTask.CreateReceipt(se.applyTx)
+			} else {
+				// TODO: pull silkworm receipts from memDb
 			}
 
 			if txTask.Final {
