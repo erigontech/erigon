@@ -21,14 +21,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -137,6 +135,8 @@ func StageExecuteBlocksCfg(
 }
 
 // ================ Erigon3 ================
+var mdaz int64
+var totalExecV3Time int64
 
 func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger, isMining bool) (err error) {
 	workersCount := cfg.syncCfg.ExecWorkerCount
@@ -158,13 +158,11 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 	}
 
 	parallel := txc.Tx == nil
-	start := time.Now()
+
 	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, initialCycle, isMining); err != nil {
 		return err
 	}
-	fmt.Println("shota time ExecV3", time.Since(start).Milliseconds())
-	fmt.Println("shota time spent in traverse", atomic.LoadInt64(&commitment.TimeSpentInTraverse)/1000)
-	fmt.Println("shota time spent in others", atomic.LoadInt64(&commitment.TimeSpentInOtherProcessing)/1000)
+
 	return nil
 }
 

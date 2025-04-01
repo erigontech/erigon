@@ -719,6 +719,7 @@ func (sd *SharedDomains) SetTrace(b bool) {
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
+	fmt.Println("shota computing commitment")
 	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
 	return
 }
@@ -1233,9 +1234,11 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.justRestored.Store(false)
 
 	if saveState {
+		s := time.Now()
 		if err := sdc.storeCommitmentState(blockNum, rootHash); err != nil {
 			return nil, err
 		}
+		fmt.Println("shota store state", time.Since(s).Microseconds())
 	}
 
 	return rootHash, err

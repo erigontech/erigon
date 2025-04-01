@@ -39,8 +39,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 		if txTask.Error != nil {
 			return false, nil
 		}
-
+		// fmt.Println("shota executor changes 0", se.domains().GetCommitmentContext().KeysCount())
 		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.skipPostEvaluation)
+		// fmt.Println("shota executor changes 1", se.domains().GetCommitmentContext().KeysCount())
 		if err := func() error {
 			if errors.Is(txTask.Error, context.Canceled) {
 				return txTask.Error
@@ -59,7 +60,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			}
 
 			txTask.CreateReceipt(se.applyTx)
-
 			if txTask.Final {
 				if !se.isMining && !se.inMemExec && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
 					// note this assumes the bloach reciepts is a fixed array shared by
@@ -111,7 +111,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			}
 			return false, nil
 		}
-
 		if !txTask.Final {
 			var receipt *types.Receipt
 			if txTask.TxIndex >= 0 {
@@ -136,7 +135,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 				}
 			}
 		}
-
 		// MA applystate
 		if err := se.rs.ApplyState4(ctx, txTask); err != nil {
 			return false, err

@@ -749,11 +749,11 @@ func (hph *HexPatriciaHashedReader) fold() (err error) {
 			}
 			hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
 			/* end of memoization */
-			ch, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
-			if err != nil {
-				return fmt.Errorf("failed to compute cell hash: %w", err)
-			}
-			_ = ch
+			// ch, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
+			// if err != nil {
+			// 	return fmt.Errorf("failed to compute cell hash: %w", err)
+			// }
+			// _ = ch
 
 			// totalBranchLen += hph.computeCellHashLen(cell, depth)
 			bitset ^= bit

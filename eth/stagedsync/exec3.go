@@ -200,6 +200,10 @@ func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum 
 
 var ToTalCommitment int64
 
+var bz int64
+
+var totalbz int64
+
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer,
 	parallel bool, //nolint
@@ -462,6 +466,7 @@ Loop:
 			start := time.Now()
 			executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
 			// First compute and commit the progress done so far
+			fmt.Println("shota compute 2")
 			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
@@ -581,7 +586,6 @@ Loop:
 			stageProgress = blockNum
 			inputTxNum++
 		}
-
 		if parallel {
 			if _, err := executor.execute(ctx, txTasks); err != nil {
 				return err
@@ -615,12 +619,17 @@ Loop:
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
+			fmt.Println("shota executor changes", executor.domains().GetCommitmentContext().KeysCount())
 
 			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix())
 			if err != nil {
 				return err
 			}
-			fmt.Println("shota ComputeCommitment total", atomic.AddInt64(&ToTalCommitment, time.Since(start).Milliseconds()))
+			m := time.Since(start).Microseconds()
+			totalbz += m
+			bz++
+			fmt.Println("shota average ComputeCommitment total", (totalbz/bz)/1000)
+			fmt.Println("shota ComputeCommitment total", m)
 
 			//if !bytes.Equal(rh, header.Root.Bytes()) {
 			//	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
