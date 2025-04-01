@@ -183,6 +183,16 @@ func limitValue(values url.Values, def int64) (int64, error) {
 		return 0, fmt.Errorf("limit %s is not a int64 number: %v", limitStr, err)
 	}
 
+	const MaxLimit = 1000000
+
+	if limit < 0 {
+		return 0, fmt.Errorf("limit %d must be non-negative", limit)
+	}
+
+	if limit > MaxLimit {
+		limit = MaxLimit
+	}
+
 	return limit, nil
 }
 
