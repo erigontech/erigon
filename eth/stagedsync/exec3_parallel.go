@@ -1065,11 +1065,10 @@ func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, t
 
 func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered) error {
 	pe.Lock()
+	defer pe.Unlock()
 	pe.applyTx = nil
-	workers := append(make([]*exec3.Worker, 0, len(pe.execWorkers)), pe.execWorkers...)
-	pe.Unlock()
 
-	for _, worker := range workers {
+	for _, worker := range pe.execWorkers {
 		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), pe.accumulator)
 	}
 
