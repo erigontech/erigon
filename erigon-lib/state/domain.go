@@ -654,7 +654,7 @@ type DomainRoTx struct {
 
 	comBuf []byte
 
-	valsCs map[kv.Tx]kv.Cursor
+	valsCs map[uint64]kv.Cursor
 
 	getFromFileCache *DomainGetFromFileCache
 }
@@ -1664,7 +1664,7 @@ func (dt *DomainRoTx) closeValsCursor() {
 
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	dt.readerMutex.RLock()
-	c = dt.valsCs[tx]
+	c = dt.valsCs[tx.ViewID()]
 	dt.readerMutex.RUnlock()
 
 	if c != nil {
@@ -1675,24 +1675,24 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	defer dt.readerMutex.Unlock()
 
 	if dt.valsCs == nil {
-		dt.valsCs = map[kv.Tx]kv.Cursor{}
+		dt.valsCs = map[uint64]kv.Cursor{}
 	} else {
-		if c = dt.valsCs[tx]; c != nil {
+		if c = dt.valsCs[tx.ViewID()]; c != nil {
 			return c, nil
 		}
 	}
 
 	if dt.d.largeValues {
 		c, err = tx.Cursor(dt.d.valuesTable)
-		if err != nil {
-			dt.valsCs[tx] = c
+		if err == nil {
+			dt.valsCs[tx.ViewID()] = c
 		}
 		return c, err
 
 	}
 	c, err = tx.CursorDupSort(dt.d.valuesTable)
-	if err != nil {
-		dt.valsCs[tx] = c
+	if err == nil {
+		dt.valsCs[tx.ViewID()] = c
 	}
 	return c, err
 }
