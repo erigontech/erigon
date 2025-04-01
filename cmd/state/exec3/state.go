@@ -293,18 +293,17 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				break
 			}
 
-			batchHeaderTxn, ok := txTask.Tx.(*types.AccountAbstractionBatchHeaderTransaction)
-			if !ok {
-				break // this is an AA transaction that should have already been executed at batch header
+			if txTask.InBatch {
+				break // this is an AA transaction that should have already been executed at header
 			}
 
-			startIdx := uint64(txTask.TxIndex + 1)
-			endIdx := startIdx + batchHeaderTxn.TransactionCount
+			startIdx := uint64(txTask.TxIndex)
+			endIdx := startIdx + txTask.AAValidationBatchSize
 
-			validationResults := make([]validationResult, batchHeaderTxn.TransactionCount)
+			validationResults := make([]validationResult, txTask.AAValidationBatchSize)
 
 			var outerErr error
-			for i := startIdx; i <= endIdx; i++ {
+			for i := startIdx; i < endIdx; i++ {
 				// check if next n transactions are AA transactions and run validation
 				if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
 					aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
