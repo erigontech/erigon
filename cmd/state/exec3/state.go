@@ -111,7 +111,7 @@ func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
 
 func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateReader state.ResettableStateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
 	fmt.Printf("%p: rest-state\n", rw)
-	fmt.Printf("%p: done rest-state\n", rw)
+	defer fmt.Printf("%p: done rest-state\n", rw)
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 
