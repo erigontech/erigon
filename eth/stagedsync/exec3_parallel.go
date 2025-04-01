@@ -526,9 +526,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 }
 
 func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool, resetWorkers func(ctx context.Context, rs *state.StateV3Buffered) error) (kv.RwTx, time.Duration, error) {
-	fmt.Println("commit")
-	defer fmt.Println("done commit")
-
 	err := execStage.Update(tx, te.lastCommittedBlockNum)
 
 	if err != nil {
@@ -571,8 +568,6 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 	doms.SetTxNum(te.lastCommittedTxNum)
 	rs := te.rs.WithDomains(doms)
 
-	fmt.Println("reset-workers")
-
 	err = resetWorkers(ctx, rs)
 
 	if err != nil {
@@ -582,8 +577,6 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 
 		return nil, t2, err
 	}
-
-	fmt.Println("clear-doms")
 
 	if !useExternalTx {
 		te.agg.BuildFilesInBackground(te.lastCommittedTxNum)
@@ -1231,9 +1224,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 
 			if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum+1]; ok {
-				//if blockExecutor.blockNum == 16793696 {
-				//	fmt.Println("Block",blockExecutor.blockNum)
-				//}
 				blockExecutor.scheduleExecution(ctx, pe.in)
 			}
 		}

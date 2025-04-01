@@ -110,15 +110,11 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
 
 func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateReader state.ResettableStateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
-	fmt.Printf("%p: reset-state\n", rw)
-	defer fmt.Printf("%p: done reset-state\n", rw)
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 
 	rw.rs = rs
-	fmt.Printf("%p: reset-tx\n", rw)
 	rw.resetTx(chainTx)
-	fmt.Printf("%p: reader\n", rw)
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
@@ -129,7 +125,6 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 		}
 	}
 
-	fmt.Printf("%p: writer\n", rw)
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
@@ -147,7 +142,6 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 
 func (rw *Worker) resetTx(chainTx kv.Tx) {
 	if rw.background && rw.chainTx != nil {
-		fmt.Println("rollback")
 		rw.chainTx.Rollback()
 	}
 	rw.chainTx = chainTx
@@ -157,23 +151,18 @@ func (rw *Worker) resetTx(chainTx kv.Tx) {
 	}
 
 	if resettable, ok := rw.stateReader.(resettable); ok {
-		fmt.Println("set reader")
 		resettable.SetTx(rw.chainTx)
 	}
 
 	if resettable, ok := rw.stateWriter.(resettable); ok {
-		fmt.Println("set writer")
 		resettable.SetTx(rw.chainTx)
 	}
 
 	if rw.chainTx != nil {
-		fmt.Println("chain reader")
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	} else {
 		rw.chain = nil
 	}
-
-	fmt.Println("reset tx - done")
 }
 
 func (rw *Worker) Run() (err error) {
@@ -213,7 +202,6 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 		rw.historyMode = false
 	default:
 		rw.historyMode = false
-		//fmt.Printf("[worker] unknown reader %T: historyMode is set to disabled\n", reader)
 	}
 }
 
