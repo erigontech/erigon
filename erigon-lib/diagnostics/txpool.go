@@ -22,7 +22,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/holiman/uint256"
 )
 
 type PoolChangeEvent struct {
@@ -33,26 +32,18 @@ type PoolChangeEvent struct {
 }
 
 type DiagTxn struct {
-	IDHash              string        `json:"hash"`
 	SenderID            uint64        `json:"senderID"`
-	SenderAddress       string        `json:"senderAddress"`
-	Nonce               uint64        `json:"nonce"`
-	Value               uint256.Int   `json:"value"`
-	Gas                 uint64        `json:"gas"`
-	FeeCap              uint256.Int   `json:"feeCap"`
-	Tip                 uint256.Int   `json:"tip"`
 	Size                uint32        `json:"size"`
-	Type                byte          `json:"type"`
 	Creation            bool          `json:"creation"`
 	DataLen             int           `json:"dataLen"`
 	AccessListAddrCount int           `json:"accessListAddrCount"`
 	AccessListStorCount int           `json:"accessListStorCount"`
 	BlobHashes          []common.Hash `json:"blobHashes"`
-	Blobs               [][]byte      `json:"blobs"`
 	IsLocal             bool          `json:"isLocal"`
 	DiscardReason       string        `json:"discardReason"`
 	Pool                string        `json:"pool"`
 	OrderMarker         uint8         `json:"orderMarker"`
+	RLP                 []byte        `json:"rlp"`
 }
 
 type IncomingTxnUpdate struct {
