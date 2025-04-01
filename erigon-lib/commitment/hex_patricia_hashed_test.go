@@ -357,6 +357,52 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			updsTwo.Close()
 		}
 		require.EqualValues(t, rBatch, rSeq, "sequential and batch root should match")
+
+		plainKeys, updates = NewUpdateBuilder().
+			Delete("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9").
+			Build()
+
+		if sortHashedKeys {
+			plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
+		}
+
+		trieSequential.SetTrace(true)
+		trieBatch.SetTrace(true)
+
+		{
+			fmt.Printf("3. Trie sequential update (%d updates)\n", len(updates))
+			for i := 0; i < len(updates); i++ {
+				err := stateSeq.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
+				require.NoError(t, err)
+
+				updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
+
+				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "")
+				require.NoError(t, err)
+
+				t.Logf("3) sequential root @%d hash %x\n", i, sequentialRoot)
+				rSeq = common.Copy(sequentialRoot)
+
+				updsOne.Close()
+			}
+		}
+		{
+			fmt.Printf("\n4. Trie batch update (%d updates)\n", len(updates))
+			fmt.Printf("active rows %d touchmap %16b aftermap %16b\n", trieBatchR.activeRows, trieBatchR.touchMap[0], trieBatchR.afterMap[0])
+
+			err := stateBatch.applyPlainUpdates(plainKeys[:], updates[:])
+			require.NoError(t, err)
+
+			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
+
+			rh, err := trieBatch.Process(ctx, updsTwo, "")
+			require.NoError(t, err)
+			t.Logf("batch of %d root hash %x\n", len(updates), rh)
+
+			rBatch = common.Copy(rh)
+			updsTwo.Close()
+		}
+		require.EqualValues(t, rBatch, rSeq, "sequential and batch root should match")
 	}
 
 	// Same PLAIN prefix is not necessary while HASHED CPL>0 is required
