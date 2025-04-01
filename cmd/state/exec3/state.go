@@ -116,9 +116,9 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 	defer rw.lock.Unlock()
 
 	rw.rs = rs
-
+	fmt.Printf("%p: reset-tx\n", rw)
 	rw.resetTx(chainTx)
-
+	fmt.Printf("%p: reader\n", rw)
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
@@ -129,6 +129,7 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 		}
 	}
 
+	fmt.Printf("%p: writer\n", rw)
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
@@ -186,8 +187,7 @@ func (rw *Worker) Run() (err error) {
 }
 
 func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
-	fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
-	defer fmt.Println("RTX Done")
+	//fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	return rw.RunTxTaskNoLock(txTask)
