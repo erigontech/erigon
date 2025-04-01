@@ -1035,9 +1035,6 @@ func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {
 }
 
 func (tx *MdbxTx) closeCursors() {
-	if len(tx.toCloseMap) > 10 {
-		fmt.Println("closing", len(tx.toCloseMap), "cursors")
-	}
 	for _, c := range tx.toCloseMap {
 		if c != nil {
 			c.Close()
