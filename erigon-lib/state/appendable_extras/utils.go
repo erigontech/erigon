@@ -1,4 +1,4 @@
-package entity_extras
+package appendable_extras
 
 import (
 	"bytes"

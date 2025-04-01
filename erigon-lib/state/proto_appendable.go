@@ -24,6 +24,8 @@ type ProtoAppendable struct {
 	freezer Freezer
 
 	a          ae.AppendableId
+	cfg        *ae.SnapshotConfig
+	parser     ae.SnapNameParser
 	builders   []AccessorIndexBuilder
 	dirtyFiles *btree2.BTreeG[*filesItem]
 	_visible   visibleFiles
@@ -36,6 +38,8 @@ type ProtoAppendable struct {
 func NewProto(a ae.AppendableId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoAppendable {
 	return &ProtoAppendable{
 		a:          a,
+		cfg:        a.SnapshotConfig(),
+		parser:     a.SnapshotConfig().Parser,
 		builders:   builders,
 		freezer:    freezer,
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
@@ -67,13 +71,13 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 	var canFreeze bool
 	cfg := a.a.SnapshotConfig()
 	for {
-		calcFrom, calcTo, canFreeze = ae.GetFreezingRange(calcFrom, calcTo, a.a)
+		calcFrom, calcTo, canFreeze = ae.GetFreezingRange(calcFrom, calcTo, cfg)
 		if !canFreeze {
 			break
 		}
 
 		log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
-		path := ae.SnapFilePath(a.a, snaptype.Version(1), calcFrom, calcTo)
+		path := a.parser.DataFile(snaptype.Version(1), calcFrom, calcTo)
 		sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, a.logger)
 		if err != nil {
 			return dirtyFiles, err
@@ -133,6 +137,54 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 	}
 
 	return dirtyFiles, nil
+}
+
+func (a *ProtoAppendable) OpenFolder() error {
+	aps, err := filesFromDir(a.a.SnapshotDir())
+	if err != nil {
+		return err
+	}
+
+	a.closeWhatNotInList(aps)
+	a.scanDirtyFiles(aps)
+
+	return nil
+}
+
+func (a *ProtoAppendable) scanDirtyFiles(aps []string) (res []*filesItem) {
+	cfg := a.a.SnapshotConfig()
+	for _, ap := range aps {
+		fileInfo, ok := a.parser.Parse(ap)
+		if !ok {
+			a.logger.Trace("can't parse file name", "file", ap)
+			continue
+		}
+		res = append(res, newFilesItemWithSnapConfig(fileInfo.From, fileInfo.To, cfg))
+	}
+	return res
+}
+
+func (a *ProtoAppendable) closeWhatNotInList(fNames []string) {
+	protectFiles := make(map[string]struct{}, len(fNames))
+	for _, f := range fNames {
+		protectFiles[f] = struct{}{}
+	}
+	var toClose []*filesItem
+	a.dirtyFiles.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			if item.decompressor != nil {
+				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
+					continue
+				}
+			}
+			toClose = append(toClose, item)
+		}
+		return true
+	})
+	for _, item := range toClose {
+		item.closeFiles()
+		a.dirtyFiles.Delete(item)
+	}
 }
 
 func (a *ProtoAppendable) Close() {
