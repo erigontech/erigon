@@ -84,6 +84,9 @@ type TxTask struct {
 	BlockReceipts types.Receipts
 
 	Config *chain.Config
+
+	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
+	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
 }
 
 func (t *TxTask) Sender() *libcommon.Address {

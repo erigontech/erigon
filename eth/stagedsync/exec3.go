@@ -610,6 +610,36 @@ Loop:
 			inputTxNum++
 		}
 
+		// check for consecutive RIP-7560 sequence
+		var isAASequence bool
+		for _, txTask := range txTasks {
+			txIndex := txTask.TxIndex
+			if txIndex < 0 || txIndex >= len(txs)-1 {
+				continue
+			}
+
+			if txTask.Tx.Type() != types.AccountAbstractionTxType {
+				isAASequence = false
+				continue
+			}
+			if isAASequence {
+				continue
+			}
+
+			aaBatchSize := uint64(1)
+			for _, tt := range txTasks[txIndex+1:] {
+				if tt.Tx.Type() == types.AccountAbstractionTxType {
+					aaBatchSize++
+					tt.InBatch = true
+				} else {
+					break
+				}
+			}
+
+			txTask.AAValidationBatchSize = aaBatchSize
+			isAASequence = true
+		}
+
 		if parallel {
 			_, err := executor.execute(ctx, txTasks)
 			if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
