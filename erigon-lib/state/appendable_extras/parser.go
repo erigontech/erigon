@@ -23,7 +23,6 @@ type SnapNameParser interface {
 
 // v1-000000-000500-bodies.idx, v1-000000-000500-bodies.seg
 // v1-000000-000500-transactions-to-block.idx
-
 // per entity parser for e2 entities
 type E2Parser struct {
 	minAggStep    uint64
