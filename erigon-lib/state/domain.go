@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -710,16 +709,13 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 		}
 	}
 
-	dt := &DomainRoTx{
+	return &DomainRoTx{
 		name:    d.name,
 		d:       d,
 		ht:      d.History.BeginFilesRo(),
 		visible: d._visible,
 		files:   d._visible.files,
 	}
-	_, f, l, _ := runtime.Caller(4)
-	fmt.Printf("%s:%p, caller %s:%d\n", d.name, dt, filepath.Base(f), l)
-	return dt
 }
 
 // Collation is the set of compressors created after aggregation
@@ -1653,8 +1649,6 @@ func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 	}
 	return r
 }
-
-var sdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immutable")
 
 func (dt *DomainRoTx) closeValsCursor() {
 	dt.readerMutex.Lock()
