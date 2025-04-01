@@ -24,9 +24,12 @@ import (
 )
 
 type Generator struct {
-	receiptsCache      *lru.Cache[common.Hash, types.Receipts]
-	receiptCache       *lru.Cache[common.Hash, *types.Receipt]
-	blockGenMutex      *loaderMutex[common.Hash]
+	receiptsCache *lru.Cache[common.Hash, types.Receipts]
+	receiptCache  *lru.Cache[common.Hash, *types.Receipt]
+
+	blockExecMutex *loaderMutex[common.Hash] // only 1 block with current hash executed at a time - same parallel requests are waiting for results
+	txnExecMutex   *loaderMutex[common.Hash] // only 1 txn with current hash executed at a time - same parallel requests are waiting for results
+
 	receiptsCacheTrace bool
 	receiptCacheTrace  bool
 
@@ -68,7 +71,8 @@ func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineR
 		receiptCacheTrace:  receiptsCacheTrace,
 		receiptCache:       receiptCache,
 
-		blockGenMutex: &loaderMutex[common.Hash]{},
+		blockExecMutex: &loaderMutex[common.Hash]{},
+		txnExecMutex:   &loaderMutex[common.Hash]{},
 	}
 }
 
@@ -131,7 +135,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if receipts, ok := g.receiptsCache.Get(header.Hash()); ok && len(receipts) > index {
 		return receipts[index], nil
 	}
-	if receipt, ok := g.receiptCache.Get(txn.Hash()); ok {
+
+	txnHash := txn.Hash()
+	mu := g.blockExecMutex.lock(txnHash)
+	defer g.blockExecMutex.unlock(mu, txnHash)
+	if receipt, ok := g.receiptCache.Get(txnHash); ok {
 		return receipt, nil
 	}
 
@@ -168,8 +176,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	blockHash := block.Hash()
-	mu := g.blockGenMutex.lock(blockHash)
-	defer g.blockGenMutex.unlock(mu, blockHash)
+	mu := g.blockExecMutex.lock(blockHash) // only 1 block with current hash executed at a time - same parallel requests are waiting for results
+	defer g.blockExecMutex.unlock(mu, blockHash)
 
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
 		return receipts, nil
