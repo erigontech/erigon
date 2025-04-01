@@ -3,6 +3,7 @@ package receipts
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -138,7 +139,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 
-	cumGasUsed, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
+	cumGasUsed, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 	if err != nil {
 		return nil, err
 	}
@@ -186,4 +187,20 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 	g.addToCacheReceipts(block.HeaderNoCopy(), receipts)
 	return receipts, nil
+}
+
+type loaderMutex[K comparable] struct {
+	sync.Map
+}
+
+func (m *loaderMutex[K]) lock(key K) *sync.Mutex {
+	value, _ := m.LoadOrStore(key, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu
+}
+
+func (m *loaderMutex[K]) unlock(mu *sync.Mutex, key K) {
+	mu.Unlock()
+	m.Delete(key)
 }
