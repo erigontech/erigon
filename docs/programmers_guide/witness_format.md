@@ -26,7 +26,7 @@ the current version is 1.
 
 ## Operators
 
-Each operator starts with an opcode (see [`witness_operators.go`](../../trie/witness_operators.go) for exact values).
+Each operator starts with an opcode (see [`witness_operators.go`](../../erigon-lib/trie/witness_operators.go) for exact values).
 
 Then it might contain some data.
 
@@ -89,7 +89,7 @@ format: `OpAccountLeaf key:[]byte flags [nonce:uint64] [balance:[]byte]`
 
 encoded as `[ 0x05 CBOR(key|[]byte)... flags /CBOR(nonce).../ /CBOR(balance).../ ]`
   
-*flags* is a bitset encoded in a single bit (see [`witness_operators_test.go`](../../trie/witness_operators_test.go) to see flags in action).
+*flags* is a bitset encoded in a single bit (see [`witness_operators_test.go`](../../erigon-lib/trie/witness_operators_test.go) to see flags in action).
 * bit 0 defines if **code** is present; if set to 1 it assumes that either `OpCode` or `OpHash` already put something on the stack;
 * bit 1 defines if **storage** is present; if set to 1, the operators preceding `OpAccountLeaf` will reconstruct a storage trie;
 * bit 2 defines if **nonce** is not 0; if set to 0, *nonce* field is not encoded;
