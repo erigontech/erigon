@@ -29,6 +29,7 @@ type PoolChangeEvent struct {
 	Pool    string `json:"pool"`
 	Event   string `json:"event"`
 	TxnHash string `json:"txnHash"`
+	Order   uint8  `json:"order"`
 }
 
 type DiagTxn struct {
@@ -51,6 +52,7 @@ type DiagTxn struct {
 	IsLocal             bool          `json:"isLocal"`
 	DiscardReason       string        `json:"discardReason"`
 	Pool                string        `json:"pool"`
+	OrderMarker         uint8         `json:"orderMarker"`
 }
 
 type IncomingTxnUpdate struct {
@@ -62,10 +64,16 @@ func (ti IncomingTxnUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
+type TxnHashOrder struct {
+	OrderMarker uint8
+	Hash        [32]byte
+}
+
 type PoolChangeBatch struct {
-	Pool    string     `json:"pool"`
-	Event   string     `json:"event"`
-	TxnHash [][32]byte `json:"txnHash"`
+	Pool         string         `json:"pool"`
+	OrderMarker  uint8          `json:"orderMarker"`
+	Event        string         `json:"event"`
+	TxnHashOrder []TxnHashOrder `json:"txnHash"`
 }
 
 type PoolChangeBatchEvent struct {
@@ -114,13 +122,14 @@ func (d *DiagnosticClient) runOnPoolChangeBatchEvent(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				for _, change := range info.Changes {
-					for _, txnHash := range change.TxnHash {
+					for _, txnHash := range change.TxnHashOrder {
 						d.Notify(DiagMessages{
 							MessageType: "txpool",
 							Message: PoolChangeEvent{
 								Pool:    change.Pool,
 								Event:   change.Event,
-								TxnHash: hex.EncodeToString(txnHash[:]),
+								TxnHash: hex.EncodeToString(txnHash.Hash[:]),
+								Order:   txnHash.OrderMarker,
 							},
 						})
 					}
