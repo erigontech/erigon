@@ -3,6 +3,7 @@ package receipts
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -25,6 +26,7 @@ import (
 type Generator struct {
 	receiptsCache      *lru.Cache[common.Hash, types.Receipts]
 	receiptCache       *lru.Cache[common.Hash, *types.Receipt]
+	blockGenMutex      *loaderMutex[common.Hash]
 	receiptsCacheTrace bool
 	receiptCacheTrace  bool
 
@@ -65,6 +67,8 @@ func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineR
 		receiptsCacheTrace: receiptsCacheTrace,
 		receiptCacheTrace:  receiptsCacheTrace,
 		receiptCache:       receiptCache,
+
+		blockGenMutex: &loaderMutex[common.Hash]{},
 	}
 }
 
@@ -163,7 +167,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 }
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
-	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
+	blockHash := block.Hash()
+	mu := g.blockGenMutex.lock(blockHash)
+	defer g.blockGenMutex.unlock(mu, blockHash)
+
+	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
 		return receipts, nil
 	}
 
@@ -180,7 +188,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
 		}
-		receipt.BlockHash = block.Hash()
+		receipt.BlockHash = blockHash
 		receipts[i] = receipt
 	}
 
@@ -218,4 +226,20 @@ func (g *Generator) GetReceiptsGasUsed(tx kv.TemporalTx, block *types.Block, txN
 	}
 
 	return receipts, nil
+}
+
+type loaderMutex[K comparable] struct {
+	sync.Map
+}
+
+func (m *loaderMutex[K]) lock(key K) *sync.Mutex {
+	value, _ := m.LoadOrStore(key, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu
+}
+
+func (m *loaderMutex[K]) unlock(mu *sync.Mutex, key K) {
+	mu.Unlock()
+	m.Delete(key)
 }
