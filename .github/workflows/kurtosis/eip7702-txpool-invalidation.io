@@ -1,6 +1,6 @@
 id: eip7702-txpool-invalidation
 name: "EIP7702 txpool invalidation"
-timeout: 1h
+timeout: 30m
 config:
   walletCount: 10 # Number of child wallets to create
   txPerWallet: 2 # Number of transactions per child wallet
@@ -21,7 +21,7 @@ tasks:
   title: "Get consensus chain specs"
 - name: check_consensus_slot_range
   title: "Wait for electra activation"
-  timeout: 1h
+  timeout: 5m
   configVars:
     minEpochNumber: "tasks.get_specs.outputs.specs.ELECTRA_FORK_EPOCH"
 

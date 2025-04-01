@@ -17,7 +17,7 @@ tasks:
 
 - name: check_consensus_validator_status
   title: "Get status for validator ${validatorIndex}"
-  timeout: 48h
+  timeout: 1h
   config:
     validatorStatus:
     - active_ongoing

@@ -16,7 +16,7 @@ tasks:
       minClientCount: 1 
   - name: check_consensus_slot_range
     title: "Wait for slot >= ${waitForSlot}"
-    timeout: 2h
+    timeout: 1h
     configVars:
       minSlotNumber: "waitForSlot"
   - name: run_task_options
@@ -38,7 +38,7 @@ tasks:
 
   - name: check_consensus_validator_status
     title: "Wait for validator consolidation to start by checking if validator (${initialSourceValidatorIndex}) is exiting"
-    timeout: 2h
+    timeout: 1h
     config:
       validatorStatus:
         - active_exiting
@@ -47,7 +47,7 @@ tasks:
 
   - name: check_consensus_validator_status
     title: "Wait for validator to exit (${initialSourceValidatorIndex}) to check consolidation status"
-    timeout: 2h
+    timeout: 1h
     config:
       validatorStatus:
         - exited_unslashed
@@ -75,7 +75,7 @@ tasks:
 
   - name: check_consensus_validator_status
     title: "Wait for validator consolidation to start by checking if validator (${initialSourceValidatorIndex}) is exiting"
-    timeout: 2h
+    timeout: 1h
     config:
       validatorStatus:
         - active_exiting
@@ -84,7 +84,7 @@ tasks:
 
   - name: check_consensus_validator_status
     title: "Wait for validator to exit (${initialSourceValidatorIndex}) to check consolidation status"
-    timeout: 2h
+    timeout: 1h
     config:
       validatorStatus:
         - exited_unslashed
