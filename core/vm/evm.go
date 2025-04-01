@@ -627,27 +627,23 @@ func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 
 // GetEOFHeader returns EOF header if IsOsaka and code is EOF code, otherwise nil
 func (evm *EVM) GetEOFHeader(code []byte, typ OpCode) (*eofHeader, error) {
-	var headerEOF *eofHeader
-	var err error
+	// var headerEOF *eofHeader
+	// var err error
 	if evm.chainRules.IsOsaka { // check if Osaka and if is EOF code
 		if len(code) > 1 && code[0] == 0xEF && code[1] == 0x00 {
 			if evm.interpreter.Depth() == 0 {
 				// first execution frame - validate all type sections, code sections and subcontainers
-				if headerEOF, err = ParseEOFHeader(code, evm.interpreter.EOFTable(), initcode, true, 0); err != nil {
-					return nil, err
-				}
+				return ParseEOFHeader(code, evm.interpreter.EOFTable(), initcode, true, 0)
 			} else {
 				// do not allow to create EOF from legacy calls
 				if typ == CREATE || typ == CREATE2 {
 					return nil, fmt.Errorf("attmept to create EOF from legacy call (CREATE, CREATE2)")
 				}
 				// subsequent execution frames do not validate anything
-				if headerEOF, err = ParseEOFHeader(code, evm.interpreter.EOFTable(), initcode, false, 0); err != nil {
-					return nil, err
-				}
+				return ParseEOFHeader(code, evm.interpreter.EOFTable(), initcode, false, 0) // depth dosn't matter in this case, required for validation only
 			}
 		}
 		// else not an EOF code
 	}
-	return headerEOF, nil
+	return nil, nil
 }
