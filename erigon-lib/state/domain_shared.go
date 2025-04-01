@@ -891,98 +891,6 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 }
 func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 
-type ConcurrentSDCommitmentContext struct {
-	*SharedDomainsCommitmentContext
-	// trie  *commitment.ParallelPatriciaHashed
-	accMu sync.Mutex // since code domain is queried during fetching account data, code is also behind this mutex
-	stoMu sync.Mutex
-	comMu sync.RWMutex
-}
-
-func NewConcurrentCommitmentContext(sdCtx *SharedDomainsCommitmentContext) (*ConcurrentSDCommitmentContext, error) {
-	cc := &ConcurrentSDCommitmentContext{
-		SharedDomainsCommitmentContext: sdCtx,
-	}
-	//
-	//t, ok := sdCtx.patriciaTrie.(*commitment.HexPatriciaHashed)
-	//if !ok {
-	//	return nil, fmt.Errorf("only hex trie parallelisation supported")
-	//}
-	//
-	////var err error
-	//cc.trie = commitment.NewParallelPatriciaHashed(t, cc, sdCtx.TempDir())
-	//if err != nil {
-	//	return nil, fmt.Errorf("failed to init parallel patricia hashed trie")
-	//}
-	return cc, nil
-}
-
-func (ctx *ConcurrentSDCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
-	ctx.comMu.RLock()
-	defer ctx.comMu.RUnlock()
-	return ctx.SharedDomainsCommitmentContext.Branch(pref)
-}
-
-func (ctx *ConcurrentSDCommitmentContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
-	ctx.comMu.Lock()
-	defer ctx.comMu.Unlock()
-
-	return ctx.SharedDomainsCommitmentContext.PutBranch(prefix, data, prevData, prevStep)
-}
-
-func (ctx *ConcurrentSDCommitmentContext) Account(plainKey []byte) (u *commitment.Update, err error) {
-	ctx.accMu.Lock()
-	defer ctx.accMu.Unlock()
-	return ctx.SharedDomainsCommitmentContext.Account(plainKey)
-}
-
-func (ctx *ConcurrentSDCommitmentContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
-	ctx.stoMu.Lock()
-	defer ctx.stoMu.Unlock()
-	return ctx.SharedDomainsCommitmentContext.Storage(plainKey)
-}
-
-func (ctx *ConcurrentSDCommitmentContext) ComputeCommitment(ct context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	panic("nope")
-	// if dbg.DiscardCommitment() {
-	// 	ctx.updates.Reset()
-	// 	return nil, nil
-	// }
-	// ctx.ResetBranchCache()
-	// defer ctx.ResetBranchCache()
-
-	// mxCommitmentRunning.Inc()
-	// defer mxCommitmentRunning.Dec()
-	// defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
-
-	// updateCount := ctx.updates.Size()
-	// if ctx.sharedDomains.trace {
-	// 	defer ctx.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", ctx.updates.Mode())
-	// }
-	// if updateCount == 0 {
-	// 	rootHash, err = ctx.patriciaTrie.RootHash()
-	// 	return rootHash, err
-	// }
-
-	// // data accessing functions should be set when domain is opened/shared context updated
-	// ctx.trie.SetTrace(ctx.sharedDomains.trace)
-	// ctx.Reset()
-
-	// rootHash, err = ctx.trie.Process(ct, ctx.updates, logPrefix)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// ctx.justRestored.Store(false)
-
-	// if saveState {
-	// 	if err := ctx.storeCommitmentState(blockNum, rootHash); err != nil {
-	// 		return nil, err
-	// 	}
-	// }
-
-	// return rootHash, err
-}
-
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains
 	branches      map[string]cachedBranch
@@ -992,12 +900,7 @@ type SharedDomainsCommitmentContext struct {
 	justRestored  atomic.Bool
 
 	limitReadAsOfTxNum uint64
-}
-
-func (sdc *SharedDomainsCommitmentContext) ConcurrentContext() commitment.PatriciaContext {
-	return &ConcurrentSDCommitmentContext{
-		SharedDomainsCommitmentContext: sdc,
-	}
+	mu                 sync.Mutex
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64) {

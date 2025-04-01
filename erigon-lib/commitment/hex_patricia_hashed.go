@@ -1917,9 +1917,6 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			return fmt.Errorf("fold: %w", err)
 		}
 	}
-	// if hph.mountedNib == 3 {
-	// hph.SetTrace(true)
-	// }
 	// Now unfold until we step on an empty cell
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		if err := hph.unfold(hashedKey, unfolding); err != nil {
