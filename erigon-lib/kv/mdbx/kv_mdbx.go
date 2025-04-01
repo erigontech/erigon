@@ -1022,7 +1022,6 @@ func (tx *MdbxTx) Rollback() {
 		tx.db.leakDetector.Del(tx.traceID)
 	}()
 	tx.closeCursors()
-	//tx.printDebugInfo()
 	tx.tx.Abort()
 }
 
@@ -1036,6 +1035,7 @@ func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {
 }
 
 func (tx *MdbxTx) closeCursors() {
+	fmt.Println("closing", len(tx.toCloseMap), "cursors")
 	for _, c := range tx.toCloseMap {
 		if c != nil {
 			c.Close()

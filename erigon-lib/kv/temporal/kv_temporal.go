@@ -207,10 +207,10 @@ func (tx *Tx) Rollback() {
 	tx.Tx = nil
 	tx.mu.Unlock()
 	fmt.Printf("%s%p:rollback-rb\n", str, tx)
-	str += " "
+	str += "    "
 	rb.Rollback()
 	if len(str) > 0 {
-		str = str[1:]
+		str = str[4:]
 	}
 	fmt.Printf("%s%p:rollback-done\n", str, tx)
 }
