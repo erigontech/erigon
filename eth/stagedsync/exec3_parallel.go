@@ -526,6 +526,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 }
 
 func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool, resetWorkers func(ctx context.Context, rs *state.StateV3Buffered) error) (kv.RwTx, time.Duration, error) {
+	fmt.Println("commit")
 	defer fmt.Println("done commit")
 
 	err := execStage.Update(tx, te.lastCommittedBlockNum)
@@ -553,8 +554,6 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 		}
 
 		t2 = time.Since(tt)
-		te.agg.BuildFilesInBackground(te.lastCommittedTxNum)
-
 		tx, err = te.cfg.db.BeginRw(ctx)
 
 		if err != nil {
@@ -572,7 +571,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 	doms.SetTxNum(te.lastCommittedTxNum)
 	rs := te.rs.WithDomains(doms)
 
-	fmt.Println("reset-tx")
+	fmt.Println("reset-workers")
 
 	err = resetWorkers(ctx, rs)
 
@@ -582,6 +581,12 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 		}
 
 		return nil, t2, err
+	}
+
+	fmt.Println("clear-doms")
+
+	if !useExternalTx {
+		te.agg.BuildFilesInBackground(te.lastCommittedTxNum)
 	}
 
 	te.doms.ClearRam(true)
@@ -1060,11 +1065,12 @@ func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, t
 
 func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered) error {
 	pe.Lock()
-	defer pe.Unlock()
-
 	pe.applyTx = nil
+	workers := make([]*exec3.Worker, 0, len(pe.execWorkers))
+	workers = append(workers, pe.execWorkers...)
+	pe.Unlock()
 
-	for _, worker := range pe.execWorkers {
+	for _, worker := range workers {
 		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), pe.accumulator)
 	}
 
