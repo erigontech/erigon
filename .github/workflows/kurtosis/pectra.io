@@ -1,8 +1,8 @@
 participants:
   - el_type: erigon
     el_image: test/erigon:current
-    el_extra_params:
-      - "--beacon.api=beacon,builder,config,debug,events,node,validator,lighthouse"
+    # el_extra_params:
+    #  - "--beacon.api=beacon,builder,config,debug,events,node,validator,lighthouse"
     vc_type: lighthouse
     validator_count: 128
 network_params:
