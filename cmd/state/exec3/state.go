@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
 
@@ -49,7 +50,7 @@ var noop = state.NewNoopWriter()
 type Worker struct {
 	lock        sync.Locker
 	notifier    *sync.Cond
-	runnable    bool
+	runnable    atomic.Bool
 	logger      log.Logger
 	chainDb     kv.RoDB
 	chainTx     kv.Tx
@@ -84,7 +85,6 @@ func NewWorker(logger log.Logger, ctx context.Context, background bool, chainDb 
 	w := &Worker{
 		lock:        lock,
 		notifier:    sync.NewCond(lock),
-		runnable:    true,
 		logger:      logger,
 		chainDb:     chainDb,
 		in:          in,
@@ -103,6 +103,7 @@ func NewWorker(logger log.Logger, ctx context.Context, background bool, chainDb 
 
 		dirs: dirs,
 	}
+	w.runnable.Store(true)
 	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0))
 	w.vmCfg = vm.Config{Debug: true, Tracer: w.callTracer}
 	w.ibs = state.New(w.stateReader)
@@ -110,15 +111,11 @@ func NewWorker(logger log.Logger, ctx context.Context, background bool, chainDb 
 }
 
 func (rw *Worker) Pause() {
-	rw.lock.Lock()
-	defer rw.lock.Unlock()
-	rw.runnable = false
+	rw.runnable.Store(false)
 }
 
 func (rw *Worker) Resume() {
-	rw.lock.Lock()
-	defer rw.lock.Unlock()
-	rw.runnable = true
+	rw.runnable.Store(true)
 	rw.notifier.Signal()
 }
 
@@ -211,7 +208,7 @@ func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 	//fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
 	rw.lock.Lock()
 
-	for !rw.runnable {
+	for !rw.runnable.Load() {
 		rw.notifier.Wait()
 	}
 
