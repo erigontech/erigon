@@ -2122,6 +2122,8 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 					OrderMarker: uint8(tx.subPool),
 					Hash:        tx.TxnSlot.IDHash,
 				},
+			})
+		}
 	}
 
 	// Promote best transactions from base fee pool to pending pool while they qualify
