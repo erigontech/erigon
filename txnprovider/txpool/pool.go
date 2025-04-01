@@ -539,7 +539,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 
 		if isDiagEnabled {
 			subpool := "Unknown"
-			orderMarker := BaseFeePoolBits
+			orderMarker := SubPoolMarker(0)
 			found := p.all.get(txn.SenderID, txn.Nonce)
 			if found != nil {
 				subpool = found.currentSubPool.String()
@@ -595,7 +595,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 			for i := 0; i < len(copied.hashes); i += 32 {
 				var txnHash [32]byte
 				copy(txnHash[:], copied.hashes[i:i+32])
-				orderMarker := BaseFeePoolBits
+				orderMarker := SubPoolMarker(0)
 				byHash, ok := p.byHash[string(copied.hashes[i:i+32])]
 				if ok {
 					orderMarker = byHash.subPool
