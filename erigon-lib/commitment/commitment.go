@@ -185,10 +185,10 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 }
 
 func (be *BranchEncoder) CollectUpdate(
-		ctx PatriciaContext,
-		prefix []byte,
-		bitmap, touchMap, afterMap uint16,
-		readCell func(nibble int, skip bool) (*cell, error),
+	ctx PatriciaContext,
+	prefix []byte,
+	bitmap, touchMap, afterMap uint16,
+	readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
 
 	prev, prevStep, err := ctx.Branch(prefix)
