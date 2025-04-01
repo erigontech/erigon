@@ -215,6 +215,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
 	}
+	mxTrieBranchesUpdated.Inc()
 	return lastNibble, nil
 }
 
