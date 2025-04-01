@@ -797,68 +797,17 @@ func (x *GetBlobsRequest) GetBlobHashes() []*typesproto.H256 {
 	return nil
 }
 
-type BlobAndProofV1 struct {
+type GetBlobsReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Blob          []byte                 `protobuf:"bytes,1,opt,name=blob,proto3" json:"blob,omitempty"`
-	Proof         []byte                 `protobuf:"bytes,2,opt,name=proof,proto3" json:"proof,omitempty"`
+	Blobs         [][]byte               `protobuf:"bytes,1,rep,name=blobs,proto3" json:"blobs,omitempty"`
+	Proofs        [][]byte               `protobuf:"bytes,2,rep,name=proofs,proto3" json:"proofs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *BlobAndProofV1) Reset() {
-	*x = BlobAndProofV1{}
-	mi := &file_txpool_txpool_proto_msgTypes[15]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BlobAndProofV1) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BlobAndProofV1) ProtoMessage() {}
-
-func (x *BlobAndProofV1) ProtoReflect() protoreflect.Message {
-	mi := &file_txpool_txpool_proto_msgTypes[15]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BlobAndProofV1.ProtoReflect.Descriptor instead.
-func (*BlobAndProofV1) Descriptor() ([]byte, []int) {
-	return file_txpool_txpool_proto_rawDescGZIP(), []int{15}
-}
-
-func (x *BlobAndProofV1) GetBlob() []byte {
-	if x != nil {
-		return x.Blob
-	}
-	return nil
-}
-
-func (x *BlobAndProofV1) GetProof() []byte {
-	if x != nil {
-		return x.Proof
-	}
-	return nil
-}
-
-type GetBlobsReply struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	BlobsAndProofs []*BlobAndProofV1      `protobuf:"bytes,1,rep,name=blobs_and_proofs,json=blobsAndProofs,proto3" json:"blobs_and_proofs,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
 func (x *GetBlobsReply) Reset() {
 	*x = GetBlobsReply{}
-	mi := &file_txpool_txpool_proto_msgTypes[16]
+	mi := &file_txpool_txpool_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -870,7 +819,7 @@ func (x *GetBlobsReply) String() string {
 func (*GetBlobsReply) ProtoMessage() {}
 
 func (x *GetBlobsReply) ProtoReflect() protoreflect.Message {
-	mi := &file_txpool_txpool_proto_msgTypes[16]
+	mi := &file_txpool_txpool_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -883,12 +832,19 @@ func (x *GetBlobsReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBlobsReply.ProtoReflect.Descriptor instead.
 func (*GetBlobsReply) Descriptor() ([]byte, []int) {
-	return file_txpool_txpool_proto_rawDescGZIP(), []int{16}
+	return file_txpool_txpool_proto_rawDescGZIP(), []int{15}
 }
 
-func (x *GetBlobsReply) GetBlobsAndProofs() []*BlobAndProofV1 {
+func (x *GetBlobsReply) GetBlobs() [][]byte {
 	if x != nil {
-		return x.BlobsAndProofs
+		return x.Blobs
+	}
+	return nil
+}
+
+func (x *GetBlobsReply) GetProofs() [][]byte {
+	if x != nil {
+		return x.Proofs
 	}
 	return nil
 }
@@ -904,7 +860,7 @@ type AllReply_Tx struct {
 
 func (x *AllReply_Tx) Reset() {
 	*x = AllReply_Tx{}
-	mi := &file_txpool_txpool_proto_msgTypes[17]
+	mi := &file_txpool_txpool_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -916,7 +872,7 @@ func (x *AllReply_Tx) String() string {
 func (*AllReply_Tx) ProtoMessage() {}
 
 func (x *AllReply_Tx) ProtoReflect() protoreflect.Message {
-	mi := &file_txpool_txpool_proto_msgTypes[17]
+	mi := &file_txpool_txpool_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -964,7 +920,7 @@ type PendingReply_Tx struct {
 
 func (x *PendingReply_Tx) Reset() {
 	*x = PendingReply_Tx{}
-	mi := &file_txpool_txpool_proto_msgTypes[18]
+	mi := &file_txpool_txpool_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -976,7 +932,7 @@ func (x *PendingReply_Tx) String() string {
 func (*PendingReply_Tx) ProtoMessage() {}
 
 func (x *PendingReply_Tx) ProtoReflect() protoreflect.Message {
-	mi := &file_txpool_txpool_proto_msgTypes[18]
+	mi := &file_txpool_txpool_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1086,15 +1042,10 @@ var file_txpool_txpool_proto_rawDesc = []byte{
 	0x73, 0x74, 0x12, 0x2c, 0x0a, 0x0b, 0x62, 0x6c, 0x6f, 0x62, 0x5f, 0x68, 0x61, 0x73, 0x68, 0x65,
 	0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x0b, 0x2e, 0x74, 0x79, 0x70, 0x65, 0x73, 0x2e,
 	0x48, 0x32, 0x35, 0x36, 0x52, 0x0a, 0x62, 0x6c, 0x6f, 0x62, 0x48, 0x61, 0x73, 0x68, 0x65, 0x73,
-	0x22, 0x3a, 0x0a, 0x0e, 0x42, 0x6c, 0x6f, 0x62, 0x41, 0x6e, 0x64, 0x50, 0x72, 0x6f, 0x6f, 0x66,
-	0x56, 0x31, 0x12, 0x12, 0x0a, 0x04, 0x62, 0x6c, 0x6f, 0x62, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c,
-	0x52, 0x04, 0x62, 0x6c, 0x6f, 0x62, 0x12, 0x14, 0x0a, 0x05, 0x70, 0x72, 0x6f, 0x6f, 0x66, 0x18,
-	0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x05, 0x70, 0x72, 0x6f, 0x6f, 0x66, 0x22, 0x51, 0x0a, 0x0d,
-	0x47, 0x65, 0x74, 0x42, 0x6c, 0x6f, 0x62, 0x73, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x40, 0x0a,
-	0x10, 0x62, 0x6c, 0x6f, 0x62, 0x73, 0x5f, 0x61, 0x6e, 0x64, 0x5f, 0x70, 0x72, 0x6f, 0x6f, 0x66,
-	0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x16, 0x2e, 0x74, 0x78, 0x70, 0x6f, 0x6f, 0x6c,
-	0x2e, 0x42, 0x6c, 0x6f, 0x62, 0x41, 0x6e, 0x64, 0x50, 0x72, 0x6f, 0x6f, 0x66, 0x56, 0x31, 0x52,
-	0x0e, 0x62, 0x6c, 0x6f, 0x62, 0x73, 0x41, 0x6e, 0x64, 0x50, 0x72, 0x6f, 0x6f, 0x66, 0x73, 0x2a,
+	0x22, 0x3d, 0x0a, 0x0d, 0x47, 0x65, 0x74, 0x42, 0x6c, 0x6f, 0x62, 0x73, 0x52, 0x65, 0x70, 0x6c,
+	0x79, 0x12, 0x14, 0x0a, 0x05, 0x62, 0x6c, 0x6f, 0x62, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0c,
+	0x52, 0x05, 0x62, 0x6c, 0x6f, 0x62, 0x73, 0x12, 0x16, 0x0a, 0x06, 0x70, 0x72, 0x6f, 0x6f, 0x66,
+	0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0c, 0x52, 0x06, 0x70, 0x72, 0x6f, 0x6f, 0x66, 0x73, 0x2a,
 	0x6c, 0x0a, 0x0c, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x12,
 	0x0b, 0x0a, 0x07, 0x53, 0x55, 0x43, 0x43, 0x45, 0x53, 0x53, 0x10, 0x00, 0x12, 0x12, 0x0a, 0x0e,
 	0x41, 0x4c, 0x52, 0x45, 0x41, 0x44, 0x59, 0x5f, 0x45, 0x58, 0x49, 0x53, 0x54, 0x53, 0x10, 0x01,
@@ -1154,7 +1105,7 @@ func file_txpool_txpool_proto_rawDescGZIP() []byte {
 }
 
 var file_txpool_txpool_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_txpool_txpool_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_txpool_txpool_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_txpool_txpool_proto_goTypes = []any{
 	(ImportResult)(0),               // 0: txpool.ImportResult
 	(AllReply_TxnType)(0),           // 1: txpool.AllReply.TxnType
@@ -1173,52 +1124,50 @@ var file_txpool_txpool_proto_goTypes = []any{
 	(*NonceRequest)(nil),            // 14: txpool.NonceRequest
 	(*NonceReply)(nil),              // 15: txpool.NonceReply
 	(*GetBlobsRequest)(nil),         // 16: txpool.GetBlobsRequest
-	(*BlobAndProofV1)(nil),          // 17: txpool.BlobAndProofV1
-	(*GetBlobsReply)(nil),           // 18: txpool.GetBlobsReply
-	(*AllReply_Tx)(nil),             // 19: txpool.AllReply.Tx
-	(*PendingReply_Tx)(nil),         // 20: txpool.PendingReply.Tx
-	(*typesproto.H256)(nil),         // 21: types.H256
-	(*typesproto.H160)(nil),         // 22: types.H160
-	(*emptypb.Empty)(nil),           // 23: google.protobuf.Empty
-	(*typesproto.VersionReply)(nil), // 24: types.VersionReply
+	(*GetBlobsReply)(nil),           // 17: txpool.GetBlobsReply
+	(*AllReply_Tx)(nil),             // 18: txpool.AllReply.Tx
+	(*PendingReply_Tx)(nil),         // 19: txpool.PendingReply.Tx
+	(*typesproto.H256)(nil),         // 20: types.H256
+	(*typesproto.H160)(nil),         // 21: types.H160
+	(*emptypb.Empty)(nil),           // 22: google.protobuf.Empty
+	(*typesproto.VersionReply)(nil), // 23: types.VersionReply
 }
 var file_txpool_txpool_proto_depIdxs = []int32{
-	21, // 0: txpool.TxHashes.hashes:type_name -> types.H256
+	20, // 0: txpool.TxHashes.hashes:type_name -> types.H256
 	0,  // 1: txpool.AddReply.imported:type_name -> txpool.ImportResult
-	21, // 2: txpool.TransactionsRequest.hashes:type_name -> types.H256
-	19, // 3: txpool.AllReply.txs:type_name -> txpool.AllReply.Tx
-	20, // 4: txpool.PendingReply.txs:type_name -> txpool.PendingReply.Tx
-	22, // 5: txpool.NonceRequest.address:type_name -> types.H160
-	21, // 6: txpool.GetBlobsRequest.blob_hashes:type_name -> types.H256
-	17, // 7: txpool.GetBlobsReply.blobs_and_proofs:type_name -> txpool.BlobAndProofV1
-	1,  // 8: txpool.AllReply.Tx.txn_type:type_name -> txpool.AllReply.TxnType
-	22, // 9: txpool.AllReply.Tx.sender:type_name -> types.H160
-	22, // 10: txpool.PendingReply.Tx.sender:type_name -> types.H160
-	23, // 11: txpool.Txpool.Version:input_type -> google.protobuf.Empty
-	2,  // 12: txpool.Txpool.FindUnknown:input_type -> txpool.TxHashes
-	3,  // 13: txpool.Txpool.Add:input_type -> txpool.AddRequest
-	5,  // 14: txpool.Txpool.Transactions:input_type -> txpool.TransactionsRequest
-	9,  // 15: txpool.Txpool.All:input_type -> txpool.AllRequest
-	23, // 16: txpool.Txpool.Pending:input_type -> google.protobuf.Empty
-	7,  // 17: txpool.Txpool.OnAdd:input_type -> txpool.OnAddRequest
-	12, // 18: txpool.Txpool.Status:input_type -> txpool.StatusRequest
-	14, // 19: txpool.Txpool.Nonce:input_type -> txpool.NonceRequest
-	16, // 20: txpool.Txpool.GetBlobs:input_type -> txpool.GetBlobsRequest
-	24, // 21: txpool.Txpool.Version:output_type -> types.VersionReply
-	2,  // 22: txpool.Txpool.FindUnknown:output_type -> txpool.TxHashes
-	4,  // 23: txpool.Txpool.Add:output_type -> txpool.AddReply
-	6,  // 24: txpool.Txpool.Transactions:output_type -> txpool.TransactionsReply
-	10, // 25: txpool.Txpool.All:output_type -> txpool.AllReply
-	11, // 26: txpool.Txpool.Pending:output_type -> txpool.PendingReply
-	8,  // 27: txpool.Txpool.OnAdd:output_type -> txpool.OnAddReply
-	13, // 28: txpool.Txpool.Status:output_type -> txpool.StatusReply
-	15, // 29: txpool.Txpool.Nonce:output_type -> txpool.NonceReply
-	18, // 30: txpool.Txpool.GetBlobs:output_type -> txpool.GetBlobsReply
-	21, // [21:31] is the sub-list for method output_type
-	11, // [11:21] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	20, // 2: txpool.TransactionsRequest.hashes:type_name -> types.H256
+	18, // 3: txpool.AllReply.txs:type_name -> txpool.AllReply.Tx
+	19, // 4: txpool.PendingReply.txs:type_name -> txpool.PendingReply.Tx
+	21, // 5: txpool.NonceRequest.address:type_name -> types.H160
+	20, // 6: txpool.GetBlobsRequest.blob_hashes:type_name -> types.H256
+	1,  // 7: txpool.AllReply.Tx.txn_type:type_name -> txpool.AllReply.TxnType
+	21, // 8: txpool.AllReply.Tx.sender:type_name -> types.H160
+	21, // 9: txpool.PendingReply.Tx.sender:type_name -> types.H160
+	22, // 10: txpool.Txpool.Version:input_type -> google.protobuf.Empty
+	2,  // 11: txpool.Txpool.FindUnknown:input_type -> txpool.TxHashes
+	3,  // 12: txpool.Txpool.Add:input_type -> txpool.AddRequest
+	5,  // 13: txpool.Txpool.Transactions:input_type -> txpool.TransactionsRequest
+	9,  // 14: txpool.Txpool.All:input_type -> txpool.AllRequest
+	22, // 15: txpool.Txpool.Pending:input_type -> google.protobuf.Empty
+	7,  // 16: txpool.Txpool.OnAdd:input_type -> txpool.OnAddRequest
+	12, // 17: txpool.Txpool.Status:input_type -> txpool.StatusRequest
+	14, // 18: txpool.Txpool.Nonce:input_type -> txpool.NonceRequest
+	16, // 19: txpool.Txpool.GetBlobs:input_type -> txpool.GetBlobsRequest
+	23, // 20: txpool.Txpool.Version:output_type -> types.VersionReply
+	2,  // 21: txpool.Txpool.FindUnknown:output_type -> txpool.TxHashes
+	4,  // 22: txpool.Txpool.Add:output_type -> txpool.AddReply
+	6,  // 23: txpool.Txpool.Transactions:output_type -> txpool.TransactionsReply
+	10, // 24: txpool.Txpool.All:output_type -> txpool.AllReply
+	11, // 25: txpool.Txpool.Pending:output_type -> txpool.PendingReply
+	8,  // 26: txpool.Txpool.OnAdd:output_type -> txpool.OnAddReply
+	13, // 27: txpool.Txpool.Status:output_type -> txpool.StatusReply
+	15, // 28: txpool.Txpool.Nonce:output_type -> txpool.NonceReply
+	17, // 29: txpool.Txpool.GetBlobs:output_type -> txpool.GetBlobsReply
+	20, // [20:30] is the sub-list for method output_type
+	10, // [10:20] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_txpool_txpool_proto_init() }
@@ -1232,7 +1181,7 @@ func file_txpool_txpool_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_txpool_txpool_proto_rawDesc,
 			NumEnums:      2,
-			NumMessages:   19,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

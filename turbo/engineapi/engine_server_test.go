@@ -21,6 +21,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -105,7 +106,8 @@ func TestGetBlobsV1(t *testing.T) {
 	dt.S.Set(s)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
-	txPool := txpool.NewTxpoolClient(conn)
+	txPool := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
+
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, logger)
 
@@ -119,10 +121,12 @@ func TestGetBlobsV1(t *testing.T) {
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
 
-	blobsResp, err := engineServer.GetBlobsV1(ctx, wrappedTxn.Tx.BlobVersionedHashes)
+	blobHashes := append([]common.Hash{{}}, wrappedTxn.Tx.BlobVersionedHashes...)
+	blobsResp, err := engineServer.GetBlobsV1(ctx, blobHashes)
 	require.NoError(err)
-	require.Equal(blobsResp[0].Blob, wrappedTxn.Blobs[0][:])
-	require.Equal(blobsResp[1].Blob, wrappedTxn.Blobs[1][:])
-	require.Equal(blobsResp[0].Proof, wrappedTxn.Proofs[0][:])
-	require.Equal(blobsResp[1].Proof, wrappedTxn.Proofs[1][:])
+	require.True(blobsResp[0] == nil)
+	require.Equal(blobsResp[1].Blob, hexutility.Bytes(wrappedTxn.Blobs[0][:]))
+	require.Equal(blobsResp[2].Blob, hexutility.Bytes(wrappedTxn.Blobs[1][:]))
+	require.Equal(blobsResp[1].Proof, hexutility.Bytes(wrappedTxn.Proofs[0][:]))
+	require.Equal(blobsResp[2].Proof, hexutility.Bytes(wrappedTxn.Proofs[1][:]))
 }
