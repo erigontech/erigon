@@ -222,19 +222,3 @@ func (m *loaderMutex[K]) unlock(mu *sync.Mutex, key K) {
 	mu.Unlock()
 	m.Delete(key)
 }
-
-type loaderMutex[K comparable] struct {
-	sync.Map
-}
-
-func (m *loaderMutex[K]) lock(key K) *sync.Mutex {
-	value, _ := m.LoadOrStore(key, &sync.Mutex{})
-	mu := value.(*sync.Mutex)
-	mu.Lock()
-	return mu
-}
-
-func (m *loaderMutex[K]) unlock(mu *sync.Mutex, key K) {
-	mu.Unlock()
-	m.Delete(key)
-}
