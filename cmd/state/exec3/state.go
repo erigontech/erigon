@@ -147,6 +147,7 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 
 func (rw *Worker) resetTx(chainTx kv.Tx) {
 	if rw.background && rw.chainTx != nil {
+		fmt.Println("roolback")
 		rw.chainTx.Rollback()
 	}
 	rw.chainTx = chainTx
@@ -156,18 +157,23 @@ func (rw *Worker) resetTx(chainTx kv.Tx) {
 	}
 
 	if resettable, ok := rw.stateReader.(resettable); ok {
+		fmt.Println("set reader")
 		resettable.SetTx(rw.chainTx)
 	}
 
 	if resettable, ok := rw.stateWriter.(resettable); ok {
+		fmt.Println("set writer")
 		resettable.SetTx(rw.chainTx)
 	}
 
 	if rw.chainTx != nil {
+		fmt.Println("chain reader")
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	} else {
 		rw.chain = nil
 	}
+
+	fmt.Println("retet tx - done")
 }
 
 func (rw *Worker) Run() (err error) {
