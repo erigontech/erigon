@@ -1,4 +1,4 @@
-package appendable_extras
+package entity_extras
 
 import (
 	"crypto/rand"
