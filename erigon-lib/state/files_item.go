@@ -212,17 +212,34 @@ func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext strin
 }
 
 func ParseStepsFromFileName(fileName string) (from, to uint64, err error) {
-	rangeString := strings.Split(fileName, ".")[1]
-	rangeNums := strings.Split(rangeString, "-")
-	// convert the range to uint64
+	parts := strings.Split(fileName, ".")
+	if len(parts) < 2 {
+		return 0, 0, fmt.Errorf("invalid file name format: %s", fileName)
+	}
+
+	var rangePart string
+	// Support both formats: "v1-accounts.32-40.kv" and "v1.0-accounts.32-40.kv"
+	if len(parts) == 3 {
+		rangePart = parts[1]
+	} else {
+		rangePart = parts[len(parts)-2]
+	}
+
+	rangeNums := strings.Split(rangePart, "-")
+	if len(rangeNums) != 2 {
+		return 0, 0, fmt.Errorf("invalid range format in file name: %s", fileName)
+	}
+
 	from, err = strconv.ParseUint(rangeNums[0], 10, 64)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+		return 0, 0, fmt.Errorf("failed to parse from %s: %w", rangeNums[0], err)
 	}
+
 	to, err = strconv.ParseUint(rangeNums[1], 10, 64)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
 	}
+
 	return from, to, nil
 }
 

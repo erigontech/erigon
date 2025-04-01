@@ -173,7 +173,7 @@ func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err erro
 func (ii *InvertedIndex) openList(fNames []string) error {
 	ii.closeWhatNotInList(fNames)
 	ii.scanDirtyFiles(fNames)
-	if err := ii.openDirtyFiles(); err != nil {
+	if err := ii.openDirtyFiles(fNames); err != nil {
 		return fmt.Errorf("InvertedIndex(%s).openDirtyFiles: %w", ii.filenameBase, err)
 	}
 	return nil
@@ -250,15 +250,31 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 
 }
 
-func (ii *InvertedIndex) openDirtyFiles() error {
+type steps struct {
+	from uint64
+	to   uint64
+}
+
+func (ii *InvertedIndex) openDirtyFiles(fNames []string) error {
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
+	stepNameMap := make(map[steps]string, len(fNames))
+	for _, filename := range fNames {
+		from, to, err := ParseStepsFromFileName(filename)
+		if err != nil {
+			continue
+		}
+		stepNameMap[steps{from: from, to: to}] = filename
+	}
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			item := item
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 			if item.decompressor == nil {
-				fPath := ii.efFilePath(fromStep, toStep)
+				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
+				if !ok {
+					fPath = ii.efFilePath(fromStep, toStep)
+				}
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
@@ -269,25 +285,12 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 				if !exists {
-					ii.version.DataEF = ii.version.DataEF.Downgrade()
-					fPath = ii.efFilePath(fromStep, toStep)
-					existsDowngrade, err := dir.FileExist(fPath)
-					if err != nil {
-						_, fName := filepath.Split(fPath)
-						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FileExists error", "f", fName, "err", err)
-						invalidFileItemsLock.Lock()
-						invalidFileItems = append(invalidFileItems, item)
-						invalidFileItemsLock.Unlock()
-						continue
-					}
-					if !existsDowngrade {
-						_, fName := filepath.Split(fPath)
-						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
-						invalidFileItemsLock.Lock()
-						invalidFileItems = append(invalidFileItems, item)
-						invalidFileItemsLock.Unlock()
-						continue
-					}
+					_, fName := filepath.Split(fPath)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
