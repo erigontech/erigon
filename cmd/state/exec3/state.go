@@ -173,7 +173,7 @@ func (rw *Worker) resetTx(chainTx kv.Tx) {
 		rw.chain = nil
 	}
 
-	fmt.Println("retet tx - done")
+	fmt.Println("reset tx - done")
 }
 
 func (rw *Worker) Run() (err error) {

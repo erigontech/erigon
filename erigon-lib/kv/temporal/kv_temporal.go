@@ -190,23 +190,29 @@ func (tx *tx) Rollback() {
 	tx.autoClose()
 }
 
+var str string
+
 func (tx *Tx) Rollback() {
 	if tx == nil {
 		return
 	}
-	fmt.Println("rollback-ac")
+	fmt.Printf("%s%p:rollback-ac\n", str, tx)
 	tx.autoClose()
 	if tx.Tx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
-	fmt.Println("rollback-reset")
+	fmt.Printf("%s%p:rollback-reset\n", str, tx)
 	tx.mu.Lock()
 	rb := tx.Tx
 	tx.Tx = nil
 	tx.mu.Unlock()
-	fmt.Println("rollback-rb")
+	fmt.Printf("%s%p:rollback-rb\n", str, tx)
+	str := " "
 	rb.Rollback()
-	fmt.Println("rollback-done")
+	if len(str) > 0 {
+		str = str[2:]
+	}
+	fmt.Printf("%s%p:rollback-done\n", str, tx)
 }
 
 func (tx *Tx) Apply(f func(tx kv.Tx) error) error {
