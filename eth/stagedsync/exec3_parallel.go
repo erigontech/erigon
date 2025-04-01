@@ -1057,11 +1057,13 @@ func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, t
 }
 
 func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered) error {
+	fmt.Println("resetting")
+	defer fmt.Println("resetting done")
 	pe.Lock()
 	defer pe.Unlock()
 
 	pe.applyTx = nil
-
+	fmt.Println("workers")
 	for _, worker := range pe.execWorkers {
 		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), pe.accumulator)
 	}
