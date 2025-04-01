@@ -204,6 +204,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	}
 
 	g.addToCacheReceipts(block.HeaderNoCopy(), receipts)
+	return nil, nil
 	return receipts, nil
 }
 
