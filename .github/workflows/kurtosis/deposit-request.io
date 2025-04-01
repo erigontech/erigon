@@ -22,7 +22,7 @@ tasks:
 - name: sleep
   title: "wait for child wallet availablility"
   config:
-    duration: 3s # wait 1 slot to ensure all ELs have the proper child wallet balance
+    duration: 12s # wait 1 slot to ensure all ELs have the proper child wallet balance
 
 # generate deposits & wait for activation
 - name: run_tasks
