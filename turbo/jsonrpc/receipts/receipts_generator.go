@@ -179,7 +179,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	blockHash := block.Hash()
-	mu := g.blockExecMutex.lock(blockHash) // only 1 block with current hash executed at a time - same parallel requests are waiting for results
+	mu := g.blockExecMutex.lock(blockHash)
 	defer g.blockExecMutex.unlock(mu, blockHash)
 
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
