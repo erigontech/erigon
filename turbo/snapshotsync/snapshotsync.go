@@ -300,7 +300,7 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 	if !ok {
 		return false
 	}
-	fmt.Println("expired")
+	fmt.Println("expired", s.Name())
 	return cc.IsPreMerge(s.To)
 }
 
