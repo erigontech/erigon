@@ -2793,7 +2793,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 
 		counts[n] = uint(cnt)
 		if cnt > 0 {
-			fmt.Printf("ask to fold [%x] #%d\n", n, cnt)
+			fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", n, cnt, phnib.depths[0])
 			if err = pph.foldNibble(n); err != nil {
 				return err
 			}
@@ -2818,12 +2818,11 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 	if p.root.trace {
 		fmt.Printf("======= folding root =========\n")
 	}
-	// p.root.currentKeyLen = 0
+	// TODO zero active rows could be a clue to some invalid cases
 	if p.root.activeRows == 0 {
 		p.root.activeRows = 1
-	} else {
-		fmt.Printf("\troot active rows %d\n", p.root.activeRows)
 	}
+
 	for p.root.activeRows > 0 {
 		if err = p.root.fold(); err != nil {
 			return nil, err
