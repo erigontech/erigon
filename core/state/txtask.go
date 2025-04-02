@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -87,6 +88,7 @@ type TxTask struct {
 
 	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
+	ValidationResults     []exec3.AAValidationResult
 }
 
 func (t *TxTask) Sender() *libcommon.Address {

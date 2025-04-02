@@ -39,6 +39,7 @@ import (
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
@@ -547,6 +548,7 @@ Loop:
 		skipPostEvaluation := false
 		var usedGas uint64
 		var txTasks []*state.TxTask
+		var validationResults []exec3.AAValidationResult
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -571,6 +573,8 @@ Loop:
 				BlockReceipts: blockReceipts,
 
 				Config: chainConfig,
+
+				ValidationResults: validationResults,
 			}
 			if txTask.HistoryExecution && usedGas == 0 {
 				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)

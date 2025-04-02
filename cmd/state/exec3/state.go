@@ -180,7 +180,7 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
-type validationResult struct {
+type AAValidationResult struct {
 	PaymasterContext []byte
 	GasUsed          uint64
 }
@@ -293,66 +293,71 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				break
 			}
 
-			if txTask.InBatch {
-				break // this is a batched AA transaction that should have already been executed at the batch header
-			}
+			if !txTask.InBatch {
+				// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask
+				startIdx := uint64(txTask.TxIndex)
+				endIdx := startIdx + txTask.AAValidationBatchSize
 
-			startIdx := uint64(txTask.TxIndex)
-			endIdx := startIdx + txTask.AAValidationBatchSize
-
-			validationResults := make([]validationResult, txTask.AAValidationBatchSize)
+				validationResults := make([]AAValidationResult, txTask.AAValidationBatchSize)
 			log.Debug("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
 
-			var outerErr error
-			for i := startIdx; i < endIdx; i++ {
-				// check if next n transactions are AA transactions and run validation
-				if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
-					aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
-					if !ok {
-						outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
+				var outerErr error
+				for i := startIdx; i < endIdx; i++ {
+					// check if next n transactions are AA transactions and run validation
+					if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
+						aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
+						if !ok {
+							outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
+							break
+						}
+
+						paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, rw.taskGasPool, header, rw.evm, rw.chainConfig)
+						if err != nil {
+							outerErr = err
+							break
+						}
+
+						validationResults[i-startIdx] = AAValidationResult{
+							PaymasterContext: paymasterContext,
+							GasUsed:          validationGasUsed,
+						}
+					} else {
+						outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
 						break
 					}
+				}
 
-					paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, rw.taskGasPool, header, rw.evm, rw.chainConfig)
-					if err != nil {
-						outerErr = err
-						break
-					}
-
-					validationResults[i-startIdx] = validationResult{
-						PaymasterContext: paymasterContext,
-						GasUsed:          validationGasUsed,
-					}
-				} else {
-					outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
+				if outerErr != nil {
+					txTask.Error = outerErr
 					break
 				}
-			}
-
-			if outerErr != nil {
-				txTask.Error = outerErr
-				break
-			}
 			log.Debug("✅[aa] validated AA bundle")
 
-			// execute batch txns
-			for i := startIdx; i <= endIdx; i++ {
-				aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction) // type cast checked earlier
-				validationRes := validationResults[i-startIdx]
-
-				_, _, _, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, header, rw.ibs)
-				if err != nil {
-					outerErr = err
-					break
-				}
+				txTask.ValidationResults = validationResults
 			}
 
-			if outerErr != nil {
-				txTask.Error = outerErr
+			if len(txTask.ValidationResults) == 0 {
+				txTask.Error = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
+			}
+
+			aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction) // type cast checked earlier
+			validationRes := txTask.ValidationResults[0]
+			txTask.ValidationResults = txTask.ValidationResults[1:]
+
+			status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, header, rw.ibs)
+			if err != nil {
+				txTask.Error = err
 				break
 			}
-			log.Debug("✅[aa] executed AA bundle")
 
+			txTask.Failed = status != 0
+			txTask.UsedGas = gasUsed
+			// Update the state with pending changes
+			ibs.SoftFinalise()
+			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
+			txTask.TraceFroms = rw.callTracer.Froms()
+			txTask.TraceTos = rw.callTracer.Tos()
+			log.Debug("✅[aa] executed AA bundle")
 		}
 
 		msg := txTask.TxAsMessage
