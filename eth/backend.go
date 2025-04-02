@@ -102,6 +102,7 @@ import (
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/ethstats"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -244,7 +245,7 @@ const blockBufferSize = 128
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
+func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Sign() <= 0 {
 		logger.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
@@ -312,6 +313,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.Genesis = genesisConfig
 		}
 
+		if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
+			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
+		}
+
 		h, err := rawdb.ReadCanonicalHash(tx, 0)
 		if err != nil {
 			panic(err)
@@ -330,6 +335,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}); err != nil {
 		panic(err)
 	}
+	chainConfig.AllowAA = config.AllowAA
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
@@ -695,6 +701,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		blockReader,
 		logger,
 		latestBlockBuiltStore,
+		chainConfig,
 	)
 	httpRpcCfg := stack.Config().Http
 	ethRpcClient, txPoolRpcClient, miningRpcClient, rpcDaemonStateCache, rpcFilters := rpcdaemoncli.EmbeddedServices(
@@ -981,12 +988,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.stopNode,
 			&engineAPISwitcher{backend: backend},
 			backend,
+			tracer,
 		)
 		backend.syncUnwindOrder = stagedsync.PolygonSyncUnwindOrder
 		backend.syncPruneOrder = stagedsync.PolygonSyncPruneOrder
 	} else {
 		backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-			blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger)
+			blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger, tracer)
 		backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 		backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 	}
@@ -1018,7 +1026,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	checkStateRoot := true
-	pipelineStages := stages2.NewPipelineStages(ctx, backend.chainDB, config, p2pConfig, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, logger, checkStateRoot)
+	pipelineStages := stages2.NewPipelineStages(ctx, backend.chainDB, config, p2pConfig, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, logger, tracer, checkStateRoot)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentLogs, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, ctx)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
@@ -1547,7 +1555,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		}
 	}
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
-	agg, err := libstate.NewAggregator2(ctx, dirs, config3.DefaultStepSize, db, logger)
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
@@ -1630,7 +1638,7 @@ func (s *Ethereum) Start() error {
 		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("polygon sync goroutine terminated")
+			defer s.logger.Info("[polygon.sync] goroutine terminated")
 			// when we're running in stand alone mode we need to run the downloader before we start the
 			// polygon services becuase they will wait for it to complete before opening thier stores
 			// which make use of snapshots and expect them to be initialize
@@ -1639,7 +1647,7 @@ func (s *Ethereum) Start() error {
 				err := stages2.StageLoopIteration(s.sentryCtx, s.chainDB, wrap.TxContainer{}, s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
 
 				if err != nil && !errors.Is(err, context.Canceled) {
-					s.logger.Error("downloader stage crashed - stopping node", "err", err)
+					s.logger.Error("[polygon.sync] downloader stage crashed - stopping node", "err", err)
 					err = s.stopNode()
 					if err != nil {
 						s.logger.Error("could not stop node", "err", err)
@@ -1653,11 +1661,11 @@ func (s *Ethereum) Start() error {
 				return err
 			}
 
-			s.logger.Error("polygon sync crashed - stopping node", "err", err)
+			s.logger.Error("[polygon.sync] crashed - stopping node", "err", err)
 			go func() { // call stopNode in another goroutine to avoid deadlock
 				stopErr := s.stopNode()
 				if stopErr != nil {
-					s.logger.Error("could not stop node", "err", stopErr)
+					s.logger.Error("[polygon.sync] could not stop node", "err", stopErr)
 				}
 			}()
 
@@ -1689,10 +1697,10 @@ func (s *Ethereum) Start() error {
 		// to initialize it properly.
 		// 2) we cannot propose for block 1 regardless.
 		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("devp2p txn pool goroutine terminated")
+			defer s.logger.Info("[devp2p] txn pool goroutine terminated")
 			err := s.txPool.Run(s.sentryCtx)
 			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("txPool.Run error", "err", err)
+				s.logger.Error("[devp2p] Run error", "err", err)
 			}
 			return err
 		})
@@ -1700,10 +1708,10 @@ func (s *Ethereum) Start() error {
 
 	if s.shutterPool != nil {
 		s.bgComponentsEg.Go(func() error {
-			defer s.logger.Info("shutter pool goroutine terminated")
+			defer s.logger.Info("[shutter] pool goroutine terminated")
 			err := s.shutterPool.Run(s.sentryCtx)
 			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("shutterPool.Run error", "err", err)
+				s.logger.Error("[shutter] Run error", "err", err)
 			}
 			return err
 		})

@@ -24,12 +24,12 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/state/exec3"
 
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/vm"
 )
 
 type GenericTracer interface {
-	vm.EVMLogger
+	TracingHooks() *tracing.Hooks
 	SetTransaction(tx types.Transaction)
 	Found() bool
 }

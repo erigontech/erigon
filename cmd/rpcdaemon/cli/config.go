@@ -430,7 +430,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 
-		agg, err := libstate.NewAggregator2(ctx, cfg.Dirs, config3.DefaultStepSize, rawDB, logger)
+		agg, err := libstate.NewAggregator(ctx, cfg.Dirs, config3.DefaultStepSize, rawDB, logger)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
@@ -841,9 +841,9 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		}()
 	}
 
-	logger.Info("JsonRpc endpoint opened", info...)
+	logger.Info("[rpc] endpoint opened", info...)
 	<-ctx.Done()
-	logger.Info("Exiting...")
+	logger.Info("[rpc] Exiting...")
 	return srv, nil
 }
 
