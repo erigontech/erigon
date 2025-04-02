@@ -182,6 +182,7 @@ func New(
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
 	newSlotsStreams *NewSlotsStreams,
+	ethBackend remote.ETHBACKENDClient,
 	logger log.Logger,
 	opts ...Option,
 ) (*TxPool, error) {
@@ -232,6 +233,7 @@ func New(
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
 		blobSchedule:            blobSchedule,
 		feeCalculator:           options.feeCalculator,
+		ethBackend:              ethBackend,
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
@@ -1001,14 +1003,19 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 			return txpoolcfg.ErrGetCode
 		}
 
-		paymasterCode, err := stateCache.GetCode(txn.Paymaster[:])
-		if err != nil {
-			return txpoolcfg.ErrGetCode
+		var paymasterCode, deployerCode []byte
+		if txn.Paymaster != nil {
+			paymasterCode, err = stateCache.GetCode(txn.Paymaster[:])
+			if err != nil {
+				return txpoolcfg.ErrGetCode
+			}
 		}
 
-		deployerCode, err := stateCache.GetCode(txn.Deployer[:])
-		if err != nil {
-			return txpoolcfg.ErrGetCode
+		if txn.Deployer != nil {
+			deployerCode, err = stateCache.GetCode(txn.Deployer[:])
+			if err != nil {
+				return txpoolcfg.ErrGetCode
+			}
 		}
 
 		err = AAStaticValidation(

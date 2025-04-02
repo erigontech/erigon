@@ -748,8 +748,18 @@ func FromProto(tx *typesproto.AccountAbstractionTransaction) *AccountAbstraction
 	}
 
 	senderAddress := common.BytesToAddress(tx.SenderAddress)
-	paymasterAddress := common.BytesToAddress(tx.Paymaster)
-	deployerAddress := common.BytesToAddress(tx.Deployer)
+
+	var paymasterAddress, deployerAddress *common.Address
+
+	if len(tx.Paymaster) != 0 {
+		address := common.BytesToAddress(tx.Paymaster)
+		paymasterAddress = &address
+	}
+
+	if len(tx.Deployer) != 0 {
+		address := common.BytesToAddress(tx.Deployer)
+		deployerAddress = &address
+	}
 
 	return &AccountAbstractionTransaction{
 		Nonce:                       tx.Nonce,
@@ -760,9 +770,9 @@ func FromProto(tx *typesproto.AccountAbstractionTransaction) *AccountAbstraction
 		SenderAddress:               &senderAddress,
 		Authorizations:              convertProtoAuthorizations(tx.Authorizations),
 		ExecutionData:               tx.ExecutionData,
-		Paymaster:                   &paymasterAddress,
+		Paymaster:                   paymasterAddress,
 		PaymasterData:               tx.PaymasterData,
-		Deployer:                    &deployerAddress,
+		Deployer:                    deployerAddress,
 		DeployerData:                tx.DeployerData,
 		BuilderFee:                  uint256.NewInt(0).SetBytes(tx.BuilderFee),
 		ValidationGasLimit:          tx.ValidationGasLimit,
