@@ -777,7 +777,7 @@ func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot, sender []byte)
 func getAddress(payload []byte, p int, name string) (*common.Address, int, error) {
 	dataPos, dataLen, err := rlp.ParseString(payload, p)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err) //nolint
+		return nil, 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err)
 	}
 	if dataLen != 0 && dataLen != length.Addr {
 		return nil, 0, fmt.Errorf("%w: unexpected length of '%s' field: %d", ErrParseTxn, name, dataLen)
