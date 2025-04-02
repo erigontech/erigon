@@ -288,19 +288,22 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snapcfg.PreverifiedItem) bool {
 	// History expiry is the default.
 	if pruneMode.Blocks != prune.DefaultBlocksPruneMode {
+		fmt.Println("bad prune mode", pruneMode.Blocks, prune.DefaultBlocksPruneMode)
 		return false
 	}
 	// Make sepolia expired by default
 	if !dbg.EnableHistoryExpiry && cc.ChainName != networkname.Sepolia {
+		fmt.Println("expired blocked=false", p.Name)
 		return false
 	}
 
 	// We use the pre-merge data policy.
 	s, _, ok := snaptype.ParseFileName("", p.Name)
 	if !ok {
+		fmt.Println("expired ok=false", s.Name())
 		return false
 	}
-	fmt.Println("expired", s.Name())
+	fmt.Println("expired", s.Name(), cc.IsPreMerge(s.To))
 	return cc.IsPreMerge(s.To)
 }
 
