@@ -301,6 +301,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			endIdx := startIdx + txTask.AAValidationBatchSize
 
 			validationResults := make([]validationResult, txTask.AAValidationBatchSize)
+			log.Debug("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
 
 			var outerErr error
 			for i := startIdx; i < endIdx; i++ {
@@ -332,6 +333,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				txTask.Error = outerErr
 				break
 			}
+			log.Debug("✅[aa] validated AA bundle")
 
 			// execute batch txns
 			for i := startIdx; i <= endIdx; i++ {
@@ -349,6 +351,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				txTask.Error = outerErr
 				break
 			}
+			log.Debug("✅[aa] executed AA bundle")
 
 		}
 

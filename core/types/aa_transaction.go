@@ -39,6 +39,7 @@ type AccountAbstractionTransaction struct {
 	AccessList AccessList
 
 	SenderAddress               *common.Address
+	SenderValidationData        []byte
 	Authorizations              []Authorization
 	ExecutionData               []byte
 	Paymaster                   *common.Address
@@ -367,6 +368,10 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
+	if err := rlp.EncodeString(tx.SenderValidationData, w, b); err != nil {
+		return err
+	}
+
 	if err := rlp.EncodeOptionalAddress(tx.Deployer, w, b); err != nil {
 		return err
 	}
@@ -466,6 +471,10 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	tx.SenderAddress = &common.Address{}
 	copy((*tx.SenderAddress)[:], b)
 
+	if tx.SenderValidationData, err = s.Bytes(); err != nil {
+		return err
+	}
+
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
@@ -548,8 +557,7 @@ func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 	defer pooledBuf.Put(b)
 	// encode TxType
 	b[0] = AccountAbstractionTxType
-	b[1] = 0x0
-	if _, err := w.Write(b[:2]); err != nil {
+	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
 	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
@@ -681,6 +689,7 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 		{Name: "maxFeePerGas", Type: "uint256"},
 		{Name: "maxPriorityFeePerGas", Type: "uint256"},
 		{Name: "builderFee", Type: "uint256"},
+		{Name: "senderValidationData", Type: "bytes"},
 		{Name: "paymaster", Type: "address"},
 		{Name: "paymasterData", Type: "bytes"},
 		{Name: "deployer", Type: "address"},
@@ -712,6 +721,7 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 		MaxFeePerGas:                tx.FeeCap,
 		MaxPriorityFeePerGas:        tx.Tip,
 		BuilderFee:                  tx.BuilderFee,
+		SenderValidationData:        tx.SenderValidationData,
 		Paymaster:                   *paymaster,
 		PaymasterData:               tx.PaymasterData,
 		Deployer:                    *deployer,
@@ -739,7 +749,7 @@ type ABIAccountAbstractTxn struct {
 	Deployer                    common.Address
 	DeployerData                []byte
 	ExecutionData               []byte
-	AuthorizationData           []byte
+	SenderValidationData        []byte
 }
 
 func FromProto(tx *typesproto.AccountAbstractionTransaction) *AccountAbstractionTransaction {
