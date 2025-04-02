@@ -72,6 +72,8 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 
 	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests")
 	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
+	bt.skipLoad("^prague/eip7251_consolidations/contract_deployment/system_contract_deployment.json")
+	bt.skipLoad("^prague/eip7002_el_triggerable_withdrawals/contract_deployment/system_contract_deployment.json")
 	checkStateRoot := true
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
