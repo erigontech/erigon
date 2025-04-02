@@ -31,6 +31,7 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/cmd/state/commands"
@@ -45,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // EthBackendAPIVersion
@@ -437,17 +439,21 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	}
 	defer tx.Rollback()
 
-	aaTxn := types.FromProto(req.Tx)
-	stateReader := state.NewHistoryReaderV3()
-	stateReader.SetTx(tx.(kv.TemporalTx))
-	ibs := state.New(stateReader)
-
 	currentBlock, err := s.blockReader.CurrentBlock(tx)
 	if err != nil {
 		return nil, err
 	}
-
 	header := currentBlock.HeaderNoCopy()
+
+	aaTxn := types.FromProto(req.Tx)
+	stateReader := state.NewHistoryReaderV3()
+	stateReader.SetTx(tx.(kv.TemporalTx))
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, s.blockReader))
+	maxTxNum, err := txNumsReader.Max(tx, header.Number.Uint64())
+	stateReader.SetTxNum(maxTxNum)
+	ibs := state.New(stateReader)
+
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &libcommon.Address{}, s.chainConfig)
 
 	ot := commands.NewOpcodeTracer(header.Number.Uint64(), true, false)
