@@ -1325,7 +1325,12 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 	}
 	if len(branchData) == 0 {
 		log.Warn("got empty branch data during unfold", "key", hex.EncodeToString(key), "row", row, "depth", depth, "deleted", deleted)
-		return false, fmt.Errorf("empty branch data read during unfold, prefix %x", key)
+		branchData, _, err := hph.ctx.Branch(key)
+		if err != nil {
+			return false, err
+		}
+		fmt.Printf("unfoldBranchNode prefix '%x', nibbles [%x] depth %d row %d '%x' %s\n", key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData, BranchData(branchData).String())
+		return false, fmt.Errorf("empty branch data read during unfold, compact prefix %x nibbles %x", key, hph.currentKey[:hph.currentKeyLen])
 	}
 	hph.branchBefore[row] = true
 	bitmap := binary.BigEndian.Uint16(branchData[0:])
@@ -1631,6 +1636,8 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 		upCell.reset()
 		if hph.branchBefore[row] {
+
+			fmt.Printf("[%x] collectBranchUpdate [%x] delete \n", hph.mountedNib, updateKey)
 			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
@@ -1661,6 +1668,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 		if hph.branchBefore[row] { // encode Delete if prefix existed before
 			//fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
+			fmt.Printf("[%x] collectBranchUpdate [%x] delete \n", hph.mountedNib, updateKey)
 			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
@@ -1750,6 +1758,8 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 		b := [...]byte{0x80}
 		cellGetter := hph.createCellGetter(b[:], updateKey, row, depth)
+		fmt.Printf("[%x] collectBranchUpdate [%x] \n", hph.mountedNib, updateKey)
+
 		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
@@ -1904,7 +1914,7 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			return fmt.Errorf("unfold: %w", err)
 		}
 		if printLater {
-			fmt.Printf("[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[hph.activeRows-1])
+			fmt.Printf("[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
 		}
 		// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
 	}
@@ -1935,23 +1945,25 @@ func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, int, error) {
 	}
 
 	if hph.trace {
-		fmt.Printf("=======[%x] folding rows %d depths %+v\n", hph.mountedNib, hph.activeRows, hph.depths[:hph.activeRows])
+		fmt.Printf("====[%x] folding rows %d depths %+v\n", hph.mountedNib, hph.activeRows, hph.depths[:hph.activeRows])
 		defer func() { fmt.Printf("=======[%x] folded =========\n", hph.mountedNib) }()
 	}
-	// fmt.Printf("===[%x] folding prefix %x (len %d)\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.currentKeyLen)
 
 	for hph.activeRows > 0 {
+		fmt.Printf("===[%x] folding prefix %x (len %d)\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.currentKeyLen)
 		if hph.activeRows == 1 && hph.depths[hph.activeRows-1] == 1 {
 			if hph.trace {
 				fmt.Printf("mount early as nibble %02x %s\n", hph.mountedNib, hph.grid[0][hph.mountedNib].String())
 			}
-			// fmt.Printf("=====[%x] stop folding at %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen])
+			fmt.Printf("===[%x] stop folding at %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen])
 			return hph.grid[0][hph.mountedNib], hph.mountedNib, nil
 		}
 		if err := hph.fold(); err != nil {
 			return cell{}, 0, fmt.Errorf("final fold: %w", err)
 		}
 	}
+
+	fmt.Printf("===[%x] !@folded to the root\n", hph.mountedNib)
 	if hph.rootPresent && hph.rootTouched {
 		if hph.trace {
 			fmt.Printf("mount root as %02x %s\n", hph.mountedNib, hph.root.String())
