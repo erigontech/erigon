@@ -691,7 +691,9 @@ func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot, sender []byte)
 		return 0, err
 	}
 	slot.SenderAddress = address
-	copy(sender, address[:])
+        if ctx.withSender {
+	    copy(sender, address[:])
+	}
 
 	address, p, err = getAddress(payload, p, "deployerAddress")
 	if err != nil {
