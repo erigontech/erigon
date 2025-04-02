@@ -19,6 +19,7 @@ package exec3
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -218,11 +219,11 @@ func (rw *Worker) Run() (err error) {
 func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 	//fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
 	rw.lock.Lock()
-	fmt.Println("RunTxTask locked")
 	defer rw.lock.Unlock()
 
 	for !rw.runnable.Load() {
-		fmt.Println("RunTxTask wait")
+		_, f, line, _ := runtime.Caller(3)
+		fmt.Println("RunTxTask wait", f, line)
 		rw.notifier.Wait()
 	}
 
