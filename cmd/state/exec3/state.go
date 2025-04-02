@@ -116,6 +116,7 @@ func (rw *Worker) Pause() {
 
 func (rw *Worker) Paused() bool {
 	if !rw.runnable.Load() && rw.lock.TryLock() {
+		fmt.Println("Paused locked")
 		rw.lock.Unlock()
 		return true
 	}
@@ -133,6 +134,7 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 	fmt.Println("reset state", rw.lock)
 	defer fmt.Println("reset state done")
 	rw.lock.Lock()
+	fmt.Println("ResetState locked")
 	defer rw.lock.Unlock()
 
 	fmt.Println("reset tx")
@@ -157,6 +159,7 @@ func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
 func (rw *Worker) DiscardReadList() { rw.stateReader.DiscardReadList() }
 func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	rw.lock.Lock()
+	fmt.Println("ResetTx locked")
 	defer rw.lock.Unlock()
 	rw.resetTx(chainTx)
 }
@@ -215,6 +218,7 @@ func (rw *Worker) Run() (err error) {
 func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 	//fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
 	rw.lock.Lock()
+	fmt.Println("RunTxTask locked")
 	defer rw.lock.Unlock()
 
 	for !rw.runnable.Load() {
