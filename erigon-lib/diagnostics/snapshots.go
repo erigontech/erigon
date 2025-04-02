@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -41,6 +42,13 @@ func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
 	d.runSegmentIndexingListener(rootCtx)
 	d.runFileDownloadedListener(rootCtx)
 	d.runFillDBListener(rootCtx)
+
+	go func() {
+		for {
+			time.Sleep(5 * time.Second)
+			d.SaveSnaphotsSyncToJsonFile()
+		}
+	}()
 }
 
 func (d *DiagnosticClient) runFillDBListener(rootCtx context.Context) {
@@ -182,4 +190,54 @@ func SnapshotIndexingUpdater(info SnapshotIndexingStatistics) func(tx kv.RwTx) e
 
 func SnapshotFillDBUpdater(info SnapshotFillDBStatistics) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSyncStages, SnapshotFillDBStatisticsKey, info)
+}
+
+// //
+func (d *DiagnosticClient) SaveSnaphotsSyncToJsonFile() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	var data []byte
+
+	// Check if file exists
+	if _, err := os.Stat("/erigon/sync_messages.json"); err == nil {
+		// File exists, read existing content
+		existingData, err := os.ReadFile("/erigon/sync_messages.json")
+		if err != nil {
+			log.Error("[Diagnostics] Error reading existing sync messages file", "err", err)
+			return
+		}
+
+		// Parse existing messages
+		var messages []SyncStatistics
+		if err := json.Unmarshal(existingData, &messages); err != nil {
+			log.Error("[Diagnostics] Error unmarshalling existing sync messages", "err", err)
+			return
+		}
+
+		// Append new stats
+		messages = append(messages, d.syncStats)
+
+		// Marshal and write back
+		data, err = json.Marshal(messages)
+		if err != nil {
+			log.Error("[Diagnostics] Error marshalling updated sync messages", "err", err)
+			return
+		}
+	} else {
+		// File doesn't exist, create new array with single message
+		messages := []SyncStatistics{d.syncStats}
+		data, err = json.Marshal(messages)
+		if err != nil {
+			log.Error("[Diagnostics] Error marshalling new sync messages", "err", err)
+			return
+		}
+	}
+
+	// Write to file
+	if err := os.WriteFile("/erigon/sync_messages.json", data, 0644); err != nil {
+		log.Error("[Diagnostics] Error writing sync messages to file", "err", err)
+		return
+	}
+	log.Info("[Diagnostics] Sync messages saved to sync_messages.json")
 }
