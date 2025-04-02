@@ -2686,6 +2686,26 @@ func (p *ParallelPatriciaHashed) foldNibble(nib int) error {
 		p.root.afterMap[0] &^= uint16(1) << nib
 	}
 	p.root.depths[0] = 1
+	p.root.grid[0][nib] = c
+
+	subtrie := p.mounts[nib]
+	subtrie.Reset()
+
+	subtrie.currentKeyLen = 0
+	subtrie.activeRows = 0
+	for ri := 0; ri < len(p.mounts[nib].grid); ri++ {
+		subtrie.currentKey[ri] = 0
+		subtrie.depths[ri] = 0
+		subtrie.touchMap[ri] = 0
+		subtrie.afterMap[ri] = 0
+		subtrie.depthsToTxNum[ri] = 0
+		subtrie.branchBefore[ri] = false
+
+		for ci := 0; ci < len(subtrie.grid[ri]); ci++ {
+			subtrie.grid[ri][ci].reset()
+		}
+	}
+
 	return nil
 }
 
