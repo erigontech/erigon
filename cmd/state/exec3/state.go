@@ -119,14 +119,16 @@ func (rw *Worker) Paused() bool {
 	if rw.runnable.Load() {
 		return false
 	}
+
+	canlock := rw.lock.TryLock() {
 	
-	if rw.lock.TryLock() {
-		fmt.Printf("%p: Paused locked\n", rw)
+	if canlock {
 		rw.lock.Unlock()
-		return false
+	} else {
+		fmt.Printf("%p: pause waiting\n", rw)
 	}
-	
-	return true
+
+	return canlock
 }
 
 func (rw *Worker) Resume() {
