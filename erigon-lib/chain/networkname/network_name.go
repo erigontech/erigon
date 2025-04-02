@@ -5,6 +5,7 @@ const (
 	HoleskyChainName        = "holesky"
 	SepoliaChainName        = "sepolia"
 	GoerliChainName         = "goerli"
+	HoodiChainName          = "hoodi"
 	DevChainName            = "dev"
 	MumbaiChainName         = "mumbai"
 	AmoyChainName           = "amoy"
@@ -20,6 +21,7 @@ var All = []string{
 	HoleskyChainName,
 	SepoliaChainName,
 	GoerliChainName,
+	HoodiChainName,
 	MumbaiChainName,
 	AmoyChainName,
 	BorMainnetChainName,

@@ -3,6 +3,7 @@ module github.com/erigontech/erigon-lib
 go 1.22.0
 
 require (
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20240814160410-2ce37904b978
 	github.com/erigontech/mdbx-go v0.27.24
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
@@ -20,7 +21,6 @@ require (
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/edsrzf/mmap-go v1.1.0
-	github.com/erigontech/erigon-snapshot v1.3.0
 	github.com/erigontech/interfaces v0.0.0-20241211040849-58b88a185510
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.8.1
@@ -146,7 +146,5 @@ require (
 )
 
 replace github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-8
-
-replace github.com/erigontech/erigon-snapshot => github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240805114253-42da880260bb
 
 replace github.com/erigontech/interfaces => github.com/ledgerwatch/interfaces v0.0.0-20241024161200-024ffe1cabff
