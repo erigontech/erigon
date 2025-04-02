@@ -21,6 +21,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv/prune"
@@ -99,6 +100,11 @@ var (
 	PruneBlocksDistanceFlag = cli.Uint64Flag{
 		Name:  "prune.distance.blocks",
 		Usage: `Keep block history for the latest N blocks (default: everything)`,
+	}
+	HistoryExpiryEnabledFlag = cli.BoolFlag{
+		Name:  "history-expiry",
+		Usage: "Enable history expiry",
+		Value: false,
 	}
 	ExperimentsFlag = cli.StringFlag{
 		Name: "experiments",
@@ -462,6 +468,11 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 		etl.BufferOptimalSize = *size
+	}
+
+	enabledHistoryExpiry := f.Bool(HistoryExpiryEnabledFlag.Name, HistoryExpiryEnabledFlag.Value, HistoryExpiryEnabledFlag.Usage)
+	if enabledHistoryExpiry != nil && *enabledHistoryExpiry {
+		dbg.EnableHistoryExpiry = true
 	}
 
 	cfg.StateStream = true
