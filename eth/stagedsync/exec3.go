@@ -928,7 +928,9 @@ func ExecV3(ctx context.Context,
 									trace = true
 								}
 								pe.doms.SetTrace(trace)
-								commitment.Captured = []string{}
+								if !dbg.BatchCommitments {
+									commitment.Captured = []string{}
+								}
 								rh, err := pe.doms.ComputeCommitment(ctx, applyTx, true, applyResult.BlockNum, pe.logPrefix)
 								pe.doms.SetTrace(false)
 								captured := commitment.Captured
@@ -938,27 +940,28 @@ func ExecV3(ctx context.Context,
 								}
 								if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
 									logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
-									for _, line := range captured {
-										fmt.Println(line)
-									}
+									if !dbg.BatchCommitments {
+										for _, line := range captured {
+											fmt.Println(line)
+										}
 
-									maxTxIndex := len(applyResult.TxIO.Inputs()) - 1
+										maxTxIndex := len(applyResult.TxIO.Inputs()) - 1
 
-									for txIndex := -1; txIndex < maxTxIndex; txIndex++ {
-										fmt.Println(
-											fmt.Sprintf("%d (%d) RD", applyResult.BlockNum, txIndex), applyResult.TxIO.ReadSet(txIndex).Len(),
-											"WRT", len(applyResult.TxIO.WriteSet(txIndex)))
+										for txIndex := -1; txIndex < maxTxIndex; txIndex++ {
+											fmt.Println(
+												fmt.Sprintf("%d (%d) RD", applyResult.BlockNum, txIndex), applyResult.TxIO.ReadSet(txIndex).Len(),
+												"WRT", len(applyResult.TxIO.WriteSet(txIndex)))
 
-										applyResult.TxIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
-											fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "RD", vr.String())
-											return true
-										})
+											applyResult.TxIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
+												fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "RD", vr.String())
+												return true
+											})
 
-										for _, vw := range applyResult.TxIO.WriteSet(txIndex) {
-											fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "WRT", vw.String())
+											for _, vw := range applyResult.TxIO.WriteSet(txIndex) {
+												fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "WRT", vw.String())
+											}
 										}
 									}
-
 									return errors.New("wrong trie root")
 								}
 
