@@ -1065,6 +1065,8 @@ func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, t
 		select {
 		case request := <-asyncTxChan:
 			request.Apply()
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
 		case <-waiter:
 		}
 	}
