@@ -250,7 +250,7 @@ func ExecuteAATransaction(
 	gasUsed += applyRes.UsedGas + validationGasPenalty
 
 	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
-		return 0, nil, nil, 0, err
+		return 0, 0, err
 	}
 
 	if err = payCoinbase(header, tx, ibs, gasUsed-gasRefund, evm.Context.Coinbase); err != nil {

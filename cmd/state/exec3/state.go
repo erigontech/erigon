@@ -180,11 +180,6 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
-type AAValidationResult struct {
-	PaymasterContext []byte
-	GasUsed          uint64
-}
-
 func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvaluaion bool) {
 	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
@@ -298,7 +293,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				startIdx := uint64(txTask.TxIndex)
 				endIdx := startIdx + txTask.AAValidationBatchSize
 
-				validationResults := make([]AAValidationResult, txTask.AAValidationBatchSize)
+				validationResults := make([]state.AAValidationResult, txTask.AAValidationBatchSize)
 				log.Debug("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx-1)
 
 				var outerErr error
@@ -317,7 +312,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 							break
 						}
 
-						validationResults[i-startIdx] = AAValidationResult{
+						validationResults[i-startIdx] = state.AAValidationResult{
 							PaymasterContext: paymasterContext,
 							GasUsed:          validationGasUsed,
 						}
