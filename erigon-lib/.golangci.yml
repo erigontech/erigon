@@ -19,7 +19,6 @@ linters:
     - err113
     - unparam
     - makezero
-    - testifylint #TODO: enable me
     - perfsprint #TODO: enable me
     - protogetter
     - typecheck
@@ -31,6 +30,7 @@ linters:
     - thelper
     - gofmt
     - gocritic
+    - testifylint
 #    - revive
 #    - forcetypeassert
 #    - stylecheck

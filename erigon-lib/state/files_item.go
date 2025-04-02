@@ -366,17 +366,6 @@ func (files visibleFiles) LatestMergedRange() MergeRange {
 	return MergeRange{}
 }
 
-func (files visibleFiles) MergedRanges() []MergeRange {
-	if len(files) == 0 {
-		return nil
-	}
-	res := make([]MergeRange, len(files))
-	for i := len(files) - 1; i >= 0; i-- {
-		res[i] = MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
-	}
-	return res
-}
-
 // fileItemsWithMissingAccessors returns list of files with missing accessors
 // here "accessors" are generated dynamically by `accessorsFor`
 func fileItemsWithMissingAccessors(dirtyFiles *btree2.BTreeG[*filesItem], aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*filesItem) {

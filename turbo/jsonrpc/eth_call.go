@@ -28,10 +28,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/trie"
 
-	"github.com/erigontech/erigon-lib/common"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
+
+	"github.com/erigontech/erigon-lib/common"
+	libstate "github.com/erigontech/erigon-lib/state"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -824,7 +825,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, excl, state)
-		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
+		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 		txCtx := core.NewEVMTxContext(msg)
 

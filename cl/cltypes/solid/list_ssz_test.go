@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Mock data
@@ -80,11 +81,11 @@ func TestListSSZEncodeDecodeSSZ(t *testing.T) {
 	list.Append(checkpoint)
 
 	encoded, err := list.EncodeSSZ(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	decodedList := NewDynamicListSSZ[Validator](limit)
 	err = decodedList.DecodeSSZ(encoded, 0)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	assert.Equal(t, list.Len(), decodedList.Len())
 }
@@ -132,10 +133,10 @@ func TestUint64VectorSSZ(t *testing.T) {
 
 	// Test EncodeSSZ and DecodeSSZ
 	encodedData, err := arr.EncodeSSZ(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	decodedArr := NewUint64VectorSSZ(size)
 	err = decodedArr.DecodeSSZ(encodedData, 0)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, arr.Length(), decodedArr.Length())
 	assert.Equal(t, arr.Get(0), decodedArr.Get(0))
 	assert.Equal(t, arr.Get(1), decodedArr.Get(1))

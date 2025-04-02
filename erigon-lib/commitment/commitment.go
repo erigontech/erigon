@@ -27,11 +27,8 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/types/accounts"
-
-	"github.com/holiman/uint256"
-
 	"github.com/google/btree"
+	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -40,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 var (
@@ -179,52 +177,13 @@ type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
-	updates   *etl.Collector
-	tmpdir    string
 }
 
-func NewBranchEncoder(sz uint64, tmpdir string) *BranchEncoder {
-	be := &BranchEncoder{
+func NewBranchEncoder(sz uint64) *BranchEncoder {
+	return &BranchEncoder{
 		buf:    bytes.NewBuffer(make([]byte, sz)),
-		tmpdir: tmpdir,
 		merger: NewHexBranchMerger(sz / 2),
 	}
-	//be.initCollector()
-	return be
-}
-
-func (be *BranchEncoder) initCollector() {
-	if be.updates != nil {
-		be.updates.Close()
-	}
-	be.updates = etl.NewCollector("commitment.BranchEncoder", be.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/4), log.Root().New("branch-encoder"))
-	be.updates.LogLvl(log.LvlDebug)
-	be.updates.SortAndFlushInBackground(true)
-}
-
-func (be *BranchEncoder) Load(pc PatriciaContext, args etl.TransformArgs) error {
-	// do not collect them at least now. Write them at CollectUpdate into pc
-	if be.updates == nil {
-		return nil
-	}
-
-	if err := be.updates.Load(nil, "", func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		stateValue, stateStep, err := pc.Branch(prefix)
-		if err != nil {
-			return err
-		}
-
-		cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
-		if err = pc.PutBranch(cp, cu, stateValue, stateStep); err != nil {
-			return err
-		}
-		mxTrieBranchesUpdated.Inc()
-		return nil
-	}, args); err != nil {
-		return err
-	}
-	be.initCollector()
-	return nil
 }
 
 func (be *BranchEncoder) CollectUpdate(
@@ -258,6 +217,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
 	}
+	mxTrieBranchesUpdated.Inc()
 	return lastNibble, nil
 }
 

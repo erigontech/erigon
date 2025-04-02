@@ -145,6 +145,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 	if len(mergeRanges) == 0 {
 		return nil
 	}
+
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 

@@ -26,23 +26,20 @@ import (
 	"hash"
 	"io"
 	"math/bits"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"golang.org/x/crypto/sha3"
 )
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -100,7 +97,7 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string)
 		hadToLoadL:    make(map[uint64]skipStat),
 		accValBuf:     make(rlp.RlpEncodedBytes, 128),
 	}
-	hph.branchEncoder = NewBranchEncoder(1024, filepath.Join(tmpdir, "branch-encoder"))
+	hph.branchEncoder = NewBranchEncoder(1024)
 	return hph
 }
 
@@ -1800,10 +1797,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
-	}
-	err = hph.branchEncoder.Load(hph.ctx, etl.TransformArgs{Quit: ctx.Done()})
-	if err != nil {
-		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
 	if dbg.KVReadLevelledMetrics {
 		log.Debug("commitment finished, counters updated (no reset)",
