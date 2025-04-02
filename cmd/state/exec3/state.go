@@ -116,12 +116,17 @@ func (rw *Worker) Pause() {
 }
 
 func (rw *Worker) Paused() bool {
-	if !rw.runnable.Load() && rw.lock.TryLock() {
-		fmt.Println("Paused locked")
-		rw.lock.Unlock()
-		return true
+	if rw.runnable.Load() {
+		return false
 	}
-	return false
+	
+	if rw.lock.TryLock() {
+		fmt.Printf("%p: Paused locked\n", rw)
+		rw.lock.Unlock()
+		return false
+	}
+	
+	return true
 }
 
 func (rw *Worker) Resume() {
@@ -132,7 +137,7 @@ func (rw *Worker) Resume() {
 func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
 
 func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateReader state.ResettableStateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
-	fmt.Println("reset state", rw.lock)
+	fmt.Printf("%p: reset state %#v\n", rw, rw.lock)
 	defer fmt.Println("reset state done")
 	rw.lock.Lock()
 	fmt.Println("ResetState locked")
@@ -222,8 +227,8 @@ func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 	defer rw.lock.Unlock()
 
 	for !rw.runnable.Load() {
-		_, f, line, _ := runtime.Caller(3)
-		fmt.Println("RunTxTask wait", f, line)
+		_, f, line, _ := runtime.Caller(2)
+		fmt.Printf("%p: RunTxTask wait %s:%d\n", rw, f, line)
 		rw.notifier.Wait()
 	}
 
