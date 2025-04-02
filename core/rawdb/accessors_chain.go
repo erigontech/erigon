@@ -1268,8 +1268,8 @@ func ReadReceipts(db kv.Tx, blockHash common.Hash, blockNum uint64) (res types.R
 }
 
 // PruneReceipts removes all receipt for given block number or newer - used for Unwind
-func PruneReceipts(tx kv.RwTx, number uint64) error {
-	rng, err := tx.Prefix(kv.Receipts, hexutil.EncodeTs(number))
+func PruneReceipts(tx kv.RwTx, blockNum uint64) error {
+	rng, err := tx.Prefix(kv.Receipts, hexutil.EncodeTs(blockNum))
 	if err != nil {
 		return err
 	}
