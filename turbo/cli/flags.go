@@ -460,6 +460,13 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 	}
+
+	enabledHistoryExpiry := f.Bool(HistoryExpiryEnabledFlag.Name, HistoryExpiryEnabledFlag.Value, HistoryExpiryEnabledFlag.Usage)
+	if enabledHistoryExpiry != nil && *enabledHistoryExpiry {
+		dbg.EnableHistoryExpiry = true
+		fmt.Println("History expiry enabled")
+	}
+
 	if v := f.String(EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value, EtlBufferSizeFlag.Usage); v != nil {
 		sizeVal := datasize.ByteSize(0)
 		size := &sizeVal
@@ -468,12 +475,6 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 		etl.BufferOptimalSize = *size
-	}
-
-	enabledHistoryExpiry := f.Bool(HistoryExpiryEnabledFlag.Name, HistoryExpiryEnabledFlag.Value, HistoryExpiryEnabledFlag.Usage)
-	if enabledHistoryExpiry != nil && *enabledHistoryExpiry {
-		dbg.EnableHistoryExpiry = true
-		fmt.Println("History expiry enabled")
 	}
 
 	cfg.StateStream = true
