@@ -1062,14 +1062,14 @@ func (pe *parallelExecutor) pause() {
 	}
 }
 
-func (pe *parallelExecutor) paused() bool {
+func (pe *parallelExecutor) paused() (chan any, bool) {
 	for _, worker := range pe.execWorkers {
-		if !worker.Paused() {
-			return false
+		if waiter, paused := worker.Paused(); !paused {
+			return waiter, false
 		}
 	}
 
-	return true
+	return nil, true
 }
 
 func (pe *parallelExecutor) resume() {

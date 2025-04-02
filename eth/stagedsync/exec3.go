@@ -1004,11 +1004,15 @@ func ExecV3(ctx context.Context,
 						var t2 time.Duration
 						commitStart := time.Now()
 						pe.pause()
-						for !pe.paused() {
+						for {
+							waiter, paused := pe.paused()
+							if paused {
+								break
+							}
 							select {
 							case request := <-asyncTxChan:
 								request.Apply()
-							default:
+							case <-waiter:
 							}
 						}
 						fmt.Println("paused")

@@ -67,7 +67,7 @@ type Worker struct {
 	ctx      context.Context
 	engine   consensus.Engine
 	genesis  *types.Genesis
-	resultCh *exec.ResultsQueue
+	results *exec.ResultsQueue
 	chain    consensus.ChainReader
 
 	callTracer  *CallTracer
@@ -95,7 +95,7 @@ func NewWorker(logger log.Logger, ctx context.Context, background bool, chainDb 
 
 		ctx:      ctx,
 		genesis:  genesis,
-		resultCh: results,
+		results: results,
 		engine:   engine,
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
@@ -115,20 +115,24 @@ func (rw *Worker) Pause() {
 	rw.runnable.Store(false)
 }
 
-func (rw *Worker) Paused() bool {
+func (rw *Worker) Paused() (waiter chan any, paused bool) {
 	if rw.runnable.Load() {
-		return false
+		return nil, false
 	}
+
+	rw.results.Lock()
+	defer rw.results.Unlock()
 
 	canlock := rw.lock.TryLock()
 
 	if canlock {
 		rw.lock.Unlock()
 	} else {
+		waiter = rw.results.AddWaiter(false)
 		fmt.Printf("%p: pause waiting\n", rw)
 	}
 
-	return canlock
+	return waiter, canlock
 }
 
 func (rw *Worker) Resume() {
@@ -145,17 +149,15 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 	fmt.Println("ResetState locked")
 	defer rw.lock.Unlock()
 
-	fmt.Println("reset tx")
 	rw.rs = rs
 	rw.resetTx(chainTx)
-	fmt.Println("reader")
 
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
 		rw.SetReader(state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains(), rw.chainTx)))
 	}
-	fmt.Println("writer")
+
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
@@ -167,7 +169,6 @@ func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
 func (rw *Worker) DiscardReadList() { rw.stateReader.DiscardReadList() }
 func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	rw.lock.Lock()
-	fmt.Println("ResetTx locked")
 	defer rw.lock.Unlock()
 	rw.resetTx(chainTx)
 }
@@ -216,7 +217,7 @@ func (rw *Worker) Run() (err error) {
 
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		result := rw.RunTxTask(txTask)
-		if err := rw.resultCh.Add(rw.ctx, result); err != nil {
+		if err := rw.results.Add(rw.ctx, result); err != nil {
 			return err
 		}
 	}
@@ -309,8 +310,8 @@ func NewWorkersPool(accumulator *shards.Accumulator, logger log.Logger, ctx cont
 	engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
-	resultChSize := workerCount * 8
-	rws = exec.NewResultsQueue(resultChSize, workerCount) // workerCount * 4
+	resultsSize := workerCount * 8
+	rws = exec.NewResultsQueue(resultsSize, workerCount) 
 	{
 		// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 		// and in applyLoop all errors are critical

@@ -673,7 +673,8 @@ type PriorityQueue[T queueable[T]] struct {
 	limit  int
 	closed bool
 
-	resultCh chan T
+	resultCh   chan T
+	addWaiters chan any
 	//tick
 	ticker *time.Ticker
 
@@ -695,9 +696,15 @@ func NewPriorityQueue[T queueable[T]](channelLimit, heapLimit int) *PriorityQueu
 // Add result of execution. May block when internal channel is full
 func (q *PriorityQueue[T]) Add(ctx context.Context, item T) error {
 
-	q.RLock()
+	q.Lock()
 	resultCh := q.resultCh
-	q.RUnlock()
+	addWaiters := q.addWaiters
+	q.addWaiters = nil
+	q.Unlock()
+
+	if addWaiters != nil {
+		close(addWaiters)
+	}
 
 	if err := ctx.Err(); err != nil {
 		return err
@@ -838,4 +845,17 @@ func (q *ResultsQueue) Dbg() (t *Result) {
 		return (*q.results)[0]
 	}
 	return nil
+}
+
+func (q *ResultsQueue) AddWaiter(lock bool) chan any {
+	if lock {
+		q.Lock()
+		defer q.Unlock()
+	}
+	
+	if q.addWaiters == nil {
+		q.addWaiters = make(chan any)
+	}
+
+	return q.addWaiters
 }
