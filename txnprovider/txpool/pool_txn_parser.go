@@ -343,7 +343,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	}
 
 	if slot.Type == AATxnType {
-		return parseTransactionBodyAA(payload, p, slot)
+		return parseTransactionBodyAA(ctx, payload, p, slot, sender)
 	}
 
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
@@ -667,7 +667,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	return p, nil
 }
 
-func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot) (int, error) {
+func parseTransactionBodyAA(ctx *TxnParseContext, payload []byte, p int, slot *TxnSlot, sender []byte) (int, error) {
 	p, err := rlp.ParseU256(payload, p, &slot.ChainID)
 	if err != nil {
 		return 0, fmt.Errorf("%w: chainID: %s", ErrParseTxn, err)
@@ -687,13 +687,16 @@ func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	slot.SenderAddress = &address
+	slot.SenderAddress = address
+	if ctx.withSender {
+		copy(sender, address[:])
+	}
 
 	address, p, err = getAddress(payload, p, "deployerAddress")
 	if err != nil {
 		return 0, err
 	}
-	slot.Deployer = &address
+	slot.Deployer = address
 
 	slot.DeployerData, p, err = getData(payload, p)
 	if err != nil {
@@ -704,7 +707,10 @@ func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	slot.Paymaster = &address
+	slot.Paymaster = address
+	if slot.Paymaster != nil && ctx.withSender {
+		copy(sender, address[:])
+	}
 
 	slot.PaymasterData, p, err = getData(payload, p)
 	if err != nil {
@@ -768,16 +774,20 @@ func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot) (int, error) {
 	return p, nil
 }
 
-func getAddress(payload []byte, p int, name string) (common.Address, int, error) {
+func getAddress(payload []byte, p int, name string) (*common.Address, int, error) {
 	dataPos, dataLen, err := rlp.ParseString(payload, p)
 	if err != nil {
-		return common.Address{}, 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err) //nolint
+		return nil, 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err)
 	}
 	if dataLen != 0 && dataLen != length.Addr {
-		return common.Address{}, 0, fmt.Errorf("%w: unexpected length of '%s' field: %d", ErrParseTxn, name, dataLen)
+		return nil, 0, fmt.Errorf("%w: unexpected length of '%s' field: %d", ErrParseTxn, name, dataLen)
+	}
+	if dataLen == 0 {
+		return nil, dataPos + dataLen, nil
 	}
 
-	return common.BytesToAddress(payload[dataPos : dataPos+dataLen]), dataPos + dataLen, nil
+	address := common.BytesToAddress(payload[dataPos : dataPos+dataLen])
+	return &address, dataPos + dataLen, nil
 }
 
 func getData(payload []byte, p int) ([]byte, int, error) {
