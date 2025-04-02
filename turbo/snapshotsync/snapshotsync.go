@@ -300,8 +300,8 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 	if !ok {
 		return false
 	}
+	fmt.Println("expired")
 	return cc.IsPreMerge(s.To)
-
 }
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
