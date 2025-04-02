@@ -98,9 +98,16 @@ type receiptRLP struct {
 
 // storedReceiptRLP is the storage encoding of a receipt.
 type storedReceiptRLP struct {
+	Type              uint8
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	FirstLogIndex     uint32 // Logs have their own incremental Index within block. To allow calc it without re-executing whole block - can store it in Receipt
+
+	Logs []*LogForStorage
+
+	TransactionIndex uint
+	ContractAddress  libcommon.Address
+	GasUsed          uint64
 }
 
 // NewReceipt creates a barebone transaction receipt, copying the init fields.
@@ -350,6 +357,8 @@ func (r *Receipt) Copy() *Receipt {
 		BlockHash:         libcommon.BytesToHash(r.BlockHash.Bytes()),
 		BlockNumber:       big.NewInt(0).Set(r.BlockNumber),
 		TransactionIndex:  r.TransactionIndex,
+
+		FirstLogIndexWithinBlock: r.FirstLogIndexWithinBlock,
 	}
 }
 
@@ -366,10 +375,20 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 	if len(r.Logs) > 0 {
 		firstLogIndex = uint32(r.Logs[0].Index)
 	}
+	logsForStorage := make([]*LogForStorage, len(r.Logs))
+	for i, l := range r.Logs {
+		logsForStorage[i] = (*LogForStorage)(l)
+	}
 	return rlp.Encode(w, &storedReceiptRLP{
+		Type:              r.Type,
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
 		CumulativeGasUsed: r.CumulativeGasUsed,
 		FirstLogIndex:     firstLogIndex,
+
+		Logs:             logsForStorage,
+		GasUsed:          r.GasUsed,
+		ContractAddress:  r.ContractAddress,
+		TransactionIndex: r.TransactionIndex,
 	})
 }
 
@@ -383,17 +402,21 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err := (*Receipt)(r).setStatus(stored.PostStateOrStatus); err != nil {
 		return err
 	}
+	r.Type = stored.Type
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
 	r.FirstLogIndexWithinBlock = stored.FirstLogIndex
 
-	//r.Logs = make([]*Log, len(stored.Logs))
-	//for i, log := range stored.Logs {
-	//	r.Logs[i] = (*Log)(log)
-	//}
+	r.Logs = make([]*Log, len(stored.Logs))
+	for i, log := range stored.Logs {
+		r.Logs[i] = (*Log)(log)
+	}
+	//r.TxHash = stored.TxHash
+	r.ContractAddress = stored.ContractAddress
+	r.GasUsed = stored.GasUsed
+	r.TransactionIndex = stored.TransactionIndex
 	//r.Bloom = CreateBloom(Receipts{(*Receipt)(r)})
 
 	return nil
-
 }
 
 // Receipts implements DerivableList for receipts.
@@ -498,7 +521,7 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 	return nil
 }
 
-// DeriveFields fills the receipts with their computed fields based on consensus
+// DeriveFieldsV3ForSingleReceipt fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
 func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevCumulativeGasUsed uint64) error {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
@@ -542,6 +565,26 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 		logIndex++
 	}
 	return nil
+}
+
+// DeriveFieldsV4ForCachedReceipt fills the receipts with their computed fields based on consensus
+// data and contextual infos like containing block and transactions.
+func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash libcommon.Hash, blockNum uint64, txnHash libcommon.Hash) {
+	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
+
+	r.BlockHash = blockHash
+	r.BlockNumber = big.NewInt(int64(blockNum))
+	r.TxHash = txnHash
+
+	// The derived log fields can simply be set from the block and transaction
+	for j := 0; j < len(r.Logs); j++ {
+		r.Logs[j].BlockNumber = blockNum
+		r.Logs[j].BlockHash = r.BlockHash
+		r.Logs[j].TxHash = r.TxHash
+		r.Logs[j].TxIndex = r.TransactionIndex
+		r.Logs[j].Index = uint(logIndex)
+		logIndex++
+	}
 }
 
 // TODO: maybe make it more prettier (only for debug purposes)
