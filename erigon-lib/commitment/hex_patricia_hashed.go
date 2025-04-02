@@ -2612,25 +2612,10 @@ func (hph *HexPatriciaHashed) PrintAccountsInGrid() {
 func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	hph.Reset()
 
-	hph.root.hashedExtLen = root.root.hashedExtLen
-	hph.root.accountAddrLen = root.root.accountAddrLen
-	hph.root.storageAddrLen = root.root.storageAddrLen
-	hph.root.stateHashLen = root.root.stateHashLen
-	hph.root.hashLen = root.root.hashLen
-	hph.root.extLen = root.root.extLen
-	hph.root.Flags = root.root.Flags
-	hph.rootPresent = root.rootPresent
-	hph.rootChecked = root.rootChecked
-	hph.rootTouched = root.rootTouched
+	hph.root = root.root
+	// hph.rootPresent = !hph.root.IsEmpty()
+	// hph.rootPresent = false
 
-	copy(hph.root.hashedExtension[:], root.root.hashedExtension[:])
-	copy(hph.root.accountAddr[:], root.root.accountAddr[:])
-	copy(hph.root.storageAddr[:], root.root.storageAddr[:])
-	copy(hph.root.stateHash[:], root.root.stateHash[:])
-	copy(hph.root.hash[:], root.root.hash[:])
-	copy(hph.root.extension[:], root.root.extension[:])
-
-	//hph.rootPresent = false
 	hph.activeRows = root.activeRows
 	hph.currentKeyLen = root.currentKeyLen
 	copy(hph.currentKey[:], root.currentKey[:])
@@ -2638,9 +2623,7 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	copy(hph.branchBefore[:], root.branchBefore[:])
 	copy(hph.touchMap[:], root.touchMap[:])
 	copy(hph.afterMap[:], root.afterMap[:])
-
-	// hph.currentKeyLen = 1
-	// hph.currentKey[0] = byte(nibble)
+	copy(hph.depthsToTxNum[:], root.depthsToTxNum[:])
 
 	for i := 0; i < len(hph.grid[0]); i++ {
 		hph.grid[0][i] = root.grid[0][i]
