@@ -324,6 +324,10 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if ctx.IsSet(PruneDistanceFlag.Name) {
 		mode.History = prune.Distance(distance)
 	}
+	fmt.Println(ctx.IsSet(HistoryExpiryEnabledFlag.Name))
+	if ctx.IsSet(HistoryExpiryEnabledFlag.Name) {
+		dbg.EnableHistoryExpiry = ctx.Bool(HistoryExpiryEnabledFlag.Name)
+	}
 
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
