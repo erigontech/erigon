@@ -302,15 +302,27 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-	// Full mode prunes all but the latest state
-	if ctx.String(PruneModeFlag.Name) == "full" {
-		mode.Blocks = prune.Distance(math.MaxUint64)
+
+	switch ctx.String(PruneModeFlag.Name) {
+	case "archive":
+	case "full":
+		mode.Blocks = prune.DefaultBlocksPruneMode
 		mode.History = prune.Distance(config3.DefaultPruneDistance)
+	case "blocks":
+		mode.Blocks = prune.KeepAllBlocksPruneMode
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
+	case "minimal":
+		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
+	default:
+		utils.Fatalf("error: --prune.mode must be one of archive, full, blocks, minimal")
 	}
-	// Minimal mode prunes all but the latest state including blocks
-	if ctx.String(PruneModeFlag.Name) == "minimal" {
-		mode.Blocks = prune.Distance(config3.DefaultPruneDistance)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
+
+	if ctx.IsSet(PruneBlocksDistanceFlag.Name) {
+		mode.Blocks = prune.Distance(blockDistance)
+	}
+	if ctx.IsSet(PruneDistanceFlag.Name) {
+		mode.History = prune.Distance(distance)
 	}
 
 	if err != nil {
