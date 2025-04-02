@@ -692,6 +692,11 @@ func parseTransactionBodyAA(ctx *TxnParseContext, payload []byte, p int, slot *T
 		copy(sender, address[:])
 	}
 
+	slot.SenderValidationData, p, err = getData(payload, p)
+	if err != nil {
+		return 0, err
+	}
+
 	address, p, err = getAddress(payload, p, "deployerAddress")
 	if err != nil {
 		return 0, err
@@ -831,13 +836,12 @@ type TxnSlot struct {
 	AuthRaw        [][]byte // rlp encoded chainID+address+nonce, used to recover authorization address in txpool
 
 	// RIP-7560: account abstraction
-	SenderAddress, Paymaster, Deployer                              *common.Address
-	PaymasterData, DeployerData, ExecutionData                      []byte
-	PostOpGasLimit, ValidationGasLimit, PaymasterValidationGasLimit uint64
-	NonceKey, BuilderFee                                            uint256.Int
+	SenderAddress, Paymaster, Deployer                               *common.Address
+	SenderValidationData, PaymasterData, DeployerData, ExecutionData []byte
+	PostOpGasLimit, ValidationGasLimit, PaymasterValidationGasLimit  uint64
+	NonceKey, BuilderFee                                             uint256.Int
 }
 
-// nolint
 func (tx *TxnSlot) PrintDebug(prefix string) {
 	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,v=%d\n", prefix, tx.SenderID, tx.Nonce, tx.Tip, tx.Value.Uint64())
 	//fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,hash=%x\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.IdHash)
@@ -870,6 +874,7 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 		FeeCap:                      tx.FeeCap.Bytes(),
 		Gas:                         tx.Gas,
 		SenderAddress:               tx.SenderAddress.Bytes(),
+		SenderValidationData:        tx.SenderValidationData,
 		ExecutionData:               tx.ExecutionData,
 		Paymaster:                   paymaster,
 		PaymasterData:               paymasterData,

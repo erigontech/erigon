@@ -212,37 +212,36 @@ func ExecuteAATransaction(
 	evm *vm.EVM,
 	header *types.Header,
 	ibs *state.IntraBlockState,
-) (executionStatus uint64, executionReturnData []byte, postOpReturnData []byte, err error) {
+) (executionStatus uint64, gasUsed uint64, err error) {
 	executionStatus = types.ExecutionStatusSuccess
 
 	// Execution frame
 	msg := tx.ExecutionFrame()
 	applyRes, err := core.ApplyFrame(evm, msg, gasPool, nil)
 	if err != nil {
-		return 0, nil, nil, err
+		return 0, 0, err
 	}
 
 	if applyRes.Failed() {
 		executionStatus = types.ExecutionStatusExecutionFailure
 	}
-	executionReturnData = applyRes.ReturnData
 
 	execRefund := capRefund(tx.GasLimit-applyRes.UsedGas, applyRes.UsedGas) // TODO: can be moved into statetransition
 	validationRefund := capRefund(tx.ValidationGasLimit-validationGasUsed, validationGasUsed)
 
 	executionGasPenalty := (tx.GasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
-	gasUsed := validationGasUsed + applyRes.UsedGas + executionGasPenalty
+	gasUsed = validationGasUsed + applyRes.UsedGas + executionGasPenalty
 	gasRefund := capRefund(execRefund+validationRefund, gasUsed)
 
 	// Paymaster post-op frame
 	msg, err = tx.PaymasterPostOp(paymasterContext, gasUsed, !applyRes.Failed())
 	if err != nil {
-		return 0, nil, nil, err
+		return 0, 0, err
 	}
 
 	applyRes, err = core.ApplyFrame(evm, msg, gasPool, nil)
 	if err != nil {
-		return 0, nil, nil, err
+		return 0, 0, err
 	}
 	if applyRes.Failed() {
 		if executionStatus == types.ExecutionStatusExecutionFailure {
@@ -255,19 +254,18 @@ func ExecuteAATransaction(
 	validationGasPenalty := (tx.PostOpGasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
 	gasRefund += capRefund(tx.PostOpGasLimit-applyRes.UsedGas, applyRes.UsedGas)
 	gasUsed += applyRes.UsedGas + validationGasPenalty
-	postOpReturnData = applyRes.ReturnData
 
 	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
-		return 0, nil, nil, err
+		return 0, 0, err
 	}
 
 	if err = payCoinbase(header, tx, ibs, gasUsed-gasRefund, evm.Context.Coinbase); err != nil {
-		return 0, nil, nil, err
+		return 0, 0, err
 	}
 
 	gasPool.AddGas(fixedgas.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
 
-	return executionStatus, executionReturnData, postOpReturnData, nil
+	return executionStatus, gasUsed, nil
 }
 
 // TODO: get rid of?
