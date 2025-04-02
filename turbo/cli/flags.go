@@ -324,7 +324,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if ctx.IsSet(PruneDistanceFlag.Name) {
 		mode.History = prune.Distance(distance)
 	}
-	fmt.Println(ctx.IsSet(HistoryExpiryEnabledFlag.Name))
+
 	if ctx.IsSet(HistoryExpiryEnabledFlag.Name) {
 		dbg.EnableHistoryExpiry = ctx.Bool(HistoryExpiryEnabledFlag.Name)
 	}
@@ -468,7 +468,6 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		mode.History = prune.Distance(distance)
 	}
 
-	fmt.Println("QQA")
 	cfg.Prune = mode
 
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
@@ -479,10 +478,8 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	}
 
 	enabledHistoryExpiry := f.Bool(HistoryExpiryEnabledFlag.Name, HistoryExpiryEnabledFlag.Value, HistoryExpiryEnabledFlag.Usage)
-	fmt.Println(enabledHistoryExpiry)
 	if enabledHistoryExpiry != nil && *enabledHistoryExpiry {
 		dbg.EnableHistoryExpiry = true
-		fmt.Println("History expiry enabled")
 	}
 
 	if v := f.String(EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value, EtlBufferSizeFlag.Usage); v != nil {
