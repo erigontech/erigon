@@ -631,5 +631,5 @@ func isForked(s *big.Int, head uint64) bool {
 }
 
 func (c *Config) IsPreMerge(blockNumber uint64) bool {
-	return c.MergeBlock != nil && blockNumber < c.MergeBlock.Uint64()
+	return c.MergeHeight != nil && blockNumber < c.MergeHeight.Uint64()
 }
