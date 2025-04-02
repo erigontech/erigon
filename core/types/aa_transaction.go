@@ -272,6 +272,8 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 		payloadSize += 20
 	}
 
+	payloadSize += rlp.StringLen(tx.SenderValidationData)
+
 	payloadSize++
 	if tx.Deployer != nil {
 		payloadSize += 20
