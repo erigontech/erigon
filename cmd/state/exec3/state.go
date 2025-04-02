@@ -222,6 +222,7 @@ func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 	defer rw.lock.Unlock()
 
 	for !rw.runnable.Load() {
+		fmt.Println("RunTxTask wait")
 		rw.notifier.Wait()
 	}
 
