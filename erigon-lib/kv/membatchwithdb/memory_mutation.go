@@ -19,6 +19,7 @@ package membatchwithdb
 import (
 	"bytes"
 	"context"
+	"math"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -701,9 +702,7 @@ func (m *MemoryMutation) Cursor(bucket string) (kv.Cursor, error) {
 	return m.makeCursor(bucket)
 }
 
-func (m *MemoryMutation) ViewID() uint64 {
-	panic("ViewID Not implemented")
-}
+func (m *MemoryMutation) ViewID() uint64 { return math.MaxUint64 }
 
 func (m *MemoryMutation) CHandle() unsafe.Pointer {
 	panic("CHandle not implemented")
