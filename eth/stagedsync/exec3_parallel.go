@@ -1062,6 +1062,16 @@ func (pe *parallelExecutor) pause() {
 	}
 }
 
+func (pe *parallelExecutor) paused() bool {
+	for _, worker := range pe.execWorkers {
+		if !worker.Paused() {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (pe *parallelExecutor) resume() {
 	for _, worker := range pe.execWorkers {
 		worker.Pause()

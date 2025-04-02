@@ -48,7 +48,7 @@ import (
 var noop = state.NewNoopWriter()
 
 type Worker struct {
-	lock        sync.Locker
+	lock        *sync.RWMutex
 	notifier    *sync.Cond
 	runnable    atomic.Bool
 	logger      log.Logger
@@ -112,6 +112,14 @@ func NewWorker(logger log.Logger, ctx context.Context, background bool, chainDb 
 
 func (rw *Worker) Pause() {
 	rw.runnable.Store(false)
+}
+
+func (rw *Worker) Paused() bool {
+	if !rw.runnable.Load() && rw.lock.TryLock() {
+		rw.lock.Unlock()
+		return true
+	}
+	return false
 }
 
 func (rw *Worker) Resume() {
@@ -207,12 +215,12 @@ func (rw *Worker) Run() (err error) {
 func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 	//fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
 	rw.lock.Lock()
+	defer rw.lock.Unlock()
 
 	for !rw.runnable.Load() {
 		rw.notifier.Wait()
 	}
 
-	defer rw.lock.Unlock()
 	return rw.RunTxTaskNoLock(txTask)
 }
 
