@@ -40,7 +40,6 @@ type AccountAbstractionTransaction struct {
 
 	SenderAddress               *common.Address
 	SenderValidationData        []byte
-	Authorizations              []Authorization
 	ExecutionData               []byte
 	Paymaster                   *common.Address
 	PaymasterData               []byte
@@ -50,6 +49,7 @@ type AccountAbstractionTransaction struct {
 	ValidationGasLimit          uint64
 	PaymasterValidationGasLimit uint64
 	PostOpGasLimit              uint64
+	Authorizations              []Authorization
 
 	// RIP-7712 two-dimensional nonce (optional), 192 bits
 	NonceKey *uint256.Int
@@ -163,6 +163,7 @@ func (tx *AccountAbstractionTransaction) copy() *AccountAbstractionTransaction {
 		FeeCap:                      tx.FeeCap,
 		GasLimit:                    tx.GasLimit,
 		AccessList:                  tx.AccessList,
+		SenderValidationData:        common.CopyBytes(tx.SenderValidationData),
 		ExecutionData:               common.CopyBytes(tx.ExecutionData),
 		PaymasterData:               common.CopyBytes(tx.PaymasterData),
 		DeployerData:                common.CopyBytes(tx.DeployerData),
@@ -219,7 +220,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 	hash := prefixedRlpHash(AccountAbstractionTxType, []interface{}{
 		tx.ChainID,
 		tx.NonceKey, tx.Nonce,
-		tx.SenderAddress,
+		tx.SenderAddress, tx.SenderValidationData,
 		tx.Deployer, tx.DeployerData,
 		tx.Paymaster, tx.PaymasterData,
 		tx.ExecutionData,
@@ -239,7 +240,7 @@ func (tx *AccountAbstractionTransaction) SigningHash(chainID *big.Int) common.Ha
 	hash := prefixedRlpHash(AccountAbstractionTxType, []interface{}{
 		chainID,
 		tx.NonceKey, tx.Nonce,
-		tx.SenderAddress,
+		tx.SenderAddress, tx.SenderValidationData,
 		tx.Deployer, tx.DeployerData,
 		tx.Paymaster, tx.PaymasterData,
 		tx.ExecutionData,
