@@ -1653,28 +1653,6 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			}
 		}
 		nibble := bits.TrailingZeros16(hph.afterMap[row])
-		// if row == 0 && hph.mounted {
-		// 	// nibble = hph.mountedNib
-
-		// 	cell := &hph.grid[row][nibble]
-		// 	upCell.extLen = 0
-		// 	upCell.stateHashLen = 0
-		// 	upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], nibble)
-		// 	fmt.Printf("folding mounted [%x] [%s] cell %s\n", nibble, updatedNibs(hph.afterMap[row]), cell.String())
-		// 	c, _ := cellGetter(nibble, false)
-		// 	fmt.Printf("folding mounted cell %s\n", c.String())
-		// 	// Delete if it existed
-		// 	// fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
-		// 	// _, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, cellGetterFn)
-		// 	// if err != nil {
-		// 	// 	return fmt.Errorf("failed to encode leaf node update: %w", err)
-		// 	// }
-		// 	hph.activeRows--
-		// 	hph.currentKeyLen = max(upDepth-1, 0)
-		// 	if hph.trace {
-		// 		fmt.Printf("formed leaf (%d %x, depth=%d) [%x] %s\n", row, nibble, depth, updateKey, cell.FullString())
-		// 	}
-		// } else {
 		cell := &hph.grid[row][nibble]
 		upCell.extLen = 0
 		upCell.stateHashLen = 0
