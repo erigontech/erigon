@@ -346,7 +346,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	}
 
 	if slot.Type == AATxnType {
-		return parseTransactionBodyAA(payload, p, slot, sender)
+		return parseTransactionBodyAA(ctx, payload, p, slot, sender)
 	}
 
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
@@ -670,7 +670,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	return p, nil
 }
 
-func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot, sender []byte) (int, error) {
+func parseTransactionBodyAA(ctx *TxnParseContext, payload []byte, p int, slot *TxnSlot, sender []byte) (int, error) {
 	p, err := rlp.ParseU256(payload, p, &slot.ChainID)
 	if err != nil {
 		return 0, fmt.Errorf("%w: chainID: %s", ErrParseTxn, err)
@@ -691,8 +691,8 @@ func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot, sender []byte)
 		return 0, err
 	}
 	slot.SenderAddress = address
-        if ctx.withSender {
-	    copy(sender, address[:])
+	if ctx.withSender {
+		copy(sender, address[:])
 	}
 
 	address, p, err = getAddress(payload, p, "deployerAddress")
@@ -711,6 +711,9 @@ func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot, sender []byte)
 		return 0, err
 	}
 	slot.Paymaster = address
+	if slot.Paymaster != nil {
+		copy(sender, address[:])
+	}
 
 	slot.PaymasterData, p, err = getData(payload, p)
 	if err != nil {
