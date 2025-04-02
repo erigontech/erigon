@@ -828,7 +828,7 @@ func ExecV3(ctx context.Context,
 					t1 = time.Since(tt) + ts
 
 					var t2 time.Duration
-					applyTx, t2, err = se.commit(ctx, execStage, applyTx, useExternalTx)
+					applyTx, t2, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
 					if err != nil {
 						return err
 					}
@@ -1003,26 +1003,10 @@ func ExecV3(ctx context.Context,
 						fmt.Println("commiting")
 						var t2 time.Duration
 						commitStart := time.Now()
-						pe.pause()
-						for {
-							waiter, paused := pe.paused()
-							if paused {
-								break
-							}
-							select {
-							case request := <-asyncTxChan:
-								request.Apply()
-								fmt.Println("applied")
-							case <-waiter:
-								fmt.Println("waited")
-							}
-						}
-						fmt.Println("paused")
-						applyTx, t2, err = pe.commit(ctx, execStage, applyTx, useExternalTx)
+						applyTx, t2, err = pe.commit(ctx, execStage, applyTx, asyncTxChan, useExternalTx)
 						if err != nil {
 							return err
 						}
-						pe.resume()
 						logger.Info("Committed", "time", time.Since(commitStart), "commit", t2)
 					}
 				}

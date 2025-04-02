@@ -11,6 +11,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
@@ -45,7 +46,7 @@ func (se *serialExecutor) wait(ctx context.Context) error {
 	return nil
 }
 
-func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool) (kv.RwTx, time.Duration, error) {
+func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
 	return se.txExecutor.commit(ctx, execStage, tx, useExternalTx, se.resetWorkers)
 }
 

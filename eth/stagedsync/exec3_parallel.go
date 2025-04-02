@@ -13,6 +13,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
@@ -87,7 +88,7 @@ type executor interface {
 	readState() *state.StateV3Buffered
 	domains() *libstate.SharedDomains
 
-	commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool) (kv.RwTx, time.Duration, error)
+	commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error)
 	resetWorkers(ctx context.Context, rs *state.StateV3Buffered) error
 
 	LogExecuted(tx kv.Tx)
@@ -1052,7 +1053,22 @@ func (pe *parallelExecutor) LogComplete(tx kv.Tx) {
 	pe.progress.LogComplete(tx, pe.rs.StateV3, pe)
 }
 
-func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool) (kv.RwTx, time.Duration, error) {
+func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
+	pe.pause()
+	defer pe.resume()
+
+	for {
+		waiter, paused := pe.paused()
+		if paused {
+			break
+		}
+		select {
+		case request := <-asyncTxChan:
+			request.Apply()
+		case <-waiter:
+		}
+	}
+
 	return pe.txExecutor.commit(ctx, execStage, tx, useExternalTx, pe.resetWorkers)
 }
 
