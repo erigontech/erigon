@@ -103,6 +103,7 @@ type BlobConfig struct {
 type BlobSchedule struct {
 	Cancun *BlobConfig `json:"cancun,omitempty"`
 	Prague *BlobConfig `json:"prague,omitempty"`
+	Osaka  *BlobConfig `json:"osaka,omitempty"`
 }
 
 func (b *BlobSchedule) TargetBlobsPerBlock(isPrague bool) uint64 {

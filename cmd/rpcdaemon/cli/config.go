@@ -650,12 +650,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	return db, eth, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err
 }
 
-func StartRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
+func StartRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) (*rpc.Server, error) {
 	if cfg.Enabled {
 		return startRegularRpcServer(ctx, cfg, rpcAPI, logger)
 	}
 
-	return nil
+	return nil, nil
 }
 
 func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
@@ -670,13 +670,13 @@ func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpC
 	return nil
 }
 
-func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
+func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) (*rpc.Server, error) {
 	// register apis and create handler stack
 	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
 
 	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	srv.SetAllowList(allowListForRPC)
 
@@ -700,7 +700,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	}
 
 	if err := node.RegisterApisFromWhitelist(defaultAPIList, apiFlags, srv, false, logger); err != nil {
-		return fmt.Errorf("could not start register RPC apis: %w", err)
+		return nil, fmt.Errorf("could not start register RPC apis: %w", err)
 	}
 
 	info := []interface{}{
@@ -711,11 +711,11 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	if cfg.SocketServerEnabled {
 		socketUrl, err := url.Parse(cfg.SocketListenUrl)
 		if err != nil {
-			return fmt.Errorf("malformatted socket url %s: %w", cfg.SocketListenUrl, err)
+			return nil, fmt.Errorf("malformatted socket url %s: %w", cfg.SocketListenUrl, err)
 		}
 		tcpListener, err := net.Listen(socketUrl.Scheme, socketUrl.Host+socketUrl.EscapedPath())
 		if err != nil {
-			return fmt.Errorf("could not start Socket Listener: %w", err)
+			return nil, fmt.Errorf("could not start Socket Listener: %w", err)
 		}
 		defer tcpListener.Close()
 		go func() {
@@ -738,7 +738,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	graphQLHandler := graphql.CreateHandler(defaultAPIList)
 	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Separate Websocket handler if websocket port flag specified
@@ -751,7 +751,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		})
 		wsListener, wsAddr, err := node.StartHTTPEndpoint(wsEndpoint, &node.HttpEndpointConfig{Timeouts: cfg.HTTPTimeouts}, wsApiHandler)
 		if err != nil {
-			return fmt.Errorf("could not start separate Websocket RPC api at port %d: %w", cfg.WebsocketPort, err)
+			return nil, fmt.Errorf("could not start separate Websocket RPC api at port %d: %w", cfg.WebsocketPort, err)
 		}
 		info = append(info, "websocket.url", wsAddr)
 		defer func() {
@@ -771,7 +771,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 			Timeouts: cfg.HTTPTimeouts,
 		}, apiHandler)
 		if err != nil {
-			return fmt.Errorf("could not start RPC api: %w", err)
+			return nil, fmt.Errorf("could not start RPC api: %w", err)
 		}
 		info = append(info, "http.url", httpAddr)
 		defer func() {
@@ -799,7 +799,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 			KeyFile:  cfg.HttpsKeyFile,
 		}, apiHandler)
 		if err != nil {
-			return fmt.Errorf("could not start RPC api: %w", err)
+			return nil, fmt.Errorf("could not start RPC api: %w", err)
 		}
 		info = append(info, "https.url", httpAddr)
 		defer func() {
@@ -819,7 +819,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	if cfg.GRPCServerEnabled {
 		grpcEndpoint = fmt.Sprintf("%s:%d", cfg.GRPCListenAddress, cfg.GRPCPort)
 		if grpcListener, err = net.Listen("tcp", grpcEndpoint); err != nil {
-			return fmt.Errorf("could not start GRPC listener: %w", err)
+			return nil, fmt.Errorf("could not start GRPC listener: %w", err)
 		}
 		grpcServer = grpc.NewServer()
 		if cfg.GRPCHealthCheckEnabled {
@@ -844,7 +844,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	logger.Info("JsonRpc endpoint opened", info...)
 	<-ctx.Done()
 	logger.Info("Exiting...")
-	return nil
+	return srv, nil
 }
 
 type engineInfo struct {

@@ -84,6 +84,48 @@ var (
 )
 
 var (
+	// DefaultCancunBlobConfig is the default blob configuration for the Cancun fork.
+	DefaultCancunBlobConfig = func() *chain.BlobConfig {
+		target := uint64(3)
+		max := uint64(6)
+		updateFrac := uint64(3338477)
+		return &chain.BlobConfig{
+			Target:                &target,
+			Max:                   &max,
+			BaseFeeUpdateFraction: &updateFrac,
+		}
+	}()
+	// DefaultPragueBlobConfig is the default blob configuration for the Prague fork.
+	DefaultPragueBlobConfig = func() *chain.BlobConfig {
+		target := uint64(3)
+		max := uint64(6)
+		updateFrac := uint64(5007716)
+		return &chain.BlobConfig{
+			Target:                &target,
+			Max:                   &max,
+			BaseFeeUpdateFraction: &updateFrac,
+		}
+	}()
+	// DefaultOsakaBlobConfig is the default blob configuration for the Osaka fork.
+	DefaultOsakaBlobConfig = func() *chain.BlobConfig {
+		target := uint64(3)
+		max := uint64(6)
+		updateFrac := uint64(5007716)
+		return &chain.BlobConfig{
+			Target:                &target,
+			Max:                   &max,
+			BaseFeeUpdateFraction: &updateFrac,
+		}
+	}()
+	// DefaultBlobSchedule is the latest configured blob schedule for test chains.
+	DefaultBlobSchedule = &chain.BlobSchedule{
+		Cancun: DefaultCancunBlobConfig,
+		Prague: DefaultPragueBlobConfig,
+		Osaka:  DefaultOsakaBlobConfig,
+	}
+)
+
+var (
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
 	MainnetChainConfig = readChainSpec("chainspecs/mainnet.json")
 
@@ -137,6 +179,27 @@ var (
 		BerlinBlock:           big.NewInt(0),
 		LondonBlock:           big.NewInt(0),
 		Clique:                &chain.CliqueConfig{Period: 0, Epoch: 30000},
+	}
+
+	AllDevChainProtocolChanges = &chain.Config{
+		ChainID:                 big.NewInt(1337),
+		HomesteadBlock:          big.NewInt(0),
+		ByzantiumBlock:          big.NewInt(0),
+		TangerineWhistleBlock:   big.NewInt(0),
+		SpuriousDragonBlock:     big.NewInt(0),
+		ConstantinopleBlock:     big.NewInt(0),
+		PetersburgBlock:         big.NewInt(0),
+		IstanbulBlock:           big.NewInt(0),
+		MuirGlacierBlock:        big.NewInt(0),
+		BerlinBlock:             big.NewInt(0),
+		LondonBlock:             big.NewInt(0),
+		ArrowGlacierBlock:       big.NewInt(0),
+		GrayGlacierBlock:        big.NewInt(0),
+		ShanghaiTime:            big.NewInt(0),
+		CancunTime:              big.NewInt(0),
+		TerminalTotalDifficulty: nil,
+		PragueTime:              big.NewInt(0),
+		BlobSchedule:            DefaultBlobSchedule,
 	}
 
 	AmoyChainConfig = readChainSpec("chainspecs/amoy.json")

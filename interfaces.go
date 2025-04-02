@@ -62,7 +62,7 @@ type ChainReader interface {
 	HeaderByHash(ctx context.Context, hash libcommon.Hash) (*types.Header, error)
 	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
 	TransactionCount(ctx context.Context, blockHash libcommon.Hash) (uint, error)
-	TransactionInBlock(ctx context.Context, blockHash libcommon.Hash, index uint) (*types.Transaction, error)
+	TransactionInBlock(ctx context.Context, blockHash libcommon.Hash, index uint) (types.Transaction, error)
 
 	// This method subscribes to notifications about changes of the head block of
 	// the canonical chain.
@@ -83,7 +83,7 @@ type TransactionReader interface {
 	// blockchain. The isPending return value indicates whether the transaction has been
 	// mined yet. Note that the transaction may not be part of the canonical chain even if
 	// it's not pending.
-	TransactionByHash(ctx context.Context, txHash libcommon.Hash) (tx *types.Transaction, isPending bool, err error)
+	TransactionByHash(ctx context.Context, txHash libcommon.Hash) (tx types.Transaction, isPending bool, err error)
 	// TransactionReceipt returns the receipt of a mined transaction. Note that the
 	// transaction may not be included in the current canonical chain even if a receipt
 	// exists.

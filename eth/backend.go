@@ -150,6 +150,9 @@ type Ethereum struct {
 	chainDB    kv.TemporalRwDB
 	privateAPI *grpc.Server
 
+	// RPC server
+	server *rpc.Server
+
 	engine consensus.Engine
 
 	gasPrice  *uint256.Int
@@ -1187,8 +1190,10 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		s.silkwormRPCDaemonService = &silkwormRPCDaemonService
 	} else {
 		go func() {
-			if err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger); err != nil {
+			if srv, err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger); err != nil {
 				s.logger.Error("cli.StartRpcServer error", "err", err)
+			} else {
+				s.server = srv
 			}
 		}()
 	}
@@ -1863,6 +1868,10 @@ func (s *Ethereum) Sentinel() rpcsentinel.SentinelClient {
 
 func (s *Ethereum) DataDir() string {
 	return s.config.Dirs.DataDir
+}
+
+func (e *Ethereum) Attach() *rpc.Client {
+	return rpc.DialInProc(e.server, e.logger)
 }
 
 // setBorDefaultMinerGasPrice enforces Miner.GasPrice to be equal to BorDefaultMinerGasPrice (25gwei by default)
