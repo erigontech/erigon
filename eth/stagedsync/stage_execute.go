@@ -395,40 +395,28 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 		defer tx.Rollback()
 	}
-	if s.ForwardProgress > uint64(dbg.MaxReorgDepth) {
-
-		if !cfg.syncCfg.AlwaysGenerateChangesets {
-			// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
-			// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
-			var pruneDiffsLimitOnChainTip = 1_000
-			pruneTimeout := 250 * time.Millisecond
-			if s.CurrentSyncCycle.IsInitialCycle {
-				pruneDiffsLimitOnChainTip = math.MaxInt
-				pruneTimeout = time.Hour
-			}
-			if err := rawdb.PruneTable(
-				tx,
-				kv.ChangeSets3,
-				s.ForwardProgress-uint64(dbg.MaxReorgDepth),
-				ctx,
-				pruneDiffsLimitOnChainTip,
-				pruneTimeout,
-				logger,
-				s.LogPrefix(),
-			); err != nil {
-				return err
-			}
+	if s.ForwardProgress > uint64(dbg.MaxReorgDepth) && !cfg.syncCfg.AlwaysGenerateChangesets {
+		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
+		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
+		var pruneDiffsLimitOnChainTip = 1_000
+		pruneTimeout := 250 * time.Millisecond
+		if s.CurrentSyncCycle.IsInitialCycle {
+			pruneDiffsLimitOnChainTip = math.MaxInt
+			pruneTimeout = time.Hour
+		}
+		if err := rawdb.PruneTable(
+			tx,
+			kv.ChangeSets3,
+			s.ForwardProgress-uint64(dbg.MaxReorgDepth),
+			ctx,
+			pruneDiffsLimitOnChainTip,
+			pruneTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
+			return err
 		}
 
-		{
-			pruneLimit := 10
-			if s.CurrentSyncCycle.IsInitialCycle {
-				pruneLimit = 10_000
-			}
-			if err := rawdb.PruneReceipts(tx, s.ForwardProgress-uint64(dbg.MaxReorgDepth), pruneLimit); err != nil {
-				return err
-			}
-		}
 	}
 
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
@@ -447,6 +435,18 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	}
 	if _, err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
 		return err
+	}
+
+	// prune receipts
+	const PersistReceipts = 90_000
+	if s.ForwardProgress > PersistReceipts {
+		pruneLimit := 10
+		if s.CurrentSyncCycle.IsInitialCycle {
+			pruneLimit = 10_000
+		}
+		if err := rawdb.PruneReceipts(tx, s.ForwardProgress-PersistReceipts, pruneLimit); err != nil {
+			return err
+		}
 	}
 
 	if err = s.Done(tx); err != nil {
