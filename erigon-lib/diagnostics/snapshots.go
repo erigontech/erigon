@@ -45,7 +45,7 @@ func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
 
 	go func() {
 		for {
-			time.Sleep(5 * time.Second)
+			time.Sleep(1 * time.Second)
 			d.SaveSnaphotsSyncToJsonFile()
 		}
 	}()
