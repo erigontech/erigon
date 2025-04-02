@@ -711,7 +711,7 @@ func parseTransactionBodyAA(ctx *TxnParseContext, payload []byte, p int, slot *T
 		return 0, err
 	}
 	slot.Paymaster = address
-	if slot.Paymaster != nil {
+	if slot.Paymaster != nil && ctx.withSender {
 		copy(sender, address[:])
 	}
 
