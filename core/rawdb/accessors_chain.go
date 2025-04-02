@@ -30,15 +30,13 @@ import (
 
 	"github.com/gballet/go-verkle"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/rawdb/utils"
 	"github.com/erigontech/erigon/core/types"
@@ -1224,4 +1222,82 @@ func ReadDBSchemaVersion(tx kv.Tx) (major, minor, patch uint32, ok bool, err err
 	minor = binary.BigEndian.Uint32(existingVersion[4:])
 	patch = binary.BigEndian.Uint32(existingVersion[8:])
 	return major, minor, patch, true, nil
+}
+
+// ReadReceipts retrieves all the transaction receipts belonging to a block, including
+// its corresponding metadata fields. If it is unable to populate these metadata
+// fields then nil is returned.
+//
+// The current implementation populates these metadata fields by reading the receipts'
+// corresponding block body, so if the block body is not found it will return nil even
+// if the receipt itself is stored.
+func ReadReceipt(db kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint32) (*types.Receipt, error) {
+	data, err := db.GetOne(kv.Receipts, dbutils.ReceiptKey(blockNum, blockHash, txnIndex))
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert the receipts from their storage form to their internal representation
+	res := &types.Receipt{}
+	if err := rlp.DecodeBytes(data, res); err != nil {
+		return nil, fmt.Errorf("%w, of block %d, %x\n", err, blockNum, blockHash)
+	}
+
+	return res, nil
+}
+
+func ReadReceipts(db kv.Tx, blockNum uint64, blockHash common.Hash) (res types.Receipts, err error) {
+	fmt.Printf("[dbg] a: %d, %x, %x\n", blockNum, blockHash, dbutils.HeaderKey(blockNum, blockHash))
+
+	rng, err := db.Prefix(kv.Receipts, dbutils.HeaderKey(blockNum, blockHash))
+	if err != nil {
+		return nil, err
+	}
+
+	for rng.HasNext() {
+		_, v, err := rng.Next()
+		if err != nil {
+			return nil, err
+		}
+		// Convert the receipts from their storage form to their internal representation
+		receipt := &types.Receipt{}
+		if err := rlp.DecodeBytes(v, receipt); err != nil {
+			return nil, fmt.Errorf("%w, of block %d, %x\n", err, blockNum, blockHash)
+		}
+		res = append(res, receipt)
+	}
+	return res, nil
+}
+
+// PruneReceipts removes all receipt for given block number or newer - used for Unwind
+func PruneReceipts(db kv.RwTx, number uint64) error {
+	rng, err := db.Prefix(kv.Receipts, hexutil.EncodeTs(number))
+	if err != nil {
+		return err
+	}
+	for rng.HasNext() {
+		k, _, err := rng.Next()
+		if err != nil {
+			return err
+		}
+		if err := db.Delete(kv.Receipts, k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// WriteReceipts stores all the transaction receipts belonging to a block.
+func WriteReceipts(tx kv.RwTx, blockNum uint64, blockHash common.Hash, receipts types.Receipts) error {
+	for txnIndex, r := range receipts {
+		bytes, err := rlp.EncodeToBytes(r)
+		if err != nil {
+			log.Crit("Failed to encode block receipts", "err", err)
+		}
+		fmt.Printf("[dbg] a: %d, %x, %x\n", blockNum, blockHash, dbutils.ReceiptKey(blockNum, blockHash, uint32(txnIndex)))
+		if err = tx.Put(kv.Receipts, dbutils.ReceiptKey(blockNum, blockHash, uint32(txnIndex)), bytes); err != nil {
+			return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
+		}
+	}
+	return nil
 }
