@@ -47,7 +47,7 @@ func (d *DiagnosticClient) SaveNotificationMessagesToJsonFile() {
 		log.Error("[Diagnostics] Error marshalling notification messages", "err", err)
 		return
 	}
-	os.WriteFile("notification_messages.json", data, 0644)
+	os.WriteFile("/erigon/notification_messages.json", data, 0644)
 	log.Info("[Diagnostics] Notification messages saved to notification_messages.json")
 }
 
@@ -124,6 +124,7 @@ func (d *DiagnosticClient) clearConnection() {
 }
 
 func (d *DiagnosticClient) Connected() bool {
+	return true
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.conn != nil
