@@ -222,7 +222,7 @@ func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string) error {
 
 	d.closeWhatNotInList(domainFiles)
 	d.scanDirtyFiles(domainFiles)
-	if err := d.openDirtyFiles(); err != nil {
+	if err := d.openDirtyFiles(domainFiles); err != nil {
 		return fmt.Errorf("Domain(%s).openList: %w", d.filenameBase, err)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles()
@@ -321,14 +321,25 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) 
 	return garbageFiles
 }
 
-func (d *Domain) openDirtyFiles() (err error) {
+func (d *Domain) openDirtyFiles(fNames []string) (err error) {
 	invalidFileItems := make([]*filesItem, 0)
 	invalidFileItemsLock := sync.Mutex{}
+	stepNameMap := make(map[steps]string, len(fNames))
+	for _, filename := range fNames {
+		from, to, err := ParseStepsFromFileName(filename)
+		if err != nil {
+			continue
+		}
+		stepNameMap[steps{from: from, to: to}] = filename
+	}
 	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			if item.decompressor == nil {
-				fPath := d.kvFilePath(fromStep, toStep)
+				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
+				if !ok {
+					fPath = d.kvFilePath(fromStep, toStep)
+				}
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)

@@ -161,7 +161,7 @@ func (h *History) openList(idxFiles, histNames []string) error {
 
 	h.closeWhatNotInList(histNames)
 	h.scanDirtyFiles(histNames)
-	if err := h.openDirtyFiles(); err != nil {
+	if err := h.openDirtyFiles(histNames); err != nil {
 		return fmt.Errorf("History(%s).openList: %w", h.filenameBase, err)
 	}
 	return nil
@@ -194,14 +194,25 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 	}
 }
 
-func (h *History) openDirtyFiles() error {
+func (h *History) openDirtyFiles(fNames []string) error {
 	invalidFilesMu := sync.Mutex{}
 	invalidFileItems := make([]*filesItem, 0)
+	stepNameMap := make(map[steps]string, len(fNames))
+	for _, filename := range fNames {
+		from, to, err := ParseStepsFromFileName(filename)
+		if err != nil {
+			continue
+		}
+		stepNameMap[steps{from: from, to: to}] = filename
+	}
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 			if item.decompressor == nil {
-				fPath := h.vFilePath(fromStep, toStep)
+				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
+				if !ok {
+					fPath = h.vFilePath(fromStep, toStep)
+				}
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
