@@ -85,8 +85,9 @@ var (
 
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
-		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal".
-				Full: Keep only blocks and latest state,
+		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
+				Full: Keep only necessary blocks and latest state,
+				Blocks: Keep all blocks and latest state,
 				Archive: Keep the entire indexed database, aka. no pruning,
 				Minimal: Keep only latest state`,
 		Value: "full",
@@ -426,16 +427,24 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	switch *pruneMode {
 	case "archive":
 	case "full":
-		mode.Blocks = prune.Distance(math.MaxUint64)
+		mode.Blocks = prune.DefaultBlocksPruneMode
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
+	case "blocks":
+		mode.Blocks = prune.KeepAllBlocksPruneMode
 		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	case "minimal":
 		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
 		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	default:
-		utils.Fatalf("error: --prune.mode must be one of archive, full, minimal")
+		utils.Fatalf("error: --prune.mode must be one of archive, full, blocks, minimal")
 	}
-	mode.Blocks = prune.Distance(blockDistance)
-	mode.History = prune.Distance(distance)
+
+	if pruneBlockDistance != nil {
+		mode.Blocks = prune.Distance(blockDistance)
+	}
+	if pruneDistance != nil {
+		mode.History = prune.Distance(distance)
+	}
 
 	cfg.Prune = mode
 

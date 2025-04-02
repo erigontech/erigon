@@ -628,3 +628,7 @@ func isForked(s *big.Int, head uint64) bool {
 	}
 	return s.Uint64() <= head
 }
+
+func (c *Config) IsPreMerge(blockNumber uint64) bool {
+	return c.MergeNetsplitBlock != nil && blockNumber < c.MergeNetsplitBlock.Uint64()
+}
