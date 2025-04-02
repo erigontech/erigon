@@ -19,7 +19,6 @@ package exec3
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -129,7 +128,6 @@ func (rw *Worker) Paused() (waiter chan any, paused bool) {
 		rw.lock.Unlock()
 	} else {
 		waiter = rw.results.AddWaiter(false)
-		fmt.Printf("%p: pause waiting\n", rw)
 	}
 
 	return waiter, canlock
@@ -143,8 +141,6 @@ func (rw *Worker) Resume() {
 func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
 
 func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateReader state.ResettableStateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
-	fmt.Printf("%p: reset state %#v\n", rw, rw.lock)
-	defer fmt.Println("reset state done")
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 
@@ -222,8 +218,6 @@ func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 	defer rw.lock.Unlock()
 
 	for !rw.runnable.Load() {
-		_, f, line, _ := runtime.Caller(2)
-		fmt.Printf("%p: RunTxTask wait %s:%d\n", rw, f, line)
 		rw.notifier.Wait()
 	}
 
