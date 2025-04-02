@@ -452,6 +452,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		mode.History = prune.Distance(distance)
 	}
 
+	fmt.Println("QQA")
 	cfg.Prune = mode
 
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
