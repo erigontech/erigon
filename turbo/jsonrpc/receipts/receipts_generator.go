@@ -147,6 +147,13 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return receipt, nil
 	}
 
+	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+	if receipt, err := rawdb.ReadReceipt(tx, header.Number.Uint64(), header.Hash(), uint32(index)); err != nil {
+		return nil, err
+	} else if receipt != nil {
+		return receipt, nil
+	}
+
 	var receipt *types.Receipt
 
 	genEnv, err := g.PrepareEnv(ctx, header, cfg, tx, index)
@@ -182,15 +189,14 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	blockHash := block.Hash()
 	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
 	defer g.blockExecMutex.unlock(mu, blockHash)
+	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
+		return receipts, nil
+	}
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	if receipts, err := rawdb.ReadReceipts(tx, blockHash, block.NumberU64()); err != nil {
 		return nil, err
 	} else if len(receipts) > 0 {
-		return receipts, nil
-	}
-
-	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
 		return receipts, nil
 	}
 
