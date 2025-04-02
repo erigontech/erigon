@@ -36,7 +36,7 @@ type SnapshotCreationConfig struct {
 	// preverified can have larger files than that indicated by `MergeSteps.last`.
 	// This is because previously, different values might have been used.
 	//Preverified       snapcfg.Preverified
-	preverifiedParsed []*SnapInfo
+	PreverifiedParsed []*SnapInfo
 }
 
 type SnapshotConfig struct {
@@ -57,16 +57,16 @@ func (s *SnapshotConfig) StepsInFrozenFile() uint64 {
 }
 
 func (s *SnapshotConfig) LoadPreverified(pre snapcfg.Preverified) {
-	if s.preverifiedParsed != nil {
+	if s.PreverifiedParsed != nil {
 		return
 	}
-	s.preverifiedParsed = make([]*SnapInfo, 0, len(pre))
+	s.PreverifiedParsed = make([]*SnapInfo, 0, len(pre))
 	for _, item := range []snapcfg.PreverifiedItem(pre) {
 		res, ok := s.Parser.Parse(item.Name)
 		if !ok {
 			continue
 		}
-		s.preverifiedParsed = append(s.preverifiedParsed, res)
+		s.PreverifiedParsed = append(s.PreverifiedParsed, res)
 	}
 
 	// some validation
@@ -99,90 +99,3 @@ func (f *SnapInfo) IsKV() bool       { return strings.Compare(f.Ext, ".kv") == 0
 func (f *SnapInfo) IsDataFile() bool { return f.IsSeg() || f.IsV() || f.IsKV() }
 
 func (f *SnapInfo) Len() uint64 { return f.To - f.From }
-
-// determine freezing ranges, given snapshot creation config
-func GetFreezingRange(rootFrom, rootTo RootNum, cfg *SnapshotConfig) (freezeFrom RootNum, freezeTo RootNum, canFreeze bool) {
-	/**
-	 1. `from`, `to` must be round off to minimum size (atleast)
-	 2. mergeLimit is a function: (from, preverified files, mergeLimit default) -> biggest file size starting `from`
-	 3. if mergeLimit size is not possible, then `freezeTo` should be next largest possible file size
-	    as allowed by the MergeSteps or MinimumSize.
-	**/
-
-	if rootFrom >= rootTo {
-		return rootFrom, rootTo, false
-	}
-
-	from := uint64(rootFrom)
-	to := uint64(rootTo)
-
-	to = to - cfg.SafetyMargin
-	from = (from / cfg.MinimumSize) * cfg.MinimumSize
-	to = (to / cfg.MinimumSize) * cfg.MinimumSize
-
-	mergeLimit := getMergeLimit(cfg, from)
-	maxJump := cfg.RootNumPerStep
-
-	if from%mergeLimit == 0 {
-		maxJump = mergeLimit
-	} else {
-		for i := len(cfg.MergeStages) - 1; i >= 0; i-- {
-			if from%cfg.MergeStages[i] == 0 {
-				maxJump = cfg.MergeStages[i]
-				break
-			}
-		}
-	}
-
-	_freezeFrom := from
-	var _freezeTo uint64
-	jump := to - from
-
-	switch {
-	case jump >= maxJump:
-		// enough data, max jump
-		_freezeTo = _freezeFrom + maxJump
-	case jump >= cfg.MergeStages[0]:
-		// else find if a merge step can be used
-		// assuming merge step multiple of each other
-		for i := len(cfg.MergeStages) - 1; i >= 0; i-- {
-			if jump >= cfg.MergeStages[i] {
-				_freezeTo = _freezeFrom + cfg.MergeStages[i]
-				break
-			}
-		}
-	case jump >= cfg.MinimumSize:
-		// else use minimum size
-		_freezeTo = _freezeFrom + cfg.MinimumSize
-
-	default:
-		_freezeTo = _freezeFrom
-	}
-
-	return RootNum(_freezeFrom), RootNum(_freezeTo), _freezeTo-_freezeFrom >= cfg.MinimumSize
-}
-
-func getMergeLimit(cfg *SnapshotConfig, from uint64) uint64 {
-	//return 0
-	maxMergeLimit := cfg.MergeStages[len(cfg.MergeStages)-1]
-
-	for _, info := range cfg.preverifiedParsed {
-		if !info.IsDataFile() {
-			continue
-		}
-
-		if from < info.From || from >= info.To {
-			continue
-		}
-
-		if info.Len() >= maxMergeLimit {
-			// info.Len() > maxMergeLimit --> this happens when previously a larger value
-			// was used, and now the configured merge limit is smaller.
-			return info.Len()
-		}
-
-		break
-	}
-
-	return maxMergeLimit
-}

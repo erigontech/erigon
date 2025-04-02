@@ -56,7 +56,7 @@ func registerEntity(dirs datadir.Dirs, name string) ae.AppendableId {
 }
 
 func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *ae.SnapshotConfig) ae.AppendableId {
-	return ae.RegisterAppendable(name, dirs, nil, ae.WithSnapshotCreationConfig(cfg))
+	return ae.RegisterAppendable(name, dirs, nil, ae.WithSnapshotConfig(cfg))
 }
 
 func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {

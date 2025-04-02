@@ -12,6 +12,7 @@ import (
 // snapshot name parser
 // owned by SnapshotConfig
 type SnapNameParser interface {
+	Name() string
 	Parse(filename string) (f *SnapInfo, ok bool)
 
 	// these give out full filepath, not just filename
@@ -39,6 +40,10 @@ func NewE2Parser(dir, fileType string) *E2Parser {
 
 func NewE2ParserWithStep(minAggStep uint64, dir, fileType string, indexFileType []string) *E2Parser {
 	return &E2Parser{minAggStep: minAggStep, fileType: fileType, indexFileType: indexFileType, dir: dir}
+}
+
+func (s *E2Parser) Name() string {
+	return s.fileType
 }
 
 // fileName assumes no folderName in it
@@ -86,7 +91,7 @@ func (s *E2Parser) Parse(fileName string) (f *SnapInfo, ok bool) {
 }
 
 func (s *E2Parser) DataFile(version Version, from, to RootNum) string {
-	return filepath.Join(s.dir, fmt.Sprintf("v%d-%06d-%06d-%s", version, from/RootNum(s.minAggStep), to/RootNum(s.minAggStep), s.fileType))
+	return filepath.Join(s.dir, fmt.Sprintf("v%d-%06d-%06d-%s.seg", version, from/RootNum(s.minAggStep), to/RootNum(s.minAggStep), s.fileType))
 }
 
 func (s *E2Parser) IndexFile(version Version, from, to RootNum, idxPos uint64) string {

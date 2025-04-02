@@ -18,13 +18,13 @@ import (
 type AppendableId uint16
 
 type holder struct {
-	name                   string
-	snapshotNameBase       string   // name to be used in snapshot file
-	indexNameBases         []string // one indexNameBase for each index
-	dirs                   datadir.Dirs
-	snapshotDir            string
-	saltFile               string
-	snapshotCreationConfig *SnapshotConfig
+	name             string
+	snapshotNameBase string   // name to be used in snapshot file
+	indexNameBases   []string // one indexNameBase for each index
+	dirs             datadir.Dirs
+	snapshotDir      string
+	saltFile         string
+	snapshotConfig   *SnapshotConfig
 }
 
 // keeping this fixed size, so that append() does not potentially re-allocate array
@@ -66,7 +66,7 @@ func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified,
 		h.saltFile = path.Join(dirs.Snap, "salt-blocks.txt")
 	}
 
-	if h.snapshotCreationConfig == nil {
+	if h.snapshotConfig == nil {
 		panic("snapshotCreationConfig is required")
 	}
 
@@ -74,7 +74,7 @@ func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified,
 
 	entityRegistry[curr] = *h
 	id := AppendableId(curr)
-	h.snapshotCreationConfig.LoadPreverified(pre)
+	h.snapshotConfig.LoadPreverified(pre)
 	curr++
 
 	mu.Unlock()
@@ -106,9 +106,9 @@ func WithIndexFileType(indexFileType []string) EntityIdOption {
 // TODO: at appendable boundary, we want this to be value type
 // so changes don't effect config appendables own. Once we get it in
 // as value, we can use reference in other places within appendables.
-func WithSnapshotCreationConfig(cfg *SnapshotConfig) EntityIdOption {
+func WithSnapshotConfig(cfg *SnapshotConfig) EntityIdOption {
 	return func(a *holder) {
-		a.snapshotCreationConfig = cfg
+		a.snapshotConfig = cfg
 	}
 }
 
@@ -153,7 +153,7 @@ func (a AppendableId) SnapshotDir() string {
 }
 
 func (a AppendableId) SnapshotConfig() *SnapshotConfig {
-	return entityRegistry[a].snapshotCreationConfig
+	return entityRegistry[a].snapshotConfig
 }
 
 func (a AppendableId) Salt() (uint32, error) {
