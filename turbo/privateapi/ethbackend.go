@@ -22,6 +22,7 @@ import (
 	"errors"
 	"math"
 
+	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -458,8 +459,8 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 
 	ot := commands.NewOpcodeTracer(header.Number.Uint64(), true, false)
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: ot.Tracer().Hooks, ReadOnly: true})
-	validationGasLimit := aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit
-	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(core.GasPool).AddGas(validationGasLimit), header, evm, s.chainConfig)
+	totalGasLimit := fixedgas.TxAAGas + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
+	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(core.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
 	log.Info("err", "err", err.Error())
 	if err != nil {
 		return &remote.AAValidationReply{Valid: false}, nil

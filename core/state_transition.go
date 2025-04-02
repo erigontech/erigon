@@ -358,9 +358,9 @@ func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlock
 		OnEnter: epc.OnEnter,
 	})
 
-	if err := st.buyGas(false); err != nil {
-		return nil, err
-	}
+	//if err := st.buyGas(false); err != nil {
+	//	return nil, err
+	//}
 
 	msg := st.msg
 	sender := vm.AccountRef(msg.From())
