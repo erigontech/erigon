@@ -2672,17 +2672,11 @@ func (p *ParallelPatriciaHashed) foldNibble(nib int) error {
 	defer p.rootMu.Unlock()
 
 	// fmt.Printf("mounted %02x => %s\n", prevByte, c.String())
-	c.extLen = 0
-	c.hashedExtLen = 0
-
-	p.root.grid[0][nib] = c
-	p.mounts[nib].Reset()
-	p.mounts[nib].currentKeyLen = 0
-	if p.mounts[nib].activeRows >= 0 {
-		p.mounts[nib].depths[0] = 0
-		p.mounts[nib].activeRows = 0
-		p.mounts[nib].touchMap[0] = 0
-		p.mounts[nib].afterMap[0] = 0
+	if c.extLen > 0 { // should we always trim first nibble or not?
+		c.extLen--
+		copy(c.extension[:], c.extension[1:])
+		c.hashedExtLen -= 2
+		copy(c.hashedExtension[:], c.hashedExtension[2:])
 	}
 
 	p.root.touchMap[0] |= uint16(1) << nib
