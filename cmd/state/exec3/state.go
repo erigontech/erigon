@@ -299,7 +299,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				endIdx := startIdx + txTask.AAValidationBatchSize
 
 				validationResults := make([]AAValidationResult, txTask.AAValidationBatchSize)
-			log.Debug("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
+				log.Debug("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx-1)
 
 				var outerErr error
 				for i := startIdx; i < endIdx; i++ {
@@ -331,7 +331,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 					txTask.Error = outerErr
 					break
 				}
-			log.Debug("✅[aa] validated AA bundle")
+				log.Debug("✅[aa] validated AA bundle", "len", startIdx-endIdx)
 
 				txTask.ValidationResults = validationResults
 			}
@@ -357,7 +357,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
-			log.Debug("✅[aa] executed AA bundle")
+
+			log.Debug("✅[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex)
 		}
 
 		msg := txTask.TxAsMessage
