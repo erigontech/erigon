@@ -339,6 +339,8 @@ func (d *Domain) openDirtyFiles(fNames []string) (err error) {
 				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
 				if !ok {
 					fPath = d.kvFilePath(fromStep, toStep)
+				} else {
+					fPath = filepath.Join(d.dirs.SnapDomain, fPath)
 				}
 				exists, err := dir.FileExist(fPath)
 				if err != nil {

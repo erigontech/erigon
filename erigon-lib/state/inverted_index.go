@@ -274,6 +274,8 @@ func (ii *InvertedIndex) openDirtyFiles(fNames []string) error {
 				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
 				if !ok {
 					fPath = ii.efFilePath(fromStep, toStep)
+				} else {
+					fPath = filepath.Join(ii.dirs.SnapIdx, fPath)
 				}
 				exists, err := dir.FileExist(fPath)
 				if err != nil {

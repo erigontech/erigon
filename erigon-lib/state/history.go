@@ -200,6 +200,7 @@ func (h *History) openDirtyFiles(fNames []string) error {
 	stepNameMap := make(map[steps]string, len(fNames))
 	for _, filename := range fNames {
 		from, to, err := ParseStepsFromFileName(filename)
+		println("hist from fnames", filename, from, to)
 		if err != nil {
 			continue
 		}
@@ -212,7 +213,10 @@ func (h *History) openDirtyFiles(fNames []string) error {
 				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
 				if !ok {
 					fPath = h.vFilePath(fromStep, toStep)
+				} else {
+					fPath = filepath.Join(h.dirs.SnapHistory, fPath)
 				}
+
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
