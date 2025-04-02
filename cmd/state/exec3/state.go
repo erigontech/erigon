@@ -64,11 +64,11 @@ type Worker struct {
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
 
-	ctx      context.Context
-	engine   consensus.Engine
-	genesis  *types.Genesis
+	ctx     context.Context
+	engine  consensus.Engine
+	genesis *types.Genesis
 	results *exec.ResultsQueue
-	chain    consensus.ChainReader
+	chain   consensus.ChainReader
 
 	callTracer  *CallTracer
 	taskGasPool *core.GasPool
@@ -93,10 +93,10 @@ func NewWorker(logger log.Logger, ctx context.Context, background bool, chainDb 
 		blockReader: blockReader,
 		chainConfig: chainConfig,
 
-		ctx:      ctx,
-		genesis:  genesis,
+		ctx:     ctx,
+		genesis: genesis,
 		results: results,
-		engine:   engine,
+		engine:  engine,
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 		callTracer:  NewCallTracer(),
@@ -146,7 +146,6 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 	fmt.Printf("%p: reset state %#v\n", rw, rw.lock)
 	defer fmt.Println("reset state done")
 	rw.lock.Lock()
-	fmt.Println("ResetState locked")
 	defer rw.lock.Unlock()
 
 	rw.rs = rs
@@ -175,14 +174,7 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 
 func (rw *Worker) resetTx(chainTx kv.Tx) {
 	if rw.background && rw.chainTx != nil {
-		if chainTx != nil {
-			fmt.Println("reset", rw.chainTx.ViewID(), "->", chainTx.ViewID())
-		}
 		rw.chainTx.Rollback()
-	} else {
-		if chainTx != nil {
-			fmt.Printf("reset nil -> %p:%d\n", chainTx, chainTx.ViewID())
-		}
 	}
 
 	rw.chainTx = chainTx
@@ -311,7 +303,7 @@ func NewWorkersPool(accumulator *shards.Accumulator, logger log.Logger, ctx cont
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultsSize := workerCount * 8
-	rws = exec.NewResultsQueue(resultsSize, workerCount) 
+	rws = exec.NewResultsQueue(resultsSize, workerCount)
 	{
 		// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 		// and in applyLoop all errors are critical

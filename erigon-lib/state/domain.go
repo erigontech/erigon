@@ -1684,7 +1684,6 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 		c, err = tx.Cursor(dt.d.valuesTable)
 		if err == nil {
 			dt.valsCs[tx] = c
-			fmt.Printf("%s:%p: added cursor %p:%d (%d)\n", dt.name, dt, tx, tx.ViewID(), len(dt.valsCs))
 		}
 		return c, err
 
@@ -1692,7 +1691,6 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	c, err = tx.CursorDupSort(dt.d.valuesTable)
 	if err == nil {
 		dt.valsCs[tx] = c
-		fmt.Printf("%s:%p: added cursor %p:%d (%d)\n", dt.name, dt, tx, tx.ViewID(), len(dt.valsCs))
 	}
 	return c, err
 }

@@ -1013,6 +1013,7 @@ func ExecV3(ctx context.Context,
 							case request := <-asyncTxChan:
 								request.Apply()
 							case <-waiter:
+								fmt.Println("waited")
 							}
 						}
 						fmt.Println("paused")
