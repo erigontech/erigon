@@ -521,7 +521,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(err)
 	require.NotNil(b)
-	rs, err := rawdb.ReadReceipts(tx, 1, hash)
+	rs, err := rawdb.ReadReceipts(tx, hash, 1)
 	require.NoError(err)
 	require.NotNil(rs)
 
@@ -539,12 +539,12 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(err)
 	require.Nil(b)
 
-	rs, err = rawdb.ReadReceipts(tx, b.NumberU64(), b.Hash())
+	rs, err = rawdb.ReadReceipts(tx, hash, 1)
 	require.NoError(err)
 	require.NotNil(rs)
 
 	// Ensure that receipts without metadata can be returned without the block body too
-	rFromDB, err := rawdb.ReadReceipts(tx, 1, hash)
+	rFromDB, err := rawdb.ReadReceipts(tx, hash, 1)
 	require.NoError(err)
 	if err := checkReceiptsRLP(rFromDB, receipts); err != nil {
 		t.Fatal(err)
@@ -557,9 +557,9 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(err)
 	require.NotNil(b)
 
-	rs, err = rawdb.ReadReceipts(tx, b.NumberU64(), b.Hash())
+	rs, err = rawdb.ReadReceipts(tx, hash, 1)
 	require.NoError(err)
-	require.Nil(b)
+	require.Nil(rs)
 	if len(rs) != 0 {
 		t.Fatalf("deleted receipts returned: %v", rs)
 	}

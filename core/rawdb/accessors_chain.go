@@ -1246,7 +1246,7 @@ func ReadReceipt(db kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint
 	return res, nil
 }
 
-func ReadReceipts(db kv.Tx, blockNum uint64, blockHash common.Hash) (res types.Receipts, err error) {
+func ReadReceipts(db kv.Tx, blockHash common.Hash, blockNum uint64) (res types.Receipts, err error) {
 	fmt.Printf("[dbg] a: %d, %x, %x\n", blockNum, blockHash, dbutils.HeaderKey(blockNum, blockHash))
 
 	rng, err := db.Prefix(kv.Receipts, dbutils.HeaderKey(blockNum, blockHash))
@@ -1270,8 +1270,8 @@ func ReadReceipts(db kv.Tx, blockNum uint64, blockHash common.Hash) (res types.R
 }
 
 // PruneReceipts removes all receipt for given block number or newer - used for Unwind
-func PruneReceipts(db kv.RwTx, number uint64) error {
-	rng, err := db.Prefix(kv.Receipts, hexutil.EncodeTs(number))
+func PruneReceipts(tx kv.RwTx, number uint64) error {
+	rng, err := tx.Prefix(kv.Receipts, hexutil.EncodeTs(number))
 	if err != nil {
 		return err
 	}
@@ -1280,7 +1280,7 @@ func PruneReceipts(db kv.RwTx, number uint64) error {
 		if err != nil {
 			return err
 		}
-		if err := db.Delete(kv.Receipts, k); err != nil {
+		if err := tx.Delete(kv.Receipts, k); err != nil {
 			return err
 		}
 	}
