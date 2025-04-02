@@ -1012,6 +1012,7 @@ func ExecV3(ctx context.Context,
 							select {
 							case request := <-asyncTxChan:
 								request.Apply()
+								fmt.Println("applied")
 							case <-waiter:
 								fmt.Println("waited")
 							}
@@ -1021,9 +1022,7 @@ func ExecV3(ctx context.Context,
 						if err != nil {
 							return err
 						}
-						fmt.Println("commited")
 						pe.resume()
-						fmt.Println("resumed")
 						logger.Info("Committed", "time", time.Since(commitStart), "commit", t2)
 					}
 				}
