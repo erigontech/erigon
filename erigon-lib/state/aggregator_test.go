@@ -446,7 +446,7 @@ func TestNewBtIndex(t *testing.T) {
 
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	t.Parallel()
-	aggStep := uint64(10)
+	aggStep := uint64(2)
 	db, agg := testDbAndAggregatorv3(t, aggStep)
 
 	tx, err := db.BeginRw(context.Background())
@@ -464,12 +464,12 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	maxTx := aggStep * 5
+	maxTx := aggStep * 3
 	t.Logf("step=%d tx_count=%d\n", aggStep, maxTx)
 
 	rnd := newRnd(0)
 
-	generateSharedDomainsUpdates(t, domains, maxTx, rnd, 20, 10, aggStep/2)
+	generateSharedDomainsUpdates(t, domains, maxTx, rnd, length.Addr, 10, aggStep/2)
 
 	// flush and build files
 	err = domains.Flush(context.Background(), tx)
@@ -656,8 +656,10 @@ func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum
 			usedKeys[k] = struct{}{}
 		}
 		if txNum%commitEvery == 0 {
-			_, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, "")
+			// domains.SetTrace(true)
+			rh, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, "")
 			require.NoErrorf(t, err, "txNum=%d", txNum)
+			t.Logf("commitment %x txn=%d", rh, txNum)
 		}
 	}
 	return usedKeys
