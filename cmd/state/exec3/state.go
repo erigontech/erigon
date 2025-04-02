@@ -334,6 +334,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				txTask.ValidationResults = validationResults
 			}
 
+			if len(txTask.ValidationResults) == 0 {
+				txTask.Error = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
+			}
+
 			aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction) // type cast checked earlier
 			validationRes := txTask.ValidationResults[0]
 			txTask.ValidationResults = txTask.ValidationResults[1:]
