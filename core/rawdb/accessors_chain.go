@@ -1247,8 +1247,6 @@ func ReadReceipt(db kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint
 }
 
 func ReadReceipts(db kv.Tx, blockHash common.Hash, blockNum uint64) (res types.Receipts, err error) {
-	fmt.Printf("[dbg] a: %d, %x, %x\n", blockNum, blockHash, dbutils.HeaderKey(blockNum, blockHash))
-
 	rng, err := db.Prefix(kv.Receipts, dbutils.HeaderKey(blockNum, blockHash))
 	if err != nil {
 		return nil, err
@@ -1278,10 +1276,10 @@ func PruneReceipts(tx kv.RwTx, number uint64) error {
 	for rng.HasNext() {
 		k, _, err := rng.Next()
 		if err != nil {
-			return err
+			return fmt.Errorf("prune receipts for block %d: %w", blockNum, err)
 		}
 		if err := tx.Delete(kv.Receipts, k); err != nil {
-			return err
+			return fmt.Errorf("prune receipts for block %d: %w", blockNum, err)
 		}
 	}
 	return nil
@@ -1292,9 +1290,8 @@ func WriteReceipts(tx kv.RwTx, blockNum uint64, blockHash common.Hash, receipts 
 	for txnIndex, r := range receipts {
 		bytes, err := rlp.EncodeToBytes(r)
 		if err != nil {
-			log.Crit("Failed to encode block receipts", "err", err)
+			return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 		}
-		fmt.Printf("[dbg] a: %d, %x, %x\n", blockNum, blockHash, dbutils.ReceiptKey(blockNum, blockHash, uint32(txnIndex)))
 		if err = tx.Put(kv.Receipts, dbutils.ReceiptKey(blockNum, blockHash, uint32(txnIndex)), bytes); err != nil {
 			return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 		}
