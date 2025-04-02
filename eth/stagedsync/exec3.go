@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -209,11 +210,11 @@ func ExecV3(ctx context.Context,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger,
+	hooks *tracing.Hooks,
 	initialCycle bool,
 	isMining bool,
-) error {
+) (execErr error) {
 	inMemExec := txc.Doms != nil
-
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
 	if parallel && cfg.chainConfig.ChainName == networkname.Gnosis {
@@ -244,6 +245,8 @@ func ExecV3(ctx context.Context,
 			}()
 		}
 	}
+
+	chainReader := NewChainReaderImpl(cfg.chainConfig, applyTx, blockReader, logger)
 	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	if !inMemExec && !isMining {
 		if initialCycle {
@@ -496,6 +499,21 @@ Loop:
 			return fmt.Errorf("nil block %d", blockNum)
 		}
 
+		if b.NumberU64() == 0 {
+			if hooks != nil && hooks.OnGenesisBlock != nil {
+				hooks.OnGenesisBlock(b, cfg.genesis.Alloc)
+			}
+		} else {
+			if hooks != nil && hooks.OnBlockStart != nil {
+				hooks.OnBlockStart(tracing.BlockEvent{
+					Block:     b,
+					TD:        chainReader.GetTd(b.ParentHash(), b.NumberU64()-1),
+					Finalized: chainReader.CurrentFinalizedHeader(),
+					Safe:      chainReader.CurrentSafeHeader(),
+				})
+			}
+		}
+
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
@@ -512,11 +530,17 @@ Loop:
 		// print type of engine
 		if parallel {
 			if err := executor.status(ctx, commitThreshold); err != nil {
+				if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+					hooks.OnBlockEnd(err)
+				}
 				return err
 			}
 		} else if accumulator != nil {
 			txs, err := blockReader.RawTransactions(context.Background(), executor.tx(), b.NumberU64(), b.NumberU64())
 			if err != nil {
+				if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+					hooks.OnBlockEnd(err)
+				}
 				return err
 			}
 			accumulator.StartChange(header, txs, false)
@@ -558,6 +582,9 @@ Loop:
 			if txTask.HistoryExecution && usedGas == 0 {
 				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
 				if err != nil {
+					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+						hooks.OnBlockEnd(err)
+					}
 					return err
 				}
 			}
@@ -578,6 +605,9 @@ Loop:
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
 				if err != nil {
+					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+						hooks.OnBlockEnd(err)
+					}
 					return err
 				}
 			}
@@ -587,9 +617,14 @@ Loop:
 			inputTxNum++
 		}
 		if parallel {
-			if _, err := executor.execute(ctx, txTasks); err != nil {
+			_, err := executor.execute(ctx, txTasks)
+			if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+				hooks.OnBlockEnd(err)
+			}
+			if err != nil {
 				return err
 			}
+
 			agg.BuildFilesInBackground(outputTxNum.Load())
 		} else {
 			se := executor.(*serialExecutor)
@@ -597,7 +632,9 @@ Loop:
 			se.skipPostEvaluation = skipPostEvaluation
 
 			continueLoop, err := se.execute(ctx, txTasks)
-
+			if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+				hooks.OnBlockEnd(err)
+			}
 			if err != nil {
 				return err
 			}
@@ -757,12 +794,12 @@ Loop:
 }
 
 // nolint
-func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
+func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *state2.SharedDomains) {
 	if doms != nil {
 		doms.Flush(context.Background(), tx)
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DebugRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -777,7 +814,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).RangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		it, err := tx.Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -790,7 +827,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).RangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
+		it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}

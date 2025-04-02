@@ -158,10 +158,13 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful
 	}
+
+	receipt.Bloom = types.LogsBloom(receipt.Logs) // why do we need to add this?
 	// if the transaction created a contract, store the creation address in the receipt.
 	//if msg.To() == nil {
 	//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
 	//}
+
 	return receipt
 }
 func (t *TxTask) Reset() *TxTask {

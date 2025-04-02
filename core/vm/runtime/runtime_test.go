@@ -56,7 +56,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	agg, err := stateLib.NewAggregator2(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func testTemporalDB(t testing.TB) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	agg, err := stateLib.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
@@ -239,10 +239,12 @@ func BenchmarkCall(b *testing.B) {
 		}
 	}
 }
+
 func benchmarkEVM_Create(b *testing.B, code string) {
 	db := testTemporalDB(b)
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(b, err)
+	defer tx.Rollback()
 	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
@@ -635,7 +637,6 @@ func TestEip2929Cases(t *testing.T) {
 	tmpdir := t.TempDir()
 	id := 1
 	prettyPrint := func(comment string, code []byte) {
-
 		instrs := make([]string, 0)
 		it := asm.NewInstructionIterator(code)
 		for it.Next() {
@@ -653,8 +654,7 @@ func TestEip2929Cases(t *testing.T) {
 			code, ops)
 		cfg := &Config{
 			EVMConfig: vm.Config{
-				Debug:     true,
-				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout),
+				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout).Hooks(),
 				ExtraEips: []int{2929},
 			},
 		}

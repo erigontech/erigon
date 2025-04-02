@@ -148,9 +148,9 @@ func TestPrunableProgress(t *testing.T) {
 	SaveExecV3PrunableProgress(tx, []byte("test"), 100)
 	s, err := GetExecV3PrunableProgress(tx, []byte("test"))
 	require.NoError(t, err)
-	require.EqualValues(t, s, 100)
+	require.EqualValues(t, 100, s)
 	SaveExecV3PrunableProgress(tx, []byte("test"), 120)
 	s, err = GetExecV3PrunableProgress(tx, []byte("test"))
 	require.NoError(t, err)
-	require.EqualValues(t, s, 120)
+	require.EqualValues(t, 120, s)
 }

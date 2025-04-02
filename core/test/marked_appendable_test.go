@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -25,7 +24,9 @@ import (
 
 type Num = state.Num
 type RootNum = state.RootNum
-type EntityId = ae.AppendableId
+type AppendableId = ae.AppendableId
+type MarkedTxI = state.MarkedTxI
+type UnmarkedTxI = state.UnmarkedTxI
 
 // test marked appendable
 func TestMarkedAppendableRegistration(t *testing.T) {
@@ -41,30 +42,18 @@ func TestMarkedAppendableRegistration(t *testing.T) {
 }
 
 func registerEntity(dirs datadir.Dirs, name string) ae.AppendableId {
-	preverified := snapcfg.Mainnet
-	return ae.RegisterAppendable(name, dirs, preverified, ae.WithSnapshotCreationConfig(
-		&ae.SnapshotConfig{
-			SnapshotCreationConfig: &ae.SnapshotCreationConfig{
-				EntitiesPerStep: 1000,
-				MergeStages:     []uint64{1000, 20000, 600000},
-				MinimumSize:     1000000,
-				SafetyMargin:    1000,
-			},
+	return registerEntityWithSnapshotConfig(dirs, name, &ae.SnapshotConfig{
+		SnapshotCreationConfig: &ae.SnapshotCreationConfig{
+			RootNumPerStep: 10,
+			MergeStages:    []uint64{20, 40},
+			MinimumSize:    10,
+			SafetyMargin:   5,
 		},
-	))
+	})
 }
 
-func registerEntityRelaxed(dirs datadir.Dirs, name string) ae.AppendableId {
-	return ae.RegisterAppendable(name, dirs, nil, ae.WithSnapshotCreationConfig(
-		&ae.SnapshotConfig{
-			SnapshotCreationConfig: &ae.SnapshotCreationConfig{
-				EntitiesPerStep: 10,
-				MergeStages:     []uint64{20, 40},
-				MinimumSize:     10,
-				SafetyMargin:    5,
-			},
-		},
-	))
+func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *ae.SnapshotConfig) ae.AppendableId {
+	return ae.RegisterAppendable(name, dirs, nil, ae.WithSnapshotCreationConfig(cfg))
 }
 
 func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
@@ -75,8 +64,8 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	return dirs, db, logger
 }
 
-func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (EntityId, *state.Appendable[state.MarkedTxI]) {
-	headerId := registerEntityRelaxed(dir, "headers")
+func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (AppendableId, *state.Appendable[state.MarkedTxI]) {
+	headerId := registerEntity(dir, "headers")
 	require.Equal(t, ae.AppendableId(0), headerId)
 
 	// create marked appendable
@@ -86,16 +75,15 @@ func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (En
 		state.WithIndexKeyFactory(&snaptype.HeaderAccessorIndexKeyFactory{}))
 
 	ma, err := state.NewMarkedAppendable(headerId, kv.Headers, kv.HeaderCanonical, ae.IdentityRootRelationInstance, log,
-		state.App_WithFreezer[state.MarkedTxI](freezer),
-		state.App_WithPruneFrom[state.MarkedTxI](Num(1)),
-		state.App_WithIndexBuilders[state.MarkedTxI](builder),
+		state.App_WithFreezer(freezer),
+		state.App_WithPruneFrom(Num(1)),
+		state.App_WithIndexBuilders(builder),
 	)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		ma.Close()
 		ma.RecalcVisibleFiles(0)
-		//ma = nil
 
 		ae.Cleanup()
 		db.Close()
@@ -113,7 +101,7 @@ func TestMarked_PutToDb(t *testing.T) {
 	dir, db, log := setup(t)
 	_, ma := setupHeader(t, log, dir, db)
 
-	ma_tx := ma.BeginFilesRo()
+	ma_tx := ma.BeginFilesTx()
 	defer ma_tx.Close()
 	rwtx, err := db.BeginRw(context.Background())
 	defer rwtx.Rollback()
@@ -125,16 +113,15 @@ func TestMarked_PutToDb(t *testing.T) {
 
 	err = ma_tx.Put(num, hash, value, rwtx)
 	require.NoError(t, err)
-	returnv, snap, err := ma_tx.Get(num, rwtx.(kv.Tx))
-	require.NoError(t, err)
-	require.Equal(t, value, returnv)
-	require.False(t, snap)
-
-	returnv, err = ma_tx.GetNc(num, hash, rwtx.(kv.Tx))
+	returnv, err := ma_tx.Get(num, rwtx)
 	require.NoError(t, err)
 	require.Equal(t, value, returnv)
 
-	returnv, err = ma_tx.GetNc(num, []byte{1}, rwtx.(kv.Tx))
+	returnv, err = ma_tx.DebugDb().GetDb(num, hash, rwtx)
+	require.NoError(t, err)
+	require.Equal(t, value, returnv)
+
+	returnv, err = ma_tx.DebugDb().GetDb(num, []byte{1}, rwtx)
 	require.NoError(t, err)
 	require.True(t, returnv == nil) // Equal fails
 
@@ -153,7 +140,7 @@ func TestPrune(t *testing.T) {
 			cfg := headerId.SnapshotConfig()
 			entries_count = cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 
-			ma_tx := ma.BeginFilesRo()
+			ma_tx := ma.BeginFilesTx()
 			defer ma_tx.Close()
 			rwtx, err := db.BeginRw(ctx)
 			defer rwtx.Rollback()
@@ -192,7 +179,7 @@ func TestPrune(t *testing.T) {
 			require.Equal(t, int64(del), max(0, min(int64(pruneTo), int64(entries_count))-cfgPruneFrom))
 
 			require.NoError(t, rwtx.Commit())
-			ma_tx = ma.BeginFilesRo()
+			ma_tx = ma.BeginFilesTx()
 			defer ma_tx.Close()
 			rwtx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
@@ -208,7 +195,7 @@ func TestUnwind(t *testing.T) {
 	// unwind
 }
 
-func TestBuildFiles(t *testing.T) {
+func TestBuildFiles_Marked(t *testing.T) {
 	// put stuff until build files is called
 	// and snapshot is created (with indexes)
 	// check beginfilesro works with new visible file
@@ -221,7 +208,7 @@ func TestBuildFiles(t *testing.T) {
 	headerId, ma := setupHeader(t, log, dir, db)
 	ctx := context.Background()
 
-	ma_tx := ma.BeginFilesRo()
+	ma_tx := ma.BeginFilesTx()
 	defer ma_tx.Close()
 	rwtx, err := db.BeginRw(ctx)
 	defer rwtx.Rollback()
@@ -259,20 +246,20 @@ func TestBuildFiles(t *testing.T) {
 	ma.IntegrateDirtyFiles(files)
 	ma.RecalcVisibleFiles(RootNum(entries_count))
 
-	ma_tx = ma.BeginFilesRo()
+	ma_tx = ma.BeginFilesTx()
 	defer ma_tx.Close()
 
 	rwtx, err = db.BeginRw(ctx)
 	defer rwtx.Rollback()
 	require.NoError(t, err)
 
-	firstRootNumNotInSnap := ma_tx.VisibleFilesMaxRootNum()
+	firstRootNumNotInSnap := ma_tx.DebugFiles().VisibleFilesMaxRootNum()
 	del, err := ma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, rwtx)
 	require.NoError(t, err)
 	require.Equal(t, del, uint64(firstRootNumNotInSnap)-uint64(ma.PruneFrom()))
 
 	require.NoError(t, rwtx.Commit())
-	ma_tx = ma.BeginFilesRo()
+	ma_tx = ma.BeginFilesTx()
 	defer ma_tx.Close()
 	rwtx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -281,16 +268,18 @@ func TestBuildFiles(t *testing.T) {
 	// check unified interface
 	for i := range int(entries_count) {
 		num, hash, value := getData(i)
-		returnv, snap, err := ma_tx.Get(num, rwtx)
+		returnv, err := ma_tx.DebugDb().GetDb(num, nil, rwtx)
 		require.NoError(t, err)
-
-		require.True(t, snap == (num < Num(firstRootNumNotInSnap)))
-		require.Equal(t, value, returnv)
+		if num < Num(firstRootNumNotInSnap) && num >= ma.PruneFrom() {
+			require.True(t, returnv == nil)
+		} else {
+			require.Equal(t, returnv, value)
+		}
 
 		// just look in db....
 		if num < ma.PruneFrom() || num >= Num(firstRootNumNotInSnap) {
 			// these should be in db
-			returnv, err = ma_tx.GetNc(num, hash, rwtx)
+			returnv, err = ma_tx.DebugDb().GetDb(num, hash, rwtx)
 			require.NoError(t, err)
 			require.Equal(t, value, returnv)
 

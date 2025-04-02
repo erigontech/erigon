@@ -8,7 +8,9 @@ import (
 
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
+	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/log/v3"
+
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
@@ -35,12 +37,26 @@ func (se *serialExecutor) status(ctx context.Context, commitThreshold uint64) er
 }
 
 func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (cont bool, err error) {
+	var z int64
+	processedKeys := 0
+	fmt.Println("shota executing ", z, processedKeys)
 	for _, txTask := range tasks {
 		if txTask.Error != nil {
 			return false, nil
 		}
 		// fmt.Println("shota executor changes 0", se.domains().GetCommitmentContext().KeysCount())
 		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.skipPostEvaluation)
+		unsorted := se.doms.GetCommitmentContext().GetUnsortedTouchedKeys()
+
+		for processedKeys < len(unsorted) {
+			key := unsorted[processedKeys]
+			processedKeys++
+			if len(key) != 20 && len(key) != 0 {
+				z++
+				se.doms.GetCommitmentContext().ROTrie.TraverseKey(commitment.KeyToHexNibbleHash(key), key, nil)
+			}
+		}
+
 		// fmt.Println("shota executor changes 1", se.domains().GetCommitmentContext().KeysCount())
 		if err := func() error {
 			if errors.Is(txTask.Error, context.Canceled) {
@@ -61,7 +77,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 
 			txTask.CreateReceipt(se.applyTx)
 			if txTask.Final {
-				if !se.isMining && !se.inMemExec && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
+				if !se.isMining && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
 					// note this assumes the bloach reciepts is a fixed array shared by
 					// all tasks - if that changes this will need to change - robably need to
 					// add this to the executor
@@ -123,6 +139,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
 				// get last receipt and store the last log index + 1
 				lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+				if lastReceipt == nil {
+					return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+				}
 				if len(lastReceipt.Logs) > 0 {
 					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
 					receipt := types.Receipt{
@@ -142,7 +161,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 
 		se.outputTxNum.Add(1)
 	}
-
+	fmt.Println("shota traversed", z, "keys", "out of ", processedKeys, se.doms.GetCommitmentContext().KeysCount())
 	return true, nil
 }
 

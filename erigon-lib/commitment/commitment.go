@@ -968,13 +968,14 @@ func ParseCommitmentMode(s string) Mode {
 }
 
 type Updates struct {
-	keccak cryptozerocopy.KeccakState
-	hasher keyHasher
-	keys   map[string]struct{}
-	etl    *etl.Collector
-	tree   *btree.BTreeG[*KeyUpdate]
-	mode   Mode
-	tmpdir string
+	keccak  cryptozerocopy.KeccakState
+	hasher  keyHasher
+	keys    map[string]struct{}
+	keyList [][]byte
+	etl     *etl.Collector
+	tree    *btree.BTreeG[*KeyUpdate]
+	mode    Mode
+	tmpdir  string
 }
 
 type keyHasher func(key []byte) []byte
@@ -990,6 +991,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	}
 	if t.mode == ModeDirect {
 		t.keys = make(map[string]struct{})
+		t.keyList = make([][]byte, 0)
 		t.initCollector()
 	} else if t.mode == ModeUpdate {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
@@ -1000,11 +1002,19 @@ func (t *Updates) SetMode(m Mode) {
 	t.mode = m
 	if t.mode == ModeDirect && t.keys == nil {
 		t.keys = make(map[string]struct{})
+		t.keyList = make([][]byte, 0)
 		t.initCollector()
 	} else if t.mode == ModeUpdate && t.tree == nil {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
 	}
 	t.Reset()
+}
+
+func (t *Updates) GetKeys() [][]byte {
+	if t.mode == ModeDirect {
+		return t.keyList
+	}
+	return nil
 }
 
 func (t *Updates) initCollector() {
@@ -1056,6 +1066,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
 			t.keys[key] = struct{}{}
+			t.keyList = append(t.keyList, keyBytes)
 		}
 	default:
 	}
@@ -1120,6 +1131,7 @@ func (t *Updates) TouchCode(c *KeyUpdate, val []byte) {
 func (t *Updates) Close() {
 	if t.keys != nil {
 		clear(t.keys)
+		clear(t.keyList)
 	}
 	if t.tree != nil {
 		t.tree.Clear(true)
@@ -1135,6 +1147,7 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
+		clear(t.keyList)
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return fn(k, v, nil)
@@ -1170,6 +1183,8 @@ func (t *Updates) Reset() {
 	case ModeDirect:
 		t.keys = nil
 		t.keys = make(map[string]struct{})
+		t.keyList = nil
+		t.keyList = make([][]byte, 0)
 		t.initCollector()
 	case ModeUpdate:
 		t.tree.Clear(true)

@@ -81,13 +81,6 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		// otherwise this may be a bor state sync transaction - check
 		if api.useBridgeReader {
 			blockNumber, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
-			if ok {
-				txNumNextBlock, err := txNumsReader.Min(tx, blockNumber+1)
-				if err != nil {
-					return nil, err
-				}
-				txNum = txNumNextBlock
-			}
 		} else {
 			blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
 		}
@@ -114,11 +107,11 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	if txNumMin+2 > txNum {
+	if txNumMin+1 > txNum && !isBorStateSyncTxn {
 		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNumber)
 	}
 
-	var txIndex = int(txNum - txNumMin - 2)
+	var txIndex = int(txNum - txNumMin - 1)
 
 	if isBorStateSyncTxn {
 		txIndex = -1
@@ -602,8 +595,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ot.r = traceResult
 		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 		ot.traceAddr = []int{}
-		vmConfig.Debug = true
-		vmConfig.Tracer = &ot
+		vmConfig.Tracer = ot.Tracer().Hooks
 		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
@@ -612,9 +604,18 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(txIndex)
+		ibs.SetHooks(ot.Tracer().Hooks)
+
+		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
+			ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
+		}
+
 		var execResult *evmtypes.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
 		if err != nil {
+			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+				ot.Tracer().OnTxEnd(nil, err)
+			}
 			if first {
 				first = false
 			} else {
@@ -624,6 +625,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			rpc.HandleError(err, stream)
 			stream.WriteObjectEnd()
 			continue
+		}
+		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
 		}
 		traceResult.Output = common.Copy(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
@@ -814,7 +818,7 @@ func (api *TraceAPIImpl) callBlock(
 		msgs[i] = msg
 	}
 
-	traces, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msgs, callParams,
+	traces, tracingHooks, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
 		&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
 
 	if cmErr != nil {
@@ -822,7 +826,8 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */)
+		ret, _, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, tracingHooks)
+		return ret, err
 	}
 
 	return traces, syscall, nil
@@ -925,7 +930,7 @@ func (api *TraceAPIImpl) callTransaction(
 		isBorStateSyncTxn: cfg.Bor != nil,
 	}
 
-	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
+	trace, tracingHooks, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
 		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
 
 	if cmErr != nil {
@@ -933,7 +938,8 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */)
+		ret, _, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, tracingHooks)
+		return ret, err
 	}
 
 	return trace, syscall, nil

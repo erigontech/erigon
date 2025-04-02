@@ -18,15 +18,23 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/hex"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 )
 
+type PoolChangeEvent struct {
+	Pool    string `json:"pool"`
+	Event   string `json:"event"`
+	TxnHash string `json:"txnHash"`
+}
+
 type DiagTxn struct {
-	IDHash              [32]byte      `json:"hash"`
+	IDHash              string        `json:"hash"`
 	SenderID            uint64        `json:"senderID"`
+	SenderAddress       string        `json:"senderAddress"`
 	Nonce               uint64        `json:"nonce"`
 	Value               uint256.Int   `json:"value"`
 	Gas                 uint64        `json:"gas"`
@@ -40,21 +48,37 @@ type DiagTxn struct {
 	AccessListStorCount int           `json:"accessListStorCount"`
 	BlobHashes          []common.Hash `json:"blobHashes"`
 	Blobs               [][]byte      `json:"blobs"`
+	IsLocal             bool          `json:"isLocal"`
+	DiscardReason       string        `json:"discardReason"`
+	Pool                string        `json:"pool"`
 }
 
 type IncomingTxnUpdate struct {
-	Txns      []DiagTxn `json:"txns"`
-	Senders   []byte    `json:"senders"`
-	IsLocal   []bool    `json:"isLocal"`
-	KnownTxns [][]byte  `json:"knownTxns"` //hashes of incomming transactions from p2p network which are already in the pool
+	Txns    []DiagTxn             `json:"txns"`
+	Updates map[string][][32]byte `json:"updates"`
 }
 
 func (ti IncomingTxnUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
+type PoolChangeBatch struct {
+	Pool    string     `json:"pool"`
+	Event   string     `json:"event"`
+	TxnHash [][32]byte `json:"txnHash"`
+}
+
+type PoolChangeBatchEvent struct {
+	Changes []PoolChangeBatch `json:"changes"`
+}
+
+func (ti PoolChangeBatchEvent) Type() Type {
+	return TypeOf(ti)
+}
+
 func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnIncommingTxnListener(rootCtx)
+	d.runOnPoolChangeBatchEvent(rootCtx)
 	d.SetupNotifier()
 }
 
@@ -73,6 +97,34 @@ func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 					MessageType: "txpool",
 					Message:     info,
 				})
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnPoolChangeBatchEvent(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[PoolChangeBatchEvent](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(PoolChangeBatchEvent{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				for _, change := range info.Changes {
+					for _, txnHash := range change.TxnHash {
+						d.Notify(DiagMessages{
+							MessageType: "txpool",
+							Message: PoolChangeEvent{
+								Pool:    change.Pool,
+								Event:   change.Event,
+								TxnHash: hex.EncodeToString(txnHash[:]),
+							},
+						})
+					}
+				}
 			}
 		}
 	}()
