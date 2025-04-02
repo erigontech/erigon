@@ -256,9 +256,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 
 			cursor, err := silkwormMemDB.Cursor(kv.Receipts)
+
 			if err != nil {
 				panic(err)
 			}
+
 			idx := 0
 			for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
 				if err != nil {
@@ -270,10 +272,17 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				if err = receipt.DecodeRLP(rlp.NewStream(bytes.NewReader(v), 0)); err != nil {
 
 				}
-				txTask.BlockReceipts[idx] = &receipt
-			}
 
+				txTask.BlockReceipts[idx] = &receipt
+				idx++
+			}
+			cursor.Close()
+			silkwormMemDB.Rollback()
 		}
+
+		//for _, v := range txTask.BlockReceipts {
+		//	fmt.Printf("Receipt with gas: %d, cummulative: %d\n", v.GasUsed, v.CumulativeGasUsed)
+		//}
 
 		// End of block transaction in a block
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {

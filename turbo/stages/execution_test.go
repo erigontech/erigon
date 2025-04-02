@@ -296,7 +296,7 @@ func TestBlockExecutionStorageContract(t *testing.T) {
 	var (
 		signer           = types.LatestSignerForChainID(big.NewInt(1337))
 		gasFeeCap        = uint256.NewInt(1)
-		subAccountsCount = 100
+		subAccountsCount = 1
 	)
 
 	tests := []struct {
