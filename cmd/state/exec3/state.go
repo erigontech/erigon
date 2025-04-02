@@ -120,8 +120,8 @@ func (rw *Worker) Paused() bool {
 		return false
 	}
 
-	canlock := rw.lock.TryLock() {
-	
+	canlock := rw.lock.TryLock()
+
 	if canlock {
 		rw.lock.Unlock()
 	} else {
