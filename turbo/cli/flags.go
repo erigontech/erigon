@@ -462,6 +462,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	}
 
 	enabledHistoryExpiry := f.Bool(HistoryExpiryEnabledFlag.Name, HistoryExpiryEnabledFlag.Value, HistoryExpiryEnabledFlag.Usage)
+	fmt.Println(enabledHistoryExpiry)
 	if enabledHistoryExpiry != nil && *enabledHistoryExpiry {
 		dbg.EnableHistoryExpiry = true
 		fmt.Println("History expiry enabled")
