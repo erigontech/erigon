@@ -771,7 +771,7 @@ func FromProto(tx *typesproto.AccountAbstractionTransaction) *AccountAbstraction
 		FeeCap:                      uint256.NewInt(0).SetBytes(tx.FeeCap),
 		GasLimit:                    tx.Gas,
 		SenderAddress:               &senderAddress,
-		Authorizations:              convertProtoAuthorizations(tx.Authorizations),
+		SenderValidationData:        tx.SenderValidationData,
 		ExecutionData:               tx.ExecutionData,
 		Paymaster:                   &paymasterAddress,
 		PaymasterData:               tx.PaymasterData,
@@ -782,6 +782,7 @@ func FromProto(tx *typesproto.AccountAbstractionTransaction) *AccountAbstraction
 		PaymasterValidationGasLimit: tx.PaymasterValidationGasLimit,
 		PostOpGasLimit:              tx.PostOpGasLimit,
 		NonceKey:                    uint256.NewInt(0).SetBytes(tx.NonceKey),
+		Authorizations:              convertProtoAuthorizations(tx.Authorizations),
 	}
 }
 

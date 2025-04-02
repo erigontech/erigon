@@ -851,6 +851,7 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 		FeeCap:                      tx.FeeCap.Bytes(),
 		Gas:                         tx.Gas,
 		SenderAddress:               tx.SenderAddress.Bytes(),
+		SenderValidationData:        tx.SenderValidationData,
 		ExecutionData:               tx.ExecutionData,
 		Paymaster:                   tx.Paymaster.Bytes(),
 		PaymasterData:               tx.PaymasterData,
