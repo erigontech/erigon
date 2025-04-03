@@ -214,23 +214,28 @@ func (h *History) openDirtyFiles(fNames []string) error {
 		if err != nil {
 			continue
 		}
-		stepNameMap[steps{from: from, to: to}] = filename
+		ext := filepath.Ext(filename)
+		stepNameMap[steps{from: from, to: to, ext: ext}] = filename
 	}
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 			if item.decompressor == nil {
-				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
+				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep, ext: ".v"}]
 				if !ok {
-					fPath = h.vFilePath(fromStep, toStep)
+					h.logger.Debug("[agg] History.openDirtyFiles: file not in map",
+						"from", fromStep, "to", toStep, "ext", ".v")
+					invalidFilesMu.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
+					continue
 				} else {
 					fPath = filepath.Join(h.dirs.SnapHistory, fPath)
 				}
-
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
-					h.logger.Debug("[agg] History.openDirtyFiles: FileExist", "f", fName, "err", err)
+					h.logger.Debug("[agg] History.openDirtyFiles: FileExist err", "f", fName, "err", err)
 					invalidFilesMu.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFilesMu.Unlock()
@@ -244,6 +249,7 @@ func (h *History) openDirtyFiles(fNames []string) error {
 					invalidFilesMu.Unlock()
 					continue
 				}
+
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
@@ -273,7 +279,13 @@ func (h *History) openDirtyFiles(fNames []string) error {
 			}
 
 			if item.index == nil {
-				fPath := h.vAccessorFilePath(fromStep, toStep)
+				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep, ext: ".vi"}]
+				if !ok {
+					h.logger.Warn("[agg] History.openDirtyFiles not in map",
+						"from", fromStep, "to", toStep, "ext", ".vi")
+				} else {
+					fPath = filepath.Join(h.dirs.SnapHistory, fPath)
+				}
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
