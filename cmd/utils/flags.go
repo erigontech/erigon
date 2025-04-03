@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -1760,8 +1761,9 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	} else {
 		cfg.ExtraData = []byte(ctx.App.Name + "-" + ctx.App.Version)
 	}
-	if len(cfg.ExtraData) > 32 {
-		cfg.ExtraData = cfg.ExtraData[:32]
+	maxExtra := min(int(params.MaximumExtraDataSize), types.ExtraVanityLength)
+	if len(cfg.ExtraData) > maxExtra {
+		cfg.ExtraData = cfg.ExtraData[:maxExtra]
 	}
 
 	if ctx.IsSet(MinerGasLimitFlag.Name) {
