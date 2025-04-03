@@ -1319,6 +1319,7 @@ func WriteReceipts(tx kv.RwTx, blockNum uint64, blockHash common.Hash, receipts 
 // WriteReceipt stores all the transaction receipts belonging to a block.
 func WriteReceipt(tx kv.Putter, blockNum uint64, blockHash common.Hash, txnIndex uint32, receipt *types.Receipt) error {
 	storageReceipt := (*types.ReceiptForStorage)(receipt)
+	fmt.Printf("[dbg] a %+v\n", storageReceipt)
 	bytes, err := rlp.EncodeToBytes(storageReceipt)
 	if err != nil {
 		return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
@@ -1334,7 +1335,7 @@ func WriteReceipt(tx kv.Putter, blockNum uint64, blockHash common.Hash, txnIndex
 		panic(err)
 		return err
 	}
-	fmt.Printf("[dbg] a %+v\n", receipt)
+	fmt.Printf("[dbg] a %+v\n", storageReceipt)
 	fmt.Printf("[dbg] b %+v\n", receipt2)
 
 	return nil
