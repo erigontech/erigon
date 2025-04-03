@@ -475,6 +475,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	tx1 := types.NewTransaction(1, libcommon.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
 	tx2 := types.NewTransaction(2, libcommon.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil)
 
+	header := &types.Header{Number: big.NewInt(1)}
 	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
 
 	// Create the two receipts to manage afterwards
@@ -488,6 +489,8 @@ func TestBlockReceiptStorage(t *testing.T) {
 		TxHash:          tx1.Hash(),
 		ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
+		BlockNumber:     header.Number,
+		BlockHash:       header.Hash(),
 	}
 	//receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
 
@@ -501,10 +504,11 @@ func TestBlockReceiptStorage(t *testing.T) {
 		TxHash:          tx2.Hash(),
 		ContractAddress: libcommon.BytesToAddress([]byte{0x02, 0x22, 0x22}),
 		GasUsed:         222222,
+		BlockNumber:     header.Number,
+		BlockHash:       header.Hash(),
 	}
 	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
 	receipts := []*types.Receipt{receipt1, receipt2}
-	header := &types.Header{Number: big.NewInt(1)}
 
 	// Check that no receipt entries are in a pristine database
 	hash := header.Hash() //libcommon.BytesToHash([]byte{0x03, 0x14})
