@@ -162,11 +162,22 @@ func (d *Domain) kvFilePath(fromStep, toStep uint64) string {
 func (d *Domain) kvAccessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvi", d.version.AccessorKVI.String(), d.filenameBase, fromStep, toStep))
 }
+func (d *Domain) kvAccessorFilePathOld(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
+}
+
 func (d *Domain) kvExistenceIdxFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvei", d.version.AccessorKVEI.String(), d.filenameBase, fromStep, toStep))
 }
 func (d *Domain) kvBtFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.version.AccessorBT.String(), d.filenameBase, fromStep, toStep))
+}
+
+func (d *Domain) kvExistenceIdxFilePathOld(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
+}
+func (d *Domain) kvBtFilePathOld(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 }
 
 // maxStepInDB - return the latest available step in db (at-least 1 value in such step)
@@ -1257,7 +1268,10 @@ func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
 	if !d.AccessorList.Has(AccessorBTree) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64, isOld bool) []string {
+		if isOld {
+			return []string{d.kvBtFilePathOld(fromStep, toStep), d.kvExistenceIdxFilePathOld(fromStep, toStep)}
+		}
 		return []string{d.kvBtFilePath(fromStep, toStep), d.kvExistenceIdxFilePath(fromStep, toStep)}
 	})
 }
@@ -1266,7 +1280,10 @@ func (d *Domain) missedMapAccessors() (l []*filesItem) {
 	if !d.AccessorList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64, isOld bool) []string {
+		if isOld {
+			return []string{d.kvAccessorFilePathOld(fromStep, toStep)}
+		}
 		return []string{d.kvAccessorFilePath(fromStep, toStep)}
 	})
 }

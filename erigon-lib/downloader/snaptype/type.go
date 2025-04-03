@@ -50,6 +50,11 @@ var (
 	V2_0        Version = Version{2, 0}
 )
 
+func IsOldFilename(filename string) bool {
+	v, _, _ := strings.Cut(filename, "-")
+	return !strings.Contains(v, ".")
+}
+
 func (v Version) Less(rhd Version) bool {
 	return v.Major < rhd.Major || v.Major == rhd.Major && v.Minor < rhd.Minor
 }

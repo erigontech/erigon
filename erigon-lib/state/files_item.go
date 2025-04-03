@@ -18,6 +18,7 @@ package state
 
 import (
 	"fmt"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"os"
 	"regexp"
 	"strconv"
@@ -396,11 +397,17 @@ func (files visibleFiles) MergedRanges() []MergeRange {
 
 // fileItemsWithMissingAccessors returns list of files with missing accessors
 // here "accessors" are generated dynamically by `accessorsFor`
-func fileItemsWithMissingAccessors(dirtyFiles *btree2.BTreeG[*filesItem], aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*filesItem) {
+func fileItemsWithMissingAccessors(dirtyFiles *btree2.BTreeG[*filesItem], aggregationStep uint64, accessorsFor func(fromStep, toStep uint64, isOld bool) []string) (l []*filesItem) {
 	dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/aggregationStep, item.endTxNum/aggregationStep
-			for _, fName := range accessorsFor(fromStep, toStep) {
+			isOld := false
+			if item.decompressor != nil {
+				isOld = snaptype.IsOldFilename(item.decompressor.FileName())
+			} else if item.index != nil {
+				isOld = snaptype.IsOldFilename(item.index.FileName())
+			}
+			for _, fName := range accessorsFor(fromStep, toStep, isOld) {
 				exists, err := dir.FileExist(fName)
 				if err != nil {
 					panic(err)

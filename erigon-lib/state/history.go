@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"math"
 	"path/filepath"
 	"sync"
@@ -159,6 +160,10 @@ func (h *History) vFilePathOld(fromStep, toStep uint64) string {
 
 func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.version.AccessorVI.String(), h.filenameBase, fromStep, toStep))
+}
+
+func (h *History) vAccessorFilePathOld(fromStep, toStep uint64) string {
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
 }
 
 // openList - main method to open list of files.
@@ -361,7 +366,12 @@ func (h *History) missedMapAccessors() (l []*filesItem) {
 	if !h.indexList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(h.dirtyFiles, h.aggregationStep, func(fromStep, toStep uint64) []string {
+	return fileItemsWithMissingAccessors(h.dirtyFiles, h.aggregationStep, func(fromStep, toStep uint64, isOld bool) []string {
+		if isOld {
+			return []string{
+				h.vAccessorFilePathOld(fromStep, toStep),
+			}
+		}
 		return []string{
 			h.vAccessorFilePath(fromStep, toStep),
 		}
@@ -378,12 +388,15 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 	if !ok {
 		return nil
 	}
-
 	if iiItem.decompressor == nil {
 		return fmt.Errorf("buildVI: got iiItem with nil decompressor %s %d-%d", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
 	}
 	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 	idxPath := h.vAccessorFilePath(fromStep, toStep)
+
+	if snaptype.IsOldFilename(iiItem.decompressor.FileName()) {
+		idxPath = h.vAccessorFilePathOld(fromStep, toStep)
+	}
 
 	_, err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, ps)
 	if err != nil {

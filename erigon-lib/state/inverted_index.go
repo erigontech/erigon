@@ -133,6 +133,11 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 func (ii *InvertedIndex) efAccessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.version.AccessorEFI.String(), ii.filenameBase, fromStep, toStep))
 }
+
+func (ii *InvertedIndex) efAccessorFilePathOld(fromStep, toStep uint64) string {
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
+}
+
 func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.version.DataEF.String(), ii.filenameBase, fromStep, toStep))
 }
@@ -224,7 +229,12 @@ func (ii *InvertedIndex) missedMapAccessors() (l []*filesItem) {
 	if !ii.indexList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(ii.dirtyFiles, ii.aggregationStep, func(fromStep, toStep uint64) []string {
+	return fileItemsWithMissingAccessors(ii.dirtyFiles, ii.aggregationStep, func(fromStep, toStep uint64, isOld bool) []string {
+		if isOld {
+			return []string{
+				ii.efAccessorFilePathOld(fromStep, toStep),
+			}
+		}
 		return []string{
 			ii.efAccessorFilePath(fromStep, toStep),
 		}
