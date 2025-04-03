@@ -253,7 +253,6 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 type steps struct {
 	from uint64
 	to   uint64
-	ext  string
 }
 
 func (ii *InvertedIndex) openDirtyFiles(fNames []string) error {
@@ -265,28 +264,28 @@ func (ii *InvertedIndex) openDirtyFiles(fNames []string) error {
 		if err != nil {
 			continue
 		}
-		ext := filepath.Ext(filename)
-		stepNameMap[steps{from: from, to: to, ext: ext}] = filename
+		stepNameMap[steps{from: from, to: to}] = filename
 	}
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			item := item
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
+			var fPathFull string
+			fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
+			if !ok {
+				_, fName := filepath.Split(fPath)
+				ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file not in map", "f", fName)
+				invalidFileItemsLock.Lock()
+				invalidFileItems = append(invalidFileItems, item)
+				invalidFileItemsLock.Unlock()
+				continue
+			} else {
+				fPathFull = filepath.Join(ii.dirs.SnapIdx, fPath)
+			}
 			if item.decompressor == nil {
-				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep, ext: ".ef"}]
-				if !ok {
-					_, fName := filepath.Split(fPath)
-					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file not in map", "f", fName)
-					invalidFileItemsLock.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFileItemsLock.Unlock()
-					continue
-				} else {
-					fPath = filepath.Join(ii.dirs.SnapIdx, fPath)
-				}
-				exists, err := dir.FileExist(fPath)
+				exists, err := dir.FileExist(fPathFull)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FileExists error", "f", fName, "err", err)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -294,7 +293,7 @@ func (ii *InvertedIndex) openDirtyFiles(fNames []string) error {
 					continue
 				}
 				if !exists {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -302,8 +301,8 @@ func (ii *InvertedIndex) openDirtyFiles(fNames []string) error {
 					continue
 				}
 
-				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
+				if item.decompressor, err = seg.NewDecompressor(fPathFull); err != nil {
+					_, fName := filepath.Split(fPathFull)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					} else {
@@ -318,23 +317,17 @@ func (ii *InvertedIndex) openDirtyFiles(fNames []string) error {
 			}
 
 			if item.index == nil {
-				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep, ext: ".efi"}]
-				if !ok {
-					_, fName := filepath.Split(fPath)
-					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file not in map", "f", fName)
-					continue
-				} else {
-					fPath = filepath.Join(ii.dirs.SnapAccessors, fPath)
-				}
-				exists, err := dir.FileExist(fPath)
+				fPath = common.ReplaceExt(fPath, ".efi")
+				fPathFull = filepath.Join(ii.dirs.SnapAccessors, fPath)
+				exists, err := dir.FileExist(fPathFull)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
 				if exists {
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
+					if item.index, err = recsplit.OpenIndex(fPathFull); err != nil {
+						_, fName := filepath.Split(fPathFull)
 						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}

@@ -214,27 +214,27 @@ func (h *History) openDirtyFiles(fNames []string) error {
 		if err != nil {
 			continue
 		}
-		ext := filepath.Ext(filename)
-		stepNameMap[steps{from: from, to: to, ext: ext}] = filename
+		stepNameMap[steps{from: from, to: to}] = filename
 	}
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
+			var fPathFull string
+			fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
 			if item.decompressor == nil {
-				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep, ext: ".v"}]
 				if !ok {
 					h.logger.Debug("[agg] History.openDirtyFiles: file not in map",
-						"from", fromStep, "to", toStep, "ext", ".v")
+						"from", fromStep, "to", toStep, "ext", ".v", "base", h.filenameBase)
 					invalidFilesMu.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFilesMu.Unlock()
 					continue
 				} else {
-					fPath = filepath.Join(h.dirs.SnapHistory, fPath)
+					fPathFull = filepath.Join(h.dirs.SnapHistory, fPath)
 				}
-				exists, err := dir.FileExist(fPath)
+				exists, err := dir.FileExist(fPathFull)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					h.logger.Debug("[agg] History.openDirtyFiles: FileExist err", "f", fName, "err", err)
 					invalidFilesMu.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -242,7 +242,7 @@ func (h *History) openDirtyFiles(fNames []string) error {
 					continue
 				}
 				if !exists {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					h.logger.Debug("[agg] History.openDirtyFiles: file does not exists", "f", fName)
 					invalidFilesMu.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -250,7 +250,7 @@ func (h *History) openDirtyFiles(fNames []string) error {
 					continue
 				}
 
-				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+				if item.decompressor, err = seg.NewDecompressor(fPathFull); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 						h.logger.Debug("[agg] History.openDirtyFiles", "err", err, "f", fName)
@@ -279,21 +279,17 @@ func (h *History) openDirtyFiles(fNames []string) error {
 			}
 
 			if item.index == nil {
-				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep, ext: ".vi"}]
-				if !ok {
-					h.logger.Warn("[agg] History.openDirtyFiles not in map",
-						"from", fromStep, "to", toStep, "ext", ".vi")
-				} else {
-					fPath = filepath.Join(h.dirs.SnapHistory, fPath)
-				}
-				exists, err := dir.FileExist(fPath)
+				fPath = common.ReplaceExt(fPath, ".vi")
+				fPathFull = filepath.Join(h.dirs.SnapHistory, fPath)
+
+				exists, err := dir.FileExist(fPathFull)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
+					if item.index, err = recsplit.OpenIndex(fPathFull); err != nil {
+						_, fName := filepath.Split(fPathFull)
 						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}

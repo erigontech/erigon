@@ -21,7 +21,9 @@ package common
 
 import (
 	"fmt"
+	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // MakeName creates a node name that follows the ethereum convention
@@ -29,4 +31,8 @@ import (
 // the name.
 func MakeName(name, version string) string {
 	return fmt.Sprintf("%s/%s/%s-%s/%s", name, version, runtime.GOOS, runtime.GOARCH, runtime.Version())
+}
+
+func ReplaceExt(filename, newExt string) string {
+	return strings.TrimSuffix(filename, filepath.Ext(filename)) + newExt
 }
