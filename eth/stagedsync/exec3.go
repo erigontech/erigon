@@ -547,6 +547,7 @@ Loop:
 		skipPostEvaluation := false
 		var usedGas uint64
 		var txTasks []*state.TxTask
+		var validationResults []state.AAValidationResult
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -571,6 +572,8 @@ Loop:
 				BlockReceipts: blockReceipts,
 
 				Config: chainConfig,
+
+				ValidationResults: validationResults,
 			}
 			if txTask.HistoryExecution && usedGas == 0 {
 				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
@@ -608,6 +611,36 @@ Loop:
 			txTasks = append(txTasks, txTask)
 			stageProgress = blockNum
 			inputTxNum++
+		}
+
+		// check for consecutive RIP-7560 sequence
+		var isAASequence bool
+		for _, txTask := range txTasks {
+			txIndex := txTask.TxIndex
+			if txIndex < 0 || txIndex >= len(txs)-1 {
+				continue
+			}
+
+			if txTask.Tx.Type() != types.AccountAbstractionTxType {
+				isAASequence = false
+				continue
+			}
+			if isAASequence {
+				continue
+			}
+
+			aaBatchSize := uint64(1)
+			for _, tt := range txTasks[txIndex+1:] {
+				if tt.Tx.Type() == types.AccountAbstractionTxType {
+					aaBatchSize++
+					tt.InBatch = true
+				} else {
+					break
+				}
+			}
+
+			txTask.AAValidationBatchSize = aaBatchSize
+			isAASequence = true
 		}
 
 		if parallel {

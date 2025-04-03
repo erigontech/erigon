@@ -376,7 +376,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	agg.Close()
 
 	// Start another aggregator on same datadir
-	anotherAgg, err := NewAggregator2(context.Background(), agg.dirs, aggStep, db, logger)
+	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, logger)
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 
@@ -856,7 +856,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	newDb := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	newAgg, err := NewAggregator2(context.Background(), agg.dirs, aggStep, newDb, logger)
+	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
 
@@ -1134,7 +1134,7 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *Aggregator)
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
-	agg, err := NewAggregator2(context.Background(), dirs, aggStep, db, logger)
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(err)
 	tb.Cleanup(agg.Close)
 	err = agg.OpenFolder()

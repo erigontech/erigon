@@ -436,7 +436,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 	rawChainDb := mdbx.MustOpen(dirs.Chaindata)
 	defer rawChainDb.Close()
 
-	agg, err := state2.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, rawChainDb, log.New())
+	agg, err := state2.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, rawChainDb, log.New())
 	if err != nil {
 		return err
 	}

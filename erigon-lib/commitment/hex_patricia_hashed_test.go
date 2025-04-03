@@ -1669,7 +1669,7 @@ func TestCell_fillFromFields(t *testing.T) {
 		return c, nil
 	}
 
-	be := NewBranchEncoder(1024, t.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
 	require.NoError(t, err)
 
