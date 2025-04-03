@@ -469,8 +469,8 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 }
 
 // longer prefixLen - harder to find required keys
-func generatePlainKeysWithSameHashPrefix(t testing.TB, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
-	t.Helper()
+func generatePlainKeysWithSameHashPrefix(tb testing.TB, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
+	tb.Helper()
 	plainKeys = make([][]byte, 0, keyCount)
 	hashedKeys = make([][]byte, 0, keyCount)
 	for {
