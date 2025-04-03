@@ -1238,13 +1238,24 @@ func ReadReceipt(db kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint
 		return nil, err
 	}
 
+	fmt.Printf("a: %d\n", len(data))
+	if len(data) > 1 {
+		//var receipt2 *types.ReceiptForStorage
+		//err = rlp.DecodeBytes(bytes, &receipt2)
+		//if err != nil {
+		//	panic(err)
+		//	return err
+		//}
+		//fmt.Printf("[dbg] a %+v\n", storageReceipt)
+		//fmt.Printf("[dbg] b %+v\n", receipt2)
+	}
 	// Convert the receipts from their storage form to their internal representation
-	res := &types.Receipt{}
+	res := &types.ReceiptForStorage{}
 	if err := rlp.DecodeBytes(data, res); err != nil {
 		return nil, fmt.Errorf("%w, of block %d, %x\n", err, blockNum, blockHash)
 	}
 
-	return res, nil
+	return (*types.Receipt)(res), nil
 }
 
 func ReadReceipts(db kv.Tx, blockHash common.Hash, blockNum uint64) (res types.Receipts, err error) {
@@ -1260,18 +1271,18 @@ func ReadReceipts(db kv.Tx, blockHash common.Hash, blockNum uint64) (res types.R
 			return nil, fmt.Errorf("ReadReceipts: %d, %w", blockNum, err)
 		}
 		// Convert the receipts from their storage form to their internal representation
-		receipt := &types.Receipt{}
+		receipt := &types.ReceiptForStorage{}
 		if err := rlp.DecodeBytes(v, receipt); err != nil {
 			return nil, fmt.Errorf("ReadReceipts: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
 		}
-		res = append(res, receipt)
+		res = append(res, (*types.Receipt)(receipt))
 	}
 	return res, nil
 }
 
-// PruneReceipts removes all receipt for given block number or newer - used for Unwind
+// PruneReceipts [1,blockNum) removes all receipt for given block number or newer - used for Unwind
 func PruneReceipts(tx kv.RwTx, blockNum uint64, pruneLimit int) error {
-	rng, err := tx.Range(kv.Receipts, nil, hexutil.EncodeTs(blockNum), order.Asc, -1)
+	rng, err := tx.Range(kv.Receipts, hexutil.EncodeTs(1), hexutil.EncodeTs(blockNum), order.Asc, -1)
 	if err != nil {
 		return err
 	}
@@ -1292,7 +1303,7 @@ func PruneReceipts(tx kv.RwTx, blockNum uint64, pruneLimit int) error {
 			prevBlockNum = blockNum
 			pruneLimit--
 
-			if pruneLimit <= 0 {
+			if pruneLimit < 0 {
 				break
 			}
 		}
@@ -1302,11 +1313,11 @@ func PruneReceipts(tx kv.RwTx, blockNum uint64, pruneLimit int) error {
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
 func WriteReceipts(tx kv.RwTx, blockNum uint64, blockHash common.Hash, receipts types.Receipts) error {
-	//if ok, err := HasReceipt(tx, blockNum, blockHash, 0); err != nil { // if exists don't write
-	//	return err
-	//} else if ok {
-	//	return nil
-	//}
+	if ok, err := HasReceipt(tx, blockNum, blockHash, 0); err != nil { // if exists don't write
+		return err
+	} else if ok {
+		return nil
+	}
 
 	for txnIndex, r := range receipts {
 		if err := WriteReceipt(tx, blockNum, blockHash, uint32(txnIndex), r); err != nil {
@@ -1319,7 +1330,6 @@ func WriteReceipts(tx kv.RwTx, blockNum uint64, blockHash common.Hash, receipts 
 // WriteReceipt stores all the transaction receipts belonging to a block.
 func WriteReceipt(tx kv.Putter, blockNum uint64, blockHash common.Hash, txnIndex uint32, receipt *types.Receipt) error {
 	storageReceipt := (*types.ReceiptForStorage)(receipt)
-	fmt.Printf("[dbg] a %+v\n", storageReceipt)
 	bytes, err := rlp.EncodeToBytes(storageReceipt)
 	if err != nil {
 		return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
@@ -1327,29 +1337,9 @@ func WriteReceipt(tx kv.Putter, blockNum uint64, blockHash common.Hash, txnIndex
 	if err = tx.Put(kv.Receipts, dbutils.ReceiptKey(blockNum, blockHash, txnIndex), bytes); err != nil {
 		return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 	}
-	fmt.Printf("[dbg] c %d\n", len(bytes))
-
-	var receipt2 *types.ReceiptForStorage
-	err = rlp.DecodeBytes(bytes, &receipt2)
-	if err != nil {
-		panic(err)
-		return err
-	}
-	fmt.Printf("[dbg] a %+v\n", storageReceipt)
-	fmt.Printf("[dbg] b %+v\n", receipt2)
 
 	return nil
 }
-
-//storageReceipts := []*types.ReceiptForStorage{}
-//if err := rlp.DecodeBytes(data, &storageReceipts); err != nil {
-//log.Error("Invalid receipt array RLP", "hash", hash, "err", err)
-//return nil
-//}
-//receipts := make(types.Receipts, len(storageReceipts))
-//for i, storageReceipt := range storageReceipts {
-//receipts[i] = (*types.Receipt)(storageReceipt)
-//}
 
 // HasReceipt stores all the transaction receipts belonging to a block.
 func HasReceipt(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint32) (bool, error) {

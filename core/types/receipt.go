@@ -364,8 +364,6 @@ type ReceiptsForStorage []*ReceiptForStorage
 type ReceiptForStorage Receipt
 
 func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
-	fmt.Printf("[dbg] a1\n")
-
 	var firstLogIndex uint32
 	if len(r.Logs) > 0 {
 		firstLogIndex = uint32(r.Logs[0].Index)
