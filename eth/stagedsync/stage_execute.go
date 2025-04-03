@@ -438,7 +438,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	}
 
 	// prune receipts
-	const PersistReceipts = 90_000
+	const PersistReceipts = 100_000
 	if s.ForwardProgress > PersistReceipts {
 		pruneLimit := 10
 		if s.CurrentSyncCycle.IsInitialCycle {
