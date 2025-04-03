@@ -253,6 +253,7 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 type steps struct {
 	from uint64
 	to   uint64
+	ext  string
 }
 
 func (ii *InvertedIndex) openDirtyFiles(fNames []string) error {
@@ -264,16 +265,22 @@ func (ii *InvertedIndex) openDirtyFiles(fNames []string) error {
 		if err != nil {
 			continue
 		}
-		stepNameMap[steps{from: from, to: to}] = filename
+		ext := filepath.Ext(filename)
+		stepNameMap[steps{from: from, to: to, ext: ext}] = filename
 	}
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			item := item
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 			if item.decompressor == nil {
-				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
+				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep, ext: ".ef"}]
 				if !ok {
-					fPath = ii.efFilePath(fromStep, toStep)
+					_, fName := filepath.Split(fPath)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file not in map", "f", fName)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
 				} else {
 					fPath = filepath.Join(ii.dirs.SnapIdx, fPath)
 				}
@@ -311,7 +318,14 @@ func (ii *InvertedIndex) openDirtyFiles(fNames []string) error {
 			}
 
 			if item.index == nil {
-				fPath := ii.efAccessorFilePath(fromStep, toStep)
+				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep, ext: ".efi"}]
+				if !ok {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file not in map", "f", fName)
+					continue
+				} else {
+					fPath = filepath.Join(ii.dirs.SnapAccessors, fPath)
+				}
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)

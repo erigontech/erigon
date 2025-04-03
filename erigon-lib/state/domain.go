@@ -330,15 +330,21 @@ func (d *Domain) openDirtyFiles(fNames []string) (err error) {
 		if err != nil {
 			continue
 		}
-		stepNameMap[steps{from: from, to: to}] = filename
+		ext := filepath.Ext(filename)
+		stepNameMap[steps{from: from, to: to, ext: ext}] = filename
 	}
 	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			if item.decompressor == nil {
-				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
+				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep, ext: ".kv"}]
 				if !ok {
-					fPath = d.kvFilePath(fromStep, toStep)
+					d.logger.Debug("[agg] Domain.openDirtyFiles: file not in map",
+						"from", fromStep, "to", toStep, "ext", ".kv")
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
 				} else {
 					fPath = filepath.Join(d.dirs.SnapDomain, fPath)
 				}
@@ -376,7 +382,13 @@ func (d *Domain) openDirtyFiles(fNames []string) (err error) {
 			}
 
 			if item.index == nil && d.AccessorList&AccessorHashMap != 0 {
-				fPath := d.kvAccessorFilePath(fromStep, toStep)
+				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep, ext: ".kvi"}]
+				if !ok {
+					d.logger.Warn("[agg] Domain.openDirtyFiles not in map",
+						"from", fromStep, "to", toStep, "ext", ".kvi")
+				} else {
+					fPath = filepath.Join(d.dirs.SnapDomain, fPath)
+				}
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
@@ -391,7 +403,13 @@ func (d *Domain) openDirtyFiles(fNames []string) (err error) {
 				}
 			}
 			if item.bindex == nil && d.AccessorList&AccessorBTree != 0 {
-				fPath := d.kvBtFilePath(fromStep, toStep)
+				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep, ext: ".bt"}]
+				if !ok {
+					d.logger.Warn("[agg] Domain.openDirtyFiles not in map",
+						"from", fromStep, "to", toStep, "ext", ".bt")
+				} else {
+					fPath = filepath.Join(d.dirs.SnapDomain, fPath)
+				}
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
@@ -410,7 +428,13 @@ func (d *Domain) openDirtyFiles(fNames []string) (err error) {
 				}
 			}
 			if item.existence == nil && d.AccessorList&AccessorExistence != 0 {
-				fPath := d.kvExistenceIdxFilePath(fromStep, toStep)
+				fPath, ok := stepNameMap[steps{from: fromStep, to: toStep, ext: ".kvei"}]
+				if !ok {
+					d.logger.Warn("[agg] Domain.openDirtyFiles not in map",
+						"from", fromStep, "to", toStep, "ext", ".kvei")
+				} else {
+					fPath = filepath.Join(d.dirs.SnapDomain, fPath)
+				}
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
