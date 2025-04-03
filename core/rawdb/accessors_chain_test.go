@@ -552,7 +552,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	rawdb.WriteHeader(tx, header)
 	// Sanity check that body alone without the receipt is a full purge
 	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
-	require.NoError(rawdb.PruneReceipts(tx, 1))
+	require.NoError(rawdb.PruneReceipts(tx, 1, 1))
 	b, _, err = br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(err)
 	require.NotNil(b)

@@ -100,6 +100,11 @@ type storedReceiptRLP struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	FirstLogIndex     uint32 // Logs have their own incremental Index within block. To allow calc it without re-executing whole block - can store it in Receipt
+
+	TxHash          libcommon.Hash
+	ContractAddress libcommon.Address
+	Logs            []*LogForStorage
+	GasUsed         uint64
 }
 
 // NewReceipt creates a barebone transaction receipt, copying the init fields.
@@ -358,17 +363,24 @@ type ReceiptsForStorage []*ReceiptForStorage
 // that omits the Bloom field and deserialization that re-computes it.
 type ReceiptForStorage Receipt
 
-// EncodeRLP implements rlp.Encoder, and flattens all content fields of a receipt
-// into an RLP stream.
 func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 	var firstLogIndex uint32
 	if len(r.Logs) > 0 {
 		firstLogIndex = uint32(r.Logs[0].Index)
 	}
+	logsForStorage := make([]*LogForStorage, len(r.Logs))
+	for i, l := range r.Logs {
+		logsForStorage[i] = (*LogForStorage)(l)
+	}
 	return rlp.Encode(w, &storedReceiptRLP{
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
 		CumulativeGasUsed: r.CumulativeGasUsed,
 		FirstLogIndex:     firstLogIndex,
+
+		Logs:            logsForStorage,
+		TxHash:          r.TxHash,
+		ContractAddress: r.ContractAddress,
+		GasUsed:         r.GasUsed,
 	})
 }
 
@@ -385,10 +397,13 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
 	r.FirstLogIndexWithinBlock = stored.FirstLogIndex
 
-	//r.Logs = make([]*Log, len(stored.Logs))
-	//for i, log := range stored.Logs {
-	//	r.Logs[i] = (*Log)(log)
-	//}
+	r.Logs = make([]*Log, len(stored.Logs))
+	for i, log := range stored.Logs {
+		r.Logs[i] = (*Log)(log)
+	}
+	r.TxHash = stored.TxHash
+	r.ContractAddress = stored.ContractAddress
+	r.GasUsed = stored.GasUsed
 	//r.Bloom = CreateBloom(Receipts{(*Receipt)(r)})
 
 	return nil

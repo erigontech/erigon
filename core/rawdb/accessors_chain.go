@@ -1318,22 +1318,37 @@ func WriteReceipts(tx kv.RwTx, blockNum uint64, blockHash common.Hash, receipts 
 
 // WriteReceipt stores all the transaction receipts belonging to a block.
 func WriteReceipt(tx kv.Putter, blockNum uint64, blockHash common.Hash, txnIndex uint32, receipt *types.Receipt) error {
-	var a *types.ReceiptForStorage = receipt
-	// Convert the receipts into their storage form and serialize them
-	storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
-	for i, receipt := range receipts {
-		storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
-	}
-
-	bytes, err := rlp.EncodeToBytes(a)
+	storageReceipt := (*types.ReceiptForStorage)(receipt)
+	bytes, err := rlp.EncodeToBytes(storageReceipt)
 	if err != nil {
 		return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 	}
 	if err = tx.Put(kv.Receipts, dbutils.ReceiptKey(blockNum, blockHash, txnIndex), bytes); err != nil {
 		return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 	}
+	fmt.Printf("[dbg] c %d\n", len(bytes))
+
+	var receipt2 *types.ReceiptForStorage
+	err = rlp.DecodeBytes(bytes, &receipt2)
+	if err != nil {
+		panic(err)
+		return err
+	}
+	fmt.Printf("[dbg] a %+v\n", receipt)
+	fmt.Printf("[dbg] b %+v\n", receipt2)
+
 	return nil
 }
+
+//storageReceipts := []*types.ReceiptForStorage{}
+//if err := rlp.DecodeBytes(data, &storageReceipts); err != nil {
+//log.Error("Invalid receipt array RLP", "hash", hash, "err", err)
+//return nil
+//}
+//receipts := make(types.Receipts, len(storageReceipts))
+//for i, storageReceipt := range storageReceipts {
+//receipts[i] = (*types.Receipt)(storageReceipt)
+//}
 
 // HasReceipt stores all the transaction receipts belonging to a block.
 func HasReceipt(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint32) (bool, error) {
