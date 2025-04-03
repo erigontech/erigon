@@ -17,8 +17,10 @@
 package exec3
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"github.com/erigontech/erigon-lib/rlp"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -155,7 +157,7 @@ func (rw *Worker) Run() (err error) {
 func (rw *Worker) RunTxTask(txTask *state.TxTask, isMining bool) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	rw.RunTxTaskNoLock(txTask, isMining, false, nil, nil)
+	rw.RunTxTaskNoLock(txTask, isMining, false, nil, nil, nil)
 }
 
 // Needed to set history reader when need to offset few txs from block beginning and does not break processing,
@@ -177,7 +179,7 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
-func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvaluaion bool, silkwormInstance *silkworm.Silkworm, applyTx kv.RwTx) {
+func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvaluaion bool, silkwormInstance *silkworm.Silkworm, applyTx kv.RwTx, silkwormMemDB kv.RwTx) {
 	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
@@ -231,6 +233,13 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			break
 		}
 
+		if silkwormInstance != nil {
+			silkwormErr := silkworm.BlockExecStart(silkwormInstance, applyTx, txTask)
+			if silkwormErr != nil {
+				return
+			}
+		}
+
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
@@ -245,6 +254,41 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		if txTask.BlockNum == 0 {
 			break
 		}
+
+		if silkwormInstance != nil {
+			silkwormErr := silkworm.BlockExecEnd(silkwormInstance, applyTx, silkwormMemDB)
+			if silkwormErr != nil {
+				return
+			}
+
+			cursor, err := silkwormMemDB.Cursor(kv.Receipts)
+
+			if err != nil {
+				panic(err)
+			}
+
+			idx := 0
+			for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
+				if err != nil {
+					panic(err)
+				}
+				var receipt types.Receipt
+				rlp.NewStream(bytes.NewReader(v), 0)
+
+				if err = receipt.DecodeRLP(rlp.NewStream(bytes.NewReader(v), 0)); err != nil {
+
+				}
+
+				txTask.BlockReceipts[idx] = &receipt
+				idx++
+			}
+			cursor.Close()
+			silkwormMemDB.Rollback()
+		}
+
+		//for _, v := range txTask.BlockReceipts {
+		//	fmt.Printf("Receipt with gas: %d, cummulative: %d\n", v.GasUsed, v.CumulativeGasUsed)
+		//}
 
 		// End of block transaction in a block
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
