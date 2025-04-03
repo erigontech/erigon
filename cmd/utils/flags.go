@@ -1760,6 +1760,9 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	} else {
 		cfg.ExtraData = []byte(ctx.App.Name + "-" + ctx.App.Version)
 	}
+	if len(cfg.ExtraData) > 32 {
+		cfg.ExtraData = cfg.ExtraData[:32]
+	}
 
 	if ctx.IsSet(MinerGasLimitFlag.Name) {
 		cfg.GasLimit = ctx.Uint64(MinerGasLimitFlag.Name)
