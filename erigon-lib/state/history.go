@@ -128,7 +128,11 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 		if err != nil {
 			panic(err)
 		}
-		return exists
+		existsOld, err := dir.FileExist(h.vFilePathOld(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
+		return exists || existsOld
 	}
 
 	var err error
@@ -143,9 +147,16 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 func (h *History) vFileName(fromStep, toStep uint64) string {
 	return fmt.Sprintf("%s-%s.%d-%d.v", h.version.DataV.String(), h.filenameBase, fromStep, toStep)
 }
+func (h *History) vFileNameOld(fromStep, toStep uint64) string {
+	return fmt.Sprintf("v1-%s.%d-%d.v", h.filenameBase, fromStep, toStep)
+}
 func (h *History) vFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
 }
+func (h *History) vFilePathOld(fromStep, toStep uint64) string {
+	return filepath.Join(h.dirs.SnapHistory, h.vFileNameOld(fromStep, toStep))
+}
+
 func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.version.AccessorVI.String(), h.filenameBase, fromStep, toStep))
 }
@@ -200,7 +211,6 @@ func (h *History) openDirtyFiles(fNames []string) error {
 	stepNameMap := make(map[steps]string, len(fNames))
 	for _, filename := range fNames {
 		from, to, err := ParseStepsFromFileName(filename)
-		println("hist from fnames", filename, from, to)
 		if err != nil {
 			continue
 		}
