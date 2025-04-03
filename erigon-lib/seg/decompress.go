@@ -231,8 +231,8 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	if pos+dictSize > uint64(d.size) {
 		return nil, &ErrCompressedFileCorrupted{
 			FileName: fName,
-			Reason: fmt.Sprintf("invalid patterns dictSize=%s while file size is just %s",
-				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(d.size).HR())}
+			Reason: fmt.Sprintf("invalid patterns dictSize=%s while file size is just %s %s",
+				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(d.size).HR(), dbg.Stack())}
 	}
 
 	// todo awskii: want to move dictionary reading to separate function?

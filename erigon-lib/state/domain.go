@@ -325,13 +325,22 @@ func (d *Domain) openDirtyFiles(fNames []string) (err error) {
 	invalidFileItems := make([]*filesItem, 0)
 	invalidFileItemsLock := sync.Mutex{}
 	stepNameMap := make(map[steps]string, len(fNames))
+	exts := make(map[string]struct{}, len(fNames))
 	for _, filename := range fNames {
 		from, to, err := ParseStepsFromFileName(filename)
 		if err != nil {
 			continue
 		}
-		stepNameMap[steps{from: from, to: to}] = filename
+		if filepath.Ext(filename) == ".kv" {
+			stepNameMap[steps{from: from, to: to}] = filename
+		}
+		exts[filepath.Ext(filename)] = struct{}{}
 	}
+	res := "in domain: " + d.filenameBase
+	for i := range exts {
+		res += "  " + i
+	}
+	println(res)
 	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
@@ -366,6 +375,7 @@ func (d *Domain) openDirtyFiles(fNames []string) (err error) {
 					continue
 				}
 
+				//println("path", fPathFull, fPath, fmt.Sprintf("%+v", fNames))
 				if item.decompressor, err = seg.NewDecompressor(fPathFull); err != nil {
 					_, fName := filepath.Split(fPathFull)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {

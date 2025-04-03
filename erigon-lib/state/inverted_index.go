@@ -259,13 +259,20 @@ func (ii *InvertedIndex) openDirtyFiles(fNames []string) error {
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	stepNameMap := make(map[steps]string, len(fNames))
+	exts := make(map[string]struct{}, len(fNames))
 	for _, filename := range fNames {
 		from, to, err := ParseStepsFromFileName(filename)
 		if err != nil {
 			continue
 		}
+		exts[filepath.Ext(filename)] = struct{}{}
 		stepNameMap[steps{from: from, to: to}] = filename
 	}
+	res := "in ii: " + ii.filenameBase
+	for i := range exts {
+		res += "  " + i
+	}
+	println(res)
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			item := item

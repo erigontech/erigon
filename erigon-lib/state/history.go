@@ -209,13 +209,20 @@ func (h *History) openDirtyFiles(fNames []string) error {
 	invalidFilesMu := sync.Mutex{}
 	invalidFileItems := make([]*filesItem, 0)
 	stepNameMap := make(map[steps]string, len(fNames))
+	exts := make(map[string]struct{}, len(fNames))
 	for _, filename := range fNames {
 		from, to, err := ParseStepsFromFileName(filename)
 		if err != nil {
 			continue
 		}
 		stepNameMap[steps{from: from, to: to}] = filename
+		exts[filepath.Ext(filename)] = struct{}{}
 	}
+	res := "in hist: " + h.filenameBase
+	for i := range exts {
+		res += "  " + i
+	}
+	println(res)
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
