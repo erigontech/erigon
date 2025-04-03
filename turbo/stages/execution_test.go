@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libState "github.com/erigontech/erigon-lib/state"
@@ -71,8 +72,10 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/silkworm"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/mock"
+	mdbxGo "github.com/erigontech/mdbx-go/mdbx"
 )
 
 func TestBlockExecutionClique(t *testing.T) {
@@ -589,6 +592,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, dirs datadir.Dirs, logger log
 }
 
 func TestManual(t *testing.T) {
+	useSilkworm := true
+
 	logger := log.New()
 
 	ctx := context.Background()
@@ -601,19 +606,9 @@ func TestManual(t *testing.T) {
 	dirs := datadir.New("/home/jacek/data/sepolia")
 	rawDb := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	defer rawDb.Close()
-	_, _, _agg, _blockReader, _, _, err := allSnapshots(ctx, rawDb, dirs, logger)
+	_allSnapshots, _allBorSnapshots, _agg, _blockReader, _, _, err := allSnapshots(ctx, rawDb, dirs, logger)
 	assert.NoError(t, err)
 
-	// agg, err := libState.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, rawDb, logger)
-	// assert.NoError(t, err)
-	// snapCfg := ethconfig.NewSnapCfg(true, true, true, "sepolia")
-	// allSnapshots := freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
-	// br := freezeblocks.NewBlockReader(allSnapshots, nil, nil, nil)
-	// err = br.Snapshots().OpenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true)
-	// assert.NoError(t, err)
-	// err = agg.OpenFolder()
-	// assert.NoError(t, err)
-	// defer agg.Close()
 	db, err := temporal.New(rawDb, _agg)
 	assert.NoError(t, err)
 	temporalTx, err := db.BeginTemporalRw(ctx)
@@ -642,6 +637,25 @@ func TestManual(t *testing.T) {
 	genesisConfig, err := rawdb.ReadGenesis(temporalTx)
 	assert.NoError(t, err)
 
+	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, _allSnapshots, _allBorSnapshots, _agg, logger)
+	notifications := shards.NewNotifications(erigonGrpcServer)
+
+	var silkwormInstance *silkworm.Silkworm
+	if useSilkworm {
+		silkwormInstance, err = silkworm.New(cfg.Dirs.DataDir, mdbxGo.Version(), cfg.SilkwormNumContexts, log.LvlDebug)
+		assert.NoError(t, err)
+
+		repository := silkworm.NewSnapshotsRepository(
+			silkwormInstance,
+			_blockReader.Snapshots().(*freezeblocks.RoSnapshots),
+			_agg,
+			logger,
+		)
+
+		err = repository.Update()
+		assert.NoError(t, err)
+	}
+
 	executeBlockCfg := stagedsync.StageExecuteBlocksCfg(
 		db,
 		prune.DefaultMode,
@@ -649,7 +663,7 @@ func TestManual(t *testing.T) {
 		chainConfig,
 		consensusEngine,
 		&vmConfig,
-		&shards.Notifications{},
+		notifications,
 		false,
 		true,
 		dirs,
@@ -657,12 +671,12 @@ func TestManual(t *testing.T) {
 		nil,
 		genesisConfig,
 		cfg.Sync,
-		nil,
+		silkwormInstance,
 	)
 
 	txc := wrap.TxContainer{Tx: temporalTx, Doms: nil}
 
-	err = stagedsync.ExecV3(ctx, &execState, nil, 1, executeBlockCfg, txc, false, 7770999, logger, false, false)
+	err = stagedsync.ExecV3(ctx, &execState, nil, 1, executeBlockCfg, txc, false, 7763755, logger, false, false)
 
 	assert.NoError(t, err)
 }

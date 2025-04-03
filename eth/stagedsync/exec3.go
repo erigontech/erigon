@@ -139,8 +139,6 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms state2.SharedDomains, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
 
-	fmt.Println("JG restoreTxNum start", doms.TxNum(), maxBlockNum)
-
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
 
 	inputTxNum = doms.TxNum()
@@ -231,7 +229,6 @@ func ExecV3(ctx context.Context,
 
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
-	fmt.Println("JG ExecV3 useExternalTx", useExternalTx)
 	if !useExternalTx {
 		if !parallel {
 			var err error
@@ -495,7 +492,7 @@ Loop:
 		executor.domains().SetBlockNum(blockNum)
 
 		b, err = blockWithSenders(ctx, cfg.db, executor.tx(), blockReader, blockNum)
-		fmt.Printf("JG executing block %d expected gas used %d\n", blockNum, b.GasUsed())
+		fmt.Printf("JG executing block %d expected gas used %d total txns %d\n", blockNum, b.GasUsed(), len(b.Transactions()))
 		if err != nil {
 			return err
 		}
