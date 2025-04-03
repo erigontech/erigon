@@ -708,6 +708,9 @@ func (a *ApiHandler) produceBeaconBody(
 							}
 						}
 					}
+					if len(requestsBundle.GetRequests()) > 0 {
+						log.Info("BlockProduction: Found requests bundle", "requests", len(requestsBundle.GetRequests()))
+					}
 				}
 
 				// Setup executionPayload
