@@ -469,7 +469,15 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		status = execution.ExecutionStatus_BadBlock
 		validationError = "headHash and blockHash mismatch"
 		if log {
-			e.logger.Warn("bad forkchoice", "head", headHash, "head block", headNumber, "hash", blockHash, "hash block", blockHashBlockNum)
+			headNum := "unknown"
+			if headNumber != nil {
+				headNum = fmt.Sprint(*headNumber)
+			}
+			hashBlockNum := "unknown"
+			if blockHashBlockNum != nil {
+				hashBlockNum = fmt.Sprint(*blockHashBlockNum)
+			}
+			e.logger.Warn("bad forkchoice", "head", headHash, "head block", headNum, "hash", blockHash, "hash block", hashBlockNum)
 		}
 	} else {
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)

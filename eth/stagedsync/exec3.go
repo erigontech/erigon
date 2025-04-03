@@ -584,7 +584,7 @@ func ExecV3(ctx context.Context,
 		executor = se
 	}
 
-	executor.resetWorkers(ctx, rs)
+	executor.resetWorkers(ctx, rs, applyTx)
 
 	defer func() {
 		executor.LogComplete(applyTx)
@@ -1045,6 +1045,11 @@ func ExecV3(ctx context.Context,
 			}
 
 			se := executor.(*serialExecutor)
+			_, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
+			if err != nil {
+				return err
+			}
+
 			se.lastCommittedBlockNum = b.NumberU64()
 			se.lastCommittedTxNum = inputTxNum
 			se.committedGas += uncommittedGas

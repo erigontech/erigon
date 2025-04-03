@@ -50,16 +50,22 @@ func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx 
 	return se.txExecutor.commit(ctx, execStage, tx, useExternalTx, se.resetWorkers)
 }
 
-func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered) (err error) {
+func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) (err error) {
 
-	if se.applyTx != nil {
-		se.applyTx.Rollback()
-	}
+	if se.applyTx != applyTx {
+		if se.applyTx != nil {
+			se.applyTx.Rollback()
+		}
 
-	se.applyTx, err = se.cfg.db.BeginRo(context.Background()) //nolint
-	if err != nil {
-		se.applyTx.Rollback()
-		return err
+		if applyTx != nil {
+			se.applyTx = applyTx
+		} else {
+			se.applyTx, err = se.cfg.db.BeginRo(context.Background()) //nolint
+			if err != nil {
+				se.applyTx.Rollback()
+				return err
+			}
+		}
 	}
 
 	se.cfg.applyWorker.ResetTx(se.applyTx)

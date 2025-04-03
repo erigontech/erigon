@@ -89,7 +89,7 @@ type executor interface {
 	domains() *libstate.SharedDomains
 
 	commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error)
-	resetWorkers(ctx context.Context, rs *state.StateV3Buffered) error
+	resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error
 
 	LogExecuted(tx kv.Tx)
 	LogCommitted(tx kv.Tx, commitStart time.Time)
@@ -526,7 +526,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 	return nil
 }
 
-func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool, resetWorkers func(ctx context.Context, rs *state.StateV3Buffered) error) (kv.RwTx, time.Duration, error) {
+func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool, resetWorkers func(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error) (kv.RwTx, time.Duration, error) {
 	err := execStage.Update(tx, te.lastCommittedBlockNum)
 
 	if err != nil {
@@ -569,7 +569,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 	doms.SetTxNum(te.lastCommittedTxNum)
 	rs := te.rs.WithDomains(doms)
 
-	err = resetWorkers(ctx, rs)
+	err = resetWorkers(ctx, rs, tx)
 
 	if err != nil {
 		if !useExternalTx {
@@ -1096,7 +1096,7 @@ func (pe *parallelExecutor) resume() {
 	}
 }
 
-func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered) error {
+func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error {
 	pe.Lock()
 	defer pe.Unlock()
 
@@ -1388,7 +1388,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()
 		defer pe.in.Close()
-		pe.resetWorkers(execLoopCtx, pe.rs)
+		pe.resetWorkers(execLoopCtx, pe.rs, nil)
 		return pe.execLoop(execLoopCtx)
 	})
 
