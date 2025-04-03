@@ -1272,11 +1272,11 @@ func ReadReceipts(db kv.Tx, blockHash common.Hash, blockNum uint64) (res types.R
 			return nil, fmt.Errorf("ReadReceipts: %d, %w", blockNum, err)
 		}
 		// Convert the receipts from their storage form to their internal representation
-		var receipt types.ReceiptForStorage
-		if err := rlp.DecodeBytes(v, &receipt); err != nil {
+		receipt := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, receipt); err != nil {
 			return nil, fmt.Errorf("ReadReceipts: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
 		}
-		res = append(res, (*types.Receipt)(&receipt))
+		res = append(res, (*types.Receipt)(receipt))
 	}
 	return res, nil
 }
