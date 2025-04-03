@@ -58,6 +58,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
+	defer tx.Rollback()
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
@@ -165,6 +166,8 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
+	defer tx.Rollback()
+
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
@@ -199,6 +202,8 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
+	defer tx.Rollback()
+
 	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
 	if err != nil {
 		tx.Rollback()
@@ -231,6 +236,8 @@ func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
+	defer tx.Rollback()
+
 	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
 	if err != nil {
 		tx.Rollback()
@@ -263,6 +270,8 @@ func TestGetBlockTransactionCountByNumber(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
+	defer tx.Rollback()
+
 	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
 	if err != nil {
 		tx.Rollback()
@@ -296,6 +305,8 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
+	defer tx.Rollback()
+
 	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
 	if err != nil {
 		tx.Rollback()
