@@ -113,7 +113,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			if test.Context.BaseFee != nil {
 				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
 			}
-			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
+			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time, 0)
 			m := mock.Mock(t)
 			dbTx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)

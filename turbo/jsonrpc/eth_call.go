@@ -872,8 +872,13 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		args.From = &libcommon.Address{}
 	}
 
+	var arbosVersion uint64
+	if chainConfig.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+
 	// Retrieve the precompiles since they don't need to be added to the access list
-	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber, header.Time))
+	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber, header.Time, arbosVersion))
 	excl := make(map[libcommon.Address]struct{})
 	for _, pc := range precompiles {
 		excl[pc] = struct{}{}

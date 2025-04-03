@@ -104,7 +104,12 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		return false, nil, err
 	}
 	header := block.Header()
-	rules := chainConfig.Rules(block.NumberU64(), header.Time)
+
+	var arbosVersion uint64
+	if chainConfig.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	rules := chainConfig.Rules(block.NumberU64(), header.Time, arbosVersion)
 	found := false
 	for idx, txn := range block.Transactions() {
 		select {
