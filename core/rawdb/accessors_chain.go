@@ -1267,20 +1267,21 @@ func ReadReceipts(db kv.Tx, blockHash common.Hash, blockNum uint64) (res types.R
 
 	for rng.HasNext() {
 		_, v, err := rng.Next()
+		fmt.Printf("[dbg] read: %d, %d\n", blockNum, len(v))
 		if err != nil {
 			return nil, fmt.Errorf("ReadReceipts: %d, %w", blockNum, err)
 		}
 		// Convert the receipts from their storage form to their internal representation
-		receipt := &types.ReceiptForStorage{}
-		if err := rlp.DecodeBytes(v, receipt); err != nil {
+		var receipt types.ReceiptForStorage
+		if err := rlp.DecodeBytes(v, &receipt); err != nil {
 			return nil, fmt.Errorf("ReadReceipts: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
 		}
-		res = append(res, (*types.Receipt)(receipt))
+		res = append(res, (*types.Receipt)(&receipt))
 	}
 	return res, nil
 }
 
-// PruneReceipts [1,blockNum) removes all receipt for given block number or newer - used for Unwind
+// PruneReceipts [1,blockNum) removes all receipt until given block number.
 func PruneReceipts(tx kv.RwTx, blockNum uint64, pruneLimit int) error {
 	rng, err := tx.Range(kv.Receipts, hexutil.EncodeTs(1), hexutil.EncodeTs(blockNum), order.Asc, -1)
 	if err != nil {
@@ -1328,12 +1329,19 @@ func WriteReceipts(tx kv.RwTx, blockNum uint64, blockHash common.Hash, receipts 
 }
 
 // WriteReceipt stores all the transaction receipts belonging to a block.
-func WriteReceipt(tx kv.Putter, blockNum uint64, blockHash common.Hash, txnIndex uint32, receipt *types.Receipt) error {
-	storageReceipt := (*types.ReceiptForStorage)(receipt)
-	bytes, err := rlp.EncodeToBytes(storageReceipt)
-	if err != nil {
-		return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
+func WriteReceipt(tx kv.Putter, blockNum uint64, blockHash common.Hash, txnIndex uint32, receipt *types.Receipt) (err error) {
+	var bytes []byte
+	if receipt != nil {
+		storageReceipt := (*types.ReceiptForStorage)(receipt)
+		bytes, err = rlp.EncodeToBytes(storageReceipt)
+		fmt.Printf("[dbg] write: %d, %d, %d\n", blockNum, len(bytes), txnIndex)
+		if err != nil {
+			return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
+		}
+	} else {
+		fmt.Printf("[dbg] put empty: %d, %d\n", blockNum, txnIndex)
 	}
+
 	if err = tx.Put(kv.Receipts, dbutils.ReceiptKey(blockNum, blockHash, txnIndex), bytes); err != nil {
 		return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 	}
