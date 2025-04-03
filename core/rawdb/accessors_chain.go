@@ -1301,11 +1301,11 @@ func PruneReceipts(tx kv.RwTx, blockNum uint64, pruneLimit int) error {
 
 		if prevBlockNum != blockNum {
 			prevBlockNum = blockNum
-			pruneLimit--
-
-			if pruneLimit < 0 {
+			if pruneLimit <= 0 {
 				break
 			}
+
+			pruneLimit--
 		}
 	}
 	return nil
