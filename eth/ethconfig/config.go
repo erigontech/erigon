@@ -78,8 +78,9 @@ var Defaults = Config{
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
 		//LoopBlockLimit:             100_000,
-		ParallelStateFlushing: true,
-		ChaosMonkey:           false,
+		ParallelStateFlushing:    true,
+		ChaosMonkey:              false,
+		AlwaysGenerateChangesets: !dbg.BatchCommitments,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,

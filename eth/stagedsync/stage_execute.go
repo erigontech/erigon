@@ -113,7 +113,7 @@ func StageExecuteBlocksCfg(
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
-
+	
 	return ExecuteBlockCfg{
 		db:            db,
 		prune:         pm,

@@ -1488,6 +1488,11 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		syncCfg.AlwaysGenerateChangesets = true
 		noCommit = false
 	}
+
+	if !dbg.BatchCommitments {
+		syncCfg.AlwaysGenerateChangesets = true
+	}
+
 	cfg.Sync = syncCfg
 
 	cfg.Prune = pm

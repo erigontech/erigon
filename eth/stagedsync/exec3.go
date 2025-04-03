@@ -717,8 +717,6 @@ func ExecV3(ctx context.Context,
 
 				se := executor.(*serialExecutor)
 
-				//fmt.Println("Block",  blockNum)
-
 				continueLoop, err := se.execute(ctx, txTasks, execStage.CurrentSyncCycle.IsInitialCycle, false)
 
 				if err != nil {
@@ -921,7 +919,7 @@ func ExecV3(ctx context.Context,
 						flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
 
 						if !dbg.DiscardCommitment() {
-							if !dbg.BatchCommitments || lastBlockResult.BlockNum == maxBlockNum ||
+							if shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
 								(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
 								var trace bool
 								if traceBlock(applyResult.BlockNum) {
@@ -1045,15 +1043,15 @@ func ExecV3(ctx context.Context,
 			}
 
 			se := executor.(*serialExecutor)
-			_, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
-			if err != nil {
-				return err
-			}
-
 			se.lastCommittedBlockNum = b.NumberU64()
 			se.lastCommittedTxNum = inputTxNum
 			se.committedGas += uncommittedGas
 			uncommittedGas = 0
+
+			_, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
+			if err != nil {
+				return err
+			}
 
 			executor.LogCommitted(applyTx, commitStart)
 		} else {
