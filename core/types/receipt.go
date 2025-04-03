@@ -101,9 +101,12 @@ type storedReceiptRLP struct {
 	CumulativeGasUsed uint64
 	FirstLogIndex     uint32 // Logs have their own incremental Index within block. To allow calc it without re-executing whole block - can store it in Receipt
 
+	Logs []*LogForStorage
+
 	TxHash          libcommon.Hash
+	BlockHash       libcommon.Hash
+	BlockNumber     uint64
 	ContractAddress libcommon.Address
-	Logs            []*LogForStorage
 	GasUsed         uint64
 }
 
@@ -381,6 +384,8 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		TxHash:          r.TxHash,
 		ContractAddress: r.ContractAddress,
 		GasUsed:         r.GasUsed,
+		BlockHash:       r.BlockHash,
+		BlockNumber:     r.BlockNumber.Uint64(),
 	})
 }
 
@@ -402,12 +407,13 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 		r.Logs[i] = (*Log)(log)
 	}
 	r.TxHash = stored.TxHash
+	r.BlockHash = stored.BlockHash
+	r.BlockNumber = big.NewInt(int64(stored.BlockNumber))
 	r.ContractAddress = stored.ContractAddress
 	r.GasUsed = stored.GasUsed
 	//r.Bloom = CreateBloom(Receipts{(*Receipt)(r)})
 
 	return nil
-
 }
 
 // Receipts implements DerivableList for receipts.

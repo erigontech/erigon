@@ -1238,17 +1238,6 @@ func ReadReceipt(db kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint
 		return nil, err
 	}
 
-	fmt.Printf("a: %d\n", len(data))
-	if len(data) > 1 {
-		//var receipt2 *types.ReceiptForStorage
-		//err = rlp.DecodeBytes(bytes, &receipt2)
-		//if err != nil {
-		//	panic(err)
-		//	return err
-		//}
-		//fmt.Printf("[dbg] a %+v\n", storageReceipt)
-		//fmt.Printf("[dbg] b %+v\n", receipt2)
-	}
 	// Convert the receipts from their storage form to their internal representation
 	res := &types.ReceiptForStorage{}
 	if err := rlp.DecodeBytes(data, res); err != nil {
@@ -1267,7 +1256,6 @@ func ReadReceipts(db kv.Tx, blockHash common.Hash, blockNum uint64) (res types.R
 
 	for rng.HasNext() {
 		_, v, err := rng.Next()
-		fmt.Printf("[dbg] read: %d, %d\n", blockNum, len(v))
 		if err != nil {
 			return nil, fmt.Errorf("ReadReceipts: %d, %w", blockNum, err)
 		}
@@ -1334,18 +1322,13 @@ func WriteReceipt(tx kv.Putter, blockNum uint64, blockHash common.Hash, txnIndex
 	if receipt != nil {
 		storageReceipt := (*types.ReceiptForStorage)(receipt)
 		bytes, err = rlp.EncodeToBytes(storageReceipt)
-		fmt.Printf("[dbg] write: %d, %d, %d\n", blockNum, len(bytes), txnIndex)
 		if err != nil {
 			return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 		}
-	} else {
-		fmt.Printf("[dbg] put empty: %d, %d\n", blockNum, txnIndex)
 	}
-
 	if err = tx.Put(kv.Receipts, dbutils.ReceiptKey(blockNum, blockHash, txnIndex), bytes); err != nil {
 		return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 	}
-
 	return nil
 }
 
