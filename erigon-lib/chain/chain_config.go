@@ -284,7 +284,10 @@ func (c *Config) IsGrayGlacier(num uint64) bool {
 }
 
 // IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
-func (c *Config) IsShanghai(time uint64) bool {
+func (c *Config) IsShanghai(time uint64, currentArbosVersion uint64) bool {
+	if c.IsArbitrum() {
+		return currentArbosVersion >= ArbosVersion_11
+	}
 	return isForked(c.ShanghaiTime, time)
 }
 
@@ -302,7 +305,10 @@ func (c *Config) IsNapoli(num uint64) bool {
 }
 
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
-func (c *Config) IsCancun(time uint64) bool {
+func (c *Config) IsCancun(time, currentArbosVersion uint64) bool {
+	if c.IsArbitrum() {
+		return currentArbosVersion >= ArbosVersion_20
+	}
 	return isForked(c.CancunTime, time)
 }
 
@@ -606,7 +612,7 @@ type Rules struct {
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
-func (c *Config) Rules(num uint64, time uint64) *Rules {
+func (c *Config) Rules(num uint64, time, currentArbosVersion uint64) *Rules {
 	chainID := c.ChainID
 	if chainID == nil {
 		chainID = new(big.Int)
@@ -623,26 +629,17 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsIstanbul:         c.IsIstanbul(num),
 		IsBerlin:           c.IsBerlin(num),
 		IsLondon:           c.IsLondon(num),
-		IsShanghai:         c.IsShanghai(time) || c.IsAgra(num),
-		IsCancun:           c.IsCancun(time),
+		IsShanghai:         c.IsShanghai(time, currentArbosVersion) || c.IsAgra(num),
+		IsCancun:           c.IsCancun(time, currentArbosVersion),
 		IsNapoli:           c.IsNapoli(num),
 		IsPrague:           c.IsPrague(time),
 		IsOsaka:            c.IsOsaka(time),
 		IsAura:             c.Aura != nil,
+		ArbOSVersion:       currentArbosVersion,
+		IsArbitrum:         c.IsArbitrum(),
+		IsStylus:           c.IsArbitrum() && currentArbosVersion >= ArbosVersion_Stylus,
 	}
 
-	if c.IsArbitrum() {
-		rules.IsLondon = isBlockForked(new(big.Int).SetUint64(c.ArbitrumChainParams.GenesisBlockNum), big.NewInt(int64(num)))
-		rules.IsArbitrum = true
-		rules.ArbOSVersion = c.ArbitrumChainParams.InitialArbOSVersion
-		// 	rules.IsCancun = c.arbosver
-		// isCancun := st.evm.ChainRules().IsCancun
-		// // st.evm.ChainConfig().IsCancun(st.evm.Context.Time)
-		// if cc := st.evm.ChainConfig(); cc.IsArbitrum() {
-		// 	isCancun = st.evm.Context.ArbOSVersion >= 20
-		// }
-
-	}
 	return rules
 }
 
@@ -653,11 +650,6 @@ func isForked(s *big.Int, head uint64) bool {
 	}
 	return s.Uint64() <= head
 }
-
-const ArbosVersion_FixRedeemGas = uint64(11)
-const ArbosVersion_Stylus = uint64(30)
-const ArbosVersion_StylusFixes = uint64(31)
-const ArbosVersion_StylusChargingFixes = uint64(32)
 
 func (c *Config) IsArbitrum() bool {
 	return c.ArbitrumChainParams.EnableArbOS

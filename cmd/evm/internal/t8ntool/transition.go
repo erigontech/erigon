@@ -240,7 +240,7 @@ func Main(ctx *cli.Context) error {
 		prestate.Env.Random = nil
 	}
 
-	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
+	if chainConfig.IsShanghai(prestate.Env.Timestamp, 0) && prestate.Env.Withdrawals == nil {
 		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
 	}
 
@@ -313,7 +313,7 @@ func Main(ctx *cli.Context) error {
 	}
 	defer sd.Close()
 
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, sd, prestate.Pre)
+	reader, writer := MakePreState(chainConfig.Rules(0, 0, 0), tx, sd, prestate.Pre)
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
 	engine := merge.New(&ethash.FakeEthash{})

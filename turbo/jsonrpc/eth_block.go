@@ -134,7 +134,12 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 
 	signer := types.MakeSigner(chainConfig, blockNumber, timestamp)
-	rules := chainConfig.Rules(blockNumber, timestamp)
+
+	var arbosVersion uint64
+	if chainConfig.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	rules := chainConfig.Rules(blockNumber, timestamp, arbosVersion)
 	firstMsg, err := txs[0].AsMessage(*signer, nil, rules)
 	if err != nil {
 		return nil, err

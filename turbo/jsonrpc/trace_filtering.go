@@ -436,7 +436,12 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 			lastBlockHash = lastHeader.Hash()
 			lastSigner = types.MakeSigner(chainConfig, blockNum, lastHeader.Time)
-			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)
+
+			var arbosVersion uint64
+			if chainConfig.IsArbitrum() {
+				arbosVersion = types.DeserializeHeaderExtraInformation(lastHeader).ArbOSFormatVersion
+			}
+			lastRules = chainConfig.Rules(blockNum, lastHeader.Time, arbosVersion)
 		}
 		if isFnalTxn {
 			// TODO(yperbasis) proper rewards for Gnosis
@@ -722,8 +727,13 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	parentNo := rpc.BlockNumber(pNo)
-	rules := cfg.Rules(blockNumber, block.Time())
 	header := block.Header()
+
+	var arbosVersion uint64
+	if cfg.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	rules := cfg.Rules(blockNumber, block.Time(), arbosVersion)
 	txs := block.Transactions()
 	var borStateSyncTxn types.Transaction
 	var borStateSyncTxnHash common.Hash
@@ -847,7 +857,12 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	parentNo := rpc.BlockNumber(pNo)
-	rules := cfg.Rules(blockNumber, header.Time)
+
+	var arbosVersion uint64
+	if cfg.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	rules := cfg.Rules(blockNumber, header.Time, arbosVersion)
 	var txn types.Transaction
 	var borStateSyncTxnHash common.Hash
 	if cfg.Bor != nil {

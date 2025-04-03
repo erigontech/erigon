@@ -94,7 +94,12 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.blockCtx = &blockCtx
 	e.blockHash = header.Hash()
 	e.header = header
-	e.rules = e.chainConfig.Rules(e.blockNum, header.Time)
+
+	var arbosVersion uint64
+	if e.chainConfig.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	e.rules = e.chainConfig.Rules(e.blockNum, header.Time, arbosVersion)
 	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time)
 	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }

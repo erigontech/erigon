@@ -381,8 +381,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			if _, _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, logger); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
+
+			var arbosVersion uint64
+			if config.IsArbitrum() {
+				arbosVersion = types.DeserializeHeaderExtraInformation(b.header).ArbOSFormatVersion
+			}
 			// Write state changes to db
-			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.Time), stateWriter); err != nil {
+			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.Time, arbosVersion), stateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
@@ -595,7 +600,12 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 		header.GasLimit = parentGasLimit
 	}
 
-	if chainConfig.IsCancun(header.Time) {
+	var arbosVersion uint64
+	if chainConfig.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+
+	if chainConfig.IsCancun(header.Time, arbosVersion) {
 		excessBlobGas := misc.CalcExcessBlobGas(chainConfig, parent, header.Time)
 		header.ExcessBlobGas = &excessBlobGas
 		header.BlobGasUsed = new(uint64)

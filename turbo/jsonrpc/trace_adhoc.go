@@ -22,10 +22,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"math"
 	"strings"
+
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/holiman/uint256"
 
@@ -1376,7 +1377,11 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
 
-		chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
+		var arbosVersion uint64
+		if chainConfig.IsArbitrum() {
+			arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+		}
+		chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time, arbosVersion)
 		traceResult.Output = libcommon.CopyBytes(execResult.ReturnData)
 		if traceTypeStateDiff {
 			initialIbs := state.New(cloneReader)
@@ -1574,7 +1579,11 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 	}
 
-	chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
+	var arbosVersion uint64
+	if chainConfig.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time, arbosVersion)
 	traceResult.Output = libcommon.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)

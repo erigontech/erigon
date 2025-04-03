@@ -74,6 +74,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 		data:       stx.Data,
 		accessList: stx.AccessList,
 		checkNonce: true,
+		Tx:         stx,
 	}
 	if !rules.IsCancun {
 		return msg, errors.New("BlobTx transactions require Cancun")

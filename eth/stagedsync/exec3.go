@@ -515,7 +515,12 @@ Loop:
 			accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
 		}
 
-		rules := chainConfig.Rules(blockNum, b.Time())
+		var arbosVersion uint64
+		if cfg.chainConfig.IsArbitrum() {
+			arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+		}
+
+		rules := chainConfig.Rules(blockNum, b.Time(), arbosVersion)
 		blockReceipts := make(types.Receipts, len(txs))
 		// During the first block execution, we may have half-block data in the snapshots.
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.

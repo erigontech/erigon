@@ -70,7 +70,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 
 	var transferFunc evmtypes.TransferFunc
 	var postApplyMessageFunc evmtypes.PostApplyMessageFunc
-	if engine != nil {
+	if engine != nil && !config.IsArbitrum() {
 		transferFunc = engine.GetTransferFunc()
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {

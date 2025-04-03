@@ -118,7 +118,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		intraBlockState: state,
 		config:          vmConfig,
 		chainConfig:     chainConfig,
-		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
+		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time, blockCtx.ArbOSVersion),
 		JumpDestCache:   NewJumpDestCache(),
 	}
 

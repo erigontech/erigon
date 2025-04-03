@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borabi"
+	"github.com/erigontech/nitro-erigon/arbos"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -49,6 +50,10 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
 ) consensus.Engine {
 	var eng consensus.Engine
+
+	if chainConfig.IsArbitrum() {
+		return arbos.Engine{}
+	}
 
 	switch consensusCfg := config.(type) {
 	case *ethashcfg.Config:

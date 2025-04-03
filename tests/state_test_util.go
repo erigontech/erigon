@@ -235,7 +235,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		if err != nil {
 			return nil, libcommon.Hash{}, err
 		}
-		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, config.Rules(0, 0))
+		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, config.Rules(0, 0, 0))
 		if err != nil {
 			return nil, libcommon.Hash{}, err
 		}
@@ -258,7 +258,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		context.PrevRanDao = &rnd
 		context.Difficulty = big.NewInt(0)
 	}
-	if config.IsCancun(block.Time()) && t.json.Env.ExcessBlobGas != nil {
+	if config.IsCancun(block.Time(), 0) && t.json.Env.ExcessBlobGas != nil {
 		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.json.Env.ExcessBlobGas, header.Time)
 		if err != nil {
 			return nil, libcommon.Hash{}, err
