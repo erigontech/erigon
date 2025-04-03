@@ -322,13 +322,14 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 			// random_bytes = hash(seed + uint_to_bytes(i // 16))
 			// offset = i % 16 * 2
 			// random_value = bytes_to_uint64(random_bytes[offset:offset + 2])
+			maxRandomValue := uint64(1<<16 - 1)
 			buf := make([]byte, 8)
 			binary.LittleEndian.PutUint64(buf, i/16)
 			input := append(seed[:], buf...)
 			randomBytes := utils.Sha256(input)
 			offset := (i % 16) * 2
 			randomValue := binary.LittleEndian.Uint16(randomBytes[offset : offset+2])
-			if validator.EffectiveBalance()*math.MaxUint16 >= beaconConfig.MaxEffectiveBalanceForVersion(b.Version())*uint64(randomValue) {
+			if validator.EffectiveBalance()*maxRandomValue >= beaconConfig.MaxEffectiveBalanceForVersion(b.Version())*uint64(randomValue) {
 				syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey())
 			}
 		} else {

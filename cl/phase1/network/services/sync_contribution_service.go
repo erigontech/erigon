@@ -307,7 +307,6 @@ func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState,
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
 	msg := utils.Sha256(contribution.BeaconBlockRoot[:], domain)
 	// only use the ones pertaining to the aggregation bits
 	subCommitteePubsKeys := make([][]byte, 0, len(subCommitteeKeys))
