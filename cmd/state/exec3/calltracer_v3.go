@@ -67,6 +67,10 @@ func (ct *CallTracer) Froms() map[libcommon.Address]struct{} { return ct.froms }
 func (ct *CallTracer) Tos() map[libcommon.Address]struct{}   { return ct.tos }
 
 func (ct *CallTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	if depth > 1 {
+		return
+	}
+
 	if ct.froms == nil {
 		ct.froms = map[libcommon.Address]struct{}{}
 		ct.tos = map[libcommon.Address]struct{}{}

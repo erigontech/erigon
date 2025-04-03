@@ -141,6 +141,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 		}
 
 		// MA applystate
+		log.Info("applying state with traces", "blockNum", txTask.BlockNum, "txIndex", txTask.TxIndex, "tracesTo", txTask.TraceTos, "tracesFrom", txTask.TraceFroms)
 		if err := se.rs.ApplyState4(ctx, txTask); err != nil {
 			return false, err
 		}
