@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon/core/rawdb"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -116,6 +117,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			var receipt *types.Receipt
 			if txTask.TxIndex >= 0 {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
+			}
+			if err := rawdb.WriteReceipt(se.applyTx, txTask.BlockNum, txTask.BlockHash, uint32(txTask.TxIndex), receipt); err != nil {
+				return false, err
 			}
 			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
 				return false, err

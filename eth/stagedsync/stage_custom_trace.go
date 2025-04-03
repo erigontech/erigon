@@ -288,6 +288,9 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				if txTask.TxIndex >= 0 {
 					receipt = txTask.BlockReceipts[txTask.TxIndex]
 				}
+				//if err := rawdb.WriteReceipt(tx, txTask.BlockNum, txTask.BlockHash, uint32(txTask.TxIndex), receipt); err != nil {
+				//	return false, err
+				//}
 				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
 					return err
 				}

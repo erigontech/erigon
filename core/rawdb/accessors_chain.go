@@ -1250,19 +1250,19 @@ func ReadReceipt(db kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint
 func ReadReceipts(db kv.Tx, blockHash common.Hash, blockNum uint64) (res types.Receipts, err error) {
 	rng, err := db.Prefix(kv.Receipts, dbutils.HeaderKey(blockNum, blockHash))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ReadReceipts: %d, %w", blockNum, err)
 	}
 	defer rng.Close()
 
 	for rng.HasNext() {
 		_, v, err := rng.Next()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("ReadReceipts: %d, %w", blockNum, err)
 		}
 		// Convert the receipts from their storage form to their internal representation
 		receipt := &types.Receipt{}
 		if err := rlp.DecodeBytes(v, receipt); err != nil {
-			return nil, fmt.Errorf("%w, of block %d, %x\n", err, blockNum, blockHash)
+			return nil, fmt.Errorf("ReadReceipts: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
 		}
 		res = append(res, receipt)
 	}
@@ -1302,11 +1302,11 @@ func PruneReceipts(tx kv.RwTx, blockNum uint64, pruneLimit int) error {
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
 func WriteReceipts(tx kv.RwTx, blockNum uint64, blockHash common.Hash, receipts types.Receipts) error {
-	if ok, err := HasReceipt(tx, blockNum, blockHash, 0); err != nil { // if exists don't write
-		return err
-	} else if ok {
-		return nil
-	}
+	//if ok, err := HasReceipt(tx, blockNum, blockHash, 0); err != nil { // if exists don't write
+	//	return err
+	//} else if ok {
+	//	return nil
+	//}
 
 	for txnIndex, r := range receipts {
 		if err := WriteReceipt(tx, blockNum, blockHash, uint32(txnIndex), r); err != nil {
@@ -1317,8 +1317,15 @@ func WriteReceipts(tx kv.RwTx, blockNum uint64, blockHash common.Hash, receipts 
 }
 
 // WriteReceipt stores all the transaction receipts belonging to a block.
-func WriteReceipt(tx kv.RwTx, blockNum uint64, blockHash common.Hash, txnIndex uint32, receipt *types.Receipt) error {
-	bytes, err := rlp.EncodeToBytes(receipt)
+func WriteReceipt(tx kv.Putter, blockNum uint64, blockHash common.Hash, txnIndex uint32, receipt *types.Receipt) error {
+	var a *types.ReceiptForStorage = receipt
+	// Convert the receipts into their storage form and serialize them
+	storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
+	for i, receipt := range receipts {
+		storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
+	}
+
+	bytes, err := rlp.EncodeToBytes(a)
 	if err != nil {
 		return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 	}
