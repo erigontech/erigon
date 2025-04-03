@@ -290,6 +290,9 @@ func ExecV3(ctx context.Context,
 	}
 
 	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.syncCfg.AlwaysGenerateChangesets
+	if shouldGenerateChangesets {
+		log.Warn("[dbg] shouldGenerateChangesets", "maxBlockNum", maxBlockNum, "blockNum", blockNum, "changesetSafeRange", changesetSafeRange, "cfg.syncCfg.AlwaysGenerateChangesets", cfg.syncCfg.AlwaysGenerateChangesets)
+	}
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
