@@ -185,7 +185,7 @@ var (
 		Aura:                  &chain.AuRaConfig{},
 	}
 
-	TestRules = TestChainConfig.Rules(0, 0)
+	TestRules = TestChainConfig.Rules(0, 0, 0)
 )
 
 type ConsensusSnapshotConfig struct {

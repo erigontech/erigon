@@ -70,7 +70,12 @@ func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, hea
 	}
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
-	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
+	var arbosVersion uint64
+	if cfg.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+
+	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time, arbosVersion)
 
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, header.Number.Uint64(), header.Time)

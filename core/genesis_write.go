@@ -524,12 +524,17 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		}
 	}
 
+	var arbosVersion uint64
+	if g.Config.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(head).ArbOSFormatVersion
+	}
+
 	var withdrawals []*types.Withdrawal
-	if g.Config != nil && g.Config.IsShanghai(g.Timestamp) {
+	if g.Config != nil && g.Config.IsShanghai(g.Timestamp, arbosVersion) {
 		withdrawals = []*types.Withdrawal{}
 	}
 
-	if g.Config != nil && g.Config.IsCancun(g.Timestamp) {
+	if g.Config != nil && g.Config.IsCancun(g.Timestamp, arbosVersion) {
 		if g.BlobGasUsed != nil {
 			head.BlobGasUsed = g.BlobGasUsed
 		} else {
