@@ -220,6 +220,12 @@ type logMarshaling struct {
 }
 
 type rlpLog struct {
+	Address common.Address
+	Topics  []common.Hash
+	Data    []byte
+}
+
+type rlpLogForStorage struct {
 	Address     common.Address
 	Topics      []common.Hash
 	Data        []byte
@@ -272,7 +278,7 @@ type LogForStorage Log
 
 // EncodeRLP implements rlp.Encoder.
 func (l *LogForStorage) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, rlpStorageLog{
+	return rlp.Encode(w, rlpLogForStorage{
 		Address:     l.Address,
 		Topics:      l.Topics,
 		Data:        l.Data,
@@ -292,7 +298,7 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	var dec rlpStorageLog
+	var dec rlpLogForStorage
 	err = rlp.DecodeBytes(blob, &dec)
 	if err != nil {
 		return err
