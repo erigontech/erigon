@@ -2746,12 +2746,17 @@ func (p *ParallelPatriciaHashed) SetParticularTrace(b bool, n int) {
 	}
 }
 
-func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHashed) error {
+func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHashed) ([]byte, error) {
+
 	if t.mode != ModeDirect {
-		return errors.New("parallel hashsort for indirect mode is not supported")
+		return nil, errors.New("parallel hashsort for indirect mode is not supported")
 	}
 	if !t.sortPerNibble {
-		return errors.New("sortPerNibble disabled")
+		return nil, errors.New("sortPerNibble disabled")
+	}
+
+	if err := pph.unfoldRoot(); err != nil {
+		return nil, err
 	}
 
 	//g, ctx := errgroup.WithContext(ctx)
@@ -2788,7 +2793,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 		if cnt > 0 {
 			fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", n, cnt, phnib.depths[0])
 			if err = pph.foldNibble(n); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		//return nil
@@ -2796,41 +2801,33 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 	}
 	clear(t.keys)
 	//return g.Wait()
-	return nil
-}
-
-func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
-	if err = p.unfoldRoot(); err != nil {
-		return nil, err
-	}
-	err = updates.ParallelHashSort(ctx, p)
-	if err != nil {
-		return nil, err
-	}
-
-	if p.root.trace {
-		fmt.Printf("======= folding root =========\n")
+	//
+	if pph.root.trace {
+		fmt.Printf("======= folding ROOT trie =========\n")
 	}
 	// TODO zero active rows could be a clue to some invalid cases
-	if p.root.activeRows == 0 {
-		p.root.activeRows = 1
+	if pph.root.activeRows == 0 {
+		pph.root.activeRows = 1
 	}
 
-	for p.root.activeRows > 0 {
-		if err = p.root.fold(); err != nil {
+	for pph.root.activeRows > 0 {
+		if err := pph.root.fold(); err != nil {
 			return nil, err
 		}
 	}
-	rootHash, err = p.root.RootHash()
+	rootHash, err := pph.root.RootHash()
 	if err != nil {
 		return nil, err
 	}
-	if p.root.trace {
+	if pph.root.trace {
 		fmt.Printf("======= folding root done =========\n")
 	}
 	// have to reset trie since we do not do any unfolding
-
 	return rootHash, nil
+}
+
+func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
+	return updates.ParallelHashSort(ctx, p)
 }
 
 // Variant returns commitment trie variant
