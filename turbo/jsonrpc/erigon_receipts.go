@@ -369,6 +369,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
+	fmt.Printf("[got] %d, %d\n", len(receipts), len(block.Transactions()))
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
