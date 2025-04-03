@@ -103,11 +103,12 @@ type storedReceiptRLP struct {
 
 	Logs []*LogForStorage
 
-	TxHash          libcommon.Hash
-	BlockHash       libcommon.Hash
-	BlockNumber     uint64
-	ContractAddress libcommon.Address
-	GasUsed         uint64
+	TxHash           libcommon.Hash
+	BlockHash        libcommon.Hash
+	BlockNumber      uint64
+	TransactionIndex uint
+	ContractAddress  libcommon.Address
+	GasUsed          uint64
 }
 
 // NewReceipt creates a barebone transaction receipt, copying the init fields.
@@ -380,12 +381,13 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		CumulativeGasUsed: r.CumulativeGasUsed,
 		FirstLogIndex:     firstLogIndex,
 
-		Logs:            logsForStorage,
-		TxHash:          r.TxHash,
-		ContractAddress: r.ContractAddress,
-		GasUsed:         r.GasUsed,
-		BlockHash:       r.BlockHash,
-		BlockNumber:     r.BlockNumber.Uint64(),
+		Logs:             logsForStorage,
+		TxHash:           r.TxHash,
+		ContractAddress:  r.ContractAddress,
+		GasUsed:          r.GasUsed,
+		BlockHash:        r.BlockHash,
+		BlockNumber:      r.BlockNumber.Uint64(),
+		TransactionIndex: r.TransactionIndex,
 	})
 }
 
@@ -411,6 +413,7 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	r.BlockNumber = big.NewInt(int64(stored.BlockNumber))
 	r.ContractAddress = stored.ContractAddress
 	r.GasUsed = stored.GasUsed
+	r.TransactionIndex = stored.TransactionIndex
 	//r.Bloom = CreateBloom(Receipts{(*Receipt)(r)})
 
 	return nil
