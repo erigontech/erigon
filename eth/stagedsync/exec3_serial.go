@@ -131,6 +131,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 				if lastReceipt == nil {
 					return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
 				}
+				if err := rawdb.WriteReceipt(se.applyTx, txTask.BlockNum, txTask.BlockHash, uint32(txTask.TxIndex), lastReceipt); err != nil {
+					return false, err
+				}
 				if len(lastReceipt.Logs) > 0 {
 					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
 					receipt := types.Receipt{
