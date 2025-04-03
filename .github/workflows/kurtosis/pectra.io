@@ -14,7 +14,8 @@ network_params:
   churn_limit_quotient: 16
 additional_services:
   - assertoor
-snooper_enabled: true
+  # - dora
+snooper_enabled: false
 assertoor_params:
   run_stability_check: false
   run_block_proposal_check: true
