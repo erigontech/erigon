@@ -37,10 +37,10 @@ import (
 )
 
 func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
-	if !e.config.IsShanghai(time) && withdrawals != nil {
+	if !e.config.IsShanghai(time, 0) && withdrawals != nil {
 		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
 	}
-	if e.config.IsShanghai(time) && withdrawals == nil {
+	if e.config.IsShanghai(time, 0) && withdrawals == nil {
 		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
 	}
 	return nil

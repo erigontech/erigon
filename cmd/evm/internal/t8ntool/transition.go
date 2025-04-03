@@ -240,7 +240,7 @@ func Main(ctx *cli.Context) error {
 		prestate.Env.Random = nil
 	}
 
-	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
+	if chainConfig.IsShanghai(prestate.Env.Timestamp, 0) && prestate.Env.Withdrawals == nil {
 		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
 	}
 
