@@ -1645,7 +1645,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		upCell.reset()
 		if hph.branchBefore[row] {
 
-			fmt.Printf("[%x] collectBranchUpdate [%x] delete \n", hph.mountedNib, updateKey)
+			// fmt.Printf("[%x] collectBranchUpdate [%x] delete \n", hph.mountedNib, updateKey)
 			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
@@ -1676,7 +1676,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 		if hph.branchBefore[row] { // encode Delete if prefix existed before
 			//fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
-			fmt.Printf("[%x] collectBranchUpdate [%x] delete \n", hph.mountedNib, updateKey)
+			// fmt.Printf("[%x] collectBranchUpdate [%x] delete \n", hph.mountedNib, updateKey)
 			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
@@ -1766,7 +1766,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 		b := [...]byte{0x80}
 		cellGetter := hph.createCellGetter(b[:], updateKey, row, depth)
-		fmt.Printf("[%x] collectBranchUpdate [%x] \n", hph.mountedNib, updateKey)
+		// fmt.Printf("[%x] collectBranchUpdate [%x] \n", hph.mountedNib, updateKey)
 
 		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
 		if err != nil {
@@ -1916,7 +1916,7 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	}
 	// Now unfold until we step on an empty cell
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
-		printLater := hph.currentKeyLen == 0 && hph.mounted
+		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.trace
 
 		if err := hph.unfold(hashedKey, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
@@ -1958,12 +1958,12 @@ func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, int, error) {
 	}
 
 	for hph.activeRows > 0 {
-		fmt.Printf("===[%x] folding prefix %x (len %d)\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.currentKeyLen)
+		// fmt.Printf("===[%x] folding prefix %x (len %d)\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.currentKeyLen)
 		if hph.activeRows == 1 && hph.depths[hph.activeRows-1] == 1 {
 			if hph.trace {
 				fmt.Printf("mount early as nibble %02x %s\n", hph.mountedNib, hph.grid[0][hph.mountedNib].String())
 			}
-			fmt.Printf("===[%x] stop folding at %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen])
+			// fmt.Printf("===[%x] stop folding at %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen])
 			return hph.grid[0][hph.mountedNib], hph.mountedNib, nil
 		}
 		if err := hph.fold(); err != nil {
@@ -1971,7 +1971,9 @@ func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, int, error) {
 		}
 	}
 
-	fmt.Printf("===[%x] !@folded to the root\n", hph.mountedNib)
+	if hph.trace {
+		fmt.Printf("===[%x] !@folded to the root\n", hph.mountedNib)
+	}
 	if hph.rootPresent && hph.rootTouched {
 		if hph.trace {
 			fmt.Printf("mount root as %02x %s\n", hph.mountedNib, hph.root.String())
@@ -2149,6 +2151,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
 	}
+
 	if dbg.KVReadLevelledMetrics {
 		log.Debug("commitment finished, counters updated (no reset)",
 			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
@@ -2801,7 +2804,9 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 
 		counts[n] = uint(cnt)
 		if cnt > 0 {
-			fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", n, cnt, phnib.depths[0])
+			if pph.mounts[n].trace {
+				fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", n, cnt, phnib.depths[0])
+			}
 			if err = pph.foldNibble(n); err != nil {
 				return nil, err
 			}
