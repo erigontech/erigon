@@ -2856,7 +2856,7 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 	}
 
 	if p.root.root.extLen == 0 {
-		zeroPrefixBranch, _, err := p.root.ctx.Branch(KeyToHexNibbleHash([]byte{}))
+		zeroPrefixBranch, _, err := p.root.ctx.Branch(KeyToHexNibbleHash([]byte{0}))
 		if err != nil {
 			return nil, fmt.Errorf("checking shortes prefix branch failed: %w", err)
 		}
@@ -2866,10 +2866,10 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 			fmt.Println("use || trie next")
 			return rootHash, nil
 		}
-		fmt.Printf(" 00 [branch %x]", zeroPrefixBranch, len(zeroPrefixBranch))
+		fmt.Printf(" 00 [branch %x len %d]\n", zeroPrefixBranch, len(zeroPrefixBranch))
 	}
 	updates.SetConcurrentCommitment(false)
-	fmt.Printf("use seq trie next [root extLen=%d][ext %x]", p.root.root.extLen, p.root.root.extension[:p.root.root.extLen])
+	fmt.Printf("use seq trie next [root extLen=%d][ext '%x']\n", p.root.root.extLen, p.root.root.extension[:p.root.root.extLen])
 	return rootHash, nil
 }
 
