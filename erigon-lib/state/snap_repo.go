@@ -88,7 +88,7 @@ func (f *SnapshotRepo) VisibleFiles() visibleFiles {
 }
 
 func (f *SnapshotRepo) GetFreezingRange(from RootNum, to RootNum) (freezeFrom RootNum, freezeTo RootNum, canFreeze bool) {
-	return GetFreezingRange(from, to, f.cfg)
+	return getFreezingRange(from, to, f.cfg)
 }
 
 // TODO: if integrity checks are done while calculating visibleFiles, and not here
@@ -318,7 +318,7 @@ func (f *SnapshotRepo) scanDirtyFiles(aps []string) (res []*filesItem) {
 }
 
 // determine freezing ranges, given snapshot creation config
-func GetFreezingRange(rootFrom, rootTo RootNum, cfg *ae.SnapshotConfig) (freezeFrom RootNum, freezeTo RootNum, canFreeze bool) {
+func getFreezingRange(rootFrom, rootTo RootNum, cfg *ae.SnapshotConfig) (freezeFrom RootNum, freezeTo RootNum, canFreeze bool) {
 	/**
 	 1. `from`, `to` must be round off to minimum size (atleast)
 	 2. mergeLimit is a function: (from, preverified files, mergeLimit default) -> biggest file size starting `from`
