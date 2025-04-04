@@ -361,7 +361,6 @@ var ChaindataTables = []string{
 	CallTraceSet,
 	CallFromIndex,
 	CallToIndex,
-	Log,
 	Sequence,
 	EthTx,
 	TrieOfAccounts,
