@@ -21,6 +21,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv/prune"
@@ -85,8 +86,9 @@ var (
 
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
-		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal".
-				Full: Keep only blocks and latest state,
+		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
+				Full: Keep only necessary blocks and latest state,
+				Blocks: Keep all blocks and latest state,
 				Archive: Keep the entire indexed database, aka. no pruning,
 				Minimal: Keep only latest state`,
 		Value: "full",
@@ -98,6 +100,11 @@ var (
 	PruneBlocksDistanceFlag = cli.Uint64Flag{
 		Name:  "prune.distance.blocks",
 		Usage: `Keep block history for the latest N blocks (default: everything)`,
+	}
+	HistoryExpiryEnabledFlag = cli.BoolFlag{
+		Name:  "history-expiry",
+		Usage: "Enable history expiry",
+		Value: false,
 	}
 	ExperimentsFlag = cli.StringFlag{
 		Name: "experiments",
@@ -295,15 +302,31 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-	// Full mode prunes all but the latest state
-	if ctx.String(PruneModeFlag.Name) == "full" {
-		mode.Blocks = prune.Distance(math.MaxUint64)
+
+	switch ctx.String(PruneModeFlag.Name) {
+	case "archive":
+	case "full":
+		mode.Blocks = prune.DefaultBlocksPruneMode
 		mode.History = prune.Distance(config3.DefaultPruneDistance)
+	case "blocks":
+		mode.Blocks = prune.KeepAllBlocksPruneMode
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
+	case "minimal":
+		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
+	default:
+		utils.Fatalf("error: --prune.mode must be one of archive, full, blocks, minimal")
 	}
-	// Minimal mode prunes all but the latest state including blocks
-	if ctx.String(PruneModeFlag.Name) == "minimal" {
-		mode.Blocks = prune.Distance(config3.DefaultPruneDistance)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
+
+	if ctx.IsSet(PruneBlocksDistanceFlag.Name) {
+		mode.Blocks = prune.Distance(blockDistance)
+	}
+	if ctx.IsSet(PruneDistanceFlag.Name) {
+		mode.History = prune.Distance(distance)
+	}
+
+	if ctx.IsSet(HistoryExpiryEnabledFlag.Name) {
+		dbg.EnableHistoryExpiry = ctx.Bool(HistoryExpiryEnabledFlag.Name)
 	}
 
 	if err != nil {
@@ -426,16 +449,24 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	switch *pruneMode {
 	case "archive":
 	case "full":
-		mode.Blocks = prune.Distance(math.MaxUint64)
+		mode.Blocks = prune.DefaultBlocksPruneMode
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
+	case "blocks":
+		mode.Blocks = prune.KeepAllBlocksPruneMode
 		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	case "minimal":
 		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
 		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	default:
-		utils.Fatalf("error: --prune.mode must be one of archive, full, minimal")
+		utils.Fatalf("error: --prune.mode must be one of archive, full, blocks, minimal")
 	}
-	mode.Blocks = prune.Distance(blockDistance)
-	mode.History = prune.Distance(distance)
+
+	if pruneBlockDistance != nil {
+		mode.Blocks = prune.Distance(blockDistance)
+	}
+	if pruneDistance != nil {
+		mode.History = prune.Distance(distance)
+	}
 
 	cfg.Prune = mode
 
@@ -445,6 +476,12 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 	}
+
+	enabledHistoryExpiry := f.Bool(HistoryExpiryEnabledFlag.Name, HistoryExpiryEnabledFlag.Value, HistoryExpiryEnabledFlag.Usage)
+	if enabledHistoryExpiry != nil && *enabledHistoryExpiry {
+		dbg.EnableHistoryExpiry = true
+	}
+
 	if v := f.String(EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value, EtlBufferSizeFlag.Usage); v != nil {
 		sizeVal := datasize.ByteSize(0)
 		size := &sizeVal
