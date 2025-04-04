@@ -19,8 +19,10 @@ package datadir
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/gofrs/flock"
@@ -86,6 +88,10 @@ func New(datadir string) Dirs {
 	dir.MustExist(dirs.Chaindata, dirs.Tmp,
 		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin,
 		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinBlobs, dirs.CaplinIndexing, dirs.CaplinLatest, dirs.CaplinGenesis)
+	err := dirs.RenameOldVersions()
+	if err != nil {
+		panic(err)
+	}
 	return dirs
 }
 
@@ -195,5 +201,40 @@ func CopyFile(from, to string) error {
 		os.Remove(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
+	return nil
+}
+
+func (d Dirs) RenameOldVersions() error {
+	println("start rename old versions")
+	directories := []string{
+		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
+		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
+	}
+
+	for _, dirPath := range directories {
+		err := filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+
+			if !d.IsDir() && strings.HasPrefix(d.Name(), "v1-") {
+				println("d name:", d.Name())
+				newName := strings.Replace(d.Name(), "v1-", "v1.0-", 1)
+				oldPath := path
+				newPath := filepath.Join(filepath.Dir(path), newName)
+
+				if err := os.Rename(oldPath, newPath); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
