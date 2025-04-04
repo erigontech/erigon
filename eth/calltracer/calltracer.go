@@ -26,11 +26,15 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/tracers"
 )
 
 type CallTracer struct {
+	t *tracers.Tracer
+
 	froms map[libcommon.Address]struct{}
 	tos   map[libcommon.Address]struct{}
 }
@@ -42,28 +46,23 @@ func NewCallTracer() *CallTracer {
 	}
 }
 
-func (ct *CallTracer) CaptureTxStart(gasLimit uint64) {}
-func (ct *CallTracer) CaptureTxEnd(restGas uint64)    {}
+func (ct *CallTracer) Tracer() *tracers.Tracer {
+	return &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnEnter: ct.OnEnter,
+		},
+	}
+}
 
 // CaptureStart and CaptureEnter also capture SELFDESTRUCT opcode invocations
-func (ct *CallTracer) captureStartOrEnter(from, to libcommon.Address) {
+func (ct *CallTracer) captureStartOrEnter(from, to libcommon.Address, create bool, code []byte) {
 	ct.froms[from] = struct{}{}
 	ct.froms[to] = struct{}{}
 }
 
-func (ct *CallTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	ct.captureStartOrEnter(from, to)
-}
-func (ct *CallTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	ct.captureStartOrEnter(from, to)
-}
-func (ct *CallTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
-}
-func (ct *CallTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
-}
-func (ct *CallTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
-}
-func (ct *CallTracer) CaptureExit(output []byte, usedGas uint64, err error) {
+func (ct *CallTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	create := vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2
+	ct.captureStartOrEnter(from, to, create, code)
 }
 
 func (ct *CallTracer) WriteToDb(tx kv.Putter, block *types.Block, vmConfig vm.Config) error {

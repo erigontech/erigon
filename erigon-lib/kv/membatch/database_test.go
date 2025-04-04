@@ -109,10 +109,8 @@ func TestNoPanicAfterDbClosed(t *testing.T) {
 
 	closeCh := make(chan struct{}, 1)
 	go func() {
-		require.NotPanics(t, func() {
-			<-closeCh
-			db.Close()
-		})
+		<-closeCh
+		db.Close()
 	}()
 	time.Sleep(time.Millisecond) // wait to check that db.Close doesn't panic, but wait when read tx finished
 	err = writeTx.Put(kv.ChaindataTables[0], []byte{1}, []byte{1})

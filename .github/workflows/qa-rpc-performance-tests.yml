@@ -6,7 +6,7 @@ on:
       - 'release/3.*'
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC
+    - cron: '0 20 * * *'  # Run every night at 20:00 (08:00 PM) UTC
 
 jobs:
   performance-test-suite:

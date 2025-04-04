@@ -37,6 +37,11 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
+type AAValidationResult struct {
+	PaymasterContext []byte
+	GasUsed          uint64
+}
+
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
 // which is processed by a single thread that writes into the ReconState1 and
 // flushes to the database
@@ -84,6 +89,10 @@ type TxTask struct {
 	BlockReceipts types.Receipts
 
 	Config *chain.Config
+
+	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
+	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
+	ValidationResults     []AAValidationResult
 }
 
 func (t *TxTask) Sender() *libcommon.Address {
@@ -158,10 +167,13 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful
 	}
+
+	receipt.Bloom = types.LogsBloom(receipt.Logs) // why do we need to add this?
 	// if the transaction created a contract, store the creation address in the receipt.
 	//if msg.To() == nil {
 	//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
 	//}
+
 	return receipt
 }
 func (t *TxTask) Reset() *TxTask {

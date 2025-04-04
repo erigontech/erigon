@@ -21,10 +21,10 @@ type BufferFactory interface {
 	New() etl.Buffer
 }
 
-var _ StartRoTx[AppendableFilesTxI] = (*Appendable[AppendableFilesTxI])(nil)
+var _ StartRoTx[AppendableBaseTxI] = (*Appendable[AppendableBaseTxI])(nil)
 var ErrNotFoundInSnapshot = errors.New("entity not found in snapshot")
 
-type Appendable[T AppendableFilesTxI] struct {
+type Appendable[T AppendableBaseTxI] struct {
 	*ProtoAppendable
 
 	canonicalTbl string // for marked structures
@@ -138,7 +138,7 @@ func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 	return a, nil
 }
 
-func create[T AppendableFilesTxI](id AppendableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Appendable[T], error) {
+func create[T AppendableBaseTxI](id AppendableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Appendable[T], error) {
 	a := &Appendable[T]{
 		ProtoAppendable: NewProto(id, nil, nil, logger),
 	}
@@ -188,6 +188,19 @@ func (a *Appendable[T]) SetTs4Bytes(ts4Bytes bool) {
 type MarkedTx struct {
 	*ProtoAppendableTx
 	ap *Appendable[MarkedTxI]
+}
+
+func (m *MarkedTx) Get(num Num, tx kv.Tx) (Bytes, error) {
+	v, found, _, err := m.GetFromFiles(num)
+	if err != nil {
+		return nil, err
+	}
+
+	if found {
+		return v, nil
+	}
+
+	return m.GetDb(num, nil, tx)
 }
 
 func (m *MarkedTx) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
@@ -250,10 +263,31 @@ func (m *MarkedTx) combK(ts Num, hash []byte) []byte {
 	return k
 }
 
+func (m *MarkedTx) DebugFiles() AppendableFilesTxI {
+	return m
+}
+
+func (m *MarkedTx) DebugDb() MarkedDbTxI {
+	return m
+}
+
 // unmarked tx
 type UnmarkedTx struct {
 	*ProtoAppendableTx
 	ap *Appendable[UnmarkedTxI]
+}
+
+func (m *UnmarkedTx) Get(num Num, tx kv.Tx) (Bytes, error) {
+	v, found, _, err := m.GetFromFiles(num)
+	if err != nil {
+		return nil, err
+	}
+
+	if found {
+		return v, nil
+	}
+
+	return m.GetDb(num, tx)
 }
 
 func (m *UnmarkedTx) GetDb(num Num, tx kv.Tx) (Bytes, error) {
@@ -287,11 +321,33 @@ func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 
+func (m *UnmarkedTx) DebugFiles() AppendableFilesTxI {
+	return m
+}
+
+func (m *UnmarkedTx) DebugDb() UnmarkedDbTxI {
+	return m
+}
+
 type BufferedTx struct {
 	*ProtoAppendableTx
 	ap      *Appendable[BufferedTxI]
 	values  *etl.Collector
 	factory BufferFactory
+}
+
+// doesn't look into buffer, but just db + files
+func (m *BufferedTx) Get(num Num, tx kv.Tx) (Bytes, error) {
+	v, found, _, err := m.GetFromFiles(num)
+	if err != nil {
+		return nil, err
+	}
+
+	if found {
+		return v, nil
+	}
+
+	return m.GetDb(num, tx)
 }
 
 // Get doesn't reflect the values currently in Buffer
@@ -342,6 +398,14 @@ func (m *BufferedTx) Close() {
 	}
 
 	m.ProtoAppendableTx.Close()
+}
+
+func (m *BufferedTx) DebugFiles() AppendableFilesTxI {
+	return m
+}
+
+func (m *BufferedTx) DebugDb() BufferedDbTxI {
+	return m
 }
 
 var (

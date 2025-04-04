@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv/memdb"
@@ -29,14 +30,14 @@ import (
 func TestSetStorageModeIfNotExist(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 	prune, err := Get(tx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, Mode{true, Distance(math.MaxUint64), Distance(math.MaxUint64), Experiments{}}, prune)
 
 	err = setIfNotExist(tx, Mode{true, Distance(1), Distance(2), Experiments{}})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	prune, err = Get(tx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, Mode{true, Distance(1), Distance(2), Experiments{}}, prune)
 }
 

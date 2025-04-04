@@ -28,7 +28,7 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 	b.StopTimer()
 	row, bm := generateCellRow(b, 16)
 
-	be := NewBranchEncoder(1024, b.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
 		return row[i], nil
 	})
@@ -89,7 +89,7 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 		return row[nibble], nil
 	}
 
-	be := NewBranchEncoder(1024, b.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
 	require.NoError(b, err)
 
@@ -107,7 +107,7 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 			return key[:4], nil
 		})
 		require.NoError(b, err)
-		require.Truef(b, len(replaced) < len(enc), "replaced expected to be shorter than original enc")
+		require.Lessf(b, len(replaced), len(enc), "replaced expected to be shorter than original enc")
 
 		keyI := 0
 		replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {

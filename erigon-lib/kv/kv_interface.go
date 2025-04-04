@@ -574,6 +574,8 @@ type TemporalTx interface {
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
 type TemporalDebugTx interface {
 	RangeLatest(domain Domain, from, to []byte, limit int) (stream.KV, error)
+	GetLatestFromDB(domain Domain, k []byte) (v []byte, step uint64, found bool, err error)
+	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
 }
 
 type WithFreezeInfo interface {

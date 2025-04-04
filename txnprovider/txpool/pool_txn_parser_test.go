@@ -80,16 +80,16 @@ func TestTransactionSignatureValidity1(t *testing.T) {
 	txn, txnSender := &TxnSlot{}, [20]byte{}
 	validTxn := hexutil.MustDecodeHex("f83f800182520894095e7baea6a6c7c4c2dfeb977efac326af552d870b801ba048b55bfa915ac795c431978d8a6a992b628d557da5ff759b307d495a3664935301")
 	_, err := ctx.ParseTransaction(validTxn, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	preEip2Txn := hexutil.MustDecodeHex("f85f800182520894095e7baea6a6c7c4c2dfeb977efac326af552d870b801ba048b55bfa915ac795c431978d8a6a992b628d557da5ff759b307d495a36649353a07fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a1")
 	_, err = ctx.ParseTransaction(preEip2Txn, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Now enforce EIP-2
 	ctx.WithAllowPreEip2s(false)
 	_, err = ctx.ParseTransaction(validTxn, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	_, err = ctx.ParseTransaction(preEip2Txn, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
 	assert.Error(t, err)

@@ -753,4 +753,4 @@ func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
 func (m *MemoryMutation) FreezeInfo() kv.FreezeInfo {
 	panic("not supported")
 }
-func (m *MemoryMutation) Debug() kv.TemporalDebugTx { panic("not supported") }
+func (m *MemoryMutation) Debug() kv.TemporalDebugTx { return m.db.(kv.TemporalTx).Debug() }

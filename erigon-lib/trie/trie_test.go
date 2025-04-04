@@ -31,6 +31,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -323,7 +324,7 @@ func TestCodeNodeValid(t *testing.T) {
 
 		trie.UpdateAccount(crypto.Keccak256(addresses[i][:]), &acc)
 		err := trie.UpdateAccountCode(crypto.Keccak256(addresses[i][:]), codeValues[i])
-		assert.Nil(t, err, "should successfully insert code")
+		require.NoError(t, err, "should successfully insert code")
 	}
 
 	for i := 0; i < len(addresses); i++ {
@@ -352,7 +353,7 @@ func TestCodeNodeUpdateNotExisting(t *testing.T) {
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue)
-	assert.Nil(t, err, "should successfully insert code")
+	require.NoError(t, err, "should successfully insert code")
 
 	nonExistingAddress := getAddressForIndex(9999)
 	codeValue2 := genRandomByteArrayOfLen(128)
@@ -380,7 +381,7 @@ func TestCodeNodeGetNotExistingAccount(t *testing.T) {
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue)
-	assert.Nil(t, err, "should successfully insert code")
+	require.NoError(t, err, "should successfully insert code")
 
 	nonExistingAddress := getAddressForIndex(9999)
 
@@ -498,7 +499,7 @@ func TestCodeNodeUpdateAccountAndCodeValidHash(t *testing.T) {
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue1)
-	assert.Nil(t, err, "should successfully insert code")
+	require.NoError(t, err, "should successfully insert code")
 
 	codeValue2 := genRandomByteArrayOfLen(128)
 	codeHash2 := common.BytesToHash(crypto.Keccak256(codeValue2))
@@ -507,7 +508,7 @@ func TestCodeNodeUpdateAccountAndCodeValidHash(t *testing.T) {
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	err = trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue2)
-	assert.Nil(t, err, "should successfully insert code")
+	require.NoError(t, err, "should successfully insert code")
 }
 
 func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
@@ -530,7 +531,7 @@ func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue1)
-	assert.Nil(t, err, "should successfully insert code")
+	require.NoError(t, err, "should successfully insert code")
 
 	codeValue2 := genRandomByteArrayOfLen(128)
 	codeHash2 := common.BytesToHash(crypto.Keccak256(codeValue2))
@@ -541,7 +542,7 @@ func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	err = trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue3)
-	assert.Error(t, err, "should NOT be able to insert code with wrong hash")
+	require.Error(t, err, "should NOT be able to insert code with wrong hash")
 }
 
 func TestCodeNodeUpdateAccountChangeCodeHash(t *testing.T) {
@@ -564,7 +565,7 @@ func TestCodeNodeUpdateAccountChangeCodeHash(t *testing.T) {
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue1)
-	assert.Nil(t, err, "should successfully insert code")
+	require.NoError(t, err, "should successfully insert code")
 
 	codeValue2 := genRandomByteArrayOfLen(128)
 	codeHash2 := common.BytesToHash(crypto.Keccak256(codeValue2))
@@ -597,7 +598,7 @@ func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue1)
-	assert.Nil(t, err, "should successfully insert code")
+	require.NoError(t, err, "should successfully insert code")
 
 	acc.Nonce = uint64(random.Int63())
 	balance = new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
