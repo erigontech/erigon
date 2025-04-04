@@ -13,7 +13,9 @@ network_params:
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
   churn_limit_quotient: 16
-  seconds_per_slot: 2
+  seconds_per_slot: 3
+  genesis_delay: 90
+
 additional_services:
   - assertoor
   # - dora
