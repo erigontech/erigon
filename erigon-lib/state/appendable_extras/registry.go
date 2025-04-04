@@ -91,9 +91,9 @@ func Cleanup() {
 
 type EntityIdOption func(*holder)
 
-func WithSnapshotPrefix(prefix string) EntityIdOption {
+func WithSnapshotTag(tag string) EntityIdOption {
 	return func(a *holder) {
-		a.snapshotNameBase = prefix
+		a.snapshotNameBase = tag
 	}
 }
 
