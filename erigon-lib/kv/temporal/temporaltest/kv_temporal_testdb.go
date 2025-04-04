@@ -42,7 +42,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) (kv.TemporalRwDB, *state.Aggreg
 		rawDB = memdb.New(dirs.DataDir, kv.ChainDB)
 	}
 
-	agg, err := state.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, rawDB, log.New())
+	agg, err := state.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, rawDB, log.New())
 	if err != nil {
 		panic(err)
 	}

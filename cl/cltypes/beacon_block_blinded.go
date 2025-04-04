@@ -388,6 +388,11 @@ func (b *BlindedBeaconBody) SetBlobKzgCommitments(commitments *solid.ListSSZ[*KZ
 	return b
 }
 
+func (b *BlindedBeaconBody) SetExecutionRequests(requests *ExecutionRequests) *BlindedBeaconBody {
+	b.ExecutionRequests = requests
+	return b
+}
+
 func (b *BlindedBeaconBody) Full(txs *solid.TransactionsSSZ, withdrawals *solid.ListSSZ[*Withdrawal]) *BeaconBody {
 	// Recover the execution payload
 	executionPayload := &Eth1Block{

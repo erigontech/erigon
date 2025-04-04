@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -33,7 +34,7 @@ import (
 )
 
 type GenericTracer interface {
-	vm.EVMLogger
+	TracingHooks() *tracing.Hooks
 	SetTransaction(tx types.Transaction)
 	Found() bool
 }
@@ -78,8 +79,7 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineR
 		ibs:          state.New(stateReader),
 	}
 	if tracer != nil {
-		ie.vmConfig.Debug = true
-		ie.vmConfig.Tracer = tracer
+		ie.vmConfig.Tracer = tracer.TracingHooks()
 	}
 	return ie
 }

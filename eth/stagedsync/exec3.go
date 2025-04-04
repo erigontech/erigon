@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -68,7 +69,7 @@ const (
 	maxUnwindJumpAllowance = 1000 // Maximum number of blocks we are allowed to unwind
 )
 
-func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
+func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string, logger log.Logger) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
 }
 
@@ -203,11 +204,11 @@ func ExecV3(ctx context.Context,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger,
+	hooks *tracing.Hooks,
 	initialCycle bool,
 	isMining bool,
-) error {
+) (execErr error) {
 	inMemExec := txc.Doms != nil
-
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
 	if parallel && cfg.chainConfig.ChainName == networkname.Gnosis {
@@ -238,6 +239,8 @@ func ExecV3(ctx context.Context,
 			}()
 		}
 	}
+
+	chainReader := NewChainReaderImpl(cfg.chainConfig, applyTx, blockReader, logger)
 	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	if !inMemExec && !isMining {
 		if initialCycle {
@@ -342,8 +345,7 @@ func ExecV3(ctx context.Context,
 	commitThreshold := cfg.batchSize.Bytes()
 
 	// TODO are these dups ?
-	processed := NewProgress(blockNum, commitThreshold, workerCount, true, execStage.LogPrefix(), logger)
-	progress := NewProgress(blockNum, commitThreshold, workerCount, false, execStage.LogPrefix(), logger)
+	progress := NewProgress(blockNum, commitThreshold, workerCount, execStage.LogPrefix(), logger)
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -382,7 +384,7 @@ func ExecV3(ctx context.Context,
 		defer executorCancel()
 
 		defer func() {
-			processed.Log("Done", executor.readState(), nil, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+			progress.Log("Done", executor.readState(), nil, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 		}()
 
 		executor = pe
@@ -409,7 +411,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			processed.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+			progress.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 		}()
 
 		executor = se
@@ -489,6 +491,21 @@ Loop:
 			return fmt.Errorf("nil block %d", blockNum)
 		}
 
+		if b.NumberU64() == 0 {
+			if hooks != nil && hooks.OnGenesisBlock != nil {
+				hooks.OnGenesisBlock(b, cfg.genesis.Alloc)
+			}
+		} else {
+			if hooks != nil && hooks.OnBlockStart != nil {
+				hooks.OnBlockStart(tracing.BlockEvent{
+					Block:     b,
+					TD:        chainReader.GetTd(b.ParentHash(), b.NumberU64()-1),
+					Finalized: chainReader.CurrentFinalizedHeader(),
+					Safe:      chainReader.CurrentSafeHeader(),
+				})
+			}
+		}
+
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
@@ -505,11 +522,17 @@ Loop:
 		// print type of engine
 		if parallel {
 			if err := executor.status(ctx, commitThreshold); err != nil {
+				if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+					hooks.OnBlockEnd(err)
+				}
 				return err
 			}
 		} else if accumulator != nil {
 			txs, err := blockReader.RawTransactions(context.Background(), executor.tx(), b.NumberU64(), b.NumberU64())
 			if err != nil {
+				if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+					hooks.OnBlockEnd(err)
+				}
 				return err
 			}
 			accumulator.StartChange(header, txs, false)
@@ -523,6 +546,7 @@ Loop:
 		skipPostEvaluation := false
 		var usedGas uint64
 		var txTasks []*state.TxTask
+		var validationResults []state.AAValidationResult
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -547,10 +571,15 @@ Loop:
 				BlockReceipts: blockReceipts,
 
 				Config: chainConfig,
+
+				ValidationResults: validationResults,
 			}
 			if txTask.HistoryExecution && usedGas == 0 {
 				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
 				if err != nil {
+					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+						hooks.OnBlockEnd(err)
+					}
 					return err
 				}
 			}
@@ -571,6 +600,9 @@ Loop:
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
 				if err != nil {
+					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+						hooks.OnBlockEnd(err)
+					}
 					return err
 				}
 			}
@@ -580,10 +612,45 @@ Loop:
 			inputTxNum++
 		}
 
+		// check for consecutive RIP-7560 sequence
+		var isAASequence bool
+		for _, txTask := range txTasks {
+			txIndex := txTask.TxIndex
+			if txIndex < 0 || txIndex >= len(txs)-1 {
+				continue
+			}
+
+			if txTask.Tx.Type() != types.AccountAbstractionTxType {
+				isAASequence = false
+				continue
+			}
+			if isAASequence {
+				continue
+			}
+
+			aaBatchSize := uint64(1)
+			for _, tt := range txTasks[txIndex+1:] {
+				if tt.Tx.Type() == types.AccountAbstractionTxType {
+					aaBatchSize++
+					tt.InBatch = true
+				} else {
+					break
+				}
+			}
+
+			txTask.AAValidationBatchSize = aaBatchSize
+			isAASequence = true
+		}
+
 		if parallel {
-			if _, err := executor.execute(ctx, txTasks); err != nil {
+			_, err := executor.execute(ctx, txTasks)
+			if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+				hooks.OnBlockEnd(err)
+			}
+			if err != nil {
 				return err
 			}
+
 			agg.BuildFilesInBackground(outputTxNum.Load())
 		} else {
 			se := executor.(*serialExecutor)
@@ -591,7 +658,9 @@ Loop:
 			se.skipPostEvaluation = skipPostEvaluation
 
 			continueLoop, err := se.execute(ctx, txTasks)
-
+			if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+				hooks.OnBlockEnd(err)
+			}
 			if err != nil {
 				return err
 			}

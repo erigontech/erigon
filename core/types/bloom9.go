@@ -130,7 +130,7 @@ func CreateBloom(receipts Receipts) Bloom {
 }
 
 // LogsBloom returns the bloom bytes for the given logs
-func LogsBloom(logs []*Log) []byte {
+func LogsBloom(logs []*Log) Bloom {
 	buf := make([]byte, 6)
 	var bin Bloom
 	for _, log := range logs {
@@ -139,7 +139,7 @@ func LogsBloom(logs []*Log) []byte {
 			bin.add(b[:], buf)
 		}
 	}
-	return bin[:]
+	return bin
 }
 
 // Bloom9 returns the bloom filter for the given data

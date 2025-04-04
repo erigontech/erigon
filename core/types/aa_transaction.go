@@ -39,7 +39,7 @@ type AccountAbstractionTransaction struct {
 	AccessList AccessList
 
 	SenderAddress               *common.Address
-	Authorizations              []Authorization
+	SenderValidationData        []byte
 	ExecutionData               []byte
 	Paymaster                   *common.Address
 	PaymasterData               []byte
@@ -49,6 +49,7 @@ type AccountAbstractionTransaction struct {
 	ValidationGasLimit          uint64
 	PaymasterValidationGasLimit uint64
 	PostOpGasLimit              uint64
+	Authorizations              []Authorization
 
 	// RIP-7712 two-dimensional nonce (optional), 192 bits
 	NonceKey *uint256.Int
@@ -162,6 +163,7 @@ func (tx *AccountAbstractionTransaction) copy() *AccountAbstractionTransaction {
 		FeeCap:                      tx.FeeCap,
 		GasLimit:                    tx.GasLimit,
 		AccessList:                  tx.AccessList,
+		SenderValidationData:        common.CopyBytes(tx.SenderValidationData),
 		ExecutionData:               common.CopyBytes(tx.ExecutionData),
 		PaymasterData:               common.CopyBytes(tx.PaymasterData),
 		DeployerData:                common.CopyBytes(tx.DeployerData),
@@ -215,10 +217,10 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := doublePrefixedRlpHash(AccountAbstractionTxType, 0x00, []interface{}{
+	hash := prefixedRlpHash(AccountAbstractionTxType, []interface{}{
 		tx.ChainID,
 		tx.NonceKey, tx.Nonce,
-		tx.SenderAddress,
+		tx.SenderAddress, tx.SenderValidationData,
 		tx.Deployer, tx.DeployerData,
 		tx.Paymaster, tx.PaymasterData,
 		tx.ExecutionData,
@@ -235,10 +237,10 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 }
 
 func (tx *AccountAbstractionTransaction) SigningHash(chainID *big.Int) common.Hash {
-	hash := doublePrefixedRlpHash(AccountAbstractionTxType, 0x00, []interface{}{
+	hash := prefixedRlpHash(AccountAbstractionTxType, []interface{}{
 		chainID,
 		tx.NonceKey, tx.Nonce,
-		tx.SenderAddress,
+		tx.SenderAddress, tx.SenderValidationData,
 		tx.Deployer, tx.DeployerData,
 		tx.Paymaster, tx.PaymasterData,
 		tx.ExecutionData,
@@ -270,6 +272,8 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 	if tx.SenderAddress != nil {
 		payloadSize += 20
 	}
+
+	payloadSize += rlp.StringLen(tx.SenderValidationData)
 
 	payloadSize++
 	if tx.Deployer != nil {
@@ -320,12 +324,12 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 func (tx *AccountAbstractionTransaction) EncodingSize() int {
 	payloadSize, _, _ := tx.payloadSize()
 	// Add envelope size and type size
-	return 2 + rlp.ListPrefixLen(payloadSize) + payloadSize
+	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	envelopSize := 2 + rlp.ListPrefixLen(payloadSize) + payloadSize
+	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// encode envelope size
@@ -334,8 +338,7 @@ func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 	}
 	// encode TxType
 	b[0] = AccountAbstractionTxType
-	b[1] = 0x00
-	if _, err := w.Write(b[:2]); err != nil {
+	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
 
@@ -365,6 +368,10 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 	}
 
 	if err := rlp.EncodeOptionalAddress(tx.SenderAddress, w, b); err != nil {
+		return err
+	}
+
+	if err := rlp.EncodeString(tx.SenderValidationData, w, b); err != nil {
 		return err
 	}
 
@@ -467,14 +474,20 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	tx.SenderAddress = &common.Address{}
 	copy((*tx.SenderAddress)[:], b)
 
+	if tx.SenderValidationData, err = s.Bytes(); err != nil {
+		return err
+	}
+
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
-	if len(b) != 20 {
+
+	if len(b) == 20 {
+		tx.Deployer = &common.Address{}
+		copy((*tx.Deployer)[:], b)
+	} else if len(b) != 0 {
 		return fmt.Errorf("wrong size for Deployer: %d", len(b))
 	}
-	tx.Deployer = &common.Address{}
-	copy((*tx.Deployer)[:], b)
 
 	if tx.DeployerData, err = s.Bytes(); err != nil {
 		return err
@@ -483,11 +496,13 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
-	if len(b) != 20 {
+
+	if len(b) == 20 {
+		tx.Paymaster = &common.Address{}
+		copy((*tx.Paymaster)[:], b)
+	} else if len(b) != 0 {
 		return fmt.Errorf("wrong size for Paymaster: %d", len(b))
 	}
-	tx.Paymaster = &common.Address{}
-	copy((*tx.Paymaster)[:], b)
 
 	if tx.PaymasterData, err = s.Bytes(); err != nil {
 		return err
@@ -549,8 +564,7 @@ func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 	defer pooledBuf.Put(b)
 	// encode TxType
 	b[0] = AccountAbstractionTxType
-	b[1] = 0x0
-	if _, err := w.Write(b[:2]); err != nil {
+	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
 	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
@@ -572,7 +586,7 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost() (uint64, error)
 	data = append(data, tx.DeployerData...)
 	data = append(data, tx.ExecutionData...)
 	data = append(data, tx.PaymasterData...)
-	gas, _, overflow := fixedgas.IntrinsicGas(data, uint64(len(tx.AccessList)), uint64(tx.AccessList.StorageKeys()), true, true, true, true, true, uint64(len(tx.Authorizations))) // NOTE: should read homestead and 2028 config from chainconfig
+	gas, _, overflow := fixedgas.IntrinsicGas(data, uint64(len(tx.AccessList)), uint64(tx.AccessList.StorageKeys()), true, true, true, true, true, true, uint64(len(tx.Authorizations))) // NOTE: should read homestead and 2028 config from chainconfig
 
 	if overflow {
 		return 0, errors.New("overflow")
@@ -682,6 +696,7 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 		{Name: "maxFeePerGas", Type: "uint256"},
 		{Name: "maxPriorityFeePerGas", Type: "uint256"},
 		{Name: "builderFee", Type: "uint256"},
+		{Name: "senderValidationData", Type: "bytes"},
 		{Name: "paymaster", Type: "address"},
 		{Name: "paymasterData", Type: "bytes"},
 		{Name: "deployer", Type: "address"},
@@ -713,6 +728,7 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 		MaxFeePerGas:                tx.FeeCap,
 		MaxPriorityFeePerGas:        tx.Tip,
 		BuilderFee:                  tx.BuilderFee,
+		SenderValidationData:        tx.SenderValidationData,
 		Paymaster:                   *paymaster,
 		PaymasterData:               tx.PaymasterData,
 		Deployer:                    *deployer,
@@ -740,7 +756,7 @@ type ABIAccountAbstractTxn struct {
 	Deployer                    common.Address
 	DeployerData                []byte
 	ExecutionData               []byte
-	AuthorizationData           []byte
+	SenderValidationData        []byte
 }
 
 func FromProto(tx *typesproto.AccountAbstractionTransaction) *AccountAbstractionTransaction {
@@ -759,7 +775,7 @@ func FromProto(tx *typesproto.AccountAbstractionTransaction) *AccountAbstraction
 		FeeCap:                      uint256.NewInt(0).SetBytes(tx.FeeCap),
 		GasLimit:                    tx.Gas,
 		SenderAddress:               &senderAddress,
-		Authorizations:              convertProtoAuthorizations(tx.Authorizations),
+		SenderValidationData:        tx.SenderValidationData,
 		ExecutionData:               tx.ExecutionData,
 		Paymaster:                   &paymasterAddress,
 		PaymasterData:               tx.PaymasterData,
@@ -770,6 +786,7 @@ func FromProto(tx *typesproto.AccountAbstractionTransaction) *AccountAbstraction
 		PaymasterValidationGasLimit: tx.PaymasterValidationGasLimit,
 		PostOpGasLimit:              tx.PostOpGasLimit,
 		NonceKey:                    uint256.NewInt(0).SetBytes(tx.NonceKey),
+		Authorizations:              convertProtoAuthorizations(tx.Authorizations),
 	}
 }
 

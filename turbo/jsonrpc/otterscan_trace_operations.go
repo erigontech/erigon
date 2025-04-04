@@ -18,13 +18,16 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/tracers"
 )
 
 type OperationType int
@@ -44,7 +47,6 @@ type InternalOperation struct {
 }
 
 type OperationsTracer struct {
-	DefaultTracer
 	ctx     context.Context
 	Results []*InternalOperation
 }
@@ -56,18 +58,38 @@ func NewOperationsTracer(ctx context.Context) *OperationsTracer {
 	}
 }
 
-func (t *OperationsTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	if typ == vm.CALL && value.Uint64() != 0 {
+func (t *OperationsTracer) Tracer() *tracers.Tracer {
+	return &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnEnter: t.OnEnter,
+		},
+		GetResult: t.GetResult,
+		Stop:      t.Stop,
+	}
+}
+
+func (t *OperationsTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	if depth == 0 {
+		return
+	}
+
+	if vm.OpCode(typ) == vm.CALL && value.Uint64() != 0 {
 		t.Results = append(t.Results, &InternalOperation{OP_TRANSFER, from, to, (*hexutil.Big)(value.ToBig())})
 		return
 	}
-	if typ == vm.CREATE {
+	if vm.OpCode(typ) == vm.CREATE {
 		t.Results = append(t.Results, &InternalOperation{OP_CREATE, from, to, (*hexutil.Big)(value.ToBig())})
 	}
-	if typ == vm.CREATE2 {
+	if vm.OpCode(typ) == vm.CREATE2 {
 		t.Results = append(t.Results, &InternalOperation{OP_CREATE2, from, to, (*hexutil.Big)(value.ToBig())})
 	}
-	if typ == vm.SELFDESTRUCT {
+	if vm.OpCode(typ) == vm.SELFDESTRUCT {
 		t.Results = append(t.Results, &InternalOperation{OP_SELF_DESTRUCT, from, to, (*hexutil.Big)(value.ToBig())})
 	}
 }
+
+func (t *OperationsTracer) GetResult() (json.RawMessage, error) {
+	return json.RawMessage{}, nil
+}
+
+func (t *OperationsTracer) Stop(err error) {}
