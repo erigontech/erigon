@@ -615,19 +615,19 @@ Loop:
 
 		mxExecBlocks.Add(1)
 
-		if shouldGenerateChangesets {
+		if shouldGenerateChangesets || cfg.chainConfig.IsArbitrum() {
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
-			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix())
+			rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix())
 			if err != nil {
 				return err
 			}
 
-			//if !bytes.Equal(rh, header.Root.Bytes()) {
-			//	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-			//	return errors.New("wrong trie root")
-			//}
+			if !bytes.Equal(rh, header.Root.Bytes()) {
+				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+				return errors.New("wrong trie root")
+			}
 
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
