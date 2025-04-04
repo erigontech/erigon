@@ -1667,7 +1667,9 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 			return err
 		}
 	}
-	s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
+	if !s.tx.readOnly {
+		s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
+	}
 	return nil
 }
 
@@ -1683,7 +1685,9 @@ func (s *cursor2iter) advance() (err error) {
 			return err
 		}
 	}
-	s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
+	if !s.tx.readOnly {
+		s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
+	}
 	return nil
 }
 
