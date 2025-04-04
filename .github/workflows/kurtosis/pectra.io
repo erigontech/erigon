@@ -5,8 +5,8 @@ participants_matrix:
   cl:
     - cl_type: teku
       cl_image: consensys/teku:develop
-    - cl_type: lodestar
-      cl_image: chainsafe/lodestar:v1.28.1
+    - cl_type: lighthouse
+      cl_image: sigp/lighthouse:v7.0.0-beta.5
 
 network_params:
   electra_fork_epoch: 1
