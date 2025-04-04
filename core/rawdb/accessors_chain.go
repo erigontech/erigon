@@ -1302,6 +1302,7 @@ func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
 		if blockNum > toBlockNum || pruneLimit == 0 {
 			break
 		}
+		log.Warn("[dbg] prune1 iter", "prevBlockNum", prevBlockNum, "blockNum", blockNum, "pruneLimit", pruneLimit)
 		if prevBlockNum != blockNum {
 			prevBlockNum = blockNum
 			pruneLimit--
