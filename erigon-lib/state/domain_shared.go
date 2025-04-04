@@ -1063,9 +1063,11 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	}
 
 	if len(code) > 0 {
+		sdc.mu.Lock()
 		sdc.keccak.Reset()
 		sdc.keccak.Write(code)
 		sdc.keccak.Read(u.CodeHash[:])
+		sdc.mu.Unlock()
 		u.Flags |= commitment.CodeUpdate
 	} else {
 		u.CodeHash = commitment.EmptyCodeHashArray
