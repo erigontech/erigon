@@ -28,7 +28,6 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/gballet/go-verkle"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -36,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -1272,27 +1270,12 @@ func ReadReceiptsCache(db kv.Tx, blockHash common.Hash, blockNum uint64) (res ty
 
 // PruneReceiptsCache [0,blockNum) removes all receipt until given block number.
 func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
-	{
-		fst, _ := kv.FirstKey(tx, kv.ReceiptsCache)
-		lst, _ := kv.LastKey(tx, kv.ReceiptsCache)
-		log.Warn("[dbg] see", "fst", binary.BigEndian.Uint64(fst), "lst", binary.BigEndian.Uint64(lst), "pruneLimit", pruneLimit, "toBlockNum", toBlockNum)
-
-		rng, err := tx.Range(kv.ReceiptsCache, nil, hexutil.EncodeTs(toBlockNum), order.Asc, -1)
-		if err != nil {
-			return err
-		}
-		defer rng.Close()
-		cnt, _ := stream.CountKV(rng)
-		log.Warn("[dbg] see", "fst", binary.BigEndian.Uint64(fst), "lst", binary.BigEndian.Uint64(lst), "pruneLimit", pruneLimit, "toBlockNum", toBlockNum, "canDeleteCnt", cnt)
-	}
-
 	rng, err := tx.RwCursor(kv.ReceiptsCache)
 	if err != nil {
 		return err
 	}
 	defer rng.Close()
 
-	a := 0
 	var prevBlockNum uint64
 	for k, _, err := rng.First(); k != nil; k, _, err = rng.Next() {
 		if err != nil {
@@ -1302,7 +1285,6 @@ func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
 		if blockNum > toBlockNum || pruneLimit == 0 {
 			break
 		}
-		log.Warn("[dbg] prune1 iter", "prevBlockNum", prevBlockNum, "blockNum", blockNum, "pruneLimit", pruneLimit)
 		if prevBlockNum != blockNum {
 			prevBlockNum = blockNum
 			pruneLimit--
@@ -1311,9 +1293,7 @@ func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
 		if err := rng.DeleteCurrent(); err != nil {
 			return err
 		}
-		a++
 	}
-	log.Warn("[dbg] pruned2", "a", a)
 
 	return nil
 }
