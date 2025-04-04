@@ -208,7 +208,7 @@ func (d Dirs) RenameOldVersions() error {
 	println("start rename old versions")
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
-		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool,
+		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
 		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
 	}
 
@@ -221,6 +221,41 @@ func (d Dirs) RenameOldVersions() error {
 			if !d.IsDir() && strings.HasPrefix(d.Name(), "v1-") {
 				println("d name:", d.Name())
 				newName := strings.Replace(d.Name(), "v1-", "v1.0-", 1)
+				oldPath := path
+				newPath := filepath.Join(filepath.Dir(path), newName)
+
+				if err := os.Rename(oldPath, newPath); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (d Dirs) RenameNewVersions() error {
+	println("start rename new versions")
+	directories := []string{
+		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
+		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
+	}
+
+	for _, dirPath := range directories {
+		err := filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+
+			if !d.IsDir() && strings.HasPrefix(d.Name(), "v1.0-") {
+				println("d name:", d.Name())
+				newName := strings.Replace(d.Name(), "v1.0-", "v1-", 1)
 				oldPath := path
 				newPath := filepath.Join(filepath.Dir(path), newName)
 
