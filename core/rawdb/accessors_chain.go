@@ -1277,6 +1277,10 @@ func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
 	}
 	defer rng.Close()
 
+	fst, _ := kv.FirstKey(tx, kv.ReceiptsCache)
+	lst, _ := kv.LastKey(tx, kv.ReceiptsCache)
+	log.Warn("[dbg] see", "fst", binary.BigEndian.Uint64(fst), "lst", binary.BigEndian.Uint64(lst))
+
 	var prevBlockNum uint64
 	for rng.HasNext() {
 		k, _, err := rng.Next()
