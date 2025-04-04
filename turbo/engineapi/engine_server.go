@@ -157,7 +157,10 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 		if executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
 		}
+	} else if executionRequests == nil {
+		return &rpc.InvalidParamsError{Message: "missing requests list"}
 	}
+
 	return nil
 }
 
