@@ -2856,7 +2856,7 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 	}
 
 	if p.root.root.extLen == 0 {
-		zeroPrefixBranch, _, err := p.root.ctx.Branch(KeyToHexNibbleHash([]byte{0}))
+		zeroPrefixBranch, _, err := p.root.ctx.Branch(hexNibblesToCompactBytes([]byte{0}))
 		if err != nil {
 			return nil, fmt.Errorf("checking shortes prefix branch failed: %w", err)
 		}
