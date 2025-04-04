@@ -1286,7 +1286,7 @@ func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
 		log.Warn("[dbg] see", "fst", binary.BigEndian.Uint64(fst), "lst", binary.BigEndian.Uint64(lst), "pruneLimit", pruneLimit, "toBlockNum", toBlockNum, "canDeleteCnt", cnt)
 	}
 
-	rng, err := tx.Range(kv.ReceiptsCache, nil, hexutil.EncodeTs(toBlockNum), order.Asc, -1)
+	rng, err := tx.RwCursor(kv.ReceiptsCache)
 	if err != nil {
 		return err
 	}
@@ -1294,28 +1294,23 @@ func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
 
 	a := 0
 	var prevBlockNum uint64
-	for rng.HasNext() {
-		k, _, err := rng.Next()
+	for k, _, err := rng.First(); k != nil; k, _, err = rng.Next() {
 		if err != nil {
 			return fmt.Errorf("prune receipts for block %d: %w", toBlockNum, err)
 		}
 		blockNum := binary.BigEndian.Uint64(k)
-		log.Warn("[dbg] pruned1", "blockNum", blockNum, "txIndex", binary.BigEndian.Uint32(k[8+32:]), "prevBlockNum", prevBlockNum, "pruneLimit", pruneLimit)
-
+		if blockNum > toBlockNum || pruneLimit == 0 {
+			break
+		}
 		if prevBlockNum != blockNum {
 			prevBlockNum = blockNum
-			if pruneLimit == 0 {
-				log.Warn("[dbg] pruned", "pruneLimit", pruneLimit)
-				break
-			}
-
 			pruneLimit--
 		}
 
-		a++
-		if err := tx.Delete(kv.ReceiptsCache, k); err != nil {
-			return fmt.Errorf("prune receipts for block %d: %w", blockNum, err)
+		if err := rng.DeleteCurrent(); err != nil {
+			return err
 		}
+		a++
 	}
 	log.Warn("[dbg] pruned2", "a", a)
 

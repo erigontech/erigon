@@ -34,7 +34,6 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
 	"golang.org/x/sync/semaphore"
@@ -1575,9 +1574,6 @@ func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By,
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
-	if !s.tx.readOnly {
-		s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
-	}
 	return s, nil
 }
 
@@ -1685,9 +1681,6 @@ func (s *cursor2iter) advance() (err error) {
 			return err
 		}
 	}
-	if !s.tx.readOnly {
-		s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
-	}
 	return nil
 }
 
@@ -1730,9 +1723,6 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 	if err = s.advance(); err != nil {
 		return nil, nil, err
 	}
-	if !s.tx.readOnly {
-		s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
-	}
 	return k, v, nil
 }
 
@@ -1746,9 +1736,6 @@ func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []
 	if err := s.init(table, tx); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
-	}
-	if !s.tx.readOnly {
-		s.nextV = common.Copy(s.nextV)
 	}
 	return s, nil
 }
@@ -1896,9 +1883,6 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	v = s.nextV
 	if err = s.advance(); err != nil {
 		return nil, nil, err
-	}
-	if !s.tx.readOnly {
-		s.nextV = common.Copy(s.nextV)
 	}
 	return s.key, v, nil
 }
