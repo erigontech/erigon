@@ -2794,7 +2794,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", n, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
 				}
 				if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
-					return fmt.Errorf("followAndUpdate[%x]: %w", n, err)
+					panic(fmt.Errorf("followAndUpdate[%x]: %w", n, err))
 				}
 				return nil
 			}, etl.TransformArgs{Quit: ctx.Done()})
@@ -2845,6 +2845,13 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 
 // Computing commitment root hash. If possible, use parallel commitment and after evaluation decides, if it can be used next time
 func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
+	start := time.Now()
+	wasConcurrent := updates.IsConcurrentCommitment()
+	updCount := updates.Size()
+	defer func(s time.Time, wasConcurrent bool) {
+		fmt.Printf("commitment time %s; keys %s; was concurrent: %t\n", time.Since(s), common.PrettyCounter(updCount), wasConcurrent)
+	}(start, wasConcurrent)
+
 	switch updates.IsConcurrentCommitment() {
 	case true:
 		rootHash, err = updates.ParallelHashSort(ctx, p)
