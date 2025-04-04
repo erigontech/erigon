@@ -1270,8 +1270,8 @@ func ReadReceipts(db kv.Tx, blockHash common.Hash, blockNum uint64) (res types.R
 }
 
 // PruneReceipts [1,blockNum) removes all receipt until given block number.
-func PruneReceipts(tx kv.RwTx, blockNum uint64, pruneLimit int) error {
-	rng, err := tx.Range(kv.Receipts, hexutil.EncodeTs(1), hexutil.EncodeTs(blockNum), order.Asc, -1)
+func PruneReceipts(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
+	rng, err := tx.Range(kv.Receipts, hexutil.EncodeTs(1), hexutil.EncodeTs(toBlockNum), order.Asc, -1)
 	if err != nil {
 		return err
 	}
@@ -1281,15 +1281,15 @@ func PruneReceipts(tx kv.RwTx, blockNum uint64, pruneLimit int) error {
 	for rng.HasNext() {
 		k, _, err := rng.Next()
 		if err != nil {
-			return fmt.Errorf("prune receipts for block %d: %w", blockNum, err)
+			return fmt.Errorf("prune receipts for block %d: %w", toBlockNum, err)
 		}
-		blockNum = binary.BigEndian.Uint64(k)
+		toBlockNum = binary.BigEndian.Uint64(k)
 		if err := tx.Delete(kv.Receipts, k); err != nil {
-			return fmt.Errorf("prune receipts for block %d: %w", blockNum, err)
+			return fmt.Errorf("prune receipts for block %d: %w", toBlockNum, err)
 		}
 
-		if prevBlockNum != blockNum {
-			prevBlockNum = blockNum
+		if prevBlockNum != toBlockNum {
+			prevBlockNum = toBlockNum
 			if pruneLimit <= 0 {
 				break
 			}
