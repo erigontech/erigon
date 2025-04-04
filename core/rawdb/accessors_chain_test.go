@@ -571,7 +571,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		require.NoError(err)
 		require.NotEmpty(rs)
 
-		require.NoError(rawdb.PruneReceiptsCache(tx, 2, 0))
+		require.NoError(rawdb.PruneReceiptsCache(tx, 2, 1))
 		rs, err = rawdb.ReadReceiptsCache(tx, hash, 1)
 		require.NoError(err)
 		require.Empty(rs)
