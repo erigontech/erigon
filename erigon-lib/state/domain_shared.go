@@ -25,6 +25,7 @@ import (
 	"math"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -133,10 +134,19 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	}
 
 	sd.SetTxNum(0)
-	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
+	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, commitment.VariantParallelHexPatricia)
 
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
+	}
+
+	if pt, ok := sd.sdCtx.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok {
+		nextConcurrent, err := pt.CanDoConcurrentNext()
+		if err != nil {
+			return nil, err
+		}
+
+		sd.sdCtx.updates.SetConcurrentCommitment(nextConcurrent)
 	}
 	return sd, nil
 }
@@ -899,6 +909,7 @@ type SharedDomainsCommitmentContext struct {
 	justRestored  atomic.Bool
 
 	limitReadAsOfTxNum uint64
+	mu                 sync.Mutex
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64) {
@@ -933,8 +944,11 @@ func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
 	prefS := toStringZeroCopy(pref)
+
+	sdc.mu.Lock()
 	cached, ok := sdc.branches[prefS]
 	if ok {
+		sdc.mu.Unlock()
 		// cached value is already transformed/clean to read.
 		// Cache should ResetBranchCache after each commitment computation
 		return cached.data, cached.step, nil
@@ -942,6 +956,7 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 
 	v, step, err := sdc.sharedDomains.LatestCommitment(pref)
 	if err != nil {
+		sdc.mu.Unlock()
 		return nil, 0, fmt.Errorf("branch failed: %w", err)
 	}
 	if sdc.sharedDomains.trace {
@@ -950,6 +965,7 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
 	// cache branch until ResetBranchCache called
 	sdc.branches[prefS] = cachedBranch{data: v, step: step}
+	sdc.mu.Unlock()
 
 	if len(v) == 0 {
 		return nil, 0, nil
@@ -962,12 +978,17 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
+	sdc.mu.Lock()
 	sdc.branches[prefixS] = cachedBranch{data: data, step: prevStep}
+	defer sdc.mu.Unlock()
 
 	return sdc.sharedDomains.updateCommitmentData(prefixS, data, prevData, prevStep)
 }
 
 func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAccount []byte, err error) {
+	sdc.mu.Lock()
+	defer sdc.mu.Unlock()
+
 	if sdc.limitReadAsOfTxNum > 0 {
 		encAccount, _, err = sdc.sharedDomains.getLatestFromFiles(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 		if err != nil {
@@ -983,6 +1004,8 @@ func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAcco
 }
 
 func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byte, err error) {
+	sdc.mu.Lock()
+	defer sdc.mu.Unlock()
 	if sdc.limitReadAsOfTxNum > 0 {
 		code, _, err = sdc.sharedDomains.getLatestFromFiles(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 		if err != nil {
@@ -997,6 +1020,8 @@ func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byt
 	return code, nil
 }
 func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []byte, err error) {
+	sdc.mu.Lock()
+	defer sdc.mu.Unlock()
 	if sdc.limitReadAsOfTxNum > 0 {
 		enc, _, err = sdc.sharedDomains.getLatestFromFiles(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 		if err != nil {
@@ -1047,9 +1072,11 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	}
 
 	if len(code) > 0 {
+		sdc.mu.Lock()
 		sdc.keccak.Reset()
 		sdc.keccak.Write(code)
 		sdc.keccak.Read(u.CodeHash[:])
+		sdc.mu.Unlock()
 		u.Flags |= commitment.CodeUpdate
 	} else {
 		u.CodeHash = commitment.EmptyCodeHashArray
@@ -1196,6 +1223,11 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 		if err != nil {
 			return nil, err
 		}
+	case *commitment.ParallelPatriciaHashed:
+		state, err = trie.RootTrie().EncodeCurrentState(nil)
+		if err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("unsupported state storing for patricia trie type: %T", sdc.patriciaTrie)
 	}
@@ -1224,7 +1256,7 @@ func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // LatestCommitmentState searches for last encoded state for CommitmentContext.
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, txNum uint64, state []byte, err error) {
-	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
+	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie && sdc.patriciaTrie.Variant() != commitment.VariantParallelHexPatricia {
 		return 0, 0, nil, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 	state, _, err = sdc.Branch(keyCommitmentState)
@@ -1261,20 +1293,37 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		}
 		// nil value is acceptable for SetState and will reset trie
 	}
-	if hext, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
-		if err := hext.SetState(cs.trieState); err != nil {
-			return 0, 0, fmt.Errorf("failed restore state : %w", err)
+	tv := sdc.patriciaTrie.Variant()
+
+	var hext *commitment.HexPatriciaHashed
+	if tv == commitment.VariantHexPatriciaTrie {
+		var ok bool
+		hext, ok = sdc.patriciaTrie.(*commitment.HexPatriciaHashed)
+		if !ok {
+			return 0, 0, errors.New("cannot typecast hex patricia trie")
 		}
-		sdc.justRestored.Store(true) // to prevent double reset
-		if sdc.sharedDomains.trace {
-			rootHash, err := hext.RootHash()
-			if err != nil {
-				return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
-			}
-			fmt.Printf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash)
+	}
+	if tv == commitment.VariantParallelHexPatricia {
+		phext, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed)
+		if !ok {
+			return 0, 0, errors.New("cannot typecast parallel hex patricia trie")
 		}
-	} else {
+		hext = phext.RootTrie()
+	}
+	if tv == commitment.VariantBinPatriciaTrie || hext == nil {
 		return 0, 0, errors.New("state storing is only supported hex patricia trie")
+	}
+
+	if err := hext.SetState(cs.trieState); err != nil {
+		return 0, 0, fmt.Errorf("failed restore state : %w", err)
+	}
+	sdc.justRestored.Store(true) // to prevent double reset
+	if sdc.sharedDomains.trace {
+		rootHash, err := hext.RootHash()
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
+		}
+		fmt.Printf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash)
 	}
 	return cs.blockNum, cs.txNum, nil
 }
