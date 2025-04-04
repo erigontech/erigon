@@ -42,6 +42,7 @@ func TestMarkedAppendableRegistration(t *testing.T) {
 }
 
 func registerEntity(dirs datadir.Dirs, name string) ae.AppendableId {
+	minAggStep := uint64(10)
 	return registerEntityWithSnapshotConfig(dirs, name, &ae.SnapshotConfig{
 		SnapshotCreationConfig: &ae.SnapshotCreationConfig{
 			RootNumPerStep: 10,
@@ -49,6 +50,8 @@ func registerEntity(dirs datadir.Dirs, name string) ae.AppendableId {
 			MinimumSize:    10,
 			SafetyMargin:   5,
 		},
+		Directory: dirs.Snap,
+		Parser:    ae.NewE2ParserWithStep(minAggStep, dirs.Snap, name, []string{name}),
 	})
 }
 

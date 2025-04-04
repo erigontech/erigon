@@ -74,7 +74,7 @@ func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified,
 
 	entityRegistry[curr] = *h
 	id := AppendableId(curr)
-	h.snapshotCreationConfig.SetupConfig(id, h.snapshotDir, pre)
+	h.snapshotCreationConfig.LoadPreverified(pre)
 	curr++
 
 	mu.Unlock()
@@ -132,7 +132,7 @@ func (a AppendableId) Name() string {
 	return entityRegistry[a].name
 }
 
-func (a AppendableId) SnapshotPrefix() string {
+func (a AppendableId) SnapshotTag() string {
 	return entityRegistry[a].snapshotNameBase
 }
 

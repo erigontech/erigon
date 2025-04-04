@@ -33,13 +33,17 @@ func TestUnmarkedAppendableRegistration(t *testing.T) {
 }
 
 func setupBorSpans(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (AppendableId, *state.Appendable[UnmarkedTxI]) {
-	borspanId := registerEntityWithSnapshotConfig(dir, "borspans", &ae.SnapshotConfig{
+	minAggStep := uint64(10)
+	name := "borspans"
+	borspanId := registerEntityWithSnapshotConfig(dir, name, &ae.SnapshotConfig{
 		SnapshotCreationConfig: &ae.SnapshotCreationConfig{
-			RootNumPerStep: 10,
+			RootNumPerStep: minAggStep,
 			MergeStages:    []uint64{200, 400},
 			MinimumSize:    10,
 			SafetyMargin:   5,
 		},
+		Directory: dir.Snap,
+		Parser:    ae.NewE2ParserWithStep(minAggStep, dir.Snap, name, []string{name}),
 	})
 	require.Equal(t, ae.AppendableId(0), borspanId)
 
