@@ -34,6 +34,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
 	"golang.org/x/sync/semaphore"
@@ -1666,6 +1667,7 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 			return err
 		}
 	}
+	s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
 	return nil
 }
 
@@ -1681,6 +1683,7 @@ func (s *cursor2iter) advance() (err error) {
 			return err
 		}
 	}
+	s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
 	return nil
 }
 
