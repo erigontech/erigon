@@ -297,8 +297,6 @@ const (
 	// GasChangeDelegatedDesignation is the amount of gas that will be charged for resolution of delegated designation.
 	GasChangeDelegatedDesignation GasChangeReason = 15
 
-	GasChangeCallContractEOFCreation GasChangeReason = 15
-
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.
 	GasChangeIgnored GasChangeReason = 0xFF

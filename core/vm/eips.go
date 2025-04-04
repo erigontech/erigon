@@ -725,7 +725,7 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	initContainer := scope.Contract.SubcontainerAt(int(initContainerIdx))
 	// TODO(racytech): this should be done in `dynamicGas` func, leave it here for now
 	hashingCharge := uint64(6 * ((len(initContainer.rawData) + 31) / 32))
-	if ok := scope.Contract.UseGas(hashingCharge, interpreter.Config().Tracer, tracing.GasChangeCallContractEOFCreation); !ok {
+	if ok := scope.Contract.UseGas(hashingCharge, interpreter.Config().Tracer, tracing.GasChangeUnspecified); !ok {
 		return nil, ErrOutOfGas
 	}
 	igas := int64(gas) - int64(hashingCharge) // TODO(racytech): make it better (doesn't look good)
@@ -735,7 +735,7 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	gas = uint64(igas)
 
 	gas -= gas / 64
-	if ok := scope.Contract.UseGas(gas, interpreter.Config().Tracer, tracing.GasChangeCallContractEOFCreation); !ok {
+	if ok := scope.Contract.UseGas(gas, interpreter.Config().Tracer, tracing.GasChangeUnspecified); !ok {
 		return nil, ErrOutOfGas
 	}
 	if size.Uint64() > 0 {
