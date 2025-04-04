@@ -117,9 +117,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			var receipt *types.Receipt
 			if txTask.TxIndex >= 0 {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
-				if err := rawdb.WriteReceipt(se.applyTx, txTask.BlockNum, txTask.BlockHash, uint32(txTask.TxIndex), receipt); err != nil {
-					return false, err
-				}
+
 			}
 			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
 				return false, err
@@ -131,7 +129,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 				if lastReceipt == nil {
 					return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
 				}
-				if err := rawdb.WriteReceipt(se.applyTx, txTask.BlockNum, txTask.BlockHash, uint32(txTask.TxIndex), lastReceipt); err != nil {
+				if err := rawdb.WriteReceiptCache(se.applyTx, txTask.BlockNum, txTask.BlockHash, uint32(txTask.TxIndex), lastReceipt); err != nil {
 					return false, err
 				}
 				if len(lastReceipt.Logs) > 0 {

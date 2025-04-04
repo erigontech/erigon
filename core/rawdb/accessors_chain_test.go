@@ -520,12 +520,12 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
 	// Insert the receipt slice into the database and check presence
-	require.NoError(rawdb.WriteReceipts(tx, 1, hash, receipts))
+	require.NoError(rawdb.WriteReceiptsCache(tx, 1, hash, receipts))
 
 	b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(err)
 	require.NotNil(b)
-	rs, err := rawdb.ReadReceipts(tx, hash, 1)
+	rs, err := rawdb.ReadReceiptsCache(tx, hash, 1)
 	require.NoError(err)
 	require.NotNil(rs)
 
@@ -543,12 +543,12 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(err)
 	require.Nil(b)
 
-	rs, err = rawdb.ReadReceipts(tx, hash, 1)
+	rs, err = rawdb.ReadReceiptsCache(tx, hash, 1)
 	require.NoError(err)
 	require.NotNil(rs)
 
 	// Ensure that receipts without metadata can be returned without the block body too
-	rFromDB, err := rawdb.ReadReceipts(tx, hash, 1)
+	rFromDB, err := rawdb.ReadReceiptsCache(tx, hash, 1)
 	require.NoError(err)
 	if err := checkReceiptsRLP(rFromDB, receipts); err != nil {
 		t.Fatal(err)
@@ -556,17 +556,27 @@ func TestBlockReceiptStorage(t *testing.T) {
 	rawdb.WriteHeader(tx, header)
 	// Sanity check that body alone without the receipt is a full purge
 	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
-	require.NoError(rawdb.PruneReceipts(tx, 3, 1))
 	b, _, err = br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(err)
 	require.NotNil(b)
 
-	rs, err = rawdb.ReadReceipts(tx, hash, 1)
-	require.NoError(err)
-	require.Nil(rs)
-	if len(rs) != 0 {
-		t.Fatalf("deleted receipts returned: %v", rs)
+	{ //prune: [0, to)
+		require.NoError(rawdb.PruneReceiptsCache(tx, 1, 1))
+		rs, err = rawdb.ReadReceiptsCache(tx, hash, 1)
+		require.NoError(err)
+		require.NotEmpty(rs)
+
+		require.NoError(rawdb.PruneReceiptsCache(tx, 2, 0))
+		rs, err = rawdb.ReadReceiptsCache(tx, hash, 1)
+		require.NoError(err)
+		require.NotEmpty(rs)
+
+		require.NoError(rawdb.PruneReceiptsCache(tx, 2, 0))
+		rs, err = rawdb.ReadReceiptsCache(tx, hash, 1)
+		require.NoError(err)
+		require.Empty(rs)
 	}
+
 }
 
 // Tests block storage and retrieval operations with withdrawals.

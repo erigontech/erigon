@@ -103,8 +103,8 @@ const (
 	EthTx    = "BlockTransaction" // tx_id_u64 -> rlp(tx)
 	MaxTxNum = "MaxTxNum"         // block_number_u64 -> max_tx_num_in_block_u64
 
-	Receipts = "Receipt"        // block_num_u64 -> canonical block receipts (non-canonical are not stored)
-	Log      = "TransactionLog" // block_num_u64 + txId -> logs of transaction
+	ReceiptsCache = "ReceiptCache"   // block_num_u64 + block_hash + txnIndex -> txn receipt
+	Log           = "TransactionLog" // block_num_u64 + txId -> logs of transaction
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
@@ -343,7 +343,7 @@ var ChaindataTables = []string{
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
-	Receipts,
+	ReceiptsCache,
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,

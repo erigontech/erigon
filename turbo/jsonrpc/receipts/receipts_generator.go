@@ -194,7 +194,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	}
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	if receipts, err := rawdb.ReadReceipts(tx, blockHash, block.NumberU64()); err != nil {
+	if receipts, err := rawdb.ReadReceiptsCache(tx, blockHash, block.NumberU64()); err != nil {
 		return nil, err
 	} else if len(receipts) > 0 {
 		return receipts, nil
