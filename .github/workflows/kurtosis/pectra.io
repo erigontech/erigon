@@ -21,9 +21,9 @@ assertoor_params:
   run_stability_check: true
   run_block_proposal_check: true
   tests:
-    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/deposit-request.io
-    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/el-triggered-consolidations-test.io
-    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/el-triggered-withdrawal.io
-    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/el-triggered-exit.io
-    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/eip7702-test.io
-    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/eip7702-txpool-invalidation.io
+    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/release/3.0/.github/workflows/kurtosis/deposit-request.io
+    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/release/3.0/.github/workflows/kurtosis/el-triggered-consolidations-test.io
+    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/release/3.0/.github/workflows/kurtosis/el-triggered-withdrawal.io
+    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/release/3.0/.github/workflows/kurtosis/el-triggered-exit.io
+    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/release/3.0/.github/workflows/kurtosis/eip7702-test.io
+    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/release/3.0/.github/workflows/kurtosis/eip7702-txpool-invalidation.io
