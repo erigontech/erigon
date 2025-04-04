@@ -2862,22 +2862,29 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 		return nil, err
 	}
 
+	nextConcurrent, err := p.CanDoConcurrentNext()
+	if err != nil {
+		return nil, err
+	}
+	updates.SetConcurrentCommitment(nextConcurrent)
+	return rootHash, nil
+}
+
+func (p *ParallelPatriciaHashed) CanDoConcurrentNext() (bool, error) {
 	if p.root.root.extLen == 0 {
 		zeroPrefixBranch, _, err := p.root.ctx.Branch(hexNibblesToCompactBytes([]byte{0}))
 		if err != nil {
-			return nil, fmt.Errorf("checking shortes prefix branch failed: %w", err)
+			return false, fmt.Errorf("checking shortes prefix branch failed: %w", err)
 		}
 		if len(zeroPrefixBranch) > 4 { // tm+am+cells
 			// if root has no extension and there is a branch of zero prefix, can use parallel commitment next time
-			updates.SetConcurrentCommitment(true)
-			fmt.Println("use || trie next")
-			return rootHash, nil
+			fmt.Printf("use concurrent next\n")
+			return true, nil
 		}
 		fmt.Printf(" 00 [branch %x len %d]\n", zeroPrefixBranch, len(zeroPrefixBranch))
 	}
-	updates.SetConcurrentCommitment(false)
 	fmt.Printf("use seq trie next [root extLen=%d][ext '%x']\n", p.root.root.extLen, p.root.root.extension[:p.root.root.extLen])
-	return rootHash, nil
+	return false, nil
 }
 
 // Variant returns commitment trie variant

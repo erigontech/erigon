@@ -139,6 +139,15 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
 	}
+
+	if pt, ok := sd.sdCtx.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok {
+		nextConcurrent, err := pt.CanDoConcurrentNext()
+		if err != nil {
+			return nil, err
+		}
+
+		sd.sdCtx.updates.SetConcurrentCommitment(nextConcurrent)
+	}
 	return sd, nil
 }
 
