@@ -149,7 +149,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	if receipt, err := rawdb.ReadReceipt(tx, header.Number.Uint64(), header.Hash(), uint32(index)); err != nil {
-		panic(err)
 		return nil, err
 	} else if receipt != nil {
 		return receipt, nil
@@ -159,13 +158,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	genEnv, err := g.PrepareEnv(ctx, header, cfg, tx, index)
 	if err != nil {
-		panic(err)
 		return nil, err
 	}
 
 	cumGasUsed, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 	if err != nil {
-		panic(err)
 		return nil, err
 	}
 
