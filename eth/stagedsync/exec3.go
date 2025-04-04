@@ -205,6 +205,10 @@ var bz int64
 
 var totalbz int64
 
+var bz2 int64
+
+var totalbz2 int64
+
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer,
 	parallel bool, //nolint
@@ -458,7 +462,6 @@ func ExecV3(ctx context.Context,
 
 	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
-
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum. this is as a safety net in chains
@@ -627,11 +630,27 @@ Loop:
 
 			agg.BuildFilesInBackground(outputTxNum.Load())
 		} else {
+
 			se := executor.(*serialExecutor)
+			se.updates = make(chan *Updates)
+			go func() {
+				for {
+					u := <-se.updates
+					if u == nil {
+						return
+					}
+					m := make([]byte, len(u.hashKey))
+					copy(m, u.hashKey) // Ensures a clean, Go-pointer-free slice
 
+					n := make([]byte, len(u.key))
+					copy(n, u.key)
+					se.doms.GetCommitmentContext().ROTrie.TraverseKey(m, n, nil)
+				}
+			}()
 			se.skipPostEvaluation = skipPostEvaluation
-
 			continueLoop, err := se.execute(ctx, txTasks)
+			se.updates <- nil
+
 			if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
 				hooks.OnBlockEnd(err)
 			}
@@ -656,7 +675,6 @@ Loop:
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
-			fmt.Println("shota executor changes", executor.domains().GetCommitmentContext().KeysCount())
 
 			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix())
 			if err != nil {
@@ -665,8 +683,7 @@ Loop:
 			m := time.Since(start).Microseconds()
 			totalbz += m
 			bz++
-			fmt.Println("shota average ComputeCommitment total", (totalbz/bz)/1000)
-			fmt.Println("shota ComputeCommitment total", m)
+			fmt.Println("shota average ComputeCommitment total", (totalbz/bz)/1000, time.Since(start).Milliseconds())
 
 			//if !bytes.Equal(rh, header.Root.Bytes()) {
 			//	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
@@ -911,12 +928,10 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
-	start := time.Now()
 	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), e.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
-	fmt.Println("shota flush compute", atomic.AddInt64(&flusht, time.Since(start).Microseconds())/1000)
 	if cfg.blockProduction {
 		header.Root = common.BytesToHash(computedRootHash)
 		return true, nil

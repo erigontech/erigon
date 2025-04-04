@@ -4,14 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
-	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/log/v3"
 
+	"github.com/erigontech/erigon-lib/commitment"
 	state2 "github.com/erigontech/erigon-lib/state"
+
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
@@ -19,13 +21,19 @@ import (
 	"github.com/erigontech/erigon/core/types"
 )
 
+type Updates struct {
+	key     []byte
+	hashKey []byte
+}
 type serialExecutor struct {
 	txExecutor
 	skipPostEvaluation bool
+	m                  sync.Mutex
 	// outputs
 	txCount     uint64
 	usedGas     uint64
 	blobGasUsed uint64
+	updates     chan *Updates
 }
 
 func (se *serialExecutor) wait() error {
@@ -39,7 +47,6 @@ func (se *serialExecutor) status(ctx context.Context, commitThreshold uint64) er
 func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (cont bool, err error) {
 	var z int64
 	processedKeys := 0
-	fmt.Println("shota executing ", z, processedKeys)
 	for _, txTask := range tasks {
 		if txTask.Error != nil {
 			return false, nil
@@ -53,7 +60,19 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			processedKeys++
 			if len(key) != 20 && len(key) != 0 {
 				z++
-				se.doms.GetCommitmentContext().ROTrie.TraverseKey(commitment.KeyToHexNibbleHash(key), key, nil)
+				if se.updates != nil {
+					z := commitment.KeyToHexNibbleHash(key)
+					m := make([]byte, len(key))
+					copy(m, key) // Ensures a clean, Go-pointer-free slice
+
+					n := make([]byte, len(z))
+					copy(n, z)
+					se.updates <- &Updates{
+						key:     m,
+						hashKey: n,
+					}
+				}
+
 			}
 		}
 

@@ -1724,7 +1724,6 @@ var bla int64
 var z int64
 
 func (hph *HexPatriciaHashed) Process(ctx context.Context, RoTrie *HexPatriciaHashedReader, updates *Updates, logPrefix string) (rootHash []byte, err error) {
-	fmt.Println("shota aq movida", z, updates.Size())
 	z++
 	var (
 		m      runtime.MemStats
@@ -1788,10 +1787,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, RoTrie *HexPatriciaHa
 	keyUpdates := make([]KeyUpdate, 0)
 	currentUpdate := PrefetchKeys
 	processedKeys := 0
-
-	a, b := RoTrie.RootHash()
-	c, d := hph.RootHash()
-	fmt.Println(a, b, c, d)
 
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		keyUpdates = append(keyUpdates, KeyUpdate{hashedKey: append([]byte{}, hashedKey...), plainKey: append([]byte{}, plainKey...), stateUpdate: stateUpdate})

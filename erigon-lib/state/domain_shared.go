@@ -24,6 +24,7 @@ import (
 	"math"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -95,6 +96,7 @@ type SharedDomains struct {
 	trace    bool //nolint
 	//muMaps   sync.RWMutex
 	//walLock sync.RWMutex
+	m sync.Mutex
 
 	domains [kv.DomainLen]map[string]dataWithPrevStep
 	storage *btree2.Map[string, dataWithPrevStep]
@@ -655,7 +657,6 @@ func (sd *SharedDomains) SetTrace(b bool) {
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	fmt.Println("shota computing commitment")
 	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
 	return
 }
@@ -898,6 +899,7 @@ type SharedDomainsCommitmentContext struct {
 	keccak        cryptozerocopy.KeccakState
 	updates       *commitment.Updates
 	reads         *commitment.Updates
+	m             sync.Mutex
 	// for building and updating commitment
 	RWTrie commitment.Trie
 	// read only patricia trie for building proofs (eth_getProof)
@@ -1026,6 +1028,8 @@ func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []b
 }
 
 func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitment.Update, err error) {
+	sdc.m.Lock()
+	defer sdc.m.Unlock()
 	encAccount, err := sdc.readAccount(plainKey)
 	if err != nil {
 		return nil, err
@@ -1076,6 +1080,8 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 }
 
 func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
+	sdc.m.Lock()
+	defer sdc.m.Unlock()
 	// Look in the summary table first
 	enc, err := sdc.readStorage(plainKey)
 	if err != nil {
@@ -1174,11 +1180,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.justRestored.Store(false)
 
 	if saveState {
-		s := time.Now()
 		if err := sdc.storeCommitmentState(blockNum, rootHash); err != nil {
 			return nil, err
 		}
-		fmt.Println("shota store state", time.Since(s).Microseconds())
 	}
 
 	return rootHash, err

@@ -157,9 +157,15 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		return nil
 	}
 
+	se := time.Now()
 	parallel := txc.Tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, cfg.vmConfig.Tracer, initialCycle, isMining); err != nil {
 		return err
+	}
+	if time.Since(se).Milliseconds() != 0 {
+		totalExecV3Time += time.Since(se).Microseconds()
+		mdaz++
+		fmt.Println("shota average ExecV3 total", (totalExecV3Time/mdaz)/1000, time.Since(se).Milliseconds())
 	}
 
 	return nil
