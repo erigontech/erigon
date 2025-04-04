@@ -5,15 +5,17 @@ participants_matrix:
   cl:
     - cl_type: teku
       cl_image: consensys/teku:develop
-    - cl_type: lodestar
-      cl_image: chainsafe/lodestar:v1.28.1
+    - cl_type: lighthouse
+      cl_image: sigp/lighthouse:v7.0.0-beta.5
 
 network_params:
   electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
   churn_limit_quotient: 16
-  seconds_per_slot: 2
+  seconds_per_slot: 3
+  genesis_delay: 90
+
 additional_services:
   - assertoor
   # - dora
