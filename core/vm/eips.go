@@ -725,7 +725,7 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	initContainer := scope.Contract.SubcontainerAt(int(initContainerIdx))
 	// TODO(racytech): this should be done in `dynamicGas` func, leave it here for now
 	hashingCharge := uint64(6 * ((len(initContainer.rawData) + 31) / 32))
-	if ok := scope.Contract.UseGas(hashingCharge, tracing.GasChangeCallContractEOFCreation); !ok {
+	if ok := scope.Contract.UseGas(hashingCharge, interpreter.Config().Tracer, tracing.GasChangeCallContractEOFCreation); !ok {
 		return nil, ErrOutOfGas
 	}
 	igas := int64(gas) - int64(hashingCharge) // TODO(racytech): make it better (doesn't look good)
@@ -735,7 +735,7 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	gas = uint64(igas)
 
 	gas -= gas / 64
-	if ok := scope.Contract.UseGas(gas, tracing.GasChangeCallContractEOFCreation); !ok {
+	if ok := scope.Contract.UseGas(gas, interpreter.Config().Tracer, tracing.GasChangeCallContractEOFCreation); !ok {
 		return nil, ErrOutOfGas
 	}
 	if size.Uint64() > 0 {
@@ -751,7 +751,7 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	}
 
 	scope.Stack.Push(&stackValue)
-	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.RefundGas(returnGas, interpreter.Config().Tracer, tracing.GasChangeCallLeftOverRefunded)
 	if suberr == ErrExecutionReverted {
 		interpreter.returnData = res // set REVERT data to return data buffer
 		return res, nil
@@ -805,7 +805,7 @@ func opTxnCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	}
 
 	scope.Stack.Push(&stackValue)
-	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.RefundGas(returnGas, interpreter.Config().Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	if suberr == ErrExecutionReverted {
 		interpreter.returnData = res // set REVERT data to return data buffer
@@ -902,7 +902,7 @@ func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	}
 	scope.Stack.Push(&dst256)
 
-	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.RefundGas(returnGas, interpreter.Config().Tracer, tracing.GasChangeCallLeftOverRefunded)
 	interpreter.returnData = ret
 
 	return ret, nil
@@ -922,7 +922,7 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 	if gas == 0 {
 		addr256.SetOne()
 		scope.Stack.Push(&addr256)
-		scope.Contract.RefundGas(gas, tracing.GasChangeCallLeftOverRefunded)
+		scope.Contract.RefundGas(gas, interpreter.Config().Tracer, tracing.GasChangeCallLeftOverRefunded)
 		interpreter.returnData = nil
 		return nil, nil
 	}
@@ -942,7 +942,7 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 	if !hasEOFMagic(code) { // TODO(racytech): see if this part is correct and can be done better
 		addr256.SetOne()
 		scope.Stack.Push(&addr256)
-		scope.Contract.RefundGas(gas, tracing.GasChangeCallLeftOverRefunded)
+		scope.Contract.RefundGas(gas, interpreter.Config().Tracer, tracing.GasChangeCallLeftOverRefunded)
 		interpreter.returnData = nil
 		return nil, nil
 	}
@@ -956,7 +956,7 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 	}
 	scope.Stack.Push(&addr256)
 
-	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.RefundGas(returnGas, interpreter.Config().Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	interpreter.returnData = ret
 	return ret, nil
@@ -977,7 +977,7 @@ func opExtStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContex
 	if gas == 0 {
 		addr256.SetOne()
 		scope.Stack.Push(&addr256)
-		scope.Contract.RefundGas(gas, tracing.GasChangeCallLeftOverRefunded)
+		scope.Contract.RefundGas(gas, interpreter.Config().Tracer, tracing.GasChangeCallLeftOverRefunded)
 		interpreter.returnData = nil
 		return nil, nil
 	}
@@ -998,7 +998,7 @@ func opExtStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContex
 	}
 	scope.Stack.Push(&addr256)
 
-	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.RefundGas(returnGas, interpreter.Config().Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	interpreter.returnData = ret
 	return ret, nil
