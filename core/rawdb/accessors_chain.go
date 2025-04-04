@@ -1283,13 +1283,13 @@ func PruneReceipts(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
 		if err != nil {
 			return fmt.Errorf("prune receipts for block %d: %w", toBlockNum, err)
 		}
-		toBlockNum = binary.BigEndian.Uint64(k)
+		blockNum := binary.BigEndian.Uint64(k)
 		if err := tx.Delete(kv.Receipts, k); err != nil {
-			return fmt.Errorf("prune receipts for block %d: %w", toBlockNum, err)
+			return fmt.Errorf("prune receipts for block %d: %w", blockNum, err)
 		}
 
-		if prevBlockNum != toBlockNum {
-			prevBlockNum = toBlockNum
+		if prevBlockNum != blockNum {
+			prevBlockNum = blockNum
 			if pruneLimit <= 0 {
 				break
 			}
