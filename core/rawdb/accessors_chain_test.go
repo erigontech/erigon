@@ -561,17 +561,17 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NotNil(b)
 
 	{ //prune: [0, to)
-		require.NoError(rawdb.PruneReceiptsCache(tx, 1, 1))
+		require.NoError(rawdb.PruneReceiptsCache(tx, 1, 1)) // exclude upper bound
 		rs, err = rawdb.ReadReceiptsCache(tx, hash, 1)
 		require.NoError(err)
 		require.NotEmpty(rs)
 
-		require.NoError(rawdb.PruneReceiptsCache(tx, 2, 0))
+		require.NoError(rawdb.PruneReceiptsCache(tx, 2, 0)) // limit preserved
 		rs, err = rawdb.ReadReceiptsCache(tx, hash, 1)
 		require.NoError(err)
 		require.NotEmpty(rs)
 
-		require.NoError(rawdb.PruneReceiptsCache(tx, 2, 1))
+		require.NoError(rawdb.PruneReceiptsCache(tx, 2, 1)) // prune block 1
 		rs, err = rawdb.ReadReceiptsCache(tx, hash, 1)
 		require.NoError(err)
 		require.Empty(rs)
