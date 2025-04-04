@@ -3,7 +3,6 @@ package test
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common/background"
@@ -23,27 +22,17 @@ func (r *BorSpanRootRelation) RootNum2Num(from state.RootNum, tx kv.Tx) (state.N
 	return Num(heimdall.SpanIdAt(uint64(from))), nil
 }
 
-func TestUnmarkedAppendableRegistration(t *testing.T) {
-	t.Cleanup(func() {
-		ae.Cleanup()
-	})
-	dirs := datadir.New(t.TempDir())
-	blockId := registerEntity(dirs, "borspans")
-	require.Equal(t, ae.AppendableId(0), blockId)
-}
-
-func setupBorSpans(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (AppendableId, *state.Appendable[UnmarkedTxI]) {
+func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (AppendableId, *state.Appendable[UnmarkedTxI]) {
 	minAggStep := uint64(10)
 	name := "borspans"
-	borspanId := registerEntityWithSnapshotConfig(dir, name, &ae.SnapshotConfig{
+	borspanId := registerEntityWithSnapshotConfig(dirs, name, &ae.SnapshotConfig{
 		SnapshotCreationConfig: &ae.SnapshotCreationConfig{
 			RootNumPerStep: minAggStep,
 			MergeStages:    []uint64{200, 400},
 			MinimumSize:    10,
 			SafetyMargin:   5,
 		},
-		Directory: dir.Snap,
-		Parser:    ae.NewE2ParserWithStep(minAggStep, dir.Snap, name, []string{name}),
+		Schema: ae.NewE2SnapSchemaWithStep(dirs, name, []string{name}, minAggStep),
 	})
 	require.Equal(t, ae.AppendableId(0), borspanId)
 
@@ -59,17 +48,19 @@ func setupBorSpans(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (
 		state.App_WithIndexBuilders(indexb))
 	require.NoError(t, err)
 
-	t.Cleanup(func() {
-		uma.Close()
-		uma.RecalcVisibleFiles(0)
-
-		ae.Cleanup()
-		db.Close()
-		os.RemoveAll(dir.Snap)
-		os.RemoveAll(dir.Chaindata)
-	})
-
+	cleanup(t, uma.ProtoAppendable, db, dirs)
 	return borspanId, uma
+}
+
+// TESTS BEGIN HERE
+
+func TestUnmarkedAppendableRegistration(t *testing.T) {
+	t.Cleanup(func() {
+		ae.Cleanup()
+	})
+	dirs := datadir.New(t.TempDir())
+	blockId := registerEntity(dirs, "borspans")
+	require.Equal(t, ae.AppendableId(0), blockId)
 }
 
 func TestUnmarked_PutToDb(t *testing.T) {

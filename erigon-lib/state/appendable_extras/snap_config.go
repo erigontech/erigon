@@ -2,7 +2,6 @@ package entity_extras
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
@@ -25,6 +24,7 @@ type SnapshotCreationConfig struct {
 	// e.g. [1000, 20000, 600000] --> first stage creates files of size 1000; then 20 of these merged to
 	// create size 10000; then 30 of these merged to create size 100000
 	// each must be divisible by `RootNumPerStep`
+	// last stage is considered to be "frozen".
 	MergeStages []uint64
 
 	// minimum snapshot size - number of "RootNums" in the minimum-sized file.
@@ -46,10 +46,7 @@ type SnapshotConfig struct {
 	// is aligned to those of the root entity.
 	RootAligned bool
 
-	// snapshot directory
-	Directory string
-
-	Parser SnapNameParser
+	Schema SnapNameSchema
 }
 
 func (s *SnapshotConfig) StepsInFrozenFile() uint64 {
@@ -62,7 +59,7 @@ func (s *SnapshotConfig) LoadPreverified(pre snapcfg.Preverified) {
 	}
 	s.PreverifiedParsed = make([]*SnapInfo, 0, len(pre))
 	for _, item := range []snapcfg.PreverifiedItem(pre) {
-		res, ok := s.Parser.Parse(item.Name)
+		res, ok := s.Schema.Parse(item.Name)
 		if !ok {
 			continue
 		}
@@ -93,9 +90,9 @@ type SnapInfo struct {
 
 type Version = snaptype.Version
 
-func (f *SnapInfo) IsSeg() bool      { return strings.Compare(f.Ext, ".seg") == 0 }
-func (f *SnapInfo) IsV() bool        { return strings.Compare(f.Ext, ".v") == 0 }
-func (f *SnapInfo) IsKV() bool       { return strings.Compare(f.Ext, ".kv") == 0 }
-func (f *SnapInfo) IsDataFile() bool { return f.IsSeg() || f.IsV() || f.IsKV() }
+// func (f *SnapInfo) IsSeg() bool      { return strings.Compare(f.Ext, ".seg") == 0 }
+// func (f *SnapInfo) IsV() bool        { return strings.Compare(f.Ext, ".v") == 0 }
+// func (f *SnapInfo) IsKV() bool       { return strings.Compare(f.Ext, ".kv") == 0 }
+func (f *SnapInfo) IsDataFile() bool { return DataExtension(f.Ext).IsSet() }
 
 func (f *SnapInfo) Len() uint64 { return f.To - f.From }

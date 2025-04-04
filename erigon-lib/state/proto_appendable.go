@@ -23,9 +23,9 @@ type ProtoAppendable struct {
 
 	a        ae.AppendableId
 	cfg      *ae.SnapshotConfig
-	parser   ae.SnapNameParser
+	parser   ae.SnapNameSchema
 	builders []AccessorIndexBuilder
-	snaps    *FilesRegistry
+	snaps    *SnapshotRepo
 
 	strategy CanonicityStrategy
 
@@ -36,24 +36,16 @@ func NewProto(a ae.AppendableId, builders []AccessorIndexBuilder, freezer Freeze
 	return &ProtoAppendable{
 		a:        a,
 		cfg:      a.SnapshotConfig(),
-		parser:   a.SnapshotConfig().Parser,
+		parser:   a.SnapshotConfig().Schema,
 		builders: builders,
 		freezer:  freezer,
-		snaps:    NewFilesRegistryForAppendable(a, logger),
+		snaps:    NewSnapshotRepoForAppendable(a, logger),
 		logger:   logger,
 	}
 }
 
-// func (a *ProtoEntity) DirtyFilesMaxRootNum() ae.RootNum {
-// 	latest, found := a.dirtyFiles.Max()
-// 	if latest == nil || !found {
-// 		return 0
-// 	}
-// 	return ae.RootNum(latest.endTxNum)
-// }
-
 func (a *ProtoAppendable) RecalcVisibleFiles(toRootNum RootNum) {
-	a._visible = calcVisibleFiles(a.dirtyFiles, AccessorHashMap, false, uint64(toRootNum))
+	a.snaps.RecalcVisibleFiles(toRootNum)
 }
 
 func (a *ProtoAppendable) IntegrateDirtyFiles(files []*filesItem) {
@@ -84,7 +76,8 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 				// TODO: look at block_Snapshots.go#dumpRange
 				// when snapshot is non-frozen range, it AddsUncompressedword (fast creation)
 				// else AddWord.
-				// But BuildFiles perhaps only used for fast builds...and merge is for slow builds.
+				// BuildFiles perhaps only used for fast builds...and merge is for slow builds.
+				// so using uncompressed here
 				return sn.AddUncompressedWord(values)
 			}, db); err != nil {
 				return dirtyFiles, err
@@ -135,63 +128,11 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 }
 
 func (a *ProtoAppendable) OpenFolder() error {
-	aps, err := filesFromDir(a.a.SnapshotDir())
-	if err != nil {
-		return err
-	}
-
-	a.closeWhatNotInList(aps)
-	a.scanDirtyFiles(aps)
-
-	return nil
-}
-
-func (a *ProtoAppendable) scanDirtyFiles(aps []string) (res []*filesItem) {
-	cfg := a.a.SnapshotConfig()
-	for _, ap := range aps {
-		fileInfo, ok := a.parser.Parse(ap)
-		if !ok {
-			a.logger.Trace("can't parse file name", "file", ap)
-			continue
-		}
-		res = append(res, newFilesItemWithSnapConfig(fileInfo.From, fileInfo.To, cfg))
-	}
-	return res
-}
-
-func (a *ProtoAppendable) closeWhatNotInList(fNames []string) {
-	protectFiles := make(map[string]struct{}, len(fNames))
-	for _, f := range fNames {
-		protectFiles[f] = struct{}{}
-	}
-	var toClose []*filesItem
-	a.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.decompressor != nil {
-				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
-					continue
-				}
-			}
-			toClose = append(toClose, item)
-		}
-		return true
-	})
-	for _, item := range toClose {
-		item.closeFiles()
-		a.dirtyFiles.Delete(item)
-	}
+	return a.snaps.OpenFolder()
 }
 
 func (a *ProtoAppendable) Close() {
-	var toClose []*filesItem
-	a.dirtyFiles.Walk(func(items []*filesItem) bool {
-		toClose = append(toClose, items...)
-		return true
-	})
-	for _, item := range toClose {
-		item.closeFiles()
-		a.dirtyFiles.Delete(item)
-	}
+	a.snaps.Close()
 }
 
 // proto_appendable_rotx
@@ -206,15 +147,17 @@ type ProtoAppendableTx struct {
 }
 
 func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableTx {
-	for i := range a._visible {
-		if a._visible[i].src.frozen {
-			a._visible[i].src.refcount.Add(1)
+	visibleFiles := a.snaps.VisibleFiles()
+	for i := range visibleFiles {
+		src := visibleFiles[i].src
+		if src.frozen {
+			src.refcount.Add(1)
 		}
 	}
 
 	return &ProtoAppendableTx{
 		id:    a.a,
-		files: a._visible,
+		files: visibleFiles,
 		a:     a,
 	}
 }
@@ -271,35 +214,12 @@ func (a *ProtoAppendableTx) Type() CanonicityStrategy {
 }
 
 func (a *ProtoAppendableTx) Garbage(merged *filesItem) (outs []*filesItem) {
-	if merged == nil {
-		return
-	}
-
-	a.a.dirtyFiles.Walk(func(item []*filesItem) bool {
-		for _, item := range item {
-			if item.frozen {
-				continue
-			}
-			if item.isSubsetOf(merged) {
-				outs = append(outs, item)
-			}
-			if item.isBefore(merged) && hasCoverVisibleFile(a.files, item) {
-				outs = append(outs, item)
-			}
-		}
-		return true
-	})
-	return outs
+	return a.a.snaps.Garbage(a.files, merged)
 }
 
 func (a *ProtoAppendableTx) VisibleFilesMaxRootNum() RootNum {
 	a.NoFilesCheck()
-	lasti := len(a.files) - 1
-	if lasti < 0 {
-		return 0
-	}
-
-	return RootNum(a.files[lasti].src.endTxNum)
+	return RootNum(a.files.EndTxNum())
 }
 
 func (a *ProtoAppendableTx) VisibleFilesMaxNum() Num {
@@ -319,8 +239,8 @@ func (a *ProtoAppendableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, fi
 	ap := a.a
 	lastNum := a.VisibleFilesMaxNum()
 	if entityNum < lastNum && ap.builders[0].AllowsOrdinalLookupByNum() {
-		index := sort.Search(len(ap._visible), func(i int) bool {
-			idx := ap._visible[i].src.index
+		index := sort.Search(len(a.files), func(i int) bool {
+			idx := a.files[i].src.index
 			return idx.BaseDataID()+idx.KeyCount() > uint64(entityNum)
 		})
 		if index == -1 {
@@ -336,7 +256,7 @@ func (a *ProtoAppendableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, fi
 
 func (a *ProtoAppendableTx) Files() []FilesItem {
 	a.NoFilesCheck()
-	v := a.a._visible
+	v := a.files
 	fi := make([]FilesItem, len(v))
 	for i, f := range v {
 		fi[i] = f.src
@@ -365,7 +285,7 @@ func (a *ProtoAppendableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found 
 		return word, true, nil
 	}
 	ap := a.a
-	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, ap._visible[idx].src.decompressor.FileName1)
+	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, a.files[idx].src.decompressor.FileName1)
 }
 
 func (a *ProtoAppendableTx) NoFilesCheck() {

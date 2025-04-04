@@ -28,19 +28,6 @@ type AppendableId = ae.AppendableId
 type MarkedTxI = state.MarkedTxI
 type UnmarkedTxI = state.UnmarkedTxI
 
-// test marked appendable
-func TestMarkedAppendableRegistration(t *testing.T) {
-	// just registration goes fine
-	t.Cleanup(func() {
-		ae.Cleanup()
-	})
-	dirs := datadir.New(t.TempDir())
-	blockId := registerEntity(dirs, "blocks")
-	require.Equal(t, ae.AppendableId(0), blockId)
-	headerId := registerEntity(dirs, "headers")
-	require.Equal(t, ae.AppendableId(1), headerId)
-}
-
 func registerEntity(dirs datadir.Dirs, name string) ae.AppendableId {
 	minAggStep := uint64(10)
 	return registerEntityWithSnapshotConfig(dirs, name, &ae.SnapshotConfig{
@@ -50,8 +37,7 @@ func registerEntity(dirs datadir.Dirs, name string) ae.AppendableId {
 			MinimumSize:    10,
 			SafetyMargin:   5,
 		},
-		Directory: dirs.Snap,
-		Parser:    ae.NewE2ParserWithStep(minAggStep, dirs.Snap, name, []string{name}),
+		Schema: ae.NewE2SnapSchemaWithStep(dirs, name, []string{name}, minAggStep),
 	})
 }
 
@@ -67,8 +53,8 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	return dirs, db, logger
 }
 
-func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (AppendableId, *state.Appendable[state.MarkedTxI]) {
-	headerId := registerEntity(dir, "headers")
+func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (AppendableId, *state.Appendable[state.MarkedTxI]) {
+	headerId := registerEntity(dirs, "headers")
 	require.Equal(t, ae.AppendableId(0), headerId)
 
 	// create marked appendable
@@ -84,17 +70,36 @@ func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (Ap
 	)
 	require.NoError(t, err)
 
+	cleanup(t, ma.ProtoAppendable, db, dirs)
+	return headerId, ma
+}
+
+func cleanup(t *testing.T, p *state.ProtoAppendable, db kv.RoDB, dirs datadir.Dirs) {
 	t.Cleanup(func() {
-		ma.Close()
-		ma.RecalcVisibleFiles(0)
+		p.Close()
+		p.RecalcVisibleFiles(0)
 
 		ae.Cleanup()
 		db.Close()
-		os.RemoveAll(dir.Snap)
-		os.RemoveAll(dir.Chaindata)
+		os.RemoveAll(dirs.Snap)
+		os.RemoveAll(dirs.Chaindata)
+		os.RemoveAll(dirs.SnapIdx)
 	})
+}
 
-	return headerId, ma
+// TESTS BEGIN HERE
+
+// test marked appendable
+func TestMarkedAppendableRegistration(t *testing.T) {
+	// just registration goes fine
+	t.Cleanup(func() {
+		ae.Cleanup()
+	})
+	dirs := datadir.New(t.TempDir())
+	blockId := registerEntity(dirs, "blocks")
+	require.Equal(t, ae.AppendableId(0), blockId)
+	headerId := registerEntity(dirs, "headers")
+	require.Equal(t, ae.AppendableId(1), headerId)
 }
 
 func TestMarked_PutToDb(t *testing.T) {

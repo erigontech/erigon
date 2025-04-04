@@ -65,7 +65,7 @@ type SimpleAccessorBuilder struct {
 	args     *AccessorArgs
 	indexPos uint64
 	id       AppendableId
-	parser   ae.SnapNameParser
+	parser   ae.SnapNameSchema
 	kf       IndexKeyFactory
 	fetcher  FirstEntityNumFetcher
 	logger   log.Logger
@@ -79,7 +79,7 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, id AppendableId, logger log.Lo
 	b := &SimpleAccessorBuilder{
 		args:   args,
 		id:     id,
-		parser: id.SnapshotConfig().Parser,
+		parser: id.SnapshotConfig().Schema,
 		logger: logger,
 	}
 
@@ -149,7 +149,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 	}()
 	iidq := s.GetInputDataQuery(from, to)
 	defer iidq.Close()
-	idxFile := s.parser.IndexFile(snaptype.Version(1), from, to, s.indexPos)
+	idxFile := s.parser.AccessorIdxFile(snaptype.Version(1), from, to, s.indexPos)
 
 	keyCount := iidq.GetCount()
 	if p != nil {

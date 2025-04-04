@@ -9,52 +9,50 @@ import (
 	btree2 "github.com/tidwall/btree"
 )
 
-// files seek cache
-
-type FilesSeekCache[V any] struct {
+// snapshot seek cache
+type SnapSeekCache[V any] struct {
 	*freelru.LRU[uint64, V]
 
 	hit, total, limit int
 	enabled, trace    bool
 }
 
-func NewFilesSeekCache[V any](limit uint32, enabled bool, trace bool,
-	hash freelru.HashKeyCallback[uint64]) *FilesSeekCache[V] {
+func NewSnapSeekCache[V any](limit uint32, enabled bool, trace bool,
+	hash freelru.HashKeyCallback[uint64]) *SnapSeekCache[V] {
 	c, err := freelru.New[uint64, V](limit, hash)
 	if err != nil {
 		panic(err)
 	}
-	return &FilesSeekCache[V]{LRU: c, enabled: enabled, trace: trace}
+	return &SnapSeekCache[V]{LRU: c, enabled: enabled, trace: trace}
 }
 
-// caching files registry
-
-type CachingFilesRegistry[V any] struct {
-	*FilesRegistry
+// caching snapshot repo
+type CachingSnapshotRepo[V any] struct {
+	*SnapshotRepo
 	enabled bool
 	caches  *sync.Pool
 }
 
-func NewCachingFilesRegistry[V any](dir string, limit uint32, enabled bool, trace bool,
-	hash freelru.HashKeyCallback[uint64]) *CachingFilesRegistry[V] {
-	f := &CachingFilesRegistry[V]{
-		FilesRegistry: &FilesRegistry{
+func NewCachingSnapshotRepo[V any](dir string, limit uint32, enabled bool, trace bool,
+	hash freelru.HashKeyCallback[uint64]) *CachingSnapshotRepo[V] {
+	f := &CachingSnapshotRepo[V]{
+		SnapshotRepo: &SnapshotRepo{
 			dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 			dir:        dir,
 		},
 		enabled: enabled,
-		caches:  &sync.Pool{New: func() any { return NewFilesSeekCache[V](limit, enabled, trace, hash) }},
+		caches:  &sync.Pool{New: func() any { return NewSnapSeekCache[V](limit, enabled, trace, hash) }},
 	}
 	//f.files = f.newVisibleFiles()
 	return f
 }
 
-func (c *FilesSeekCache[V]) LogStats(fileBaseName string) {
+func (c *SnapSeekCache[V]) LogStats(fileBaseName string) {
 	if c == nil || !c.trace {
 		return
 	}
 	m := c.Metrics()
-	log.Warn("[dbg] FilesSeekCache", "a", fileBaseName, "ratio",
+	log.Warn("[dbg] SnapSeekCache", "a", fileBaseName, "ratio",
 		fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)), "hit", c.hit, "collisions", m.Collisions,
 		"evictions", m.Evictions, "inserts", m.Inserts, "removals", m.Removals, "limit", c.limit)
 }
