@@ -366,7 +366,10 @@ func (evm *EVM) CallCode(caller ContractRef, addr libcommon.Address, input []byt
 // DelegateCall differs from CallCode in the sense that it executes the given address'
 // code with the caller as context and the caller is set to the caller of the caller.
 func (evm *EVM) DelegateCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	callerContract := caller.(*Contract)
+	callerContract, ok := caller.(*Contract)
+	if !ok {
+		return nil, gas, fmt.Errorf("caller is not of type *Contract")
+	}
 	return evm.call(DELEGATECALL, caller, addr, input, gas, nil, false, &AdvancedPrecompileCall{
 		PrecompileAddress: addr,
 		ActingAsAddress:   caller.Address(),
