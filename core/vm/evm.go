@@ -21,6 +21,7 @@ package vm
 
 import (
 	"fmt"
+	"math/big"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -40,6 +41,10 @@ var emptyHash = libcommon.Hash{}
 func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
+	case evm.chainRules.IsStylus:
+		precompiles = PrecompiledContractsArbOS30
+	case evm.chainRules.IsArbitrum:
+		precompiles = PrecompiledContractsArbitrum
 	case evm.chainRules.IsPrague:
 		precompiles = PrecompiledContractsPrague
 	case evm.chainRules.IsNapoli:
@@ -182,7 +187,7 @@ func (evm *EVM) Interpreter() Interpreter {
 	return evm.interpreter
 }
 
-func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool, arbInfo *AdvancedPrecompileCall) (ret []byte, leftOverGas uint64, err error) {
 	depth := evm.interpreter.Depth()
 
 	if evm.config.NoRecursion && depth > 0 {
@@ -274,7 +279,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
-		ret, gas, err = RunPrecompiledContract(p, input, gas)
+		ret, gas, err = RunPrecompiledContract(p, input, gas, arbInfo)
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
@@ -327,7 +332,14 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 // the necessary steps to create accounts and reverses the state in case of an
 // execution error or failed value transfer.
 func (evm *EVM) Call(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(CALL, caller, addr, input, gas, value, bailout)
+	return evm.call(CALL, caller, addr, input, gas, value, bailout, &AdvancedPrecompileCall{
+		PrecompileAddress: addr,
+		ActingAsAddress:   addr,
+		Caller:            caller.Address(),
+		Value:             value.ToBig(),
+		ReadOnly:          false,
+		Evm:               evm,
+	})
 }
 
 // CallCode executes the contract associated with the addr with the given input
@@ -338,7 +350,14 @@ func (evm *EVM) Call(caller ContractRef, addr libcommon.Address, input []byte, g
 // CallCode differs from Call in the sense that it executes the given address'
 // code with the caller as context.
 func (evm *EVM) CallCode(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(CALLCODE, caller, addr, input, gas, value, false)
+	return evm.call(CALLCODE, caller, addr, input, gas, value, false, &AdvancedPrecompileCall{
+		PrecompileAddress: addr,
+		ActingAsAddress:   caller.Address(),
+		Caller:            caller.Address(),
+		Value:             value.ToBig(),
+		ReadOnly:          false,
+		Evm:               evm,
+	})
 }
 
 // DelegateCall executes the contract associated with the addr with the given input
@@ -347,7 +366,15 @@ func (evm *EVM) CallCode(caller ContractRef, addr libcommon.Address, input []byt
 // DelegateCall differs from CallCode in the sense that it executes the given address'
 // code with the caller as context and the caller is set to the caller of the caller.
 func (evm *EVM) DelegateCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(DELEGATECALL, caller, addr, input, gas, nil, false)
+	callerContract := caller.(*Contract)
+	return evm.call(DELEGATECALL, caller, addr, input, gas, nil, false, &AdvancedPrecompileCall{
+		PrecompileAddress: addr,
+		ActingAsAddress:   caller.Address(),
+		Caller:            callerContract.CallerAddress,
+		Value:             callerContract.Value().ToBig(),
+		ReadOnly:          false,
+		Evm:               evm,
+	})
 }
 
 // StaticCall executes the contract associated with the addr with the given input
@@ -355,7 +382,14 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr libcommon.Address, input [
 // Opcodes that attempt to perform such modifications will result in exceptions
 // instead of performing the modifications.
 func (evm *EVM) StaticCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(STATICCALL, caller, addr, input, gas, new(uint256.Int), false)
+	return evm.call(STATICCALL, caller, addr, input, gas, new(uint256.Int), false, &AdvancedPrecompileCall{
+		PrecompileAddress: addr,
+		ActingAsAddress:   addr,
+		Caller:            caller.Address(),
+		Value:             new(big.Int),
+		ReadOnly:          true,
+		Evm:               evm,
+	})
 }
 
 type codeAndHash struct {

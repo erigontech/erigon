@@ -212,8 +212,13 @@ func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64,
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, advancedInfoForArbos *AdvancedPrecompileCall,
 ) (ret []byte, remainingGas uint64, err error) {
+	advanced, isAdvanced := p.(AdvancedPrecompile)
+	if isAdvanced {
+		return advanced.RunAdvanced(input, suppliedGas, advancedInfoForArbos)
+	}
+
 	gasCost := p.RequiredGas(input)
 	if suppliedGas < gasCost {
 		return nil, 0, ErrOutOfGas
