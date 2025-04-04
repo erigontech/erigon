@@ -1300,6 +1300,8 @@ func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
 			return fmt.Errorf("prune receipts for block %d: %w", toBlockNum, err)
 		}
 		blockNum := binary.BigEndian.Uint64(k)
+		log.Warn("[dbg] pruned1", "blockNum", blockNum, "txIndex", binary.BigEndian.Uint32(k[8+32:]))
+
 		if prevBlockNum != blockNum {
 			prevBlockNum = blockNum
 			if pruneLimit == 0 {
