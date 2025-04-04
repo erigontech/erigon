@@ -414,7 +414,7 @@ func WrapKeyUpdatesParallel(tb testing.TB, mode Mode, hasher keyHasher, keys [][
 	tb.Helper()
 
 	upd := NewUpdates(mode, tb.TempDir(), hasher)
-	upd.SetConcurrentCommitment()
+	upd.SetConcurrentCommitment(true)
 	for i, key := range keys {
 		ks := toStringZeroCopy(key)
 		upd.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {

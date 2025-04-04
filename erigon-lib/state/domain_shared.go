@@ -934,6 +934,8 @@ func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 }
 
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
+	sdc.mu.Lock()
+	defer sdc.mu.Unlock()
 	prefS := toStringZeroCopy(pref)
 	cached, ok := sdc.branches[prefS]
 	if ok {
@@ -960,6 +962,8 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 }
 
 func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
+	sdc.mu.Lock()
+	defer sdc.mu.Unlock()
 	prefixS := toStringZeroCopy(prefix)
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
@@ -1014,6 +1018,8 @@ func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []b
 }
 
 func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitment.Update, err error) {
+	sdc.mu.Lock()
+	defer sdc.mu.Unlock()
 	encAccount, err := sdc.readAccount(plainKey)
 	if err != nil {
 		return nil, err
@@ -1064,6 +1070,8 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 }
 
 func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
+	sdc.mu.Lock()
+	defer sdc.mu.Unlock()
 	// Look in the summary table first
 	enc, err := sdc.readStorage(plainKey)
 	if err != nil {

@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -2775,48 +2776,49 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 		return nil, err
 	}
 
-	//g, ctx := errgroup.WithContext(ctx)
-	//g.SetLimit(16)
+	clear(t.keys)
 
-	counts := [16]uint{}
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(16)
+
 	for n := 0; n < len(t.nibbles); n++ {
 		nib := t.nibbles[n]
 		phnib := pph.mounts[n]
 
-		//g.Go(func() error {
-		//n = n
-		cnt := 0
-		err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			cnt++
-			if phnib.trace {
-				fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", n, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
+		g.Go(func() error {
+			n = n
+			cnt := 0
+			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+				cnt++
+				if phnib.trace {
+					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", n, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
+				}
+				if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
+					return fmt.Errorf("followAndUpdate[%x]: %w", n, err)
+				}
+				return nil
+			}, etl.TransformArgs{Quit: ctx.Done()})
+
+			if err != nil {
+				panic(err)
+				// return err
 			}
-			if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
-				return fmt.Errorf("followAndUpdate[%x]: %w", n, err)
+
+			if cnt > 0 {
+				if pph.mounts[n].trace {
+					fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", n, cnt, phnib.depths[0])
+				}
+				if err = pph.foldNibble(n); err != nil {
+					return err
+				}
 			}
 			return nil
-		}, etl.TransformArgs{Quit: ctx.Done()})
-
-		if err != nil {
-			panic(err)
-			// return err
-		}
-
-		counts[n] = uint(cnt)
-		if cnt > 0 {
-			if pph.mounts[n].trace {
-				fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", n, cnt, phnib.depths[0])
-			}
-			if err = pph.foldNibble(n); err != nil {
-				return nil, err
-			}
-		}
-		//return nil
-		//})
+		})
 	}
-	clear(t.keys)
-	//return g.Wait()
-	//
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
 	if pph.root.trace {
 		fmt.Printf("======= folding ROOT trie =========\n")
 	}
@@ -2861,10 +2863,12 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 		if len(zeroPrefixBranch) > 4 { // tm+am+cells
 			// if root has no extension and there is a branch of zero prefix, can use parallel commitment next time
 			updates.SetConcurrentCommitment(true)
+			fmt.Println("use || trie next")
 			return rootHash, nil
 		}
 	}
 	updates.SetConcurrentCommitment(false)
+	fmt.Println("use seq trie next")
 	return rootHash, nil
 }
 
