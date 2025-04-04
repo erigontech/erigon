@@ -128,9 +128,9 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 	switch tv {
 	case VariantParallelHexPatricia:
 		root := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
-		trie := NewParallelPatriciaHashed(root, nil, tmpdir)
+		trie := NewParallelPatriciaHashed(root, nil)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
-		tree.SetConcurrentCommitment()
+		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree
 	case VariantBinPatriciaTrie:
 		//trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
@@ -930,8 +930,8 @@ func ParseCommitmentMode(s string) Mode {
 type Updates struct {
 	keccak cryptozerocopy.KeccakState
 	hasher keyHasher
-	keys   map[string]struct{}
-	etl    *etl.Collector // all-in-one collector
+	keys   map[string]struct{} // plain keys to keep only unique keys in etl
+	etl    *etl.Collector      // all-in-one collector
 	tree   *btree.BTreeG[*KeyUpdate]
 	mode   Mode
 	tmpdir string
@@ -940,15 +940,19 @@ type Updates struct {
 	nibbles       [16]*etl.Collector
 }
 
+// Should be called right after updates initialisation. Otherwise could lost some data
+func (t *Updates) SetConcurrentCommitment(b bool) {
+	t.sortPerNibble = b
+	t.initCollector()
+}
+
+func (t *Updates) IsConcurrentCommitment() bool {
+	return t.sortPerNibble
+}
+
 type keyHasher func(key []byte) []byte
 
 func keyHasherNoop(key []byte) []byte { return key }
-
-// Should be called right after updates initialisation. Otherwise could lost some data
-func (t *Updates) SetConcurrentCommitment() {
-	t.sortPerNibble = true
-	t.initCollector()
-}
 
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	t := &Updates{

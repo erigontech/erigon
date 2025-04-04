@@ -89,15 +89,24 @@ type HexPatriciaHashed struct {
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 	hadToLoadL    map[uint64]skipStat
 
-	mounted    bool
-	mountedNib int // < 16
+	mounted      bool
+	mountedNib   int                  // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
+	mountedTries []*HexPatriciaHashed // list of mounted tries to unmount
 
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 }
 
+// Clones current trie state to allow concurrent processing.
+func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *HexPatriciaHashed {
+	subTrie := NewHexPatriciaHashed(hph.accountKeyLen, ctx, "")
+
+	subTrie.mountTo(hph, forNibble)
+	return subTrie
+}
+
 func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
-	hph := &HexPatriciaHashed{
+	return &HexPatriciaHashed{
 		ctx:           ctx,
 		keccak:        sha3.NewLegacyKeccak256().(keccakState),
 		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
@@ -105,9 +114,8 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string)
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
 		hadToLoadL:    make(map[uint64]skipStat),
 		accValBuf:     make(rlp.RlpEncodedBytes, 128),
+		branchEncoder: NewBranchEncoder(1024),
 	}
-	hph.branchEncoder = NewBranchEncoder(1024)
-	return hph
 }
 
 type cell struct {
@@ -2605,6 +2613,7 @@ func (hph *HexPatriciaHashed) PrintAccountsInGrid() {
 	}
 }
 
+// if nibble set is -1 then subtrie is not mounted to the nibble, but limited by depth: eg do not fold mounted trie above depth 63
 func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	hph.Reset()
 
@@ -2621,12 +2630,15 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	copy(hph.afterMap[:], root.afterMap[:])
 	copy(hph.depthsToTxNum[:], root.depthsToTxNum[:])
 
-	for i := 0; i < len(hph.grid[0]); i++ {
-		hph.grid[0][i] = root.grid[0][i]
-	}
-
 	hph.mountedNib = nibble
 	hph.mounted = true
+	root.mountedTries = append(root.mountedTries, hph)
+
+	for row := 0; row <= hph.activeRows; row++ {
+		for nib := 0; nib < len(hph.grid[row]); nib++ {
+			hph.grid[row][nib] = root.grid[row][nib]
+		}
+	}
 }
 
 type ParallelPatriciaHashed struct {
@@ -2692,12 +2704,15 @@ func (p *ParallelPatriciaHashed) unfoldRoot() error {
 	if p.root.trace {
 		fmt.Printf("=============ROOT unfold============\n")
 	}
+	// if p.root.rootPresent && p.root.root.hashedExtLen == 0 { // if root has no extension, we have to unfold
 	zero := []byte{0}
 	for unfolding := p.root.needUnfolding(zero); unfolding > 0; unfolding = p.root.needUnfolding(zero) {
 		if err := p.root.unfold(zero, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
 	}
+	// }
+
 	if p.root.trace {
 		fmt.Printf("=========END=ROOT unfold============\n")
 	}
@@ -2712,15 +2727,13 @@ func (p *ParallelPatriciaHashed) unfoldRoot() error {
 	return nil
 }
 
-func NewParallelPatriciaHashed(root *HexPatriciaHashed, ctx PatriciaContext, tmpdir string) *ParallelPatriciaHashed {
+// Subtrie inherits root state, address length
+func NewParallelPatriciaHashed(root *HexPatriciaHashed, ctx PatriciaContext) *ParallelPatriciaHashed {
 	p := &ParallelPatriciaHashed{root: root}
 
 	for i := range p.mounts {
-		hph := NewHexPatriciaHashed(length.Addr, ctx, tmpdir)
-		hph.mountedNib = i
-		hph.mounted = true
-		p.mounts[i] = hph
-		p.ctx[i] = ctx
+		p.mounts[i] = p.root.SpawnSubTrie(ctx, i)
+		p.ctx[i] = ctx // todo barely needed
 	}
 	return p
 }
@@ -2762,7 +2775,6 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 	//g, ctx := errgroup.WithContext(ctx)
 	//g.SetLimit(16)
 
-	// latestKeys := [16][2][]byte{}
 	counts := [16]uint{}
 	for n := 0; n < len(t.nibbles); n++ {
 		nib := t.nibbles[n]
@@ -2776,8 +2788,6 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 			if phnib.trace {
 				fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", n, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
 			}
-			// latestKeys[n][0] = common.Copy(hashedKey)
-			// latestKeys[n][1] = common.Copy(plainKey)
 			if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
 				return fmt.Errorf("followAndUpdate[%x]: %w", n, err)
 			}
@@ -2826,8 +2836,31 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 	return rootHash, nil
 }
 
+// Computing commitment root hash. If possible, use parallel commitment and after evaluation decides, if it can be used next time
 func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
-	return updates.ParallelHashSort(ctx, p)
+	switch updates.IsConcurrentCommitment() {
+	case true:
+		rootHash, err = updates.ParallelHashSort(ctx, p)
+	default:
+		rootHash, err = p.root.Process(ctx, updates, logPrefix)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if p.root.root.extLen == 0 {
+		zeroPrefixBranch, _, err := p.root.ctx.Branch(KeyToHexNibbleHash([]byte{}))
+		if err != nil {
+			return nil, fmt.Errorf("checking shortes prefix branch failed: %w", err)
+		}
+		if len(zeroPrefixBranch) > 4 { // tm+am+cells
+			// if root has no extension and there is a branch of zero prefix, can use parallel commitment next time
+			updates.SetConcurrentCommitment(true)
+			return rootHash, nil
+		}
+	}
+	updates.SetConcurrentCommitment(false)
+	return rootHash, nil
 }
 
 // Variant returns commitment trie variant

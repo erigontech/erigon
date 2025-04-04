@@ -303,7 +303,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq, stateSeq.TempDir())
 
 		trieBatchR := NewHexPatriciaHashed(keyLen, stateBatch, stateSeq.TempDir())
-		trieBatch := NewParallelPatriciaHashed(trieBatchR, stateBatch, stateSeq.TempDir())
+		trieBatch := NewParallelPatriciaHashed(trieBatchR, stateBatch)
 
 		if sortHashedKeys {
 			plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
@@ -546,7 +546,7 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, stateSeq.TempDir())
 
 	trieBatchR := NewHexPatriciaHashed(length.Addr, stateBatch, stateSeq.TempDir())
-	trieBatch := NewParallelPatriciaHashed(trieBatchR, stateBatch, stateSeq.TempDir())
+	trieBatch := NewParallelPatriciaHashed(trieBatchR, stateBatch)
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 	ctx := context.Background()
@@ -1466,7 +1466,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 
 		//updsTwo.Close()
 		fmt.Printf("\n2. Trie parallel update (%d updates)\n", len(updates))
-		trieBatch := NewParallelPatriciaHashed(batch, stateBatch, stateSeq.TempDir())
+		trieBatch := NewParallelPatriciaHashed(batch, stateBatch)
 		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:somewhere+1], updates[:somewhere+1])
 
 		trieBatch.SetTrace(true)
