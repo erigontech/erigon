@@ -444,7 +444,6 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		if s.CurrentSyncCycle.IsInitialCycle {
 			pruneLimit = -1
 		}
-		log.Warn("[dbg] a", "pruneLimit", pruneLimit, "to", s.ForwardProgress-PersistReceipts)
 		if err := rawdb.PruneReceiptsCache(tx, s.ForwardProgress-PersistReceipts, pruneLimit); err != nil {
 			return err
 		}
