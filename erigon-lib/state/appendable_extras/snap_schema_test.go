@@ -153,9 +153,9 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 	_, fName = filepath.Split(exFull)
 	require.Equal(t, fName, "v1-accounts.288-296.kvei")
 
-	require.True(t, p.BtIdxFileMetadata().Supported())
-	require.True(t, p.ExistenceFileMetadata().Supported())
-	require.False(t, p.AccessorIdxFileMetadata().Supported())
+	require.True(t, p.btIdxFileMetadata.supported)
+	require.True(t, p.existenceFileMetadata.supported)
+	require.False(t, p.indexFileMetadata.supported)
 }
 
 func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
@@ -199,9 +199,9 @@ func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
 		p.ExistenceFile(Version(1), stepFrom, stepTo)
 	})
 
-	require.True(t, p.AccessorIdxFileMetadata().Supported())
-	require.False(t, p.BtIdxFileMetadata().Supported())
-	require.False(t, p.ExistenceFileMetadata().Supported())
+	require.True(t, p.indexFileMetadata.supported)
+	require.False(t, p.existenceFileMetadata.supported)
+	require.False(t, p.btIdxFileMetadata.supported)
 }
 
 func TestE3SnapSchemaForHistory(t *testing.T) {
@@ -248,9 +248,9 @@ func TestE3SnapSchemaForHistory(t *testing.T) {
 		p.ExistenceFile(Version(1), stepFrom, stepTo)
 	})
 
-	require.True(t, p.AccessorIdxFileMetadata().Supported())
-	require.False(t, p.BtIdxFileMetadata().Supported())
-	require.False(t, p.ExistenceFileMetadata().Supported())
+	require.True(t, p.indexFileMetadata.supported)
+	require.False(t, p.btIdxFileMetadata.supported)
+	require.False(t, p.existenceFileMetadata.supported)
 }
 
 func TestE3SnapSchemaForII(t *testing.T) {
@@ -300,7 +300,7 @@ func TestE3SnapSchemaForII(t *testing.T) {
 		p.ExistenceFile(Version(1), stepFrom, stepTo)
 	})
 
-	require.True(t, p.AccessorIdxFileMetadata().Supported())
-	require.False(t, p.BtIdxFileMetadata().Supported())
-	require.False(t, p.ExistenceFileMetadata().Supported())
+	require.True(t, p.indexFileMetadata.supported)
+	require.False(t, p.btIdxFileMetadata.supported)
+	require.False(t, p.existenceFileMetadata.supported)
 }

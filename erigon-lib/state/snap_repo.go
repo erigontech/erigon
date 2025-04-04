@@ -217,7 +217,9 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 				}
 			}
 
-			if item.index == nil && p.AccessorIdxFileMetadata().Supported() {
+			accessors := p.AccessorList()
+
+			if item.index == nil && accessors.Has(AccessorHashMap) {
 				fPath := p.AccessorIdxFile(version, ae.RootNum(item.startTxNum), ae.RootNum(item.endTxNum), 0)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
@@ -234,7 +236,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 				}
 			}
 
-			if item.bindex == nil && p.BtIdxFileMetadata().Supported() {
+			if item.bindex == nil && accessors.Has(AccessorBTree) {
 				fPath, params := p.BtIdxFile(version, ae.RootNum(item.startTxNum), ae.RootNum(item.endTxNum))
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
@@ -249,7 +251,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 					}
 				}
 			}
-			if item.existence == nil && p.ExistenceFileMetadata().Supported() {
+			if item.existence == nil && accessors.Has(AccessorExistence) {
 				fPath := p.ExistenceFile(version, ae.RootNum(item.startTxNum), ae.RootNum(item.endTxNum))
 				exists, err := dir.FileExist(fPath)
 				if err != nil {

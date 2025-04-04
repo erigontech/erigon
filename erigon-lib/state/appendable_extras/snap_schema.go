@@ -33,21 +33,15 @@ type SnapNameSchema interface {
 	ExistenceFile(version Version, from, to RootNum) string
 
 	AccessorIdxCount() uint64
-
-	// TODO: this can be removed and Accessors used?
-	DataFileMetadata() *FileMetadata
-	AccessorIdxFileMetadata() *FileMetadata
-	BtIdxFileMetadata() *FileMetadata
-	ExistenceFileMetadata() *FileMetadata
 }
 
-type FileMetadata struct {
+type _fileMetadata struct {
 	folder    string
 	supported bool
 }
 
-func (f *FileMetadata) Folder() string  { return f.folder }
-func (f *FileMetadata) Supported() bool { return f.supported }
+func (f *_fileMetadata) Folder() string  { return f.folder }
+func (f *_fileMetadata) Supported() bool { return f.supported }
 
 type BtIdxParams struct {
 	Compression seg.FileCompression
@@ -66,10 +60,10 @@ type E2SnapSchema struct {
 	accessors   Accessors
 
 	// caches
-	dataFileMetadata      *FileMetadata
-	indexFileMetadata     *FileMetadata
-	btIdxFileMetadata     *FileMetadata
-	existenceFileMetadata *FileMetadata
+	dataFileMetadata      *_fileMetadata
+	indexFileMetadata     *_fileMetadata
+	btIdxFileMetadata     *_fileMetadata
+	existenceFileMetadata *_fileMetadata
 }
 
 var _ SnapNameSchema = (*E2SnapSchema)(nil)
@@ -91,16 +85,16 @@ func NewE2SnapSchemaWithStep(dirs datadir.Dirs, dataFileTag string, indexFileTag
 		indexFolder:   dirs.Snap,
 		accessors:     AccessorHashMap,
 
-		dataFileMetadata: &FileMetadata{
+		dataFileMetadata: &_fileMetadata{
 			folder:    dirs.Snap,
 			supported: true,
 		},
-		indexFileMetadata: &FileMetadata{
+		indexFileMetadata: &_fileMetadata{
 			folder:    dirs.Snap,
 			supported: true,
 		},
-		btIdxFileMetadata:     &FileMetadata{},
-		existenceFileMetadata: &FileMetadata{},
+		btIdxFileMetadata:     &_fileMetadata{},
+		existenceFileMetadata: &_fileMetadata{},
 	}
 }
 
@@ -172,19 +166,19 @@ func (s *E2SnapSchema) ExistenceFile(version Version, from, to RootNum) string {
 	panic("unsupported")
 }
 
-func (s *E2SnapSchema) DataFileMetadata() *FileMetadata {
+func (s *E2SnapSchema) DataFileMetadata() *_fileMetadata {
 	return s.dataFileMetadata
 }
 
-func (s *E2SnapSchema) AccessorIdxFileMetadata() *FileMetadata {
+func (s *E2SnapSchema) AccessorIdxFileMetadata() *_fileMetadata {
 	return s.indexFileMetadata
 }
 
-func (s *E2SnapSchema) BtIdxFileMetadata() *FileMetadata {
+func (s *E2SnapSchema) BtIdxFileMetadata() *_fileMetadata {
 	return s.btIdxFileMetadata
 }
 
-func (s *E2SnapSchema) ExistenceFileMetadata() *FileMetadata {
+func (s *E2SnapSchema) ExistenceFileMetadata() *_fileMetadata {
 	return s.existenceFileMetadata
 }
 
@@ -203,10 +197,10 @@ type E3SnapSchema struct {
 
 	accessorIdxExtension AccessorExtension
 	// caches
-	dataFileMetadata      *FileMetadata
-	indexFileMetadata     *FileMetadata
-	btIdxFileMetadata     *FileMetadata
-	existenceFileMetadata *FileMetadata
+	dataFileMetadata      *_fileMetadata
+	indexFileMetadata     *_fileMetadata
+	btIdxFileMetadata     *_fileMetadata
+	existenceFileMetadata *_fileMetadata
 
 	// misc
 	btParams *BtIdxParams
@@ -229,19 +223,20 @@ func NewE3ParserBuilder(accessors Accessors, stepSize uint64) *E3SnapSchemaBuild
 func (b *E3SnapSchemaBuilder) Data(dataFolder string, dataFileTag string, dataExtension DataExtension) *E3SnapSchemaBuilder {
 	b.e.dataFileTag = dataFileTag
 	b.e.dataExtension = dataExtension
-	b.e.dataFileMetadata = &FileMetadata{
+	b.e.dataFileMetadata = &_fileMetadata{
 		folder:    dataFolder,
 		supported: true,
 	}
 	return b
 }
 
-// assumes Data() is called first
+// currently assumes dataFolder as the folder
+// So, Data() should be called first
 func (b *E3SnapSchemaBuilder) BtIndex(fileCompression seg.FileCompression) *E3SnapSchemaBuilder {
 	b.e.btParams = &BtIdxParams{
 		Compression: fileCompression,
 	}
-	b.e.btIdxFileMetadata = &FileMetadata{
+	b.e.btIdxFileMetadata = &_fileMetadata{
 		folder:    b.e.dataFileMetadata.folder, // assuming "data" and btindex in same folder, which is currently the case
 		supported: true,
 	}
@@ -249,16 +244,17 @@ func (b *E3SnapSchemaBuilder) BtIndex(fileCompression seg.FileCompression) *E3Sn
 }
 
 func (b *E3SnapSchemaBuilder) Accessor(accessorFolder string, accessorExtension AccessorExtension) *E3SnapSchemaBuilder {
-	b.e.indexFileMetadata = &FileMetadata{
-		folder:    accessorFolder, // assuming "data" and idx in same folder, which is currently the case
+	b.e.indexFileMetadata = &_fileMetadata{
+		folder:    accessorFolder,
 		supported: true,
 	}
 	b.e.accessorIdxExtension = accessorExtension
 	return b
 }
 
+// Data() should be called first
 func (b *E3SnapSchemaBuilder) Existence() *E3SnapSchemaBuilder {
-	b.e.existenceFileMetadata = &FileMetadata{
+	b.e.existenceFileMetadata = &_fileMetadata{
 		folder:    b.e.dataFileMetadata.folder, // assuming "data" and existence in same folder, which is currently the case
 		supported: true,
 	}
@@ -277,7 +273,7 @@ func (b *E3SnapSchemaBuilder) Build() *E3SnapSchema {
 	return e
 }
 
-func (b *E3SnapSchemaBuilder) checkPresence(check Accessors, met *FileMetadata) *FileMetadata {
+func (b *E3SnapSchemaBuilder) checkPresence(check Accessors, met *_fileMetadata) *_fileMetadata {
 	if b.e.accessors&check == 0 && met != nil {
 		panic(fmt.Sprintf("accessor %s is not meant to be supported for %s", check, b.e.dataFileTag))
 	} else if b.e.accessors&check != 0 && met == nil {
@@ -285,7 +281,7 @@ func (b *E3SnapSchemaBuilder) checkPresence(check Accessors, met *FileMetadata) 
 	}
 
 	if met == nil {
-		met = &FileMetadata{supported: false}
+		met = &_fileMetadata{supported: false}
 	}
 
 	return met
@@ -354,6 +350,9 @@ func (s *E3SnapSchema) AccessorIdxFile(version Version, from, to RootNum, idxPos
 	if !s.indexFileMetadata.supported {
 		panic(fmt.Sprintf("%s not supported for %s", AccessorHashMap, s.dataFileTag))
 	}
+	if idxPos > 0 {
+		panic("e3 accessor idx pos should be 0")
+	}
 	return filepath.Join(s.indexFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d%s", version, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.accessorIdxExtension))
 }
 
@@ -373,22 +372,6 @@ func (s *E3SnapSchema) ExistenceFile(version Version, from, to RootNum) string {
 
 func (s *E3SnapSchema) DataTag() string {
 	return s.dataFileTag
-}
-
-func (s *E3SnapSchema) DataFileMetadata() *FileMetadata {
-	return s.dataFileMetadata
-}
-
-func (s *E3SnapSchema) AccessorIdxFileMetadata() *FileMetadata {
-	return s.indexFileMetadata
-}
-
-func (s *E3SnapSchema) BtIdxFileMetadata() *FileMetadata {
-	return s.btIdxFileMetadata
-}
-
-func (s *E3SnapSchema) ExistenceFileMetadata() *FileMetadata {
-	return s.existenceFileMetadata
 }
 
 func (s *E3SnapSchema) AccessorList() Accessors {
