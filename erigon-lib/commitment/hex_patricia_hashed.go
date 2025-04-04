@@ -2866,10 +2866,10 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 			fmt.Println("use || trie next")
 			return rootHash, nil
 		}
-		fmt.Println(" 00 [branch %x]", zeroPrefixBranch, len(zeroPrefixBranch))
+		fmt.Printf(" 00 [branch %x]", zeroPrefixBranch, len(zeroPrefixBranch))
 	}
 	updates.SetConcurrentCommitment(false)
-	fmt.Println("use seq trie next [root extLen=%d][ext %x]", p.root.root.extLen, p.root.root.extension[:])
+	fmt.Printf("use seq trie next [root extLen=%d][ext %x]", p.root.root.extLen, p.root.root.extension[:p.root.root.extLen])
 	return rootHash, nil
 }
 
