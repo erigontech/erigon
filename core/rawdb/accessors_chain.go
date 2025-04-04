@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/gballet/go-verkle"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -1271,15 +1272,25 @@ func ReadReceiptsCache(db kv.Tx, blockHash common.Hash, blockNum uint64) (res ty
 
 // PruneReceiptsCache [0,blockNum) removes all receipt until given block number.
 func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
+	{
+		fst, _ := kv.FirstKey(tx, kv.ReceiptsCache)
+		lst, _ := kv.LastKey(tx, kv.ReceiptsCache)
+		log.Warn("[dbg] see", "fst", binary.BigEndian.Uint64(fst), "lst", binary.BigEndian.Uint64(lst), "pruneLimit", pruneLimit, "toBlockNum", toBlockNum)
+
+		rng, err := tx.Range(kv.ReceiptsCache, nil, hexutil.EncodeTs(toBlockNum), order.Asc, -1)
+		if err != nil {
+			return err
+		}
+		defer rng.Close()
+		cnt, _ := stream.CountKV(rng)
+		log.Warn("[dbg] see", "fst", binary.BigEndian.Uint64(fst), "lst", binary.BigEndian.Uint64(lst), "pruneLimit", pruneLimit, "toBlockNum", toBlockNum, "canDeleteCnt", cnt)
+	}
+
 	rng, err := tx.Range(kv.ReceiptsCache, nil, hexutil.EncodeTs(toBlockNum), order.Asc, -1)
 	if err != nil {
 		return err
 	}
 	defer rng.Close()
-
-	fst, _ := kv.FirstKey(tx, kv.ReceiptsCache)
-	lst, _ := kv.LastKey(tx, kv.ReceiptsCache)
-	log.Warn("[dbg] see", "fst", binary.BigEndian.Uint64(fst), "lst", binary.BigEndian.Uint64(lst), "pruneLimit", pruneLimit, "toBlockNum", toBlockNum)
 
 	var prevBlockNum uint64
 	for rng.HasNext() {
