@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -58,7 +59,6 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
-	defer tx.Rollback()
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
@@ -124,9 +124,9 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	ctx := context.Background()
 	tx, err := m.DB.BeginRw(ctx)
-	if err != nil {
-		t.Errorf("could not begin read write transaction: %s", err)
-	}
+	require.NoError(t, err)
+	defer tx.Rollback()
+
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
@@ -163,9 +163,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	ctx := context.Background()
 	tx, err := m.DB.BeginRw(ctx)
-	if err != nil {
-		t.Errorf("could not begin read write transaction: %s", err)
-	}
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
@@ -199,9 +197,7 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 
 	tx, err := m.DB.BeginRw(ctx)
-	if err != nil {
-		t.Errorf("could not begin read write transaction: %s", err)
-	}
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
@@ -233,9 +229,7 @@ func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
 	blockHash := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
 
 	tx, err := m.DB.BeginRw(ctx)
-	if err != nil {
-		t.Errorf("could not begin read write transaction: %s", err)
-	}
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
@@ -267,9 +261,7 @@ func TestGetBlockTransactionCountByNumber(t *testing.T) {
 	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 
 	tx, err := m.DB.BeginRw(ctx)
-	if err != nil {
-		t.Errorf("could not begin read write transaction: %s", err)
-	}
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
@@ -302,9 +294,7 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 	blockHash := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
 
 	tx, err := m.DB.BeginRw(ctx)
-	if err != nil {
-		t.Errorf("could not begin read write transaction: %s", err)
-	}
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	header, err := rawdb.ReadHeaderByHash(tx, blockHash)

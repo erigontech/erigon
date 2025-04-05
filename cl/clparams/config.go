@@ -855,7 +855,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DenebForkVersion:     0x04000000,
 	DenebForkEpoch:       269568,
 	ElectraForkVersion:   0x05000000,
-	ElectraForkEpoch:     math.MaxUint64,
+	ElectraForkEpoch:     364032,
 	FuluForkVersion:      0x06000000,
 	FuluForkEpoch:        math.MaxUint64,
 

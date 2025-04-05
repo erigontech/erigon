@@ -308,6 +308,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			GasLimit:                    commonTx.GasLimit,
 			AccessList:                  tr.RandAccessList(tr.RandIntInRange(0, 5)),
 			SenderAddress:               &senderAddress,
+			SenderValidationData:        tr.RandBytes(tr.RandIntInRange(128, 1024)),
 			Authorizations:              tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
 			ExecutionData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
 			Paymaster:                   &paymaster,

@@ -610,34 +610,6 @@ func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
 	assert.True(t, gotValue, "should indicate that the code is still in the cache")
 }
 
-func TestNextSubtreeHex(t *testing.T) {
-	assert := assert.New(t)
-
-	type tc struct {
-		prev, next string
-		expect     bool
-	}
-
-	cases := []tc{
-		{prev: "", next: "00", expect: true},
-		{prev: "", next: "0000", expect: true},
-		{prev: "", next: "01", expect: false},
-		{prev: "00", next: "01", expect: true},
-		{prev: "01020304", next: "01020305", expect: true},
-		{prev: "01020f0f", next: "0103", expect: true},
-		{prev: "01020f0f", next: "0103000000000000", expect: true},
-		{prev: "01020304", next: "05060708", expect: false},
-		{prev: "0f0f0d", next: "0f0f0e", expect: true},
-		{prev: "0f", next: "", expect: true},
-		{prev: "0f01", next: "", expect: false},
-	}
-
-	for _, tc := range cases {
-		res := isDenseSequence(common.FromHex(tc.prev), common.FromHex(tc.next))
-		assert.Equal(tc.expect, res, "%s, %s", tc.prev, tc.next)
-	}
-}
-
 func TestShortNode(t *testing.T) {
 	extensionKeyStr := "0b00000d020809020b080f0d0a090a0a0705070f050d0002090f0d0d0e07080e0402070e010c08030d0e0409060e040b0e0406060b0c080b0503010005"
 	extensionKeyNibbles := make([]byte, len(extensionKeyStr)/2+1)
