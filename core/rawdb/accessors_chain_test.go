@@ -527,15 +527,11 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NotNil(b)
 	rs, err := rawdb.ReadReceiptsCache(tx, hash, 1)
 	require.NoError(err)
-	require.NotNil(rs)
-
-	if len(rs) == 0 {
-		t.Fatalf("no receipts returned")
-	} else {
-		if err := checkReceiptsRLP(rs, receipts); err != nil {
-			t.Fatalf(err.Error())
-		}
+	require.NotEmpty(rs)
+	if err := checkReceiptsRLP(rs, receipts); err != nil {
+		t.Fatalf(err.Error())
 	}
+
 	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
 	rawdb.DeleteHeader(tx, hash, 1)
 	rawdb.DeleteBody(tx, hash, 1)
