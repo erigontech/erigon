@@ -513,8 +513,8 @@ func TestBlockReceiptStorage(t *testing.T) {
 	// Check that no receipt entries are in a pristine database
 	hash := header.Hash() //libcommon.BytesToHash([]byte{0x03, 0x14})
 
-	rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64())
-	rawdb.WriteHeader(tx, header)
+	require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()))
+	require.NoError(rawdb.WriteHeader(tx, header))
 	// Insert the body that corresponds to the receipts
 	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
 	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
@@ -528,9 +528,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	rs, err := rawdb.ReadReceiptsCache(tx, hash, 1)
 	require.NoError(err)
 	require.NotEmpty(rs)
-	if err := checkReceiptsRLP(rs, receipts); err != nil {
-		t.Fatalf(err.Error())
-	}
+	require.NoError(checkReceiptsRLP(rs, receipts))
 
 	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
 	rawdb.DeleteHeader(tx, hash, 1)
@@ -546,10 +544,9 @@ func TestBlockReceiptStorage(t *testing.T) {
 	// Ensure that receipts without metadata can be returned without the block body too
 	rFromDB, err := rawdb.ReadReceiptsCache(tx, hash, 1)
 	require.NoError(err)
-	if err := checkReceiptsRLP(rFromDB, receipts); err != nil {
-		t.Fatal(err)
-	}
-	rawdb.WriteHeader(tx, header)
+	require.NoError(checkReceiptsRLP(rFromDB, receipts))
+
+	require.NoError(rawdb.WriteHeader(tx, header))
 	// Sanity check that body alone without the receipt is a full purge
 	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
 	b, _, err = br.BlockWithSenders(ctx, tx, hash, 1)
