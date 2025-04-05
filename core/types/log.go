@@ -226,14 +226,14 @@ type rlpLog struct {
 }
 
 type rlpLogForStorage struct {
-	Address     common.Address
-	Topics      []common.Hash
-	Data        []byte
-	BlockNumber uint64
-	TxHash      common.Hash
-	TxIndex     uint
-	BlockHash   common.Hash
-	Index       uint
+	Address common.Address
+	Topics  []common.Hash
+	Data    []byte
+	//BlockNumber uint64
+	//TxHash common.Hash
+	//TxIndex uint
+	//BlockHash   common.Hash
+	Index uint
 }
 
 // rlpStorageLog is the storage encoding of a log.
@@ -279,14 +279,10 @@ type LogForStorage Log
 // EncodeRLP implements rlp.Encoder.
 func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, rlpLogForStorage{
-		Address:     l.Address,
-		Topics:      l.Topics,
-		Data:        l.Data,
-		BlockNumber: l.BlockNumber,
-		TxHash:      l.TxHash,
-		TxIndex:     l.TxIndex,
-		BlockHash:   l.BlockHash,
-		Index:       l.Index,
+		Address: l.Address,
+		Topics:  l.Topics,
+		Data:    l.Data,
+		Index:   l.Index,
 	})
 }
 
