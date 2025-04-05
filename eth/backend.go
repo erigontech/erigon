@@ -1198,10 +1198,10 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		s.silkwormRPCDaemonService = &silkwormRPCDaemonService
 	} else {
 		go func() {
-			if srv, err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger); err != nil {
+			// register apis and create handler stack
+			s.server = rpc.NewServer(httpRpcCfg.RpcBatchConcurrency, httpRpcCfg.TraceRequests, httpRpcCfg.DebugSingleRequest, httpRpcCfg.RpcStreamingDisable, s.logger, httpRpcCfg.RPCSlowLogThreshold)
+			if err := rpcdaemoncli.StartRpcServer(ctx, s.server, &httpRpcCfg, s.apiList, s.logger); err != nil {
 				s.logger.Error("cli.StartRpcServer error", "err", err)
-			} else {
-				s.server = srv
 			}
 		}()
 	}

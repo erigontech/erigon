@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
@@ -39,11 +40,14 @@ import (
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 // BlockGen creates blocks for testing.
@@ -95,6 +99,10 @@ func (b *BlockGen) SetNonce(nonce types.BlockNonce) {
 // ethash tests, please use OffsetTime, which implicitly recalculates the diff.
 func (b *BlockGen) SetDifficulty(diff *big.Int) {
 	b.header.Difficulty = diff
+}
+
+func (b *BlockGen) SetWithdrawalsHash(hash *common.Hash) {
+	b.header.WithdrawalsHash = hash
 }
 
 // AddTx adds a transaction to the generated block. If no coinbase has
@@ -425,6 +433,143 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
+func GenerateChainWithReader(config *chain.Config, parent *types.Block, blockReader services.FullBlockReader, engine consensus.Engine, db kv.RwDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
+	if config == nil {
+		config = params.TestChainConfig
+	}
+	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
+	ctx := context.Background()
+	// roTx, err := db.BeginRo(ctx)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// defer roTx.Rollback()
+	// chainreader := &FakeChainReader{Cfg: config, current: parent}
+	tx, errBegin := db.BeginRw(ctx)
+	if errBegin != nil {
+		return nil, errBegin
+	}
+	defer tx.Rollback()
+	chainreader := consensuschain.NewReader(config, tx, blockReader, log.New())
+	logger := log.New("generate-chain", config.ChainName)
+
+	domains, err := libstate.NewSharedDomains(tx, logger)
+	if err != nil {
+		return nil, err
+	}
+	defer domains.Close()
+	stateReader := state.NewReaderV3(domains)
+	stateWriter := state.NewWriterV4(domains)
+
+	txNum := -1
+	setBlockNum := func(blockNum uint64) {
+		domains.SetBlockNum(blockNum)
+	}
+	txNumIncrement := func() {
+		txNum++
+		domains.SetTxNum(uint64(txNum))
+	}
+	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
+		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
+		txNumIncrement()
+
+		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, config: config, engine: engine, txs: make([]types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1),
+			beforeAddTx: func() {
+				txNumIncrement()
+			},
+		}
+		b.header = makeHeader(chainreader, parent, ibs, b.engine)
+		// Mutate the state and block according to any hard-fork specs
+		if daoBlock := config.DAOForkBlock; daoBlock != nil {
+			limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
+			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
+				b.header.Extra = libcommon.CopyBytes(params.DAOForkBlockExtra)
+			}
+		}
+		if b.engine != nil {
+			err := InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, nil, logger, nil)
+			if err != nil {
+				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
+			}
+		}
+		// Execute any user modifications to the block
+		if gen != nil {
+			gen(i, b)
+		}
+		txNumIncrement()
+		if b.engine != nil {
+			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+				ret, _, err := SysCallContract(contract, data, config, ibs, b.header, engine, false /* constCall */, nil)
+				return ret, err
+			}
+
+			var withdrawals = []*types.Withdrawal{}
+			if config.IsShanghai(b.header.Time) {
+				withdrawals = []*types.Withdrawal{}
+
+			}
+
+			// Finalize and seal the block
+			if _, _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, withdrawals, chainreader, syscall, nil, logger); err != nil {
+				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
+			}
+			// Write state changes to db
+			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.Time), stateWriter); err != nil {
+				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
+			}
+
+			var err error
+			//To use `CalcHashRootForTests` need flush before, but to use `domains.ComputeCommitment` need flush after
+			//if err = domains.Flush(ctx, tx); err != nil {
+			//	return nil, nil, err
+			//}
+			//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
+			stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), "")
+			if err != nil {
+				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
+			}
+			if err = domains.Flush(ctx, tx); err != nil {
+				return nil, nil, err
+			}
+			b.header.Root = libcommon.BytesToHash(stateRoot)
+
+			// Recreating block to make sure Root makes it into the header
+			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, withdrawals /* withdrawals */)
+
+			blockNum := b.header.Number.Uint64()
+			parentTd, err := rawdb.ReadTd(tx, parent.Hash(), b.header.Number.Uint64()-1)
+			if err != nil || parentTd == nil {
+				return nil, nil, fmt.Errorf("[GenerateChainWithReader] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", b.header.ParentHash, blockNum-1, b.header.Hash(), blockNum, err)
+			}
+			td := new(big.Int).Add(parentTd, b.header.Difficulty)
+			// if err = rawdb.WriteHeader(tx, header); err != nil {
+			// 	return fmt.Errorf("[%s] failed to WriteHeader: %w", hi.logPrefix, err)
+			// }
+			if err = rawdb.WriteTd(tx, block.Hash(), blockNum, td); err != nil {
+				return nil, nil, fmt.Errorf("[GenerateChainWithReader] failed to WriteTd: %w", err)
+			}
+			return block, b.receipts, nil
+		}
+		return nil, nil, errors.New("no engine to generate blocks")
+	}
+
+	for i := 0; i < n; i++ {
+		setBlockNum(uint64(i))
+		ibs := state.New(stateReader)
+		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
+		if err != nil {
+			return nil, fmt.Errorf("generating block %d: %w", i, err)
+		}
+		headers[i] = block.Header()
+		blocks[i] = block
+		receipts[i] = receipt
+		parent = block
+	}
+	tx.Rollback()
+
+	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
+}
+
 func hashKeyAndAddIncarnation(k []byte, h *libcommon.Hasher) (newK []byte, err error) {
 	if len(k) == length.Addr {
 		newK = make([]byte, length.Hash)
@@ -605,16 +750,10 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 }
 
 func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.IntraBlockState, engine consensus.Engine) *types.Header {
-	var time uint64
-	if parent.Time() == 0 {
-		time = 10
-	} else {
-		time = parent.Time() + 10 // block time is fixed at 10 seconds
-	}
-
-	header := MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
-	header.Coinbase = parent.Coinbase()
-	header.Difficulty = engine.CalcDifficulty(chain, time,
+	time := parent.Time() + 10 // block time is fixed at 10 seconds
+	parentHeader := parent.Header()
+	config := chain.Config()
+	difficulty := engine.CalcDifficulty(chain, time,
 		time-10,
 		parent.Difficulty(),
 		parent.NumberU64(),
@@ -622,9 +761,53 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		parent.UncleHash(),
 		parent.Header().AuRaStep,
 	)
+	header := &types.Header{
+		ParentHash: parent.Hash(),
+		Coinbase:   parent.Coinbase(),
+		Difficulty: difficulty,
+		GasLimit:   parent.GasLimit(),
+		Number:     new(big.Int).Add(parent.Number(), common.Big1),
+		Time:       time,
+	}
 
+	if config.IsLondon(header.Number.Uint64()) {
+		header.BaseFee = misc.CalcBaseFee(config, parentHeader)
+		if !config.IsLondon(parent.Number().Uint64()) {
+			parentGasLimit := parent.GasLimit() * params.ElasticityMultiplier
+			header.GasLimit = CalcGasLimit(parentGasLimit, parentGasLimit)
+		}
+	}
+
+	if config.IsCancun(header.Time) {
+		excessBlobGas := misc.CalcExcessBlobGas(config, parentHeader, time)
+		header.ExcessBlobGas = &excessBlobGas
+		header.BlobGasUsed = new(uint64)
+		header.ParentBeaconBlockRoot = new(common.Hash)
+	}
 	return header
 }
+
+// func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.IntraBlockState, engine consensus.Engine) *types.Header {
+// 	var time uint64
+// 	if parent.Time() == 0 {
+// 		time = 10
+// 	} else {
+// 		time = parent.Time() + 10 // block time is fixed at 10 seconds
+// 	}
+
+// 	header := MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
+// 	header.Coinbase = parent.Coinbase()
+// 	header.Difficulty = engine.CalcDifficulty(chain, time,
+// 		time-10,
+// 		parent.Difficulty(),
+// 		parent.NumberU64(),
+// 		parent.Hash(),
+// 		parent.UncleHash(),
+// 		parent.Header().AuRaStep,
+// 	)
+
+// 	return header
+// }
 
 type FakeChainReader struct {
 	Cfg     *chain.Config

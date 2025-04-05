@@ -30,12 +30,7 @@ type Bank struct {
 	initialBalance *big.Int
 }
 
-func NewBank(initialBalance *big.Int) Bank {
-	privKey, err := crypto.GenerateKey()
-	if err != nil {
-		panic(err)
-	}
-
+func NewBank(privKey *ecdsa.PrivateKey, initialBalance *big.Int) Bank {
 	return Bank{
 		privKey:        privKey,
 		initialBalance: initialBalance,

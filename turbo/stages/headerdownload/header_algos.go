@@ -974,9 +974,13 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return nil, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
-	// skipIndexing=true - because next stages will build indices in-batch (for example StageBlockHash)
-	if err = rawdb.WriteHeaderRaw(db, blockHeight, hash, headerRaw, true); err != nil {
-		return nil, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
+	// // skipIndexing=true - because next stages will build indices in-batch (for example StageBlockHash)
+	// if err = rawdb.WriteHeaderRaw(db, blockHeight, hash, headerRaw, true); err != nil {
+	// 	return nil, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
+	// }
+
+	if err = rawdb.WriteHeader(db.(kv.RwTx), header); err != nil {
+		return nil, fmt.Errorf("[%s] failed to WriteHeader: %w", hi.logPrefix, err)
 	}
 
 	hi.prevHash = hash

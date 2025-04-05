@@ -58,7 +58,8 @@ func main() {
 
 		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader)
 		rpc.PreAllocateRPCMetricLabels(apiList)
-		if _, err := cli.StartRpcServer(ctx, cfg, apiList, logger); err != nil {
+		server := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
+		if err := cli.StartRpcServer(ctx, server, cfg, apiList, logger); err != nil {
 			logger.Error(err.Error())
 			return nil
 		}

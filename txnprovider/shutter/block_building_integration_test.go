@@ -35,29 +35,101 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/contracts"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/app"
 	"github.com/erigontech/erigon/turbo/engineapi"
+	"github.com/erigontech/erigon/turbo/stages"
 	"github.com/erigontech/erigon/turbo/testlog"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
+
+var (
+	testKey, _         = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testAddr           = crypto.PubkeyToAddress(testKey.PublicKey)
+	testBalance        = big.NewInt(2e15)
+	revertContractAddr = common.HexToAddress("290f1b36649a61e369c6276f6d29463335b4400c")
+	revertCode         = common.FromHex("7f08c379a0000000000000000000000000000000000000000000000000000000006000526020600452600a6024527f75736572206572726f7200000000000000000000000000000000000000000000604452604e6000fd")
+)
+
+var (
+	testNodeKey, _ = crypto.GenerateKey()
+)
+
+var genesis = &types.Genesis{
+	Config: params.AllDevChainProtocolChanges,
+	Alloc: types.GenesisAlloc{
+		testAddr:           {Balance: testBalance},
+		revertContractAddr: {Code: revertCode, Balance: testBalance},
+	},
+	ExtraData: []byte("test genesis"),
+	Timestamp: 9000,
+	BaseFee:   big.NewInt(params.InitialBaseFee),
+}
+
+var chainId = big.NewInt(987656789)
+
+func getChainConfig() *chain.Config {
+	chainConfig := *params.ChiadoChainConfig
+	chainConfig.ChainName = "shutter-devnet"
+	chainConfig.ChainID = chainId
+	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
+	chainConfig.ShanghaiTime = big.NewInt(0)
+	chainConfig.CancunTime = big.NewInt(0)
+	chainConfig.PragueTime = big.NewInt(0)
+	return &chainConfig
+}
+
+var testTx1 = types.MustSignNewTx(testKey, *types.LatestSigner(getChainConfig()), &types.LegacyTx{
+	CommonTx: types.CommonTx{
+		Nonce:    0,
+		Value:    uint256.NewInt(12),
+		GasLimit: params.TxGas,
+		To:       &common.Address{2},
+	},
+	GasPrice: uint256.NewInt(params.InitialBaseFee),
+})
+
+var testTx2 = types.MustSignNewTx(testKey, *types.LatestSigner(getChainConfig()), &types.LegacyTx{
+	CommonTx: types.CommonTx{
+		Nonce:    1,
+		Value:    uint256.NewInt(8),
+		GasLimit: params.TxGas,
+		To:       &common.Address{2},
+	},
+	GasPrice: uint256.NewInt(params.InitialBaseFee),
+})
+
+var generateTestChain = func(i int, g *core.BlockGen) {
+	g.OffsetTime(5)
+	g.SetExtra([]byte("test"))
+	g.SetDifficulty(big.NewInt(0))
+	if i == 1 {
+		// Test transactions are included in block #2.
+		g.AddTx(testTx1)
+		g.AddTx(testTx2)
+	}
+}
 
 func TestShutterBlockBuilding(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -282,7 +354,6 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	txPoolConfig := txpoolcfg.DefaultConfig
 	txPoolConfig.DBDir = dirs.TxPool
 
-	chainId := big.NewInt(987656789)
 	chainIdU256, _ := uint256.FromBig(chainId)
 	decryptionKeySenderPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -309,6 +380,16 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	shutterConfig.KeyperSetManagerContractAddress = crypto.CreateAddress(contractDeployer, 1).String()
 	shutterConfig.KeyBroadcastContractAddress = crypto.CreateAddress(contractDeployer, 2).String()
 
+	chainConfig := getChainConfig()
+	genesis := core.ChiadoGenesisBlock()
+	// genesis.Timestamp = uint64(time.Now().Unix() - 1)
+	genesis.Timestamp = 1743777048
+	genesis.Config = chainConfig
+
+	// 1_000 ETH in wei in the bank
+	bank := testhelpers.NewBank(testKey, new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))
+	bank.RegisterGenesisAlloc(genesis)
+
 	ethConfig := ethconfig.Config{
 		Dirs: dirs,
 		Snapshot: ethconfig.BlocksFreezing{
@@ -318,7 +399,9 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		Miner: params.MiningConfig{
 			EnabledPOS: true,
 		},
-		Shutter: shutterConfig,
+		Shutter:    shutterConfig,
+		Genesis:    genesis,
+		ImportMode: true, // this is to avoid getting stuck on a never-ending loop waiting for headers
 	}
 
 	ethNode, err := node.New(ctx, &nodeConfig, logger)
@@ -334,30 +417,30 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	}
 	t.Cleanup(cleanNode(ethNode))
 
-	chainConfig := *params.ChiadoChainConfig
-	chainConfig.ChainName = "shutter-devnet"
-	chainConfig.ChainID = chainId
-	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
-	chainConfig.ShanghaiTime = big.NewInt(0)
-	chainConfig.CancunTime = big.NewInt(0)
-	chainConfig.PragueTime = big.NewInt(0)
-	genesis := core.ChiadoGenesisBlock()
-	genesis.Timestamp = uint64(time.Now().Unix() - 1)
-	genesis.Config = &chainConfig
-	// 1_000 ETH in wei in the bank
-	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))
-	bank.RegisterGenesisAlloc(genesis)
-	chainDB, err := node.OpenDatabase(ctx, ethNode.Config(), kv.ChainDB, "", false, logger)
-	require.NoError(t, err)
-	_, gensisBlock, err := core.CommitGenesisBlock(chainDB, genesis, ethNode.Config().Dirs, logger)
-	require.NoError(t, err)
-	chainDB.Close()
-
 	ethBackend, err := eth.New(ctx, ethNode, &ethConfig, logger, nil)
 	require.NoError(t, err)
-	err = ethBackend.Init(ethNode, &ethConfig, &chainConfig)
+	_, gensisBlock, err := core.CommitGenesisBlock(ethBackend.ChainDB(), genesis, ethNode.Config().Dirs, logger)
 	require.NoError(t, err)
+	err = ethBackend.Init(ethNode, &ethConfig, chainConfig)
+	require.NoError(t, err)
+	blockReader, _ := ethBackend.BlockIO()
+	err = stages.StageLoopIteration(ctx, ethBackend.ChainDB(), wrap.TxContainer{}, ethBackend.StagedSync(), false, false, logger, blockReader, nil)
+	require.NoError(t, err)
+	chain, err := core.GenerateChainWithReader(genesis.Config, gensisBlock, blockReader, ethBackend.SentryControlServer().Engine, ethBackend.ChainDB(), 2, generateTestChain)
+	require.NoError(t, err)
+	genesisHash := gensisBlock.Hash()
+	fmt.Printf("genesisHash = %x\n", genesisHash)
+	firstHash := chain.Headers[0].Hash()
+	fmt.Printf("firstHash = %x\n", firstHash)
+	parentHash := chain.Headers[1].ParentHash
+	fmt.Printf("parentHash = %x\n", parentHash)
+	secondHash := chain.Headers[1].Hash()
+	fmt.Printf("secondHash = %x\n", secondHash)
+
 	err = ethNode.Start()
+	require.NoError(t, err)
+
+	err = app.InsertChain(ethBackend, chain, logger)
 	require.NoError(t, err)
 
 	rpcDaemonHttpUrl := fmt.Sprintf("%s:%d", httpConfig.HttpListenAddress, httpConfig.HttpPort)
@@ -370,7 +453,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	engineApiClient, err := engineapi.DialJsonRpcClient(engineApiUrl, jwtSecret, logger)
 	require.NoError(t, err)
 	slotCalculator := shutter.NewBeaconChainSlotCalculator(shutterConfig.BeaconChainGenesisTimestamp, shutterConfig.SecondsPerSlot)
-	cl := testhelpers.NewMockCl(slotCalculator, engineApiClient, bank.Address(), gensisBlock)
+	cl := testhelpers.NewMockCl(slotCalculator, engineApiClient, bank.Address(), chain.TopBlock)
 	_, err = cl.BuildBlock(ctx)
 	require.NoError(t, err)
 
@@ -454,7 +537,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	ethBackend, err = eth.New(ctx, ethNode, &ethConfig, logger, nil)
 	require.NoError(t, err)
-	err = ethBackend.Init(ethNode, &ethConfig, &chainConfig)
+	err = ethBackend.Init(ethNode, &ethConfig, chainConfig)
 	require.NoError(t, err)
 	err = ethNode.Start()
 	require.NoError(t, err)

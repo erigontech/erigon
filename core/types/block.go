@@ -29,6 +29,7 @@ import (
 	"math/big"
 	"reflect"
 	"slices"
+	"strings"
 	"sync/atomic"
 
 	"github.com/gballet/go-verkle"
@@ -1164,6 +1165,93 @@ func CopyHeader(h *Header) *Header {
 		cpy.hash.Store(&hashCopy)
 	}
 	return &cpy
+}
+
+func (h *Header) String() string {
+	var b strings.Builder
+	b.WriteString("Header {\n")
+	b.WriteString(fmt.Sprintf("  ParentHash: %s\n", h.ParentHash))
+	b.WriteString(fmt.Sprintf("  UncleHash: %s\n", h.UncleHash))
+	b.WriteString(fmt.Sprintf("  Coinbase: %s\n", h.Coinbase))
+	b.WriteString(fmt.Sprintf("  Root: %s\n", h.Root))
+	b.WriteString(fmt.Sprintf("  TxHash: %s\n", h.TxHash))
+	b.WriteString(fmt.Sprintf("  ReceiptHash: %s\n", h.ReceiptHash))
+	b.WriteString(fmt.Sprintf("  Bloom: %s\n", h.Bloom))
+
+	if h.Difficulty != nil {
+		b.WriteString(fmt.Sprintf("  Difficulty: %s\n", h.Difficulty.String()))
+	} else {
+		b.WriteString("  Difficulty: <nil>\n")
+	}
+	if h.Number != nil {
+		b.WriteString(fmt.Sprintf("  Number: %s\n", h.Number.String()))
+	} else {
+		b.WriteString("  Number: <nil>\n")
+	}
+	b.WriteString(fmt.Sprintf("  GasLimit: %d\n", h.GasLimit))
+	b.WriteString(fmt.Sprintf("  GasUsed: %d\n", h.GasUsed))
+	b.WriteString(fmt.Sprintf("  Time: %d\n", h.Time))
+	b.WriteString(fmt.Sprintf("  Extra: %x\n", h.Extra))
+	b.WriteString(fmt.Sprintf("  MixDigest: %s\n", h.MixDigest))
+	b.WriteString(fmt.Sprintf("  Nonce: %s\n", h.Nonce))
+
+	// AuRa extensions
+	b.WriteString(fmt.Sprintf("  AuRaStep: %d\n", h.AuRaStep))
+	b.WriteString(fmt.Sprintf("  AuRaSeal: %x\n", h.AuRaSeal))
+
+	// EIP-1559 and EIP-4895 fields
+	if h.BaseFee != nil {
+		b.WriteString(fmt.Sprintf("  BaseFee: %s\n", h.BaseFee.String()))
+	} else {
+		b.WriteString("  BaseFee: <nil>\n")
+	}
+	if h.WithdrawalsHash != nil {
+		b.WriteString(fmt.Sprintf("  WithdrawalsHash: %s\n", *h.WithdrawalsHash))
+	} else {
+		b.WriteString("  WithdrawalsHash: <nil>\n")
+	}
+	if h.BlobGasUsed != nil {
+		b.WriteString(fmt.Sprintf("  BlobGasUsed: %d\n", *h.BlobGasUsed))
+	} else {
+		b.WriteString("  BlobGasUsed: <nil>\n")
+	}
+	if h.ExcessBlobGas != nil {
+		b.WriteString(fmt.Sprintf("  ExcessBlobGas: %d\n", *h.ExcessBlobGas))
+	} else {
+		b.WriteString("  ExcessBlobGas: <nil>\n")
+	}
+	if h.ParentBeaconBlockRoot != nil {
+		b.WriteString(fmt.Sprintf("  ParentBeaconBlockRoot: %s\n", *h.ParentBeaconBlockRoot))
+	} else {
+		b.WriteString("  ParentBeaconBlockRoot: <nil>\n")
+	}
+	if h.RequestsHash != nil {
+		b.WriteString(fmt.Sprintf("  RequestsHash: %s\n", *h.RequestsHash))
+	} else {
+		b.WriteString("  RequestsHash: <nil>\n")
+	}
+
+	// Verkle fields
+	b.WriteString(fmt.Sprintf("  Verkle: %t\n", h.Verkle))
+	b.WriteString(fmt.Sprintf("  VerkleProof: %x\n", h.VerkleProof))
+	if len(h.VerkleKeyVals) > 0 {
+		b.WriteString("  VerkleKeyVals:\n")
+		for i, kv := range h.VerkleKeyVals {
+			b.WriteString(fmt.Sprintf("    %d: %v\n", i, kv))
+		}
+	} else {
+		b.WriteString("  VerkleKeyVals: []\n")
+	}
+
+	// Internal fields
+	b.WriteString(fmt.Sprintf("  mutable: %t\n", h.mutable))
+	if h.hash.Load() != nil {
+		b.WriteString(fmt.Sprintf("  hash: %s\n", *h.hash.Load()))
+	} else {
+		b.WriteString("  hash: <nil>\n")
+	}
+	b.WriteString("}")
+	return b.String()
 }
 
 // DecodeRLP decodes the Ethereum
